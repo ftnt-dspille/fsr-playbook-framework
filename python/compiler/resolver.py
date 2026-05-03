@@ -25,13 +25,34 @@ SHORT_TYPE_TO_FSR: dict[str, str] = {
     "start": "cybersponse.abstract_trigger",
     "find_record": "FindRecords",
     "update_record": "UpdateRecord",
+    "create_record": "InsertData",
+    # Legacy alias kept so existing fixtures don't break; emit a hint via
+    # the linter when authors use the old name.
     "insert_record": "InsertData",
     "delay": "Delay",
     "manual_input": "ManualInput",
     "code_snippet": "CodeSnippet",
     "approval": "Approval",
     "workflow_reference": "WorkflowReference",
+    # `stop` / `end` — first-class no-op terminals. Compile to a connector
+    # step calling `cyops_utilities.no_op` (FSR's canonical "Utils: No
+    # Operation" idiom), so a decision branch that should do nothing has
+    # an obvious YAML keyword instead of dangling or filler set_variable.
+    "stop": "Connectors",
+    "end": "Connectors",
+    # Auto-fired record triggers (genuinely different from manual `start`):
+    # event-driven, not invokable from the designer.
+    "start_on_create": "cybersponse.post_create",
+    "start_on_update": "cybersponse.post_update",
 }
+
+# `type: start` covers ALL manually-triggered playbooks. The compiler
+# decides between the two underlying FSR step types based on whether a
+# module is bound:
+#   - no `module:` arg → `cybersponse.abstract_trigger` (designer / pure manual)
+#   - `module:` arg    → `cybersponse.action` (also shows on the module's
+#                         listing Execute menu and per-record right-click)
+# Either way the playbook can still be run from the designer's Run button.
 
 
 class Resolver:
@@ -135,13 +156,157 @@ class Resolver:
         step.step_type_name = st["name"]
         step.handler = self.handler_for_step_type(st)
 
+        # `type: start` covers both flavors of manual trigger. If the
+        # author bound a module, switch the resolved step type to
+        # `cybersponse.action` (record-listing Execute menu / right-click).
+        # Otherwise stay on `cybersponse.abstract_trigger` (designer-only
+        # manual). Either way the playbook is still runnable from the
+        # designer Run button.
+        if step.type == "start" and isinstance(step.arguments, dict):
+            if step.arguments.get("module") or step.arguments.get("modules"):
+                action_row = self.conn.execute(
+                    "SELECT * FROM step_types WHERE name = ?",
+                    ("cybersponse.action",),
+                ).fetchone()
+                if action_row is not None:
+                    step.step_type_uuid = action_row["uuid"]
+                    step.step_type_name = action_row["name"]
+                    step.handler = self.handler_for_step_type(action_row)
+                self._normalize_record_action_args(step, path, errors)
+
+        if step.type in ("start_on_create", "start_on_update"):
+            self._normalize_record_action_args(step, path, errors)
+
+        # `stop` / `end` synthesize the canonical Utils: No Operation call,
+        # then fall through to connector arg resolution.
+        if step.type in ("stop", "end"):
+            a = step.arguments if isinstance(step.arguments, dict) else {}
+            a.setdefault("connector", "cyops_utilities")
+            a.setdefault("operation", "no_op")
+            a.setdefault("config", "")
+            a.setdefault("params", {})
+            step.arguments = a
+
         # Per-step-type argument validation
-        if step.type == "connector":
+        if step.type == "connector" or step.type in ("stop", "end"):
             self._resolve_connector_args(step, path, errors)
-        elif step.type == "workflow_reference":
+            return
+        if step.type == "workflow_reference":
             self._resolve_workflow_reference_args(step, path, errors, pb_by_name or {})
-        # set_variable, decision: no further ref-checking in v1 — args are
-        # free-form jinja; reference linting is a future TODO.
+        elif step.type == "set_variable":
+            self._normalize_set_variable_args(step, path, errors)
+        elif step.type == "start":
+            self._normalize_start_args(step)
+        # decision: no further ref-checking in v1 — args are free-form jinja.
+
+    def _normalize_record_action_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Fill canonical args for record-bound triggers.
+
+        Friendly inputs:
+          module:           single module name (or modules: [list])
+          button_label:     Trigger Button Label — what the user sees in the
+                            Execute menu. Defaults to blank, in which case FSR
+                            shows the *playbook* name (NOT the step name).
+                            Don't reuse the step's `name:` for this; that field
+                            names the canvas node, not the button.
+          requires_record:  bool, default True. False = "Does not require record
+                            input to run" — button shows on the module listing's
+                            Execute menu but no record context is passed.
+          run_mode:         'per_record' (default) | 'once_for_all' — when
+                            requires_record=True, controls whether the playbook
+                            fires once per selected record or once for all.
+
+        Everything else fills with the canonical defaults observed across the
+        live FSR corpus.
+        """
+        import uuid as _uuidmod
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Trigger Button Label — separate from step.name. Empty means
+        # FSR will show the playbook name in the Execute menu.
+        button_label = a.pop("button_label", None) or a.pop("title", None) or ""
+        modules_raw = a.pop("module", None) or a.pop("modules", None) or a.get("resources")
+        if isinstance(modules_raw, str):
+            modules = [modules_raw]
+        elif isinstance(modules_raw, list):
+            modules = [str(m) for m in modules_raw]
+        else:
+            modules = []
+        if not modules:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message=f"{step.type} requires `module:` (or `modules:`)",
+                path=f"{path}.arguments.module",
+            ))
+            modules = ["alerts"]  # let downstream emit succeed for diagnostics
+        requires_record = bool(a.pop("requires_record", True))
+        run_mode = a.pop("run_mode", "per_record")
+        # FSR's `title` is the persisted Trigger Button Label.
+        a["title"] = button_label
+        a["resources"] = modules
+        # Deterministic route UUID so re-pushes stay stable. Hash from
+        # the title + resources keeps the action button identity consistent
+        # across imports.
+        if not a.get("route"):
+            seed = (button_label or step.name or "") + "|" + ",".join(sorted(modules))
+            a["route"] = str(_uuidmod.uuid5(_uuidmod.NAMESPACE_OID, seed))
+        a.setdefault("inputVariables", [])
+        a.setdefault("step_variables", {"input": {"params": [],
+                                                  "records": "{{vars.input.records}}"}})
+        a.setdefault("triggerOnSource", True)
+        a.setdefault("triggerOnReplicate", False)
+        # noRecordExecution: True = "Does not require record input to run".
+        # singleRecordExecution: True = per-record run; False = once for all.
+        # When requires_record=False, run_mode is irrelevant.
+        a["noRecordExecution"] = not requires_record
+        a["singleRecordExecution"] = (requires_record and run_mode == "per_record")
+        a.setdefault("__triggerLimit", True)
+        a.setdefault("executeButtonText", "Execute")
+        a.setdefault("showToasterMessage", {"visible": False, "messageVisible": True})
+        # Empty per-module display filter — button shows for all records.
+        a.setdefault("displayConditions",
+                     {m: {"sort": [], "limit": 30, "logic": "AND", "filters": []}
+                      for m in modules})
+        step.arguments = a
+
+    def _normalize_start_args(self, step: Step) -> None:
+        """abstract_trigger needs `arguments.step_variables.input.params`
+        populated even when the playbook takes no input — without it FSR's
+        runtime fails with `pop expected at most 1 argument, got 2` when it
+        tries to extract the input shape (verified live 2026-05-03).
+        Mirrors the canonical default observed in every live playbook.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        a.setdefault("step_variables", {"input": {"params": []}})
+        step.arguments = a
+
+    def _normalize_set_variable_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Canonical SetVariable.arguments is a flat {var_name: value} dict.
+
+        Verified against live import sample (Playbook - 00 - a Import
+        testing): `{var1, var2, var3}` flat dict. Accept the friendly
+        `arg_list: [{name, value}, ...]` form as back-compat sugar and
+        unwrap it.
+        """
+        a = step.arguments
+        if not isinstance(a, dict):
+            return
+        if "arg_list" in a and isinstance(a["arg_list"], list):
+            unwrapped: dict = {}
+            for i, item in enumerate(a["arg_list"]):
+                if not isinstance(item, dict) or "name" not in item:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="arg_list entries must be {name, value} mappings",
+                        path=f"{path}.arguments.arg_list[{i}]",
+                    ))
+                    return
+                unwrapped[item["name"]] = item.get("value", "")
+            siblings = {k: v for k, v in a.items() if k != "arg_list"}
+            step.arguments = {**unwrapped, **siblings}
 
     def _resolve_connector_args(
         self, step: Step, path: str, errors: list[CompileError],
@@ -188,7 +353,10 @@ class Resolver:
             ))
             return
 
-        # Check params against operation_params
+        # Check params against operation_params.
+        # When the store has zero rows for this op (catalog connector not
+        # installed on the probe instance), skip validation and emit a
+        # warning so the playbook still compiles.
         valid_params = set(self.operation_params(connector, operation))
         provided = a.get("params") or {}
         if not isinstance(provided, dict):
@@ -198,23 +366,50 @@ class Resolver:
                 path=f"{path}.arguments.params",
             ))
             return
-        for p_name in provided:
-            if p_name not in valid_params:
-                sug = None
-                if valid_params:
+        if not valid_params:
+            errors.append(CompileError(
+                code=ErrorCode.UNKNOWN_PARAM,
+                message=(
+                    f"no param schema in store for {connector}.{operation} "
+                    f"(connector not installed on probe instance) — params passed through unvalidated"
+                ),
+                path=f"{path}.arguments.params",
+                near=None,
+                suggestion="run `fsrpb run-op` or install the connector to populate the schema",
+                severity="warning",
+            ))
+        else:
+            for p_name in provided:
+                if p_name not in valid_params:
+                    sug = None
                     m = difflib.get_close_matches(p_name, list(valid_params), n=1, cutoff=0.6)
                     sug = m[0] if m else None
-                errors.append(CompileError(
-                    code=ErrorCode.UNKNOWN_PARAM,
-                    message=f"unknown param {p_name!r} on {connector}.{operation}",
-                    path=f"{path}.arguments.params.{p_name}",
-                    near=sug,
-                    suggestion=f"did you mean {sug!r}?" if sug else None,
-                ))
+                    errors.append(CompileError(
+                        code=ErrorCode.UNKNOWN_PARAM,
+                        message=f"unknown param {p_name!r} on {connector}.{operation}",
+                        path=f"{path}.arguments.params.{p_name}",
+                        near=sug,
+                        suggestion=f"did you mean {sug!r}?" if sug else None,
+                    ))
 
         # Stamp the connector version onto the step (FSR JSON requires it).
         if "version" not in a and crow["version"]:
             a["version"] = crow["version"]
+        # The UI's connector-step header reads `arguments.name` (display
+        # title) and `arguments.operationTitle`. Without them the canvas
+        # shows "UNDEFINED <version>". The exporter writes them; we mirror.
+        if "name" not in a and crow["label"]:
+            a["name"] = crow["label"]
+        if "operationTitle" not in a and orow["title"]:
+            a["operationTitle"] = orow["title"]
+        # FSR canonical default for step_variables on connector steps is
+        # an empty list (observed in live exports).
+        if "step_variables" not in a:
+            a["step_variables"] = []
+        # Tenant/agent picker — false unless the playbook author wires a
+        # multi-tenant config.
+        if "pickFromTenant" not in a:
+            a["pickFromTenant"] = False
 
     def _resolve_workflow_reference_args(
         self, step: Step, path: str, errors: list[CompileError],

@@ -107,6 +107,7 @@ PROBE_TABLES: dict[str, tuple[str, ...]] = {
     # verification records — so it has an empty table tuple.
     "probe_playbook_constraints": (),
     "probe_cleanup": (),
+    "probe_jinja_corpus": ("jinja_expressions", "jinja_filter_usage"),
 }
 
 

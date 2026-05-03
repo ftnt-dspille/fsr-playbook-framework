@@ -1,6 +1,0 @@
-/opt/cyops-api/src/Controller/WorkflowTriggerController.php:10:use App\Constants\Triggers;
-/opt/cyops-api/src/Controller/WorkflowTriggerController.php:38:class WorkflowTriggerController extends BaseController
-/opt/cyops-api/src/Controller/WorkflowActionsController.php:16:use App\Constants\Triggers;
-/opt/cyops-api/src/EventSubscriber/WorkflowEventSubscriber.php:18:use App\Constants\Triggers;
-/opt/cyops-api/src/Service/ConfigExportImport/PlaybookHelperConfig.php:213:        $fullURI = sprintf('%s/api/triggers/1/notrigger/%s', $this->container->getParameter(AppConstants::CRUDHUB_PARAMETER_KEY), $playbookUuid);
-/opt/cyops-api/src/Service/WorkflowHelper.php:11:use App\Constants\Triggers;

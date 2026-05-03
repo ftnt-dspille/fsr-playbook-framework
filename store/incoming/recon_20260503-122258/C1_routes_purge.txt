@@ -1,1 +1,0 @@
-  app_fsr_delete_query                                 DELETE                ANY      ANY    /api/3/delete-with-query/{resourceShortName}                   

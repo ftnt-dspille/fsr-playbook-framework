@@ -1,19 +1,35 @@
 # FSRPlaybookYaml — TODO / resume state
 
-**Last touched**: 2026-05-02. Live FSR target: `https://10.99.249.205` (label `dev`).
+**Last touched**: 2026-05-03. Live FSR target: `https://10.99.249.205` (label `dev`).
+
+## Recent changes (most-recent first)
+
+- **2026-05-03 — Jinja corpus mining**: new `probe_jinja_corpus` walks 1,669 live workflows, extracts every `{{…}}`/`{%…%}` block (19,305 total → 7,789 unique idioms), populates `jinja_expressions` (kind=expr/set/for/if/macro/…) and `jinja_filter_usage`. Most-used real example auto-promoted onto `jinja_macros.example`. New table column `jinja_macros.curated_doc` + 13 hand-written long-form filter docs (json_query JMESPath syntax breakdown, picklist, fromIRI, resolveRange, map, selectattr, regex_search, regex_replace, ternary, default, dict2items, flatten, from_json/to* family). New MCP tool `find_jinja_pattern(q, kind)` and enriched `find_jinja_filter` / `get_filter_examples`.
+- **2026-05-03 — `store/JINJA_IDIOMS.md`** (new) — 10 corpus-mined patterns with occurrence counts.
+- **2026-05-03 — Live e2e loop closed**: `fsrpb push` is idempotent (PUT → POST → PURGE+POST including child-workflow purge), `run-playbook --follow` auto-dumps step diagnostics on failure (fetches `?step_detail=true`), `fsrpb env <pb_execution>` rebuilds the live `{vars: {…env, steps: {Step_Name: result}}}` Jinja context, `fsrpb jinja '<tpl>' --from-pb-execution <id>` renders against it. MCP equivalents: `get_run_env`, `render_jinja(from_pb_execution=…)`.
+- **2026-05-03 — Connector params 14 % → 90 %**: new RPM-based tier in `probe_connectors`. Downloads each connector's RPM from `repo.fortisoar.fortinet.com`, extracts `info.json`, ingests params. Fingerprint diff (`connectors.rpm_fingerprint`) so re-runs short-circuit. Cache at `store/rpm_cache/`.
+- **2026-05-03 — Connector healthcheck**: `fsrpb health [name] [--probe] [--config <uuid>]`. Lists configured + active via `POST /api/integration/connector_details/?configured=true&active=true`; per-config probe via `GET /api/integration/connectors/healthcheck/{name}/{version}/?config=…`. MCP: `list_configured_connectors`, `healthcheck_connector`.
+- **2026-05-03 — Compiler**: start step now emits `arguments.step_variables.input.params=[]` (was `{}`, caused runtime `pop expected at most 1 argument`).
+- **2026-05-03 — `vars.steps.<step_id>` rule confirmed**: keyed off `step.name.replace(" ", "_")` (case **preserved**, not lowercased). Verified against the Jinja editor widget's `view.controller.js`. AUTHORING.md updated.
+
+
 
 ## Where we are
 
-All five static probes operational against the live instance:
+Compiler v1, reference store, live e2e (push/run/poll/env), MCP server (16 tools), and corpus-mined Jinja docs are all live. Open work: demo MVP, Phase 8 frontend research, `CONNECTORS.md` generation.
 
-| Probe | What it captures | Trusted rows |
+| Probe | What it captures | Status |
 |---|---|---|
-| `probe_api_endpoints` | Hydra root + dashboard FORTISOAR_API.md inventory | 10 / 856 endpoints |
-| `probe_connectors` | `/api/integration/connectors/` (installed) + `/api/query/solutionpacks` (catalog) | 70 installed + 644 catalog = 714 connectors, 6749 ops, 4753 params |
-| `probe_modules` | `/api/3/staging_model_metadatas?$relationships=true` + `/api/3/picklist_names` | 62 modules, 1233 fields, 124 with picklist values |
-| `probe_playbooks` | `/api/3/workflow_step_types/`, `workflow_steps?$relationships=true`, `workflows` | 43 step types, 7092 steps mined, 1664 playbooks, 6 trigger recipes |
-| `probe_jinja` | Widget constants + Playbooks Guide PDF + live `type_debug` rendering | 99 filters tested_pass with observed types, 144 cataloged |
-| `probe_jinja_backend` | **Backend introspection** via `inspect.signature()` on `sealab.jinja` Environment | 170 filters, 15 globals, 39 tests with canonical signatures |
+| `probe_api_endpoints` | Hydra root + dashboard endpoint inventory | live |
+| `probe_connectors` | 3 tiers: live (installed) → solutionpacks (catalog) → **fortinet_repo_rpm** (RPM `info.json` from `repo.fortisoar.fortinet.com`, fingerprint diff so re-runs short-circuit) | 714 connectors, 6,762 ops, **6,097 with params (90%)** |
+| `probe_modules` | `/api/3/staging_model_metadatas?$relationships=true` + `/api/3/picklist_names` | 62 modules, 1,233 fields |
+| `probe_playbooks` | step types, playbook corpus, trigger recipes | 43 step types, 1,669 playbooks |
+| `probe_jinja` | Widget constants + PDF + live `type_debug` rendering | 144 filters, 99 w/ observed types |
+| `probe_jinja_backend` | Backend introspection via `inspect.signature()` | 170 filters, 15 globals, 39 tests |
+| `probe_jinja_corpus` (NEW) | Mines every `{{…}}`/`{%…%}` block from live workflow args | 19,305 blocks → 7,789 unique idioms |
+| `probe_step_handlers` | FUNCTION_MAP signatures | 100% coverage |
+| `probe_playbook_constraints` | rule constraints | live |
+| `probe_cleanup` | pattern-matched delete of test artifacts (gated on `FSR_ALLOW_E2E`) | live |
 
 DB at `store/fsr_reference.db`, schema at `store/schema.sql`. All probes are
 idempotent and re-runnable. `python/probes/_env.py` loads `.env` (already
@@ -51,13 +67,13 @@ Three step types reference handlers not in FUNCTION_MAP:
 `workflow_reference`, `map`, `fetch_email_and_explode` — flagged in
 `GAPS.md`.
 
-### 3. Live-instance probes (Phase 5)
-Workflow collection import + playbook execute + assert + cleanup probes
-for end-to-end compiler validation. Needs `FSR_ALLOW_E2E=true` in `.env`
-plus a confirmed import endpoint (currently 🔴 in `GAPS.md` — discovery
-recipe is `php bin/console debug:router | grep import` on the box).
-pyfsr enhancement: `client.workflow_collections.import_(payload)`,
-`client.playbooks.run(trigger_uuid, body)`, `client.records.create_bulk`.
+### 3. Live-instance probes (Phase 5) — ✅ DONE 2026-05-03
+End-to-end via CLI: compile → push (idempotent w/ child-workflow purge)
+→ trigger via `/api/triggers/1/notrigger/<wf>` → poll
+`/api/wf/api/workflows/?task_id=` → on terminal, fetch `?step_detail=true`
+and dump per-step status + top-level error inline. `fsrpb env <pk>` and
+`fsrpb jinja '<tpl>' --from-pb-execution <pk>` close the loop for
+authoring the next step against the previous run's real data.
 
 ### 4. Compiler v1 — vertical slice landed; widen coverage next
 ✅ Pipeline complete: parser → resolver → validator → emitter, plus
@@ -91,32 +107,21 @@ surfaces — CLI, MCP, visual editor — sit on top of). Targets:
 - Acceptance: bambenek-feed YAML → JSON byte-equivalent (modulo UUIDs/ts)
   to the vendor original.
 
-### 5a. `fsrpb push` — re-push UNBLOCKED 2026-05-03
-**Resolution**: Symfony route dump (recon_20260503-122258) found two routes
-that close §5.0:
+### 5a. `fsrpb push` — idempotent ✅ DONE 2026-05-03
 
-- **`POST /api/3/bulkupsert/workflow_collections`** — true upsert. Per
-  `UpsertController.php:89-90`, when the body sets `deletedAt: null` it
-  resurrects soft-deleted records, which removes the UUID-conflict failure
-  mode entirely. **This is the canonical re-push path** — replaces the
-  POST→409→DELETE→409 dance.
-- **`DELETE /api/3/{resource}/{uuid}?$hardDelete=true`** — confirmed via
-  `MqMessagebroadcastSubscriber.php:147`. Bypasses soft-delete on a single
-  record. Useful for cleanup probes that need to fully purge test artifacts.
-- **`DELETE /api/3/delete-with-query/{resource}?$showDeleted=true`** with
-  body `{logic, filters}` — bulk hard-purge. Already used by built-in
-  scheduler playbooks (DataFixtures/SchedulerSystemWorkflow).
+The actually-shipped path: `cmd_push --mode replace` does PUT → POST →
+PURGE+POST. The crucial fix that unblocked re-push was that **the
+collection-level hard-purge does not cascade to its workflows** — orphaned
+workflows from a prior failed import keep their UUIDs, which causes the
+second POST to 409 on the workflow (not the collection). Solution: the
+purge step now also deletes every child workflow UUID via
+`DELETE /api/3/delete/workflows?$hardDelete=true {ids: [...]}`. Verified
+by re-pushing `examples/hello_connector.yaml` twice — both succeed as
+`PURGE+POST` with the same `uuid=3a892679`.
 
-To wire up:
-1. Replace `cmd_push --mode replace` PUT/POST fallback with a single call to
-   `POST /api/3/bulkupsert/workflow_collections` (body = same unwrapped
-   entity already used for first-create POST, plus `deletedAt: null` if the
-   target is in the recycle bin).
-2. Add `cmd_push --mode purge-and-create` for the rare case where bulkupsert
-   semantics aren't right (e.g. you want a clean slate without keeping
-   audit/comment history): `DELETE …?$hardDelete=true` then `POST`.
-3. Backup paranoia from §5.0 still applies for first run, but the
-   bulkupsert path doesn't destroy data — it merges.
+`bulkupsert` is documented but not wired — the PURGE+POST path works,
+and bulkupsert had separate PHP-side bugs in `UpsertController.php` we
+didn't want to depend on.
 
 ---
 
@@ -173,12 +178,21 @@ Workaround for now: use `--mode create` for first imports; for updates
 go through the FSR UI, or compile to JSON and use `app:import:from:file`
 on the appliance.
 
-### 5. MCP server v1 (new — depends on #4)
-Wraps the compiler + reference store as MCP tools so any agent (Claude
-Code, IDEs, the widget) can author playbooks via tool use without
-hand-rolling lookups. See `ARCHITECTURE.md §3` for the tool table.
-First cut is read-only + validate/compile (no e2e). `dry_run_playbook`
-gets added after TODO #3 lands.
+### 5. MCP server v1 — ✅ LIVE (16 tools)
+`python/mcp_server.py` over stdio; `.claude/settings.json` registers it
+as `fsrpb`. Tools (verified 2026-05-03): `find_connector`,
+`find_operation`, `get_op_schema`, `get_connector_source`, `run_op`
+(w/ confirm guardrails + risk classification), `get_step_type`,
+`find_jinja_filter` (returns `corpus_uses` + `curated_doc`),
+`find_jinja_pattern` (search corpus by block kind), `get_filter_examples`,
+`render_jinja` (w/ `from_pb_execution`), `search_playbooks`,
+`validate_yaml`, `compile_yaml`, `get_run_env`,
+`list_configured_connectors`, `healthcheck_connector`.
+
+**Open follow-ups:**
+- `dry_run_playbook` — sandbox-execute compiled JSON without persisting.
+- Bug: `render_jinja` doesn't unwrap non-string scalar results (returns
+  `{"output": '{"result": 5}'}` instead of `{"output": "5"}`).
 
 ### Read-only probes landed 2026-05-03
 

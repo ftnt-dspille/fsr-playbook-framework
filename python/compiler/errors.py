@@ -31,6 +31,7 @@ class CompileError:
     path: str = ""              # YAML-ish dotted path, e.g. "playbooks[0].steps[2]"
     suggestion: Optional[str] = None
     near: Optional[str] = None  # "did you mean X" candidate
+    severity: str = "error"     # "error" blocks compilation; "warning" does not
 
     def to_dict(self) -> dict:
         return {
@@ -39,4 +40,5 @@ class CompileError:
             "path": self.path,
             "suggestion": self.suggestion,
             "near": self.near,
+            "severity": self.severity,
         }

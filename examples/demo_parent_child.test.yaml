@@ -8,7 +8,7 @@ timeout_s: 120
 expects:
   status: finished
   vars:
-    final_product: "70"
+    final_product: 70
   steps:
     Call_multiplier:
       status: finished

@@ -1,6 +1,6 @@
 # FSRPlaybookYaml — architecture & end state
 
-**Status**: living doc. Last updated 2026-05-02.
+**Status**: living doc. Last updated 2026-05-03. Compiler v1, reference store, live e2e (push/run/poll/env), MCP server (16 tools), and corpus-mined Jinja docs are all live. Open: demo MVP + Phase 8 frontend research (Monaco YAML editor + LLM chat).
 
 ## North star
 

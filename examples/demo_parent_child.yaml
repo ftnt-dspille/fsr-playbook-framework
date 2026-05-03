@@ -55,4 +55,7 @@ playbooks:
         arguments:
           arg_list:
             - name: final_product
-              value: "{{ vars.product }}"
+              # The child's vars land in the workflow_reference step's
+              # `result`, not auto-merged into the parent's top-level
+              # vars. Read via vars.steps.<step name underscored>.<key>.
+              value: "{{ vars.steps.Call_multiplier.product }}"

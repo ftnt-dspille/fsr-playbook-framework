@@ -1,3 +1,0 @@
-  app_post_action_trigger_workflows                    POST                  ANY      ANY    /api/triggers/1/action/{workflowid}                            
-  app_post_no_trigger                                  POST|GET              ANY      ANY    /api/triggers/1/notrigger/{workflowId}                         
-  app_post_api_trigger_workflows                       POST|GET              ANY      ANY    /api/triggers/1/{apiEndpoint}                                  

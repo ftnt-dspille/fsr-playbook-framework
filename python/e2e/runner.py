@@ -14,7 +14,7 @@ Test sidecar schema:
 
     # ----- setup (optional) -----
     setup:
-      - kind: insert_record
+      - kind: create_record
         module: alerts
         fields:
           name: fsrpb_e2e_test_alert
@@ -161,7 +161,8 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
     try:
         for i, step in enumerate(setup_steps):
             kind = step.get("kind")
-            if kind != "insert_record":
+            # Accept create_record (preferred) and the legacy insert_record alias.
+            if kind not in ("create_record", "insert_record"):
                 _log(f"[{run_id}] setup[{i}] unknown kind {kind!r}, skipping")
                 continue
             module = step.get("module")
@@ -210,8 +211,11 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
                 "__uuid": wf_uuid,
                 "records": [f"/api/3/{module}/{rec_uuid}"]}
     else:
+        # Resolve any {{ setup.<cap>.<field> }} templates in the input
+        # values now that setup has run.
+        resolved_input = _render_templates(trigger_input, setup_ctx)
         trig_url = f"{client.base_url}/api/triggers/1/notrigger/{wf_uuid}"
-        body = {"input": {}, "request": {"data": trigger_input or {}},
+        body = {"input": {}, "request": {"data": resolved_input or {}},
                 "useMockOutput": False, "globalMock": False}
     trigger_started = time.time()
     r = client.session.post(trig_url, json=body, verify=client.verify_ssl)
@@ -268,13 +272,21 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
                         if got != want:
                             failures.append(
                                 f"record.{cap}.{k}: want {want!r}, got {got!r}")
+                    for k, needle in (rec_expects.get("contains") or {}).items():
+                        got = _picklist_value(fresh.get(k))
+                        if not isinstance(got, str) or needle not in got:
+                            failures.append(
+                                f"record.{cap}.{k}: missing substring {needle!r}, "
+                                f"got {got!r}")
                 else:
                     failures.append(
                         f"record.{cap}: re-fetch failed HTTP {fr.status_code}")
     res.failures.extend(failures)
 
-    # 8. Cleanup setup records, then collection.
+    # 8. Cleanup setup records + cleanup_query records, then collection.
     _flush_cleanup(client, cleanup_records, _log, run_id)
+    for q in spec.get("cleanup_query") or []:
+        _purge_by_query(client, q.get("module"), q.get("where") or {}, _log, run_id)
     if cleanup:
         _hard_purge(client, coll_uuid, coll_entity)
         _log(f"[{run_id}] purged collection")
@@ -483,6 +495,38 @@ def _picklist_value(field):
     if isinstance(field, dict):
         return field.get("itemValue") or field.get("@id") or field
     return field
+
+
+def _purge_by_query(client, module: str, where: dict, log, run_id: str) -> None:
+    """Find records matching `where` (field=value, exact match) and hard-delete.
+    Uses POST /api/query/<module> to find, DELETE /api/3/delete/<module> to purge.
+    """
+    if not module or not where:
+        return
+    body = {"logic": "AND",
+            "filters": [{"type": "primitive", "field": k, "value": v,
+                         "operator": "eq", "_operator": "eq"}
+                        for k, v in where.items()],
+            "limit": 200}
+    try:
+        r = client.session.post(client.base_url + f"/api/query/{module}",
+                                json=body, verify=client.verify_ssl)
+    except Exception:  # noqa: BLE001
+        return
+    if r.status_code != 200:
+        return
+    members = r.json().get("hydra:member") or []
+    uuids = [m.get("uuid") for m in members if m.get("uuid")]
+    if not uuids:
+        return
+    try:
+        client.session.delete(
+            client.base_url + f"/api/3/delete/{module}?$hardDelete=true",
+            json={"ids": uuids}, verify=client.verify_ssl)
+    except Exception:  # noqa: BLE001
+        pass
+    log(f"[{run_id}] cleanup_query purged {len(uuids)} {module} record(s) "
+        f"matching {where}")
 
 
 def _flush_cleanup(client, cleanup_records: list[tuple[str, str]], log, run_id: str) -> None:

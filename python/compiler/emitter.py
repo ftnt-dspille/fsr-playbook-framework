@@ -47,8 +47,78 @@ def _group_iri(u: str) -> str:
 _STEP_LEFT = 200
 _STEP_TOP_BASE = 120
 _STEP_VSTRIDE = 100
+_STEP_HSTRIDE = 280          # Horizontal spacing between sibling branches.
 _STEP_WIDTH = 200            # FSR canvas step boxes are ~200px wide.
 _NOTE_GAP = 40               # Horizontal gap between step and its auto-note.
+
+
+def _compute_layout(steps: list, start_id: str | None) -> dict[str, tuple[int, int]]:
+    """Tree-aware (top, left) assignment.
+
+    Linear `next:` keeps the same column. Decision `branches:` (and any
+    other multi-target step type that uses the same field) fan out: the
+    first branch stays in the parent column, each subsequent branch gets
+    a column to the right. `unlabeled_next` siblings get the same
+    treatment. BFS so a step reachable via two paths wins on the shorter
+    one. Steps unreachable from start fall through to a stable
+    column=last+1 to avoid stacking on the trunk.
+    """
+    if not steps:
+        return {}
+    by_id = {s.id: s for s in steps}
+    layout: dict[str, tuple[int, int]] = {}
+    if start_id and start_id in by_id:
+        first = start_id
+    else:
+        first = steps[0].id
+
+    # BFS: (id, depth, col)
+    queue: list[tuple[str, int, int]] = [(first, 0, 0)]
+    max_col = 0
+    while queue:
+        sid, depth, col = queue.pop(0)
+        if sid in layout or sid not in by_id:
+            continue
+        top = _STEP_TOP_BASE + depth * _STEP_VSTRIDE
+        left = _STEP_LEFT + col * _STEP_HSTRIDE
+        layout[sid] = (top, left)
+        if col > max_col:
+            max_col = col
+        s = by_id[sid]
+        # Collect children. Linear `next` stays in column; each branch
+        # target gets an offset column.
+        children: list[tuple[str, int]] = []
+        if s.next and s.next in by_id:
+            children.append((s.next, col))
+        # branches: dict[label, target_id] — labels iterated in declaration order
+        offset = 0
+        for label, target in s.branches.items():
+            if target in by_id:
+                # If linear `next` already used this column, branches start at +1
+                branch_col = col + offset + (1 if s.next and offset == 0 else 0)
+                # Actually simpler: branches always offset from the parent's column,
+                # incrementing per branch. If there's no linear `next`, the first
+                # branch stays in the parent column (looks centered).
+                branch_col = col + offset
+                children.append((target, branch_col))
+                offset += 1
+        for target in getattr(s, "unlabeled_next", []) or []:
+            if target in by_id:
+                children.append((target, col + offset))
+                offset += 1
+        for tgt, tcol in children:
+            if tgt not in layout:
+                queue.append((tgt, depth + 1, tcol))
+
+    # Steps not reachable from start: park them in their declaration order
+    # at the bottom of the trunk, in a fresh column to the right.
+    for s in steps:
+        if s.id in layout:
+            continue
+        max_col += 1
+        layout[s.id] = (_STEP_TOP_BASE + (len(layout)) * _STEP_VSTRIDE,
+                        _STEP_LEFT + max_col * _STEP_HSTRIDE)
+    return layout
 
 
 def emit(collection: Collection) -> dict[str, Any]:
@@ -98,12 +168,22 @@ def emit(collection: Collection) -> dict[str, Any]:
             for sid in ann.contains:
                 step_group[sid] = ann_uuid
 
+        # Tree-aware layout: linear flow goes top-to-bottom in one column;
+        # each decision branch (and unlabeled multi-`next`) fans out into
+        # its own column. BFS from start so reachability + first-visit
+        # row dominates.
+        start_id = pb.trigger_step_id
+        if not start_id:
+            for s in pb.steps:
+                if s.type == "start":
+                    start_id = s.id
+                    break
+        step_layout = _compute_layout(pb.steps, start_id)
+
         trigger_step_iri = None
         for idx, s in enumerate(pb.steps):
             su = step_uuids[s.id]
-            top = _STEP_TOP_BASE + idx * _STEP_VSTRIDE
-            left = _STEP_LEFT
-            step_layout[s.id] = (top, left)
+            top, left = step_layout[s.id]
             # workflow_reference: rewrite local `target: <name>` to IRI;
             # drop the friendly key from emitted JSON.
             if s.type == "workflow_reference" and isinstance(s.arguments, dict):
@@ -112,11 +192,67 @@ def emit(collection: Collection) -> dict[str, Any]:
                     s.arguments["workflowReference"] = (
                         f"/api/3/workflows/{wf_uuid_by_name[target]}"
                     )
+            # manual_input: each response option needs a `step_iri` that
+            # points at the next step. Map by branch label (DecisionBased
+            # multi-option) or fall back to the step's `next:` (the only
+            # option for InputBased single-button prompts). Without this
+            # FSR's manual_input handler emits a malformed-URL error and
+            # the run fails.
+            # decision: each condition entry needs `step_iri` (and optionally
+            # `step_name`) pointing at the branch target. Without it FSR's
+            # `cond` handler raises CS-WF-10 ("Step IRI or Condition not set").
+            # Mirrors manual_input's option→step_iri injection. Implicit-else
+            # branches in `branches:` whose option has no matching `conditions`
+            # entry get a synthesized `{option, step_iri, default: true}` row.
+            if s.type == "decision" and isinstance(s.arguments, dict):
+                conds = s.arguments.get("conditions")
+                if not isinstance(conds, list):
+                    conds = []
+                    s.arguments["conditions"] = conds
+                step_name_by_id = {st.id: (st.name or st.id) for st in pb.steps}
+                seen_options = set()
+                for cond in conds:
+                    if not isinstance(cond, dict):
+                        continue
+                    label = cond.get("option")
+                    if label is not None:
+                        seen_options.add(label)
+                    if cond.get("step_iri"):
+                        continue
+                    target_id = s.branches.get(label) if label else None
+                    if target_id and target_id in step_uuids:
+                        cond["step_iri"] = _step_iri(step_uuids[target_id])
+                        cond.setdefault("step_name", step_name_by_id.get(target_id))
+                # implicit-else branches: in `branches:` but not in `conditions:`
+                for label, target_id in s.branches.items():
+                    if label in seen_options:
+                        continue
+                    if target_id not in step_uuids:
+                        continue
+                    conds.append({
+                        "option": label,
+                        "default": True,
+                        "step_iri": _step_iri(step_uuids[target_id]),
+                        "step_name": step_name_by_id.get(target_id),
+                    })
+            if s.type == "manual_input" and isinstance(s.arguments, dict):
+                rmap = s.arguments.get("response_mapping") or {}
+                opts = rmap.get("options") or []
+                for opt in opts:
+                    if not isinstance(opt, dict) or opt.get("step_iri"):
+                        continue
+                    label = opt.get("option")
+                    target_id = s.branches.get(label) if label else None
+                    if not target_id:
+                        target_id = s.next
+                    if target_id and target_id in step_uuids:
+                        opt["step_iri"] = _step_iri(step_uuids[target_id])
             steps_out.append(_emit_step(
                 s, su, top, left,
                 group_iri=_group_iri(step_group[s.id]) if s.id in step_group else None,
             ))
-            if pb.trigger_step_id is None and s.type == "start":
+            if pb.trigger_step_id is None and s.type in (
+                    "start", "start_on_create", "start_on_update"):
                 trigger_step_iri = _step_iri(su)
         if pb.trigger_step_id and pb.trigger_step_id in step_uuids:
             trigger_step_iri = _step_iri(step_uuids[pb.trigger_step_id])

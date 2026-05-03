@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS connectors (
     config_schema_json TEXT,                 -- connection-level config fields
     source            TEXT NOT NULL,         -- 'live_api_get' | 'rpm_info_json' | ...
     source_path       TEXT,                  -- when local: path to info.json
-    info_json         TEXT                   -- full blob, fallback / debug only (icons stripped)
+    info_json         TEXT,                  -- full blob, fallback / debug only (icons stripped)
+    source_code       TEXT,                  -- connector.py + operations.py concatenated, populated lazily by mcp get_connector_source
+    rpm_fingerprint   TEXT                   -- "<rpm_full_name>:<size_bytes>" — set by repo_rpm tier; lets re-runs skip already-ingested connectors
 );
 
 CREATE TABLE IF NOT EXISTS operations (

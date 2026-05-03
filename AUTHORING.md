@@ -70,7 +70,7 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 | `start` | `cybersponse.abstract_trigger` | (trigger) | (none — just routes downstream) |
 | `set_variable` | `SetVariable` | `set_multiple` | `arg_list: [{name, value}, …]` |
 | `decision` | `Decision` | `cond` | `conditions: [{option, condition}]` + `branches:` |
-| `connector` | `Connectors` | `connector` | `connector, operation, params, version, config` |
+| `connector` | `Connectors` | `connector` | `connector, operation, params, version, config, step_variables` |
 | `find_record` | `FindRecords` | `find_data` | `module, query, partial` |
 | `update_record` | `UpdateRecord` | `update_data` | `collection, resource` |
 | `insert_record` | `InsertData` | `insert_data` | `collection, resource` |
@@ -84,6 +84,31 @@ Other FSR step types (`cybersponse.action`, `RestApi`, `RunScript`,
 `ParallelExecution`, `MapPlaybook`, `FetchEmail`) round-trip
 correctly through the compiler — they just don't have a friendly short
 alias yet. Use the canonical name in `type:` when you need them.
+
+## Connector step fields
+
+```yaml
+- id: lookup
+  type: connector
+  arguments:
+    connector: fortinet-fortisiem      # required
+    operation: get_org_name_by_org_id  # required
+    config: dans fortisiem             # name OR uuid; "" = use connector's default config
+    params: { domain_id: "Fortinet" }
+    # version: auto-stamped from the store
+    # step_variables: defaults to {} — set keys to capture step output as a variable
+```
+
+`config:` accepts either the friendly config name (as shown in the FSR
+Connectors UI) or the config uuid. Empty string tells FSR to use the
+connector's saved default. The compiler passes it through unchanged —
+FSR resolves it at runtime.
+
+`step_variables:` lets a step expose its output under a named variable
+(`{{ vars.<name> }}`) for downstream steps. Recommended practice is to
+use a separate `set_variable` step instead — `step_variables` on a
+connector step is invisible from the canvas, and a downstream reader
+can't tell where the variable came from.
 
 ## Comments and annotations
 
@@ -162,9 +187,50 @@ Inside a playbook you read state via Jinja templates:
 |---|---|
 | `{{ vars.input.records[0] }}` | the trigger record (alert/incident/etc.) |
 | `{{ vars.input.params.<name> }}` | input param declared in `parameters:` |
-| `{{ vars.steps.<step_id>.<field> }}` | output of a previous step |
+| `{{ vars.steps.<step_name_underscored>.<field> }}` | output of a previous step (see note below) |
 | `{{ vars.<name> }}` | a variable set via `set_variable` |
 | `{{ vars.env.<key> }}` | env-level variables (organization, user, …) |
+
+### Reading a previous step's output
+
+The Jinja namespace `vars.steps.<key>` keys off the step's **display name**
+with spaces converted to underscores (case preserved) — NOT the YAML `id:`
+field, NOT the step UUID. The transform is exactly
+`step.name.replace(" ", "_")` (verified against the Jinja editor widget's
+`view.controller.js`). Authoring rule of thumb:
+
+```yaml
+- id: lookup                     # YAML-internal — used for `next:` / `branches:` only
+  type: connector
+  name: Get organization         # ← spaces→_, case preserved → "Get_organization"
+  arguments: { … }
+  next: route
+
+- id: route
+  type: decision
+  arguments:
+    conditions:
+      - option: ok
+        condition: "{{ vars.steps.Get_organization.records[0].id is defined }}"
+        # ↑ keys off the previous step's NAME (Get_organization), not its id (lookup)
+```
+
+Per step-type output shape (observed; for connector ops the canonical
+shape lives in the operation's `output_schema` plus any cached observed
+shape from `mcp run_op`):
+
+| Step type | Where the output lands |
+|---|---|
+| connector  | `vars.steps.<name>.data` (or `.records` / `.<custom>` per op `output_schema`) |
+| find_record | `vars.steps.<name>.records[]` (each is a full module record) |
+| set_variable | the variables themselves go to top-level `vars.<var_name>` (not under `vars.steps`) |
+| manual_input (after resume) | `vars.steps.<name>.input.<field>` |
+| code_snippet | whatever the snippet `return`s, at `vars.steps.<name>` |
+| workflow_reference | sub-playbook's `vars` are merged into parent on completion |
+
+If you reference a step output with a key that doesn't match any step
+name in the playbook, the value is silently undefined at runtime. The
+compiler doesn't yet flag this — sanity-check by name, not by id.
 
 Use `fsrpb explain filter <name>` to see canonical filter signatures
 and observed return types. Examples:

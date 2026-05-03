@@ -25,7 +25,12 @@ class CompileResult:
 
     @property
     def ok(self) -> bool:
-        return not self.errors and self.fsr_json is not None
+        blocking = [e for e in self.errors if e.severity != "warning"]
+        return not blocking and self.fsr_json is not None
+
+    @property
+    def warnings(self) -> list[CompileError]:
+        return [e for e in self.errors if e.severity == "warning"]
 
 
 def compile_yaml(text: str, db_path: Path) -> CompileResult:
@@ -33,19 +38,26 @@ def compile_yaml(text: str, db_path: Path) -> CompileResult:
     if errs or coll is None:
         return CompileResult(errors=errs, ir=coll)
 
+    all_warnings: list[CompileError] = []
+
+    def _has_blocking(errs: list[CompileError]) -> bool:
+        blocking = [e for e in errs if e.severity != "warning"]
+        all_warnings.extend(e for e in errs if e.severity == "warning")
+        return bool(blocking)
+
     resolver = Resolver(db_path)
     try:
         errs = resolver.resolve(coll)
-        if errs:
+        if _has_blocking(errs):
             return CompileResult(errors=errs, ir=coll)
         errs = ArgValidator(resolver.conn).validate(coll)
     finally:
         resolver.close()
-    if errs:
+    if _has_blocking(errs):
         return CompileResult(errors=errs, ir=coll)
 
     errs = validate(coll)
-    if errs:
+    if _has_blocking(errs):
         return CompileResult(errors=errs, ir=coll)
 
-    return CompileResult(fsr_json=emit(coll), ir=coll)
+    return CompileResult(fsr_json=emit(coll), errors=all_warnings, ir=coll)

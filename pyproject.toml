@@ -10,6 +10,7 @@ dependencies = [
     # Local sibling repo, installed editable in dev:
     #   pip install -e ../pyfsr
     "pyfsr",
+    "mcp>=1.0",
 ]
 
 [project.scripts]
