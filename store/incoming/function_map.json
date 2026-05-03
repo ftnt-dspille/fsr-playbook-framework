@@ -1,0 +1,1669 @@
+{
+  "schema_version": 1,
+  "function_map": {
+    "add": {
+      "qualname": "add",
+      "module": "workflow.builtins.misc",
+      "doc": " Tries to add left and right together.\n\n Each operand type must implement the __add__ function to be supported.\n\n:param Any left: the lefthand operand\n:param Any right: the righthand operand\n\n:raises TypeError: If the left and/or right operand don't support addition\n\n:return: the result of adding left and right together\n:rtype: Any",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(left, right, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "left",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "right",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "add_one": {
+      "qualname": "add_one",
+      "module": "workflow.builtins.misc",
+      "doc": " Adds one to whatever number was passed\n\n:param int num: the num to add 1 to\n\n:return: The number incremented by one\n:rtype: int",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(num, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "num",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "api_call": {
+      "qualname": "api_call",
+      "module": "workflow.builtins.http",
+      "doc": " A wrapper around the python requests library.\n\n Can be used to make any generic http call.\n\n:param str url: End point to hit\n:param str method: Http method\n:param dict params: Any query params to send as part of the url\n:param str body: The body (which won't be encoded) to send with the request\n:param dict headers: An object full of headers to add to the request\n:param bool verify: Boolean to indicate whether to verify certificates\n:param str username: Username used in basic auth\n:param str password: Password used in basic auth\n:param dict auth_config: Username and password used in basic auth, but in\n    dict form\n\n:return: the API response either as a json-like dict if possible or as bytes\n:rtype: dict or bytes\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(url, method='GET', params=None, body='', headers=None, verify=True, username='', password='', auth_config=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "url",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "method",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'GET'",
+          "annotation": null
+        },
+        {
+          "name": "params",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "body",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "headers",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "verify",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "True",
+          "annotation": null
+        },
+        {
+          "name": "username",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "auth_config",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "call": {
+      "qualname": "workflow_reference",
+      "module": "workflow.eval",
+      "doc": " This task will start the execution of another workflow. It will resolve an\n IRI to fetch the workflow data it needs, and read that data into sealab\n models.\n\n:param str/dict workflowReference: An IRI that points to the location of     the workflow template data, or the template data itself as a dict if     already preloaded.\n\n:return: The result of evaluating the workflow reference\n:rtype: Any\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(workflowReference, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "workflowReference",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "remote_workflow_reference": {
+      "qualname": "remote_workflow_reference",
+      "module": "workflow.eval",
+      "doc": " This task will start the execution of a workflow on a peer instance.\n\n:param str playbook_alias_id: A playbook alias that points to the remote workflow to be run\n\n:param str tenant_id:\n\n:return: The result of evaluating the workflow reference\n:rtype: Any\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(playbook_alias_id, tenant_id=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "playbook_alias_id",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "tenant_id",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "cond": {
+      "qualname": "cond",
+      "module": "workflow.eval",
+      "doc": " Cond will go though its predicates in order, and if a predicate is false,\n it will skip the corresponding set of steps. At least one condition must be\n true.\n\n:param Step step: The cond step to evaluate\n:param list conditions: list of dicts, each dict has keys step_iri, condition\n\n:raises TypeError: if conditions dict isn't a well formed list of key-values\n:raises ValueError: it is considered an error if none of the conditions\n    evaluate to true. It is possible to avoid this by using True as the final\n    condition\n\n:return: The IRI of the step to follow\n:rtype: str\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(step, conditions, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "step",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "conditions",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "create_file_from_string": {
+      "qualname": "create_file_from_string",
+      "module": "workflow.builtins.files",
+      "doc": "Creates a (temporary) file filled with `contents`. The content-type of this\nfile will be 'text/plain'\n\n:param str contents: The text contents of the file\n:return: filename\n:rtype: str",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(contents, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "contents",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "crudhub_crud": {
+      "qualname": "crudhub_crud",
+      "module": "workflow.builtins.crudhub",
+      "doc": " A task for generic requests to crud hub.\n\n:param str collection: An IRI that points to the location of the crud hub        collection (E.g. /api/3/events)\n:param str method: HTTP method\n:param dict resource: An object to json encode and send to crud hub\n\n:return: the API response either as a json-like dict if possible or as bytes\n:rtype: dict or bytes\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(collection, method, resource=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "collection",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "method",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "resource",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "database_connector": {
+      "qualname": "database_connector",
+      "module": "workflow.builtins.db",
+      "doc": "Sets up a database connector object. See DatabaseConnector. This function\nwill also ping the database to confirm the connector is configured properly.\n\n:param dict dbconfig: Dictionary of configuration options. See\n    :class:`DatabaseConnector.__init__`\n:return: The string 'success' if the database was reachable\n:rtype: str",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(db_config, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "db_config",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "database_connector_test": {
+      "qualname": "database_connector_with_args",
+      "module": "workflow.builtins.db",
+      "doc": null,
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(host, port, engine, username, password, name, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "host",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "port",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "engine",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "username",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "database_query": {
+      "qualname": "make_query",
+      "module": "workflow.builtins.db",
+      "doc": "Takes a database connector out of the defined connectors and makes a query\nwith it.\n\n:param str query: The text of the query to send to the database\n:param str connector_name: Optional named connector to use, if not specified\n    the most recently defined database connector will be used\n:return: Results of the query\n:rtype: list\n:raises Exception: If the database connector has not been configured\n    properly",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(query, connector_name=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "query",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "connector_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "delay": {
+      "qualname": "delay",
+      "module": "workflow.eval",
+      "doc": " Delays execution of subsequent steps for the specified duration.\n\n:param Step step: The delay step to evaluate\n:param dict delay: datetime object to delay this playbook\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(step_id, delay, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "step_id",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "delay",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "download_file_from_crudhub": {
+      "qualname": "download_file_from_crudhub",
+      "module": "workflow.builtins.files",
+      "doc": "Downloads a file and the corresponding metadata from Crudhub. This will do\nHMAC authentication. The iri can be either a file or an attachment.\n\n:param str iri: Absolute path to the file as an IRI\n:return: filename\n:rtype: str",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(iri, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "iri",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "download_file_from_url": {
+      "qualname": "download_file_from_url",
+      "module": "workflow.builtins.files",
+      "doc": "Downloads a file from a url. Optionally takes username/password arguments\nfor use in basic authentication schemes. Otherwise, if a file is public,\nthese arguments are not required (obviously).\n\n:param str url: Absolute path to the file as an URL\n:param str username: username for basic auth\n:param str password: password for basic auth\n:param dict request_headers: A dictionary of headers to add to the requests\n    call\n:return: filename\n:rtype: str",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(url, username=None, password=None, request_headers=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "url",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "username",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "request_headers",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "filter_result": {
+      "qualname": "filter_result_and_skip",
+      "module": "workflow.eval",
+      "doc": " Filters the result of the previous step. If the filter results in an empty\n list, the subsequent steps are skipped. If the resulting list has a length\n of 1, return just that result.\n\n:param dict query_obj: Query object to filter with\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(query_obj, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "query_obj",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "find_data": {
+      "qualname": "find_data",
+      "module": "workflow.builtins.crudhub",
+      "doc": " Performs a CrudHub search using the query api.\n\n:param partial:\n:param str module: A model to use as an IRI (e.g. events)\n:param dict query: A query object to send to the query api\n:return: search results\n:rtype: list\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(module, query, partial=True, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "module",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "query",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "partial",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "True",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "if": {
+      "qualname": "If",
+      "module": "workflow.eval",
+      "doc": " Conditional guard before a step. In the case that the  condition evaluates\n to true, the first step will be followed; otherwise, the second step will\n execute. The second step is not required.\n\n:param Step step: The If step to evaluate\n:param bool condition: bool post-template evaluation\n:param str true_step_iri: iri of the step to take if condition is true\n:param str false_step_iri: iri of the step to take if condition is false\n\n:raises ValueError: if the true step iri is non-existent\n\n:return: The IRI of the step to follow\n:rtype: str\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(step, condition, true_step_iri, false_step_iri='', *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "step",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "condition",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "true_step_iri",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "false_step_iri",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "insert_data": {
+      "qualname": "insert_data",
+      "module": "workflow.builtins.crudhub",
+      "doc": " A task for inserting new data into crud hub. Uses the POST method.\n\n:param str collection: An IRI that points to the location of the crud hub        collection (E.g. /api/3/events)\n:param dict resource: An object to json encode and send to crud hub\n\n:return: the API response either as a json-like dict if possible or as bytes\n:rtype: dict or bytes\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(collection, resource, __bulk=False, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "collection",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "resource",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "__bulk",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "map_json": {
+      "qualname": "map_json",
+      "module": "workflow.builtins.convert",
+      "doc": " Applies a `JSON patch <https://tools.ietf.org/html/rfc6902>`_ to the given\n json\n\n:param str json_data: the json to transform\n:param str patch: the json for transformation\n\n:return: the newly formed json\n:rtype: dict\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(json_data, patch, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "json_data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "patch",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "no_op": {
+      "qualname": "no_op",
+      "module": "workflow.builtins.misc",
+      "doc": "This function does nothing",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "panic": {
+      "qualname": "panic",
+      "module": "workflow.builtins.misc",
+      "doc": " Aborts\n\n:param str msg: A message to display\n:raises Exception: Unconditionally.",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(msg='', *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "msg",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "pause": {
+      "qualname": "pause",
+      "module": "workflow.eval",
+      "doc": " Will pause the current workflow. Running steps will finish, but new steps     will not be run until the workflow is unpaused. If timeout is given, the     workflow will be automatically resumed at that time.\n\n:param str timeout: ISO 8601 formated time string\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(timeout=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "timeout",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "resume": {
+      "qualname": "resume",
+      "module": "workflow.eval",
+      "doc": " This step will unpause a workflow.\n\n:param boolean condition: should it be unpaused\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(condition, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "condition",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "run_remote_command": {
+      "qualname": "run_remote_command",
+      "module": "workflow.builtins.ssh",
+      "doc": " Executes a command on a remote server. Assumes that keys have already been\n set up properly -- it does not allow for password based login, you must set\n up the public/private keys. RSA keys only for now. Host configuration for\n this object is of the following form::\n\n     {\n         'host': '<host string>',\n         'port': <port number; 0-65535; default 22>,\n         'timeout': '<ssh timeout in seconds; default 5',\n         'private_key': '<text of a private key file>'\n         'username': '<string>',\n         'password': '<string; default None>'\n     }\n\n Keys can be generated using ssh-keygen. If a password is provided in the\n hostconfig, it will be used to decrypt the private key.\n\n .. caution::\n     There are currently no restrictions on the commands you can run, nor any\n     plans to implement said restrictions. Notice, also, that you did not SEA\n     a sign outside of sealab that said 'Configuration management'. The\n     reason you did not see that sign, is that configuration management is\n     not sealab's business. Any programs you want to use on your server, you\n     must install yourself.\n\n:param dict host_config: describes how/where to connect to; see above\n:param str cmd: the command to be run on the remote server\n:param list allowed_exit: a list of non-standard exit codes to allow from\n    remote commands. Default values are 0 (standard success exit code) and -1\n    (meaning the remote command did not return any exit code)\n:return: the result of the run command\n:rtype: str\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(host_config, cmd, allowed_exit=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "host_config",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "cmd",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "allowed_exit",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "soap_connector": {
+      "qualname": "soap_connector",
+      "module": "workflow.builtins.soap",
+      "doc": "Sets up a soap connector object. See SoapConnector.\n\n:param dict host_config: dictionary of configuration options. This\n    dictionary is of the form::\n\n        {\n            'wsdl': '<url to the wsdl file>',\n            'username': '<wsse username>',\n            'password': '<wsse password>',\n        }\n\n:return: The string 'success' if no errors occured\n:rtype: str",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(host_config, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "host_config",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "soap_call": {
+      "qualname": "soap_call",
+      "module": "workflow.builtins.soap",
+      "doc": "Takes a soap connector out of the defined connectors and makes a soap call.\nAlso see: :class:`SoapConnector.call`\n\n:param str func_name: name of the soap function to call\n:param list params: a list of arguments to send along\n:return: result of the soap call",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(func_name, params, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "func_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "params",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "send_email": {
+      "qualname": "send_email",
+      "module": "workflow.builtins.notify",
+      "doc": " A task for sending email.\n\n:param list to: Recipient list\n:param str from_str: Email to put in the From header\n:param str content: Actual email content to send\n:param str subject: Subject of the email to send\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(to, from_str, content, subject='Email from Workflow', content_type='text/plain', *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "to",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "from_str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "content",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "subject",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'Email from Workflow'",
+          "annotation": null
+        },
+        {
+          "name": "content_type",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'text/plain'",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "send_irc_notification": {
+      "qualname": "irc_notify",
+      "module": "workflow.builtins.notify",
+      "doc": "Sends `message` to `recipient`, where `recipient` can be either a channel or\nan irc user\n\n:param str recipient: entity to send message to\n:param str message: message to send to entity\n:return: A message from the irc bot\n:rtype: str",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(recipient, message, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "recipient",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "message",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "set": {
+      "qualname": "set_variable",
+      "module": "workflow.eval",
+      "doc": " This task sets a variable.\n\n:param str name: name to save the variable under in the environment\n:param Any value: value to set\n\n:return: the value of the variable\n:rtype: Any\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(name, value, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "set_multiple": {
+      "qualname": "set_variables",
+      "module": "workflow.eval",
+      "doc": " This task sets variables.\n\n:param dict arg_list: dict containing all of the args to set\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(arg_list=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "arg_list",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "update_all": {
+      "qualname": "update_all",
+      "module": "workflow.builtins.crudhub",
+      "doc": " Trys to update the value of results.\n\n:param dict resource: An object to json encode and send to crud hub\n:param str collection: An IRI that points to the location of the crud hub        collection (E.g. /api/3/events)\n:return: number of updated records\n:rtype: dict\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(resource, collection, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "resource",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "collection",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "update_data": {
+      "qualname": "update_data",
+      "module": "workflow.builtins.crudhub",
+      "doc": " A task for updating crud hub data. Uses the PUT method.\n\n:param str collection: An IRI that points to the location of the crud hub        collection (E.g. /api/3/events)\n:param dict resource: An object to json encode and send to crud hub\n\n:return: the API response either as a json-like dict if possible or as bytes\n:rtype: dict or bytes\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(collection, resource, __bulk=False, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "collection",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "resource",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "__bulk",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "upsert_data": {
+      "qualname": "upsert_data",
+      "module": "workflow.builtins.crudhub",
+      "doc": " A task for upserting crud hub data.\n  Uses the insert_data/updata_data methods\n\n:param str collection: An IRI that points to the location of the crud hub        collection (E.g. /api/3/events)\n:param dict resource: An object to json encode and send to crud hub\n:param list fields: a list of fields to check for uniqueness.         Default to ['@id']\n:param bool ignore_missing_fields: a boolean flag that indicates         whether or not to raise an error if user specifies a field         in fields that is not in the record.         Default False - i.e. raise an exception.\n\n:return: the API response either as a json-like dict if possible or as bytes\n:rtype: dict or bytes\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(collection, resource, fields=['@id'], ignore_missing_fields=False, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "collection",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "resource",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "fields",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "['@id']",
+          "annotation": null
+        },
+        {
+          "name": "ignore_missing_fields",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ingest_bulk_feed": {
+      "qualname": "ingest_bulk_feed",
+      "module": "workflow.builtins.crudhub",
+      "doc": " A task for ingesting bulk feed into crud hub. Uses the POST method.\n\n:param str collection: An IRI that points to the location of the crud hub        collection (E.g. /api/insert_with_query/threat_intel_feed)\n:param dict resource: List of objects to create\n\n:return: the API response either as a json-like dict if possible or as bytes\n:rtype: dict or bytes\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(collection, resource, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "collection",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "resource",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "upload_to_crudhub": {
+      "qualname": "create_attachment",
+      "module": "workflow.builtins.files",
+      "doc": "Uploads a file to Crudhub, then associates the file with an attachment.\n\n:param str file: Name of file on the filesystem\n:param str name: User provided name for the attachment\n:param str description: User provided description for the attachment\n:param dict extra_fields: extra form data to put into the body\n:param dict request_headers: Headers added to the http request\n:param dict multipart_headers: Headers to add to the multipart body\n:return: CH result\n:rtype: dict",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(file, name='', description='', request_headers=None, multipart_headers=None, extra_multipart_fields=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "file",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "description",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "request_headers",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "multipart_headers",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "extra_multipart_fields",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "upload_to_url": {
+      "qualname": "upload_to_url",
+      "module": "workflow.builtins.files",
+      "doc": "Uploads a file, specified by a file handle uuid. Basic auth to\nthe external endpoint is avaliable with the username and password fields.\nCustomization of the multipart body is also avaliable the same as\n:class:`upload_file`.\n\n.. hint::\n    There are also ~~super secret~~ kwargs (download_auth and download_url)\n    that allow for downloading a file first. Don't rely on these sticking\n    around though.\n\n:param str file: Name of file on the filesystem\n:param str url: The location to send the file to\n:param str username: username to use in basic auth of external system\n:param str password: password to use in basic auth of external system\n:param dict extra_multipart_fields: extra form data to put into the body\n:param dict request_headers: Headers added to the http request\n:param dict multipart_headers: Headers to add to the multipart body\n:return: Request response content\n:rtype: Any",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(file=None, url='', username=None, password=None, request_headers=None, multipart_headers=None, extra_multipart_fields=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "file",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "url",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "username",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "request_headers",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "multipart_headers",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "extra_multipart_fields",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "xml_to_dictionary": {
+      "qualname": "xml_to_dictionary",
+      "module": "workflow.builtins.convert",
+      "doc": " Converts an XML string into a dictionary\n\n:param str xml: The xml to be converted into dictionary\n\n:return: The converted dictionary\n:rtype: dict\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(xml, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "xml",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "connector": {
+      "qualname": "connector",
+      "module": "workflow.builtins.misc",
+      "doc": null,
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(connector, operation=None, version=None, config=None, params=None, agent=None, pickFromTenant=False, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "connector",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "operation",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "version",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "config",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "params",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "agent",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "pickFromTenant",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "approval": {
+      "qualname": "wait",
+      "module": "workflow.builtins.wait",
+      "doc": null,
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(collection, resource, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "collection",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "resource",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "wait": {
+      "qualname": "wait",
+      "module": "workflow.builtins.wait",
+      "doc": null,
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(collection, resource, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "collection",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "resource",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "manual_input": {
+      "qualname": "manual_input",
+      "module": "workflow.eval",
+      "doc": " This task will save input details of respective workflow into database\n\n:param str record: Reocrd IRI\n\n:param str input: Input schema\n\n:return: Saving data into database\n:rtype: Any\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(record='', type='', unauthenticated_input=False, input={}, owner_detail={}, response_mapping={}, timeout=None, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "record",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "type",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "unauthenticated_input",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "input",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "{}",
+          "annotation": null
+        },
+        {
+          "name": "owner_detail",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "{}",
+          "annotation": null
+        },
+        {
+          "name": "response_mapping",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "{}",
+          "annotation": null
+        },
+        {
+          "name": "timeout",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "store_creds": {
+      "qualname": "store_creds",
+      "module": "workflow.builtins.misc",
+      "doc": "Attempts to store creds in vault at the desired path. You probably want to\nprepend 'secret/' to your path, to use vault's builtin secret backend. This\nshould really only be used for dev/testing purposes, so don't expect this\nstep to live forever (or yourself, for that matter).\n\n:param str path: vault path to store creds under\n:param dict cred_dict: key vaule pairs to store in vault\n:return: The string 'success' if everything worked\n:rtype: str\n:raises TypeError: if cred_dict is not actually a dictionary\n:raises requests.exceptions.ConnectionError: problems talking to vault",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(path, cred_dict, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "path",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "cred_dict",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "set_result": {
+      "qualname": "set_result",
+      "module": "workflow.builtins.misc",
+      "doc": null,
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(result, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "result",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "create_condition_rule": {
+      "qualname": "create_condition_rule",
+      "module": "workflow.eval",
+      "doc": " This step will create the rule of given condition.\n\n:param dict rule: should it be dict\n ",
+      "type": "cython_function_or_method",
+      "file": null,
+      "signature": "(rule, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "rule",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    }
+  }
+}

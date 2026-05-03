@@ -1,0 +1,63 @@
+# manual_input — pause execution and ask a human a question.
+# Common in approval flows: bot proposes an action, user confirms.
+#
+# manual_input arguments:
+#   record:        IRI of the record to attach the prompt to (alert/incident)
+#   type:          input form type (single-select / free-text / etc.)
+#   input:         the form definition; rendered in FSR UI
+#   timeout:       seconds before the playbook is auto-cancelled
+#
+# After resume, the user's choice is in `vars.steps.<step_id>.input.<field>`.
+
+collection: Compiler Examples
+description: Approval loop — ask a human, then act based on their response.
+visible: true
+
+playbooks:
+  - name: Confirm Before Block
+    description: Ask SOC analyst to approve a block, then act.
+    steps:
+      - id: start
+        type: start
+        next: ask
+
+      - id: ask
+        type: manual_input
+        name: Ask analyst
+        arguments:
+          record: "{{ vars.input.records[0]['@id'] }}"
+          type: single-select
+          input:
+            title: Block this IP?
+            options:
+              - block
+              - skip
+          timeout: 3600    # 1 hour
+        next: branch
+
+      - id: branch
+        type: decision
+        name: Block or skip
+        arguments:
+          conditions:
+            - option: block
+              condition: "{{ vars.steps.ask.input.choice == 'block' }}"
+        branches:
+          block: do_block
+          skip: noop
+
+      - id: do_block
+        type: set_variable
+        name: Pretend we blocked
+        arguments:
+          arg_list:
+            - name: result
+              value: blocked
+
+      - id: noop
+        type: set_variable
+        name: Skip
+        arguments:
+          arg_list:
+            - name: result
+              value: skipped
