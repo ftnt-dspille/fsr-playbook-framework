@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 from .errors import CompileError, ErrorCode
-from .ir import Collection, Playbook, Step
+from .ir import Annotation, Collection, Playbook, Step
 
 
 def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
@@ -132,6 +132,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 ))
                 branches = {}
 
+            cmt = s_raw.get("comment")
             steps.append(Step(
                 id=sid,
                 type=stype,
@@ -139,6 +140,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 arguments=args,
                 next=s_raw.get("next") if isinstance(s_raw.get("next"), str) else None,
                 branches={str(k): str(v) for k, v in branches.items()},
+                comment=cmt if isinstance(cmt, str) and cmt.strip() else None,
             ))
 
         params_raw = pb_raw.get("parameters") or []
@@ -150,6 +152,69 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             ))
             params_raw = []
 
+        annotations: list[Annotation] = []
+        ann_raw = pb_raw.get("annotations") or []
+        if not isinstance(ann_raw, list):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="annotations must be a list",
+                path=f"{pb_path}.annotations",
+            ))
+            ann_raw = []
+        seen_ann_ids: set[str] = set()
+        for k, a_raw in enumerate(ann_raw):
+            ap = f"{pb_path}.annotations[{k}]"
+            if not isinstance(a_raw, dict):
+                errors.append(CompileError(
+                    code=ErrorCode.PARSE_ERROR,
+                    message="annotation entry must be a mapping",
+                    path=ap,
+                ))
+                continue
+            aid = a_raw.get("id")
+            if not isinstance(aid, str) or not aid:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message="annotation.id is required",
+                    path=f"{ap}.id",
+                ))
+                continue
+            if aid in seen_ann_ids:
+                errors.append(CompileError(
+                    code=ErrorCode.DUPLICATE_STEP_ID,
+                    message=f"duplicate annotation id: {aid}",
+                    path=f"{ap}.id",
+                ))
+                continue
+            seen_ann_ids.add(aid)
+            kind = a_raw.get("kind", "note")
+            if kind not in ("note", "block", "custom"):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=f"annotation.kind must be note|block|custom (got {kind!r})",
+                    path=f"{ap}.kind",
+                ))
+                continue
+            position = a_raw.get("position") or {}
+            if not isinstance(position, dict):
+                position = {}
+            contains = a_raw.get("contains") or []
+            if not isinstance(contains, list):
+                contains = []
+            annotations.append(Annotation(
+                id=aid,
+                kind=kind,
+                title=str(a_raw.get("title") or "Note"),
+                body=str(a_raw.get("body") or ""),
+                top=position.get("top"),
+                left=position.get("left"),
+                height=int(position.get("height") or 0),
+                width=int(position.get("width") or 300),
+                collapsed=bool(a_raw.get("collapsed", False)),
+                hide_in_logs=bool(a_raw.get("hide_in_logs", kind == "note")),
+                contains=[str(c) for c in contains],
+            ))
+
         playbooks.append(Playbook(
             name=pb_name,
             description=pb_raw.get("description", "") or "",
@@ -158,6 +223,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             trigger=str(pb_raw.get("trigger", "start") or "start"),
             parameters=list(params_raw),
             steps=steps,
+            annotations=annotations,
         ))
 
     if errors:

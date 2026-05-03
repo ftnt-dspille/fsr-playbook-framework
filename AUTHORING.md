@@ -41,7 +41,15 @@ playbooks:
         type: start        # see "Step types" below
         next: <next-id>
         # branches: {label: target-id}      # for decision steps
+        # comment: |                        # optional explanation
+        #   Why this step exists / what it does.
+        #   Auto-rendered as a sticky-note next to the step on the canvas.
       - ...
+    annotations:           # optional: notes and blocks on the canvas
+      - id: setup_phase
+        kind: block         # note (sticky comment) | block (grouping) | custom
+        title: Setup
+        contains: [start, prep, lookup]   # block-only: which steps it wraps
 ```
 
 **Constraints the compiler checks at compile time** (verified from FSR's
@@ -76,6 +84,44 @@ Other FSR step types (`cybersponse.action`, `RestApi`, `RunScript`,
 `ParallelExecution`, `MapPlaybook`, `FetchEmail`) round-trip
 correctly through the compiler — they just don't have a friendly short
 alias yet. Use the canonical name in `type:` when you need them.
+
+## Comments and annotations
+
+Two ways to leave human-readable notes on the canvas. Both round-trip
+losslessly through the compiler.
+
+**`step.comment` — preferred for explaining a single step.**
+```yaml
+- id: lookup_alert
+  type: find_record
+  comment: |
+    Pulls the matching alert before we mutate it. Don't merge with
+    update_record — that loses the audit trail.
+  arguments: { module: alerts, query: "id={{vars.input.id}}" }
+```
+The compiler emits a sticky-note (`type: note`, title `Note`) positioned
+to the right of the step. On round-trip the note is folded back into
+`step.comment` so the YAML stays clean. Title defaults to `Note` if you
+don't set one.
+
+**`playbook.annotations` — for free-floating notes or grouping blocks.**
+```yaml
+annotations:
+  - id: explainer
+    kind: note
+    title: "Why we re-queue here"     # defaults to "Note"
+    body: |
+      The async output is checked every minute.
+    position: { top: 240, left: 800, width: 500, height: 160 }
+  - id: setup
+    kind: block
+    title: Setup phase
+    contains: [start, prep, lookup]   # block: each listed step gets group=this
+```
+Blocks visually wrap their `contains:` steps and set each step's `group`
+field on the FSR side. Notes are positional only — they sit at the
+canvas coordinates you give them (or the compiler picks coords near the
+first contained step).
 
 ## Routing: linear vs branching
 

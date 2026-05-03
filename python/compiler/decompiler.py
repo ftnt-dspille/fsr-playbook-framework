@@ -14,7 +14,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .ir import Collection, Playbook, Step
+from .ir import Annotation, Collection, Playbook, Step
 from .resolver import SHORT_TYPE_TO_FSR
 
 _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
@@ -143,6 +143,85 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str]) -> Pla
     trigger_uuid = _to_uuid(wf.get("triggerStep"))
     trigger_id = id_by_uuid.get(trigger_uuid)
 
+    # Decompile workflow_groups: blocks own steps via WorkflowStep.group,
+    # notes are positional (no FK link) and may fold into step.comment.
+    annotations: list[Annotation] = []
+    ann_id_taken: set[str] = set()
+
+    # Block-owned steps: index by group uuid → list of step ids.
+    block_uuid_to_step_ids: dict[str, list[str]] = {}
+    for s in raw_steps:
+        gu = _to_uuid(s.get("group")) if s.get("group") else ""
+        if gu:
+            sid = id_by_uuid.get(s.get("uuid", ""), "")
+            if sid:
+                block_uuid_to_step_ids.setdefault(gu, []).append(sid)
+
+    # Step canvas positions (id -> (top, left)) for the note→step heuristic.
+    step_pos: dict[str, tuple[int, int]] = {}
+    for s in raw_steps:
+        sid = id_by_uuid.get(s.get("uuid", ""), "")
+        if not sid:
+            continue
+        try:
+            step_pos[sid] = (int(s.get("top") or 0), int(s.get("left") or 0))
+        except (TypeError, ValueError):
+            pass
+
+    step_by_id = {st.id: st for st in steps_out}
+    for g in wf.get("groups", []) or []:
+        gtype = g.get("type") or "note"
+        gtitle = g.get("name") or "Note"
+        gbody = g.get("description") or ""
+        guuid = g.get("uuid") or ""
+        try:
+            top_v = int(g.get("top") or 0)
+            left_v = int(g.get("left") or 0)
+            h_v = int(g.get("height") or 0)
+            w_v = int(g.get("width") or 0)
+        except (TypeError, ValueError):
+            top_v = left_v = 0
+            h_v = w_v = 0
+
+        if gtype == "block":
+            contains = block_uuid_to_step_ids.get(guuid, [])
+        else:
+            contains = []
+
+        # Auto-comment heuristic for notes only: if title=="Note" and the
+        # note sits to the right of exactly one step at the same vertical
+        # position (within ±50px), fold into that step's .comment.
+        if gtype == "note" and gtitle == "Note":
+            candidates = [
+                sid for sid, (st_top, st_left) in step_pos.items()
+                if abs(st_top - top_v) <= 50 and left_v > st_left + 100
+                and step_by_id.get(sid) and step_by_id[sid].comment is None
+            ]
+            if len(candidates) == 1:
+                step_by_id[candidates[0]].comment = gbody
+                continue
+            if len(candidates) > 1:
+                # Pick the closest one (smallest horizontal distance).
+                candidates.sort(key=lambda sid: left_v - step_pos[sid][1])
+                step_by_id[candidates[0]].comment = gbody
+                continue
+
+        aid = _slugify(gtitle if gtitle != "Note" else g.get("type", "note"),
+                       ann_id_taken)
+        annotations.append(Annotation(
+            id=aid,
+            kind=gtype,
+            title=gtitle,
+            body=gbody,
+            top=top_v or None,
+            left=left_v or None,
+            height=h_v,
+            width=w_v or 300,
+            collapsed=bool(g.get("isCollapsed", False)),
+            hide_in_logs=bool(g.get("hideInLogs", gtype == "note")),
+            contains=contains,
+        ))
+
     # FSR is inconsistent here: parameters is either `{}` (empty) or a
     # list of parameter names. Normalize to a list of strings.
     raw_params = wf.get("parameters") or []
@@ -160,4 +239,5 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str]) -> Pla
         trigger_step_id=trigger_id,
         parameters=params,
         steps=steps_out,
+        annotations=annotations,
     )

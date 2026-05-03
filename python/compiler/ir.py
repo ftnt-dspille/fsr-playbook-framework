@@ -23,11 +23,42 @@ class Step:
     # no labels were attached. Rare in practice (~0.5% of playbooks) but the
     # round-trip needs to preserve `label=None` distinctly from a labeled branch.
     unlabeled_next: list[str] = field(default_factory=list)
+    # Free-form explanation rendered as a sticky-note next to the step on
+    # the FSR canvas. Authors set this to leave human-readable rationale
+    # for AI-modified steps; the emitter auto-creates a 'note' annotation
+    # positioned to the right of the step. Mutually compatible with
+    # explicit `playbook.annotations` entries.
+    comment: Optional[str] = None
 
     # Filled by the resolver:
     step_type_uuid: Optional[str] = None
     step_type_name: Optional[str] = None  # canonical FSR name e.g. 'Connectors'
     handler: Optional[str] = None         # FUNCTION_MAP key
+
+
+@dataclass
+class Annotation:
+    """A sticky-note or visual block on the playbook canvas.
+
+    Maps 1:1 to FSR's `WorkflowGroup` entity (table `workflow_groups`).
+    `kind` is the FSR `type` field — `note` (sticky comment), `block`
+    (bordered grouping that wraps steps), or `custom`.
+    """
+    id: str                          # local slug, unique within a playbook
+    kind: str = "note"               # 'note' | 'block' | 'custom'
+    title: str = "Note"              # FSR `name`; defaults to "Note" when blank
+    body: str = ""                   # FSR `description`; markdown for notes
+    top: Optional[int] = None        # canvas Y; emitter fills in if None
+    left: Optional[int] = None       # canvas X; emitter fills in if None
+    height: int = 0                  # 0 means auto-grow (FSR convention for notes)
+    width: int = 300
+    collapsed: bool = False
+    hide_in_logs: bool = True        # default true for notes per real playbooks
+    contains: list[str] = field(default_factory=list)  # block: step ids inside
+    # Marker for auto-generated notes (from step.comment). Not user-set.
+    # Lets the decompiler collapse the round-trip back into step.comment.
+    auto_for_step: Optional[str] = None
+    uuid: Optional[str] = None       # filled by emitter
 
 
 @dataclass
@@ -46,6 +77,7 @@ class Playbook:
     # inside the playbook, values are read as `{{vars.input.params.<name>}}`.
     parameters: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
+    annotations: list["Annotation"] = field(default_factory=list)
 
 
 @dataclass

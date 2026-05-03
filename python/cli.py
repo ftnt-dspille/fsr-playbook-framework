@@ -252,9 +252,27 @@ def _decompile_to_yaml(coll, db_path: Path) -> str:
                         "next": s.next,
                         "branches": dict(s.branches) or None,
                         "unlabeled_next": list(s.unlabeled_next) or None,
+                        "comment": s.comment,
                     }
                     for s in pb.steps
                 ],
+                "annotations": [
+                    {
+                        "id": a.id,
+                        "kind": a.kind if a.kind != "note" else None,
+                        "title": a.title if a.title != "Note" else None,
+                        "body": a.body or None,
+                        "contains": list(a.contains) or None,
+                        "position": (
+                            {"top": a.top, "left": a.left,
+                             "height": a.height or None, "width": a.width}
+                            if a.top is not None or a.left is not None
+                            else None
+                        ),
+                        "collapsed": a.collapsed or None,
+                    }
+                    for a in pb.annotations
+                ] or None,
             }
             for pb in ir.playbooks
         ],

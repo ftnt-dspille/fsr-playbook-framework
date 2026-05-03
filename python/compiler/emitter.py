@@ -22,7 +22,7 @@ import json
 import uuid
 from typing import Any
 
-from .ir import Collection, Playbook, Step
+from .ir import Annotation, Collection, Playbook, Step
 
 _NS = uuid.UUID("00000000-0000-0000-0000-000000000fc1")  # FSR-compiler namespace
 
@@ -37,6 +37,18 @@ def _step_iri(u: str) -> str:
 
 def _step_type_iri(u: str) -> str:
     return f"/api/3/workflow_step_types/{u}"
+
+
+def _group_iri(u: str) -> str:
+    return f"/api/3/workflow_groups/{u}"
+
+
+# Layout constants used both for steps and for auto-positioning notes.
+_STEP_LEFT = 200
+_STEP_TOP_BASE = 120
+_STEP_VSTRIDE = 100
+_STEP_WIDTH = 200            # FSR canvas step boxes are ~200px wide.
+_NOTE_GAP = 40               # Horizontal gap between step and its auto-note.
 
 
 def emit(collection: Collection) -> dict[str, Any]:
@@ -54,14 +66,44 @@ def emit(collection: Collection) -> dict[str, Any]:
         steps_out: list[dict[str, Any]] = []
         routes_out: list[dict[str, Any]] = []
 
-        # Pass 1: assign UUIDs and emit step JSON
+        # Pass 1: assign UUIDs, compute step layout
         step_uuids: dict[str, str] = {
             s.id: _u("step", collection.name, pb.name, s.id) for s in pb.steps
         }
+        step_layout: dict[str, tuple[int, int]] = {}  # id -> (top, left)
+
+        # Build the merged annotation list: explicit annotations + one
+        # auto-generated note per step that carries a comment. Auto-notes
+        # are tagged so the decompiler can fold them back into step.comment.
+        annotations: list[Annotation] = list(pb.annotations)
+        for s in pb.steps:
+            if s.comment:
+                annotations.append(Annotation(
+                    id=f"__comment_{s.id}",
+                    kind="note",
+                    title="Note",
+                    body=s.comment,
+                    contains=[s.id],
+                    auto_for_step=s.id,
+                ))
+
+        # block annotations need step.group set on contained steps.
+        # Pre-compute a step_id -> group_uuid map for blocks only.
+        step_group: dict[str, str] = {}
+        for ann in annotations:
+            if ann.kind != "block":
+                continue
+            ann_uuid = _u("group", collection.name, pb.name, ann.id)
+            ann.uuid = ann_uuid
+            for sid in ann.contains:
+                step_group[sid] = ann_uuid
 
         trigger_step_iri = None
         for idx, s in enumerate(pb.steps):
             su = step_uuids[s.id]
+            top = _STEP_TOP_BASE + idx * _STEP_VSTRIDE
+            left = _STEP_LEFT
+            step_layout[s.id] = (top, left)
             # workflow_reference: rewrite local `target: <name>` to IRI;
             # drop the friendly key from emitted JSON.
             if s.type == "workflow_reference" and isinstance(s.arguments, dict):
@@ -70,11 +112,20 @@ def emit(collection: Collection) -> dict[str, Any]:
                     s.arguments["workflowReference"] = (
                         f"/api/3/workflows/{wf_uuid_by_name[target]}"
                     )
-            steps_out.append(_emit_step(s, su, idx))
+            steps_out.append(_emit_step(
+                s, su, top, left,
+                group_iri=_group_iri(step_group[s.id]) if s.id in step_group else None,
+            ))
             if pb.trigger_step_id is None and s.type == "start":
                 trigger_step_iri = _step_iri(su)
         if pb.trigger_step_id and pb.trigger_step_id in step_uuids:
             trigger_step_iri = _step_iri(step_uuids[pb.trigger_step_id])
+
+        groups_out: list[dict[str, Any]] = []
+        for ann in annotations:
+            if not ann.uuid:
+                ann.uuid = _u("group", collection.name, pb.name, ann.id)
+            groups_out.append(_emit_group(ann, step_layout))
 
         # Pass 2: emit routes from .next + .branches
         for s in pb.steps:
@@ -119,7 +170,7 @@ def emit(collection: Collection) -> dict[str, Any]:
             "triggerStep": trigger_step_iri,
             "steps": steps_out,
             "routes": routes_out,
-            "groups": [],
+            "groups": groups_out,
             "priority": None,
             "playbookOrigin": None,
             "isEditable": True,
@@ -145,18 +196,68 @@ def emit(collection: Collection) -> dict[str, Any]:
     }
 
 
-def _emit_step(s: Step, step_uuid: str, idx: int) -> dict[str, Any]:
+def _emit_step(s: Step, step_uuid: str, top: int, left: int,
+               group_iri: str | None = None) -> dict[str, Any]:
     return {
         "@type": "WorkflowStep",
         "name": s.name or s.id,
         "description": None,
         "arguments": s.arguments or {},
         "status": None,
-        "top": str(120 + idx * 100),
-        "left": str(200),
+        "top": str(top),
+        "left": str(left),
         "stepType": _step_type_iri(s.step_type_uuid) if s.step_type_uuid else None,
-        "group": None,
+        "group": group_iri,
         "uuid": step_uuid,
+    }
+
+
+def _emit_group(ann: Annotation, step_layout: dict[str, tuple[int, int]]) -> dict[str, Any]:
+    """Emit a WorkflowGroup. Auto-fills position when missing.
+
+    For notes: place to the right of the first contained step. For blocks
+    with explicit step set: bounding box around them. Otherwise: pin near
+    the playbook origin so the user can drag in the UI.
+    """
+    top = ann.top
+    left = ann.left
+    height = ann.height
+    width = ann.width
+
+    if (top is None or left is None) and ann.contains:
+        layouts = [step_layout[sid] for sid in ann.contains if sid in step_layout]
+        if layouts:
+            tops = [t for t, _ in layouts]
+            lefts = [l for _, l in layouts]
+            if ann.kind == "note":
+                top = top if top is not None else min(tops)
+                left = left if left is not None else max(lefts) + _STEP_WIDTH + _NOTE_GAP
+            else:  # block: bounding box
+                top = top if top is not None else max(0, min(tops) - 30)
+                left = left if left is not None else max(0, min(lefts) - 30)
+                height = height or (max(tops) - min(tops) + _STEP_VSTRIDE + 60)
+                width = width or (_STEP_WIDTH + 60)
+    if top is None:
+        top = _STEP_TOP_BASE
+    if left is None:
+        left = _STEP_LEFT + _STEP_WIDTH + _NOTE_GAP
+
+    return {
+        "@type": "WorkflowGroup",
+        "name": ann.title or "Note",
+        "description": ann.body or "",
+        "type": ann.kind,
+        "isCollapsed": ann.collapsed,
+        "hasTriggerStep": False,
+        "hideInLogs": ann.hide_in_logs,
+        "metadata": [],
+        "reusable": False,
+        "top": str(top),
+        "left": str(left),
+        "height": str(height),
+        "width": str(width),
+        "uuid": ann.uuid,
+        "recordTags": [],
     }
 
 
