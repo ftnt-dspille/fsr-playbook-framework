@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# generated artifacts
+store/fsr_reference.db
+store/fsr_reference.db-shm
+store/fsr_reference.db-wal
+**/fsr_reference.db
+**/fsr_reference.db-shm
+**/fsr_reference.db-wal
+store/e2e_runs/
+
+# ts
+ts/node_modules/
+ts/dist/
+ts/.vitest-cache/
+
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+/store/rpm_cache/
+
+# archives / recon tarballs
+*.tar.gz
+*.tgz

@@ -1,0 +1,64 @@
+collection: FSRPB Manual-Input Test
+description: |
+  Stage 4 — adds a manual_input pause between two set_variable steps.
+  The integration test fires this playbook, finds the pending input via
+  `fsrpb inputs list`, responds with the primary option via `fsrpb
+  inputs respond`, and asserts the run finishes.
+visible: true
+
+playbooks:
+  - name: E2E - Manual Input
+    description: start → set_variable → manual_input → terminal.
+    is_active: true
+    steps:
+      - id: start
+        type: start
+        name: Run
+        next: prep
+
+      - id: prep
+        type: set_variable
+        name: Pre-input vars
+        arguments:
+          before_input: "ready"
+        next: pause
+
+      - id: pause
+        type: manual_input
+        name: Choose action
+        # Schema mirrored from corpus minimum (store/MANUAL_INPUT.md §2).
+        # All listed fields are present on every working ManualInput step
+        # in the live corpus; omitting them drops the run with a malformed-
+        # URL error in the manual-input handler.
+        arguments:
+          type: InputBased
+          input:
+            schema:
+              title: "E2E test gate"
+              description: "Click Continue to resume the test playbook."
+              inputVariables: []
+          record: ""
+          is_approval: false
+          isRecordLinked: false
+          owner_detail:
+            isAssigned: false
+          step_variables: []
+          response_mapping:
+            options:
+              - { option: Continue, primary: true }
+            duplicateOption: false
+            customSuccessMessage: "Awaiting Playbook resumed successfully."
+          email_notification:
+            enabled: false
+            smtpParameters: []
+          inline_channel_list: []
+          external_channel_list: []
+          unauthenticated_input: false
+        next: terminal
+
+      - id: terminal
+        type: set_variable
+        name: After input
+        arguments:
+          after_input: "resumed"
+          final_status: complete

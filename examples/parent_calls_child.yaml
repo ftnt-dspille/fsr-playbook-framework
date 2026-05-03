@@ -1,0 +1,39 @@
+collection: Multi-Playbook Demo
+description: Two playbooks; the parent invokes the child with input parameters.
+
+playbooks:
+  - name: Resolve Hostname
+    description: Child playbook — looks up an IP for a hostname.
+    parameters:
+      - hostname
+      - dns_server
+    steps:
+      - id: start
+        type: start
+        next: lookup
+      - id: lookup
+        type: set_variable
+        name: Stub lookup
+        arguments:
+          arg_list:
+            - name: ip
+              value: "10.0.0.1  # would be {{vars.input.params.hostname}} resolved via {{vars.input.params.dns_server}}"
+
+  - name: Add Host And Resolve
+    description: Parent — calls Resolve Hostname with input args.
+    steps:
+      - id: start
+        type: start
+        next: call_child
+      - id: call_child
+        type: workflow_reference
+        name: Resolve via child playbook
+        arguments:
+          target: Resolve Hostname        # local-name reference; emitter rewrites to IRI
+          arguments:
+            hostname: "fsr-1"
+            dns_server: "8.8.8.8"
+          apply_async: false
+          pass_parent_env: false
+          pass_input_record: false
+          step_variables: []

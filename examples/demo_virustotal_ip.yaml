@@ -1,0 +1,71 @@
+# Demo A backbone: real VirusTotal IP-reputation lookup, branched on the
+# real `last_analysis_stats.malicious` count, no hardcoding. The runner
+# passes an IP via parameters; the playbook calls VT live and stamps a
+# verdict.
+#
+# This is the smallest playbook that actually demonstrates the full
+# SOAR pattern (input → enrichment → decision → action) end-to-end on
+# a real connector against a real API.
+
+collection: FSRPB Demo VirusTotal
+description: Look up an IP on VirusTotal and stamp a verdict by malicious count.
+visible: true
+
+playbooks:
+  - name: VT IP Reputation
+    description: Real VT lookup → branch on last_analysis_stats.malicious.
+    is_active: true
+    parameters: [ip]
+    steps:
+      - id: start
+        type: start
+        next: lookup
+
+      - id: lookup
+        type: connector
+        name: Query VirusTotal
+        arguments:
+          connector: virustotal
+          operation: query_ip
+          config: ""
+          params:
+            ip: "{{ vars.input.params.ip }}"
+        next: extract_score
+
+      - id: extract_score
+        type: set_variable
+        name: Extract malicious count
+        arguments:
+          arg_list:
+            - name: malicious_count
+              value: "{{ vars.steps.Query_VirusTotal.data.attributes.last_analysis_stats.malicious }}"
+        next: verdict_decision
+
+      - id: verdict_decision
+        type: decision
+        name: Branch on verdict
+        arguments:
+          conditions:
+            - option: malicious
+              condition: "{{ (vars.malicious_count | int) > 0 }}"
+            - option: clean
+              condition: "{{ (vars.malicious_count | int) == 0 }}"
+        branches:
+          malicious: stamp_malicious
+          clean: stamp_clean
+
+      - id: stamp_malicious
+        type: set_variable
+        name: Stamp malicious
+        arguments:
+          arg_list:
+            - name: verdict
+              value: "malicious"
+
+      - id: stamp_clean
+        type: set_variable
+        name: Stamp clean
+        arguments:
+          arg_list:
+            - name: verdict
+              value: "clean"

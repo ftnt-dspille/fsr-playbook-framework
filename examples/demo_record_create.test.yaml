@@ -1,0 +1,22 @@
+fixture: examples/demo_record_create.yaml
+playbook: FSRPB Create Alert
+
+input:
+  alert_name: fsrpb_e2e_create_alert
+
+timeout_s: 120
+
+expects:
+  status: finished
+  steps:
+    Create_alert:
+      status: finished
+
+# Cleanup pattern — the playbook creates a record we don't capture as a
+# setup record, so the runner can't auto-delete it. After the run, query
+# alerts by marker and hard-purge.
+cleanup_query:
+  - module: alerts
+    where: {description: "fsrpb_e2e_create marker"}
+
+cleanup: true

@@ -1,0 +1,239 @@
+
+URL                                                                     | Module                                          | Name                                                 | Decorator
+------------------------------------------------------------------------+-------------------------------------------------+------------------------------------------------------+-
+/rule/api/                                                              | rest_framework.routers.APIRootView              | api-root                                             | 
+/rule/api/<drf_format_suffix:format>                                    | rest_framework.routers.APIRootView              | api-root                                             | 
+/rule/api/channel/                                                      | rules_engine.views.ChannelView                  | channel-list                                         | 
+/rule/api/channel/<pk>/                                                 | rules_engine.views.ChannelView                  | channel-detail                                       | 
+/rule/api/channel/<pk>\.<format>/                                       | rules_engine.views.ChannelView                  | channel-detail                                       | 
+/rule/api/channel\.<format>/                                            | rules_engine.views.ChannelView                  | channel-list                                         | 
+/rule/api/pending-notification/                                         | rules_engine.views.PendingNotificationView      | pending-notification-list                            | 
+/rule/api/pending-notification/<pk>/                                    | rules_engine.views.PendingNotificationView      | pending-notification-detail                          | 
+/rule/api/pending-notification/<pk>\.<format>/                          | rules_engine.views.PendingNotificationView      | pending-notification-detail                          | 
+/rule/api/pending-notification/purge/                                   | rules_engine.views.PendingNotificationView      | pending-notification-purge                           | 
+/rule/api/pending-notification/purge\.<format>/                         | rules_engine.views.PendingNotificationView      | pending-notification-purge                           | 
+/rule/api/pending-notification/retry/                                   | rules_engine.views.PendingNotificationView      | pending-notification-retry                           | 
+/rule/api/pending-notification/retry\.<format>/                         | rules_engine.views.PendingNotificationView      | pending-notification-retry                           | 
+/rule/api/pending-notification\.<format>/                               | rules_engine.views.PendingNotificationView      | pending-notification-list                            | 
+/rule/api/rules/                                                        | rules_engine.views.RuleView                     | rule-engine-list                                     | 
+/rule/api/rules/<pk>/                                                   | rules_engine.views.RuleView                     | rule-engine-detail                                   | 
+/rule/api/rules/<pk>\.<format>/                                         | rules_engine.views.RuleView                     | rule-engine-detail                                   | 
+/rule/api/rules/bulk/clone                                              | rules_engine.views.RuleBulkView                 | rule-view-bulk-clone                                 | 
+/rule/api/rules/bulk/create                                             | rules_engine.views.RuleBulkView                 | rule-view-bulk-create                                | 
+/rule/api/rules/bulk/delete                                             | rules_engine.views.RuleBulkView                 | rule-view-bulk-delete                                | 
+/rule/api/rules/bulk/update                                             | rules_engine.views.RuleBulkView                 | rule-view-bulk-update                                | 
+/rule/api/rules\.<format>/                                              | rules_engine.views.RuleView                     | rule-engine-list                                     | 
+/rule/api/system-notification/                                          | rules_engine.views.SystemNotificationView       | system-notification-list                             | 
+/rule/api/system-notification/<pk>/                                     | rules_engine.views.SystemNotificationView       | system-notification-detail                           | 
+/rule/api/system-notification/<pk>\.<format>/                           | rules_engine.views.SystemNotificationView       | system-notification-detail                           | 
+/rule/api/system-notification/notifications/                            | rules_engine.views.SystemNotificationView       | system-notification-notifications                    | 
+/rule/api/system-notification/notifications\.<format>/                  | rules_engine.views.SystemNotificationView       | system-notification-notifications                    | 
+/rule/api/system-notification/purge/                                    | rules_engine.views.SystemNotificationView       | system-notification-purge                            | 
+/rule/api/system-notification/purge\.<format>/                          | rules_engine.views.SystemNotificationView       | system-notification-purge                            | 
+/rule/api/system-notification/read/                                     | rules_engine.views.SystemNotificationView       | system-notification-read                             | 
+/rule/api/system-notification/read\.<format>/                           | rules_engine.views.SystemNotificationView       | system-notification-read                             | 
+/rule/api/system-notification\.<format>/                                | rules_engine.views.SystemNotificationView       | system-notification-list                             | 
+/wf/                                                                    | django.views.generic.base.RedirectView          | index                                                | 
+/wf/admin/                                                              | django.contrib.admin.sites.index                | admin:index                                          | 
+/wf/admin/<app_label>/                                                  | django.contrib.admin.sites.app_index            | admin:app_list                                       | 
+/wf/admin/<url>                                                         | django.contrib.admin.sites.catch_all_view       |                                                      | 
+/wf/admin/auth/group/                                                   | django.contrib.admin.options.changelist_view    | admin:auth_group_changelist                          | 
+/wf/admin/auth/group/<path:object_id>/                                  | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/auth/group/<path:object_id>/change/                           | django.contrib.admin.options.change_view        | admin:auth_group_change                              | 
+/wf/admin/auth/group/<path:object_id>/delete/                           | django.contrib.admin.options.delete_view        | admin:auth_group_delete                              | 
+/wf/admin/auth/group/<path:object_id>/history/                          | django.contrib.admin.options.history_view       | admin:auth_group_history                             | 
+/wf/admin/auth/group/add/                                               | django.contrib.admin.options.add_view           | admin:auth_group_add                                 | 
+/wf/admin/auth/user/                                                    | django.contrib.admin.options.changelist_view    | admin:auth_user_changelist                           | 
+/wf/admin/auth/user/<id>/password/                                      | django.contrib.auth.admin.user_change_password  | admin:auth_user_password_change                      | 
+/wf/admin/auth/user/<path:object_id>/                                   | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/auth/user/<path:object_id>/change/                            | django.contrib.admin.options.change_view        | admin:auth_user_change                               | 
+/wf/admin/auth/user/<path:object_id>/delete/                            | django.contrib.admin.options.delete_view        | admin:auth_user_delete                               | 
+/wf/admin/auth/user/<path:object_id>/history/                           | django.contrib.admin.options.history_view       | admin:auth_user_history                              | 
+/wf/admin/auth/user/add/                                                | django.contrib.auth.admin.add_view              | admin:auth_user_add                                  | 
+/wf/admin/autocomplete/                                                 | django.contrib.admin.sites.autocomplete_view    | admin:autocomplete                                   | 
+/wf/admin/django_celery_beat/clockedschedule/                           | django.contrib.admin.options.changelist_view    | admin:django_celery_beat_clockedschedule_changelist  | 
+/wf/admin/django_celery_beat/clockedschedule/<path:object_id>/          | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/django_celery_beat/clockedschedule/<path:object_id>/change/   | django.contrib.admin.options.change_view        | admin:django_celery_beat_clockedschedule_change      | 
+/wf/admin/django_celery_beat/clockedschedule/<path:object_id>/delete/   | django.contrib.admin.options.delete_view        | admin:django_celery_beat_clockedschedule_delete      | 
+/wf/admin/django_celery_beat/clockedschedule/<path:object_id>/history/  | django.contrib.admin.options.history_view       | admin:django_celery_beat_clockedschedule_history     | 
+/wf/admin/django_celery_beat/clockedschedule/add/                       | django.contrib.admin.options.add_view           | admin:django_celery_beat_clockedschedule_add         | 
+/wf/admin/django_celery_beat/crontabschedule/                           | django.contrib.admin.options.changelist_view    | admin:django_celery_beat_crontabschedule_changelist  | 
+/wf/admin/django_celery_beat/crontabschedule/<path:object_id>/          | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/django_celery_beat/crontabschedule/<path:object_id>/change/   | django.contrib.admin.options.change_view        | admin:django_celery_beat_crontabschedule_change      | 
+/wf/admin/django_celery_beat/crontabschedule/<path:object_id>/delete/   | django.contrib.admin.options.delete_view        | admin:django_celery_beat_crontabschedule_delete      | 
+/wf/admin/django_celery_beat/crontabschedule/<path:object_id>/history/  | django.contrib.admin.options.history_view       | admin:django_celery_beat_crontabschedule_history     | 
+/wf/admin/django_celery_beat/crontabschedule/add/                       | django.contrib.admin.options.add_view           | admin:django_celery_beat_crontabschedule_add         | 
+/wf/admin/django_celery_beat/intervalschedule/                          | django.contrib.admin.options.changelist_view    | admin:django_celery_beat_intervalschedule_changelist | 
+/wf/admin/django_celery_beat/intervalschedule/<path:object_id>/         | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/django_celery_beat/intervalschedule/<path:object_id>/change/  | django.contrib.admin.options.change_view        | admin:django_celery_beat_intervalschedule_change     | 
+/wf/admin/django_celery_beat/intervalschedule/<path:object_id>/delete/  | django.contrib.admin.options.delete_view        | admin:django_celery_beat_intervalschedule_delete     | 
+/wf/admin/django_celery_beat/intervalschedule/<path:object_id>/history/ | django.contrib.admin.options.history_view       | admin:django_celery_beat_intervalschedule_history    | 
+/wf/admin/django_celery_beat/intervalschedule/add/                      | django.contrib.admin.options.add_view           | admin:django_celery_beat_intervalschedule_add        | 
+/wf/admin/django_celery_beat/periodictask/                              | django_celery_beat.admin.changelist_view        | admin:django_celery_beat_periodictask_changelist     | 
+/wf/admin/django_celery_beat/periodictask/<path:object_id>/             | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/django_celery_beat/periodictask/<path:object_id>/change/      | django.contrib.admin.options.change_view        | admin:django_celery_beat_periodictask_change         | 
+/wf/admin/django_celery_beat/periodictask/<path:object_id>/delete/      | django.contrib.admin.options.delete_view        | admin:django_celery_beat_periodictask_delete         | 
+/wf/admin/django_celery_beat/periodictask/<path:object_id>/history/     | django.contrib.admin.options.history_view       | admin:django_celery_beat_periodictask_history        | 
+/wf/admin/django_celery_beat/periodictask/add/                          | django.contrib.admin.options.add_view           | admin:django_celery_beat_periodictask_add            | 
+/wf/admin/django_celery_beat/solarschedule/                             | django.contrib.admin.options.changelist_view    | admin:django_celery_beat_solarschedule_changelist    | 
+/wf/admin/django_celery_beat/solarschedule/<path:object_id>/            | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/django_celery_beat/solarschedule/<path:object_id>/change/     | django.contrib.admin.options.change_view        | admin:django_celery_beat_solarschedule_change        | 
+/wf/admin/django_celery_beat/solarschedule/<path:object_id>/delete/     | django.contrib.admin.options.delete_view        | admin:django_celery_beat_solarschedule_delete        | 
+/wf/admin/django_celery_beat/solarschedule/<path:object_id>/history/    | django.contrib.admin.options.history_view       | admin:django_celery_beat_solarschedule_history       | 
+/wf/admin/django_celery_beat/solarschedule/add/                         | django.contrib.admin.options.add_view           | admin:django_celery_beat_solarschedule_add           | 
+/wf/admin/django_celery_results/groupresult/                            | django.contrib.admin.options.changelist_view    | admin:django_celery_results_groupresult_changelist   | 
+/wf/admin/django_celery_results/groupresult/<path:object_id>/           | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/django_celery_results/groupresult/<path:object_id>/change/    | django.contrib.admin.options.change_view        | admin:django_celery_results_groupresult_change       | 
+/wf/admin/django_celery_results/groupresult/<path:object_id>/delete/    | django.contrib.admin.options.delete_view        | admin:django_celery_results_groupresult_delete       | 
+/wf/admin/django_celery_results/groupresult/<path:object_id>/history/   | django.contrib.admin.options.history_view       | admin:django_celery_results_groupresult_history      | 
+/wf/admin/django_celery_results/groupresult/add/                        | django.contrib.admin.options.add_view           | admin:django_celery_results_groupresult_add          | 
+/wf/admin/django_celery_results/taskresult/                             | django.contrib.admin.options.changelist_view    | admin:django_celery_results_taskresult_changelist    | 
+/wf/admin/django_celery_results/taskresult/<path:object_id>/            | django.views.generic.base.RedirectView          |                                                      | 
+/wf/admin/django_celery_results/taskresult/<path:object_id>/change/     | django.contrib.admin.options.change_view        | admin:django_celery_results_taskresult_change        | 
+/wf/admin/django_celery_results/taskresult/<path:object_id>/delete/     | django.contrib.admin.options.delete_view        | admin:django_celery_results_taskresult_delete        | 
+/wf/admin/django_celery_results/taskresult/<path:object_id>/history/    | django.contrib.admin.options.history_view       | admin:django_celery_results_taskresult_history       | 
+/wf/admin/django_celery_results/taskresult/add/                         | django.contrib.admin.options.add_view           | admin:django_celery_results_taskresult_add           | 
+/wf/admin/jsi18n/                                                       | django.contrib.admin.sites.i18n_javascript      | admin:jsi18n                                         | 
+/wf/admin/login/                                                        | django.contrib.admin.sites.login                | admin:login                                          | 
+/wf/admin/logout/                                                       | django.contrib.admin.sites.logout               | admin:logout                                         | 
+/wf/admin/password_change/                                              | django.contrib.admin.sites.password_change      | admin:password_change                                | 
+/wf/admin/password_change/done/                                         | django.contrib.admin.sites.password_change_done | admin:password_change_done                           | 
+/wf/admin/r/<int:content_type_id>/<path:object_id>/                     | django.contrib.contenttypes.views.shortcut      | admin:view_on_site                                   | 
+/wf/api-auth/login/                                                     | django.contrib.auth.views.LoginView             | rest_framework:login                                 | 
+/wf/api-auth/logout/                                                    | django.contrib.auth.views.LogoutView            | rest_framework:logout                                | 
+/wf/api/                                                                | django.views.generic.base.RedirectView          |                                                      | 
+/wf/api/                                                                | django.views.generic.base.RedirectView          |                                                      | 
+/wf/api/                                                                | rest_framework.routers.APIRootView              | api-root                                             | 
+/wf/api/<drf_format_suffix:format>                                      | rest_framework.routers.APIRootView              | api-root                                             | 
+/wf/api/crontab-schedule/                                               | workflow.views.PeriodicCrontabScheduleViewSet   | crontabschedule-list                                 | 
+/wf/api/crontab-schedule/<pk>/                                          | workflow.views.PeriodicCrontabScheduleViewSet   | crontabschedule-detail                               | 
+/wf/api/crontab-schedule/<pk>\.<format>/                                | workflow.views.PeriodicCrontabScheduleViewSet   | crontabschedule-detail                               | 
+/wf/api/crontab-schedule\.<format>/                                     | workflow.views.PeriodicCrontabScheduleViewSet   | crontabschedule-list                                 | 
+/wf/api/dynamic-variable/                                               | dynamic_variable.views.DynamicVariableView      | dynamic variable-list                                | 
+/wf/api/dynamic-variable/<pk>/                                          | dynamic_variable.views.DynamicVariableView      | dynamic variable-detail                              | 
+/wf/api/dynamic-variable/<pk>\.<format>/                                | dynamic_variable.views.DynamicVariableView      | dynamic variable-detail                              | 
+/wf/api/dynamic-variable\.<format>/                                     | dynamic_variable.views.DynamicVariableView      | dynamic variable-list                                | 
+/wf/api/expressions/                                                    | expression_builder.views.ExpressionsView        | Expressions View-list                                | 
+/wf/api/expressions/<pk>/                                               | expression_builder.views.ExpressionsView        | Expressions View-detail                              | 
+/wf/api/expressions/<pk>\.<format>/                                     | expression_builder.views.ExpressionsView        | Expressions View-detail                              | 
+/wf/api/expressions/bulk                                                | expression_builder.views.ExpressionsBulkView    |                                                      | 
+/wf/api/expressions\.<format>/                                          | expression_builder.views.ExpressionsView        | Expressions View-list                                | 
+/wf/api/historical-query/                                               | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-list                       | 
+/wf/api/historical-query/<pk>/                                          | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-detail                     | 
+/wf/api/historical-query/<pk>\.<format>/                                | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-detail                     | 
+/wf/api/historical-query/context/                                       | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-context                    | 
+/wf/api/historical-query/context\.<format>/                             | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-context                    | 
+/wf/api/historical-query/vocab/                                         | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-vocab                      | 
+/wf/api/historical-query/vocab\.<format>/                               | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-vocab                      | 
+/wf/api/historical-query/workflow_logs/                                 | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-workflow-logs              | 
+/wf/api/historical-query/workflow_logs\.<format>/                       | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-workflow-logs              | 
+/wf/api/historical-query\.<format>/                                     | workflow.views.HistoricalWorkflowQueryViewSet   | historical workflow query-list                       | 
+/wf/api/historical-steps/                                               | workflow.views.HistoricalStepViewSet            | historicalstep-list                                  | 
+/wf/api/historical-steps/<pk>/                                          | workflow.views.HistoricalStepViewSet            | historicalstep-detail                                | 
+/wf/api/historical-steps/<pk>\.<format>/                                | workflow.views.HistoricalStepViewSet            | historicalstep-detail                                | 
+/wf/api/historical-steps/context/                                       | workflow.views.HistoricalStepViewSet            | historicalstep-context                               | 
+/wf/api/historical-steps/context\.<format>/                             | workflow.views.HistoricalStepViewSet            | historicalstep-context                               | 
+/wf/api/historical-steps/vocab/                                         | workflow.views.HistoricalStepViewSet            | historicalstep-vocab                                 | 
+/wf/api/historical-steps/vocab\.<format>/                               | workflow.views.HistoricalStepViewSet            | historicalstep-vocab                                 | 
+/wf/api/historical-steps\.<format>/                                     | workflow.views.HistoricalStepViewSet            | historicalstep-list                                  | 
+/wf/api/historical-workflows/                                           | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-list                              | 
+/wf/api/historical-workflows/<pk>/                                      | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-detail                            | 
+/wf/api/historical-workflows/<pk>\.<format>/                            | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-detail                            | 
+/wf/api/historical-workflows/config/                                    | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-config                            | 
+/wf/api/historical-workflows/config\.<format>/                          | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-config                            | 
+/wf/api/historical-workflows/context/                                   | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-context                           | 
+/wf/api/historical-workflows/context\.<format>/                         | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-context                           | 
+/wf/api/historical-workflows/count/                                     | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-count                             | 
+/wf/api/historical-workflows/count\.<format>/                           | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-count                             | 
+/wf/api/historical-workflows/log_list/                                  | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-log-list                          | 
+/wf/api/historical-workflows/log_list\.<format>/                        | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-log-list                          | 
+/wf/api/historical-workflows/metrics/                                   | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-metrics                           | 
+/wf/api/historical-workflows/metrics\.<format>/                         | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-metrics                           | 
+/wf/api/historical-workflows/vocab/                                     | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-vocab                             | 
+/wf/api/historical-workflows/vocab\.<format>/                           | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-vocab                             | 
+/wf/api/historical-workflows\.<format>/                                 | workflow.views.HistoricalWorkflowViewSet        | historicalworkflow-list                              | 
+/wf/api/interval-schedule/                                              | workflow.views.PeriodicIntervalScheduleViewSet  | intervalschedule-list                                | 
+/wf/api/interval-schedule/<pk>/                                         | workflow.views.PeriodicIntervalScheduleViewSet  | intervalschedule-detail                              | 
+/wf/api/interval-schedule/<pk>\.<format>/                               | workflow.views.PeriodicIntervalScheduleViewSet  | intervalschedule-detail                              | 
+/wf/api/interval-schedule\.<format>/                                    | workflow.views.PeriodicIntervalScheduleViewSet  | intervalschedule-list                                | 
+/wf/api/jinja-editor/                                                   | dynamic_variable.views.JinjaEditorView          | jinja-template-view                                  | 
+/wf/api/manual-wf-input/                                                | workflow.views.WorkflowInputView                | manual-workflow-input-list                           | 
+/wf/api/manual-wf-input/<pk>/                                           | workflow.views.WorkflowInputView                | manual-workflow-input-detail                         | 
+/wf/api/manual-wf-input/<pk>/retrieve_wfinput/                          | workflow.views.WorkflowInputView                | manual-workflow-input-retrieve-wfinput               | 
+/wf/api/manual-wf-input/<pk>/retrieve_wfinput\.<format>/                | workflow.views.WorkflowInputView                | manual-workflow-input-retrieve-wfinput               | 
+/wf/api/manual-wf-input/<pk>\.<format>/                                 | workflow.views.WorkflowInputView                | manual-workflow-input-detail                         | 
+/wf/api/manual-wf-input/list_wfinput/                                   | workflow.views.WorkflowInputView                | manual-workflow-input-list-wfinput                   | 
+/wf/api/manual-wf-input/list_wfinput\.<format>/                         | workflow.views.WorkflowInputView                | manual-workflow-input-list-wfinput                   | 
+/wf/api/manual-wf-input\.<format>/                                      | workflow.views.WorkflowInputView                | manual-workflow-input-list                           | 
+/wf/api/query/                                                          | workflow.views.WorkflowQueryViewSet             | workflowview-list                                    | 
+/wf/api/query/<pk>/                                                     | workflow.views.WorkflowQueryViewSet             | workflowview-detail                                  | 
+/wf/api/query/<pk>\.<format>/                                           | workflow.views.WorkflowQueryViewSet             | workflowview-detail                                  | 
+/wf/api/query/context/                                                  | workflow.views.WorkflowQueryViewSet             | workflowview-context                                 | 
+/wf/api/query/context\.<format>/                                        | workflow.views.WorkflowQueryViewSet             | workflowview-context                                 | 
+/wf/api/query/vocab/                                                    | workflow.views.WorkflowQueryViewSet             | workflowview-vocab                                   | 
+/wf/api/query/vocab\.<format>/                                          | workflow.views.WorkflowQueryViewSet             | workflowview-vocab                                   | 
+/wf/api/query/workflow_logs/                                            | workflow.views.WorkflowQueryViewSet             | workflowview-workflow-logs                           | 
+/wf/api/query/workflow_logs\.<format>/                                  | workflow.views.WorkflowQueryViewSet             | workflowview-workflow-logs                           | 
+/wf/api/query\.<format>/                                                | workflow.views.WorkflowQueryViewSet             | workflowview-list                                    | 
+/wf/api/scheduled/                                                      | workflow.views.PeriodicWorkflowViewSet          | periodic task-list                                   | 
+/wf/api/scheduled/<pk>/                                                 | workflow.views.PeriodicWorkflowViewSet          | periodic task-detail                                 | 
+/wf/api/scheduled/<pk>\.<format>/                                       | workflow.views.PeriodicWorkflowViewSet          | periodic task-detail                                 | 
+/wf/api/scheduled/trigger-now/                                          | workflow.views.PeriodicWorkflowViewSet          | periodic task-trigger                                | 
+/wf/api/scheduled/trigger-now\.<format>/                                | workflow.views.PeriodicWorkflowViewSet          | periodic task-trigger                                | 
+/wf/api/scheduled\.<format>/                                            | workflow.views.PeriodicWorkflowViewSet          | periodic task-list                                   | 
+/wf/api/steps/                                                          | workflow.views.StepViewSet                      | step-list                                            | 
+/wf/api/steps/<pk>/                                                     | workflow.views.StepViewSet                      | step-detail                                          | 
+/wf/api/steps/<pk>\.<format>/                                           | workflow.views.StepViewSet                      | step-detail                                          | 
+/wf/api/steps/context/                                                  | workflow.views.StepViewSet                      | step-context                                         | 
+/wf/api/steps/context\.<format>/                                        | workflow.views.StepViewSet                      | step-context                                         | 
+/wf/api/steps/vocab/                                                    | workflow.views.StepViewSet                      | step-vocab                                           | 
+/wf/api/steps/vocab\.<format>/                                          | workflow.views.StepViewSet                      | step-vocab                                           | 
+/wf/api/steps\.<format>/                                                | workflow.views.StepViewSet                      | step-list                                            | 
+/wf/api/workflows/                                                      | workflow.views.WorkflowViewSet                  | workflow-list                                        | 
+/wf/api/workflows/<pk>/                                                 | workflow.views.WorkflowViewSet                  | workflow-detail                                      | 
+/wf/api/workflows/<pk>/approval/                                        | workflow.views.WorkflowViewSet                  | workflow-approval                                    | 
+/wf/api/workflows/<pk>/approval\.<format>/                              | workflow.views.WorkflowViewSet                  | workflow-approval                                    | 
+/wf/api/workflows/<pk>/proxy/                                           | workflow.views.WorkflowViewSet                  | workflow-proxy                                       | 
+/wf/api/workflows/<pk>/proxy\.<format>/                                 | workflow.views.WorkflowViewSet                  | workflow-proxy                                       | 
+/wf/api/workflows/<pk>/refresh_settings/                                | workflow.views.WorkflowViewSet                  | workflow-refresh-settings                            | 
+/wf/api/workflows/<pk>/refresh_settings\.<format>/                      | workflow.views.WorkflowViewSet                  | workflow-refresh-settings                            | 
+/wf/api/workflows/<pk>/resume/                                          | workflow.views.WorkflowViewSet                  | workflow-resume                                      | 
+/wf/api/workflows/<pk>/resume\.<format>/                                | workflow.views.WorkflowViewSet                  | workflow-resume                                      | 
+/wf/api/workflows/<pk>/retry/                                           | workflow.views.WorkflowViewSet                  | workflow-retry                                       | 
+/wf/api/workflows/<pk>/retry\.<format>/                                 | workflow.views.WorkflowViewSet                  | workflow-retry                                       | 
+/wf/api/workflows/<pk>/start/                                           | workflow.views.WorkflowViewSet                  | workflow-start                                       | 
+/wf/api/workflows/<pk>/start\.<format>/                                 | workflow.views.WorkflowViewSet                  | workflow-start                                       | 
+/wf/api/workflows/<pk>/wfinput_resume/                                  | workflow.views.WorkflowViewSet                  | workflow-wfinput-resume                              | 
+/wf/api/workflows/<pk>/wfinput_resume\.<format>/                        | workflow.views.WorkflowViewSet                  | workflow-wfinput-resume                              | 
+/wf/api/workflows/<pk>\.<format>/                                       | workflow.views.WorkflowViewSet                  | workflow-detail                                      | 
+/wf/api/workflows/auto_vacuum/                                          | workflow.views.WorkflowViewSet                  | workflow-auto-vacuum                                 | 
+/wf/api/workflows/auto_vacuum\.<format>/                                | workflow.views.WorkflowViewSet                  | workflow-auto-vacuum                                 | 
+/wf/api/workflows/context/                                              | workflow.views.WorkflowViewSet                  | workflow-context                                     | 
+/wf/api/workflows/context\.<format>/                                    | workflow.views.WorkflowViewSet                  | workflow-context                                     | 
+/wf/api/workflows/count/                                                | workflow.views.WorkflowViewSet                  | workflow-count                                       | 
+/wf/api/workflows/count\.<format>/                                      | workflow.views.WorkflowViewSet                  | workflow-count                                       | 
+/wf/api/workflows/delete/                                               | workflow.views.WorkflowViewSet                  | workflow-delete                                      | 
+/wf/api/workflows/delete\.<format>/                                     | workflow.views.WorkflowViewSet                  | workflow-delete                                      | 
+/wf/api/workflows/log_list/                                             | workflow.views.WorkflowViewSet                  | workflow-log-list                                    | 
+/wf/api/workflows/log_list\.<format>/                                   | workflow.views.WorkflowViewSet                  | workflow-log-list                                    | 
+/wf/api/workflows/metrics/                                              | workflow.views.WorkflowViewSet                  | workflow-metrics                                     | 
+/wf/api/workflows/metrics\.<format>/                                    | workflow.views.WorkflowViewSet                  | workflow-metrics                                     | 
+/wf/api/workflows/statuslist/                                           | workflow.views.WorkflowViewSet                  | workflow-statuslist                                  | 
+/wf/api/workflows/statuslist\.<format>/                                 | workflow.views.WorkflowViewSet                  | workflow-statuslist                                  | 
+/wf/api/workflows/vocab/                                                | workflow.views.WorkflowViewSet                  | workflow-vocab                                       | 
+/wf/api/workflows/vocab\.<format>/                                      | workflow.views.WorkflowViewSet                  | workflow-vocab                                       | 
+/wf/api/workflows\.<format>/                                            | workflow.views.WorkflowViewSet                  | workflow-list                                        | 
+/wf/favicon.ico                                                         | django.views.generic.base.RedirectView          | favicon                                              | 
+/wf/workflow/                                                           | django.views.generic.base.RedirectView          |                                                      | 
+/wf/workflow/config/                                                    | workflow.views.ActionCountView                  |                                                      | 
+/wf/workflow/create-start/                                              | workflow.views.CreateAndStartView               |                                                      | 
+/wf/workflow/healthcheck/                                               | workflow.views.HealthcheckView                  |                                                      | 
+/wf/workflow/healthcheck/job/                                           | workflow.views.JobHealthcheckView               |                                                      | 
+/wf/workflow/healthcheck/job/<task_id>/                                 | workflow.views.JobHealthcheckView               |                                                      | 
+/wf/workflow/output-detail/                                             | workflow.views.OutputView                       |                                                      | 
+/wf/workflow/purge/tasks/                                               | workflow.views.TasksView                        | tasks-purge-view                                     | 
+/wf/workflow/revoke/tasks/                                              | workflow.views.TasksView                        | tasks-revoke-view                                    | 
+/wf/workflow/smtpconfig/                                                | workflow.views.SMTPConfigView                   |                                                      | 
+/wf/workflow/start/                                                     | workflow.views.StartView                        | start-view                                           | 
+/wf/workflow/tasks/                                                     | workflow.views.TasksView                        | tasks-view                                           | 
+/wf/workflow/tasks/<func_name>/                                         | workflow.views.TaskDetailView                   | tasks-detail-view                                    | 

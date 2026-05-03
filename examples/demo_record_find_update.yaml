@@ -1,0 +1,61 @@
+# Find + Update record CRUD demo. Covers ~38% of corpus (FindRecords +
+# UpdateRecord). Setup inserts a tagged test alert; this playbook
+# finds it by uuid, then updates its description field.
+#
+# FSR canonical shapes (verified live 2026-05-03):
+#   find_record arguments:
+#     module:    'alerts'    — the module name. Suffix `?$limit=N`
+#                              optional but the API Platform respects it.
+#     query:                  — query DSL
+#       logic:    'AND' | 'OR'
+#       filters:  [{type:'primitive', field, value, operator, _operator}]
+#       __selectFields: list of fields to fetch (optional)
+#     step_variables: []
+#
+#   update_record arguments:
+#     collection:     IRI of the record to update (Jinja from find_record output)
+#     collectionType: module IRI (e.g. /api/3/alerts)
+#     resource:       {field: value, ...} fields to set
+#     operation:      'Replace' | 'Append'
+#     step_variables: []
+
+collection: FSRPB Demo Record CRUD
+description: Find a tagged alert and update it.
+visible: true
+
+playbooks:
+  - name: FSRPB Find And Update Alert
+    is_active: true
+    parameters: [target_uuid]
+    steps:
+      - id: trigger
+        type: start
+        next: find
+
+      - id: find
+        type: find_record
+        name: Find target alert
+        arguments:
+          module: alerts
+          query:
+            logic: AND
+            filters:
+              - type: primitive
+                field: uuid
+                value: "{{ vars.input.params.target_uuid }}"
+                operator: eq
+                _operator: eq
+            __selectFields: [uuid, name, description]
+          step_variables: []
+        next: stamp_status
+
+      - id: stamp_status
+        type: update_record
+        name: Stamp description
+        arguments:
+          collection: "{{ vars.steps.Find_target_alert[0]['@id'] }}"
+          collectionType: /api/3/alerts
+          resource:
+            description: "fsrpb e2e — stamped at {{ vars.task_id }}"
+          operation: Replace
+          step_variables: []

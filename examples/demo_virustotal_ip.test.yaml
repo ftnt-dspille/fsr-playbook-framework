@@ -1,0 +1,28 @@
+fixture: examples/demo_virustotal_ip.yaml
+playbook: VT IP Reputation
+
+# 8.8.8.8 (Google DNS) is a stable known-clean IP — VT's
+# last_analysis_stats.malicious has been 0 every time we've checked.
+# Asserts the clean branch fires. Swap to a known-malicious IP to
+# verify the malicious branch (no fixture change needed).
+input:
+  ip: "8.8.8.8"
+
+timeout_s: 180
+
+expects:
+  status: finished
+  vars:
+    verdict: clean
+  steps:
+    Query_VirusTotal:
+      status: finished
+      result_contains: '"attributes"'   # proves it really hit VT
+    Branch_on_verdict:
+      status: finished
+    Stamp_clean:
+      status: finished
+    Stamp_malicious:
+      status: skipped
+
+cleanup: true

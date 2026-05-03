@@ -1,0 +1,4970 @@
+{
+  "filters": {
+    "abs": {
+      "qualname": "abs",
+      "module": "builtins",
+      "doc": "Return the absolute value of the argument.",
+      "file": null,
+      "signature": "(x, /)",
+      "parameters": [
+        {
+          "name": "x",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "attr": {
+      "qualname": "do_attr",
+      "module": "jinja2.filters",
+      "doc": "Get an attribute of an object.  ``foo|attr(\"bar\")`` works like\n``foo.bar`` just that always an attribute is returned and items are not\nlooked up.\n\nSee :ref:`Notes on subscriptions <notes-on-subscriptions>` for more details.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(environment: 'Environment', obj: Any, name: str) -> Union[jinja2.runtime.Undefined, Any]",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "obj",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "batch": {
+      "qualname": "do_batch",
+      "module": "jinja2.filters",
+      "doc": "A filter that batches items. It works pretty much like `slice`\njust the other way round. It returns a list of lists with the\ngiven number of items. If you provide a second parameter this\nis used to fill up missing items. See this example:\n\n.. sourcecode:: html+jinja\n\n    <table>\n    {%- for row in items|batch(3, '&nbsp;') %}\n      <tr>\n      {%- for column in row %}\n        <td>{{ column }}</td>\n      {%- endfor %}\n      </tr>\n    {%- endfor %}\n    </table>",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: 't.Iterable[V]', linecount: int, fill_with: 't.Optional[V]' = None) -> 't.Iterator[t.List[V]]'",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "linecount",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "fill_with",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "t.Optional[V]"
+        }
+      ]
+    },
+    "capitalize": {
+      "qualname": "do_capitalize",
+      "module": "jinja2.filters",
+      "doc": "Capitalize a value. The first character will be uppercase, all others\nlowercase.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(s: str) -> str",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "center": {
+      "qualname": "do_center",
+      "module": "jinja2.filters",
+      "doc": "Centers the value in a field of a given width.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: str, width: int = 80) -> str",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "width",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "80",
+          "annotation": "<class 'int'>"
+        }
+      ]
+    },
+    "count": {
+      "qualname": "len",
+      "module": "builtins",
+      "doc": "Return the number of items in a container.",
+      "file": null,
+      "signature": "(obj, /)",
+      "parameters": [
+        {
+          "name": "obj",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "d": {
+      "qualname": "do_default",
+      "module": "jinja2.filters",
+      "doc": "If the value is undefined it will return the passed default value,\notherwise the value of the variable:\n\n.. sourcecode:: jinja\n\n    {{ my_variable|default('my_variable is not defined') }}\n\nThis will output the value of ``my_variable`` if the variable was\ndefined, otherwise ``'my_variable is not defined'``. If you want\nto use default with variables that evaluate to false you have to\nset the second parameter to `true`:\n\n.. sourcecode:: jinja\n\n    {{ ''|default('the string was empty', true) }}\n\n.. versionchanged:: 2.11\n   It's now possible to configure the :class:`~jinja2.Environment` with\n   :class:`~jinja2.ChainableUndefined` to make the `default` filter work\n   on nested elements and attributes that may contain undefined values\n   in the chain without getting an :exc:`~jinja2.UndefinedError`.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: ~V, default_value: ~V = '', boolean: bool = False) -> ~V",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "~V"
+        },
+        {
+          "name": "default_value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": "~V"
+        },
+        {
+          "name": "boolean",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        }
+      ]
+    },
+    "default": {
+      "qualname": "do_default",
+      "module": "jinja2.filters",
+      "doc": "If the value is undefined it will return the passed default value,\notherwise the value of the variable:\n\n.. sourcecode:: jinja\n\n    {{ my_variable|default('my_variable is not defined') }}\n\nThis will output the value of ``my_variable`` if the variable was\ndefined, otherwise ``'my_variable is not defined'``. If you want\nto use default with variables that evaluate to false you have to\nset the second parameter to `true`:\n\n.. sourcecode:: jinja\n\n    {{ ''|default('the string was empty', true) }}\n\n.. versionchanged:: 2.11\n   It's now possible to configure the :class:`~jinja2.Environment` with\n   :class:`~jinja2.ChainableUndefined` to make the `default` filter work\n   on nested elements and attributes that may contain undefined values\n   in the chain without getting an :exc:`~jinja2.UndefinedError`.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: ~V, default_value: ~V = '', boolean: bool = False) -> ~V",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "~V"
+        },
+        {
+          "name": "default_value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": "~V"
+        },
+        {
+          "name": "boolean",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        }
+      ]
+    },
+    "dictsort": {
+      "qualname": "do_dictsort",
+      "module": "jinja2.filters",
+      "doc": "Sort a dict and yield (key, value) pairs. Python dicts may not\nbe in the order you want to display them in, so sort them first.\n\n.. sourcecode:: jinja\n\n    {% for key, value in mydict|dictsort %}\n        sort the dict by key, case insensitive\n\n    {% for key, value in mydict|dictsort(reverse=true) %}\n        sort the dict by key, case insensitive, reverse order\n\n    {% for key, value in mydict|dictsort(true) %}\n        sort the dict by key, case sensitive\n\n    {% for key, value in mydict|dictsort(false, 'value') %}\n        sort the dict by value, case insensitive",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: Mapping[~K, ~V], case_sensitive: bool = False, by: 'te.Literal[\"key\", \"value\"]' = 'key', reverse: bool = False) -> List[Tuple[~K, ~V]]",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Mapping[~K, ~V]"
+        },
+        {
+          "name": "case_sensitive",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "by",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'key'",
+          "annotation": "te.Literal[\"key\", \"value\"]"
+        },
+        {
+          "name": "reverse",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        }
+      ]
+    },
+    "e": {
+      "qualname": "escape",
+      "module": "markupsafe",
+      "doc": "Replace the characters ``&``, ``<``, ``>``, ``'``, and ``\"`` in\nthe string with HTML-safe sequences. Use this if you need to display\ntext that might contain such characters in HTML.\n\nIf the object has an ``__html__`` method, it is called and the\nreturn value is assumed to already be safe for HTML.\n\n:param s: An object to be converted to a string and escaped.\n:return: A :class:`Markup` string with the escaped text.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/markupsafe/__init__.py",
+      "signature": "(s: 't.Any', /) -> 'Markup'",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": "t.Any"
+        }
+      ]
+    },
+    "escape": {
+      "qualname": "escape",
+      "module": "markupsafe",
+      "doc": "Replace the characters ``&``, ``<``, ``>``, ``'``, and ``\"`` in\nthe string with HTML-safe sequences. Use this if you need to display\ntext that might contain such characters in HTML.\n\nIf the object has an ``__html__`` method, it is called and the\nreturn value is assumed to already be safe for HTML.\n\n:param s: An object to be converted to a string and escaped.\n:return: A :class:`Markup` string with the escaped text.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/markupsafe/__init__.py",
+      "signature": "(s: 't.Any', /) -> 'Markup'",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": "t.Any"
+        }
+      ]
+    },
+    "filesizeformat": {
+      "qualname": "do_filesizeformat",
+      "module": "jinja2.filters",
+      "doc": "Format the value like a 'human-readable' file size (i.e. 13 kB,\n4.1 MB, 102 Bytes, etc).  Per default decimal prefixes are used (Mega,\nGiga, etc.), if the second parameter is set to `True` the binary\nprefixes are used (Mebi, Gibi).",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: Union[str, float, int], binary: bool = False) -> str",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Union[str, float, int]"
+        },
+        {
+          "name": "binary",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        }
+      ]
+    },
+    "first": {
+      "qualname": "do_first",
+      "module": "jinja2.filters",
+      "doc": "Return the first item of a sequence.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(environment: 'Environment', seq: 't.Iterable[V]') -> 't.Union[V, Undefined]'",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "seq",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        }
+      ]
+    },
+    "float": {
+      "qualname": "do_float",
+      "module": "jinja2.filters",
+      "doc": "Convert the value into a floating point number. If the\nconversion doesn't work it will return ``0.0``. You can\noverride this default using the first parameter.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: Any, default: float = 0.0) -> float",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "default",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0.0",
+          "annotation": "<class 'float'>"
+        }
+      ]
+    },
+    "forceescape": {
+      "qualname": "do_forceescape",
+      "module": "jinja2.filters",
+      "doc": "Enforce HTML escaping.  This will probably double escape variables.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: 't.Union[str, HasHTML]') -> markupsafe.Markup",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Union[str, HasHTML]"
+        }
+      ]
+    },
+    "format": {
+      "qualname": "do_format",
+      "module": "jinja2.filters",
+      "doc": "Apply the given values to a `printf-style`_ format string, like\n``string % values``.\n\n.. sourcecode:: jinja\n\n    {{ \"%s, %s!\"|format(greeting, name) }}\n    Hello, World!\n\nIn most cases it should be more convenient and efficient to use the\n``%`` operator or :meth:`str.format`.\n\n.. code-block:: text\n\n    {{ \"%s, %s!\" % (greeting, name) }}\n    {{ \"{}, {}!\".format(greeting, name) }}\n\n.. _printf-style: https://docs.python.org/library/stdtypes.html\n    #printf-style-string-formatting",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: str, *args: Any, **kwargs: Any) -> str",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "groupby": {
+      "qualname": "do_groupby",
+      "module": "jinja2.filters",
+      "doc": "Group a sequence of objects by an attribute using Python's\n:func:`itertools.groupby`. The attribute can use dot notation for\nnested access, like ``\"address.city\"``. Unlike Python's ``groupby``,\nthe values are sorted first so only one group is returned for each\nunique value.\n\nFor example, a list of ``User`` objects with a ``city`` attribute\ncan be rendered in groups. In this example, ``grouper`` refers to\nthe ``city`` value of the group.\n\n.. sourcecode:: html+jinja\n\n    <ul>{% for city, items in users|groupby(\"city\") %}\n      <li>{{ city }}\n        <ul>{% for user in items %}\n          <li>{{ user.name }}\n        {% endfor %}</ul>\n      </li>\n    {% endfor %}</ul>\n\n``groupby`` yields namedtuples of ``(grouper, list)``, which\ncan be used instead of the tuple unpacking above. ``grouper`` is the\nvalue of the attribute, and ``list`` is the items with that value.\n\n.. sourcecode:: html+jinja\n\n    <ul>{% for group in users|groupby(\"city\") %}\n      <li>{{ group.grouper }}: {{ group.list|join(\", \") }}\n    {% endfor %}</ul>\n\nYou can specify a ``default`` value to use if an object in the list\ndoes not have the given attribute.\n\n.. sourcecode:: jinja\n\n    <ul>{% for city, items in users|groupby(\"city\", default=\"NY\") %}\n      <li>{{ city }}: {{ items|map(attribute=\"name\")|join(\", \") }}</li>\n    {% endfor %}</ul>\n\nLike the :func:`~jinja-filters.sort` filter, sorting and grouping is\ncase-insensitive by default. The ``key`` for each group will have\nthe case of the first item in that group of values. For example, if\na list of users has cities ``[\"CA\", \"NY\", \"ca\"]``, the \"CA\" group\nwill have two values. This can be disabled by passing\n``case_sensitive=True``.\n\n.. versionchanged:: 3.1\n    Added the ``case_sensitive`` parameter. Sorting and grouping is\n    case-insensitive by default, matching other filters that do\n    comparisons.\n\n.. versionchanged:: 3.0\n    Added the ``default`` parameter.\n\n.. versionchanged:: 2.6\n    The attribute supports dot notation for nested access.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(environment: 'Environment', value: 't.Iterable[V]', attribute: Union[str, int], default: Optional[Any] = None, case_sensitive: bool = False) -> 't.List[_GroupTuple]'",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "attribute",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Union[str, int]"
+        },
+        {
+          "name": "default",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[typing.Any]"
+        },
+        {
+          "name": "case_sensitive",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        }
+      ]
+    },
+    "indent": {
+      "qualname": "do_indent",
+      "module": "jinja2.filters",
+      "doc": "Return a copy of the string with each line indented by 4 spaces. The\nfirst line and blank lines are not indented by default.\n\n:param width: Number of spaces, or a string, to indent by.\n:param first: Don't skip indenting the first line.\n:param blank: Don't skip indenting empty lines.\n\n.. versionchanged:: 3.0\n    ``width`` can be a string.\n\n.. versionchanged:: 2.10\n    Blank lines are not indented by default.\n\n    Rename the ``indentfirst`` argument to ``first``.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(s: str, width: Union[int, str] = 4, first: bool = False, blank: bool = False) -> str",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "width",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "4",
+          "annotation": "typing.Union[int, str]"
+        },
+        {
+          "name": "first",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "blank",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        }
+      ]
+    },
+    "int": {
+      "qualname": "do_int",
+      "module": "jinja2.filters",
+      "doc": "Convert the value into an integer. If the\nconversion doesn't work it will return ``0``. You can\noverride this default using the first parameter. You\ncan also override the default base (10) in the second\nparameter, which handles input with prefixes such as\n0b, 0o and 0x for bases 2, 8 and 16 respectively.\nThe base is ignored for decimal numbers and non-string values.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: Any, default: int = 0, base: int = 10) -> int",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "default",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "base",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "10",
+          "annotation": "<class 'int'>"
+        }
+      ]
+    },
+    "join": {
+      "qualname": "do_join",
+      "module": "jinja2.filters",
+      "doc": "Return a string which is the concatenation of the strings in the\nsequence. The separator between elements is an empty string per\ndefault, you can define it with the optional parameter:\n\n.. sourcecode:: jinja\n\n    {{ [1, 2, 3]|join('|') }}\n        -> 1|2|3\n\n    {{ [1, 2, 3]|join }}\n        -> 123\n\nIt is also possible to join certain attributes of an object:\n\n.. sourcecode:: jinja\n\n    {{ users|join(', ', attribute='username') }}\n\n.. versionadded:: 2.6\n   The `attribute` parameter was added.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(eval_ctx: 'EvalContext', value: Iterable[Any], d: str = '', attribute: Union[str, int, NoneType] = None) -> str",
+      "parameters": [
+        {
+          "name": "eval_ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "EvalContext"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Iterable[typing.Any]"
+        },
+        {
+          "name": "d",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "attribute",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Union[str, int, NoneType]"
+        }
+      ]
+    },
+    "last": {
+      "qualname": "do_last",
+      "module": "jinja2.filters",
+      "doc": "Return the last item of a sequence.\n\nNote: Does not work with generators. You may want to explicitly\nconvert it to a list:\n\n.. sourcecode:: jinja\n\n    {{ data | selectattr('name', '==', 'Jinja') | list | last }}",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(environment: 'Environment', seq: 't.Reversible[V]') -> 't.Union[V, Undefined]'",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "seq",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Reversible[V]"
+        }
+      ]
+    },
+    "length": {
+      "qualname": "len",
+      "module": "builtins",
+      "doc": "Return the number of items in a container.",
+      "file": null,
+      "signature": "(obj, /)",
+      "parameters": [
+        {
+          "name": "obj",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "list": {
+      "qualname": "do_list",
+      "module": "jinja2.filters",
+      "doc": "Convert the value into a list.  If it was a string the returned list\nwill be a list of characters.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(value: 't.Iterable[V]') -> 't.List[V]'",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        }
+      ]
+    },
+    "lower": {
+      "qualname": "do_lower",
+      "module": "jinja2.filters",
+      "doc": "Convert a value to lowercase.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(s: str) -> str",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "items": {
+      "qualname": "do_items",
+      "module": "jinja2.filters",
+      "doc": "Return an iterator over the ``(key, value)`` items of a mapping.\n\n``x|items`` is the same as ``x.items()``, except if ``x`` is\nundefined an empty iterator is returned.\n\nThis filter is useful if you expect the template to be rendered with\nan implementation of Jinja in another programming language that does\nnot have a ``.items()`` method on its mapping type.\n\n.. code-block:: html+jinja\n\n    <dl>\n    {% for key, value in my_dict|items %}\n        <dt>{{ key }}\n        <dd>{{ value }}\n    {% endfor %}\n    </dl>\n\n.. versionadded:: 3.1",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: Union[Mapping[~K, ~V], jinja2.runtime.Undefined]) -> Iterator[Tuple[~K, ~V]]",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Union[typing.Mapping[~K, ~V], jinja2.runtime.Undefined]"
+        }
+      ]
+    },
+    "map": {
+      "qualname": "do_map",
+      "module": "jinja2.filters",
+      "doc": "Applies a filter on a sequence of objects or looks up an attribute.\nThis is useful when dealing with lists of objects but you are really\nonly interested in a certain value of it.\n\nThe basic usage is mapping on an attribute.  Imagine you have a list\nof users but you are only interested in a list of usernames:\n\n.. sourcecode:: jinja\n\n    Users on this page: {{ users|map(attribute='username')|join(', ') }}\n\nYou can specify a ``default`` value to use if an object in the list\ndoes not have the given attribute.\n\n.. sourcecode:: jinja\n\n    {{ users|map(attribute=\"username\", default=\"Anonymous\")|join(\", \") }}\n\nAlternatively you can let it invoke a filter by passing the name of the\nfilter and the arguments afterwards.  A good example would be applying a\ntext conversion filter on a sequence:\n\n.. sourcecode:: jinja\n\n    Users on this page: {{ titles|map('lower')|join(', ') }}\n\nSimilar to a generator comprehension such as:\n\n.. code-block:: python\n\n    (u.username for u in users)\n    (getattr(u, \"username\", \"Anonymous\") for u in users)\n    (do_lower(x) for x in titles)\n\n.. versionchanged:: 2.11.0\n    Added the ``default`` parameter.\n\n.. versionadded:: 2.7",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(context: 'Context', value: Iterable[Any], *args: Any, **kwargs: Any) -> Iterable[Any]",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Context"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Iterable[typing.Any]"
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "min": {
+      "qualname": "do_min",
+      "module": "jinja2.filters",
+      "doc": "Return the smallest item from the sequence.\n\n.. sourcecode:: jinja\n\n    {{ [1, 2, 3]|min }}\n        -> 1\n\n:param case_sensitive: Treat upper and lower case strings as distinct.\n:param attribute: Get the object with the min value of this attribute.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(environment: 'Environment', value: 't.Iterable[V]', case_sensitive: bool = False, attribute: Union[str, int, NoneType] = None) -> 't.Union[V, Undefined]'",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "case_sensitive",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "attribute",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Union[str, int, NoneType]"
+        }
+      ]
+    },
+    "max": {
+      "qualname": "do_max",
+      "module": "jinja2.filters",
+      "doc": "Return the largest item from the sequence.\n\n.. sourcecode:: jinja\n\n    {{ [1, 2, 3]|max }}\n        -> 3\n\n:param case_sensitive: Treat upper and lower case strings as distinct.\n:param attribute: Get the object with the max value of this attribute.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(environment: 'Environment', value: 't.Iterable[V]', case_sensitive: bool = False, attribute: Union[str, int, NoneType] = None) -> 't.Union[V, Undefined]'",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "case_sensitive",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "attribute",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Union[str, int, NoneType]"
+        }
+      ]
+    },
+    "pprint": {
+      "qualname": "do_pprint",
+      "module": "jinja2.filters",
+      "doc": "Pretty print a variable. Useful for debugging.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: Any) -> str",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "random": {
+      "qualname": "rand",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(environment, end, start=None, step=None, seed=None)",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "end",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "start",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "step",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "seed",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "reject": {
+      "qualname": "do_reject",
+      "module": "jinja2.filters",
+      "doc": "Filters a sequence of objects by applying a test to each object,\nand rejecting the objects with the test succeeding.\n\nIf no test is specified, each object will be evaluated as a boolean.\n\nExample usage:\n\n.. sourcecode:: jinja\n\n    {{ numbers|reject(\"odd\") }}\n\nSimilar to a generator comprehension such as:\n\n.. code-block:: python\n\n    (n for n in numbers if not test_odd(n))\n\n.. versionadded:: 2.7",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(context: 'Context', value: 't.Iterable[V]', *args: Any, **kwargs: Any) -> 't.Iterator[V]'",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Context"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "rejectattr": {
+      "qualname": "do_rejectattr",
+      "module": "jinja2.filters",
+      "doc": "Filters a sequence of objects by applying a test to the specified\nattribute of each object, and rejecting the objects with the test\nsucceeding.\n\nIf no test is specified, the attribute's value will be evaluated as\na boolean.\n\n.. sourcecode:: jinja\n\n    {{ users|rejectattr(\"is_active\") }}\n    {{ users|rejectattr(\"email\", \"none\") }}\n\nSimilar to a generator comprehension such as:\n\n.. code-block:: python\n\n    (user for user in users if not user.is_active)\n    (user for user in users if not test_none(user.email))\n\n.. versionadded:: 2.7",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(context: 'Context', value: 't.Iterable[V]', *args: Any, **kwargs: Any) -> 't.Iterator[V]'",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Context"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "replace": {
+      "qualname": "do_replace",
+      "module": "jinja2.filters",
+      "doc": "Return a copy of the value with all occurrences of a substring\nreplaced with a new one. The first argument is the substring\nthat should be replaced, the second is the replacement string.\nIf the optional third argument ``count`` is given, only the first\n``count`` occurrences are replaced:\n\n.. sourcecode:: jinja\n\n    {{ \"Hello World\"|replace(\"Hello\", \"Goodbye\") }}\n        -> Goodbye World\n\n    {{ \"aaaaargh\"|replace(\"a\", \"d'oh, \", 2) }}\n        -> d'oh, d'oh, aaargh",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(eval_ctx: 'EvalContext', s: str, old: str, new: str, count: Optional[int] = None) -> str",
+      "parameters": [
+        {
+          "name": "eval_ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "EvalContext"
+        },
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "old",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "new",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "count",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[int]"
+        }
+      ]
+    },
+    "reverse": {
+      "qualname": "do_reverse",
+      "module": "jinja2.filters",
+      "doc": "Reverse the object or return an iterator that iterates over it the other\nway round.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: Union[str, Iterable[~V]]) -> Union[str, Iterable[~V]]",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Union[str, typing.Iterable[~V]]"
+        }
+      ]
+    },
+    "round": {
+      "qualname": "do_round",
+      "module": "jinja2.filters",
+      "doc": "Round the number to a given precision. The first\nparameter specifies the precision (default is ``0``), the\nsecond the rounding method:\n\n- ``'common'`` rounds either up or down\n- ``'ceil'`` always rounds up\n- ``'floor'`` always rounds down\n\nIf you don't specify a method ``'common'`` is used.\n\n.. sourcecode:: jinja\n\n    {{ 42.55|round }}\n        -> 43.0\n    {{ 42.55|round(1, 'floor') }}\n        -> 42.5\n\nNote that even if rounded to 0 precision, a float is returned.  If\nyou need a real integer, pipe it through `int`:\n\n.. sourcecode:: jinja\n\n    {{ 42.55|round|int }}\n        -> 43",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: float, precision: int = 0, method: 'te.Literal[\"common\", \"ceil\", \"floor\"]' = 'common') -> float",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'float'>"
+        },
+        {
+          "name": "precision",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "method",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'common'",
+          "annotation": "te.Literal[\"common\", \"ceil\", \"floor\"]"
+        }
+      ]
+    },
+    "safe": {
+      "qualname": "do_mark_safe",
+      "module": "jinja2.filters",
+      "doc": "Mark the value as safe which means that in an environment with automatic\nescaping enabled this variable will not be escaped.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: str) -> markupsafe.Markup",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "select": {
+      "qualname": "do_select",
+      "module": "jinja2.filters",
+      "doc": "Filters a sequence of objects by applying a test to each object,\nand only selecting the objects with the test succeeding.\n\nIf no test is specified, each object will be evaluated as a boolean.\n\nExample usage:\n\n.. sourcecode:: jinja\n\n    {{ numbers|select(\"odd\") }}\n    {{ numbers|select(\"odd\") }}\n    {{ numbers|select(\"divisibleby\", 3) }}\n    {{ numbers|select(\"lessthan\", 42) }}\n    {{ strings|select(\"equalto\", \"mystring\") }}\n\nSimilar to a generator comprehension such as:\n\n.. code-block:: python\n\n    (n for n in numbers if test_odd(n))\n    (n for n in numbers if test_divisibleby(n, 3))\n\n.. versionadded:: 2.7",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(context: 'Context', value: 't.Iterable[V]', *args: Any, **kwargs: Any) -> 't.Iterator[V]'",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Context"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "selectattr": {
+      "qualname": "do_selectattr",
+      "module": "jinja2.filters",
+      "doc": "Filters a sequence of objects by applying a test to the specified\nattribute of each object, and only selecting the objects with the\ntest succeeding.\n\nIf no test is specified, the attribute's value will be evaluated as\na boolean.\n\nExample usage:\n\n.. sourcecode:: jinja\n\n    {{ users|selectattr(\"is_active\") }}\n    {{ users|selectattr(\"email\", \"none\") }}\n\nSimilar to a generator comprehension such as:\n\n.. code-block:: python\n\n    (user for user in users if user.is_active)\n    (user for user in users if test_none(user.email))\n\n.. versionadded:: 2.7",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(context: 'Context', value: 't.Iterable[V]', *args: Any, **kwargs: Any) -> 't.Iterator[V]'",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Context"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "slice": {
+      "qualname": "do_slice",
+      "module": "jinja2.filters",
+      "doc": "Slice an iterator and return a list of lists containing\nthose items. Useful if you want to create a div containing\nthree ul tags that represent columns:\n\n.. sourcecode:: html+jinja\n\n    <div class=\"columnwrapper\">\n      {%- for column in items|slice(3) %}\n        <ul class=\"column-{{ loop.index }}\">\n        {%- for item in column %}\n          <li>{{ item }}</li>\n        {%- endfor %}\n        </ul>\n      {%- endfor %}\n    </div>\n\nIf you pass it a second argument it's used to fill missing\nvalues on the last iteration.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(value: 't.Collection[V]', slices: int, fill_with: 't.Optional[V]' = None) -> 't.Iterator[t.List[V]]'",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Collection[V]"
+        },
+        {
+          "name": "slices",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "fill_with",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "t.Optional[V]"
+        }
+      ]
+    },
+    "sort": {
+      "qualname": "do_sort",
+      "module": "jinja2.filters",
+      "doc": "Sort an iterable using Python's :func:`sorted`.\n\n.. sourcecode:: jinja\n\n    {% for city in cities|sort %}\n        ...\n    {% endfor %}\n\n:param reverse: Sort descending instead of ascending.\n:param case_sensitive: When sorting strings, sort upper and lower\n    case separately.\n:param attribute: When sorting objects or dicts, an attribute or\n    key to sort by. Can use dot notation like ``\"address.city\"``.\n    Can be a list of attributes like ``\"age,name\"``.\n\nThe sort is stable, it does not change the relative order of\nelements that compare equal. This makes it is possible to chain\nsorts on different attributes and ordering.\n\n.. sourcecode:: jinja\n\n    {% for user in users|sort(attribute=\"name\")\n        |sort(reverse=true, attribute=\"age\") %}\n        ...\n    {% endfor %}\n\nAs a shortcut to chaining when the direction is the same for all\nattributes, pass a comma separate list of attributes.\n\n.. sourcecode:: jinja\n\n    {% for user in users|sort(attribute=\"age,name\") %}\n        ...\n    {% endfor %}\n\n.. versionchanged:: 2.11.0\n    The ``attribute`` parameter can be a comma separated list of\n    attributes, e.g. ``\"age,name\"``.\n\n.. versionchanged:: 2.6\n   The ``attribute`` parameter was added.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(environment: 'Environment', value: 't.Iterable[V]', reverse: bool = False, case_sensitive: bool = False, attribute: Union[str, int, NoneType] = None) -> 't.List[V]'",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "reverse",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "case_sensitive",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "attribute",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Union[str, int, NoneType]"
+        }
+      ]
+    },
+    "string": {
+      "qualname": "soft_str",
+      "module": "markupsafe",
+      "doc": "Convert an object to a string if it isn't already. This preserves\na :class:`Markup` string rather than converting it back to a basic\nstring, so it will still be marked as safe and won't be escaped\nagain.\n\n>>> value = escape(\"<User 1>\")\n>>> value\nMarkup('&lt;User 1&gt;')\n>>> escape(str(value))\nMarkup('&amp;lt;User 1&amp;gt;')\n>>> escape(soft_str(value))\nMarkup('&lt;User 1&gt;')",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/markupsafe/__init__.py",
+      "signature": "(s: 't.Any', /) -> 'str'",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": "t.Any"
+        }
+      ]
+    },
+    "striptags": {
+      "qualname": "do_striptags",
+      "module": "jinja2.filters",
+      "doc": "Strip SGML/XML tags and replace adjacent whitespace by one space.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: 't.Union[str, HasHTML]') -> str",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Union[str, HasHTML]"
+        }
+      ]
+    },
+    "sum": {
+      "qualname": "do_sum",
+      "module": "jinja2.filters",
+      "doc": "Returns the sum of a sequence of numbers plus the value of parameter\n'start' (which defaults to 0).  When the sequence is empty it returns\nstart.\n\nIt is also possible to sum up only certain attributes:\n\n.. sourcecode:: jinja\n\n    Total: {{ items|sum(attribute='price') }}\n\n.. versionchanged:: 2.6\n   The ``attribute`` parameter was added to allow summing up over\n   attributes.  Also the ``start`` parameter was moved on to the right.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/async_utils.py",
+      "signature": "(environment: 'Environment', iterable: 't.Iterable[V]', attribute: Union[str, int, NoneType] = None, start: ~V = 0) -> ~V",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "iterable",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "t.Iterable[V]"
+        },
+        {
+          "name": "attribute",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Union[str, int, NoneType]"
+        },
+        {
+          "name": "start",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": "~V"
+        }
+      ]
+    },
+    "title": {
+      "qualname": "do_title",
+      "module": "jinja2.filters",
+      "doc": "Return a titlecased version of the value. I.e. words will start with\nuppercase letters, all remaining characters are lowercase.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(s: str) -> str",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "trim": {
+      "qualname": "do_trim",
+      "module": "jinja2.filters",
+      "doc": "Strip leading and trailing characters, by default whitespace.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(value: str, chars: Optional[str] = None) -> str",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "chars",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[str]"
+        }
+      ]
+    },
+    "truncate": {
+      "qualname": "do_truncate",
+      "module": "jinja2.filters",
+      "doc": "Return a truncated copy of the string. The length is specified\nwith the first parameter which defaults to ``255``. If the second\nparameter is ``true`` the filter will cut the text at length. Otherwise\nit will discard the last word. If the text was in fact\ntruncated it will append an ellipsis sign (``\"...\"``). If you want a\ndifferent ellipsis sign than ``\"...\"`` you can specify it using the\nthird parameter. Strings that only exceed the length by the tolerance\nmargin given in the fourth parameter will not be truncated.\n\n.. sourcecode:: jinja\n\n    {{ \"foo bar baz qux\"|truncate(9) }}\n        -> \"foo...\"\n    {{ \"foo bar baz qux\"|truncate(9, True) }}\n        -> \"foo ba...\"\n    {{ \"foo bar baz qux\"|truncate(11) }}\n        -> \"foo bar baz qux\"\n    {{ \"foo bar baz qux\"|truncate(11, False, '...', 0) }}\n        -> \"foo bar...\"\n\nThe default leeway on newer Jinja versions is 5 and was 0 before but\ncan be reconfigured globally.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(env: 'Environment', s: str, length: int = 255, killwords: bool = False, end: str = '...', leeway: Optional[int] = None) -> str",
+      "parameters": [
+        {
+          "name": "env",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "length",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "255",
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "killwords",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "end",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'...'",
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "leeway",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[int]"
+        }
+      ]
+    },
+    "unique": {
+      "qualname": "unique",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(environment, a, case_sensitive=None, attribute=None)",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "case_sensitive",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "attribute",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "upper": {
+      "qualname": "do_upper",
+      "module": "jinja2.filters",
+      "doc": "Convert a value to uppercase.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(s: str) -> str",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "urlencode": {
+      "qualname": "urlencode",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(url)",
+      "parameters": [
+        {
+          "name": "url",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "urlize": {
+      "qualname": "do_urlize",
+      "module": "jinja2.filters",
+      "doc": "Convert URLs in text into clickable links.\n\nThis may not recognize links in some situations. Usually, a more\ncomprehensive formatter, such as a Markdown library, is a better\nchoice.\n\nWorks on ``http://``, ``https://``, ``www.``, ``mailto:``, and email\naddresses. Links with trailing punctuation (periods, commas, closing\nparentheses) and leading punctuation (opening parentheses) are\nrecognized excluding the punctuation. Email addresses that include\nheader fields are not recognized (for example,\n``mailto:address@example.com?cc=copy@example.com``).\n\n:param value: Original text containing URLs to link.\n:param trim_url_limit: Shorten displayed URL values to this length.\n:param nofollow: Add the ``rel=nofollow`` attribute to links.\n:param target: Add the ``target`` attribute to links.\n:param rel: Add the ``rel`` attribute to links.\n:param extra_schemes: Recognize URLs that start with these schemes\n    in addition to the default behavior. Defaults to\n    ``env.policies[\"urlize.extra_schemes\"]``, which defaults to no\n    extra schemes.\n\n.. versionchanged:: 3.0\n    The ``extra_schemes`` parameter was added.\n\n.. versionchanged:: 3.0\n    Generate ``https://`` links for URLs without a scheme.\n\n.. versionchanged:: 3.0\n    The parsing rules were updated. Recognize email addresses with\n    or without the ``mailto:`` scheme. Validate IP addresses. Ignore\n    parentheses and brackets in more cases.\n\n.. versionchanged:: 2.8\n   The ``target`` parameter was added.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(eval_ctx: 'EvalContext', value: str, trim_url_limit: Optional[int] = None, nofollow: bool = False, target: Optional[str] = None, rel: Optional[str] = None, extra_schemes: Optional[Iterable[str]] = None) -> str",
+      "parameters": [
+        {
+          "name": "eval_ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "EvalContext"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "trim_url_limit",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[int]"
+        },
+        {
+          "name": "nofollow",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "target",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[str]"
+        },
+        {
+          "name": "rel",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[str]"
+        },
+        {
+          "name": "extra_schemes",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[typing.Iterable[str]]"
+        }
+      ]
+    },
+    "wordcount": {
+      "qualname": "do_wordcount",
+      "module": "jinja2.filters",
+      "doc": "Count the words in that string.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(s: str) -> int",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "wordwrap": {
+      "qualname": "do_wordwrap",
+      "module": "jinja2.filters",
+      "doc": "Wrap a string to the given width. Existing newlines are treated\nas paragraphs to be wrapped separately.\n\n:param s: Original text to wrap.\n:param width: Maximum length of wrapped lines.\n:param break_long_words: If a word is longer than ``width``, break\n    it across lines.\n:param break_on_hyphens: If a word contains hyphens, it may be split\n    across lines.\n:param wrapstring: String to join each wrapped line. Defaults to\n    :attr:`Environment.newline_sequence`.\n\n.. versionchanged:: 2.11\n    Existing newlines are treated as paragraphs wrapped separately.\n\n.. versionchanged:: 2.11\n    Added the ``break_on_hyphens`` parameter.\n\n.. versionchanged:: 2.7\n    Added the ``wrapstring`` parameter.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(environment: 'Environment', s: str, width: int = 79, break_long_words: bool = True, wrapstring: Optional[str] = None, break_on_hyphens: bool = True) -> str",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        },
+        {
+          "name": "width",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "79",
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "break_long_words",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "True",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "wrapstring",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[str]"
+        },
+        {
+          "name": "break_on_hyphens",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "True",
+          "annotation": "<class 'bool'>"
+        }
+      ]
+    },
+    "xmlattr": {
+      "qualname": "do_xmlattr",
+      "module": "jinja2.filters",
+      "doc": "Create an SGML/XML attribute string based on the items in a dict.\n\n**Values** that are neither ``none`` nor ``undefined`` are automatically\nescaped, safely allowing untrusted user input.\n\nUser input should not be used as **keys** to this filter. If any key\ncontains a space, ``/`` solidus, ``>`` greater-than sign, or ``=`` equals\nsign, this fails with a ``ValueError``. Regardless of this, user input\nshould never be used as keys to this filter, or must be separately validated\nfirst.\n\n.. sourcecode:: html+jinja\n\n    <ul{{ {'class': 'my_list', 'missing': none,\n            'id': 'list-%d'|format(variable)}|xmlattr }}>\n    ...\n    </ul>\n\nResults in something like this:\n\n.. sourcecode:: html\n\n    <ul class=\"my_list\" id=\"list-42\">\n    ...\n    </ul>\n\nAs you can see it automatically prepends a space in front of the item\nif the filter returned something unless the second parameter is false.\n\n.. versionchanged:: 3.1.4\n    Keys with ``/`` solidus, ``>`` greater-than sign, or ``=`` equals sign\n    are not allowed.\n\n.. versionchanged:: 3.1.3\n    Keys with spaces are not allowed.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(eval_ctx: 'EvalContext', d: Mapping[str, Any], autospace: bool = True) -> str",
+      "parameters": [
+        {
+          "name": "eval_ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "EvalContext"
+        },
+        {
+          "name": "d",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Mapping[str, typing.Any]"
+        },
+        {
+          "name": "autospace",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "True",
+          "annotation": "<class 'bool'>"
+        }
+      ]
+    },
+    "tojson": {
+      "qualname": "do_tojson",
+      "module": "jinja2.filters",
+      "doc": "Serialize an object to a string of JSON, and mark it safe to\nrender in HTML. This filter is only for use in HTML documents.\n\nThe returned string is safe to render in HTML documents and\n``<script>`` tags. The exception is in HTML attributes that are\ndouble quoted; either use single quotes or the ``|forceescape``\nfilter.\n\n:param value: The object to serialize to JSON.\n:param indent: The ``indent`` parameter passed to ``dumps``, for\n    pretty-printing the value.\n\n.. versionadded:: 2.9",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/filters.py",
+      "signature": "(eval_ctx: 'EvalContext', value: Any, indent: Optional[int] = None) -> markupsafe.Markup",
+      "parameters": [
+        {
+          "name": "eval_ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "EvalContext"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "indent",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": "typing.Optional[int]"
+        }
+      ]
+    },
+    "toDict": {
+      "qualname": "toDict",
+      "module": "sealab.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(string)",
+      "parameters": [
+        {
+          "name": "string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "resolveRange": {
+      "qualname": "resolveRange",
+      "module": "sealab.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(value, rangeDict)",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "rangeDict",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "fromIRI": {
+      "qualname": "fromIRI",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(context, iri)",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "iri",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "find_indicators": {
+      "qualname": "find_indicators",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(context, iri, indicator_types=None, indicator_reputations=None, indicator_values=None, include_related_records=False)",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "iri",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "indicator_types",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "indicator_reputations",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "indicator_values",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "include_related_records",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        }
+      ]
+    },
+    "getRelativeDate": {
+      "qualname": "getRelativeDate",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(years=0, months=0, days=0, hours=0, minutes=0, seconds=0)",
+      "parameters": [
+        {
+          "name": "years",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "months",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "days",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "hours",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "minutes",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "seconds",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        }
+      ]
+    },
+    "iriToLink": {
+      "qualname": "iriToLink",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(record_iri, base_uri='')",
+      "parameters": [
+        {
+          "name": "record_iri",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "base_uri",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        }
+      ]
+    },
+    "loadRelationships": {
+      "qualname": "loadRelationships",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(record_iri, module, selected_fields=[])",
+      "parameters": [
+        {
+          "name": "record_iri",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "module",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "selected_fields",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "[]",
+          "annotation": null
+        }
+      ]
+    },
+    "logParse": {
+      "qualname": "logParse",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(data: 'str', log_type: 'str')",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "str"
+        },
+        {
+          "name": "log_type",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "str"
+        }
+      ]
+    },
+    "toJSON": {
+      "qualname": "toJSON",
+      "module": "workflow.jinja",
+      "doc": " Converts a python data type into a JSON string.\n\n .. note::\n     This filter will put the data through two iterations of `json.dumps`\n     because one iteration will automatically be stripped off by\n     `workflow.environment.Environment.expand`\n\n:param dict data: The object to be converted\n\n:return: a valid json string\n:rtype: str\n ",
+      "file": null,
+      "signature": "(data)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "picklist": {
+      "qualname": "picklist",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(context, name, value=None, key=None)",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "key",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "yaql": {
+      "qualname": "yaql",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(context, data, yaqlExpression)",
+      "parameters": [
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "yaqlExpression",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "xml_to_dict": {
+      "qualname": "xml_to_dict",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(xml)",
+      "parameters": [
+        {
+          "name": "xml",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "extract_artifacts": {
+      "qualname": "extract_artifacts",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(data)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ip_range": {
+      "qualname": "ip_range",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(ip_address, cidr)",
+      "parameters": [
+        {
+          "name": "ip_address",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "cidr",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "extract_cef": {
+      "qualname": "extract_cef",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(cef_input)",
+      "parameters": [
+        {
+          "name": "cef_input",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "count_occurrence": {
+      "qualname": "count_occurrence",
+      "module": "workflow.jinja",
+      "doc": ":param list data: ['apple','red','apple','red','red','pear']\n:return: count of occurrence of each item {'red': 3, 'apple': 2, 'pear': 1}\n:rtype: dict",
+      "file": null,
+      "signature": "(data)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "urldecode": {
+      "qualname": "urldecode",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(url)",
+      "parameters": [
+        {
+          "name": "url",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "json2html": {
+      "qualname": "json2html",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(data, row_fields=None, template='Stylized with row selection', display='Horizontal', styling=False, table_style=None)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "row_fields",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "template",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'Stylized with row selection'",
+          "annotation": null
+        },
+        {
+          "name": "display",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'Horizontal'",
+          "annotation": null
+        },
+        {
+          "name": "styling",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "table_style",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "htmltotext": {
+      "qualname": "htmltotext",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(string)",
+      "parameters": [
+        {
+          "name": "string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "markdown2html": {
+      "qualname": "markdown2html",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(markdown_string)",
+      "parameters": [
+        {
+          "name": "markdown_string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "np_split": {
+      "qualname": "np_split",
+      "module": "workflow.np_filters",
+      "doc": null,
+      "file": null,
+      "signature": "(data, batch_size)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "batch_size",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "np_unique": {
+      "qualname": "np_unique",
+      "module": "workflow.np_filters",
+      "doc": null,
+      "file": null,
+      "signature": "(data)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "np_join": {
+      "qualname": "np_join",
+      "module": "workflow.np_filters",
+      "doc": null,
+      "file": null,
+      "signature": "(list1, list2)",
+      "parameters": [
+        {
+          "name": "list1",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "list2",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "counter": {
+      "qualname": "count_occurrence",
+      "module": "workflow.jinja",
+      "doc": ":param list data: ['apple','red','apple','red','red','pear']\n:return: count of occurrence of each item {'red': 3, 'apple': 2, 'pear': 1}\n:rtype: dict",
+      "file": null,
+      "signature": "(data)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "html2text": {
+      "qualname": "htmltotext",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(string)",
+      "parameters": [
+        {
+          "name": "string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "np_batch": {
+      "qualname": "np_split",
+      "module": "workflow.np_filters",
+      "doc": null,
+      "file": null,
+      "signature": "(data, batch_size)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "batch_size",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ipmath": {
+      "qualname": "_ipmath",
+      "module": "ansible_collections.ansible.utils.plugins.filter.ipmath",
+      "doc": "Convert the given data from json to xml.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/ipmath.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ipaddr": {
+      "qualname": "_ipaddr",
+      "module": "ansible_collections.ansible.utils.plugins.filter.ipaddr",
+      "doc": "This filter is designed to return the input value if a query is True, and False if a query is False",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/ipaddr.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ipwrap": {
+      "qualname": "_ipwrap",
+      "module": "ansible_collections.ansible.utils.plugins.filter.ipwrap",
+      "doc": "This filter is designed to Wrap IPv6 addresses in [ ] brackets.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/ipwrap.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "next_nth_usable": {
+      "qualname": "_next_nth_usable",
+      "module": "ansible_collections.ansible.utils.plugins.filter.next_nth_usable",
+      "doc": "This filter returns the next nth usable ip within a network described by value.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/next_nth_usable.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "reduce_on_network": {
+      "qualname": "_reduce_on_network",
+      "module": "ansible_collections.ansible.utils.plugins.filter.reduce_on_network",
+      "doc": "This filter returns whether an address or a network passed as argument is in a network.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/reduce_on_network.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "network_in_usable": {
+      "qualname": "_network_in_usable",
+      "module": "ansible_collections.ansible.utils.plugins.filter.network_in_usable",
+      "doc": "This filter returns whether an address or a network passed as argument is in a network.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/network_in_usable.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ipv6": {
+      "qualname": "_ipv6",
+      "module": "ansible_collections.ansible.utils.plugins.filter.ipv6",
+      "doc": "This filter is designed to return the input value if a query is True, and False if a query is False",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/ipv6.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "nthhost": {
+      "qualname": "_nthhost",
+      "module": "ansible_collections.ansible.utils.plugins.filter.nthhost",
+      "doc": "This filter returns whether an address or a network passed as argument is in a network.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/nthhost.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ip4_hex": {
+      "qualname": "_ip4_hex",
+      "module": "ansible_collections.ansible.utils.plugins.filter.ip4_hex",
+      "doc": "This filter is designed to Convert an IPv4 address to Hexadecimal notation",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/ip4_hex.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ipv4": {
+      "qualname": "_ipv4",
+      "module": "ansible_collections.ansible.utils.plugins.filter.ipv4",
+      "doc": "This filter is designed to return the input value if a query is True, and False if a query is False",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/ipv4.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "slaac": {
+      "qualname": "_slaac",
+      "module": "ansible_collections.ansible.utils.plugins.filter.slaac",
+      "doc": "This filter returns whether an address or a network passed as argument is in a network.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/slaac.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "hwaddr": {
+      "qualname": "_hwaddr",
+      "module": "ansible_collections.ansible.utils.plugins.filter.hwaddr",
+      "doc": "This filter check if string is a HW/MAC address and filter it",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/hwaddr.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "cidr_merge": {
+      "qualname": "_cidr_merge",
+      "module": "ansible_collections.ansible.utils.plugins.filter.cidr_merge",
+      "doc": "Convert the given data from json to xml.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/cidr_merge.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ipsubnet": {
+      "qualname": "_ipsubnet",
+      "module": "ansible_collections.ansible.utils.plugins.filter.ipsubnet",
+      "doc": "Manipulate IPv4/IPv6 subnets",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/ipsubnet.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "macaddr": {
+      "qualname": "_macaddr",
+      "module": "ansible_collections.ansible.utils.plugins.filter.macaddr",
+      "doc": "This filter check if string is a HW/MAC address and filter it",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/macaddr.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "previous_nth_usable": {
+      "qualname": "_previous_nth_usable",
+      "module": "ansible_collections.ansible.utils.plugins.filter.previous_nth_usable",
+      "doc": "This filter returns the previous nth usable ip within a network described by value.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/previous_nth_usable.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "network_in_network": {
+      "qualname": "_network_in_network",
+      "module": "ansible_collections.ansible.utils.plugins.filter.network_in_network",
+      "doc": "This filter returns whether an address or a network passed as argument is in a network.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/utils/plugins/filter/network_in_network.py",
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "urlsplit": {
+      "qualname": "split_url",
+      "module": "ansible.plugins.filter.urlsplit",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/urlsplit.py",
+      "signature": "(value, query='', alias='urlsplit')",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "query",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "alias",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'urlsplit'",
+          "annotation": null
+        }
+      ]
+    },
+    "log": {
+      "qualname": "logarithm",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(x, base=2.718281828459045)",
+      "parameters": [
+        {
+          "name": "x",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "base",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "2.718281828459045",
+          "annotation": null
+        }
+      ]
+    },
+    "pow": {
+      "qualname": "power",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(x, y)",
+      "parameters": [
+        {
+          "name": "x",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "y",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "root": {
+      "qualname": "inversepower",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(x, base=2)",
+      "parameters": [
+        {
+          "name": "x",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "base",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "2",
+          "annotation": null
+        }
+      ]
+    },
+    "intersect": {
+      "qualname": "intersect",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(environment, a, b)",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "difference": {
+      "qualname": "difference",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(environment, a, b)",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "symmetric_difference": {
+      "qualname": "symmetric_difference",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(environment, a, b)",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "union": {
+      "qualname": "union",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(environment, a, b)",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "product": {
+      "qualname": "product",
+      "module": "itertools",
+      "doc": "product(*iterables, repeat=1) --> product object\n\nCartesian product of input iterables.  Equivalent to nested for-loops.\n\nFor example, product(A, B) returns the same as:  ((x,y) for x in A for y in B).\nThe leftmost iterators are in the outermost for-loop, so the output tuples\ncycle in a manner similar to an odometer (with the rightmost element changing\non every iteration).\n\nTo compute the product of an iterable with itself, specify the number\nof repetitions with the optional repeat keyword argument. For example,\nproduct(A, repeat=4) means the same as product(A, A, A, A).\n\nproduct('ab', range(3)) --> ('a',0) ('a',1) ('a',2) ('b',0) ('b',1) ('b',2)\nproduct((0,1), (0,1), (0,1)) --> (0,0,0) (0,0,1) (0,1,0) (0,1,1) (1,0,0) ...",
+      "file": null,
+      "signature_error": "no signature found for builtin type <class 'itertools.product'>"
+    },
+    "permutations": {
+      "qualname": "permutations",
+      "module": "itertools",
+      "doc": "Return successive r-length permutations of elements in the iterable.\n\npermutations(range(3), 2) --> (0,1), (0,2), (1,0), (1,2), (2,0), (2,1)",
+      "file": null,
+      "signature": "(iterable, r=None)",
+      "parameters": [
+        {
+          "name": "iterable",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "r",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "combinations": {
+      "qualname": "combinations",
+      "module": "itertools",
+      "doc": "Return successive r-length combinations of elements in the iterable.\n\ncombinations(range(4), 3) --> (0,1,2), (0,1,3), (0,2,3), (1,2,3)",
+      "file": null,
+      "signature": "(iterable, r)",
+      "parameters": [
+        {
+          "name": "iterable",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "r",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "human_readable": {
+      "qualname": "human_readable",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": "Return a human readable string ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(size, isbits=False, unit=None)",
+      "parameters": [
+        {
+          "name": "size",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "isbits",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "unit",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "human_to_bytes": {
+      "qualname": "human_to_bytes",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": "Return bytes count from a human readable string ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(size, default_unit=None, isbits=False)",
+      "parameters": [
+        {
+          "name": "size",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "default_unit",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "isbits",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        }
+      ]
+    },
+    "rekey_on_member": {
+      "qualname": "rekey_on_member",
+      "module": "ansible.plugins.filter.mathstuff",
+      "doc": "Rekey a dict of dicts on another member\n\nMay also create a dict from a list of dicts.\n\nduplicates can be one of ``error`` or ``overwrite`` to specify whether to error out if the key\nvalue would be duplicated or to overwrite previous entries if that's the case.",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/mathstuff.py",
+      "signature": "(data, key, duplicates='error')",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "key",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "duplicates",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'error'",
+          "annotation": null
+        }
+      ]
+    },
+    "zip": {
+      "qualname": "zip",
+      "module": "builtins",
+      "doc": "zip(*iterables) --> A zip object yielding tuples until an input is exhausted.\n\n   >>> list(zip('abcdefg', range(3), range(4)))\n   [('a', 0, 0), ('b', 1, 1), ('c', 2, 2)]\n\nThe zip object yields n-length tuples, where n is the number of iterables\npassed as positional arguments to zip().  The i-th element in every tuple\ncomes from the i-th iterable argument to zip().  This continues until the\nshortest argument is exhausted.",
+      "file": null,
+      "signature_error": "no signature found for builtin type <class 'zip'>"
+    },
+    "zip_longest": {
+      "qualname": "zip_longest",
+      "module": "itertools",
+      "doc": "zip_longest(iter1 [,iter2 [...]], [fillvalue=None]) --> zip_longest object\n\nReturn a zip_longest object whose .__next__() method returns a tuple where\nthe i-th element comes from the i-th iterable argument.  The .__next__()\nmethod continues until the longest iterable in the argument sequence\nis exhausted and then it raises StopIteration.  When the shorter iterables\nare exhausted, the fillvalue is substituted in their place.  The fillvalue\ndefaults to None or can be specified by a keyword argument.",
+      "file": null,
+      "signature_error": "no signature found for builtin type <class 'itertools.zip_longest'>"
+    },
+    "b64decode": {
+      "qualname": "b64decode",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(string, encoding='utf-8')",
+      "parameters": [
+        {
+          "name": "string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "encoding",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'utf-8'",
+          "annotation": null
+        }
+      ]
+    },
+    "b64encode": {
+      "qualname": "b64encode",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(string, encoding='utf-8')",
+      "parameters": [
+        {
+          "name": "string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "encoding",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'utf-8'",
+          "annotation": null
+        }
+      ]
+    },
+    "to_uuid": {
+      "qualname": "to_uuid",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(string, namespace=UUID('361e6d51-faec-444a-9079-341386da8e2e'))",
+      "parameters": [
+        {
+          "name": "string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "namespace",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "UUID('361e6d51-faec-444a-9079-341386da8e2e')",
+          "annotation": null
+        }
+      ]
+    },
+    "to_json": {
+      "qualname": "to_json",
+      "module": "ansible.plugins.filter.core",
+      "doc": "Convert the value to JSON ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(a, *args, **kw)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kw",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "to_nice_json": {
+      "qualname": "to_nice_json",
+      "module": "ansible.plugins.filter.core",
+      "doc": "Make verbose, human readable JSON",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(a, indent=4, sort_keys=True, *args, **kw)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "indent",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "4",
+          "annotation": null
+        },
+        {
+          "name": "sort_keys",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "True",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kw",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "from_json": {
+      "qualname": "loads",
+      "module": "json",
+      "doc": "Deserialize ``s`` (a ``str``, ``bytes`` or ``bytearray`` instance\ncontaining a JSON document) to a Python object.\n\n``object_hook`` is an optional function that will be called with the\nresult of any object literal decode (a ``dict``). The return value of\n``object_hook`` will be used instead of the ``dict``. This feature\ncan be used to implement custom decoders (e.g. JSON-RPC class hinting).\n\n``object_pairs_hook`` is an optional function that will be called with the\nresult of any object literal decoded with an ordered list of pairs.  The\nreturn value of ``object_pairs_hook`` will be used instead of the ``dict``.\nThis feature can be used to implement custom decoders.  If ``object_hook``\nis also defined, the ``object_pairs_hook`` takes priority.\n\n``parse_float``, if specified, will be called with the string\nof every JSON float to be decoded. By default this is equivalent to\nfloat(num_str). This can be used to use another datatype or parser\nfor JSON floats (e.g. decimal.Decimal).\n\n``parse_int``, if specified, will be called with the string\nof every JSON int to be decoded. By default this is equivalent to\nint(num_str). This can be used to use another datatype or parser\nfor JSON integers (e.g. float).\n\n``parse_constant``, if specified, will be called with one of the\nfollowing strings: -Infinity, Infinity, NaN.\nThis can be used to raise an exception if invalid JSON numbers\nare encountered.\n\nTo use a custom ``JSONDecoder`` subclass, specify it with the ``cls``\nkwarg; otherwise ``JSONDecoder`` is used.",
+      "file": "/usr/lib64/python3.9/json/__init__.py",
+      "signature": "(s, *, cls=None, object_hook=None, parse_float=None, parse_int=None, parse_constant=None, object_pairs_hook=None, **kw)",
+      "parameters": [
+        {
+          "name": "s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "cls",
+          "kind": "KEYWORD_ONLY",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "object_hook",
+          "kind": "KEYWORD_ONLY",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "parse_float",
+          "kind": "KEYWORD_ONLY",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "parse_int",
+          "kind": "KEYWORD_ONLY",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "parse_constant",
+          "kind": "KEYWORD_ONLY",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "object_pairs_hook",
+          "kind": "KEYWORD_ONLY",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "kw",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "to_yaml": {
+      "qualname": "to_yaml",
+      "module": "ansible.plugins.filter.core",
+      "doc": "Make verbose, human readable yaml",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(a, *args, **kw)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kw",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "to_nice_yaml": {
+      "qualname": "to_nice_yaml",
+      "module": "ansible.plugins.filter.core",
+      "doc": "Make verbose, human readable yaml",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(a, indent=4, *args, **kw)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "indent",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "4",
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kw",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "from_yaml": {
+      "qualname": "from_yaml",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(data)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "from_yaml_all": {
+      "qualname": "from_yaml_all",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(data)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "basename": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function basename at 0x7f4dad45cd30>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "dirname": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function dirname at 0x7f4dad45cdc0>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "expanduser": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function expanduser at 0x7f4dad460040>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "expandvars": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function expandvars at 0x7f4dad4600d0>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "path_join": {
+      "qualname": "path_join",
+      "module": "ansible.plugins.filter.core",
+      "doc": "takes a sequence or a string, and return a concatenation\nof the different members ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(paths)",
+      "parameters": [
+        {
+          "name": "paths",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "realpath": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function realpath at 0x7f4dad460280>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "relpath": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function relpath at 0x7f4dad4603a0>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "splitext": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function splitext at 0x7f4dad45cc10>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "win_basename": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function basename at 0x7f4dac58e8b0>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "win_dirname": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function dirname at 0x7f4dac58e940>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "win_splitdrive": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <function splitdrive at 0x7f4dac58e700>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "fileglob": {
+      "qualname": "fileglob",
+      "module": "ansible.plugins.filter.core",
+      "doc": "return list of matched regular files for glob ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(pathname)",
+      "parameters": [
+        {
+          "name": "pathname",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "bool": {
+      "qualname": "to_bool",
+      "module": "ansible.plugins.filter.core",
+      "doc": "return a bool for the arg ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(a)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "to_datetime": {
+      "qualname": "to_datetime",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(string, format='%Y-%m-%d %H:%M:%S')",
+      "parameters": [
+        {
+          "name": "string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "format",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'%Y-%m-%d %H:%M:%S'",
+          "annotation": null
+        }
+      ]
+    },
+    "strftime": {
+      "qualname": "strftime",
+      "module": "ansible.plugins.filter.core",
+      "doc": "return a date string using string. See https://docs.python.org/3/library/time.html#time.strftime for format ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(string_format, second=None, utc=False)",
+      "parameters": [
+        {
+          "name": "string_format",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "second",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "utc",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        }
+      ]
+    },
+    "quote": {
+      "qualname": "quote",
+      "module": "ansible.plugins.filter.core",
+      "doc": "return its argument quoted for shell usage ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(a)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "md5": {
+      "qualname": "md5s",
+      "module": "ansible.utils.hashing",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/utils/hashing.py",
+      "signature": "(data)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "sha1": {
+      "qualname": "secure_hash_s",
+      "module": "ansible.utils.hashing",
+      "doc": "Return a secure hash hex digest of data. ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/utils/hashing.py",
+      "signature": "(data, hash_func=<built-in function openssl_sha1>)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "hash_func",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "<built-in function openssl_sha1>",
+          "annotation": null
+        }
+      ]
+    },
+    "checksum": {
+      "qualname": "secure_hash_s",
+      "module": "ansible.utils.hashing",
+      "doc": "Return a secure hash hex digest of data. ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/utils/hashing.py",
+      "signature": "(data, hash_func=<built-in function openssl_sha1>)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "hash_func",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "<built-in function openssl_sha1>",
+          "annotation": null
+        }
+      ]
+    },
+    "password_hash": {
+      "qualname": "get_encrypted_password",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(password, hashtype='sha512', salt=None, salt_size=None, rounds=None, ident=None)",
+      "parameters": [
+        {
+          "name": "password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "hashtype",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'sha512'",
+          "annotation": null
+        },
+        {
+          "name": "salt",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "salt_size",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "rounds",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "ident",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "hash": {
+      "qualname": "get_hash",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(data, hashtype='sha1')",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "hashtype",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'sha1'",
+          "annotation": null
+        }
+      ]
+    },
+    "regex_replace": {
+      "qualname": "regex_replace",
+      "module": "ansible.plugins.filter.core",
+      "doc": "Perform a `re.sub` returning a string ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(value='', pattern='', replacement='', ignorecase=False, multiline=False)",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "pattern",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "replacement",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "''",
+          "annotation": null
+        },
+        {
+          "name": "ignorecase",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "multiline",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        }
+      ]
+    },
+    "regex_escape": {
+      "qualname": "regex_escape",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(string, re_type='python')",
+      "parameters": [
+        {
+          "name": "string",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "re_type",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'python'",
+          "annotation": null
+        }
+      ]
+    },
+    "regex_search": {
+      "qualname": "regex_search",
+      "module": "ansible.plugins.filter.core",
+      "doc": "Perform re.search and return the list of matches or a backref ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(value, regex, *args, **kwargs)",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "regex",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "regex_findall": {
+      "qualname": "regex_findall",
+      "module": "ansible.plugins.filter.core",
+      "doc": "Perform re.findall and return the list of matches ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(value, regex, multiline=False, ignorecase=False)",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "regex",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "multiline",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        },
+        {
+          "name": "ignorecase",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        }
+      ]
+    },
+    "ternary": {
+      "qualname": "ternary",
+      "module": "ansible.plugins.filter.core",
+      "doc": "value ? true_val : false_val ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(value, true_val, false_val, none_val=None)",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "true_val",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "false_val",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "none_val",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "shuffle": {
+      "qualname": "randomize_list",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(mylist, seed=None)",
+      "parameters": [
+        {
+          "name": "mylist",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "seed",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "mandatory": {
+      "qualname": "mandatory",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(a, msg=None)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "msg",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "comment": {
+      "qualname": "comment",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(text, style='plain', **kw)",
+      "parameters": [
+        {
+          "name": "text",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "style",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'plain'",
+          "annotation": null
+        },
+        {
+          "name": "kw",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "type_debug": {
+      "qualname": "FilterModule.filters.<locals>.<lambda>",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(o)",
+      "parameters": [
+        {
+          "name": "o",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "combine": {
+      "qualname": "combine",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(*terms, **kwargs)",
+      "parameters": [
+        {
+          "name": "terms",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "extract": {
+      "qualname": "extract",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(environment, item, container, morekeys=None)",
+      "parameters": [
+        {
+          "name": "environment",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "item",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "container",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "morekeys",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "flatten": {
+      "qualname": "flatten",
+      "module": "ansible.plugins.filter.core",
+      "doc": null,
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(mylist, levels=None, skip_nulls=True)",
+      "parameters": [
+        {
+          "name": "mylist",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "levels",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        },
+        {
+          "name": "skip_nulls",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "True",
+          "annotation": null
+        }
+      ]
+    },
+    "dict2items": {
+      "qualname": "dict_to_list_of_dict_key_value_elements",
+      "module": "ansible.plugins.filter.core",
+      "doc": "takes a dictionary and transforms it into a list of dictionaries,\nwith each having a 'key' and 'value' keys that correspond to the keys and values of the original ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(mydict, key_name='key', value_name='value')",
+      "parameters": [
+        {
+          "name": "mydict",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "key_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'key'",
+          "annotation": null
+        },
+        {
+          "name": "value_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'value'",
+          "annotation": null
+        }
+      ]
+    },
+    "items2dict": {
+      "qualname": "list_of_dict_key_value_elements_to_dict",
+      "module": "ansible.plugins.filter.core",
+      "doc": "takes a list of dicts with each having a 'key' and 'value' keys, and transforms the list into a dictionary,\neffectively as the reverse of dict2items ",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(mylist, key_name='key', value_name='value')",
+      "parameters": [
+        {
+          "name": "mylist",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "key_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'key'",
+          "annotation": null
+        },
+        {
+          "name": "value_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "'value'",
+          "annotation": null
+        }
+      ]
+    },
+    "subelements": {
+      "qualname": "subelements",
+      "module": "ansible.plugins.filter.core",
+      "doc": "Accepts a dict or list of dicts, and a dotted accessor and produces a product\nof the element and the results of the dotted accessor\n\n>>> obj = [{\"name\": \"alice\", \"groups\": [\"wheel\"], \"authorized\": [\"/tmp/alice/onekey.pub\"]}]\n>>> subelements(obj, 'groups')\n[({'name': 'alice', 'groups': ['wheel'], 'authorized': ['/tmp/alice/onekey.pub']}, 'wheel')]",
+      "file": "/usr/lib/python3.9/site-packages/ansible/plugins/filter/core.py",
+      "signature": "(obj, subelements, skip_missing=False)",
+      "parameters": [
+        {
+          "name": "obj",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "subelements",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "skip_missing",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        }
+      ]
+    },
+    "split": {
+      "qualname": "functools.partial(<function unicode_wrap at 0x7f4da289e430>, <method 'split' of 'str' objects>)",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "parse_cli": {
+      "qualname": "parse_cli",
+      "module": "ansible_collections.ansible.netcommon.plugins.filter.network",
+      "doc": null,
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/netcommon/plugins/filter/network.py",
+      "signature": "(output, tmpl)",
+      "parameters": [
+        {
+          "name": "output",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "tmpl",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "parse_cli_textfsm": {
+      "qualname": "parse_cli_textfsm",
+      "module": "ansible_collections.ansible.netcommon.plugins.filter.network",
+      "doc": null,
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/netcommon/plugins/filter/network.py",
+      "signature": "(value, template)",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "template",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "parse_xml": {
+      "qualname": "parse_xml",
+      "module": "ansible_collections.ansible.netcommon.plugins.filter.network",
+      "doc": null,
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/netcommon/plugins/filter/network.py",
+      "signature": "(output, tmpl)",
+      "parameters": [
+        {
+          "name": "output",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "tmpl",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "type5_pw": {
+      "qualname": "type5_pw",
+      "module": "ansible_collections.ansible.netcommon.plugins.filter.network",
+      "doc": null,
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/netcommon/plugins/filter/network.py",
+      "signature": "(password, salt=None)",
+      "parameters": [
+        {
+          "name": "password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "salt",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    },
+    "hash_salt": {
+      "qualname": "hash_salt",
+      "module": "ansible_collections.ansible.netcommon.plugins.filter.network",
+      "doc": null,
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/netcommon/plugins/filter/network.py",
+      "signature": "(password)",
+      "parameters": [
+        {
+          "name": "password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "comp_type5": {
+      "qualname": "comp_type5",
+      "module": "ansible_collections.ansible.netcommon.plugins.filter.network",
+      "doc": null,
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/netcommon/plugins/filter/network.py",
+      "signature": "(unencrypted_password, encrypted_password, return_original=False)",
+      "parameters": [
+        {
+          "name": "unencrypted_password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "encrypted_password",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "return_original",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "False",
+          "annotation": null
+        }
+      ]
+    },
+    "vlan_parser": {
+      "qualname": "vlan_parser",
+      "module": "ansible_collections.ansible.netcommon.plugins.filter.network",
+      "doc": "Input: Unsorted list of vlan integers\nOutput: Sorted string list of integers according to IOS-like vlan list rules\n\n1. Vlans are listed in ascending order\n2. Runs of 3 or more consecutive vlans are listed with a dash\n3. The first line of the list can be first_line_len characters long\n4. Subsequent list lines can be other_line_len characters",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/netcommon/plugins/filter/network.py",
+      "signature": "(vlan_list, first_line_len=48, other_line_len=44)",
+      "parameters": [
+        {
+          "name": "vlan_list",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "first_line_len",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "48",
+          "annotation": null
+        },
+        {
+          "name": "other_line_len",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "44",
+          "annotation": null
+        }
+      ]
+    },
+    "vlan_expander": {
+      "qualname": "vlan_expander",
+      "module": "ansible_collections.ansible.netcommon.plugins.filter.network",
+      "doc": null,
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/ansible/netcommon/plugins/filter/network.py",
+      "signature": "(raw_vlan)",
+      "parameters": [
+        {
+          "name": "raw_vlan",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "json_query": {
+      "qualname": "json_query",
+      "module": "ansible_collections.community.general.plugins.filter.json_query",
+      "doc": "Query data using jmespath query language ( http://jmespath.org ). Example:\n- ansible.builtin.debug: msg=\"{{ instance | json_query(tagged_instances[*].block_device_mapping.*.volume_id') }}\"",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/community/general/plugins/filter/json_query.py",
+      "signature": "(data, expr)",
+      "parameters": [
+        {
+          "name": "data",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "expr",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "random_mac": {
+      "qualname": "random_mac",
+      "module": "ansible_collections.community.general.plugins.filter.random_mac",
+      "doc": "takes string prefix, and return it completed with random bytes\nto get a complete 6 bytes MAC address ",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/ansible_collections/community/general/plugins/filter/random_mac.py",
+      "signature": "(value, seed=None)",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "seed",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "None",
+          "annotation": null
+        }
+      ]
+    }
+  },
+  "globals": {
+    "range": {
+      "qualname": "safe_range",
+      "module": "jinja2.sandbox",
+      "doc": "A range that can't generate ranges with a length of more than\nMAX_RANGE items.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/sandbox.py",
+      "signature": "(*args: int) -> range",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "<class 'int'>"
+        }
+      ]
+    },
+    "dict": {
+      "qualname": "dict",
+      "module": "builtins",
+      "doc": "dict() -> new empty dictionary\ndict(mapping) -> new dictionary initialized from a mapping object's\n    (key, value) pairs\ndict(iterable) -> new dictionary initialized as if via:\n    d = {}\n    for k, v in iterable:\n        d[k] = v\ndict(**kwargs) -> new dictionary initialized with the name=value pairs\n    in the keyword argument list.  For example:  dict(one=1, two=2)",
+      "file": null,
+      "signature_error": "no signature found for builtin type <class 'dict'>"
+    },
+    "lipsum": {
+      "qualname": "generate_lorem_ipsum",
+      "module": "jinja2.utils",
+      "doc": "Generate some lorem ipsum for the template.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/utils.py",
+      "signature": "(n: int = 5, html: bool = True, min: int = 20, max: int = 100) -> str",
+      "parameters": [
+        {
+          "name": "n",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "5",
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "html",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "True",
+          "annotation": "<class 'bool'>"
+        },
+        {
+          "name": "min",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "20",
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "max",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "100",
+          "annotation": "<class 'int'>"
+        }
+      ]
+    },
+    "cycler": {
+      "qualname": "Cycler",
+      "module": "jinja2.utils",
+      "doc": "Cycle through values by yield them one at a time, then restarting\nonce the end is reached. Available as ``cycler`` in templates.\n\nSimilar to ``loop.cycle``, but can be used outside loops or across\nmultiple loops. For example, render a list of folders and files in a\nlist, alternating giving them \"odd\" and \"even\" classes.\n\n.. code-block:: html+jinja\n\n    {% set row_class = cycler(\"odd\", \"even\") %}\n    <ul class=\"browser\">\n    {% for folder in folders %}\n      <li class=\"folder {{ row_class.next() }}\">{{ folder }}\n    {% endfor %}\n    {% for file in files %}\n      <li class=\"file {{ row_class.next() }}\">{{ file }}\n    {% endfor %}\n    </ul>\n\n:param items: Each positional argument will be yielded in the order\n    given for each cycle.\n\n.. versionadded:: 2.1",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/utils.py",
+      "signature": "(*items: Any) -> None",
+      "parameters": [
+        {
+          "name": "items",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "joiner": {
+      "qualname": "Joiner",
+      "module": "jinja2.utils",
+      "doc": "A joining helper for templates.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/utils.py",
+      "signature": "(sep: str = ', ') -> None",
+      "parameters": [
+        {
+          "name": "sep",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "', '",
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "namespace": {
+      "qualname": "Namespace",
+      "module": "jinja2.utils",
+      "doc": "A namespace object that can hold arbitrary attributes.  It may be\ninitialized from a dictionary or with keyword arguments.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/utils.py",
+      "signature": "(*args: Any, **kwargs: Any) -> None",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "get_current_date": {
+      "qualname": "get_current_date",
+      "module": "sealab.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "()",
+      "parameters": []
+    },
+    "get_current_datetime": {
+      "qualname": "get_current_datetime",
+      "module": "sealab.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "()",
+      "parameters": []
+    },
+    "currentDateMinus": {
+      "qualname": "current_date_minus",
+      "module": "sealab.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(days)",
+      "parameters": [
+        {
+          "name": "days",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "uuid": {
+      "qualname": "get_uuid",
+      "module": "sealab.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "()",
+      "parameters": []
+    },
+    "arrow": {
+      "qualname": "<module 'arrow' from '/opt/cyops/python_packages/third_party/lib/python3.9/site-packages/arrow/__init__.py'>",
+      "module": null,
+      "doc": null,
+      "file": "/opt/cyops/python_packages/third_party/lib/python3.9/site-packages/arrow/__init__.py",
+      "signature_error": "<module 'arrow' from '/opt/cyops/python_packages/third_party/lib/python3.9/site-packages/arrow/__init__.py'> is not a callable object"
+    },
+    "getRelativeDate": {
+      "qualname": "getRelativeDate",
+      "module": "workflow.jinja",
+      "doc": null,
+      "file": null,
+      "signature": "(years=0, months=0, days=0, hours=0, minutes=0, seconds=0)",
+      "parameters": [
+        {
+          "name": "years",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "months",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "days",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "hours",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "minutes",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        },
+        {
+          "name": "seconds",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "0",
+          "annotation": null
+        }
+      ]
+    },
+    "get_connector_config": {
+      "qualname": "functools.partial(<cyfunction fsr_action at 0x7f4da00e6c70>, 'get_connector_config')",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "keystore": {
+      "qualname": "functools.partial(<cyfunction fsr_action at 0x7f4da00e6c70>, 'keystore')",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "safe_decode_base64": {
+      "qualname": "functools.partial(<cyfunction fsr_action at 0x7f4da00e6c70>, 'safe_decode_base64')",
+      "module": null,
+      "doc": "partial(func, *args, **keywords) - new function with partial application\nof the given arguments and keywords.",
+      "file": null,
+      "signature": "(*args, **kwargs)",
+      "parameters": [
+        {
+          "name": "args",
+          "kind": "VAR_POSITIONAL",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "kwargs",
+          "kind": "VAR_KEYWORD",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    }
+  },
+  "tests": {
+    "odd": {
+      "qualname": "test_odd",
+      "module": "jinja2.tests",
+      "doc": "Return true if the variable is odd.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: int) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'int'>"
+        }
+      ]
+    },
+    "even": {
+      "qualname": "test_even",
+      "module": "jinja2.tests",
+      "doc": "Return true if the variable is even.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: int) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'int'>"
+        }
+      ]
+    },
+    "divisibleby": {
+      "qualname": "test_divisibleby",
+      "module": "jinja2.tests",
+      "doc": "Check if a variable is divisible by a number.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: int, num: int) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'int'>"
+        },
+        {
+          "name": "num",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'int'>"
+        }
+      ]
+    },
+    "defined": {
+      "qualname": "test_defined",
+      "module": "jinja2.tests",
+      "doc": "Return true if the variable is defined:\n\n.. sourcecode:: jinja\n\n    {% if variable is defined %}\n        value of variable: {{ variable }}\n    {% else %}\n        variable is not defined\n    {% endif %}\n\nSee the :func:`default` filter for a simple way to set undefined\nvariables.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "undefined": {
+      "qualname": "test_undefined",
+      "module": "jinja2.tests",
+      "doc": "Like :func:`defined` but the other way round.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "filter": {
+      "qualname": "test_filter",
+      "module": "jinja2.tests",
+      "doc": "Check if a filter exists by name. Useful if a filter may be\noptionally available.\n\n.. code-block:: jinja\n\n    {% if 'markdown' is filter %}\n        {{ value | markdown }}\n    {% else %}\n        {{ value }}\n    {% endif %}\n\n.. versionadded:: 3.0",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(env: 'Environment', value: str) -> bool",
+      "parameters": [
+        {
+          "name": "env",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "test": {
+      "qualname": "test_test",
+      "module": "jinja2.tests",
+      "doc": "Check if a test exists by name. Useful if a test may be\noptionally available.\n\n.. code-block:: jinja\n\n    {% if 'loud' is test %}\n        {% if value is loud %}\n            {{ value|upper }}\n        {% else %}\n            {{ value|lower }}\n        {% endif %}\n    {% else %}\n        {{ value }}\n    {% endif %}\n\n.. versionadded:: 3.0",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(env: 'Environment', value: str) -> bool",
+      "parameters": [
+        {
+          "name": "env",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "Environment"
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "none": {
+      "qualname": "test_none",
+      "module": "jinja2.tests",
+      "doc": "Return true if the variable is none.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "boolean": {
+      "qualname": "test_boolean",
+      "module": "jinja2.tests",
+      "doc": "Return true if the object is a boolean value.\n\n.. versionadded:: 2.11",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "false": {
+      "qualname": "test_false",
+      "module": "jinja2.tests",
+      "doc": "Return true if the object is False.\n\n.. versionadded:: 2.11",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "true": {
+      "qualname": "test_true",
+      "module": "jinja2.tests",
+      "doc": "Return true if the object is True.\n\n.. versionadded:: 2.11",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "integer": {
+      "qualname": "test_integer",
+      "module": "jinja2.tests",
+      "doc": "Return true if the object is an integer.\n\n.. versionadded:: 2.11",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "float": {
+      "qualname": "test_float",
+      "module": "jinja2.tests",
+      "doc": "Return true if the object is a float.\n\n.. versionadded:: 2.11",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "lower": {
+      "qualname": "test_lower",
+      "module": "jinja2.tests",
+      "doc": "Return true if the variable is lowercased.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: str) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "upper": {
+      "qualname": "test_upper",
+      "module": "jinja2.tests",
+      "doc": "Return true if the variable is uppercased.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: str) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "<class 'str'>"
+        }
+      ]
+    },
+    "string": {
+      "qualname": "test_string",
+      "module": "jinja2.tests",
+      "doc": "Return true if the object is a string.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "mapping": {
+      "qualname": "test_mapping",
+      "module": "jinja2.tests",
+      "doc": "Return true if the object is a mapping (dict etc.).\n\n.. versionadded:: 2.6",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "number": {
+      "qualname": "test_number",
+      "module": "jinja2.tests",
+      "doc": "Return true if the variable is a number.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "sequence": {
+      "qualname": "test_sequence",
+      "module": "jinja2.tests",
+      "doc": "Return true if the variable is a sequence. Sequences are variables\nthat are iterable.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "iterable": {
+      "qualname": "test_iterable",
+      "module": "jinja2.tests",
+      "doc": "Check if it's possible to iterate over an object.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "callable": {
+      "qualname": "callable",
+      "module": "builtins",
+      "doc": "Return whether the object is callable (i.e., some kind of function).\n\nNote that classes are callable, as are instances of classes with a\n__call__() method.",
+      "file": null,
+      "signature": "(obj, /)",
+      "parameters": [
+        {
+          "name": "obj",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "sameas": {
+      "qualname": "test_sameas",
+      "module": "jinja2.tests",
+      "doc": "Check if an object points to the same memory address than another\nobject:\n\n.. sourcecode:: jinja\n\n    {% if foo.attribute is sameas false %}\n        the foo attribute really is the `False` singleton\n    {% endif %}",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any, other: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "other",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "escaped": {
+      "qualname": "test_escaped",
+      "module": "jinja2.tests",
+      "doc": "Check if the value is escaped.",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        }
+      ]
+    },
+    "in": {
+      "qualname": "test_in",
+      "module": "jinja2.tests",
+      "doc": "Check if value is in seq.\n\n.. versionadded:: 2.10",
+      "file": "/opt/cyops-workflow/.env/lib64/python3.9/site-packages/jinja2/tests.py",
+      "signature": "(value: Any, seq: Container[Any]) -> bool",
+      "parameters": [
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Any"
+        },
+        {
+          "name": "seq",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "typing.Container[typing.Any]"
+        }
+      ]
+    },
+    "==": {
+      "qualname": "eq",
+      "module": "_operator",
+      "doc": "Same as a == b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "eq": {
+      "qualname": "eq",
+      "module": "_operator",
+      "doc": "Same as a == b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "equalto": {
+      "qualname": "eq",
+      "module": "_operator",
+      "doc": "Same as a == b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "!=": {
+      "qualname": "ne",
+      "module": "_operator",
+      "doc": "Same as a != b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ne": {
+      "qualname": "ne",
+      "module": "_operator",
+      "doc": "Same as a != b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    ">": {
+      "qualname": "gt",
+      "module": "_operator",
+      "doc": "Same as a > b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "gt": {
+      "qualname": "gt",
+      "module": "_operator",
+      "doc": "Same as a > b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "greaterthan": {
+      "qualname": "gt",
+      "module": "_operator",
+      "doc": "Same as a > b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "ge": {
+      "qualname": "ge",
+      "module": "_operator",
+      "doc": "Same as a >= b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    ">=": {
+      "qualname": "ge",
+      "module": "_operator",
+      "doc": "Same as a >= b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "<": {
+      "qualname": "lt",
+      "module": "_operator",
+      "doc": "Same as a < b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "lt": {
+      "qualname": "lt",
+      "module": "_operator",
+      "doc": "Same as a < b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "lessthan": {
+      "qualname": "lt",
+      "module": "_operator",
+      "doc": "Same as a < b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "<=": {
+      "qualname": "le",
+      "module": "_operator",
+      "doc": "Same as a <= b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    },
+    "le": {
+      "qualname": "le",
+      "module": "_operator",
+      "doc": "Same as a <= b.",
+      "file": null,
+      "signature": "(a, b, /)",
+      "parameters": [
+        {
+          "name": "a",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        },
+        {
+          "name": "b",
+          "kind": "POSITIONAL_ONLY",
+          "default": null,
+          "annotation": null
+        }
+      ]
+    }
+  },
+  "schema_version": 1
+}

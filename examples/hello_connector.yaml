@@ -1,0 +1,32 @@
+collection: Compiler Demo
+description: Smallest possible end-to-end — start, set a variable, call a connector.
+visible: true
+
+playbooks:
+  - name: Hello Connector
+    description: Demonstrates start -> set_variable -> connector flow.
+    is_active: false
+    steps:
+      - id: start
+        type: start
+        name: Start
+        next: prep
+
+      - id: prep
+        type: set_variable
+        name: Prepare inputs
+        arguments:
+          arg_list:
+            - name: target_org
+              value: "Fortinet"
+        next: lookup
+
+      - id: lookup
+        type: connector
+        name: Get organization
+        arguments:
+          connector: fortinet-fortisiem
+          operation: get_org_name_by_org_id
+          config: ""
+          params:
+            domain_id: "{{ vars.target_org }}"
