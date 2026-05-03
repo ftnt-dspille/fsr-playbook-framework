@@ -1,0 +1,9 @@
+--- /opt/cyops-api/src/Service/ConfigExportImport/PlaybookConfig.php ---
+244:        $deleteUuids = [];
+427:                        $deleteUuids[] = $playbookCollectionOption['existing_uuid'];
+451:        if (!empty($deleteUuids)) {
+452:            $fullURI = sprintf('%s/api/3/delete-with-query/workflow_collections?$showDeleted=true', $this->container->getParameter(AppConstants::CRUDHUB_PARAMETER_KEY));
+456:            $filterObj->{'value'} = array_unique($deleteUuids);
+463:            $this->sendRequest($fullURI, 'delete', $data, $tokenType);
+477:            $fullURI = sprintf('%s/api/3/delete-with-query/workflows?$showDeleted=true', $this->container->getParameter(AppConstants::CRUDHUB_PARAMETER_KEY));
+478:            $this->sendRequest($fullURI, 'delete', $data, $tokenType);

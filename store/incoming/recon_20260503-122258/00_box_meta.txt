@@ -1,0 +1,49 @@
+
+=== uname / release ===
+Linux fsr-1 5.14.0-611.13.1.el9_7.x86_64 #1 SMP PREEMPT_DYNAMIC Fri Dec 12 11:55:11 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux
+NAME="Rocky Linux"
+VERSION="9.7 (Blue Onyx)"
+ID="rocky"
+ID_LIKE="rhel centos fedora"
+VERSION_ID="9.7"
+PLATFORM_ID="platform:el9"
+PRETTY_NAME="Rocky Linux 9.7 (Blue Onyx)"
+ANSI_COLOR="0;32"
+LOGO="fedora-logo-icon"
+CPE_NAME="cpe:/o:rocky:rocky:9::baseos"
+HOME_URL="https://rockylinux.org/"
+VENDOR_NAME="RESF"
+VENDOR_URL="https://resf.org/"
+BUG_REPORT_URL="https://bugs.rockylinux.org/"
+SUPPORT_END="2032-05-31"
+ROCKY_SUPPORT_PRODUCT="Rocky-Linux-9"
+ROCKY_SUPPORT_PRODUCT_VERSION="9.7"
+REDHAT_SUPPORT_PRODUCT="Rocky Linux"
+REDHAT_SUPPORT_PRODUCT_VERSION="9.7"
+
+=== hostname / IPs ===
+fsr-1
+lo               UNKNOWN        127.0.0.1/8 
+eth0             UP             192.168.0.1/24 
+eth1             UP             192.168.1.1/24 
+
+=== FSR version ===
+adm
+certs
+configs
+packages
+pg_hba.conf
+postgresql.conf
+python_packages
+readme.txt
+requirements.txt
+scripts
+semodule
+
+=== cyops-* services ===
+  cyops-auth.service                                    loaded active running DAS Webserver
+  cyops-ha.service                                      loaded active running HA service
+  cyops-integrations-agent.service                      loaded active running FortiSOAR Agent Service
+  cyops-postman.service                                 loaded active running CyOPs Postman Service
+  cyops-search.service                                  loaded active running CyOPs Search Service
+  cyops-tomcat.service                                  loaded active running Apache Tomcat 10

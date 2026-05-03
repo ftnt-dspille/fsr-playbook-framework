@@ -98,12 +98,24 @@ for the symbol names.
 | **Filtered query** (user mentioned this works) | `POST /api/query/workflows` with body `{ "logic": "AND", "filters": [...] }` | 🟡 | confirmed pattern in dashboard doc for any model |
 | Import a collection | `POST /api/3/import_jobs` (envelope, **upsert**) — or `POST /api/3/workflow_collections` (entity, strict create) | 🟢 | verified 2026-05-02 by `probe_playbook_constraints`; details in FORTISOAR_API.md |
 | Export a collection | `POST /api/3/export_jobs/` + `PUT /api/export?...` | 🟢 (big API doc) | — |
-| Trigger a playbook | `POST /api/triggers/1/<trigger_uuid>` | 🟡 | confirmed pattern, exact path tbd |
-| Execution status | `GET /api/3/workflow_logs/{uuid}` ? | 🔴 | needs discovery |
+| Trigger a playbook (action) | `POST /api/triggers/1/action/{workflowid}` | 🟢 | confirmed via Symfony route dump 2026-05-03 (`app_post_action_trigger_workflows`). Most common path. |
+| Trigger a playbook (no-trigger / abstract) | `POST /api/triggers/1/notrigger/{workflowId}` | 🟢 | route `app_post_no_trigger`. Used by import flows + manual invocation. |
+| Trigger a playbook (api_call) | `POST /api/triggers/1/{apiEndpoint}` | 🟢 | route `app_post_api_trigger_workflows`. Webhook-style trigger. |
+| **Upsert** a workflow collection (re-push) | `POST /api/3/bulkupsert/workflow_collections` | 🟢 | confirmed via route dump (`app_api_workflow_collections_upsert`). True upsert — handles soft-deleted UUIDs by setting `deletedAt: null` (per `UpsertController.php:89-90`). **This is the canonical re-push path** (replaces the parked POST/PUT 409 dance in TODO §5a). |
+| Bulk-upsert workflows | `POST /api/3/bulkupsert/workflows` | 🟢 | route `app_api_workflows_upsert`. |
+| Hard-purge by query | `DELETE /api/3/delete-with-query/{resourceShortName}?$showDeleted=true` body `{logic, filters}` | 🟢 | confirmed via `app_fsr_delete_query`. Used by built-in scheduler playbooks (DataFixtures/SchedulerSystemWorkflow). |
+| Hard-purge single record | `DELETE /api/3/{resource}/{uuid}?$hardDelete=true` | 🟢 | confirmed via `MqMessagebroadcastSubscriber.php:147` — `$hardDelete=true` query param bypasses soft-delete. |
+| Execution status — historical runs | `GET /api/wf/api/historical-workflows/` (Hydra paged) | 🟢 | confirmed live 2026-05-03; 6012 entries on this instance. Detail: `GET /api/wf/api/historical-workflows/{pk}/`. |
+| Execution status — historical step results | `GET /api/wf/api/historical-steps/` | 🟢 | per-step results — use to assert step-level outputs in e2e. |
+| Execution status — live runs | `POST /api/wf/api/workflows/log_list/` (body filters) | 🟢 | non-historical / in-flight runs. GET → 405. |
+| Execution status — query | `POST /api/wf/api/query/workflow_logs/` (body filters) | 🟢 | power-user query interface for workflow logs. |
+| Run-state vocabulary | `GET /api/wf/api/workflows/statuslist/` | 🟢 | returns `[incipient, active, paused, failed, finished, awaiting, rejected, skipped, finished_with_error, terminated]`. |
 
-**Where to look**: `/opt/cyops-api/src/Entity/Workflow*.php`,
-`WorkflowCollection.php`, plus `/opt/cyops-api/src/Controller/` for any
-`*Import*` controllers.
+**Note**: every `/api/wf/...` endpoint is a Symfony→Django proxy via the
+single route `app_api_workflow_proxy_action` (`/api/wf/{route}`). The actual
+view classes live in `/opt/cyops-workflow/sealab/workflow/views.py`
+(WorkflowViewSet, HistoricalWorkflowViewSet, HistoricalStepViewSet, etc.)
+and are re-exposed by the proxy under `/api/wf/api/...`.
 
 ## 5. Jinja  (largely closed — see notes)
 

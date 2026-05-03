@@ -1,0 +1,51 @@
+/opt/cyops-api/src/Command/SystemUpdateCommand.php:537:                $sql = sprintf("delete from %s where deletedat is not null", $value['tableName']);
+/opt/cyops-api/src/Command/GenerateModelsCommand.php:263:            $idIndexName = $stagingModelData->getType() . '_deletedat_idx';
+/opt/cyops-api/src/Command/GenerateModelsCommand.php:264:            $indexList[$idIndexName]['columns'] = ["deletedat"];
+/opt/cyops-api/src/Command/GenerateModelsCommand.php:266:            $indexList[$idIndexName]['options']['condition'] = "deletedat IS NULL";
+/opt/cyops-api/src/Controller/UpsertController.php:89:            if (array_key_exists('deletedAt', $requestBody) && $requestBody->deletedAt === Null) {
+/opt/cyops-api/src/Controller/UpsertController.php:90:                $requestBody = ["deletedAt" => Null];
+/opt/cyops-api/src/DataFixtures/Workflow/ReportManagementWorkflow/workflows.json:646:      "deletedAt": null,
+/opt/cyops-api/src/DataFixtures/Workflow/SchedulerSystemWorkflow/workflows.json:705:              "iri": "/api/3/delete-with-query/{{vars.item.type}}?$showDeleted=true",
+/opt/cyops-api/src/DataFixtures/Workflow/SchedulerSystemWorkflow/workflows.json:706:              "body": "{\"logic\":\"AND\",\"filters\":[{\"field\":\"deletedAt\",\"operator\":\"isnull\",\"value\":\"false\",\"type\":\"object\"},{\"field\":\"modifyDate\",\"operator\":\"gte\",\"value\":\"{{ arrow.utcnow().shift(days=-vars.bin_ttl_config.ttl).int_timestamp}}\",\"type\":\"datetime\"}]}",
+/opt/cyops-api/src/DataFixtures/Workflow/SchedulerSystemWorkflow/workflows.json:840:      "deletedAt": null
+/opt/cyops-api/src/DataFixtures/Workflow/SchedulerSystemWorkflow/workflows.json:925:      "deletedAt": null
+/opt/cyops-api/src/DataFixtures/Workflow/SchedulerSystemWorkflow/workflows.json:970:              "iri": "/api/3/delete-with-query/threat_intel_feeds?$showDeleted=true",
+/opt/cyops-api/src/DataFixtures/Workflow/SchedulerSystemWorkflow/workflows.json:1043:      "deletedAt": null,
+/opt/cyops-api/src/DataFixtures/Workflow/SchedulerSystemWorkflow/workflows.json:1074:              "iri": "/api/3/delete-with-query/statistics?$showDeleted=true",
+/opt/cyops-api/src/DataFixtures/Workflow/SchedulerSystemWorkflow/workflows.json:1133:      "deletedAt": null,
+/opt/cyops-api/src/Entity/Query/Query.php:45:    const SHOW_DELETED = '$showDeleted';
+/opt/cyops-api/src/Entity/Workflow/Workflow.php:47: * @Gedmo\SoftDeleteable(fieldName="deletedAt")
+/opt/cyops-api/src/Entity/Workflow/Workflow.php:48: * @ORM\Table(name="workflows", uniqueConstraints={@UniqueConstraint(name="name_unique", columns={"name", "collection"})}, indexes={@Doctrine\ORM\Mapping\Index(name="workflows_modifydate_idx", columns={"modifydate"}), @Doctrine\ORM\Mapping\Index(name="workflows_createdate_idx", columns={"createdate"}), @Doctrine\ORM\Mapping\Index(name="workflows_id_idx", columns={"id"}), @Doctrine\ORM\Mapping\Index(name="workflows_deletedat_idx", columns={"deletedat"}, options={"where": "(deletedat IS NULL)"})})
+/opt/cyops-api/src/Entity/Workflow/WorkflowCollection.php:37: * @Gedmo\SoftDeleteable(fieldName="deletedAt")
+/opt/cyops-api/src/Entity/Workflow/WorkflowCollection.php:40: * @Doctrine\ORM\Mapping\Table(name="workflow_collections", indexes={@Doctrine\ORM\Mapping\Index(name="workflow_collections_deletedat_idx", columns={"deletedat"}, options={"where": "(deletedat IS NULL)"})})
+/opt/cyops-api/src/EventSubscriber/MqMessagebroadcastSubscriber.php:139:            $deletedAt = $normalized_previous_data->{'deletedAt'} ?? null;
+/opt/cyops-api/src/EventSubscriber/MqMessagebroadcastSubscriber.php:141:            $deletedAt = $normalized_previous_data['deletedAt'] ?? null;
+/opt/cyops-api/src/EventSubscriber/MqMessagebroadcastSubscriber.php:145:        // softDelete is false when the query param "hardDelete" exists and is true (or) deletedAt is not null
+/opt/cyops-api/src/EventSubscriber/MqMessagebroadcastSubscriber.php:147:            (array_key_exists('$hardDelete', $queryParams) && !$queryParams['$hardDelete'])) && is_null($deletedAt)) {
+/opt/cyops-api/src/EventSubscriber/MqMessagebroadcastSubscriber.php:149:        } elseif ($this->isSoftDeleteable($entity) && $replicationOp == 'PUT' && $deletedAt && is_null($normalized_current_data['deletedAt'])) {
+/opt/cyops-api/src/Migrations/Version20211007045212.php:190:              "iri": "/api/3/delete-with-query/{{vars.item.type}}?$showDeleted=true",
+/opt/cyops-api/src/Migrations/Version20211007045212.php:191:              "body": "{\"logic\":\"AND\",\"filters\":[{\"field\":\"deletedAt\",\"operator\":\"isnull\",\"value\":\"false\",\"type\":\"object\"},{\"field\":\"modifyDate\",\"operator\":\"gte\",\"value\":\"{{ arrow.utcnow().shift(days=-vars.bin_ttl_config.ttl).int_timestamp}}\",\"type\":\"datetime\"}]}",
+/opt/cyops-api/src/Migrations/Version20211007045212.php:323:      "deletedAt": null
+/opt/cyops-api/src/Migrations/Version20211019162042.php:179:        "deletedAt": null
+/opt/cyops-api/src/Migrations/Version20211019162042.php:223:              "iri": "/api/3/delete-with-query/threat_intel_feeds?$showDeleted=true",
+/opt/cyops-api/src/Migrations/Version20211019162042.php:262:      "deletedAt": null
+/opt/cyops-api/src/Migrations/Version20220607070903.php:200:        "deletedAt": null,
+/opt/cyops-api/src/Migrations/Version20220711104057.php:72:                "iri": "/api/3/delete-with-query/threat_intel_feeds?$showDeleted=true",
+/opt/cyops-api/src/Migrations/Version20220711104057.php:143:        "deletedAt": null,
+/opt/cyops-api/src/Migrations/Version20230313051645.php:61:                "iri": "/api/3/delete-with-query/statistics?$showDeleted=true",
+/opt/cyops-api/src/Migrations/Version20230313051645.php:118:        "deletedAt": null,
+/opt/cyops-api/src/Migrations/Version20230905172941.php:271:        "deletedAt": null,
+/opt/cyops-api/src/Service/ConfigExportImport/PlaybookConfig.php:452:            $fullURI = sprintf('%s/api/3/delete-with-query/workflow_collections?$showDeleted=true', $this->container->getParameter(AppConstants::CRUDHUB_PARAMETER_KEY));
+/opt/cyops-api/src/Service/ConfigExportImport/PlaybookConfig.php:477:            $fullURI = sprintf('%s/api/3/delete-with-query/workflows?$showDeleted=true', $this->container->getParameter(AppConstants::CRUDHUB_PARAMETER_KEY));
+/opt/cyops-api/src/Service/ConfigExportImport/RecordSetConfig.php:277:                ['$hardDelete' => "true", '$showDeleted' => "true"],
+/opt/cyops-api/src/Service/EntityGenerator.php:939:            $lines[] = ' * ' . '@Gedmo\SoftDeleteable(fieldName="deletedAt")';
+/opt/cyops-api/src/Traits/SoftDeleteable.php:15:     * @var \DateTime|null $deletedAt
+/opt/cyops-api/src/Traits/SoftDeleteable.php:16:     * @Groups({"fsr_primary", "fsr_all", "deletedAt"})
+/opt/cyops-api/src/Traits/SoftDeleteable.php:17:     * @Doctrine\ORM\Mapping\Column(name="deletedat", type="datetime", nullable=true, unique=false)
+/opt/cyops-api/src/Traits/SoftDeleteable.php:19:    protected $deletedAt;
+/opt/cyops-api/src/Traits/SoftDeleteable.php:22:     * Get $deletedAt
+/opt/cyops-api/src/Traits/SoftDeleteable.php:28:        return $this->deletedAt;
+/opt/cyops-api/src/Traits/SoftDeleteable.php:32:     * Set $deletedAt
+/opt/cyops-api/src/Traits/SoftDeleteable.php:34:     * @param  \DateTime  $deletedAt  $deletedAt
+/opt/cyops-api/src/Traits/SoftDeleteable.php:38:    public function setDeletedAt($deletedAt = null)
+/opt/cyops-api/src/Traits/SoftDeleteable.php:40:        $this->deletedAt = $deletedAt;

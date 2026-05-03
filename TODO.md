@@ -91,8 +91,36 @@ surfaces — CLI, MCP, visual editor — sit on top of). Targets:
 - Acceptance: bambenek-feed YAML → JSON byte-equivalent (modulo UUIDs/ts)
   to the vendor original.
 
-### 5a. `fsrpb push` — first-create works; re-push parked
-**Status (2026-05-02):**
+### 5a. `fsrpb push` — re-push UNBLOCKED 2026-05-03
+**Resolution**: Symfony route dump (recon_20260503-122258) found two routes
+that close §5.0:
+
+- **`POST /api/3/bulkupsert/workflow_collections`** — true upsert. Per
+  `UpsertController.php:89-90`, when the body sets `deletedAt: null` it
+  resurrects soft-deleted records, which removes the UUID-conflict failure
+  mode entirely. **This is the canonical re-push path** — replaces the
+  POST→409→DELETE→409 dance.
+- **`DELETE /api/3/{resource}/{uuid}?$hardDelete=true`** — confirmed via
+  `MqMessagebroadcastSubscriber.php:147`. Bypasses soft-delete on a single
+  record. Useful for cleanup probes that need to fully purge test artifacts.
+- **`DELETE /api/3/delete-with-query/{resource}?$showDeleted=true`** with
+  body `{logic, filters}` — bulk hard-purge. Already used by built-in
+  scheduler playbooks (DataFixtures/SchedulerSystemWorkflow).
+
+To wire up:
+1. Replace `cmd_push --mode replace` PUT/POST fallback with a single call to
+   `POST /api/3/bulkupsert/workflow_collections` (body = same unwrapped
+   entity already used for first-create POST, plus `deletedAt: null` if the
+   target is in the recycle bin).
+2. Add `cmd_push --mode purge-and-create` for the rare case where bulkupsert
+   semantics aren't right (e.g. you want a clean slate without keeping
+   audit/comment history): `DELETE …?$hardDelete=true` then `POST`.
+3. Backup paranoia from §5.0 still applies for first run, but the
+   bulkupsert path doesn't destroy data — it merges.
+
+---
+
+### 5a-archive. Original re-push parking notes (kept for context):
 
 ✅ **First-create** push works end-to-end.
 `POST /api/3/workflow_collections` with the **unwrapped collection
