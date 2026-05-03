@@ -58,13 +58,15 @@ def cmd_push(args: argparse.Namespace) -> int:
     Mode semantics:
       replace (default) — try PUT first (in-place update); fall back to
                           POST if no record exists yet at that UUID.
-                          Avoids the soft-delete uniqueness trap (FSR
-                          marks records `deletedat=NOW()` rather than
-                          purging, so DELETE+POST collides on the
-                          soft-deleted UUID).
-      create            — POST only; fail with 409 if UUID/name collides.
-      update            — PUT to /api/3/workflow_collections/{uuid}; fail
-                          with 404 if no record exists at that UUID.
+      create            — POST to `/api/3/workflow_collections`; fail
+                          with 409 if UUID/name collides (or is
+                          soft-deleted).
+      update            — PUT to `/api/3/workflow_collections/{uuid}`;
+                          fail with 404 if no record exists.
+      upsert            — POST to `/api/3/bulkupsert/workflow_collections`.
+                          Discovered 2026-05-03 in route dump but every
+                          body shape attempted returns 400 TypeError —
+                          needs prod.log access to debug. Track in TODO.
     """
     from compiler import compile_yaml
     from probes import _env  # type: ignore
@@ -100,12 +102,28 @@ def cmd_push(args: argparse.Namespace) -> int:
         except Exception as e:  # noqa: BLE001
             return False, e
 
+    def _upsert() -> tuple[bool, object]:
+        # Body shape mirrors a single-collection import envelope. The
+        # bulkupsert controller resurrects soft-deletes when deletedAt is
+        # explicitly null (UpsertController.php:89-90).
+        body = dict(coll_entity)
+        body["deletedAt"] = None
+        try:
+            return True, client.post(
+                "/api/3/bulkupsert/workflow_collections", [body],
+            )
+        except Exception as e:  # noqa: BLE001
+            return False, e
+
     if args.mode == "create":
         ok, payload_or_err = _post()
         action = "POST"
     elif args.mode == "update":
         ok, payload_or_err = _put()
         action = "PUT"
+    elif args.mode == "upsert":
+        ok, payload_or_err = _upsert()
+        action = "BULKUPSERT"
     else:  # replace — try PUT first, fall back to POST on 404
         ok, payload_or_err = _put()
         action = "PUT"
@@ -645,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("push", help="compile + POST to /api/3/import_jobs (upsert)")
     sp.add_argument("input")
-    sp.add_argument("--mode", choices=["replace", "create", "update"], default="replace",
+    sp.add_argument("--mode", choices=["replace", "create", "update", "upsert"], default="replace",
                     help="replace (default): DELETE+POST clean-slate update. "
                          "create: POST only (409 on UUID/name collision). "
                          "update: PUT in-place (preserves unmodeled fields).")
