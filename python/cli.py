@@ -56,17 +56,18 @@ def cmd_push(args: argparse.Namespace) -> int:
     `workflows[]` and their steps/routes.
 
     Mode semantics:
-      replace (default) — try PUT first (in-place update); fall back to
-                          POST if no record exists yet at that UUID.
-      create            — POST to `/api/3/workflow_collections`; fail
-                          with 409 if UUID/name collides (or is
-                          soft-deleted).
-      update            — PUT to `/api/3/workflow_collections/{uuid}`;
-                          fail with 404 if no record exists.
+      replace (default) — try PUT first; on 404 POST; on 409 (UUID owned
+                          by a soft-deleted record) hard-purge and POST.
+                          Idempotent across recycle-bin state.
+      create            — POST only. Fails with 409 if UUID/name collides
+                          (live or soft-deleted).
+      update            — PUT only. Fails with 404 if no record.
       upsert            — POST to `/api/3/bulkupsert/workflow_collections`.
-                          Discovered 2026-05-03 in route dump but every
-                          body shape attempted returns 400 TypeError —
-                          needs prod.log access to debug. Track in TODO.
+                          NOTE: confirmed broken on FSR side (PHP 8 bugs
+                          in UpsertController.php at lines 89 and 258 —
+                          `array_key_exists` and array-index access used
+                          on stdClass). Works only for fresh creates with
+                          no existing match. Kept as opt-in for testing.
     """
     from compiler import compile_yaml
     from probes import _env  # type: ignore
@@ -103,17 +104,35 @@ def cmd_push(args: argparse.Namespace) -> int:
             return False, e
 
     def _upsert() -> tuple[bool, object]:
-        # Body shape mirrors a single-collection import envelope. The
-        # bulkupsert controller resurrects soft-deletes when deletedAt is
-        # explicitly null (UpsertController.php:89-90).
-        body = dict(coll_entity)
-        body["deletedAt"] = None
+        # Body is a single workflow_collection object (NOT a list, despite
+        # the "bulkupsert" name). Verified live 2026-05-03.
+        # Limitation: UpsertController.php:89 uses array_key_exists on a
+        # stdClass which crashes when an existing soft-deleted record
+        # matches by uuid/name. Caller should hard-purge first if that's
+        # the case — see _purge_soft_deleted().
         try:
             return True, client.post(
-                "/api/3/bulkupsert/workflow_collections", [body],
+                "/api/3/bulkupsert/workflow_collections", coll_entity,
             )
         except Exception as e:  # noqa: BLE001
             return False, e
+
+    def _purge_soft_deleted() -> bool:
+        """Hard-purge by UUID via the canonical UI endpoint.
+        `DELETE /api/3/delete/workflow_collections?$hardDelete=true` body
+        `{ids:[<uuid>]}` — what the FSR web UI uses for "permanently delete".
+        Returns True on success. Idempotent.
+        """
+        try:
+            r = client.session.delete(
+                client.base_url
+                + "/api/3/delete/workflow_collections?$hardDelete=true",
+                json={"ids": [coll_uuid]},
+                verify=client.verify_ssl,
+            )
+            return r.status_code in (200, 204)
+        except Exception:  # noqa: BLE001
+            return False
 
     if args.mode == "create":
         ok, payload_or_err = _post()
@@ -124,14 +143,26 @@ def cmd_push(args: argparse.Namespace) -> int:
     elif args.mode == "upsert":
         ok, payload_or_err = _upsert()
         action = "BULKUPSERT"
-    else:  # replace — try PUT first, fall back to POST on 404
+    else:  # replace — PUT, then POST, then (purge+POST) for soft-delete collision
         ok, payload_or_err = _put()
         action = "PUT"
         if not ok:
             r = getattr(payload_or_err, "response", None)
-            if r is not None and r.status_code == 404:
+            status = getattr(r, "status_code", None)
+            if status == 404:
                 ok, payload_or_err = _post()
                 action = "POST"
+                if not ok:
+                    r2 = getattr(payload_or_err, "response", None)
+                    status2 = getattr(r2, "status_code", None)
+                    if status2 == 409 and _purge_soft_deleted():
+                        ok, payload_or_err = _post()
+                        action = "PURGE+POST"
+            elif status == 409:
+                # PUT 409 also indicates soft-deleted UUID lock — same recovery
+                if _purge_soft_deleted():
+                    ok, payload_or_err = _post()
+                    action = "PURGE+POST"
     if not ok:
         e = payload_or_err
         r = getattr(e, "response", None)

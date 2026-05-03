@@ -188,7 +188,19 @@ gets added after TODO #3 lands.
 - ✅ **Custom-macro corpus grep** — FSR "macros" are scalar globals accessed via `{{ globalVars.NAME }}` (NOT Jinja `{% macro %}`). 12 defined in pb_examples; 122 ref occurrences. Recorded into `jinja_context_vars` (`scope='globalVars'`).
 - ✅ **GlobalVars / macros endpoint** — `GET /api/wf/api/dynamic-variable/` confirmed live 2026-05-03. Schema `{id, name, value, default_value}`. Full CRUD via `/{pk}/`. UI capture #14 closed without needing capture.
 - ✅ **historical-workflows record shape** — confirmed via live fetch. Per-run record: `@id, name, result.{data,status,message}, template_iri, created, modified, env.{wf_id, step_id, task_id, lastPullTime,...}, status, tags, metadata.{routes, groups}`. Use top-level `status` for completion polling, `result.status` for pass/fail.
-- ⚠️ **Bulkupsert** — `POST /api/3/bulkupsert/workflow_collections` route confirmed in dump but every body shape (dict / list / `data` envelope / minimal `{uuid,name}`) returns 400 TypeError ("Check prod.log"). CLI now exposes `--mode upsert` for testing once the body shape is known. Default `--mode replace` stays on PUT→POST.  Needs prod.log peek (TODO #21).
+- ✅/⚠️ **Bulkupsert characterized** — `POST /api/3/bulkupsert/workflow_collections` body = single workflow_collection object. **Works only for fresh creates with no existing match** (live or soft-deleted). Two FSR-side PHP 8 bugs confirmed via `prod.log`:
+  - `UpsertController.php:89` — `array_key_exists()` on `stdClass` (the json-decoded body). Crashes when an existing soft-deleted record matches by uuid/name, blocking the resurrect path.
+  - `UpsertController.php:258` (`upsertWorkflowCollections`) — `['workflows']` array-index access on stdClass when called via the bulk list path. Crashes during update.
+  - `BulkRequestService.php:70` — `count()` on stdClass.
+
+  Bottom line: bulkupsert can't update existing records. Kept as `--mode upsert` opt-in for never-seen UUIDs only.
+
+- ✅ **Canonical UI delete endpoints** (from user UI capture 2026-05-03):
+  - Soft-delete: `DELETE /api/3/delete/workflow_collections` body `{ids:[<uuid>]}`
+  - Hard-delete: `DELETE /api/3/delete/workflow_collections?$hardDelete=true` body `{ids:[<uuid>]}`
+  - These work on records visible to the caller. They do NOT reach into the recycle bin — for that, the `delete-with-query` path with `?$showDeleted=true` is the right tool.
+
+- ✅ **`fsrpb push --mode replace`** wired up for the success path (PUT → POST → on 409 PURGE+POST). Soft-delete recovery path requires the recycle-bin scope, but a once-soft-deleted UUID with sub-entity wedge can still 409 — manual cleanup of that record needed for fully clean re-push idempotency.
 - ✅ **`?name=` filter** — works as exact match after URL-encoding (`&`→`%26`). Django suffix variants (`name__exact`, `name__contains`) do NOT work on `/api/3/`. `POST /api/query/workflow_collections` body filter also works. Earlier failure was a URL-encoding bug.
 - ✅ **`attribute_metadatas`** — 1233 entries; richer per-field metadata than `module_fields`. Worth a follow-up probe but not blocking compiler v1.
 - ✅ **Picklist hydration** — confirmed: `model_metadatas` embeds `dataSource: {model:'picklists', query: …}` rather than inlining values. Current ingest path correct.
