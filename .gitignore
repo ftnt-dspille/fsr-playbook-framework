@@ -10,6 +10,9 @@ venv/
 store/fsr_reference.db
 store/fsr_reference.db-shm
 store/fsr_reference.db-wal
+**/fsr_reference.db
+**/fsr_reference.db-shm
+**/fsr_reference.db-wal
 store/e2e_runs/
 
 # ts

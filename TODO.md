@@ -152,6 +152,29 @@ hand-rolling lookups. See `ARCHITECTURE.md §3` for the tool table.
 First cut is read-only + validate/compile (no e2e). `dry_run_playbook`
 gets added after TODO #3 lands.
 
+### Read-only probes landed 2026-05-03
+
+- ✅ **CONNECTORS.md** generated (13,595 lines, 714 connectors / 6,749 ops / 4,753 params, grouped by 85 categories). Builder: `python/store/export_connectors.py`.
+- ✅ **RECIPES.md** generated (355 lines: 5 hand-curated patterns + trigger frequency table + top-25 connector orchestrations). Builder: `python/store/export_recipes.py`.
+- ✅ **YAQL filter probe** — confirmed `yaql` is a live Jinja filter via `/api/wf/api/jinja-editor/`. 6/6 probes pass; output type `list`; shape `{{ v | yaql("$.where($ > 1)") }}`. Recorded into `verifications` and `jinja_macros.output_type_observed`. Script: `scripts/probe_yaql_smoke.py`.
+- ✅ **Custom-macro corpus grep** — FSR "macros" are scalar globals accessed via `{{ globalVars.NAME }}` (NOT Jinja `{% macro %}`). 12 defined in pb_examples; 122 ref occurrences. Recorded into `jinja_context_vars` (`scope='globalVars'`).
+- ✅ **`?name=` filter** — works as exact match after URL-encoding (`&`→`%26`). Django suffix variants (`name__exact`, `name__contains`) do NOT work on `/api/3/`. `POST /api/query/workflow_collections` body filter also works. Earlier failure was a URL-encoding bug.
+- ✅ **`attribute_metadatas`** — 1233 entries; richer per-field metadata than `module_fields`. Worth a follow-up probe but not blocking compiler v1.
+- ✅ **Picklist hydration** — confirmed: `model_metadatas` embeds `dataSource: {model:'picklists', query: …}` rather than inlining values. Current ingest path correct.
+
+### Live-instance gaps still pending (need backend recon)
+
+`scripts/fsr_recon.sh` is a single-shot read-only recon script for `csadmin@10.99.249.205`. Outputs to `/home/csadmin/fsrpb_recon/<ts>/` + a tarball next to it. Covers:
+- Symfony route table + filtered views (workflow / trigger / purge / import).
+- Workflow Django app `urls.py` + `/api/wf/runs/` view code (the 403 endpoint).
+- Live `workflow.eval.FUNCTION_MAP` dump (resolves missing `map`, `fetch_email_and_explode` handlers).
+- `PlaybookConfig.php` delete logic for soft-delete purge unblocking.
+- `cyops-integrations` log tail for connector op execution shape.
+- `nginx` confs (so we know which `/api/*` prefix maps to which service).
+- Copies of `api_platform/`, `routes/`, `Entity/Workflow/`, `Controller/`.
+
+Once the tarball is back: extract under `store/incoming/recon_<ts>/` and write `probe_recon.py` to ingest the diffs.
+
 ### 5b. Pull / diff / status — local-only, working
 - ✅ `fsrpb pull <name|uuid> [-o out.yaml]` — fetch live collection,
   decompile to YAML. Verified end-to-end except: API Platform `?name=`
