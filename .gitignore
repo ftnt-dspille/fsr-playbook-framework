@@ -24,3 +24,8 @@ ts/.vitest-cache/
 .idea/
 .vscode/
 .DS_Store
+/store/rpm_cache/
+
+# archives / recon tarballs
+*.tar.gz
+*.tgz

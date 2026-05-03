@@ -1,0 +1,166 @@
+{
+  "type": "workflow_collections",
+  "data": [
+    {
+      "@context": "/api/3/contexts/WorkflowCollection",
+      "@type": "WorkflowCollection",
+      "name": "Hello World Demo",
+      "description": "Smallest possible end-to-end — start, set a variable, call a connector.",
+      "visible": true,
+      "image": null,
+      "uuid": "0507ab34-b0ea-51d4-ac3b-7af701cf9544",
+      "id": 204,
+      "createDate": 1777815569.323557,
+      "modifyDate": 1777815569.323557,
+      "deletedAt": null,
+      "importedBy": [],
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "Hello Connector",
+          "aliasName": null,
+          "tag": "",
+          "description": "Demonstrates start -> set_variable -> connector flow.",
+          "isActive": false,
+          "debug": false,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1777815842,
+          "collection": "/api/3/workflow_collections/0507ab34-b0ea-51d4-ac3b-7af701cf9544",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/e5a3b5e7-bf2d-54a3-9610-6bedf93feb22",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "Get organization",
+              "description": null,
+              "arguments": {
+                "config": "",
+                "params": {
+                  "domain_id": "{{ vars.target_org }}"
+                },
+                "version": "5.4.2",
+                "connector": "fortinet-fortisiem",
+                "operation": "get_org_name_by_org_id",
+                "step_variables": []
+              },
+              "status": null,
+              "top": "320",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "4c5831a0-d7b9-52d3-97e0-f5ed40d15ef0"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Get organization 2",
+              "description": null,
+              "arguments": {
+                "name": "Fortinet FortiSIEM",
+                "config": "84647b63-d1ad-44f1-ba02-4cafdf391dae",
+                "params": {
+                  "domain_id": "{{ vars.target_org }}"
+                },
+                "version": "5.4.2",
+                "connector": "fortinet-fortisiem",
+                "operation": "get_org_name_by_org_id",
+                "operationTitle": "Get Organization Details",
+                "pickFromTenant": false,
+                "step_variables": []
+              },
+              "status": null,
+              "top": "327",
+              "left": "543",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "3ea8026e-25e0-4fe2-85a3-b997eff49c2d"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Prepare inputs",
+              "description": null,
+              "arguments": {
+                "arg_list": [
+                  {
+                    "name": "target_org",
+                    "value": "Fortinet"
+                  }
+                ]
+              },
+              "status": null,
+              "top": "220",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "eaf958c8-21ce-5dd1-b8ef-509756590006"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": [],
+              "status": null,
+              "top": "120",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "group": null,
+              "uuid": "e5a3b5e7-bf2d-54a3-9610-6bedf93feb22"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "Prepare inputs -> Get organization 2",
+              "targetStep": "/api/3/workflow_steps/3ea8026e-25e0-4fe2-85a3-b997eff49c2d",
+              "sourceStep": "/api/3/workflow_steps/eaf958c8-21ce-5dd1-b8ef-509756590006",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "fa14e4e4-13c4-4028-aa29-70ce4d6f2483"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "prep->lookup",
+              "targetStep": "/api/3/workflow_steps/4c5831a0-d7b9-52d3-97e0-f5ed40d15ef0",
+              "sourceStep": "/api/3/workflow_steps/eaf958c8-21ce-5dd1-b8ef-509756590006",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "8724fa49-df0c-571a-b304-7f1ed08cadf0"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "start->prep",
+              "targetStep": "/api/3/workflow_steps/eaf958c8-21ce-5dd1-b8ef-509756590006",
+              "sourceStep": "/api/3/workflow_steps/e5a3b5e7-bf2d-54a3-9610-6bedf93feb22",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "4f412eb8-cb8b-5307-99ea-b34e41795401"
+            }
+          ],
+          "groups": [],
+          "priority": null,
+          "playbookOrigin": "/api/3/picklists/15c1e8c9-22bf-4e66-8fbb-0a502d4a4a3f",
+          "isEditable": true,
+          "uuid": "60bae260-1035-5965-b08d-311dea943359",
+          "id": 2531,
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1777815569.323984,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1777815842.347134,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": []
+        }
+      ]
+    }
+  ],
+  "exported_tags": []
+}

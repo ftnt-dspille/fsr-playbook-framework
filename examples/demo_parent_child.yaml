@@ -1,0 +1,58 @@
+# workflow_reference demo: parent invokes child with input args, child
+# computes a value, parent reads it back from the merged vars namespace.
+# Covers ~34% of real FSR playbooks which use sub-playbooks for reuse.
+#
+# vars merging: when `pass_parent_env: false` and `apply_async: false`,
+# the child's set_variables propagate into the parent's vars after the
+# child completes (verified live).
+
+collection: FSRPB Demo Parent Child
+description: Parent calls a child via workflow_reference; reads result from vars.
+visible: true
+
+playbooks:
+  - name: FSRPB Score Multiplier
+    description: Child — multiplies an input by 10. Returns via vars.product.
+    is_active: true
+    parameters: [base]
+    steps:
+      - id: start
+        type: start
+        next: compute
+      - id: compute
+        type: set_variable
+        name: Compute product
+        arguments:
+          arg_list:
+            - name: product
+              value: "{{ (vars.input.params.base | int) * 10 }}"
+
+  - name: FSRPB Parent Caller
+    description: Parent — calls Score Multiplier with base=7, expects product=70.
+    is_active: true
+    parameters: [base]
+    steps:
+      - id: start
+        type: start
+        next: call_child
+
+      - id: call_child
+        type: workflow_reference
+        name: Call multiplier
+        arguments:
+          target: FSRPB Score Multiplier
+          arguments:
+            base: "{{ vars.input.params.base }}"
+          apply_async: false
+          pass_parent_env: false
+          pass_input_record: false
+          step_variables: []
+        next: stamp_result
+
+      - id: stamp_result
+        type: set_variable
+        name: Stamp result
+        arguments:
+          arg_list:
+            - name: final_product
+              value: "{{ vars.product }}"
