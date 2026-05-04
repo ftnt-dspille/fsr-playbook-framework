@@ -1,0 +1,155 @@
+export type Health = {
+  ok: boolean;
+  compiler: { ok: boolean; error: string | null };
+  fsr: { ok: boolean | null; error?: string; base_url?: string; note?: string };
+  llm: { configured: boolean };
+};
+
+export type ExampleEntry = { name: string; filename: string; preview: string };
+
+export async function listExamples(): Promise<ExampleEntry[]> {
+  const r = await fetch('/api/examples');
+  if (!r.ok) throw new Error(`examples ${r.status}`);
+  return r.json();
+}
+
+export async function loadExample(name: string): Promise<{ name: string; text: string }> {
+  const r = await fetch(`/api/examples/${encodeURIComponent(name)}`);
+  if (!r.ok) throw new Error(`example ${name}: ${r.status}`);
+  return r.json();
+}
+
+export async function getHealth(): Promise<Health> {
+  const r = await fetch('/api/health');
+  if (!r.ok) throw new Error(`health ${r.status}`);
+  return r.json();
+}
+
+export type Marker = {
+  line: number;
+  col: number;
+  severity: 'error' | 'warning' | 'info';
+  code: string;
+  message: string;
+  path: string;
+  suggestion: string | null;
+};
+
+export type ValidateResult = { ok: boolean; markers: Marker[] };
+export type CompileResult = { ok: boolean; fsr_json: unknown | null; markers: Marker[] };
+
+export async function validateYaml(text: string): Promise<ValidateResult> {
+  const r = await fetch('/api/yaml/validate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+  if (!r.ok) throw new Error(`validate ${r.status}`);
+  return r.json();
+}
+
+export async function compileYaml(text: string): Promise<CompileResult> {
+  const r = await fetch('/api/yaml/compile', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+  if (!r.ok) throw new Error(`compile ${r.status}`);
+  return r.json();
+}
+
+export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
+export type ChatEvent =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool_use'; name: string; arguments: Record<string, unknown>; call_id: string }
+  | { kind: 'tool_result'; call_id: string; result_preview: string }
+  | { kind: 'done'; stop_reason: string }
+  | { kind: 'error'; message: string };
+
+export function parseChatEvent(event: string, data: string): ChatEvent | null {
+  try {
+    const obj = JSON.parse(data);
+    switch (event) {
+      case 'text':
+        return { kind: 'text', ...obj };
+      case 'tool_use':
+        return { kind: 'tool_use', ...obj };
+      case 'tool_result':
+        return { kind: 'tool_result', ...obj };
+      case 'done':
+        return { kind: 'done', ...obj };
+      case 'error':
+        return { kind: 'error', ...obj };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export type StepTypeHint = { name: string; detail: string };
+
+export async function getStepTypes(): Promise<StepTypeHint[]> {
+  const r = await fetch('/api/ref/step-types');
+  if (!r.ok) throw new Error(`step-types ${r.status}`);
+  return r.json();
+}
+
+export type ConnectorRef = {
+  name: string;
+  label: string | null;
+  category: string | null;
+  description: string | null;
+};
+
+export async function searchConnectors(q = '', limit = 50): Promise<ConnectorRef[]> {
+  const r = await fetch(`/api/ref/connectors?q=${encodeURIComponent(q)}&limit=${limit}`);
+  if (!r.ok) throw new Error(`connectors ${r.status}`);
+  return r.json();
+}
+
+export type OperationRef = {
+  op_name: string;
+  title: string | null;
+  category: string | null;
+  description: string | null;
+};
+
+export async function listOperations(connector: string, q = '', limit = 100): Promise<OperationRef[]> {
+  const r = await fetch(
+    `/api/ref/connectors/${encodeURIComponent(connector)}/operations?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
+  if (!r.ok) return [];
+  return r.json();
+}
+
+export type PushResult = { ok: boolean; stdout: string; stderr: string; exit_code: number };
+
+export async function pushPlaybook(text: string, mode = 'replace'): Promise<PushResult> {
+  const r = await fetch('/api/playbook/push', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text, mode })
+  });
+  if (!r.ok) throw new Error(`push ${r.status}`);
+  return r.json();
+}
+
+export type RunStartIn = { name: string; input?: Record<string, unknown>; record?: string };
+
+export type EnvResult = { ok: boolean; env: { vars: Record<string, unknown> } | null; error: string | null };
+
+export async function getRunEnv(pk: string): Promise<EnvResult> {
+  const r = await fetch(`/api/run/${encodeURIComponent(pk)}/env`);
+  if (!r.ok) throw new Error(`env ${r.status}`);
+  return r.json();
+}
+
+export function extractYamlBlock(text: string): string | null {
+  const re = /```ya?ml\n([\s\S]*?)```/gi;
+  let m: RegExpExecArray | null;
+  let last: string | null = null;
+  while ((m = re.exec(text))) last = m[1];
+  return last;
+}

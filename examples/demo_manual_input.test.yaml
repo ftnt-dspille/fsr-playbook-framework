@@ -1,0 +1,23 @@
+fixture: examples/demo_manual_input.yaml
+playbook: FSRPB Demo - Manual Input
+
+input: {}
+
+# Auto-resume the manual_input when the run hits status='awaiting'.
+# Picks the 'approve' option, which routes to Stamp_approved.
+resume_input:
+  option: approve
+
+timeout_s: 60
+
+expects:
+  status: finished
+  vars:
+    verdict: approved
+  steps:
+    Approve_action:
+      status: finished
+    Stamp_approved:
+      status: finished
+
+cleanup: true

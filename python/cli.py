@@ -874,6 +874,28 @@ def cmd_run_op(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fetch_trigger_route_uuid(client, wf_uuid: str) -> str | None:
+    """Pull `arguments.route` from the workflow's trigger step. /action
+    wires the action button to a workflow via this route uuid, separate
+    from the workflow uuid. None when the playbook isn't a
+    cybersponse.action style (abstract_trigger has no route arg)."""
+    try:
+        r = client.session.get(
+            client.base_url + f"/api/3/workflows/{wf_uuid}?$relationships=true",
+            verify=client.verify_ssl)
+    except Exception:  # noqa: BLE001
+        return None
+    if r.status_code != 200:
+        return None
+    w = r.json()
+    trig_iri = w.get("triggerStep") or ""
+    for s in w.get("steps") or []:
+        if s.get("@id") == trig_iri or trig_iri.endswith(s.get("uuid") or ""):
+            a = s.get("arguments") if isinstance(s.get("arguments"), dict) else {}
+            return a.get("route")
+    return None
+
+
 def cmd_run_playbook(args: argparse.Namespace) -> int:
     """Manually trigger a deployed playbook via /api/triggers/1/.
 
@@ -908,27 +930,39 @@ def cmd_run_playbook(args: argparse.Namespace) -> int:
             else args.input
         )
 
-    # Both /action and /notrigger take the workflow uuid in the URL
-    # (verified live 2026-05-03). Earlier guess that they took the
-    # trigger-route uuid was wrong — the route uuid lives only inside
-    # the trigger step's arguments, not in the URL.
+    # /notrigger takes the workflow uuid in the URL.
+    # /action takes the trigger step's *route* uuid in the URL — different
+    # from the workflow uuid. The body's misleadingly-named `__uuid` is
+    # the WORKFLOW uuid (not the record). `records[]` carries the record
+    # IRI. Verified live 2026-05-03 against the FSR UI's Run-Action call.
     if args.record:
         if ":" not in args.record:
             print("--record must be <module>:<uuid>", file=sys.stderr)
             return 2
         module, rec_uuid = args.record.split(":", 1)
-        path = f"/api/triggers/1/action/{wf_uuid}"
+        route_uuid = _fetch_trigger_route_uuid(client, wf_uuid)
+        if not route_uuid:
+            print(f"could not find trigger.route on wf {wf_uuid[:8]} "
+                  f"— playbook trigger isn't a record-action style "
+                  f"(cybersponse.action). For abstract_trigger playbooks, "
+                  f"omit --record.", file=sys.stderr)
+            return 1
+        path = f"/api/triggers/1/action/{route_uuid}"
         body = {
             "singleRecordExecution": True,
             "__resource": module,
-            "__uuid": rec_uuid,
+            "__uuid": wf_uuid,
             "records": [f"/api/3/{module}/{rec_uuid}"],
         }
     else:
         path = f"/api/triggers/1/notrigger/{wf_uuid}"
+        # Trigger params (declared via `parameters: [...]` on the playbook)
+        # ride in `request.data`, NOT `input`. FSR's runtime maps
+        # request.data.<k> → vars.input.params.<k>. `input` is reserved
+        # for the trigger record list (set automatically by /action).
         body = {
-            "input": input_data,
-            "request": {"data": {}},
+            "input": {},
+            "request": {"data": input_data},
             "useMockOutput": False,
             "globalMock": False,
         }

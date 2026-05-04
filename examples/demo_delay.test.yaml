@@ -1,0 +1,17 @@
+fixture: examples/demo_delay.yaml
+playbook: FSRPB Demo - Delay
+
+input: {}
+timeout_s: 30
+
+expects:
+  status: finished
+  vars:
+    marker: delay_passed
+  steps:
+    Wait_2s:
+      status: finished
+    Stamp_done:
+      status: finished
+
+cleanup: true

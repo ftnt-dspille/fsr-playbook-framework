@@ -22,7 +22,7 @@ playbooks:
         type: create_record
         name: Create alert
         arguments:
-          collection: /api/3/alerts
+          module: alerts                # → collection: /api/3/alerts
           operation: Replace
           resource:
             name: "{{ vars.input.params.alert_name }}"

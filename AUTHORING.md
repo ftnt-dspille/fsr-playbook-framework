@@ -67,18 +67,24 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 
 | YAML `type` | FSR step type | Handler | Common arguments |
 |---|---|---|---|
-| `start` | `cybersponse.abstract_trigger` | (trigger) | (none — just routes downstream) |
-| `set_variable` | `SetVariable` | `set_multiple` | `arg_list: [{name, value}, …]` |
+| `start` | `cybersponse.abstract_trigger` (or `cybersponse.action` when `module:` present) | (trigger) | `module`, `button_label`, `requires_record`, `run_mode` (record-context only) |
+| `start_on_create` | `cybersponse.post_create` | (trigger) | `module`, `when: {logic, filters: [{field, op, value}]}` |
+| `start_on_update` | `cybersponse.post_update` | (trigger) | `module`, `when: …` (supports `op: changed`) |
+| `set_variable` | `SetVariable` | `set_multiple` | `arg_list: [{name, value}, …]` or flat `{name: value}` |
 | `decision` | `Decision` | `cond` | `conditions: [{option, condition}]` + `branches:` |
 | `connector` | `Connectors` | `connector` | `connector, operation, params, version, config, step_variables` |
+| `stop` / `end` | `Connectors` (cyops_utilities `no_op`) | `connector` | (no args — synthesized as Utils: No Operation) |
 | `find_record` | `FindRecords` | `find_data` | `module, query, partial` |
-| `update_record` | `UpdateRecord` | `update_data` | `collection, resource` |
-| `insert_record` | `InsertData` | `insert_data` | `collection, resource` |
-| `delay` | `Delay` | `delay` | `delay` (seconds) |
-| `manual_input` | `ManualInput` | `manual_input` | `record, type, input, timeout` |
-| `code_snippet` | `CodeSnippet` | `connector` | (uses connector dispatch internally) |
+| `create_record` | `InsertData` | `insert_data` | `module` (→ `collection`), `resource`, `operation` |
+| `update_record` | `UpdateRecord` | `update_data` | `collection` (record IRI), `module` (→ `collectionType`), `resource`, `operation` |
+| `insert_record` | `InsertData` | `insert_data` | legacy alias for `create_record` |
+| `delay` | `Delay` | `delay` | `seconds` (or `minutes`/`hours`/`days`) |
+| `manual_input` | `ManualInput` | `manual_input` | `title, description, options: [...], inputs: []` |
+| `code_snippet` | `CodeSnippet` | `connector` | `code: |...`, optional `config: <friendly-name>` |
 | `approval` | `Approval` | `approval` | `collection, resource` |
 | `workflow_reference` | `WorkflowReference` | (per-type validator) | `target` (local name) or `workflowReference` (IRI) + `arguments` |
+
+> Removed: `record_action` short alias is gone — fold into `start` with a `module:` arg. `requires_record: false` is the same as the old "no record context" form.
 
 Other FSR step types (`cybersponse.action`, `RestApi`, `RunScript`,
 `ParallelExecution`, `MapPlaybook`, `FetchEmail`) round-trip
@@ -226,11 +232,11 @@ shape from `mcp run_op`):
 | set_variable | the variables themselves go to top-level `vars.<var_name>` (not under `vars.steps`) |
 | manual_input (after resume) | `vars.steps.<name>.input.<field>` |
 | code_snippet | whatever the snippet `return`s, at `vars.steps.<name>` |
-| workflow_reference | sub-playbook's `vars` are merged into parent on completion |
+| workflow_reference | child output at `vars.steps.<call_step_name>.<key>` — child vars do NOT auto-merge into parent's top-level `vars` |
 
 If you reference a step output with a key that doesn't match any step
-name in the playbook, the value is silently undefined at runtime. The
-compiler doesn't yet flag this — sanity-check by name, not by id.
+name in the playbook, the compiler flags it with a difflib-suggested
+correction (see "What the compiler validates" below).
 
 Use `fsrpb explain filter <name>` to see canonical filter signatures
 and observed return types. Examples:
@@ -318,8 +324,8 @@ Codes you'll see most often:
 | `unknown_param` | param not in op definition | check `fsrpb explain` output; suggestion shown |
 | `unknown_next_step` | `next:` or `branches:` target doesn't match a step id | typo in step ids |
 | `duplicate_step_id` | two steps share an id | ids must be unique within a playbook |
-| `bad_value` | wrong shape for a field (e.g. `branches:` not a mapping) | check the column types in the table above |
-| `no_trigger` | no `start` step in a playbook | every playbook needs exactly one `type: start` |
+| `bad_value` | wrong shape, cycles, unreachable steps, reserved-name collisions, bad Jinja paths | message includes the specific cause |
+| `no_trigger` | no trigger step in a playbook | every playbook needs exactly one `start`, `start_on_create`, or `start_on_update` |
 
 ## Re-importing existing playbooks
 
@@ -387,16 +393,116 @@ Every playbook in the bundled corpus (`pb_examples/all_fsr_evoke_playbooks.json`
 the output is semantically identical to what FSR would have exported.
 This is the regression gate — `pytest -m slow` runs it.
 
+## What the compiler validates
+
+Beyond per-step argument shape, the validator runs cross-cutting checks:
+
+**Graph-level**
+- Cycles (back-edges in `next:` / `branches:`).
+- Unreachable steps (warning — FSR tolerates them but they're dead code).
+- Dangling decision branches: every `conditions[].option` needs a
+  `branches[]` entry or a default `next:`. Stale branch labels (typos)
+  are flagged as warnings.
+
+**Reserved names**
+- SetVariable arg names that shadow runtime vars: `input, steps, task_id,
+  env, result, vars, globalVars, globals, parent_wf, self`.
+- Step names that aren't valid Jinja identifiers (Python/Jinja keywords
+  like `for`, `class`; identifiers starting with digits).
+- Playbook `parameters:` that collide with `records`.
+
+**Jinja paths**
+- `{{ vars.steps.<key>... }}` references where `<key>` doesn't match any
+  step's name (with spaces→underscores). Suggests the closest match via
+  difflib.
+- For connector ops with a known `output_schema_json`, the first
+  attribute after the step key is checked against the declared output
+  keys (warning).
+
 ## What the compiler does NOT validate (yet)
 
-- **Jinja template correctness** — we accept any string in jinja contexts;
-  type-mismatches surface only at runtime. The reference store has type
-  data per filter (run `fsrpb explain filter <name>` to see) but the
-  compiler doesn't yet flow-type pipelines.
+- **Full Jinja flow-typing** — we check the first attribute after
+  `vars.steps.<name>`, not the full chain.
 - **`for_each` / `do_until` semantics** — accepted as opaque mappings.
 - **Permission checks** — the compiler trusts you have RBAC on the
   modules / connectors you reference.
 - **Schedule definitions** — `schedules:` on a playbook isn't yet
   modeled in the IR.
 
-These are tracked in `TODO.md` §6 (Smaller wishes).
+## Picklist values are friendly strings
+
+Picklist-typed fields (e.g. alerts.severity, alerts.status, indicators.
+reputation) accept the friendly display value:
+
+```yaml
+arguments:
+  resource:
+    severity: High           # not /api/3/picklists/<uuid>
+    status: Investigating
+    type: Phishing
+```
+
+Auto-resolution lives in `python/picklists.py` (used by the e2e runner
++ MCP `resolve_picklist_value` tool). The (module, field)→picklist_name
+map is discovered live and persisted to `store/picklist_name_map.json`.
+
+> **Foot-gun for trigger filters**: a stored picklist value is the IRI,
+> not the display string. So `start_on_create` / `start_on_update` with
+> `when: {field: severity, op: like, value: "High"}` will never match.
+> Filter on string fields (`name`, `description`) or use `op: changed`
+> on post_update.
+
+## Friendly argument expansions
+
+Several step types have a friendly authoring shape that expands to FSR's
+canonical argument blob.
+
+**`delay`**
+```yaml
+- type: delay
+  arguments: {seconds: 5}        # or minutes / hours / days
+```
+Expands to a `TimeBased` rule with the instance-wide `resume_playbook`
+channel.
+
+**`code_snippet`**
+```yaml
+- type: code_snippet
+  arguments:
+    code: |
+      print("hi")
+    config: test                  # optional connector-config name
+```
+Expands to a `connector: code-snippet, operation:
+python_inline_code_editor` step. Config UUID resolved live + cached at
+`store/connector_config_map.json`.
+
+**`manual_input`**
+```yaml
+- type: manual_input
+  arguments:
+    title: "Approve action?"
+    description: "Click approve to continue."
+    options:
+      - {option: approve, primary: true}
+      - {option: reject}
+    inputs: []                    # optional InputBased fields
+  branches:
+    approve: do_thing
+    reject: bail
+```
+
+**`create_record` / `update_record`**
+```yaml
+- type: create_record
+  arguments:
+    module: alerts                # → collection: /api/3/alerts
+    resource: {name: "...", severity: High}
+
+- type: update_record
+  arguments:
+    collection: "{{ vars.steps.Find.records[0]['@id'] }}"  # the record IRI
+    module: alerts                # → collectionType: /api/3/alerts
+    resource: {description: "..."}
+    operation: Replace
+```

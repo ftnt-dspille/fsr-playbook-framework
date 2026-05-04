@@ -23,7 +23,7 @@ playbooks:
 
       - id: ask
         type: manual_input
-        name: Ask analyst
+        name: ask
         arguments:
           record: "{{ vars.input.records[0]['@id'] }}"
           type: single-select
@@ -42,6 +42,8 @@ playbooks:
           conditions:
             - option: block
               condition: "{{ vars.steps.ask.input.choice == 'block' }}"
+            - option: skip
+              condition: "{{ vars.steps.ask.input.choice != 'block' }}"
         branches:
           block: do_block
           skip: noop
@@ -51,7 +53,7 @@ playbooks:
         name: Pretend we blocked
         arguments:
           arg_list:
-            - name: result
+            - name: outcome
               value: blocked
 
       - id: noop
@@ -59,5 +61,5 @@ playbooks:
         name: Skip
         arguments:
           arg_list:
-            - name: result
+            - name: outcome
               value: skipped

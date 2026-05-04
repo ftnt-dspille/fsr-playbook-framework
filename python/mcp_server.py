@@ -1148,6 +1148,186 @@ def list_recent_failed_runs(limit: int = 20,
     return out
 
 
+@mcp.tool()
+def list_playbook_runs(playbook: str | None = None,
+                       playbook_uuid: str | None = None,
+                       limit: int = 20,
+                       include_finished: bool = False) -> dict[str, Any]:
+    """List runs of a single playbook, server-filtered by template_iri.
+
+    Faster + more reliable than `list_recent_failed_runs(playbook=...)`
+    when you know which playbook you care about — the API uses
+    template_iri to do the filter on its side, so we don't waste a fetch
+    of irrelevant rows.
+
+    Args:
+        playbook: playbook name (resolved live to uuid).
+        playbook_uuid: skip the lookup if you already have the uuid.
+        limit: max rows (default 20).
+        include_finished: include finished runs too (default failures only).
+
+    Returns:
+        {playbook_uuid, runs: [{task_id, name, status, error_message,
+         modified, pk}]}.
+    """
+    client = _live_client()
+    if client is None:
+        return {"error": "FSR instance not configured"}
+    if not playbook_uuid:
+        if not playbook:
+            return {"error": "provide playbook (name) or playbook_uuid"}
+        # Resolve name → uuid.
+        import urllib.parse
+        qs = urllib.parse.urlencode({"name": playbook, "$limit": 5})
+        nr = client.session.get(client.base_url + f"/api/3/workflows?{qs}",
+                                verify=client.verify_ssl)
+        if nr.status_code != 200:
+            return {"error": f"name lookup HTTP {nr.status_code}"}
+        members = nr.json().get("hydra:member") or []
+        if not members:
+            return {"error": f"no playbook named {playbook!r}"}
+        playbook_uuid = members[0].get("uuid")
+    template_iri = f"/api/3/workflows/{playbook_uuid}"
+    url = (client.base_url + "/api/wf/api/workflows/?format=json"
+           f"&limit={limit * 4 if not include_finished else limit}"
+           f"&ordering=-modified&parent_wf__isnull=True"
+           f"&template_iri={template_iri}")
+    r = client.session.get(url, verify=client.verify_ssl)
+    if r.status_code != 200:
+        return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+    members = r.json().get("hydra:member") or []
+    if not include_finished:
+        bad = {"failed", "finished_with_error", "terminated"}
+        members = [m for m in members if m.get("status") in bad]
+    out = []
+    for m in members[:limit]:
+        res = m.get("result") if isinstance(m.get("result"), dict) else {}
+        err = ((res.get("Error message") or res.get("error")
+                or res.get("message")) if isinstance(res, dict) else None)
+        pk_url = m.get("@id") or ""
+        pk = pk_url.rstrip("/").rsplit("/", 1)[-1] if pk_url else None
+        out.append({
+            "task_id": m.get("task_id"),
+            "name": m.get("name"),
+            "status": m.get("status"),
+            "error_message": err,
+            "modified": m.get("modified"),
+            "pk": pk,
+        })
+    return {"playbook_uuid": playbook_uuid, "count": len(out), "runs": out}
+
+
+# ---------------------------------------------------------------------------
+# Picklists
+# ---------------------------------------------------------------------------
+
+def _live_client():
+    """Return a live FSR client or None if env not configured."""
+    try:
+        from probes._env import get_client, get_config
+    except Exception:  # noqa: BLE001
+        return None
+    if not get_config().is_live():
+        return None
+    return get_client()
+
+
+@mcp.tool()
+def list_picklists() -> dict[str, Any]:
+    """List every picklist `listName.name` known to the FSR instance.
+
+    Use when the agent needs to discover what picklists exist (e.g.
+    'Severity', 'AlertStatus', 'Threat Type') before resolving a value
+    to an IRI. Live-fetched once per process and cached.
+    """
+    client = _live_client()
+    if client is None:
+        return {"error": "FSR instance not configured"}
+    from picklists import list_picklist_names
+    names = list_picklist_names(client)
+    return {"count": len(names), "names": names}
+
+
+@mcp.tool()
+def get_picklist(name: str) -> dict[str, Any]:
+    """List items of a single picklist as [{itemValue, uuid, iri, ordinal}].
+
+    Args:
+        name: picklist `listName.name` (e.g. 'AlertStatus', 'Severity').
+              Use list_picklists() to discover.
+    """
+    client = _live_client()
+    if client is None:
+        return {"error": "FSR instance not configured"}
+    from picklists import picklist_values
+    items = picklist_values(client, name)
+    return {"name": name, "count": len(items), "items": items}
+
+
+@mcp.tool()
+def picklist_for_field(module: str, field: str) -> dict[str, Any]:
+    """Auto-discover the picklist behind a (module, field).
+
+    Returns the picklist_name plus the offline list of valid string
+    values pulled from the local module_fields cache. Tries heuristic
+    names first (e.g. 'AlertStatus' for alerts.status), then falls back
+    to a Jaccard-overlap match against all live picklist values. Result
+    persists to store/picklist_name_map.json.
+
+    Args:
+        module: lowercase module name, e.g. 'alerts', 'incidents'.
+        field:  field name, e.g. 'status', 'severity', 'type'.
+    """
+    client = _live_client()
+    if client is None:
+        return {"error": "FSR instance not configured"}
+    from picklists import picklist_name_for, valid_values
+    pn = picklist_name_for(client, module, field)
+    return {
+        "module": module, "field": field,
+        "picklist_name": pn,
+        "valid_values_local": valid_values(module, field),
+    }
+
+
+@mcp.tool()
+def resolve_picklist_value(value: str, picklist_name: str | None = None,
+                           module: str | None = None,
+                           field: str | None = None) -> dict[str, Any]:
+    """Resolve a friendly value (e.g. 'High') to a picklist IRI.
+
+    Provide either `picklist_name`, or both `module` + `field` to
+    auto-discover. Strings that already start with '/api/3/' pass
+    through unchanged. Returns close-match suggestions when the value
+    isn't an exact itemValue — useful when the LLM authored an invalid
+    value like 'In Progress' for AlertStatus (which only has Open,
+    Investigating, Pending, Closed, Active, Re-Opened).
+    """
+    client = _live_client()
+    if client is None:
+        return {"error": "FSR instance not configured"}
+    from picklists import resolve_iri, picklist_name_for, picklist_values
+    pn = picklist_name
+    if pn is None and module and field:
+        pn = picklist_name_for(client, module, field)
+    if pn is None:
+        return {"error": "picklist_name unknown — provide it, or "
+                         "(module, field) for auto-discovery"}
+    iri = resolve_iri(client, value, picklist_name=pn)
+    if iri:
+        return {"ok": True, "iri": iri, "picklist_name": pn,
+                "value": value}
+    items = picklist_values(client, pn)
+    valid = [it.get("itemValue") for it in items]
+    # Cheap fuzzy: prefix or substring match.
+    vl = value.lower()
+    suggestions = [v for v in valid if v and (
+        v.lower().startswith(vl) or vl in v.lower() or
+        v.lower() in vl)]
+    return {"ok": False, "picklist_name": pn, "value": value,
+            "valid_values": valid, "suggestions": suggestions[:5]}
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

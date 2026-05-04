@@ -82,13 +82,24 @@ MCP-capable agent (Claude Code, IDE plugins, the widget) can call:
 | `find_connector(q)` | SQLite FTS | fuzzy search 714 connectors |
 | `find_operation(connector, q)` | SQLite | list ops + fuzzy search |
 | `get_op_schema(connector, op)` | SQLite | params, types, required, picklists |
+| `get_connector_source(connector)` | live FSR | fetch operations.py source |
+| `run_op(connector, op, params)` | live `/wf/workflow/tasks/connector` | one-shot op exec; caches output shape |
 | `get_step_type(name)` | SQLite + STEP_TYPES.md | schema + 3 real examples |
 | `find_jinja_filter(q)` | SQLite | filter sig + observed type |
+| `find_jinja_pattern(q, kind)` | SQLite | global/macro/test catalog |
+| `get_filter_examples(name)` | SQLite | real corpus uses of a filter |
 | `render_jinja(template, ctx)` | live `/api/wf/api/jinja-editor/` | runtime check |
 | `search_playbooks(q)` | FTS over `playbooks_seen` | "how do others do X" |
 | `validate_yaml(yaml)` | compiler dry-run | structured errors |
-| `compile(yaml)` | compiler | YAML → FSR JSON |
-| `dry_run_playbook(yaml)` | Phase 5 e2e probes | import + execute + cleanup on test FSR |
+| `compile_yaml(yaml)` | compiler | YAML → FSR JSON |
+| `get_run_env(pb_execution)` | live | dump a run's `vars` env for triage |
+| `list_configured_connectors(probe)` | live | connector configs + health probe |
+| `healthcheck_connector(name)` | live | invoke connector's health_check op |
+| `list_recent_failed_runs(...)` | live | triage list for "my playbook is broken" |
+| `list_picklists()` | live | every `listName.name` on the instance |
+| `get_picklist(name)` | live | items: `{itemValue, uuid, iri}` |
+| `picklist_for_field(module, field)` | live + cached | auto-discover picklist_name |
+| `resolve_picklist_value(value, ...)` | live + cached | friendly value → IRI, with close-match suggestions |
 
 ### 4. End-user interfaces (longer-term)
 All sit on top of the compiler + MCP, none reinvent the engine.

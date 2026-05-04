@@ -16,6 +16,10 @@ from typing import Optional
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Step
 
+
+def _looks_like_uuid(s: str) -> bool:
+    return isinstance(s, str) and len(s) == 36 and s.count("-") == 4
+
 # Friendly short types -> canonical FSR step type names. v1 only covers
 # the ones we have full handler signatures for + Start.
 SHORT_TYPE_TO_FSR: dict[str, str] = {
@@ -175,7 +179,19 @@ class Resolver:
                 self._normalize_record_action_args(step, path, errors)
 
         if step.type in ("start_on_create", "start_on_update"):
-            self._normalize_record_action_args(step, path, errors)
+            self._normalize_post_create_update_args(step, path, errors)
+
+        if step.type in ("create_record", "insert_record", "update_record"):
+            self._normalize_record_crud_args(step)
+
+        if step.type == "delay":
+            self._normalize_delay_args(step)
+
+        if step.type == "code_snippet":
+            self._normalize_code_snippet_args(step)
+
+        if step.type == "manual_input":
+            self._normalize_manual_input_args(step)
 
         # `stop` / `end` synthesize the canonical Utils: No Operation call,
         # then fall through to connector arg resolution.
@@ -268,6 +284,269 @@ class Resolver:
         a.setdefault("displayConditions",
                      {m: {"sort": [], "limit": 30, "logic": "AND", "filters": []}
                       for m in modules})
+        step.arguments = a
+
+    def _normalize_post_create_update_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Canonical args for cybersponse.post_create / post_update.
+
+        Friendly inputs:
+          module:  single module name (or modules: [list]).
+          when:    optional fieldbasedtrigger filter — fires only when the
+                   query matches the post-write record state, OR (for
+                   post_update) when the listed fields *changed*.
+                   Shape: {logic: AND|OR, filters: [{field, op, value?}]}
+                   `op: changed` needs no value (post_update only).
+
+        Emits the canonical FSR shape: resource/resources, step_variables,
+        fieldbasedtrigger.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        modules_raw = a.pop("module", None) or a.pop("modules", None) \
+            or a.get("resources") or a.get("resource")
+        if isinstance(modules_raw, str):
+            modules = [modules_raw]
+        elif isinstance(modules_raw, list):
+            modules = [str(m) for m in modules_raw]
+        else:
+            modules = []
+        if not modules:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message=f"{step.type} requires `module:` (or `modules:`)",
+                path=f"{path}.arguments.module",
+            ))
+            modules = ["alerts"]
+        a["resource"] = modules[0]
+        a["resources"] = modules
+        a.setdefault("step_variables",
+                     {"input": {"records": ["{{vars.input.records[0]}}"]}})
+        a.setdefault("triggerOnSource", True)
+        a.setdefault("triggerOnReplicate", False)
+        a.setdefault("__triggerLimit", True)
+
+        when = a.pop("when", None)
+        if when is not None:
+            fbt = self._expand_when(when, step.type, path, errors)
+            if fbt is not None:
+                a["fieldbasedtrigger"] = fbt
+        elif "fieldbasedtrigger" not in a:
+            a["fieldbasedtrigger"] = {
+                "sort": [], "limit": 30, "logic": "AND", "filters": [],
+            }
+        step.arguments = a
+
+    def _expand_when(
+        self, when, step_type: str, path: str, errors: list[CompileError],
+    ):
+        if not isinstance(when, dict):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="`when:` must be a mapping with logic/filters",
+                path=f"{path}.arguments.when",
+            ))
+            return None
+        logic = str(when.get("logic", "AND")).upper()
+        if logic not in ("AND", "OR"):
+            logic = "AND"
+        raw_filters = when.get("filters") or []
+        if not isinstance(raw_filters, list):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="`when.filters` must be a list",
+                path=f"{path}.arguments.when.filters",
+            ))
+            return None
+        out_filters = []
+        for i, f in enumerate(raw_filters):
+            if not isinstance(f, dict):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message="filter entries must be mappings",
+                    path=f"{path}.arguments.when.filters[{i}]",
+                ))
+                continue
+            field = f.get("field")
+            op = f.get("op") or f.get("operator") or "eq"
+            value = f.get("value")
+            if not field:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message="filter requires `field:`",
+                    path=f"{path}.arguments.when.filters[{i}].field",
+                ))
+                continue
+            if op == "changed":
+                if step_type != "start_on_update":
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="`op: changed` only valid on start_on_update",
+                        path=f"{path}.arguments.when.filters[{i}].op",
+                    ))
+                    continue
+                out_filters.append({
+                    "type": "object", "field": field, "value": None,
+                    "_value": {"display": "", "itemValue": ""},
+                    "operator": "changed",
+                })
+            else:
+                out_filters.append({
+                    "type": "primitive", "field": field, "value": value,
+                    "operator": op, "_operator": op,
+                })
+        return {"sort": [], "limit": 30, "logic": logic, "filters": out_filters}
+
+    def _normalize_record_crud_args(self, step: Step) -> None:
+        """Friendly `module: alerts` → canonical IRI keys.
+
+        - create_record / insert_record (InsertData):
+            module → collection ('/api/3/<m>')
+        - update_record (UpdateRecord):
+            module → collectionType ('/api/3/<m>')
+            (`collection:` here is the *record* IRI; do not overwrite.)
+
+        find_record's handler takes `module:` directly; nothing to do.
+        Already-set canonical keys win — never clobber an explicit value.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        module = a.pop("module", None)
+        if not module or not isinstance(module, str):
+            step.arguments = a
+            return
+        iri = f"/api/3/{module}" if not module.startswith("/api/") else module
+        if step.type in ("create_record", "insert_record"):
+            a.setdefault("collection", iri)
+        elif step.type == "update_record":
+            a.setdefault("collectionType", iri)
+        step.arguments = a
+
+    def _normalize_manual_input_args(self, step: Step) -> None:
+        """Friendly manual_input authoring shape:
+
+            arguments:
+              title: "Approve?"
+              description: "Optional markdown body"
+              options: [Continue]                  # or [{option: yes, primary: true}, {option: no}]
+              inputs: []                           # optional input variables to collect
+
+        Expands to FSR's canonical InputBased shape (input.schema +
+        response_mapping + the dozen always-present sibling fields).
+        Already-canonical args (with `input` + `response_mapping`)
+        pass through untouched.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        if isinstance(a.get("input"), dict) and isinstance(
+                a.get("response_mapping"), dict):
+            step.arguments = a
+            return
+        title = a.pop("title", None) or step.name or "Awaiting input"
+        description = a.pop("description", "")
+        raw_options = a.pop("options", None) or [{"option": "Continue", "primary": True}]
+        options = []
+        for o in raw_options:
+            if isinstance(o, str):
+                options.append({"option": o})
+            elif isinstance(o, dict):
+                options.append({k: v for k, v in o.items() if k != "next"})
+        if options and not any(o.get("primary") for o in options):
+            options[0]["primary"] = True
+        inputs = a.pop("inputs", None) or []
+        a["type"] = a.get("type", "InputBased")
+        a["input"] = {
+            "schema": {
+                "title": title,
+                "description": description,
+                "inputVariables": inputs,
+            },
+        }
+        a.setdefault("record", "")
+        a.setdefault("is_approval", False)
+        a.setdefault("isRecordLinked", False)
+        a.setdefault("owner_detail", {"isAssigned": False})
+        a.setdefault("step_variables", [])
+        a["response_mapping"] = {
+            "options": options,
+            "duplicateOption": False,
+            "customSuccessMessage": "Awaiting Playbook resumed successfully.",
+        }
+        a.setdefault("email_notification", {"enabled": False, "smtpParameters": []})
+        a.setdefault("inline_channel_list", [])
+        a.setdefault("external_channel_list", [])
+        a.setdefault("unauthenticated_input", False)
+        step.arguments = a
+
+    def _normalize_code_snippet_args(self, step: Step) -> None:
+        """Friendly Python-snippet step:
+
+            arguments:
+              code: |
+                print("hi")
+              config: test          # optional connector-config name (defaults to default)
+
+        FSR's CodeSnippet step type uses the connector dispatcher under
+        the hood (`script: /wf/workflow/tasks/connector`, connector
+        `code-snippet`, op `python_inline_code_editor`). Args fill:
+            connector, operation, version, params.python_function, config,
+            operationTitle, step_variables, pickFromTenant.
+
+        config UUID is resolved via connector_configs (live, cached).
+        Already-canonical args (`connector`+`operation`+`params`) pass
+        through untouched.
+        """
+        from connector_configs import resolve_config_id
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        if a.get("connector") and a.get("operation") and a.get("params"):
+            step.arguments = a
+            return
+        code = a.pop("code", None) or a.pop("python", None) or ""
+        config_name = a.pop("config", None) if isinstance(
+            a.get("config"), str) and not _looks_like_uuid(a.get("config")) \
+            else None
+        cid = resolve_config_id("code-snippet", config_name) or ""
+        a.setdefault("connector", "code-snippet")
+        a.setdefault("operation", "python_inline_code_editor")
+        a.setdefault("operationTitle", "Execute Python Code")
+        a.setdefault("version", "2.1.4")
+        a.setdefault("config", cid)
+        params = a.get("params") if isinstance(a.get("params"), dict) else {}
+        params.setdefault("python_function", code)
+        a["params"] = params
+        a.setdefault("step_variables", [])
+        step.arguments = a
+
+    def _normalize_delay_args(self, step: Step) -> None:
+        """Friendly delay step:
+
+            arguments:
+              seconds: 5      # or minutes/hours/days
+
+        Expands to FSR's canonical TimeBased rule shape with the
+        instance-wide `resume_playbook` channel UUID. Already-canonical
+        args (top-level `type`, `delay`, `rule`) pass through untouched.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Don't clobber explicit canonical input.
+        if "rule" in a and "delay" in a:
+            step.arguments = a
+            return
+        delay = {"days": 0, "hours": 0, "minutes": 0, "seconds": 0}
+        for k in ("days", "hours", "minutes", "seconds"):
+            if k in a:
+                delay[k] = int(a.pop(k))
+        if not any(delay.values()):
+            delay["seconds"] = 1  # avoid zero-delay edge cases
+        a["type"] = a.get("type", "TimeBased")
+        a["delay"] = delay
+        a.setdefault("rule", {
+            "actions": [{
+                "type": "resume_playbook", "enabled": True,
+                # FSR-instance-wide constant; same value on every box.
+                "channel_uuid": "e2ce87c2-c55a-11ec-9d64-0242ac120002",
+            }],
+            "is_active": True,
+            "event_source": "crudhub",
+        })
         step.arguments = a
 
     def _normalize_start_args(self, step: Step) -> None:
@@ -367,17 +646,25 @@ class Resolver:
             ))
             return
         if not valid_params:
-            errors.append(CompileError(
-                code=ErrorCode.UNKNOWN_PARAM,
-                message=(
-                    f"no param schema in store for {connector}.{operation} "
-                    f"(connector not installed on probe instance) — params passed through unvalidated"
-                ),
-                path=f"{path}.arguments.params",
-                near=None,
-                suggestion="run `fsrpb run-op` or install the connector to populate the schema",
-                severity="warning",
-            ))
+            # Two sub-cases:
+            #   1. Op genuinely takes no params (e.g. cyops_utilities.no_op,
+            #      auto-injected by the compiler for `stop`/`end`). User
+            #      passed nothing → silent.
+            #   2. User passed params we can't verify because the param
+            #      probe didn't capture this op. Emit the warning so they
+            #      know something might be wrong.
+            if provided:
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    message=(
+                        f"no param schema in store for {connector}.{operation} — "
+                        f"params passed through unvalidated"
+                    ),
+                    path=f"{path}.arguments.params",
+                    near=None,
+                    suggestion="run `fsrpb run-op` or re-ingest the connector to populate the schema",
+                    severity="warning",
+                ))
         else:
             for p_name in provided:
                 if p_name not in valid_params:

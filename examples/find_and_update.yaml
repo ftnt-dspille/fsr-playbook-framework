@@ -29,7 +29,7 @@ playbooks:
 
       - id: find
         type: find_record
-        name: Find indicator by value
+        name: find
         arguments:
           module: indicators
           query:

@@ -111,6 +111,9 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
         return _fail("test spec missing 'playbook'")
     trigger_input = spec.get("input") or {}
     trigger_record = spec.get("record")  # "module:uuid", may contain templates
+    trigger_mutate = spec.get("mutate")  # {capture, fields} for post_update
+    trigger_auto = bool(spec.get("auto_trigger"))  # post_create: setup POST fires it
+    resume_spec = spec.get("resume_input")  # {option, vars} for manual_input auto-resume
     setup_steps = spec.get("setup") or []
     timeout_s = int(spec.get("timeout_s", 180))
     expects = spec.get("expects") or {}
@@ -158,6 +161,10 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
         return _fail(f"could not resolve workflow {playbook_name!r} in {coll_name}")
 
     # 4b. Setup steps: insert tagged test records, capture for templating + cleanup.
+    # For auto_trigger mode (post_create), capture the timestamp BEFORE
+    # setup runs — the setup POST itself fires the run.
+    if trigger_auto:
+        trigger_started = time.time()
     try:
         for i, step in enumerate(setup_steps):
             kind = step.get("kind")
@@ -185,9 +192,50 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
             _hard_purge(client, coll_uuid, coll_entity)
         return _fail(f"setup failed: {e}")
 
-    # 5. Trigger. Two modes: /notrigger (manual) or /action (record-context).
+    # 5. Trigger. Four modes:
+    #    - auto:   the setup POST itself fires the run (post_create)
+    #    - mutate: PUT a captured setup record to fire post_update
+    #    - record: /action/<route> for cybersponse.action (record-context manual)
+    #    - input:  /notrigger/<wf> for cybersponse.abstract_trigger (manual)
     rec_target = _render_templates(trigger_record, setup_ctx) if trigger_record else None
-    if rec_target:
+    if trigger_auto:
+        _log(f"[{run_id}] auto-trigger (post_create) — setup POST fired the run")
+        task_id = None
+    elif trigger_mutate:
+        cap = trigger_mutate.get("capture")
+        if not cap or cap not in setup_ctx:
+            _flush_cleanup(client, cleanup_records, _log, run_id)
+            if cleanup:
+                _hard_purge(client, coll_uuid, coll_entity)
+            return _fail(f"mutate.capture {cap!r} not in setup captures "
+                         f"({list(setup_ctx)})")
+        target_rec = setup_ctx[cap]
+        rec_uuid = target_rec.get("uuid")
+        # Find module from cleanup_records (the setup step recorded it).
+        module = next((m for m, u in cleanup_records if u == rec_uuid), None)
+        if not module or not rec_uuid:
+            _flush_cleanup(client, cleanup_records, _log, run_id)
+            if cleanup:
+                _hard_purge(client, coll_uuid, coll_entity)
+            return _fail(f"mutate target {cap!r} missing module/uuid")
+        mut_fields = _render_templates(trigger_mutate.get("fields") or {}, setup_ctx)
+        mut_fields = _resolve_module_fields(client, module, mut_fields)
+        trigger_started = time.time()
+        pr = client.session.put(
+            client.base_url + f"/api/3/{module}/{rec_uuid}",
+            json=mut_fields, verify=client.verify_ssl)
+        if pr.status_code >= 400:
+            _flush_cleanup(client, cleanup_records, _log, run_id)
+            if cleanup:
+                _hard_purge(client, coll_uuid, coll_entity)
+            (log_dir / "mutate_error.txt").write_text(f"{pr.status_code}\n{pr.text}")
+            return _fail(f"mutate PUT failed: HTTP {pr.status_code}")
+        _log(f"[{run_id}] mutated {module}/{rec_uuid[:8]} → "
+             f"{list(mut_fields)} (post_update fire)")
+        # Skip the POST /triggers branch entirely — FSR's event subscriber
+        # spawns the workflow run from the PUT.
+        task_id = None
+    elif rec_target:
         if ":" not in rec_target:
             _flush_cleanup(client, cleanup_records, _log, run_id)
             if cleanup:
@@ -217,32 +265,36 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
         trig_url = f"{client.base_url}/api/triggers/1/notrigger/{wf_uuid}"
         body = {"input": {}, "request": {"data": resolved_input or {}},
                 "useMockOutput": False, "globalMock": False}
-    trigger_started = time.time()
-    r = client.session.post(trig_url, json=body, verify=client.verify_ssl)
-    if r.status_code >= 400:
-        _flush_cleanup(client, cleanup_records, _log, run_id)
-        if cleanup:
-            _hard_purge(client, coll_uuid, coll_entity)
-        (log_dir / "trigger_error.txt").write_text(f"{r.status_code}\n{r.text}")
-        return _fail(f"trigger failed: HTTP {r.status_code}")
-    task_id = (r.json() or {}).get("task_id") if rec_target is None else None
-    if rec_target:
-        _log(f"[{run_id}] triggered (action) wf={wf_uuid[:8]} record={rec_target}")
-    else:
-        if not task_id:
+    if not trigger_mutate and not trigger_auto:
+        trigger_started = time.time()
+        r = client.session.post(trig_url, json=body, verify=client.verify_ssl)
+        if r.status_code >= 400:
             _flush_cleanup(client, cleanup_records, _log, run_id)
             if cleanup:
                 _hard_purge(client, coll_uuid, coll_entity)
-            return _fail("no task_id returned from /notrigger")
-        res.task_id = task_id
-        _log(f"[{run_id}] triggered task_id={task_id}")
+            (log_dir / "trigger_error.txt").write_text(f"{r.status_code}\n{r.text}")
+            return _fail(f"trigger failed: HTTP {r.status_code}")
+        task_id = (r.json() or {}).get("task_id") if rec_target is None else None
+        if rec_target:
+            _log(f"[{run_id}] triggered (action) wf={wf_uuid[:8]} record={rec_target}")
+        else:
+            if not task_id:
+                _flush_cleanup(client, cleanup_records, _log, run_id)
+                if cleanup:
+                    _hard_purge(client, coll_uuid, coll_entity)
+                return _fail("no task_id returned from /notrigger")
+            res.task_id = task_id
+            _log(f"[{run_id}] triggered task_id={task_id}")
 
-    # 6. Poll to terminal.
-    if rec_target:
+    # 6. Poll to terminal. auto/mutate/record modes poll by template_iri;
+    # notrigger polls by task_id.
+    if trigger_auto or trigger_mutate or rec_target:
         final, pk = _poll_by_template(client, wf_uuid, trigger_started,
-                                      timeout_s, log_dir, _log, run_id)
+                                      timeout_s, log_dir, _log, run_id,
+                                      resume_spec=resume_spec)
     else:
-        final, pk = _poll(client, task_id, timeout_s, log_dir, _log, run_id)
+        final, pk = _poll(client, task_id, timeout_s, log_dir, _log, run_id,
+                          resume_spec=resume_spec)
     if final is None:
         _flush_cleanup(client, cleanup_records, _log, run_id)
         if cleanup:
@@ -424,69 +476,12 @@ def _render_templates(value, ctx: dict):
     return value
 
 
-_PICKLIST_CACHE: dict[str, str] = {}  # "ListName:ItemValue" → "/api/3/picklists/<uuid>"
-
-
-def _resolve_picklist(client, list_name: str, item_value: str) -> str | None:
-    """Look up a picklist item by display name; return its IRI or None.
-
-    Cached per process. `list_name` matches `listName.name` (e.g.
-    'Severity', 'Status', 'Threat Type'). `item_value` matches
-    `itemValue` (case-insensitive).
-    """
-    key = f"{list_name}:{item_value.lower()}"
-    if key in _PICKLIST_CACHE:
-        return _PICKLIST_CACHE[key]
-    import urllib.parse
-    qs = urllib.parse.urlencode({"listName.name": list_name, "$limit": 50})
-    r = client.session.get(client.base_url + f"/api/3/picklists?{qs}",
-                           verify=client.verify_ssl)
-    if r.status_code != 200:
-        return None
-    for m in r.json().get("hydra:member") or []:
-        if (m.get("itemValue") or "").lower() == item_value.lower():
-            iri = f"/api/3/picklists/{m.get('uuid')}"
-            _PICKLIST_CACHE[key] = iri
-            return iri
-    return None
-
-
-# Per-module picklist field map. When a setup.fields entry's value is a
-# bare string like "High" and the field is in this map, the runner
-# resolves it to the picklist IRI before posting. Field-specific lookup
-# is required because itemValues collide across lists (e.g., 'Closed'
-# exists in both Status and Closure Reason).
-_MODULE_PICKLIST_FIELDS: dict[str, dict[str, str]] = {
-    "alerts":    {"severity": "Severity", "status": "Status",
-                  "type": "Alert Type", "source": "Source",
-                  "phase": "Investigation Phase",
-                  "closureReason": "Closure Reason"},
-    "incidents": {"severity": "Severity", "status": "Status",
-                  "type": "Incident Type",
-                  "phase": "Investigation Phase"},
-    "indicators": {"severity": "Severity",
-                   "type": "Threat Type",
-                   "reputation": "Reputation"},
-}
-
-
 def _resolve_module_fields(client, module: str, fields: dict) -> dict:
-    """Walk a setup.fields dict and resolve picklist names → IRIs.
-
-    Only fields listed in _MODULE_PICKLIST_FIELDS for this module are
-    candidates. Strings that already look like an IRI (start with
-    '/api/3/') are passed through unchanged.
-    """
-    pmap = _MODULE_PICKLIST_FIELDS.get(module, {})
-    out = {}
-    for k, v in fields.items():
-        if k in pmap and isinstance(v, str) and not v.startswith("/api/"):
-            iri = _resolve_picklist(client, pmap[k], v)
-            if iri:
-                out[k] = iri
-                continue
-        out[k] = v
-    return out
+    """Resolve friendly picklist values in a record-fields dict to IRIs.
+    Delegates to `picklists.resolve_module_fields`, which auto-discovers
+    the picklist_name per (module, field) — no hardcoded map."""
+    from picklists import resolve_module_fields as _shared
+    return _shared(client, module, fields)
 
 
 def _picklist_value(field):
@@ -544,7 +539,8 @@ def _flush_cleanup(client, cleanup_records: list[tuple[str, str]], log, run_id: 
 
 
 def _poll_by_template(client, wf_uuid: str, started_unix: float,
-                      timeout_s: int, log_dir: Path, log, run_id: str
+                      timeout_s: int, log_dir: Path, log, run_id: str,
+                      *, resume_spec: dict | None = None,
                       ) -> tuple[dict | None, str | None]:
     """Poll for a workflow run matching template_iri=<wf_uuid> created
     after `started_unix`. Used for /action triggers which don't return
@@ -586,6 +582,9 @@ def _poll_by_template(client, wf_uuid: str, started_unix: float,
         if status != last:
             log(f"[{run_id}]   status: {status}  ({int(time.time() - start)}s)")
             last = status
+        if status == "awaiting" and resume_spec:
+            wf_pk = (candidate.get("@id") or "").rstrip("/").rsplit("/", 1)[-1]
+            _resume_awaiting(client, wf_pk, resume_spec, log, run_id)
         if status in TERMINAL:
             pk_url = candidate.get("@id") or ""
             full = candidate
@@ -605,8 +604,90 @@ def _poll_by_template(client, wf_uuid: str, started_unix: float,
     return None, None
 
 
+def _resume_awaiting(client, wf_pk: str, resume_spec: dict, log, run_id: str,
+                     ) -> None:
+    """When a run hits status='awaiting', find its pending manual_input
+    and POST the canonical wfinput_resume body. resume_spec accepts:
+        option: <button label>      (default: the option flagged primary)
+        vars:   {<name>: <value>}   (only when inputVariables.required)
+    Idempotent: if no pending input matches wf_pk, returns silently
+    (the next poll iteration will retry).
+
+    Match strategy: list_wfinput's `workflow` field is an opaque token,
+    not the wf IRI. We instead fetch the wf record's current step_id
+    (the one with status=processing/awaiting) and match against
+    inputs[*].step_id, which is a stable workflow_step pk.
+    """
+    try:
+        wfr = client.session.get(
+            client.base_url + f"/api/wf/api/workflows/{wf_pk}/?format=json"
+            f"&step_detail=true", verify=client.verify_ssl,
+        )
+        if wfr.status_code != 200:
+            return
+        wf_full = wfr.json()
+    except Exception:  # noqa: BLE001
+        return
+    pending_step_ids = {
+        s.get("id") for s in (wf_full.get("steps") or [])
+        if s.get("status") in ("awaiting", "processing", "incipient")
+    }
+    try:
+        r = client.session.post(
+            client.base_url + "/api/wf/api/manual-wf-input/list_wfinput/"
+            "?format=json&limit=200",
+            json={}, verify=client.verify_ssl,
+        )
+        if r.status_code != 200:
+            return
+        items = r.json().get("hydra:member") or []
+    except Exception:  # noqa: BLE001
+        return
+    target = next((it for it in items
+                   if it.get("step_id") in pending_step_ids), None)
+    # Fallback: if we couldn't link via step_id, take the newest input.
+    if target is None and items:
+        target = sorted(items, key=lambda i: i.get("created") or "",
+                        reverse=True)[0]
+    if target is None:
+        return
+    # The list endpoint omits response_mapping; fetch it via retrieve_wfinput.
+    try:
+        rr = client.session.post(
+            client.base_url + f"/api/wf/api/manual-wf-input/{target['id']}/"
+            f"retrieve_wfinput/?format=json",
+            json={}, verify=client.verify_ssl,
+        )
+        if rr.status_code == 200:
+            target = {**target, **rr.json()}
+    except Exception:  # noqa: BLE001
+        pass
+    options = (target.get("response_mapping") or {}).get("options") or []
+    want_label = resume_spec.get("option")
+    chosen = None
+    if want_label:
+        chosen = next((o for o in options if o.get("option") == want_label), None)
+    if chosen is None and options:
+        chosen = next((o for o in options if o.get("primary")), options[0])
+    body = {
+        "input": resume_spec.get("vars") or {},
+        "step_iri": (chosen or {}).get("step_iri"),
+        "step_id": target.get("step_id"),
+        "manual_input_id": int(target.get("id")),
+    }
+    if target.get("is_approval"):
+        body["approved"] = bool((chosen or {}).get("primary"))
+    pr = client.session.post(
+        client.base_url + f"/api/wf/api/workflows/{wf_pk}/wfinput_resume/?format=json",
+        json=body, verify=client.verify_ssl,
+    )
+    log(f"[{run_id}]   resumed manual_input #{target.get('id')} "
+        f"option={(chosen or {}).get('option')!r} HTTP {pr.status_code}")
+
+
 def _poll(client, task_id: str, timeout_s: int, log_dir: Path,
-          log, run_id: str) -> tuple[dict | None, str | None]:
+          log, run_id: str, *, resume_spec: dict | None = None,
+          ) -> tuple[dict | None, str | None]:
     """Poll until terminal. Returns (full_record_with_steps, pk) or (None, None) on timeout."""
     poll_url = (client.base_url + "/api/wf/api/workflows/"
                 "?format=json&limit=1&offset=0&ordering=-modified"
@@ -626,6 +707,9 @@ def _poll(client, task_id: str, timeout_s: int, log_dir: Path,
             if status != last:
                 log(f"[{run_id}]   status: {status}  ({int(time.time() - start)}s)")
                 last = status
+            if status == "awaiting" and resume_spec:
+                wf_pk = (rec.get("@id") or "").rstrip("/").rsplit("/", 1)[-1]
+                _resume_awaiting(client, wf_pk, resume_spec, log, run_id)
             if status in TERMINAL:
                 pk_url = rec.get("@id") or ""
                 full = rec

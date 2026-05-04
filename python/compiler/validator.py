@@ -6,8 +6,397 @@ linear paths terminate, etc.
 """
 from __future__ import annotations
 
+import json
+import re
+import sqlite3
+from pathlib import Path
+
 from .errors import CompileError, ErrorCode
-from .ir import Collection
+from .ir import Collection, Playbook, Step
+
+_DB_PATH = Path(__file__).resolve().parent.parent.parent / "store" / "fsr_reference.db"
+
+# Find every Jinja expression. Non-greedy; tolerates whitespace.
+_JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
+# vars.steps.<key>.<path...> — capture the step jinja-key + the trailing
+# attribute chain. Stops at any non-attribute character (operators,
+# whitespace, brackets, pipes).
+_VARS_STEPS_RE = re.compile(
+    r"\bvars\.steps\.([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z_][A-Za-z0-9_]*"
+    r"|\[\s*(?:\d+|'[^']*'|\"[^\"]*\")\s*\])*)"
+)
+
+
+# Top-level keys present on every workflow's `vars` context at runtime.
+# Setting one of these via SetVariable shadows the FSR-provided value
+# silently, breaking later steps that read it. Sourced from the corpus
+# + live runs (see store/JINJA_IDIOMS.md, /api/wf/api/workflows env dump).
+_RESERVED_VARS_KEYS = {
+    "input",          # trigger payload: records, params
+    "steps",          # per-step output namespace
+    "task_id",        # current workflow task uuid
+    "env",            # workflow environment dict
+    "result",         # last step's result (set automatically by some types)
+    "vars",           # self-reference (would create infinite loop)
+    "globalVars",     # collection-level globals
+    "globals",        # alias used by some step handlers
+    "parent_wf",      # set when invoked via workflow_reference
+    "self",           # reserved by FSR's playbook runtime
+}
+
+# Jinja/Python tokens that would break `vars.steps.<name>` attribute access
+# or get parsed as keywords. Short list — only the ones that actually break.
+_INVALID_JINJA_KEY_TOKENS = {
+    "true", "false", "none", "null",
+    "and", "or", "not", "is", "in", "if", "else", "for",
+    "class", "def", "return", "import", "from", "as", "with",
+}
+
+
+def _step_outgoing(s) -> list[str]:
+    """Yield all outgoing step ids from a step (next + branches + unlabeled)."""
+    out: list[str] = []
+    if s.next:
+        out.append(s.next)
+    out.extend(s.branches.values())
+    out.extend(s.unlabeled_next)
+    return out
+
+
+def _walk_strings(value, *, prefix: str = ""):
+    """Yield (path, string_value) pairs from any nested args structure."""
+    if isinstance(value, str):
+        yield prefix, value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            sub = f"{prefix}.{k}" if prefix else k
+            yield from _walk_strings(v, prefix=sub)
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            yield from _walk_strings(v, prefix=f"{prefix}[{i}]")
+
+
+def _step_output_top_keys(s: Step) -> set[str] | None:
+    """Best-effort top-level output key set for a step.
+    Returns None if we don't know (don't lint that reference).
+    The keys are what would appear immediately after `vars.steps.<name>.`."""
+    if s.type == "set_variable" and isinstance(s.arguments, dict):
+        # SetVariable's output keys are the variable names themselves.
+        if isinstance(s.arguments.get("arg_list"), list):
+            keys = {item["name"] for item in s.arguments["arg_list"]
+                    if isinstance(item, dict) and "name" in item}
+        else:
+            keys = {k for k in s.arguments if k != "step_variables"}
+        return keys
+
+    if s.type == "connector" and isinstance(s.arguments, dict):
+        connector = s.arguments.get("connector")
+        op = s.arguments.get("operation")
+        if not connector or not op:
+            return None
+        try:
+            with sqlite3.connect(_DB_PATH) as conn:
+                row = conn.execute(
+                    "SELECT output_schema_json, output_schema_observed "
+                    "FROM operations WHERE connector_name=? AND op_name=?",
+                    (connector, op),
+                ).fetchone()
+        except Exception:  # noqa: BLE001
+            return None
+        if not row:
+            return None
+        for blob in (row[1], row[0]):  # observed wins
+            if not blob:
+                continue
+            try:
+                shape = json.loads(blob)
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(shape, dict):
+                return set(shape.keys())
+        return None
+
+    if s.type == "find_record":
+        # FindRecords returns a hydra:Collection-shaped envelope. Top-level
+        # keys are the canonical hydra ones. Skip strict validation for
+        # this — most authors index `[0]` directly.
+        return {"@context", "@id", "@type", "hydra:member",
+                "hydra:totalItems", "hydra:itemsPerPage"}
+
+    if s.type == "manual_input":
+        # Output is the resumed input + chosen option.
+        return {"input", "option", "user", "username", "datetime"}
+
+    # Unknown — code_snippet, workflow_reference, decision, delay,
+    # create_record, update_record, start*, etc.
+    return None
+
+
+def _check_jinja_paths(pb: Playbook, pi: int,
+                       errors: list[CompileError]) -> None:
+    """Catch `{{ vars.steps.<name>... }}` references that don't resolve.
+
+    Two failure modes:
+      1. The named step doesn't exist (typo) — error.
+      2. The first attribute after the step name isn't in the step's
+         declared/observed output schema — warning (we may have the
+         wrong shape; observed schemas are more authoritative).
+    """
+    path = f"playbooks[{pi}]"
+    by_jinja_key: dict[str, Step] = {}
+    for s in pb.steps:
+        sname = s.name or s.id
+        by_jinja_key[sname.replace(" ", "_")] = s
+
+    # `vars.steps.input` is also a valid alias on some FSR versions;
+    # treat the literal token 'input' as never-a-step.
+    for si, s in enumerate(pb.steps):
+        spath = f"{path}.steps[{si}]"
+        for sub, val in _walk_strings(s.arguments):
+            for jm in _JINJA_EXPR_RE.finditer(val):
+                expr = jm.group(1)
+                for m in _VARS_STEPS_RE.finditer(expr):
+                    key = m.group(1)
+                    rest = m.group(2) or ""
+                    target = by_jinja_key.get(key)
+                    if target is None:
+                        # Don't flag references to steps that exist with the
+                        # same name but different casing/spaces — emitter
+                        # already collisions-checks. Just unknown ones.
+                        suggestion = _closest_step(key, by_jinja_key.keys())
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(f"Jinja reference vars.steps.{key}{rest} "
+                                     f"in step {s.id!r}: no step with "
+                                     f"jinja-key {key!r} in this playbook"),
+                            path=f"{spath}.arguments.{sub}",
+                            near=suggestion,
+                            suggestion=(f"did you mean vars.steps.{suggestion}?"
+                                        if suggestion else None),
+                            severity="error",
+                        ))
+                        continue
+                    # Validate first attribute against known top-level keys.
+                    if not rest.startswith("."):
+                        continue
+                    first_attr = rest.lstrip(".").split(".", 1)[0].split("[", 1)[0]
+                    if not first_attr:
+                        continue
+                    keys = _step_output_top_keys(target)
+                    if keys is None or first_attr in keys:
+                        continue
+                    # FSR exposes `status`/`result` on every step in addition
+                    # to the handler's payload — never flag those.
+                    if first_attr in {"status", "result", "id", "name",
+                                      "uuid", "@id", "@type", "step_id"}:
+                        continue
+                    valid = sorted(keys)[:8]
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"Jinja reference vars.steps.{key}.{first_attr} "
+                                 f"in step {s.id!r}: {first_attr!r} is not in "
+                                 f"step {target.id!r}'s output keys "
+                                 f"({', '.join(valid)})"),
+                        path=f"{spath}.arguments.{sub}",
+                        severity="warning",
+                    ))
+
+
+def _closest_step(needle: str, hay) -> str | None:
+    import difflib
+    matches = difflib.get_close_matches(needle, list(hay), n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
+def _check_reserved_names(pb: Playbook, pi: int,
+                          errors: list[CompileError]) -> None:
+    """Catch SetVariable/parameters/step names that collide with FSR's
+    runtime vars context. A SetVariable named `result` silently shadows
+    `vars.result` (the last step's auto-result). A step named `for` or
+    `class` produces a `vars.steps.for` key that breaks attribute-style
+    Jinja access.
+    """
+    path = f"playbooks[{pi}]"
+
+    # Playbook parameter names → vars.input.params.<name>; collisions with
+    # `records` (the other key under vars.input) are silently shadowed.
+    for j, p in enumerate(pb.parameters):
+        if p in {"records"}:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"playbook parameter {p!r} shadows "
+                         f"vars.input.records (the trigger record list)"),
+                path=f"{path}.parameters[{j}]",
+                severity="error",
+            ))
+
+    for si, s in enumerate(pb.steps):
+        spath = f"{path}.steps[{si}]"
+        # Step names → vars.steps.<name> Jinja keys. Spaces become
+        # underscores; case is preserved.
+        sname = s.name or s.id
+        jinja_key = sname.replace(" ", "_")
+        if jinja_key.lower() in _INVALID_JINJA_KEY_TOKENS:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"step name {sname!r} normalises to Jinja key "
+                         f"{jinja_key!r}, which is a reserved keyword — "
+                         f"`vars.steps.{jinja_key}` won't parse"),
+                path=f"{spath}.name",
+                severity="error",
+            ))
+        if jinja_key and not (jinja_key[0].isalpha() or jinja_key[0] == "_"):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"step name {sname!r} starts with {jinja_key[0]!r}; "
+                         f"Jinja attribute access `vars.steps.{jinja_key}` "
+                         f"requires identifier-style names (letter or _)"),
+                path=f"{spath}.name",
+                severity="error",
+            ))
+
+        # SetVariable arg names → vars.<name>. Collisions with reserved
+        # top-level keys silently overwrite the FSR-provided value.
+        if s.type == "set_variable" and isinstance(s.arguments, dict):
+            # Both shapes: flat dict {name: value} OR arg_list:[{name,value}]
+            names: list[tuple[str, str]] = []  # (var_name, sub-path)
+            if isinstance(s.arguments.get("arg_list"), list):
+                for k, item in enumerate(s.arguments["arg_list"]):
+                    if isinstance(item, dict) and "name" in item:
+                        names.append((item["name"], f"arg_list[{k}].name"))
+            else:
+                for k in s.arguments:
+                    if k in {"step_variables"}:  # framework key, not a var
+                        continue
+                    names.append((k, k))
+            for n, sub in names:
+                if n in _RESERVED_VARS_KEYS:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"SetVariable {n!r} shadows FSR's reserved "
+                                 f"vars.{n} — pick a different name (downstream "
+                                 f"steps that read vars.{n} will break)"),
+                        path=f"{spath}.arguments.{sub}",
+                        severity="error",
+                    ))
+
+
+def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
+    """Graph-level lint: cycles, unreachable steps, decision branch
+    coverage. Targeting non-existent step ids is already caught by
+    resolver._check_routing (UNKNOWN_NEXT_STEP)."""
+    path = f"playbooks[{pi}]"
+    if not pb.steps:
+        return
+    by_id: dict[str, object] = {s.id: s for s in pb.steps}
+    trigger_id = pb.trigger_step_id
+    if not trigger_id:
+        # First step whose type starts with 'start' is the canonical fallback.
+        for s in pb.steps:
+            if s.type.startswith("start"):
+                trigger_id = s.id
+                break
+    if trigger_id is None or trigger_id not in by_id:
+        return  # NO_TRIGGER already reported
+
+    # 1. Reachability: BFS from trigger.
+    reachable: set[str] = set()
+    frontier = [trigger_id]
+    while frontier:
+        sid = frontier.pop()
+        if sid in reachable:
+            continue
+        reachable.add(sid)
+        s = by_id.get(sid)
+        if s is None:
+            continue
+        for nxt in _step_outgoing(s):
+            if nxt not in reachable and nxt in by_id:
+                frontier.append(nxt)
+    for si, s in enumerate(pb.steps):
+        if s.id not in reachable:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"step {s.id!r} ({s.name or s.type}) is unreachable "
+                         f"from the trigger — no step's next/branches "
+                         f"point to it"),
+                path=f"{path}.steps[{si}]",
+                severity="warning",
+            ))
+
+    # 2. Cycles: directed-graph DFS with grey/black colouring.
+    WHITE, GREY, BLACK = 0, 1, 2
+    color = {sid: WHITE for sid in by_id}
+    cycle_reported: set[tuple[str, str]] = set()
+
+    def dfs(sid: str, stack: list[str]) -> None:
+        s = by_id.get(sid)
+        if s is None:
+            return
+        color[sid] = GREY
+        stack.append(sid)
+        for nxt in _step_outgoing(s):
+            if nxt not in by_id:
+                continue
+            if color.get(nxt) == GREY:
+                # Back-edge — found a cycle. Report once per (src, dst) pair.
+                key = (sid, nxt)
+                if key in cycle_reported:
+                    continue
+                cycle_reported.add(key)
+                # Trim the stack to the cycle.
+                if nxt in stack:
+                    cycle = stack[stack.index(nxt):] + [nxt]
+                else:
+                    cycle = [nxt, sid, nxt]
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"cycle in playbook {pb.name!r}: "
+                             f"{' → '.join(cycle)}; FSR will not loop, "
+                             f"the run will stall or error"),
+                    path=f"{path}.steps",
+                    severity="error",
+                ))
+            elif color.get(nxt) == WHITE:
+                dfs(nxt, stack)
+        stack.pop()
+        color[sid] = BLACK
+
+    dfs(trigger_id, [])
+
+    # 3. Decision branch coverage: every conditions[].option should have
+    # a branches[] entry or a default `next:` fall-through.
+    for si, s in enumerate(pb.steps):
+        if s.type != "decision":
+            continue
+        args = s.arguments if isinstance(s.arguments, dict) else {}
+        conds = args.get("conditions") or []
+        if not isinstance(conds, list):
+            continue
+        option_labels = []
+        for c in conds:
+            if isinstance(c, dict) and "option" in c:
+                option_labels.append(c["option"])
+        for label in option_labels:
+            if label not in s.branches and not s.next:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"decision {s.id!r}: option {label!r} has no "
+                             f"branch target (add `branches: {{{label}: "
+                             f"<step_id>}}` or a default `next:`)"),
+                    path=f"{path}.steps[{si}].branches",
+                    severity="error",
+                ))
+        # Stale branch keys (point to nothing in conditions list).
+        for label in s.branches:
+            if option_labels and label not in option_labels:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"decision {s.id!r}: branch label {label!r} is "
+                             f"not in conditions[].option (typo? unused?)"),
+                    path=f"{path}.steps[{si}].branches.{label}",
+                    severity="warning",
+                ))
 
 
 def validate(collection: Collection) -> list[CompileError]:
@@ -29,6 +418,9 @@ def validate(collection: Collection) -> list[CompileError]:
 
     for pi, pb in enumerate(collection.playbooks):
         path = f"playbooks[{pi}]"
+        _check_graph(pb, pi, errors)
+        _check_reserved_names(pb, pi, errors)
+        _check_jinja_paths(pb, pi, errors)
 
         # Step names must be unique within a playbook. FSR's Jinja runtime
         # exposes step output at `vars.steps.<Name_with_underscores>`, so
