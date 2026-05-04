@@ -112,7 +112,7 @@ def _step_output_top_keys(s: Step) -> set[str] | None:
                 shape = json.loads(blob)
             except Exception:  # noqa: BLE001
                 continue
-            if isinstance(shape, dict):
+            if isinstance(shape, dict) and shape:
                 return set(shape.keys())
         return None
 

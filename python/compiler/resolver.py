@@ -191,7 +191,7 @@ class Resolver:
             self._normalize_code_snippet_args(step)
 
         if step.type == "manual_input":
-            self._normalize_manual_input_args(step)
+            self._normalize_manual_input_args(step, path, errors)
 
         # `stop` / `end` synthesize the canonical Utils: No Operation call,
         # then fall through to connector arg resolution.
@@ -421,14 +421,163 @@ class Resolver:
             a.setdefault("collectionType", iri)
         step.arguments = a
 
-    def _normalize_manual_input_args(self, step: Step) -> None:
+    # Friendly `kind:` → canonical (formType, dataType, type, templateUrl)
+    # for the inputVariables section of a manual_input step. Verified
+    # against live FSR exports under fortisoar/SPs/playbooks/.
+    _INPUT_FIELD_KINDS: dict[str, dict[str, Any]] = {
+        "text":     {"formType": "text",     "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
+        "textarea": {"formType": "textarea", "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
+        "richtext": {"formType": "html",     "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/htmlEditor.html"},
+        "html":     {"formType": "html",     "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/htmlEditor.html"},
+        "email":    {"formType": "email",    "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
+        "url":      {"formType": "url",      "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
+        "password": {"formType": "password", "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
+        "integer":  {"formType": "integer",  "dataType": "text",        "type": "integer", "templateUrl": "app/components/form/fields/input.html"},
+        "number":   {"formType": "integer",  "dataType": "text",        "type": "integer", "templateUrl": "app/components/form/fields/input.html"},
+        "checkbox": {"formType": "checkbox", "dataType": "checkbox",    "type": "boolean", "templateUrl": "app/components/form/fields/checkbox.html"},
+        "boolean":  {"formType": "checkbox", "dataType": "checkbox",    "type": "boolean", "templateUrl": "app/components/form/fields/checkbox.html"},
+        "select":   {"formType": "dynamicList", "dataType": "dynamicList", "type": "array",  "templateUrl": "app/components/form/fields/dynamicList.html"},
+        "datetime": {"formType": "datetime", "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
+        "json":     {"formType": "object",   "dataType": "lookup",      "type": "object",  "templateUrl": "app/components/form/fields/json.html"},
+    }
+
+    # Per-kind humanised "title" shown next to the field in the FSR UI.
+    _INPUT_FIELD_TITLE: dict[str, str] = {
+        "text": "Text", "textarea": "Text Area", "richtext": "Rich Text (HTML)",
+        "html": "Rich Text (HTML)", "email": "Email", "url": "URL",
+        "password": "Password", "integer": "Integer", "number": "Integer",
+        "checkbox": "Checkbox", "boolean": "Checkbox", "select": "Dynamic List",
+        "datetime": "Datetime", "json": "JSON",
+    }
+
+    def _expand_input_variables(
+        self, raw: Any, path: str, errors: list[CompileError],
+    ) -> list[dict[str, Any]]:
+        """Expand the friendly `inputs:` list into FSR's canonical
+        inputVariables shape.
+
+        Friendly per-field keys:
+          name      — required; variable name (referenced after resume as
+                      `vars.steps.<step_name>.input.<name>`)
+          kind      — required; one of text, textarea, richtext, email,
+                      url, password, integer, checkbox, select, datetime,
+                      json. Determines formType / dataType / templateUrl.
+          label     — display label; defaults to `name`
+          tooltip   — optional helper text
+          required  — bool, default false
+          default   — default value (literal or jinja)
+          options   — for kind=select; list of strings or jinja that
+                      resolves to a list
+
+        Already-expanded entries (those carrying their own formType +
+        templateUrl) pass through untouched, so authors who need a
+        bespoke field shape can still drop in raw FSR inputVariable
+        dicts.
+        """
+        if not isinstance(raw, list):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="manual_input.arguments.inputs must be a list",
+                path=f"{path}.arguments.inputs",
+            ))
+            return []
+        out: list[dict[str, Any]] = []
+        for i, item in enumerate(raw):
+            ipath = f"{path}.arguments.inputs[{i}]"
+            if not isinstance(item, dict):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message="each `inputs[]` entry must be a mapping",
+                    path=ipath,
+                ))
+                continue
+            # Pass-through escape hatch — if the author wrote the full
+            # canonical shape (or anything close), trust them.
+            if "formType" in item and "templateUrl" in item:
+                out.append(item)
+                continue
+            name = item.get("name")
+            kind = item.get("kind") or item.get("type")
+            if not name:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message="`inputs[].name` is required",
+                    path=f"{ipath}.name",
+                ))
+                continue
+            if not kind or kind not in self._INPUT_FIELD_KINDS:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        f"`inputs[].kind` must be one of "
+                        f"{', '.join(sorted(self._INPUT_FIELD_KINDS))}; "
+                        f"got {kind!r}"
+                    ),
+                    path=f"{ipath}.kind",
+                ))
+                continue
+            spec = self._INPUT_FIELD_KINDS[kind]
+            # Strict per-entry whitelist — surface obvious typos.
+            allowed = {"name", "kind", "type", "label", "tooltip",
+                       "required", "default", "options"}
+            unknown = sorted(set(item) - allowed)
+            if unknown:
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    message=(
+                        f"unknown key(s) on inputs[] entry: "
+                        f"{', '.join(repr(k) for k in unknown)}"
+                    ),
+                    path=ipath,
+                    suggestion=(
+                        "friendly keys: name, kind, label, tooltip, "
+                        "required, default, options"
+                    ),
+                ))
+                continue
+            field: dict[str, Any] = {
+                "name": name,
+                "type": spec["type"],
+                "label": item.get("label") or name,
+                "title": self._INPUT_FIELD_TITLE.get(kind, kind.title()),
+                "usable": True,
+                "tooltip": item.get("tooltip", ""),
+                "dataType": spec["dataType"],
+                "formType": spec["formType"],
+                "required": bool(item.get("required", False)),
+                "_expanded": True,
+                "templateUrl": spec["templateUrl"],
+                "defaultValue": item.get("default"),
+                "_previousName": "",
+                "playbookField": True,
+                "jinjaExpressionView": True,
+                "useRecordFieldDefault": False,
+            }
+            if kind == "select":
+                opts = item.get("options")
+                if opts is None:
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message="`kind: select` needs `options:` (list or jinja)",
+                        path=f"{ipath}.options",
+                    ))
+                    continue
+                field["options"] = opts
+            out.append(field)
+        return out
+
+    def _normalize_manual_input_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
         """Friendly manual_input authoring shape:
 
             arguments:
               title: "Approve?"
               description: "Optional markdown body"
               options: [Continue]                  # or [{option: yes, primary: true}, {option: no}]
-              inputs: []                           # optional input variables to collect
+              inputs:                              # optional fields to collect
+                - {name: comment, kind: textarea, label: "Comment", required: true}
+                - {name: severity, kind: select, options: [Low, Med, High]}
 
         Expands to FSR's canonical InputBased shape (input.schema +
         response_mapping + the dozen always-present sibling fields).
@@ -436,6 +585,66 @@ class Resolver:
         pass through untouched.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Hard rule: if `input` is provided, it MUST be a dict. FSR's
+        # runtime calls .get() on it. Producing a string here is a common
+        # LLM failure mode that previously slipped through to a runtime
+        # crash (`'str' object has no attribute 'get'`).
+        raw_input = a.get("input")
+        if raw_input is not None and not isinstance(raw_input, dict):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"manual_input.arguments.input must be a mapping "
+                    f"(got {type(raw_input).__name__}); FSR will crash with "
+                    f"\"'str' object has no attribute 'get'\""
+                ),
+                path=f"{path}.arguments.input",
+                suggestion='use: input: { title: "...", options: [...] }',
+            ))
+            return
+        # Strict whitelist — every working ManualInput in the corpus uses
+        # only these keys. Unknown keys (`label`, `message`, `textarea`,
+        # `timeout`, etc.) compile but get dropped at runtime; flag them
+        # so the author sees the mistake before push.
+        _FRIENDLY = {"title", "description", "options", "inputs"}
+        _CANONICAL = {
+            "type", "input", "record", "is_approval", "isRecordLinked",
+            "owner_detail", "step_variables", "response_mapping",
+            "email_notification", "inline_channel_list",
+            "external_channel_list", "unauthenticated_input", "resources",
+        }
+        unknown = sorted(set(a) - _FRIENDLY - _CANONICAL)
+        if unknown:
+            errors.append(CompileError(
+                code=ErrorCode.UNKNOWN_PARAM,
+                message=(
+                    f"manual_input: unknown argument(s) "
+                    f"{', '.join(repr(k) for k in unknown)}; "
+                    f"FSR drops these silently at runtime"
+                ),
+                path=f"{path}.arguments",
+                suggestion=(
+                    "friendly form: title, description, options, inputs · "
+                    "canonical form: type=InputBased, input.schema, "
+                    "response_mapping, record, owner_detail, …"
+                ),
+            ))
+            return
+        # `type` if provided must be a known FSR ManualInput dispatch
+        # value. Corpus only ever shows "InputBased"; reject anything
+        # else (covers `type: textarea`, `type: single-select`, etc.).
+        t = a.get("type")
+        if t is not None and t != "InputBased":
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"manual_input.arguments.type must be 'InputBased' "
+                    f"(got {t!r}); FSR has no other dispatch path"
+                ),
+                path=f"{path}.arguments.type",
+                suggestion="omit `type:` to let the compiler fill it in",
+            ))
+            return
         if isinstance(a.get("input"), dict) and isinstance(
                 a.get("response_mapping"), dict):
             step.arguments = a
@@ -452,12 +661,13 @@ class Resolver:
         if options and not any(o.get("primary") for o in options):
             options[0]["primary"] = True
         inputs = a.pop("inputs", None) or []
+        expanded_inputs = self._expand_input_variables(inputs, path, errors)
         a["type"] = a.get("type", "InputBased")
         a["input"] = {
             "schema": {
                 "title": title,
                 "description": description,
-                "inputVariables": inputs,
+                "inputVariables": expanded_inputs,
             },
         }
         a.setdefault("record", "")

@@ -47,4 +47,4 @@ playbooks:
         arguments:
           collection: indicators
           resource:
-            tags: "{{ vars.steps.find.records[0].tags + [vars.input.params.tag] }}"
+            tags: "{{ vars.steps.find['hydra:member'][0].tags + [vars.input.params.tag] }}"

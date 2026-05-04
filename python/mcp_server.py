@@ -534,14 +534,359 @@ def _record_verification(connector: str, op: str, status: str, notes: str) -> No
 # get_step_type
 # ---------------------------------------------------------------------------
 
+# Friendly YAML short names → canonical FSR step type names. Mirrors
+# compiler.resolver.SHORT_TYPE_TO_FSR; duplicated here to avoid a
+# resolver import in the MCP layer.
+_SHORT_TO_CANONICAL: dict[str, str] = {
+    "connector": "Connectors",
+    "set_variable": "SetVariable",
+    "decision": "Decision",
+    "start": "cybersponse.abstract_trigger",
+    "find_record": "FindRecords",
+    "update_record": "UpdateRecord",
+    "create_record": "InsertData",
+    "insert_record": "InsertData",
+    "delay": "Delay",
+    "manual_input": "ManualInput",
+    "code_snippet": "CodeSnippet",
+    "approval": "Approval",
+    "workflow_reference": "WorkflowReference",
+    "stop": "Connectors",
+    "end": "Connectors",
+    "start_on_create": "cybersponse.post_create",
+    "start_on_update": "cybersponse.post_update",
+}
+
+# Friendly authoring forms the compiler resolver normalizes. The AI
+# should prefer these over the wire form when both work — they're
+# shorter, more readable, and harder to malform. Keys that aren't in
+# the friendly schema are rejected by the resolver. Coverage matches
+# every short type the resolver handles in compiler.resolver.
+_FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
+    "start": {
+        "accepted_keys": ["module", "modules", "button_label",
+                          "requires_record", "run_mode"],
+        "note": (
+            "Manual / designer trigger. With NO `module:` it's a pure "
+            "designer trigger (cybersponse.abstract_trigger). With a "
+            "`module:` set it becomes a record-context Execute action "
+            "(cybersponse.action) — `button_label:` is what the user "
+            "sees in the Execute menu (NOT the step name). "
+            "`run_mode: per_record` (default) or `once_for_all`."
+        ),
+        "example": {
+            "type": "start",
+            "name": "Run",
+            "arguments": {
+                "module": "alerts",
+                "button_label": "Enrich This Alert",
+                "run_mode": "per_record",
+            },
+        },
+    },
+    "start_on_create": {
+        "accepted_keys": ["module", "modules", "when"],
+        "note": (
+            "Auto-fires whenever a record is created in `module`. "
+            "Optional `when:` filters by post-write field state."
+        ),
+        "when_shape": (
+            "{logic: AND|OR, filters: [{field, op, value?}, ...]} — "
+            "use string-typed fields or `op: changed` (changed only on "
+            "start_on_update); LIKE against picklist fields will not match."
+        ),
+        "example": {
+            "type": "start_on_create",
+            "arguments": {
+                "module": "alerts",
+                "when": {
+                    "logic": "AND",
+                    "filters": [{"field": "name", "op": "contains",
+                                 "value": "phish"}],
+                },
+            },
+        },
+    },
+    "start_on_update": {
+        "accepted_keys": ["module", "modules", "when"],
+        "note": (
+            "Auto-fires whenever a record in `module` is updated. "
+            "`op: changed` lets you fire only when a specific field "
+            "changed value (no `value:` needed)."
+        ),
+        "example": {
+            "type": "start_on_update",
+            "arguments": {
+                "module": "alerts",
+                "when": {
+                    "logic": "AND",
+                    "filters": [{"field": "status", "op": "changed"}],
+                },
+            },
+        },
+    },
+    "set_variable": {
+        "accepted_keys": "flat dict of {var_name: value}",
+        "example": {
+            "type": "set_variable",
+            "name": "Stash inputs",
+            "arguments": {
+                "source_ip": "{{ vars.input.records[0].sourceIp }}",
+                "verdict": "pending",
+            },
+        },
+        "do_not_use": [
+            "arg_list: [{name, value}, ...] — legacy sugar; use flat dict",
+        ],
+    },
+    "decision": {
+        "accepted_keys": ["conditions"],
+        "branches": (
+            "every conditions[].option must have a branches[label] entry; "
+            "fall-through goes on the decision step's `next:`, NOT a branch"
+        ),
+        "example": {
+            "type": "decision",
+            "arguments": {
+                "conditions": [
+                    {"option": "Critical", "condition": "{{ vars.score > 50 }}"},
+                ],
+            },
+            "branches": {"Critical": "set_critical"},
+            "next": "set_low",
+        },
+        "do_not_use": [
+            "branch labels that aren't in conditions[].option — "
+            "use `next:` for the catch-all default instead",
+        ],
+    },
+    "connector": {
+        "accepted_keys": ["connector", "operation", "config", "params",
+                          "agent", "version", "pickFromTenant"],
+        "note": (
+            "Always look up the operation first via "
+            "find_operation/get_op_schema — `params` keys are validated "
+            "against the operation_params catalog. `config: \"\"` "
+            "selects the default connector configuration."
+        ),
+        "step_outputs": (
+            "Reference results as `vars.steps.<step_name>.<key>` where "
+            "<step_name> is the step's display NAME with spaces → "
+            "underscores (NOT the YAML id:)."
+        ),
+        "example": {
+            "type": "connector",
+            "name": "Query VirusTotal",
+            "arguments": {
+                "connector": "virustotal",
+                "operation": "query_ip",
+                "config": "",
+                "params": {"ip": "{{ vars.input.params.ip }}"},
+            },
+        },
+    },
+    "stop": {
+        "accepted_keys": [],
+        "example": {"type": "stop", "name": "End"},
+        "note": (
+            "Compiles to the connector handler's no_op (cyops_utilities). "
+            "Use as a decision-branch terminator instead of dangling "
+            "steps or filler set_variable."
+        ),
+    },
+    "end": {
+        "accepted_keys": [],
+        "example": {"type": "end", "name": "End"},
+        "note": "Alias for stop.",
+    },
+    "find_record": {
+        "accepted_keys": ["module", "query", "partial"],
+        "note": (
+            "Returns a hydra envelope. Records are at "
+            "`vars.steps.<name>['hydra:member']`, NOT `.records`. "
+            "`partial: true` returns first page only."
+        ),
+        "query_shape": (
+            "{logic: AND|OR, filters: [{field, operator, value}, ...]}"
+        ),
+        "example": {
+            "type": "find_record",
+            "name": "find",
+            "arguments": {
+                "module": "indicators",
+                "query": {
+                    "logic": "AND",
+                    "filters": [{"field": "value", "operator": "eq",
+                                 "value": "{{ vars.input.params.indicator }}"}],
+                },
+                "partial": True,
+            },
+        },
+    },
+    "create_record": {
+        "accepted_keys": ["module", "resource"],
+        "note": (
+            "`module:` is the friendly module name (alerts, incidents, "
+            "indicators, ...) — compiler converts to the IRI form. "
+            "`resource:` is a flat dict of {field: value}."
+        ),
+        "example": {
+            "type": "create_record",
+            "name": "Create alert",
+            "arguments": {
+                "module": "alerts",
+                "resource": {
+                    "name": "Phishing - {{ vars.input.params.subject }}",
+                    "severity": "{{ 'High' | picklist('severity') }}",
+                },
+            },
+        },
+    },
+    "insert_record": {
+        "accepted_keys": ["module", "resource"],
+        "note": "Alias for create_record (legacy short name).",
+        "example": {
+            "type": "create_record",
+            "name": "Create alert",
+            "arguments": {
+                "module": "alerts",
+                "resource": {"name": "Test alert"},
+            },
+        },
+    },
+    "update_record": {
+        "accepted_keys": ["module", "collection", "resource"],
+        "note": (
+            "`module:` (or `collectionType:`) names the module being "
+            "updated. `collection:` is the RECORD IRI to update — "
+            "usually `\"{{ vars.input.records[0]['@id'] }}\"`. Don't "
+            "confuse the two."
+        ),
+        "example": {
+            "type": "update_record",
+            "name": "Update alert severity",
+            "arguments": {
+                "module": "alerts",
+                "resource": {
+                    "severity": "{{ 'Critical' | picklist('severity') }}",
+                },
+            },
+        },
+    },
+    "delay": {
+        "accepted_keys": ["seconds", "minutes", "hours", "days"],
+        "note": (
+            "Provide one or more units; the compiler builds the canonical "
+            "TimeBased rule with the instance-wide resume_playbook channel."
+        ),
+        "example": {
+            "type": "delay",
+            "name": "Wait",
+            "arguments": {"minutes": 5},
+        },
+    },
+    "manual_input": {
+        "accepted_keys": ["title", "description", "options", "inputs"],
+        "type_value": "InputBased (only valid value; omit to let compiler fill)",
+        "options_shape": "list of strings or {option, primary?} dicts",
+        "branches": "each option label becomes a branches: key on the step",
+        "inputs_shape": (
+            "list of {name, kind, label?, tooltip?, required?, default?, "
+            "options?} — kind is one of: text, textarea, richtext, email, "
+            "url, password, integer, checkbox, select, datetime, json. "
+            "After the operator submits, fields are read at "
+            "`vars.steps.<step_name>.input.<name>`. `kind: select` requires "
+            "`options:` (list of strings or jinja that resolves to a list)."
+        ),
+        "example": {
+            "type": "manual_input",
+            "name": "Triage decision",
+            "arguments": {
+                "title": "Confirm triage",
+                "description": "Review the alert details and approve.",
+                "inputs": [
+                    {"name": "comment", "kind": "textarea",
+                     "label": "Analyst comment", "required": True},
+                    {"name": "severity", "kind": "select",
+                     "label": "Severity",
+                     "options": ["Low", "Medium", "High"]},
+                ],
+                "options": [
+                    {"option": "approve", "primary": True},
+                    {"option": "reject"},
+                ],
+            },
+            "branches": {"approve": "act", "reject": "drop"},
+        },
+        "do_not_use": [
+            "type: textarea / single-select / free-text (no such dispatch — "
+            "use `inputs: [{kind: textarea, ...}]` for a textarea field)",
+            "label, message (not valid keys — use title/description)",
+            "timeout (FSR ignores it)",
+            "vars.steps.<id>.input.choice (does not exist; route via branches)",
+        ],
+    },
+    "code_snippet": {
+        "accepted_keys": ["code", "config"],
+        "note": (
+            "`code:` is the Python body. `config:` is an optional named "
+            "code-snippet connector config; defaults to the default config."
+        ),
+        "example": {
+            "type": "code_snippet",
+            "name": "Compute",
+            "arguments": {"code": "result = inputs['x'] * 2"},
+        },
+    },
+    "workflow_reference": {
+        "accepted_keys": ["target", "workflowReference", "arguments"],
+        "note": (
+            "Either `target: <playbook_name>` (resolved within the same "
+            "collection) OR `workflowReference: /api/3/workflows/<uuid>` "
+            "for cross-collection refs. `arguments:` keys must match the "
+            "target's declared `parameters:` list. Child output is at "
+            "`vars.steps.<call_step_name>.<key>` — does NOT auto-merge "
+            "into parent vars."
+        ),
+        "example": {
+            "type": "workflow_reference",
+            "name": "Call Score Multiplier",
+            "arguments": {
+                "target": "FSRPB Score Multiplier",
+                "arguments": {"score": "{{ vars.input.params.base_score }}"},
+            },
+        },
+    },
+    "approval": {
+        "accepted_keys": "pass-through (canonical FSR Approval shape)",
+        "note": (
+            "No friendly form yet. Use the canonical Approval wire shape "
+            "from `args_schema_json` / `examples`."
+        ),
+    },
+}
+
+
 @mcp.tool()
-def get_step_type(name: str) -> dict[str, Any]:
+def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
     """Return schema and examples for a playbook step type.
 
-    `name` can be a partial match (e.g. 'connector', 'set_variable',
-    'decision').  Returns the step type definition and up to 3 real
-    examples mined from production playbooks.
+    `name` can be the friendly YAML short type (`manual_input`,
+    `set_variable`, `decision`, ...) or the canonical FSR name
+    (`ManualInput`, `SetVariable`, `Decision`). Friendly short names
+    map to their canonical form. The response includes a
+    `friendly_form` block with the YAML-author-facing schema (the
+    keys our compiler accepts) — prefer that over the wire-format
+    `args_schema_json` when authoring YAML.
+
+    By default the response is slim (~1–2 KB): the friendly_form
+    suffices for authoring and raw corpus examples are omitted. Pass
+    `verbose=True` for the full corpus dump (3 examples, no caps) —
+    only useful when debugging an unusual case the friendly_form
+    doesn't cover.
     """
+    short = name
+    canonical = _SHORT_TO_CANONICAL.get(name, name)
     with _db() as conn:
         rows = _rows(
             conn,
@@ -550,14 +895,13 @@ def get_step_type(name: str) -> dict[str, Any]:
                   OR name LIKE '%'||?||'%'
                ORDER BY (name=?) DESC
                LIMIT 1""",
-            (name, name, name),
+            (canonical, canonical, canonical),
         )
         if not rows:
-            # broader search
             rows = _rows(
                 conn,
                 "SELECT * FROM step_types WHERE name LIKE '%'||?||'%' LIMIT 1",
-                (name,),
+                (canonical,),
             )
         if not rows:
             return {"error": f"step type '{name}' not found"}
@@ -570,11 +914,26 @@ def get_step_type(name: str) -> dict[str, Any]:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+        # Examples are noisy for the LLM — one corpus playbook can drag
+        # in a whole 18 KB Python code blob (verified: code_snippet).
+        # When we have a friendly_form, that block already contains a
+        # concise example, so skip the corpus dump unless verbose=True.
+        # Otherwise, return at most one example and cap it.
+        if short in _FRIENDLY_FORMS:
+            st["friendly_form"] = _FRIENDLY_FORMS[short]
+            if not verbose:
+                st["examples_note"] = (
+                    "raw corpus examples omitted; use the example in "
+                    "friendly_form. Call get_step_type(verbose=True) "
+                    "to fetch them."
+                )
+                return st
+        limit = 3 if verbose else 1
         examples = _rows(
             conn,
             """SELECT from_playbook, snippet_json FROM step_examples
-               WHERE step_type_name=? LIMIT 3""",
-            (st["name"],),
+               WHERE step_type_name=? LIMIT ?""",
+            (st["name"], limit),
         )
         for ex in examples:
             if ex.get("snippet_json"):
@@ -582,6 +941,13 @@ def get_step_type(name: str) -> dict[str, Any]:
                     ex["snippet_json"] = json.loads(ex["snippet_json"])
                 except (json.JSONDecodeError, TypeError):
                     pass
+            if not verbose:
+                blob = json.dumps(ex.get("snippet_json"), default=str)
+                if len(blob) > 2048:
+                    ex["snippet_json"] = (
+                        f"<{len(blob)} chars truncated — call with "
+                        f"verbose=True for full payload>"
+                    )
         st["examples"] = examples
         return st
 

@@ -2,6 +2,62 @@
 
 **Last touched**: 2026-05-03. Live FSR target: `https://10.99.249.205` (label `dev`).
 
+## Backlog (parked 2026-05-04)
+
+Captured mid-session when we pivoted to the editor "save" problem. Each
+item is a real follow-up grounded in something the session exposed.
+
+1. **Apply the strict-whitelist pattern to the other resolver normalizers.**
+   `manual_input` now hard-errors on unknown keys and on bad `type:` values
+   (silent-drop trap fixed). The same trap still exists for `delay`,
+   `code_snippet`, `start_on_create` / `start_on_update`, and the record
+   CRUD trio (`create_record`, `update_record`, `find_record`). Add a
+   per-handler accepted-keys check + fail-on-unknown the way
+   `_normalize_manual_input_args` does. Template: `compiler/resolver.py`,
+   the `_FRIENDLY` / `_CANONICAL` whitelists pattern. ~30 min.
+
+2. **Slim the other big tools the way `get_step_type` was slimmed.**
+   Token analyzer is built (`fsrpb chat-stats`, `web/backend/usage.jsonl`).
+   Run it after a real chat session and trim whatever sits at the top of
+   the tool-cost ranking. Likely candidates: `search_playbooks` (full
+   snippet JSON × N), `validate_yaml` (returns the entire compiled
+   collection), `decompile`. Pattern: add a `verbose: bool = False`
+   parameter and a default cap, mirroring `get_step_type`. ~1 hr after
+   seeing real data.
+
+3. **Investigate the `--mode upsert` HTTP 400.** Every push to
+   `/api/3/bulkupsert/workflow_collections` 500s with a generic
+   `TypeError` from FSR. Replace mode works as a workaround. Either fix
+   the payload shape or remove the `upsert` option from `cli.py:cmd_push`
+   and document why. Reproduce with `fsrpb push --mode upsert <yaml>`.
+   ~1 hr.
+
+4. **Roundtrip test against the friendly-form examples.** Decompile →
+   recompile may regress YAMLs from friendly form to canonical wire form
+   after the recent friendly-form work. Run `fsrpb roundtrip` on the 11
+   demo examples and confirm nothing diverges semantically. ~15 min smoke.
+
+5. **Smoke test for the 9 examples without `.test.yaml` sidecars**
+   (`decision_branch`, `find_and_update`, `hello_connector`,
+   `ip_reputation_check`, `ip_reputation_check_abuseipdb`,
+   `manual_input_then_act`, `parent_calls_child`, `test_complex_e2e`,
+   `test_manual_input_e2e`). Some genuinely can't be run blind, but a
+   "compile + push + check link 200" smoke per example would catch
+   regressions like the URL-pattern bug we just fixed
+   (`cli.py:cmd_push`'s post-push GET on `/api/3/workflows/<uuid>`).
+
+6. **History tab (started, parked).** `web/backend/history.py` written
+   with the schema (`pushes`, `push_workflows`, `chat_sessions`,
+   `chat_turns`, `chat_tool_calls`) + writers, readers, YAML diff helper,
+   chat↔push correlation via `~/.fsrpb/active_session`. **Not yet wired
+   in** — `cli.py:cmd_push` and `web/backend/llm/anthropic_provider.py`
+   still need to call `record_push()` / `record_chat_turn()`, and the
+   `/api/history` FastAPI endpoints + Svelte `/history` page are TODO.
+   Resume by importing `from history import …` in those two writers and
+   adding the route handlers; reader functions are already shaped for
+   the UI.
+
+
 ## Recent changes (most-recent first)
 
 - **2026-05-03 — Jinja corpus mining**: new `probe_jinja_corpus` walks 1,669 live workflows, extracts every `{{…}}`/`{%…%}` block (19,305 total → 7,789 unique idioms), populates `jinja_expressions` (kind=expr/set/for/if/macro/…) and `jinja_filter_usage`. Most-used real example auto-promoted onto `jinja_macros.example`. New table column `jinja_macros.curated_doc` + 13 hand-written long-form filter docs (json_query JMESPath syntax breakdown, picklist, fromIRI, resolveRange, map, selectattr, regex_search, regex_replace, ternary, default, dict2items, flatten, from_json/to* family). New MCP tool `find_jinja_pattern(q, kind)` and enriched `find_jinja_filter` / `get_filter_examples`.

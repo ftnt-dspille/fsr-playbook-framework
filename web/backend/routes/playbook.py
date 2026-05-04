@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api", tags=["playbook"])
 
 
 def _cli_cmd(*args: str) -> list[str]:
-    return [sys.executable, "-m", "cli", *args]
+    return [sys.executable, "-W", "ignore::Warning", "-m", "cli", *args]
 
 
 def _cli_env() -> dict[str, str]:
@@ -39,7 +39,37 @@ def _cli_env() -> dict[str, str]:
     env["PYTHONPATH"] = (
         str(PYTHON_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     )
+    # Belt-and-braces — even with -W, some libs print to stderr directly.
+    env.setdefault("PYTHONWARNINGS", "ignore")
     return env
+
+
+_NOISE_RE = re.compile(
+    r"(InsecureRequestWarning|Unverified HTTPS request|"
+    r"urllib3\.readthedocs\.io|warnings\.warn\()"
+)
+
+
+def _scrub(text: str) -> str:
+    """Strip urllib3 self-signed-cert warning noise from CLI output."""
+    if not text:
+        return text
+    if os.environ.get("FSR_SUPPRESS_INSECURE_WARNING", "true").lower() == "false":
+        return text
+    out: list[str] = []
+    skip_next = False
+    for line in text.splitlines():
+        if _NOISE_RE.search(line):
+            skip_next = True
+            continue
+        if skip_next:
+            # The warning block is usually 2-3 lines; drop indented or
+            # empty trailing lines that follow it.
+            if line.startswith((" ", "\t")) or line.strip() == "":
+                continue
+            skip_next = False
+        out.append(line)
+    return "\n".join(out)
 
 
 class PushIn(BaseModel):
@@ -74,8 +104,8 @@ def push(body: PushIn) -> PushOut:
         )
         return PushOut(
             ok=proc.returncode == 0,
-            stdout=proc.stdout,
-            stderr=proc.stderr,
+            stdout=_scrub(proc.stdout),
+            stderr=_scrub(proc.stderr),
             exit_code=proc.returncode,
         )
     finally:
@@ -116,6 +146,8 @@ async def run_playbook(body: RunIn) -> EventSourceResponse:
             assert proc.stdout is not None
             async for raw in proc.stdout:
                 line = raw.decode("utf-8", "replace").rstrip("\n")
+                if _NOISE_RE.search(line):
+                    continue
                 if task_id is None:
                     m = _TASK_ID_RE.search(line)
                     if m:

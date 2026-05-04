@@ -47,7 +47,7 @@ const STEP_SNIPPETS: Record<string, (pad: string) => string> = {
   set_variable: (pad) =>
     `set_variable\n${pad}arguments:\n${pad}  arg_list:\n${pad}    - name: \${1:my_var}\n${pad}      value: \${2:value}\${0}`,
   decision: (pad) =>
-    `decision\n${pad}arguments:\n${pad}  conditions:\n${pad}    - { option: \${1:Yes}, condition: "\${2:vars.x > 10}" }\n${pad}branches:\n${pad}  \${1:Yes}: \${3:next_step}\${0}`,
+    `decision\n${pad}arguments:\n${pad}  conditions:\n${pad}    - option: \${1:yes}\n${pad}      condition: "{{ \${2:vars.x > 10} }}"\n${pad}branches:\n${pad}  \${1:yes}: \${3:next_step}\n${pad}# default fallthrough when no condition matches\n${pad}next: \${4:default_step}\${0}`,
   find_record: (pad) =>
     `find_record\n${pad}arguments:\n${pad}  module: \${1:alerts}\n${pad}  filter:\n${pad}    \${2:name}: \${3:value}\${0}`,
   create_record: (pad) =>
@@ -56,7 +56,7 @@ const STEP_SNIPPETS: Record<string, (pad: string) => string> = {
     `update_record\n${pad}arguments:\n${pad}  collection: \${1:/api/3/alerts/\${2:uuid}}\n${pad}  module: \${3:alerts}\n${pad}  data:\n${pad}    \${4:status}: \${5:Closed}\${0}`,
   delay: (pad) => `delay\n${pad}arguments:\n${pad}  delay_seconds: \${1:30}\${0}`,
   manual_input: (pad) =>
-    `manual_input\n${pad}arguments:\n${pad}  inputs:\n${pad}    - name: \${1:approval}\n${pad}      type: choice\n${pad}      options: ['Approve','Reject']\${0}`,
+    `manual_input\n${pad}arguments:\n${pad}  record: "{{ \${1:vars.input.records[0]['@id']} }}"\n${pad}  type: \${2:single-select}\n${pad}  input:\n${pad}    title: \${3:Approve this action?}\n${pad}    options:\n${pad}      - \${4:Approve}\n${pad}      - \${5:Reject}\n${pad}  timeout: \${6:3600}\${0}`,
   code_snippet: (pad) =>
     `code_snippet\n${pad}arguments:\n${pad}  code: |\n${pad}    \${1:# python}\n${pad}    result = {\\"ok\\": True}\${0}`,
   workflow_reference: (pad) =>

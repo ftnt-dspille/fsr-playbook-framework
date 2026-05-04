@@ -1,8 +1,16 @@
 @import 'tailwindcss';
 
-/* Bumps the whole UI ~12% larger — Monaco's font size is set on the editor
-   itself and respects this via `rem`-derived computations. */
+/* Fluid base font: scales between 14px on narrow screens and 18px on
+   wide ones. Tailwind's rem-based utilities track this, so spacing,
+   padding, and component widths scale proportionally with the window. */
 html {
-  font-size: 17px;
+  font-size: clamp(14px, calc(0.65rem + 0.6vw), 18px);
 }
 
+html,
+body {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+}

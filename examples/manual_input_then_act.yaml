@@ -1,13 +1,15 @@
 # manual_input — pause execution and ask a human a question.
 # Common in approval flows: bot proposes an action, user confirms.
 #
-# manual_input arguments:
-#   record:        IRI of the record to attach the prompt to (alert/incident)
-#   type:          input form type (single-select / free-text / etc.)
-#   input:         the form definition; rendered in FSR UI
-#   timeout:       seconds before the playbook is auto-cancelled
+# Friendly authoring form (compiler expands to canonical InputBased shape):
+#   title:         prompt heading shown to the operator
+#   description:   markdown body
+#   options:       button list; each entry resolves to a `branches:` key
+#   inputs:        optional inputVariables to collect alongside the choice
 #
-# After resume, the user's choice is in `vars.steps.<step_id>.input.<field>`.
+# Each option becomes a branch label; route by adding a sibling `branches:`
+# block on the manual_input step. There is no `vars.steps.<id>.input.choice`
+# at runtime — the choice IS the branch taken.
 
 collection: Compiler Examples
 description: Approval loop — ask a human, then act based on their response.
@@ -23,27 +25,13 @@ playbooks:
 
       - id: ask
         type: manual_input
-        name: ask
+        name: Approve block
         arguments:
-          record: "{{ vars.input.records[0]['@id'] }}"
-          type: single-select
-          input:
-            title: Block this IP?
-            options:
-              - block
-              - skip
-          timeout: 3600    # 1 hour
-        next: branch
-
-      - id: branch
-        type: decision
-        name: Block or skip
-        arguments:
-          conditions:
-            - option: block
-              condition: "{{ vars.steps.ask.input.choice == 'block' }}"
-            - option: skip
-              condition: "{{ vars.steps.ask.input.choice != 'block' }}"
+          title: Block this IP?
+          description: Click **block** to proceed, **skip** to abort.
+          options:
+            - {option: block, primary: true}
+            - {option: skip}
         branches:
           block: do_block
           skip: noop
@@ -52,14 +40,10 @@ playbooks:
         type: set_variable
         name: Pretend we blocked
         arguments:
-          arg_list:
-            - name: outcome
-              value: blocked
+          outcome: blocked
 
       - id: noop
         type: set_variable
         name: Skip
         arguments:
-          arg_list:
-            - name: outcome
-              value: skipped
+          outcome: skipped

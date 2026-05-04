@@ -28,9 +28,7 @@ playbooks:
         type: set_variable
         name: Extract source IP
         arguments:
-          arg_list:
-            - name: source_ip
-              value: "{{ vars.input.records[0].sourceIp }}"
+          source_ip: "{{ vars.input.records[0].sourceIp }}"
         next: lookup_ip_reputation
         comment: |
           Read the sourceIp field from the alert record and store it for use
@@ -47,16 +45,14 @@ playbooks:
             ip: "{{ vars.source_ip }}"
         next: extract_abuse_score
         comment: |
-          Call the AbuseIPDB connector to look up the IP address.
-          The response will be available in vars.steps.lookup_ip_reputation.
+          Call the AbuseIPDB connector. Step output is keyed by step name:
+          vars.steps.Check_IP_on_AbuseIPDB.
 
       - id: extract_abuse_score
         type: set_variable
         name: Extract abuse confidence score
         arguments:
-          arg_list:
-            - name: abuse_confidence_score
-              value: "{{ vars.steps.lookup_ip_reputation.abuseConfidenceScore | int }}"
+          abuse_confidence_score: "{{ vars.steps.Check_IP_on_AbuseIPDB.abuseConfidenceScore | int }}"
         next: severity_decision
         comment: |
           Extract the abuseConfidenceScore from the connector response.
@@ -71,18 +67,16 @@ playbooks:
               condition: "{{ vars.abuse_confidence_score >= 50 }}"
         branches:
           Critical: set_critical_severity
-          Low: set_low_severity
+        next: set_low_severity
         comment: |
-          Branch based on the abuse confidence score.
-          If >= 50, route to Critical; otherwise to Low.
+          Branch on the abuse confidence score.
+          If >= 50, route to Critical; otherwise fall through (next:) to Low.
 
       - id: set_critical_severity
         type: set_variable
         name: Set Critical severity
         arguments:
-          arg_list:
-            - name: new_severity
-              value: "Critical"
+          new_severity: "Critical"
         next: update_alert
         comment: |
           Prepare to update the alert with Critical severity.
@@ -91,9 +85,7 @@ playbooks:
         type: set_variable
         name: Set Low severity
         arguments:
-          arg_list:
-            - name: new_severity
-              value: "Low"
+          new_severity: "Low"
         next: update_alert
         comment: |
           Prepare to update the alert with Low severity.

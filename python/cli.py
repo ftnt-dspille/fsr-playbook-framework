@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -179,12 +180,36 @@ def cmd_push(args: argparse.Namespace) -> int:
                 if _purge_soft_deleted():
                     ok, payload_or_err = _post()
                     action = "PURGE+POST"
+    # Best-effort import of the history store. The CLI must keep
+    # working even if the web/backend tree isn't available (e.g. the
+    # core compile/push path is sometimes invoked from a stripped
+    # checkout). All history calls below are wrapped accordingly.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]
+                               / "web" / "backend"))
+        import history as _history  # type: ignore
+    except Exception:  # noqa: BLE001
+        _history = None  # type: ignore
+
     if not ok:
         e = payload_or_err
         r = getattr(e, "response", None)
         status = getattr(r, "status_code", "?")
         body = (r.text if r is not None else str(e))[:500]
         print(f"push failed: HTTP {status}\n{body}", file=sys.stderr)
+        if _history is not None:
+            _history.record_push(
+                source_path=str(args.input),
+                coll_uuid=coll_uuid, coll_name=coll_name,
+                mode=args.mode, action=action, ok=False,
+                http_status=status if isinstance(status, int) else None,
+                workflows=[
+                    {"uuid": w.get("uuid"), "name": w.get("name")}
+                    for w in coll_entity.get("workflows", [])
+                ],
+                source_yaml=text,
+                chat_session_id=_history.read_active_session(),
+            )
         return 1
     resp = payload_or_err
 
@@ -193,6 +218,59 @@ def cmd_push(args: argparse.Namespace) -> int:
         f"uuid={coll_uuid[:8]} mode={args.mode}",
         file=sys.stderr,
     )
+    base = client.base_url.rstrip("/")
+    # Emit OSC 8 hyperlinks so modern terminals (iTerm2, Terminal.app,
+    # WezTerm, kitty, VS Code, GNOME Terminal) cmd-click open them in
+    # the browser. Plain-text terminals fall back to showing the URL.
+    use_links = sys.stderr.isatty()
+    workflow_records: list[dict[str, object]] = []
+    for wf in coll_entity.get("workflows", []):
+        wf_uuid = wf.get("uuid")
+        wf_name = wf.get("name") or wf_uuid
+        if not wf_uuid:
+            continue
+        # Per the FSR Angular router (main.playbookDetail state at
+        # /playbooks/:id), :id is the workflow UUID — not the
+        # collection's. Verified against /js/app.min.*.js on the live
+        # appliance: `Entity("workflows").get(e.id, …)`.
+        url = f"{base}/playbooks/{wf_uuid}"
+        # Confirm the API resource the SPA loads on that route actually
+        # exists. /api/3/workflows/<uuid> is what the playbookDetail
+        # state's resolver fetches; if it 404s the deep-link is dead.
+        # Hitting the SPA URL itself can't catch this — every path
+        # serves the same index.html and returns 200.
+        api_url = f"{base}/api/3/workflows/{wf_uuid}"
+        try:
+            check = client.session.get(
+                api_url, verify=client.verify_ssl, timeout=10,
+            )
+            link_ok = check.status_code == 200
+            status = check.status_code
+        except Exception as e:  # noqa: BLE001
+            link_ok = False
+            status = f"ERR {type(e).__name__}"
+        marker = "✓" if link_ok else f"✗ HTTP {status}"
+        if use_links:
+            link = f"\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\"
+            print(f"  {marker} {wf_name}: {link}", file=sys.stderr)
+        else:
+            print(f"  {marker} {wf_name}: {url}", file=sys.stderr)
+        workflow_records.append({
+            "uuid": wf_uuid, "name": wf_name,
+            "link_url": url, "link_ok": link_ok,
+        })
+
+    if _history is not None:
+        _history.record_push(
+            source_path=str(args.input),
+            coll_uuid=coll_uuid, coll_name=coll_name,
+            mode=args.mode, action=action, ok=True,
+            http_status=200,
+            workflows=workflow_records,
+            source_yaml=text,
+            chat_session_id=_history.read_active_session(),
+        )
+
     if args.json and resp is not None:
         print(json.dumps(resp, indent=2))
     return 0
@@ -2126,6 +2204,107 @@ def cmd_mcp(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_chat_stats(args: argparse.Namespace) -> int:
+    """Summarise the chat agent's per-turn token telemetry.
+
+    Reads the JSONL written by web/backend/llm/usage_log.py and prints
+    three rollups:
+      1. Per-session totals (input/output/cache split, biggest history).
+      2. Worst turns by output cost (output + uncached input).
+      3. Tool-call cost ranking (which tools blew up context).
+
+    Use this to answer "what just spiked?" — the worst-turn rollup
+    pinpoints the round-trip; the tool ranking pinpoints the payload.
+    """
+    import collections
+    from pathlib import Path
+
+    if args.path:
+        path = Path(args.path).expanduser()
+    else:
+        env = os.environ.get("STUDIO_USAGE_LOG")
+        path = Path(env).expanduser() if env else (
+            Path(__file__).resolve().parents[1]
+            / "web" / "backend" / "usage.jsonl"
+        )
+    if not path.exists():
+        print(f"no usage log at {path}", file=sys.stderr)
+        return 1
+
+    records = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    if args.session:
+        records = [r for r in records if r.get("session") == args.session]
+    if not records:
+        print("no records to summarise", file=sys.stderr)
+        return 1
+
+    # ---- 1. per-session rollup ----
+    by_sess: dict[str, list[dict]] = collections.defaultdict(list)
+    for r in records:
+        by_sess[r.get("session", "?")].append(r)
+
+    print(f"=== sessions ({len(by_sess)}) — log: {path}")
+    print(f"{'session':10} {'turns':>5} {'in':>7} {'out':>6} "
+          f"{'cache_r':>8} {'cache_w':>8} {'max_hist':>9}  first_ts")
+    for sid, rs in sorted(by_sess.items(),
+                          key=lambda kv: -sum(r.get("input_tokens", 0)
+                                              + r.get("output_tokens", 0)
+                                              for r in kv[1])):
+        ti = sum(r.get("input_tokens", 0) for r in rs)
+        to = sum(r.get("output_tokens", 0) for r in rs)
+        cr = sum(r.get("cache_read", 0) for r in rs)
+        cw = sum(r.get("cache_write", 0) for r in rs)
+        mh = max((r.get("history_chars", 0) for r in rs), default=0)
+        first = rs[0].get("ts", "")[:19]
+        print(f"{sid:10} {len(rs):5d} {ti:7d} {to:6d} {cr:8d} {cw:8d} "
+              f"{mh:9d}  {first}")
+
+    # ---- 2. worst turns ----
+    print()
+    print(f"=== worst {args.top} turns (by uncached input + output) ===")
+    print(f"{'session':10} {'#':>3} {'in':>7} {'out':>6} {'cache_r':>8} "
+          f"{'hist_chars':>10}  stop  tool_calls")
+    worst = sorted(records,
+                   key=lambda r: -(r.get("input_tokens", 0)
+                                   - r.get("cache_read", 0)
+                                   + r.get("output_tokens", 0)))[:args.top]
+    for r in worst:
+        tcs = r.get("tool_calls") or []
+        tc_summary = ", ".join(
+            f"{t['name']}({t['result_chars']})"
+            for t in tcs[:5]
+        ) or "—"
+        print(f"{r.get('session',''):10} {r.get('turn',0):3d} "
+              f"{r.get('input_tokens',0):7d} {r.get('output_tokens',0):6d} "
+              f"{r.get('cache_read',0):8d} {r.get('history_chars',0):10d}  "
+              f"{(r.get('stop_reason') or '')[:8]:8}  {tc_summary}")
+
+    # ---- 3. tool ranking ----
+    print()
+    print(f"=== tool-result cost ranking ===")
+    print(f"{'tool':30} {'calls':>6} {'total_chars':>12} "
+          f"{'avg_chars':>10} {'max_chars':>10}")
+    by_tool: dict[str, list[int]] = collections.defaultdict(list)
+    for r in records:
+        for t in r.get("tool_calls") or []:
+            by_tool[t.get("name", "?")].append(t.get("result_chars", 0))
+    for name, sizes in sorted(by_tool.items(),
+                              key=lambda kv: -sum(kv[1])):
+        total = sum(sizes)
+        print(f"{name:30} {len(sizes):6d} {total:12d} "
+              f"{total // max(len(sizes),1):10d} {max(sizes):10d}")
+
+    return 0
+
+
 # Registry of all runnable probes.  Each entry: (module_path, description).
 _PROBES: dict[str, tuple[str, str]] = {
     "connectors":    ("probes.probe_connectors",       "connectors / operations / operation_params"),
@@ -2418,6 +2597,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("mcp", help="start the MCP server (stdio transport)")
     sp.set_defaults(func=cmd_mcp)
+
+    sp = sub.add_parser("chat-stats",
+                        help="summarise web/backend/usage.jsonl token telemetry")
+    sp.add_argument("path", nargs="?", default=None,
+                    help="path to usage JSONL (defaults to "
+                         "$STUDIO_USAGE_LOG or web/backend/usage.jsonl)")
+    sp.add_argument("--session", default=None,
+                    help="filter to one session id")
+    sp.add_argument("--top", type=int, default=10,
+                    help="rows to show in tool-cost ranking (default 10)")
+    sp.set_defaults(func=cmd_chat_stats)
 
     sp = sub.add_parser(
         "probe",

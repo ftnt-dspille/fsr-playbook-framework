@@ -22,11 +22,8 @@ playbooks:
         type: set_variable
         name: Extract source IP and domain
         arguments:
-          arg_list:
-            - name: source_ip
-              value: "{{ vars.input.records[0].sourceIp }}"
-            - name: source_domain
-              value: "{{ vars.input.records[0].senderDomain | default('Fortinet') }}"
+          source_ip: "{{ vars.input.records[0].sourceIp }}"
+          source_domain: "{{ vars.input.records[0].senderDomain | default('Fortinet') }}"
         next: lookup_organization
         comment: |
           Read the sourceIp and senderDomain fields from the alert record.
@@ -44,21 +41,20 @@ playbooks:
         next: extract_org_result
         comment: |
           Call the FortiSIEM connector to look up organization information.
-          The response will be available in vars.steps.lookup_organization.
+          Step output is keyed by the step name: vars.steps.Get_Organization_Details.
 
       - id: extract_org_result
         type: set_variable
         name: Extract organization result
         arguments:
-          arg_list:
-            - name: org_found
-              value: "{{ vars.steps.lookup_organization.org_name is not none }}"
-            - name: org_name
-              value: "{{ vars.steps.lookup_organization.org_name | default('Unknown') }}"
+          org_found: "{{ vars.steps.Get_Organization_Details['@id'] is not none }}"
+          org_name: "{{ vars.steps.Get_Organization_Details['@xmlId'] | default('Unknown') }}"
         next: severity_decision
         comment: |
-          Extract the organization name from the connector response.
-          Check if a result was found (non-null org_name indicates success).
+          Pull the org identifier from the connector response. The recorded
+          output schema for get_org_name_by_org_id exposes @id / @xmlId
+          (not an `org_name` field), so use @id for the existence check
+          and @xmlId as the human-readable label.
 
       - id: severity_decision
         type: decision
@@ -69,18 +65,16 @@ playbooks:
               condition: "{{ vars.org_found }}"
         branches:
           Critical: set_critical_severity
-          Low: set_low_severity
+        next: set_low_severity
         comment: |
-          Branch based on whether organization was found.
-          If organization is known, route to Critical; otherwise to Low.
+          Branch on whether organization was found.
+          If org is known, route to Critical; otherwise fall through (next:) to Low.
 
       - id: set_critical_severity
         type: set_variable
         name: Set Critical severity
         arguments:
-          arg_list:
-            - name: new_severity
-              value: "Critical"
+          new_severity: "Critical"
         next: update_alert
         comment: |
           Prepare to update the alert with Critical severity
@@ -90,9 +84,7 @@ playbooks:
         type: set_variable
         name: Set Low severity
         arguments:
-          arg_list:
-            - name: new_severity
-              value: "Low"
+          new_severity: "Low"
         next: update_alert
         comment: |
           Prepare to update the alert with Low severity

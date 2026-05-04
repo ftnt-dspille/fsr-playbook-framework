@@ -38,7 +38,7 @@
   );
 </script>
 
-<div class="grid h-full grid-cols-[1fr_420px]">
+<div class="grid h-full grid-cols-[minmax(0,1fr)_minmax(320px,30rem)]">
   <div class="flex min-h-0 flex-col border-r border-zinc-800">
     <div class="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5 text-xs">
       <span class="h-2 w-2 rounded-full {dotColor}"></span>

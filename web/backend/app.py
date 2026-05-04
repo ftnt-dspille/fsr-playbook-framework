@@ -17,6 +17,19 @@ PYTHON_DIR = REPO_ROOT / "python"
 if str(PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_DIR))
 
+
+# Self-signed FSR appliances (e.g. dev VMs) trigger urllib3's
+# InsecureRequestWarning every probe. Suppress in the backend's own log
+# unless the operator explicitly turns it back on. Subprocess output is
+# filtered separately (see routes/playbook.py).
+if os.environ.get("FSR_SUPPRESS_INSECURE_WARNING", "true").lower() != "false":
+    try:
+        import urllib3  # noqa: E402
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except Exception:
+        pass
+
 # Smoke-import the compiler so we fail fast if the integration is broken.
 try:
     import compiler  # noqa: F401

@@ -2,15 +2,26 @@
   import MonacoYaml from '$lib/components/MonacoYaml.svelte';
   import Chat from '$lib/components/Chat.svelte';
   import ExamplesMenu from '$lib/components/ExamplesMenu.svelte';
+  import DraftsMenu from '$lib/components/DraftsMenu.svelte';
   import { compileYaml, pushPlaybook, validateYaml, type Marker } from '$lib/api';
   import { runStore } from '$lib/runStore.svelte';
   import { yamlStore } from '$lib/yamlStore.svelte';
   import { postSse } from '$lib/sse';
   import { goto } from '$app/navigation';
 
+  // Two-way bind: editor edits the store directly via the effect below.
+  // Wholesale replacements (load example, load draft, reset) MUST call
+  // yamlStore.setText() so an auto-snapshot fires and the user can undo
+  // a misclick.
   let yaml = $state(yamlStore.text);
   $effect(() => {
     yamlStore.text = yaml;
+  });
+  // When the store is mutated externally (loadDraft, reset, restoreSnapshot,
+  // setText from another tab via storage event), pull the new value into
+  // the local `yaml` so the editor re-renders.
+  $effect(() => {
+    if (yamlStore.text !== yaml) yaml = yamlStore.text;
   });
 
   let markers = $state<Marker[]>([]);
@@ -129,8 +140,34 @@
   }
 
   function loadExampleText(text: string, name: string) {
-    yaml = text;
+    yamlStore.setText(text, `loaded example: ${name}`);
     status = { kind: 'idle', msg: `loaded ${name}` };
+  }
+
+  function loadDraftText(_text: string, name: string) {
+    // The DraftsMenu component already called yamlStore.loadDraft(),
+    // which performs its own snapshot. Just update the status pill.
+    status = { kind: 'idle', msg: `loaded draft: ${name}` };
+  }
+
+  function saveCurrentDraft() {
+    const suggested = yamlStore.suggestedName();
+    const name = window.prompt('Save draft as:', suggested);
+    if (!name) return;
+    try {
+      const d = yamlStore.saveDraft(name);
+      status = { kind: 'ok', msg: `saved draft: ${d.name}` };
+    } catch (e: any) {
+      status = { kind: 'err', msg: e?.message ?? String(e) };
+    }
+  }
+
+  function undoLastReplace() {
+    const snap = yamlStore.lastSnapshot;
+    if (!snap) return;
+    const reason = snap.reason;
+    yamlStore.restoreSnapshot();
+    status = { kind: 'idle', msg: `undone (${reason})` };
   }
 
   const dot = $derived(
@@ -147,19 +184,35 @@
   const warnCount = $derived(markers.filter((m) => m.severity === 'warning').length);
 </script>
 
-<div class="grid h-full grid-cols-[1fr_400px]">
+<div class="grid h-full grid-cols-[minmax(0,1fr)_minmax(320px,28rem)]">
   <div class="flex min-h-0 flex-col border-r border-zinc-800">
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-3 py-1.5 text-xs">
       <ExamplesMenu onLoad={loadExampleText} />
+      <DraftsMenu onLoad={loadDraftText} />
+      <button
+        class="rounded border border-zinc-700 px-2 py-0.5 text-zinc-200 hover:bg-zinc-800"
+        onclick={saveCurrentDraft}
+        title="Save current YAML as a named draft (stored in this browser)"
+      >
+        Save
+      </button>
       <button
         class="rounded border border-zinc-800 px-2 py-0.5 text-zinc-400 hover:bg-zinc-900"
         onclick={() => {
           yamlStore.reset();
-          yaml = yamlStore.text;
         }}
-        title="Reset to placeholder">Reset</button
+        title="Reset to placeholder (snapshot taken; click Undo to restore)"
+        >Reset</button
       >
+      {#if yamlStore.lastSnapshot}
+        <button
+          class="rounded border border-amber-700/60 bg-amber-950/30 px-2 py-0.5 text-amber-200 hover:bg-amber-900/40"
+          onclick={undoLastReplace}
+          title="Restore the buffer from before: {yamlStore.lastSnapshot.reason}"
+          >↶ Undo {yamlStore.lastSnapshot.reason}</button
+        >
+      {/if}
       <span class="ml-2 flex items-center gap-1.5">
         <span class="h-2 w-2 rounded-full {dot}"></span>
         <span class="text-zinc-300">{status.msg}</span>
@@ -246,13 +299,16 @@
           {/if}
         </button>
         <button
-          class="ml-auto px-2 py-1 text-zinc-500 hover:text-zinc-200"
+          class="ml-auto flex items-center gap-1 rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
           onclick={() => (drawerOpen = !drawerOpen)}
-          title={drawerOpen ? 'collapse' : 'expand'}>{drawerOpen ? '▾' : '▴'}</button
+          title={drawerOpen ? 'collapse drawer' : 'expand drawer'}
         >
+          <span class="text-sm">{drawerOpen ? '▾' : '▴'}</span>
+          <span>{drawerOpen ? 'collapse' : 'expand'}</span>
+        </button>
       </div>
       {#if drawerOpen}
-        <div class="h-56 overflow-auto px-3 py-2 text-xs">
+        <div class="h-96 overflow-auto px-4 py-3 text-sm">
           {#if drawerTab === 'diagnostics'}
             {#if !markers.length}
               <div class="text-zinc-500">No diagnostics. The YAML parses, resolves, and validates clean.</div>
@@ -283,14 +339,14 @@
             {/if}
           {:else if drawerTab === 'compile'}
             {#if compileJson}
-              <pre class="whitespace-pre-wrap font-mono text-[11px] text-zinc-200">{compileJson}</pre>
+              <pre class="whitespace-pre-wrap font-mono text-[13px] text-zinc-200">{compileJson}</pre>
             {:else}
               <div class="text-zinc-500">Click Compile to produce the FSR JSON.</div>
             {/if}
           {:else if drawerTab === 'push'}
             {#if runStore.pushOutput}
               <pre
-                class="whitespace-pre-wrap font-mono text-[11px] text-zinc-200">{runStore.pushOutput}</pre>
+                class="whitespace-pre-wrap font-mono text-[13px] text-zinc-200">{runStore.pushOutput}</pre>
             {:else}
               <div class="text-zinc-500">
                 Push uses the FSRPlaybookYaml CLI to PUT/POST your compiled
@@ -301,7 +357,7 @@
           {:else if drawerTab === 'run'}
             {#if runStore.logs.length}
               <pre
-                class="whitespace-pre-wrap font-mono text-[11px] text-zinc-200">{runStore.logs.join('\n')}</pre>
+                class="whitespace-pre-wrap font-mono text-[13px] text-zinc-200">{runStore.logs.join('\n')}</pre>
               {#if runStore.taskId}
                 <div class="mt-2 text-zinc-500">
                   task_id <span class="font-mono">{runStore.taskId}</span> · open the Run tab for

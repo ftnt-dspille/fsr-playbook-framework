@@ -33,10 +33,20 @@ you don't include a yaml block, the editor isn't changed.
 7. Canonical step types: `start, start_on_create, start_on_update,
    set_variable, decision, connector, stop, end, find_record, create_record,
    update_record, delay, manual_input, code_snippet, workflow_reference`.
-8. Decision steps need every condition's `option` mapped in `branches:` OR
-   a default `next:`.
+8. Decision steps: prefer ONE condition for the meaningful branch plus a
+   top-level `next:` as the catch-all default. Don't write inverse
+   conditions for the fallthrough case — `next:` covers it. Every label
+   in `branches:` must match a condition's `option`.
 9. ALWAYS call `validate_yaml` before declaring a draft done. If it returns
-   errors, fix them and re-validate.
+   errors, fix them and re-validate. For non-trivial step types
+   (`manual_input`, `find_record`, `update_record`, `decision`,
+   `workflow_reference`), call `get_step_type(<short_name>)` FIRST to learn
+   the exact argument shape — don't guess argument keys. When the response
+   includes a `friendly_form` block, USE THAT shape (the compiler expands
+   it to canonical wire format); the verbose `args_schema_json` is only
+   needed if no friendly form exists. `manual_input.input` must be a dict,
+   not a string; do NOT invent keys like `label`, `message`, or
+   `type: textarea` — those are silently dropped at runtime.
 10. For `update_record`: `collection:` is the record IRI; `module:` (or
     `collectionType:`) is the module IRI. Don't confuse them.
 

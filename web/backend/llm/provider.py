@@ -5,7 +5,7 @@ event stream so the SSE route doesn't care which backend it's talking to.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Literal, Protocol
 
 
@@ -45,7 +45,44 @@ class ErrorEvent:
     kind: Literal["error"] = "error"
 
 
-Event = TextEvent | ToolUseEvent | ToolResultEvent | DoneEvent | ErrorEvent
+@dataclass
+class ToolCallUsage:
+    """Per-tool-call accounting emitted with each UsageEvent. Lets the
+    consumer attribute context bloat to a specific tool result."""
+    name: str
+    args_chars: int
+    result_chars: int
+
+
+@dataclass
+class UsageEvent:
+    """One emitted per LLM round-trip. Providers populate the fields
+    they have access to; consumers (telemetry, history.db) are the
+    same regardless of provider. This is the contract that lets us
+    swap providers without rewiring logging.
+
+    `tags` is a free-form dict the route handler stamps in to attribute
+    a turn to e.g. a specific playbook (`{"playbook_collection": "..."}`).
+    """
+    session_id: str
+    turn: int
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cache_read: int
+    cache_write: int
+    history_chars: int
+    stop_reason: str
+    self_repair_turn: int = 0
+    tool_calls: list[ToolCallUsage] = field(default_factory=list)
+    tags: dict[str, Any] = field(default_factory=dict)
+    kind: Literal["usage"] = "usage"
+
+
+Event = (
+    TextEvent | ToolUseEvent | ToolResultEvent
+    | DoneEvent | ErrorEvent | UsageEvent
+)
 
 
 @dataclass
@@ -65,4 +102,14 @@ class LLMProvider(Protocol):
         system: str,
         messages: list[Message],
         tools: list[dict[str, Any]],
-    ) -> AsyncIterator[Event]: ...
+        tags: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Event]:
+        """Stream events for one user turn. Implementations MUST emit
+        a `UsageEvent` after each LLM round-trip (before any tool
+        execution for that turn) so consumers can attribute cost
+        independently of the provider.
+
+        `tags` is opaque to the provider — it just round-trips it on
+        the UsageEvent so the route handler can stamp e.g. the active
+        playbook collection name."""
+        ...

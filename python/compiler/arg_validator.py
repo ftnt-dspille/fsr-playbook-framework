@@ -36,10 +36,16 @@ from .ir import Collection, Step
 # where `step` is the running step record).
 _FRAMEWORK_PARAMS = frozenset({
     "step", "step_id", "wf_id", "env", "audit_info", "child_step_id",
-    "step_variables", "message", "do_until", "ignore_errors", "when",
+    "step_variables", "do_until", "ignore_errors", "when",
     "for_each", "cyops_playbook_iri", "cyops_playbook_name",
     "collaborationNote", "inputVariables", "displayConditions",
     "__bulk", "_showJson", "fieldOperation",
+    # Auto-injected by the resolver for manual_input — never user-supplied
+    # in the friendly YAML, but live on the step by the time arg_validator
+    # runs. Listing them here keeps the unknown-arg warning quiet for them.
+    "is_approval", "isRecordLinked", "owner_detail", "email_notification",
+    "inline_channel_list", "external_channel_list", "unauthenticated_input",
+    "response_mapping",
 })
 
 
@@ -72,9 +78,23 @@ class ArgValidator:
     def _validate_step(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
-        # connector: detailed check already done in resolver against
-        # operation_params; skip handler-signature pass.
-        if step.type == "connector" or not step.handler:
+        # The resolver does its own per-handler arg normalization and
+        # validation (and injects FSR-required wire-format keys like
+        # `name`, `operationTitle`, `operation`, `collectionType`, `type`,
+        # `rule`). For those handlers, a generic signature pass produces
+        # false positives on the injected keys. Skip them.
+        # set_variable's arguments is a flat {var_name: value} payload —
+        # the keys ARE the variables to set, not handler kwargs.
+        _RESOLVER_VALIDATES = frozenset({
+            "connector",       # connector / stop / end (no_op)
+            "update_data",     # update_record
+            "insert_data",     # create_record
+            "delay",
+            "code_snippet",
+            "manual_input",
+            "set_multiple",    # set_variable
+        })
+        if step.handler in _RESOLVER_VALIDATES or not step.handler:
             return
         h = self._handler(step.handler)
         if h is None:
@@ -105,11 +125,46 @@ class ArgValidator:
                     path=f"{path}.arguments.{r}",
                 ))
 
-        if not accepts_kwargs:
-            for k in provided:
-                if k not in named_params and k not in _FRAMEWORK_PARAMS:
-                    errors.append(CompileError(
-                        code=ErrorCode.UNKNOWN_PARAM,
-                        message=f"unknown argument {k!r} for handler {step.handler!r}",
-                        path=f"{path}.arguments.{k}",
-                    ))
+        for k in provided:
+            if k in named_params or k in _FRAMEWORK_PARAMS:
+                continue
+            if accepts_kwargs:
+                # Handler accepts **kwargs so technically the arg is legal
+                # syntactically — but in practice FSR's runtime often errors
+                # on unrecognised top-level keys (manual_input is a notorious
+                # offender). Warn so the author can see it before runtime.
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    message=(
+                        f"unknown argument {k!r} for handler {step.handler!r} — "
+                        f"FSR may ignore or error at runtime"
+                    ),
+                    path=f"{path}.arguments.{k}",
+                    suggestion=(
+                        f"known args: {', '.join(sorted(named_params - _FRAMEWORK_PARAMS))}"
+                    ),
+                    severity="warning",
+                ))
+            else:
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    message=f"unknown argument {k!r} for handler {step.handler!r}",
+                    path=f"{path}.arguments.{k}",
+                ))
+
+        # manual_input: `input` MUST be a dict at runtime — FSR calls .get()
+        # on it. We've seen the LLM produce `input: "some string"` which
+        # passes generic shape checks but crashes the workflow.
+        if step.handler == "manual_input":
+            inp = provided.get("input")
+            if inp is not None and not isinstance(inp, dict):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        f"manual_input.arguments.input must be a mapping "
+                        f"(got {type(inp).__name__}); FSR will crash with "
+                        f"\"'str' object has no attribute 'get'\""
+                    ),
+                    path=f"{path}.arguments.input",
+                    suggestion='use: input: { title: "...", options: [...] }',
+                ))
