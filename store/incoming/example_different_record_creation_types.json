@@ -1,0 +1,291 @@
+{
+  "type": "workflow_collections",
+  "data": [
+    {
+      "@context": "/api/3/contexts/WorkflowCollection",
+      "@type": "WorkflowCollection",
+      "name": "00 - a Import testing",
+      "description": null,
+      "visible": true,
+      "image": null,
+      "uuid": "65ab88db-6ccc-4b45-890e-3d7c5bbf0228",
+      "id": 189,
+      "createDate": 1775924778.180994,
+      "modifyDate": 1775924784.561227,
+      "deletedAt": null,
+      "importedBy": [],
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "wipe out step data",
+          "aliasName": null,
+          "tag": null,
+          "description": null,
+          "isActive": true,
+          "debug": false,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1777978747,
+          "collection": "/api/3/workflow_collections/65ab88db-6ccc-4b45-890e-3d7c5bbf0228",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/954b624f-3dbd-4be1-9dc2-a123c2c67319",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "Copy of Create record on alerts_parallel",
+              "description": null,
+              "arguments": {
+                "for_each": {
+                  "item": "{{ vars.steps.x }}",
+                  "__bulk": false,
+                  "parallel": true,
+                  "condition": ""
+                },
+                "resource": {
+                  "name": "test",
+                  "type": "/api/3/picklists/574a6ee2-7265-4701-815e-cff83b053bce",
+                  "state": "/api/3/picklists/a1bac09b-1441-45aa-ad1b-c88744e48e72",
+                  "status": "/api/3/picklists/7de816ff-7140-4ee5-bd05-93ce22002146",
+                  "severity": "/api/3/picklists/58d0753f-f7e4-403b-953c-b0f521eab759",
+                  "__replace": "",
+                  "ackSlaStatus": "/api/3/picklists/72979f64-e8b9-4888-a965-957e0ec24818",
+                  "respSlaStatus": "/api/3/picklists/72979f64-e8b9-4888-a965-957e0ec24818",
+                  "priorityWeight": 1,
+                  "escalatedtoincident": "/api/3/picklists/2128a09c-153d-4db3-985d-de6be33deae5",
+                  "resolvedAutomatedly": false,
+                  "alertRemainingAckSLA": 0
+                },
+                "operation": "Overwrite",
+                "collection": "/api/3/alerts",
+                "__recommend": [],
+                "fieldOperation": [],
+                "step_variables": []
+              },
+              "status": null,
+              "top": "240",
+              "left": "520",
+              "stepType": "/api/3/workflow_step_types/2597053c-e718-44b4-8394-4d40fe26d357",
+              "group": null,
+              "uuid": "a6e31456-bf46-48e3-a501-6422f67243ba"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Create record on alerts bulk",
+              "description": null,
+              "arguments": {
+                "for_each": {
+                  "item": "{{ vars.steps.x }}",
+                  "__bulk": true,
+                  "condition": "",
+                  "batch_size": 100
+                },
+                "resource": {
+                  "name": "test",
+                  "type": "/api/3/picklists/574a6ee2-7265-4701-815e-cff83b053bce",
+                  "state": "/api/3/picklists/a1bac09b-1441-45aa-ad1b-c88744e48e72",
+                  "status": "/api/3/picklists/7de816ff-7140-4ee5-bd05-93ce22002146",
+                  "severity": "/api/3/picklists/58d0753f-f7e4-403b-953c-b0f521eab759",
+                  "__replace": "",
+                  "ackSlaStatus": "/api/3/picklists/72979f64-e8b9-4888-a965-957e0ec24818",
+                  "respSlaStatus": "/api/3/picklists/72979f64-e8b9-4888-a965-957e0ec24818",
+                  "priorityWeight": 1,
+                  "escalatedtoincident": "/api/3/picklists/2128a09c-153d-4db3-985d-de6be33deae5",
+                  "resolvedAutomatedly": false,
+                  "alertRemainingAckSLA": 0
+                },
+                "operation": "Overwrite",
+                "collection": "/api/3/alerts",
+                "__recommend": [],
+                "fieldOperation": [],
+                "step_variables": []
+              },
+              "status": null,
+              "top": "378",
+              "left": "128",
+              "stepType": "/api/3/workflow_step_types/2597053c-e718-44b4-8394-4d40fe26d357",
+              "group": null,
+              "uuid": "2b440c6a-61aa-4538-b63d-71d261e048c9"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Create record on alerts_sequential",
+              "description": null,
+              "arguments": {
+                "for_each": {
+                  "item": "{{ vars.steps.x }}",
+                  "__bulk": false,
+                  "parallel": false,
+                  "condition": ""
+                },
+                "resource": {
+                  "name": "test",
+                  "type": "/api/3/picklists/574a6ee2-7265-4701-815e-cff83b053bce",
+                  "state": "/api/3/picklists/a1bac09b-1441-45aa-ad1b-c88744e48e72",
+                  "status": "/api/3/picklists/7de816ff-7140-4ee5-bd05-93ce22002146",
+                  "severity": "/api/3/picklists/58d0753f-f7e4-403b-953c-b0f521eab759",
+                  "__replace": "",
+                  "ackSlaStatus": "/api/3/picklists/72979f64-e8b9-4888-a965-957e0ec24818",
+                  "respSlaStatus": "/api/3/picklists/72979f64-e8b9-4888-a965-957e0ec24818",
+                  "priorityWeight": 1,
+                  "escalatedtoincident": "/api/3/picklists/2128a09c-153d-4db3-985d-de6be33deae5",
+                  "resolvedAutomatedly": false,
+                  "alertRemainingAckSLA": 0
+                },
+                "operation": "Overwrite",
+                "collection": "/api/3/alerts",
+                "__recommend": [],
+                "fieldOperation": [],
+                "step_variables": []
+              },
+              "status": null,
+              "top": "100",
+              "left": "560",
+              "stepType": "/api/3/workflow_step_types/2597053c-e718-44b4-8394-4d40fe26d357",
+              "group": null,
+              "uuid": "21bb572b-55f2-434e-a95b-6b4c6f97e8c5"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Ingest Bulk Feed example on Alerts",
+              "description": null,
+              "arguments": {
+                "for_each": {
+                  "item": "{{vars.steps.x }}",
+                  "__bulk": true,
+                  "condition": "",
+                  "batch_size": 100
+                },
+                "resource": {
+                  "name": "test",
+                  "type": "/api/3/picklists/574a6ee2-7265-4701-815e-cff83b053bce",
+                  "state": "/api/3/picklists/a1bac09b-1441-45aa-ad1b-c88744e48e72",
+                  "status": "/api/3/picklists/7de816ff-7140-4ee5-bd05-93ce22002146",
+                  "severity": "/api/3/picklists/58d0753f-f7e4-403b-953c-b0f521eab759",
+                  "__replace": "",
+                  "ackSlaStatus": "/api/3/picklists/72979f64-e8b9-4888-a965-957e0ec24818",
+                  "respSlaStatus": "/api/3/picklists/72979f64-e8b9-4888-a965-957e0ec24818",
+                  "priorityWeight": 1,
+                  "escalatedtoincident": "/api/3/picklists/2128a09c-153d-4db3-985d-de6be33deae5",
+                  "resolvedAutomatedly": false,
+                  "alertRemainingAckSLA": 0
+                },
+                "collection": "/api/ingest-feeds/alerts",
+                "step_variables": []
+              },
+              "status": null,
+              "top": "360",
+              "left": "520",
+              "stepType": "/api/3/workflow_step_types/7b221880-716b-4726-a2ca-5e568d330b3e",
+              "group": null,
+              "uuid": "5712612b-80a2-489e-9e9c-7479266c5fc6"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {
+                "route": "da296243-fa4c-4fab-96cb-e3740cef3e0b",
+                "resources": [
+                  "alerts"
+                ],
+                "__triggerLimit": true,
+                "inputVariables": [],
+                "step_variables": {
+                  "input": {
+                    "params": [],
+                    "records": "{{vars.input.records}}"
+                  }
+                },
+                "triggerOnSource": true,
+                "displayConditions": {
+                  "alerts": {
+                    "sort": [],
+                    "limit": 30,
+                    "logic": "AND",
+                    "filters": []
+                  }
+                },
+                "executeButtonText": "Execute",
+                "noRecordExecution": false,
+                "showToasterMessage": {
+                  "visible": false,
+                  "messageVisible": true
+                },
+                "triggerOnReplicate": false,
+                "singleRecordExecution": false
+              },
+              "status": null,
+              "top": "40",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/f414d039-bb0d-4e59-9c39-a8f1e880b18a",
+              "group": null,
+              "uuid": "954b624f-3dbd-4be1-9dc2-a123c2c67319"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> Copy of Create record on alerts bulk",
+              "targetStep": "/api/3/workflow_steps/21bb572b-55f2-434e-a95b-6b4c6f97e8c5",
+              "sourceStep": "/api/3/workflow_steps/954b624f-3dbd-4be1-9dc2-a123c2c67319",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "ca24a690-f672-4dca-b6e4-a2add75a9e9f"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> Copy of Create record on alerts_sequential",
+              "targetStep": "/api/3/workflow_steps/a6e31456-bf46-48e3-a501-6422f67243ba",
+              "sourceStep": "/api/3/workflow_steps/954b624f-3dbd-4be1-9dc2-a123c2c67319",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "2ef2d83b-188b-4af2-9c05-46a55e73cd85"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> Create record on alerts bulk",
+              "targetStep": "/api/3/workflow_steps/2b440c6a-61aa-4538-b63d-71d261e048c9",
+              "sourceStep": "/api/3/workflow_steps/954b624f-3dbd-4be1-9dc2-a123c2c67319",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "acdd9952-41ff-4b08-91cb-d97ddf607705"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> Ingest Bulk Feed example on Alerts",
+              "targetStep": "/api/3/workflow_steps/5712612b-80a2-489e-9e9c-7479266c5fc6",
+              "sourceStep": "/api/3/workflow_steps/954b624f-3dbd-4be1-9dc2-a123c2c67319",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "a3103949-10b6-4599-b69d-2d07f34fb267"
+            }
+          ],
+          "groups": [],
+          "priority": "/api/3/picklists/2b563c61-ae2c-41c0-a85a-c9709585e3f2",
+          "playbookOrigin": "/api/3/picklists/15c1e8c9-22bf-4e66-8fbb-0a502d4a4a3f",
+          "isEditable": true,
+          "uuid": "1bc83303-4e03-407f-b3fc-3793020cb1da",
+          "id": 2758,
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1777937705.176927,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1777978747.671923,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": []
+        }
+      ]
+    }
+  ],
+  "exported_tags": []
+}

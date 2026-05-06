@@ -30,6 +30,10 @@ SHORT_TYPE_TO_FSR: dict[str, str] = {
     "find_record": "FindRecords",
     "update_record": "UpdateRecord",
     "create_record": "InsertData",
+    # Bulk feed insertion — used by threat-feed ingestion recipes. Bypasses
+    # on-create playbook triggers (intentional for high-volume feeds; do
+    # NOT use this for Alerts ingestion where triggers must fire).
+    "ingest_bulk_feed": "IngestBulkFeed",
     # Legacy alias kept so existing fixtures don't break; emit a hint via
     # the linter when authors use the old name.
     "insert_record": "InsertData",
@@ -113,11 +117,48 @@ class Resolver:
         ).fetchone()
 
     def suggest_operation(self, connector: str, op: str) -> Optional[str]:
+        # Score each op by max(ratio(input, op_name), ratio(input, snake_title)).
+        # Title match catches the case where the agent guessed an op name from
+        # the human-readable label (`get_ip_reputation` ≈ "Get IP Reputation"
+        # = title of `query_ip`).
         rows = self.conn.execute(
-            "SELECT op_name FROM operations WHERE connector_name = ?", (connector,),
+            "SELECT op_name, title FROM operations WHERE connector_name = ?",
+            (connector,),
         ).fetchall()
-        m = difflib.get_close_matches(op, [r["op_name"] for r in rows], n=1, cutoff=0.6)
-        return m[0] if m else None
+        if not rows:
+            return None
+        needle = op.lower()
+        best_name, best_score = None, 0.0
+        for r in rows:
+            name = r["op_name"]
+            title_snake = (r["title"] or "").lower().replace(" ", "_")
+            score = max(
+                difflib.SequenceMatcher(None, needle, name.lower()).ratio(),
+                difflib.SequenceMatcher(None, needle, title_snake).ratio() if title_snake else 0.0,
+            )
+            if score > best_score:
+                best_name, best_score = name, score
+        return best_name if best_score >= 0.6 else None
+
+    def suggest_operations_topn(self, connector: str, op: str, n: int = 5) -> list[str]:
+        """Return top-N close-ish op names (using both op_name and title), for picklist hints."""
+        rows = self.conn.execute(
+            "SELECT op_name, title FROM operations WHERE connector_name = ?",
+            (connector,),
+        ).fetchall()
+        needle = op.lower()
+        scored = []
+        for r in rows:
+            name = r["op_name"]
+            title_snake = (r["title"] or "").lower().replace(" ", "_")
+            score = max(
+                difflib.SequenceMatcher(None, needle, name.lower()).ratio(),
+                difflib.SequenceMatcher(None, needle, title_snake).ratio() if title_snake else 0.0,
+            )
+            if score >= 0.3:
+                scored.append((score, name))
+        scored.sort(reverse=True)
+        return [name for _, name in scored[:n]]
 
     def operation_params(self, connector: str, op: str) -> list[str]:
         rows = self.conn.execute(
@@ -833,12 +874,21 @@ class Resolver:
         orow = self.operation(connector, operation)
         if orow is None:
             sug = self.suggest_operation(connector, operation)
+            if sug:
+                suggestion = f"did you mean {sug!r}?"
+            else:
+                topn = self.suggest_operations_topn(connector, operation)
+                suggestion = (
+                    f"closest ops: {', '.join(repr(o) for o in topn)}"
+                    if topn else
+                    f"run `fsrpb find op {connector} <keyword>` to list operations"
+                )
             errors.append(CompileError(
                 code=ErrorCode.UNKNOWN_OPERATION,
                 message=f"unknown operation {operation!r} on connector {connector!r}",
                 path=f"{path}.arguments.operation",
                 near=sug,
-                suggestion=f"did you mean {sug!r}?" if sug else None,
+                suggestion=suggestion,
             ))
             return
 
@@ -878,15 +928,21 @@ class Resolver:
         else:
             for p_name in provided:
                 if p_name not in valid_params:
-                    sug = None
                     m = difflib.get_close_matches(p_name, list(valid_params), n=1, cutoff=0.6)
                     sug = m[0] if m else None
+                    if sug:
+                        suggestion = f"did you mean {sug!r}?"
+                    else:
+                        # Lexical match failed; just list the valid params.
+                        # Param sets are small (median ~4) so this is cheap.
+                        listed = ", ".join(repr(p) for p in sorted(valid_params))
+                        suggestion = f"valid params: {listed}"
                     errors.append(CompileError(
                         code=ErrorCode.UNKNOWN_PARAM,
                         message=f"unknown param {p_name!r} on {connector}.{operation}",
                         path=f"{path}.arguments.params.{p_name}",
                         near=sug,
-                        suggestion=f"did you mean {sug!r}?" if sug else None,
+                        suggestion=suggestion,
                     ))
 
         # Stamp the connector version onto the step (FSR JSON requires it).

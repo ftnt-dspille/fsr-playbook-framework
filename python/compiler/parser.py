@@ -133,6 +133,56 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 branches = {}
 
             cmt = s_raw.get("comment")
+
+            for_each = None
+            fe_raw = s_raw.get("for_each")
+            if fe_raw is not None:
+                if not isinstance(fe_raw, dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="for_each must be a mapping",
+                        path=f"{sp}.for_each",
+                    ))
+                else:
+                    accepted = {"item", "parallel", "condition", "__bulk",
+                                "batch_size", "break_loop"}
+                    unknown = set(fe_raw.keys()) - accepted
+                    if unknown:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"for_each has unknown keys: {sorted(unknown)}. "
+                                f"Accepted: {sorted(accepted)}"
+                            ),
+                            path=f"{sp}.for_each",
+                        ))
+                    item = fe_raw.get("item")
+                    if not isinstance(item, str) or not item.strip():
+                        errors.append(CompileError(
+                            code=ErrorCode.MISSING_FIELD,
+                            message="for_each.item is required (Jinja list expression, e.g. '{{ vars.records }}')",
+                            path=f"{sp}.for_each.item",
+                        ))
+                    else:
+                        for_each = {
+                            "item": item,
+                            "parallel": bool(fe_raw.get("parallel", False)),
+                            "condition": str(fe_raw.get("condition", "") or ""),
+                        }
+                        if "__bulk" in fe_raw:
+                            for_each["__bulk"] = bool(fe_raw["__bulk"])
+                        if "batch_size" in fe_raw:
+                            try:
+                                for_each["batch_size"] = int(fe_raw["batch_size"])
+                            except (TypeError, ValueError):
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message="for_each.batch_size must be an integer",
+                                    path=f"{sp}.for_each.batch_size",
+                                ))
+                        if "break_loop" in fe_raw:
+                            for_each["break_loop"] = str(fe_raw["break_loop"] or "")
+
             steps.append(Step(
                 id=sid,
                 type=stype,
@@ -141,6 +191,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 next=s_raw.get("next") if isinstance(s_raw.get("next"), str) else None,
                 branches={str(k): str(v) for k, v in branches.items()},
                 comment=cmt if isinstance(cmt, str) and cmt.strip() else None,
+                for_each=for_each,
             ))
 
         params_raw = pb_raw.get("parameters") or []

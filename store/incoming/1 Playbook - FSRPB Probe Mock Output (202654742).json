@@ -1,0 +1,148 @@
+{
+  "type": "workflow_collections",
+  "data": [
+    {
+      "@context": "/api/3/contexts/WorkflowCollection",
+      "@type": "WorkflowCollection",
+      "name": "FSRPB Probe Mock Output",
+      "description": "Validates that useMockOutput=true substitutes mock_result and downstream steps see it.",
+      "visible": true,
+      "image": null,
+      "uuid": "c8e461fe-8a4c-51bf-9a9b-bdcf25ee9698",
+      "id": 337,
+      "createDate": 1777898523.086974,
+      "modifyDate": 1777898523.086974,
+      "deletedAt": null,
+      "importedBy": [],
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "FSRPB Probe Mock",
+          "aliasName": null,
+          "tag": "",
+          "description": "connector → set_variable; mock_result must show up in capture step.",
+          "isActive": true,
+          "debug": false,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1777898547,
+          "collection": "/api/3/workflow_collections/c8e461fe-8a4c-51bf-9a9b-bdcf25ee9698",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/b716bf6c-8b05-5834-a50d-de033b05d131",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "Capture mock",
+              "description": null,
+              "arguments": {
+                "step_variables": [
+                  {
+                    "name": "mocked_marker",
+                    "value": "{{ vars.steps.Fetch_mocked.mock_marker }}"
+                  },
+                  {
+                    "name": "mocked_count",
+                    "value": "{{ vars.steps.Fetch_mocked['items'] | length }}"
+                  },
+                  {
+                    "name": "mocked_first_name",
+                    "value": "{{ vars.steps.Fetch_mocked['items'][0]['name'] }}"
+                  }
+                ]
+              },
+              "status": null,
+              "top": "360",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "1428819c-28c3-5342-9175-fbf27ae5da6e"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Fetch mocked",
+              "description": null,
+              "arguments": {
+                "name": "Recorded Future",
+                "config": "",
+                "params": [],
+                "version": "2.0.0",
+                "connector": "recorded-future",
+                "operation": "get_riskrules",
+                "mock_result": "{\"mock_marker\": \"fsrpb-mock-probe-OK\", \"items\": [{\"id\": 1, \"name\": \"alpha\"}, {\"id\": 2, \"name\": \"beta\"}]}\n",
+                "operationTitle": "Get Risk Rules",
+                "pickFromTenant": false,
+                "step_variables": []
+              },
+              "status": null,
+              "top": "240",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "7f3e89ab-fe40-52e7-b297-6129a4ca7295"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "trigger",
+              "description": null,
+              "arguments": {
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  }
+                }
+              },
+              "status": null,
+              "top": "120",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "group": null,
+              "uuid": "b716bf6c-8b05-5834-a50d-de033b05d131"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "fetch->capture",
+              "targetStep": "/api/3/workflow_steps/1428819c-28c3-5342-9175-fbf27ae5da6e",
+              "sourceStep": "/api/3/workflow_steps/7f3e89ab-fe40-52e7-b297-6129a4ca7295",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "dda3cc5e-e4f8-5ab0-9682-f0fbb7832be6"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "trigger->fetch",
+              "targetStep": "/api/3/workflow_steps/7f3e89ab-fe40-52e7-b297-6129a4ca7295",
+              "sourceStep": "/api/3/workflow_steps/b716bf6c-8b05-5834-a50d-de033b05d131",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "cbd5caae-b465-5493-a733-76271759d2f1"
+            }
+          ],
+          "groups": [],
+          "priority": null,
+          "playbookOrigin": "/api/3/picklists/15c1e8c9-22bf-4e66-8fbb-0a502d4a4a3f",
+          "isEditable": true,
+          "uuid": "75daef6e-31c5-5535-827d-52e548c35d30",
+          "id": 2676,
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1777898523.08739,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1777898547.243955,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": []
+        }
+      ]
+    }
+  ],
+  "exported_tags": []
+}

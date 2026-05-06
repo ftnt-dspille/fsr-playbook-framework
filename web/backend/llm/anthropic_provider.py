@@ -26,25 +26,16 @@ from .provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from .tools import dispatch
+from ._loop_helpers import (
+    MAX_SELF_REPAIR_TURNS,
+    MAX_TOOL_TURNS,
+    compile_errors as _compile_errors,
+    extract_yaml_block as _extract_yaml_block,
+)
+from .tools import anthropic_tools, dispatch
 
 
 DEFAULT_MODEL = os.environ.get("STUDIO_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
-MAX_TOOL_TURNS = 8
-# Cap on extra "fix the YAML" turns we'll auto-issue when the assistant's
-# final message contains a yaml block that fails to compile. Each repair
-# turn is ~$0.02–0.03; 2 keeps the cost ceiling at ~$0.05/conversation.
-MAX_SELF_REPAIR_TURNS = 2
-
-_SELF_REPAIR_SENTINEL = "__fsr_studio_self_repair__"
-
-
-def _extract_yaml_block(text: str) -> str | None:
-    """Last fenced ```yaml block. Mirrors frontend's extractYamlBlock."""
-    import re
-
-    matches = list(re.finditer(r"```ya?ml\n([\s\S]*?)```", text, flags=re.IGNORECASE))
-    return matches[-1].group(1) if matches else None
 
 
 def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
@@ -60,9 +51,25 @@ def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
 class AnthropicProvider:
     name = "anthropic"
 
-    def __init__(self, *, model: str = DEFAULT_MODEL, client: AsyncAnthropic | None = None):
-        self.model = model
-        self._client = client or AsyncAnthropic()
+    def __init__(
+        self,
+        *,
+        model: str = DEFAULT_MODEL,
+        api_key: str | None = None,
+        client: AsyncAnthropic | None = None,
+    ):
+        self.model = model or DEFAULT_MODEL
+        # max_retries=5 (SDK default is 2). Failed retries cost nothing —
+        # Anthropic only bills successful generations — so a higher
+        # ceiling makes us robust to transient 529 overloads at zero
+        # cost. The SDK already exponentially backs off between retries.
+        if client is not None:
+            self._client = client
+        elif api_key:
+            self._client = AsyncAnthropic(api_key=api_key, max_retries=5)
+        else:
+            # Falls back to ANTHROPIC_API_KEY env var via SDK default.
+            self._client = AsyncAnthropic(max_retries=5)
 
     async def stream(
         self,
@@ -79,6 +86,11 @@ class AnthropicProvider:
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
+        # Allow callers to pass tools=None or tools=[] and have the
+        # provider supply its own. Keeps the route handler ignorant of
+        # which schema shape applies.
+        if not tools:
+            tools = anthropic_tools()
 
         # Prompt caching: mark the last tool with `cache_control` so the
         # entire (system + tools) prefix is cached for 5 min. Cached reads
@@ -122,7 +134,49 @@ class AnthropicProvider:
 
                     final = await stream.get_final_message()
             except Exception as e:
-                yield ErrorEvent(message=f"{type(e).__name__}: {e}")
+                # Surface a clean, user-readable message; log the raw
+                # detail server-side. The SDK already auto-retried up to
+                # max_retries on 429/5xx/529 — if we reach this except
+                # block, retries were exhausted (or it's a non-retryable
+                # error like Auth/BadRequest).
+                import logging
+                from anthropic import (
+                    APIConnectionError, APITimeoutError, AuthenticationError,
+                    BadRequestError, PermissionDeniedError, RateLimitError,
+                    APIStatusError,
+                )
+                logging.exception("anthropic stream failed")
+                if isinstance(e, AuthenticationError):
+                    msg = "Anthropic authentication failed — check ANTHROPIC_API_KEY in the backend env."
+                elif isinstance(e, PermissionDeniedError):
+                    msg = "Anthropic API key lacks permission for this model."
+                elif isinstance(e, RateLimitError):
+                    msg = "You've hit Anthropic's rate limit. Wait a moment and try again."
+                elif isinstance(e, APITimeoutError):
+                    msg = "The request to Anthropic timed out. Try again, or shorten the prompt if it's very long."
+                elif isinstance(e, APIConnectionError):
+                    msg = "Could not reach Anthropic — check your network connection and try again."
+                elif isinstance(e, BadRequestError):
+                    msg = f"Anthropic rejected the request: {getattr(e, 'message', str(e))[:200]}"
+                elif isinstance(e, APIStatusError):
+                    # 529 overloaded_error and any other status that
+                    # slipped past auto-retry. Pull the canonical type
+                    # from the response body if present.
+                    err_type = ""
+                    try:
+                        body = getattr(e, "body", None) or {}
+                        err_type = (body.get("error") or {}).get("type", "")
+                    except Exception:
+                        pass
+                    if err_type == "overloaded_error":
+                        msg = ("Anthropic is overloaded right now. We retried a few times "
+                               "and still couldn't get through — please try again in a moment.")
+                    else:
+                        status = getattr(e, "status_code", "?")
+                        msg = f"Anthropic returned an error (HTTP {status}). Please try again."
+                else:
+                    msg = "Something went wrong talking to Anthropic. Please try again."
+                yield ErrorEvent(message=msg)
                 return
 
             assistant_blocks: list[dict[str, Any]] = []
@@ -241,29 +295,3 @@ def _stringify(result: Any) -> str:
         return str(result)
 
 
-def _compile_errors(yaml_text: str) -> str | None:
-    """Run the same compiler the editor uses; return a human/LLM-readable
-    bullet list of error messages, or None if the YAML compiles clean."""
-    from pathlib import Path
-
-    try:
-        from compiler import compile_yaml as _cy  # type: ignore
-    except Exception as e:
-        return f"compiler import failed: {e}"
-
-    db = Path(__file__).resolve().parents[3] / "store" / "fsr_reference.db"
-    res = _cy(yaml_text, db)
-    if res.ok:
-        return None
-    blocking = [e for e in res.errors if e.severity != "warning"]
-    if not blocking:
-        return None
-    lines: list[str] = []
-    for e in blocking:
-        line = f"- [{e.code.value}] {e.message}"
-        if e.path:
-            line += f"  (path: {e.path})"
-        if e.suggestion:
-            line += f"  → {e.suggestion}"
-        lines.append(line)
-    return "\n".join(lines)

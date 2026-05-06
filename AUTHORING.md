@@ -185,6 +185,61 @@ The compiler synthesizes a `WorkflowRoute` per `next` and per `branches`
 entry — labels become FSR's edge labels. Empty-string labels are
 normalized to null on round-trip.
 
+## Setting variables: where they go under `arguments`
+
+Two distinct cases — easy to confuse, and the wrong shape silently
+emits one variable literally named `step_variables`:
+
+**On a `set_variable` step → flat keys directly under `arguments`.**
+The whole point of the step is to set variables; the entire arguments
+dict IS the var bucket. No wrapper, no list-of-`{name, value}`.
+
+```yaml
+- id: capture
+  type: set_variable
+  arguments:
+    severity_label: "{{ vars.input.records[0].severity }}"
+    indicator_count: "{{ vars.steps.Fetch.indicators | length }}"
+    next_action: "escalate"
+```
+
+**On any other step that supports inline-stamping vars (`start`,
+`connector`, `create_record`, `find_record`, `update_record`, …) →
+`step_variables` dict, sitting alongside the step's normal args.**
+Here `arguments` is a mixed bag (step config + inline vars), so the
+labeled bucket is needed to tell them apart. Always a **dict**
+(`{name: value, ...}`), never a list of `{name, value}`.
+
+```yaml
+- id: fetch
+  type: connector
+  arguments:
+    connector: my-connector
+    operation: list_things
+    config: ""
+    params:
+      since: "{{ vars.lastPullTime }}"
+    step_variables:                 # vars stamped after the step runs
+      fetched_at: "{{ now() }}"
+      pull_window: "{{ vars.lastPullTime }}"
+```
+
+On `start` (`cybersponse.abstract_trigger`), `step_variables` is also a
+dict; the canonical key `input.params: []` lives there. Inline vars go
+alongside it. The compiler auto-fills the canonical default if you
+leave it off.
+
+Anti-pattern that silently breaks rendering:
+
+```yaml
+# DON'T — `step_variables: [...]` on a set_variable step gets emitted
+# as ONE variable literally named "step_variables" whose value is the
+# list. FSR's UI shows "step_variables = [object Object],[object Object]".
+arguments:
+  step_variables:
+    - { name: foo, value: bar }
+```
+
 ## Variables and Jinja
 
 Inside a playbook you read state via Jinja templates:
@@ -251,6 +306,52 @@ The reference store has 170 backend-introspected filters with canonical
 signatures plus 144 documented in the widget catalog. FSR-custom
 extensions live under `workflow.*` and `sealab.*` modules — see
 `store/FSR_CUSTOM_JINJA.md`.
+
+## Looping a step over a list (`for_each`)
+
+Any step can run once per element of a list by adding a `for_each:`
+mapping at the step level (sibling of `arguments`). Inside the step,
+the current element is bound to **`{{ vars.item }}`** (object items
+expose fields as `{{ vars.item.<field> }}`).
+
+```yaml
+- id: create_alerts
+  type: create_record
+  for_each:
+    item: "{{ vars.steps.fetch.records }}"   # required: Jinja list expression
+    parallel: false                          # optional, default false
+    condition: ""                            # optional Jinja filter; empty = run every iteration
+    # __bulk: true        # optional; bypasses on-create playbook triggers (use only for feeds)
+    # batch_size: 100     # optional; only relevant with __bulk
+    # break_loop: ""      # optional Jinja; truthy stops the loop early
+  arguments:
+    module: alerts
+    resource:
+      name: "{{ vars.item.name }}"
+      severity: "{{ vars.item.severity | default('Medium') }}"
+      description: "{{ vars.item.description }}"
+```
+
+Rules:
+
+- `for_each.item` is **required** and must be a Jinja expression that
+  evaluates to a list. The compiler hard-errors if it's missing.
+- The runtime variable is always `vars.item`, regardless of how `item`
+  is named in YAML — they're separate concepts (the YAML key names the
+  *iterable*, FSR exposes each *element* under the fixed name `vars.item`).
+- `parallel: true` runs iterations concurrently — only safe if the body
+  has no shared state. Default is sequential.
+- `__bulk: true` is the **trigger-bypass** flag — the body's writes do
+  not fire on-create / on-update playbooks. Use it for high-volume
+  threat-feed ingestion where per-record triggers would melt the system.
+  **Do not** use `__bulk` when ingesting Alerts — you want triggers to
+  fire for enrichment / escalation / dedupe.
+- `batch_size` only affects `__bulk: true` runs (how many records the
+  bulk POST sends per request).
+- `break_loop` evaluates each iteration; a truthy result stops further
+  iterations.
+
+Unknown keys under `for_each:` are rejected by the compiler.
 
 ## Calling another playbook
 
@@ -423,7 +524,11 @@ Beyond per-step argument shape, the validator runs cross-cutting checks:
 
 - **Full Jinja flow-typing** — we check the first attribute after
   `vars.steps.<name>`, not the full chain.
-- **`for_each` / `do_until` semantics** — accepted as opaque mappings.
+- **`do_until` semantics** — accepted as opaque mappings.
+- **`for_each.item` expression typing** — the compiler checks that
+  `item` is a non-empty string but does not statically verify it
+  evaluates to a list at runtime. (Accepted keys and required fields
+  *are* validated — see the `for_each` section above.)
 - **Permission checks** — the compiler trusts you have RBAC on the
   modules / connectors you reference.
 - **Schedule definitions** — `schedules:` on a playbook isn't yet
@@ -478,6 +583,12 @@ python_inline_code_editor` step. Config UUID resolved live + cached at
 `store/connector_config_map.json`.
 
 **`manual_input`**
+
+Friendly form (compiler expands to FSR's canonical InputBased shape).
+**Top-level keys are strictly whitelisted**: `title`, `description`,
+`options`, `inputs`. Anything else is a hard error — silent-drop trap
+verified in the field.
+
 ```yaml
 - type: manual_input
   arguments:
@@ -486,11 +597,34 @@ python_inline_code_editor` step. Config UUID resolved live + cached at
     options:
       - {option: approve, primary: true}
       - {option: reject}
-    inputs: []                    # optional InputBased fields
+    inputs:                         # optional InputBased fields
+      - {name: comment,  kind: textarea, label: "Comment", required: true}
+      - {name: severity, kind: select,   label: "Severity",
+         options: [Low, Medium, High]}
+      - {name: notify,   kind: checkbox, label: "Notify lead?", default: false}
   branches:
     approve: do_thing
     reject: bail
 ```
+
+`inputs[]` per-field accepted keys: `name`, `kind`, `label`, `tooltip`,
+`required`, `default`, `options` (only). Supported `kind:` values:
+`text, textarea, richtext, html, email, url, password, integer,
+number, checkbox, boolean, select, datetime, json`. `kind: select`
+needs `options:` (list of strings or jinja → list).
+
+After the operator submits, fields are read at
+`vars.steps.<step_name>.input.<name>` (step name = display name with
+spaces → underscores).
+
+**DO NOT USE** (rejected by the compiler):
+- `type: textarea` / `type: single-select` — there is no such FSR
+  dispatch; `type:` may only be `InputBased` or omitted.
+- `label`, `message` at the top level — not valid keys; use
+  `title` / `description` instead, or move into `inputs[]`.
+- `timeout` — silently ignored by FSR at runtime.
+- `vars.steps.<id>.input.choice` — does not exist; the chosen option
+  drives `branches:`, not a variable on the step output.
 
 **`create_record` / `update_record`**
 ```yaml

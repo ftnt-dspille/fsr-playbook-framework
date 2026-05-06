@@ -136,6 +136,22 @@ def anthropic_tools() -> list[dict[str, Any]]:
     ]
 
 
+def openai_tools() -> list[dict[str, Any]]:
+    """OpenAI / LM Studio function-calling schema shape. Same registry,
+    different envelope: `{type:"function", function:{name, description, parameters}}`."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.input_schema,
+            },
+        }
+        for t in REGISTRY.values()
+    ]
+
+
 def dispatch(name: str, arguments: dict[str, Any]) -> Any:
     spec = REGISTRY.get(name)
     if spec is None:

@@ -235,7 +235,12 @@ def test_active_session_marker_written_during_stream(client, tmp_path):
 # ---- No-API-key path --------------------------------------------
 
 def test_chat_no_api_key_returns_error_event(monkeypatch):
+    """When the active provider is unconfigured, the chat route emits a
+    config_error event without invoking the LLM. Clear both env and the
+    in-memory secrets backend that the conftest pre-seeded."""
+    from backend import secrets_store
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    secrets_store.get_secrets().delete("anthropic_api_key")
     c = TestClient(app_module.app)
     r = c.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert r.status_code == 200
@@ -246,17 +251,18 @@ def test_chat_no_api_key_returns_error_event(monkeypatch):
 
 
 # ---- Compile-error helpers (regression) -------------------------
+# Self-repair helpers now live in _loop_helpers, shared by both providers.
 
 def test_compile_errors_helper_flags_broken_yaml():
-    from backend.llm.anthropic_provider import _compile_errors
+    from backend.llm._loop_helpers import compile_errors
     bad = "collection: T\nplaybooks: []\n"
-    out = _compile_errors(bad)
+    out = compile_errors(bad)
     assert out is not None
     assert "playbook" in out.lower()
 
 
 def test_compile_errors_helper_returns_none_on_clean_yaml():
-    from backend.llm.anthropic_provider import _compile_errors
+    from backend.llm._loop_helpers import compile_errors
     good = (
         "collection: Hello\n"
         "playbooks:\n"
@@ -268,11 +274,11 @@ def test_compile_errors_helper_returns_none_on_clean_yaml():
         "      - id: stop\n"
         "        type: stop\n"
     )
-    assert _compile_errors(good) is None
+    assert compile_errors(good) is None
 
 
 def test_extract_yaml_block_picks_last_fence():
-    from backend.llm.anthropic_provider import _extract_yaml_block
+    from backend.llm._loop_helpers import extract_yaml_block
     txt = "intro\n```yaml\na: 1\n```\nthen\n```yaml\nb: 2\n```\n"
-    assert _extract_yaml_block(txt) == "b: 2\n"
-    assert _extract_yaml_block("nothing here") is None
+    assert extract_yaml_block(txt) == "b: 2\n"
+    assert extract_yaml_block("nothing here") is None

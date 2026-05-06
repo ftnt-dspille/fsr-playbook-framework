@@ -90,21 +90,21 @@ def _compute_layout(steps: list, start_id: str | None) -> dict[str, tuple[int, i
         children: list[tuple[str, int]] = []
         if s.next and s.next in by_id:
             children.append((s.next, col))
-        # branches: dict[label, target_id] — labels iterated in declaration order
+        # branches: dict[label, target_id] — labels iterated in declaration order.
+        # If the step has a linear `next:`, that target stays in the parent
+        # column and each branch target offsets one column to the right per
+        # branch. With no linear `next:`, the first branch stays in the parent
+        # column and subsequent branches offset right from there. Without this,
+        # `next` and `branches[0]` collide on the same (top, left).
         offset = 0
+        base_branch_offset = 1 if s.next else 0
         for label, target in s.branches.items():
             if target in by_id:
-                # If linear `next` already used this column, branches start at +1
-                branch_col = col + offset + (1 if s.next and offset == 0 else 0)
-                # Actually simpler: branches always offset from the parent's column,
-                # incrementing per branch. If there's no linear `next`, the first
-                # branch stays in the parent column (looks centered).
-                branch_col = col + offset
-                children.append((target, branch_col))
+                children.append((target, col + base_branch_offset + offset))
                 offset += 1
         for target in getattr(s, "unlabeled_next", []) or []:
             if target in by_id:
-                children.append((target, col + offset))
+                children.append((target, col + base_branch_offset + offset))
                 offset += 1
         for tgt, tcol in children:
             if tgt not in layout:
@@ -146,13 +146,33 @@ def emit(collection: Collection) -> dict[str, Any]:
         # auto-generated note per step that carries a comment. Auto-notes
         # are tagged so the decompiler can fold them back into step.comment.
         annotations: list[Annotation] = list(pb.annotations)
+        # Recognized prefixes — first word of the comment body categorizes
+        # the note. Lets authors flag actionable items vs. background
+        # explanation in the canvas without a separate field.
+        _PREFIXES = ("TODO", "FIX", "NOTE", "WARN", "HACK", "XXX")
         for s in pb.steps:
             if s.comment:
+                # Title with the step's display name so the canvas makes
+                # the note→step linkage obvious. Prefix carries the
+                # comment category (TODO/FIX/Note/...) so authors can
+                # scan the canvas for actionable items.
+                body = s.comment
+                first_word = body.lstrip().split(None, 1)[0].rstrip(":").upper() if body.strip() else ""
+                prefix = first_word if first_word in _PREFIXES else "Note"
+                title = f"{prefix}: {s.name or s.id}"
+                # ~58 visible chars per line at width=440; 22px per
+                # line; 50px chrome (title bar + padding). Cap so
+                # really long notes don't dominate the canvas.
+                est_lines = sum(max(1, (len(line) // 58) + 1)
+                                for line in body.splitlines() or [""])
+                height = min(360, 50 + est_lines * 22)
                 annotations.append(Annotation(
                     id=f"__comment_{s.id}",
                     kind="note",
-                    title="Note",
-                    body=s.comment,
+                    title=title,
+                    body=body,
+                    width=440,
+                    height=height,
                     contains=[s.id],
                     auto_for_step=s.id,
                 ))
@@ -257,6 +277,27 @@ def emit(collection: Collection) -> dict[str, Any]:
         if pb.trigger_step_id and pb.trigger_step_id in step_uuids:
             trigger_step_iri = _step_iri(step_uuids[pb.trigger_step_id])
 
+        # Pre-pass: stack auto-comment notes vertically so a tall note
+        # doesn't overlap the next note that wants its step's row.
+        # Sort by the contained step's `top`, then push each note down
+        # to clear the previous one (with a small gap). Notes inherit
+        # their preferred top from the step they annotate; this pass
+        # only nudges them downward when needed.
+        _NOTE_VGAP = 20
+        cursor = -1
+        auto_notes = sorted(
+            (a for a in annotations
+             if a.kind == "note" and a.auto_for_step
+             and a.top is None and a.contains
+             and a.contains[0] in step_layout),
+            key=lambda a: step_layout[a.contains[0]][0],
+        )
+        for ann in auto_notes:
+            step_top = step_layout[ann.contains[0]][0]
+            note_top = max(step_top, cursor + _NOTE_VGAP) if cursor >= 0 else step_top
+            ann.top = note_top
+            cursor = note_top + (ann.height or 60)
+
         groups_out: list[dict[str, Any]] = []
         for ann in annotations:
             if not ann.uuid:
@@ -334,11 +375,17 @@ def emit(collection: Collection) -> dict[str, Any]:
 
 def _emit_step(s: Step, step_uuid: str, top: int, left: int,
                group_iri: str | None = None) -> dict[str, Any]:
+    args = dict(s.arguments or {})
+    if s.for_each:
+        # for_each lives inside arguments on the wire (alongside resource,
+        # operation, etc). The IR keeps it as a sibling of `arguments` for
+        # ergonomic YAML; we merge it in here.
+        args["for_each"] = dict(s.for_each)
     return {
         "@type": "WorkflowStep",
         "name": s.name or s.id,
         "description": None,
-        "arguments": s.arguments or {},
+        "arguments": args,
         "status": None,
         "top": str(top),
         "left": str(left),
@@ -367,7 +414,16 @@ def _emit_group(ann: Annotation, step_layout: dict[str, tuple[int, int]]) -> dic
             lefts = [l for _, l in layouts]
             if ann.kind == "note":
                 top = top if top is not None else min(tops)
-                left = left if left is not None else max(lefts) + _STEP_WIDTH + _NOTE_GAP
+                # Park notes in a single column to the RIGHT of every step
+                # in the workflow, not just the right of the contained
+                # step. Otherwise notes for steps in column 0 land
+                # mid-canvas and visually collide with steps in column 1+
+                # (Decision branch targets). All notes in the same column
+                # → no overlap with the topology, and notes for different
+                # steps differ vertically so they don't overlap each other.
+                if left is None:
+                    canvas_max_left = max(l for _, l in step_layout.values()) if step_layout else max(lefts)
+                    left = canvas_max_left + _STEP_WIDTH + _NOTE_GAP
             else:  # block: bounding box
                 top = top if top is not None else max(0, min(tops) - 30)
                 left = left if left is not None else max(0, min(lefts) - 30)

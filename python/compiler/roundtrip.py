@@ -41,10 +41,18 @@ def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
     steps_by_uuid = {s["uuid"]: s for s in wf.get("steps", [])}
     norm_steps = []
     for s in wf.get("steps", []):
+        args = dict(s.get("arguments") or {})
+        # for_each is a wire-level args key but conceptually a separate
+        # construct — lift it out so it's compared as its own thing and
+        # arguments-diffs aren't drowned by for_each contents.
+        fe = args.pop("for_each", None)
+        if isinstance(fe, dict) and not fe:
+            fe = None
         norm_steps.append({
             "name": s.get("name"),
             "stepType": _step_type_key(s.get("stepType")),
-            "arguments": s.get("arguments") or {},
+            "arguments": args,
+            "for_each": fe,
         })
     norm_steps.sort(key=lambda x: (x["name"] or "", x["stepType"] or ""))
 

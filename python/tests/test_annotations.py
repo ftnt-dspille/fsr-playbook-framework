@@ -54,7 +54,11 @@ def test_step_comment_emits_note(db_path):
     assert len(groups) == 1
     note = groups[0]
     assert note["type"] == "note"
-    assert note["name"] == "Note"
+    # Auto-comment notes are titled "<PREFIX>: <step name>" where the
+    # prefix carries the comment category (Note/TODO/FIX/...). For a
+    # plain comment body that doesn't start with a recognized keyword,
+    # the prefix defaults to "Note".
+    assert note["name"] == "Note: noop"
     assert "AI-added 2026-05-03" in note["description"]
     # Note positioned to the right of the step
     assert int(note["left"]) > 200

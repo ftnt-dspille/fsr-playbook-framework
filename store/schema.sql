@@ -348,6 +348,69 @@ CREATE TABLE IF NOT EXISTS _probe_runs (
     notes        TEXT
 );
 
+-- ---------- JSON-key alias views ----------
+-- Column names in the tables above use SQL-friendly names (op_name, *_json,
+-- ord) that don't match the keys in the source info.json blobs. These views
+-- expose every column under BOTH the table name AND the info.json key name,
+-- so a query that guesses the column from the JSON shape ("operation",
+-- "output_schema", "options", "order", "tags", "config_schema") still works.
+-- Read-only; underlying tables are untouched.
+DROP VIEW IF EXISTS v_connectors;
+CREATE VIEW v_connectors AS
+SELECT
+    name, version, label, category, description, publisher, contributor,
+    active, system, cs_approved, cs_compatible, ingestion_supported,
+    tags_json, tags_json AS tags,
+    config_schema_json, config_schema_json AS config_schema,
+    source, source_path,
+    info_json, info_json AS info,
+    source_code, rpm_fingerprint
+FROM connectors;
+
+DROP VIEW IF EXISTS v_operations;
+CREATE VIEW v_operations AS
+SELECT
+    connector_name,
+    op_name, op_name AS operation,
+    title, annotation, category, description, visible, enabled,
+    output_schema_json, output_schema_json AS output_schema,
+    conditional_output_schema_json,
+    conditional_output_schema_json AS conditional_output_schema,
+    output_schema_observed
+FROM operations;
+
+DROP VIEW IF EXISTS v_operation_params;
+CREATE VIEW v_operation_params AS
+SELECT
+    connector_name,
+    op_name, op_name AS operation,
+    parent_param_name, condition_value,
+    param_name, param_name AS name,
+    title, type, required,
+    default_value, default_value AS value,
+    options_json, options_json AS options,
+    tooltip, placeholder, description, visible, editable,
+    ord, ord AS "order"
+FROM operation_params;
+
+DROP VIEW IF EXISTS v_module_fields;
+CREATE VIEW v_module_fields AS
+SELECT
+    module_name,
+    field_name, field_name AS name,
+    title, type, required,
+    picklist_options, picklist_options AS options,
+    tooltip
+FROM module_fields;
+
+DROP VIEW IF EXISTS v_step_types;
+CREATE VIEW v_step_types AS
+SELECT
+    uuid, name, label, category, description,
+    args_schema_json, args_schema_json AS args_schema,
+    occurrences, common_pitfalls
+FROM step_types;
+
 -- ---------- Full-text search ----------
 -- Agents query this for "enrich indicator", "create incident", etc.
 CREATE VIRTUAL TABLE IF NOT EXISTS fsr_fts USING fts5(

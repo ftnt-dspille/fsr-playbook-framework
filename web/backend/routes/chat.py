@@ -14,6 +14,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from backend import settings as _settings
 from backend.llm.factory import get_provider
 from backend.llm.provider import (
     DoneEvent,
@@ -25,7 +26,6 @@ from backend.llm.provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from backend.llm.tools import anthropic_tools
 from backend.system_prompt import SYSTEM_PROMPT
 from backend import history as history_db
 from backend.llm.usage_log import est_tokens, log_turn
@@ -42,7 +42,9 @@ class ChatMessageIn(BaseModel):
 class ChatIn(BaseModel):
     messages: list[ChatMessageIn]
     current_yaml: str | None = None
-    provider: str = "anthropic"
+    # None = use the active provider per settings; explicit string =
+    # caller-pinned (rare; mostly for tests).
+    provider: str | None = None
 
 
 def _serialize(event: Event) -> dict[str, Any]:
@@ -172,26 +174,32 @@ def _build_messages(body: ChatIn) -> list[Message]:
 
 @router.post("/chat")
 async def chat(body: ChatIn) -> EventSourceResponse:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    chosen = body.provider or _settings.get_active_provider_name()
+    cfg = _settings.load_provider(chosen)
+    if not cfg.is_configured():
         async def gen_err() -> AsyncIterator[dict[str, Any]]:
             yield {
                 "event": "error",
-                "data": json.dumps({"message": "ANTHROPIC_API_KEY not configured"}),
+                "data": json.dumps({
+                    "message": f"{chosen!r} is not fully configured — open Settings "
+                               f"and set the URL/key/model."
+                }),
             }
             yield {"event": "done", "data": json.dumps({"stop_reason": "config_error"})}
         return EventSourceResponse(gen_err())
 
-    provider = get_provider(body.provider)
+    provider = get_provider(chosen)
     messages = _build_messages(body)
-    tools = anthropic_tools()
     tags = _yaml_tags(body.current_yaml)
 
     async def gen() -> AsyncIterator[dict[str, Any]]:
         active_session_written = False
         try:
+            # tools=[] → provider self-fills with the right schema shape
+            # (Anthropic input_schema vs OpenAI function-calling).
             async for ev in provider.stream(
                 system=SYSTEM_PROMPT, messages=messages,
-                tools=tools, tags=tags,
+                tools=[], tags=tags,
             ):
                 if isinstance(ev, UsageEvent):
                     _persist_usage(ev)

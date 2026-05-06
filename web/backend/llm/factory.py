@@ -1,18 +1,13 @@
 """LLM provider factory.
 
-The chat route asks for a provider by name; tests can register a fake.
-This is the single point where wiring decisions land — adding an
-OpenAI / Bedrock / etc. provider is `register("openai", OpenAIProvider)`
-plus reading `STUDIO_LLM_PROVIDER=openai` at startup.
-
-Every provider must conform to the LLMProvider Protocol and emit a
-UsageEvent per LLM round-trip — that's how cost accounting stays
-provider-agnostic.
+Routes ask for `get_provider()` (active per settings) or
+`get_provider("lmstudio")` (explicit). Either way we hydrate the provider
+from `backend.settings.load_provider(name)` so URL/key/model live in one
+place. Tests can register a `FakeProvider` to bypass settings entirely.
 """
 from __future__ import annotations
 
-import os
-from typing import Callable
+from typing import Any, Callable
 
 from .provider import LLMProvider
 
@@ -21,21 +16,56 @@ _REGISTRY: dict[str, Callable[..., LLMProvider]] = {}
 
 
 def register(name: str, factory: Callable[..., LLMProvider]) -> None:
-    """Bind a name to a constructor (zero-arg callable returning an
-    LLMProvider). Tests use this to inject a FakeProvider."""
+    """Bind a name to a constructor. The constructor receives kwargs
+    matching ProviderConfig fields (base_url, api_key, model). Tests use
+    this to inject a FakeProvider."""
     _REGISTRY[name] = factory
 
 
-def get_provider(name: str | None = None, **kwargs) -> LLMProvider:
-    """Return a provider by name. If `name` is None, falls back to
-    `STUDIO_LLM_PROVIDER` env var, then 'anthropic'."""
-    chosen = name or os.environ.get("STUDIO_LLM_PROVIDER", "anthropic")
+def get_provider(name: str | None = None, **overrides: Any) -> LLMProvider:
+    """Return a configured provider.
+
+    `name=None` → active per settings.
+    `overrides` → override any ProviderConfig field for this call only
+      (used in tests; the route handler passes nothing).
+    """
+    # Imported here to avoid a circular import at module load: settings →
+    # secrets_store → keyring. Lazy is fine, this runs once per request.
+    from backend import settings as _settings
+
+    chosen = name or _settings.get_active_provider_name()
     fac = _REGISTRY.get(chosen)
     if fac is None:
         raise KeyError(
             f"unknown LLM provider {chosen!r}; "
             f"registered: {sorted(_REGISTRY)}"
         )
+
+    cfg = _settings.load_provider(chosen)
+    kwargs: dict[str, Any] = {
+        "model": cfg.model or None,
+        "api_key": cfg.api_key,
+    }
+    if cfg.base_url is not None:
+        kwargs["base_url"] = cfg.base_url
+    kwargs.update(overrides)
+    # Drop Nones so the provider's own defaults kick in.
+    kwargs = {k: v for k, v in kwargs.items() if v is not None}
+    # Tolerate factories that don't accept all of these (e.g. test
+    # fixtures that pre-bind args via lambda). Inspect the signature
+    # and pass only what the callable knows about; **kwargs-style
+    # callables still receive everything.
+    import inspect
+    try:
+        sig = inspect.signature(fac)
+        accepts_var_kw = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+        if not accepts_var_kw:
+            kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    except (TypeError, ValueError):
+        pass  # builtins / C-callables; just hand them what we have
     return fac(**kwargs)
 
 
@@ -49,14 +79,15 @@ def reset_registry() -> None:
     _REGISTRY.clear()
 
 
-# ---- built-in registrations --------------------------------------
-# Imported lazily so a missing provider SDK (e.g. the openai package)
-# doesn't blow up the whole module.
-
 def _register_builtins() -> None:
     try:
         from .anthropic_provider import AnthropicProvider
         register("anthropic", AnthropicProvider)
+    except Exception:
+        pass
+    try:
+        from .lmstudio_provider import LMStudioProvider
+        register("lmstudio", LMStudioProvider)
     except Exception:
         pass
 

@@ -34,41 +34,55 @@ function findConnectorAbove(model: any, lineNumber: number): string | null {
   return null;
 }
 
-function indent(line: string): string {
-  const m = line.match(/^(\s*)/);
-  return m ? m[1] : '';
-}
-
-/** Snippets keyed by short step type — inserted INSTEAD OF just the keyword
- *  when the user picks an item. `${N}` are tab-stops; ${0} is the final cursor. */
+/**
+ * Snippets keyed by short step type — inserted INSTEAD OF just the keyword
+ * when the user picks an item. `${N}` are tab-stops; ${0} is the final cursor.
+ *
+ * Monaco's autoIndent:'full' (default) re-indents each newline to match the
+ * surrounding context, so snippets must NOT include an explicit base-indent
+ * prefix.  Each continuation line carries only its *relative* child indent.
+ * The `pad` parameter is accepted for API compatibility but intentionally
+ * unused — Monaco provides the base indentation automatically.
+ */
 const STEP_SNIPPETS: Record<string, (pad: string) => string> = {
-  connector: (pad) =>
-    `connector\n${pad}arguments:\n${pad}  connector: \${1:connector_name}\n${pad}  operation: \${2:operation_name}\n${pad}  params:\n${pad}    \${0}`,
-  set_variable: (pad) =>
-    `set_variable\n${pad}arguments:\n${pad}  arg_list:\n${pad}    - name: \${1:my_var}\n${pad}      value: \${2:value}\${0}`,
-  decision: (pad) =>
-    `decision\n${pad}arguments:\n${pad}  conditions:\n${pad}    - option: \${1:yes}\n${pad}      condition: "{{ \${2:vars.x > 10} }}"\n${pad}branches:\n${pad}  \${1:yes}: \${3:next_step}\n${pad}# default fallthrough when no condition matches\n${pad}next: \${4:default_step}\${0}`,
-  find_record: (pad) =>
-    `find_record\n${pad}arguments:\n${pad}  module: \${1:alerts}\n${pad}  filter:\n${pad}    \${2:name}: \${3:value}\${0}`,
-  create_record: (pad) =>
-    `create_record\n${pad}arguments:\n${pad}  module: \${1:alerts}\n${pad}  data:\n${pad}    \${2:name}: \${3:value}\${0}`,
-  update_record: (pad) =>
-    `update_record\n${pad}arguments:\n${pad}  collection: \${1:/api/3/alerts/\${2:uuid}}\n${pad}  module: \${3:alerts}\n${pad}  data:\n${pad}    \${4:status}: \${5:Closed}\${0}`,
-  delay: (pad) => `delay\n${pad}arguments:\n${pad}  delay_seconds: \${1:30}\${0}`,
-  manual_input: (pad) =>
-    `manual_input\n${pad}arguments:\n${pad}  record: "{{ \${1:vars.input.records[0]['@id']} }}"\n${pad}  type: \${2:single-select}\n${pad}  input:\n${pad}    title: \${3:Approve this action?}\n${pad}    options:\n${pad}      - \${4:Approve}\n${pad}      - \${5:Reject}\n${pad}  timeout: \${6:3600}\${0}`,
-  code_snippet: (pad) =>
-    `code_snippet\n${pad}arguments:\n${pad}  code: |\n${pad}    \${1:# python}\n${pad}    result = {\\"ok\\": True}\${0}`,
-  workflow_reference: (pad) =>
-    `workflow_reference\n${pad}arguments:\n${pad}  workflow: \${1:Other Collection:Other Playbook}\n${pad}  inputs:\n${pad}    \${0}`,
-  start: (pad) => `start\n${pad}\${0}`,
-  start_on_create: (pad) =>
-    `start_on_create\n${pad}arguments:\n${pad}  module: \${1:alerts}\n${pad}\${0}`,
-  start_on_update: (pad) =>
-    `start_on_update\n${pad}arguments:\n${pad}  module: \${1:alerts}\n${pad}\${0}`,
-  stop: (pad) => `stop\${0}`,
-  end: (pad) => `end\${0}`
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  connector: (_pad) =>
+    `connector\narguments:\n  connector: \${1:connector_name}\n  operation: \${2:operation_name}\n  params:\n    \${0}`,
+  set_variable: (_pad) =>
+    `set_variable\narguments:\n  arg_list:\n    - name: \${1:my_var}\n      value: \${2:value}\${0}`,
+  decision: (_pad) =>
+    `decision\narguments:\n  conditions:\n    - option: \${1:"yes"}\n      condition: "{{ \${2:vars.x > 10} }}"\nbranches:\n  \${1:"yes"}: \${3:next_step}\n# default fallthrough when no condition matches\nnext: \${4:default_step}\${0}`,
+  find_record: (_pad) =>
+    `find_record\narguments:\n  module: \${1:alerts}\n  filter:\n    \${2:name}: \${3:value}\${0}`,
+  create_record: (_pad) =>
+    `create_record\narguments:\n  module: \${1:alerts}\n  data:\n    \${2:name}: \${3:value}\${0}`,
+  update_record: (_pad) =>
+    `update_record\narguments:\n  collection: \${1:/api/3/alerts/\${2:uuid}}\n  module: \${3:alerts}\n  data:\n    \${4:status}: \${5:Closed}\${0}`,
+  delay: (_pad) => `delay\narguments:\n  delay_seconds: \${1:30}\${0}`,
+  manual_input: (_pad) =>
+    `manual_input\narguments:\n  record: "{{ \${1:vars.input.records[0]['@id']} }}"\n  type: \${2:single-select}\n  input:\n    title: \${3:Approve this action?}\n    options:\n      - \${4:Approve}\n      - \${5:Reject}\n  timeout: \${6:3600}\${0}`,
+  code_snippet: (_pad) =>
+    `code_snippet\narguments:\n  code: |\n    \${1:# python}\n    result = {\\"ok\\": True}\${0}`,
+  workflow_reference: (_pad) =>
+    `workflow_reference\narguments:\n  workflow: \${1:Other Collection:Other Playbook}\n  inputs:\n    \${0}`,
+  start: (_pad) => `start\n\${0}`,
+  start_on_create: (_pad) =>
+    `start_on_create\narguments:\n  module: \${1:alerts}\n\${0}`,
+  start_on_update: (_pad) =>
+    `start_on_update\narguments:\n  module: \${1:alerts}\n\${0}`,
+  stop: (_pad) => `stop\${0}`,
+  end: (_pad) => `end\${0}`
 };
+
+/** Names of all step types that have snippet templates. */
+export const SNIPPET_NAMES = Object.keys(STEP_SNIPPETS);
+
+/** Build a snippet for the given step type. `pad` is accepted for API
+ *  compatibility; Monaco provides base indentation automatically. */
+export function buildSnippet(name: string, pad: string): string {
+  const fn = STEP_SNIPPETS[name];
+  return fn ? fn(pad) : name;
+}
 
 export function registerYamlCompletions(monaco: any): { dispose: () => void } {
   return monaco.languages.registerCompletionItemProvider('yaml', {
@@ -87,12 +101,11 @@ export function registerYamlCompletions(monaco: any): { dispose: () => void } {
       // type: …  →  step-type snippets
       if (/^\s*type:\s*[A-Za-z_]*$/.test(before)) {
         const types = await getStepTypesCached();
-        const pad = indent(line);
         return {
           suggestions: types.map((t) => {
-            const snippet: ((pad: string) => string) | undefined = STEP_SNIPPETS[t.name];
-            const hasSnippet = typeof snippet === 'function';
-            const insertText = hasSnippet ? snippet(pad) : t.name;
+            const hasSnippet = t.name in STEP_SNIPPETS;
+            // Pass '' — Monaco autoIndent:'full' provides the base indentation.
+            const insertText = hasSnippet ? buildSnippet(t.name, '') : t.name;
             return {
               label: t.name,
               kind: monaco.languages.CompletionItemKind.Snippet,

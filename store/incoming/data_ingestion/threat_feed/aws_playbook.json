@@ -1,0 +1,607 @@
+{
+  "type": "workflow_collections",
+  "data": [
+    {
+      "@type": "WorkflowCollection",
+      "name": "Sample - AWS Feed - 1.0.0",
+      "description": "Sample playbooks for \"AWS Feed\" connector. If you are planning to use any of the sample playbooks in your environment, ensure that you clone those playbooks and move them to a different collection, since the sample playbook collection gets deleted during connector upgrade and delete.",
+      "visible": true,
+      "image": "/api/3/images/e8ba252e-1fb8-4b67-9bca-eed35b60f1e8",
+      "uuid": "26faaa9a-047a-4c34-a057-205eaef40f3d",
+      "id": 54,
+      "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+      "createDate": 1648531889.933526,
+      "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+      "modifyDate": 1648531889.933526,
+      "deletedAt": null,
+      "importedBy": [],
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "Get Indicators",
+          "aliasName": null,
+          "tag": null,
+          "description": "Retrieve list of all indicators form AWS feed",
+          "isActive": false,
+          "debug": true,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1648531889,
+          "collection": "/api/3/workflow_collections/26faaa9a-047a-4c34-a057-205eaef40f3d",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/1d8ed5ee-7c40-47f3-a532-e80f9977c930",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {
+                "route": "dcb556d1-879f-4622-95f6-0af8ddb267b5",
+                "title": "AWS Feed: Get Indicators",
+                "resources": [
+                  "alerts"
+                ],
+                "inputVariables": [],
+                "step_variables": {
+                  "input": {
+                    "params": [],
+                    "records": "{{vars.input.records}}"
+                  }
+                },
+                "executeButtonText": "Execute",
+                "noRecordExecution": true,
+                "singleRecordExecution": false
+              },
+              "status": null,
+              "top": "40",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/f414d039-bb0d-4e59-9c39-a8f1e880b18a",
+              "uuid": "1d8ed5ee-7c40-47f3-a532-e80f9977c930"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Get Indicators",
+              "description": null,
+              "arguments": {
+                "name": "AWS Feed",
+                "config": "05ae92d5-ce25-4e23-9005-a81e869994fe",
+                "params": {
+                  "last_pull_time": "2022-02-07T18:30:00.000Z"
+                },
+                "version": "1.0.0",
+                "connector": "aws-feed",
+                "operation": "get_indicators",
+                "operationTitle": "Get Indicators",
+                "pickFromTenant": false,
+                "step_variables": []
+              },
+              "status": null,
+              "top": "221",
+              "left": "413",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "uuid": "6f1301f5-998c-4e0c-9285-b0100c281f1a"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> Get Indicators",
+              "targetStep": "/api/3/workflow_steps/6f1301f5-998c-4e0c-9285-b0100c281f1a",
+              "sourceStep": "/api/3/workflow_steps/1d8ed5ee-7c40-47f3-a532-e80f9977c930",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "f5678cf1-2995-447e-9a16-75a2fc4ba622"
+            }
+          ],
+          "priority": "/api/3/picklists/2b563c61-ae2c-41c0-a85a-c9709585e3f2",
+          "uuid": "647543d1-9fa4-47bc-9d3b-19c2bbb6bf23",
+          "id": "554",
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1648531889.935017,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1648531889.935017,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": [
+            "AWS",
+            "aws-feed"
+          ]
+        },
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "AWS Feed > Ingest",
+          "aliasName": null,
+          "tag": null,
+          "description": "Fetch Collections from AWS Feed",
+          "isActive": false,
+          "debug": true,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1648531889,
+          "collection": "/api/3/workflow_collections/26faaa9a-047a-4c34-a057-205eaef40f3d",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/738ba913-7978-4b1a-8f4d-1ca1b668f2e0",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "Get Macro Value",
+              "description": null,
+              "arguments": {
+                "params": {
+                  "iri": "/api/wf/api/dynamic-variable/?name={{vars.pullTimeMacro}}",
+                  "body": "",
+                  "method": "GET"
+                },
+                "version": "3.2.0",
+                "connector": "cyops_utilities",
+                "operation": "make_cyops_request",
+                "operationTitle": "FSR: Make FortiSOAR API Call",
+                "step_variables": []
+              },
+              "status": null,
+              "top": "180",
+              "left": "380",
+              "stepType": "/api/3/workflow_step_types/0109f35d-090b-4a2b-bd8a-94cbc3508562",
+              "uuid": "f18179d8-4ab7-4e35-893d-a1484e430eda"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Update Pull Time",
+              "description": null,
+              "arguments": {
+                "params": {
+                  "macro": "{{vars.pullTimeMacro}}",
+                  "value": "{{vars.steps.Fetch_Indicators.currentPullTime}}"
+                },
+                "version": "3.2.0",
+                "connector": "cyops_utilities",
+                "operation": "updatemacro",
+                "operationTitle": "CyOPs: Update Macro",
+                "step_variables": []
+              },
+              "status": null,
+              "top": "460",
+              "left": "960",
+              "stepType": "/api/3/workflow_step_types/0109f35d-090b-4a2b-bd8a-94cbc3508562",
+              "uuid": "bd6cbecd-5a03-44ba-9f6f-52d89b88dd2f"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Extract Value from Response",
+              "description": null,
+              "arguments": {
+                "lastPullTime": "{% if (vars.steps.Get_Macro_Value.data[\"hydra:member\"] | length) > 0%}{{vars.steps.Get_Macro_Value.data[\"hydra:member\"][0].value }}{% else %}0{% endif %}"
+              },
+              "status": null,
+              "top": "260",
+              "left": "560",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "uuid": "efc15400-ee62-4e58-aef2-854fbeff0cc8"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Fetch Indicators",
+              "description": null,
+              "arguments": {
+                "arguments": {
+                  "lastPullTime": "{{vars.lastPullTime}}"
+                },
+                "apply_async": false,
+                "step_variables": [],
+                "workflowReference": "/api/3/workflows/e1449b09-5dab-45cd-b51a-40dff704de6e"
+              },
+              "status": null,
+              "top": "360",
+              "left": "760",
+              "stepType": "/api/3/workflow_step_types/74932bdc-b8b6-4d24-88c4-1a4dfbc524f3",
+              "uuid": "a811ec53-7926-4ca6-a545-a067bdf6119e"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Configuration",
+              "description": null,
+              "arguments": {
+                "fetchTime": "0",
+                "pullTimeMacro": "AWSFeedLastPullTime_{{vars['audit_info']['cyops_playbook_iri'].split('/')[-1].replace('-','_')}}"
+              },
+              "status": null,
+              "top": "100",
+              "left": "180",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "uuid": "95555233-5fd9-4e72-944e-709eafe33e34"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  }
+                }
+              },
+              "status": null,
+              "top": "20",
+              "left": "20",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "uuid": "738ba913-7978-4b1a-8f4d-1ca1b668f2e0"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "Get Macro Value -> Extract Value from Response",
+              "targetStep": "/api/3/workflow_steps/efc15400-ee62-4e58-aef2-854fbeff0cc8",
+              "sourceStep": "/api/3/workflow_steps/f18179d8-4ab7-4e35-893d-a1484e430eda",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "eb38ee37-35b7-434d-908c-cf72ab46956a"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> Configuration",
+              "targetStep": "/api/3/workflow_steps/95555233-5fd9-4e72-944e-709eafe33e34",
+              "sourceStep": "/api/3/workflow_steps/738ba913-7978-4b1a-8f4d-1ca1b668f2e0",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "cb1109fe-fd8f-416a-a1a1-4745c45b96cd"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Configuration -> Get Macro Value",
+              "targetStep": "/api/3/workflow_steps/f18179d8-4ab7-4e35-893d-a1484e430eda",
+              "sourceStep": "/api/3/workflow_steps/95555233-5fd9-4e72-944e-709eafe33e34",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "bf2ddd68-519e-408d-803a-f6855f828427"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Fetch Indicators -> Update Pull Time",
+              "targetStep": "/api/3/workflow_steps/bd6cbecd-5a03-44ba-9f6f-52d89b88dd2f",
+              "sourceStep": "/api/3/workflow_steps/a811ec53-7926-4ca6-a545-a067bdf6119e",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "640b4f10-3805-41ab-9426-6f917533fa81"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Extract Value from Response -> Fetch Indicators",
+              "targetStep": "/api/3/workflow_steps/a811ec53-7926-4ca6-a545-a067bdf6119e",
+              "sourceStep": "/api/3/workflow_steps/efc15400-ee62-4e58-aef2-854fbeff0cc8",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "ccb12ef6-ba95-47aa-9f66-e313a6bbf16a"
+            }
+          ],
+          "priority": "/api/3/picklists/2b563c61-ae2c-41c0-a85a-c9709585e3f2",
+          "uuid": "a46073d2-5b25-405d-8d1d-ba69f8b8c248",
+          "id": "555",
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1648531889.935718,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1648531889.935718,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": [
+            "dataingestion",
+            "ingest",
+            "aws-feed"
+          ]
+        },
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "> AWS Feed > Fetch and Create",
+          "aliasName": null,
+          "tag": null,
+          "description": "Fetch and Create Indicators from AWS Feed",
+          "isActive": false,
+          "debug": true,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [
+            "lastPullTime"
+          ],
+          "synchronous": false,
+          "lastModifyDate": 1648531889,
+          "collection": "/api/3/workflow_collections/26faaa9a-047a-4c34-a057-205eaef40f3d",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/bfb42714-5bf9-47de-95f3-36f3d2d135c4",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "Create Feed List",
+              "description": null,
+              "arguments": {
+                "data": "{{vars.steps.Get_Indicators.data.prefixes + vars.steps.Get_Indicators.data.ipv6_prefixes}}",
+                "currentPullTime": "{{vars.steps.Get_Indicators.data.createDate}}"
+              },
+              "status": null,
+              "top": "280",
+              "left": "860",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "uuid": "72ebde08-7332-475f-8531-0db4852215a9"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Resolve Range",
+              "description": null,
+              "arguments": {
+                "tlp_resolved": "{{vars.tlp | resolveRange(vars.tlp_map)}}",
+                "reputation_resolved": "{{vars.reputation | resolveRange(vars.reputation_map)}}"
+              },
+              "status": null,
+              "top": "280",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "uuid": "659738ae-62ad-44b6-8eed-59ff3f042a56"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Configuration",
+              "description": null,
+              "arguments": {
+                "tlp": "White",
+                "expiry": 90,
+                "tlp_map": "{'Red': {{'TrafficLightProtocol'| picklist('Red') }}, 'Amber': {{'TrafficLightProtocol'| picklist('Amber') }}, 'Green': {{'TrafficLightProtocol'| picklist('Green') }}, 'White': {{'TrafficLightProtocol'| picklist('White') }}}",
+                "confidence": 90,
+                "reputation": "Good",
+                "reputation_map": "{'Good': {{'IndicatorReputation'| picklist('Good') }}, 'Malicious': {{'IndicatorReputation'| picklist('Malicious') }}, 'Suspicious': {{'IndicatorReputation'| picklist('Suspicious') }}, 'TBD': {{'IndicatorReputation'| picklist('TBD') }}, 'No Reputation Available': {{'IndicatorReputation'| picklist('No Reputation Available') }}}",
+                "threat_intel_feeds_tLP_map": "{}",
+                "threat_intel_feeds_reputation_map": "{}",
+                "threat_intel_feeds_typeOfFeed_map": "{}",
+                "threat_intelligence_typeofindicator_map": "{'domain-name-value': {{'ThreatIntelFeedType'| picklist('Domain') }}, 'file-name': {{'ThreatIntelFeedType'| picklist('Filename') }}, 'file-hashes-MD5': {{'ThreatIntelFeedType'| picklist('FileHash-MD5') }}, 'file-hashes-SHA-1': {{'ThreatIntelFeedType'| picklist('FileHash-SHA1') }}, 'file-hashes-SHA-256': {{'ThreatIntelFeedType'| picklist('FileHash-SHA256') }}, 'ipv4-addr-value': {{'ThreatIntelFeedType'| picklist('IPv4 Address') }}, 'ipv6-addr-value': {{'ThreatIntelFeedType'| picklist('IPv6 Address') }}, 'windows-registry-key-key': {{'ThreatIntelFeedType'| picklist('Registry') }}, 'process-name': {{'ThreatIntelFeedType'| picklist('Process') }}, 'url-value': {{'ThreatIntelFeedType'| picklist('URL') }}, 'user-account-value': {{'ThreatIntelFeedType'| picklist('User') }}, 'email-message-from_ref-value': {{'ThreatIntelFeedType'| picklist('Email Address') }}, 'email-message-sender_ref-value': {{'ThreatIntelFeedType'| picklist('Email Address') }} }"
+              },
+              "status": null,
+              "top": "160",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "uuid": "3c113637-aacb-46b4-a9dc-b1f69879ab8e"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Save Result",
+              "description": null,
+              "arguments": {
+                "currentPullTime": "{{vars.currentPullTime}}"
+              },
+              "status": null,
+              "top": "480",
+              "left": "1220",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "uuid": "6e69bfcf-4e31-45e6-a236-39781bb2c290"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Create Record",
+              "description": null,
+              "arguments": {
+                "when": "{{vars.data | length > 0}}",
+                "for_each": {
+                  "item": "{{vars.data}}",
+                  "__bulk": true,
+                  "parallel": false,
+                  "condition": "",
+                  "batch_size": 100
+                },
+                "resource": {
+                  "tLP": "{% if vars.tlp %}{{ vars.tlp | resolveRange(vars.tlp_map)}}{% else %}None{% endif %}",
+                  "value": "{{vars.item.ip_prefix or vars.item.ipv6_prefix}}",
+                  "source": "AWS Feed",
+                  "__replace": "",
+                  "expiresOn": "{% if vars.expiry %}{{ arrow.get(vars.currentPullTime[:10]).int_timestamp + (vars.expiry | int)*24*60*60 }}{% else %}None{% endif %}",
+                  "confidence": "{% if vars.confidence %}{{ vars.confidence }}{% else %}None{% endif %}",
+                  "reputation": "{% if vars.reputation %}{{ vars.reputation | resolveRange(vars.reputation_map)}}{% else %}None{% endif %}",
+                  "sourceData": "{{vars.item | toJSON}}",
+                  "typeOfFeed": "/api/3/picklists/b788efc2-dadb-4448-9018-043b37266de4"
+                },
+                "_showJson": false,
+                "collection": "/api/ingest-feeds/threat_intel_feeds",
+                "__recommend": [],
+                "step_variables": []
+              },
+              "status": null,
+              "top": "380",
+              "left": "1040",
+              "stepType": "/api/3/workflow_step_types/7b221880-716b-4726-a2ca-5e568d330b3e",
+              "uuid": "ff9f3b17-cc0e-4be1-92c6-c5bf30507746"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Return Sample Data",
+              "description": null,
+              "arguments": {
+                "data": "[\n  {\n    \"region\": \"ap-east-1\",\n    \"service\": \"EC2\",\n    \"ip_prefix\": \"52.95.226.0/24\",\n    \"network_border_group\": \"ap-east-1\"\n  },\n  {\n    \"region\": \"ap-east-1\",\n    \"service\": \"EC2\",\n    \"ip_prefix\": \"52.94.249.144/28\",\n    \"network_border_group\": \"ap-east-1\"\n  },\n  {\n    \"region\": \"ap-east-1\",\n    \"service\": \"EC2\",\n    \"ip_prefix\": \"15.177.86.0/24\",\n    \"network_border_group\": \"ap-east-1\"\n  },\n  {\n    \"region\": \"ap-east-1\",\n    \"service\": \"EC2\",\n    \"ip_prefix\": \"18.163.0.0/16\",\n    \"network_border_group\": \"ap-east-1\"\n  },\n  {\n    \"region\": \"ap-east-1\",\n    \"service\": \"EC2\",\n    \"ip_prefix\": \"54.240.17.0/24\",\n    \"network_border_group\": \"ap-east-1\"\n  },\n  {\n    \"region\": \"ap-east-1\",\n    \"service\": \"EC2\",\n    \"ipv6_prefix\": \"2406:da70:e000::/40\",\n    \"network_border_group\": \"ap-east-1\"\n  },\n  {\n    \"region\": \"ap-east-1\",\n    \"service\": \"EC2\",\n    \"ipv6_prefix\": \"2406:da1e::/32\",\n    \"network_border_group\": \"ap-east-1\"\n  }\n]"
+              },
+              "status": null,
+              "top": "80",
+              "left": "440",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "uuid": "5581b452-ab93-4fc2-867c-abf3b805c0ed"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Get Indicators",
+              "description": null,
+              "arguments": {
+                "name": "AWS Feed",
+                "config": "05ae92d5-ce25-4e23-9005-a81e869994fe",
+                "params": {
+                  "limit": 10,
+                  "last_pull_time": "{{vars.input.params.lastPullTime}}"
+                },
+                "version": "1.0.0",
+                "connector": "aws-feed",
+                "operation": "get_indicators",
+                "operationTitle": "Get Indicators",
+                "pickFromTenant": false,
+                "step_variables": []
+              },
+              "status": null,
+              "top": "180",
+              "left": "680",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "uuid": "a3fe894f-1764-48ae-b7f6-89fd8e22cc14"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Is data only for mapping",
+              "description": null,
+              "arguments": {
+                "conditions": [
+                  {
+                    "option": "Yes, For Mapping",
+                    "step_iri": "/api/3/workflow_steps/5581b452-ab93-4fc2-867c-abf3b805c0ed",
+                    "condition": "{{ vars.request.env_setup == true }}",
+                    "step_name": "Return Sample Data"
+                  },
+                  {
+                    "option": "No, For Ingestion",
+                    "default": true,
+                    "step_iri": "/api/3/workflow_steps/a3fe894f-1764-48ae-b7f6-89fd8e22cc14",
+                    "step_name": "Get Indicators"
+                  }
+                ]
+              },
+              "status": null,
+              "top": "400",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/12254cf5-5db7-4b1a-8cb1-3af081924b28",
+              "uuid": "2225c278-5b84-4542-8cbf-b39c128e20d7"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  },
+                  "_configuration_schema": "[\n  {\n    \"title\": \"Confidence\",\n    \"name\": \"confidence\",\n    \"type\": \"integer\",\n    \"tooltip\": \"Default Confidence score to be set for the feeds\",\n    \"required\": false,\n    \"editable\": true,\n    \"visible\": true,\n    \"value\": 90,\n    \"validation\": {\n       \"minlength\": 0,\n       \"maxlength\": 100\n    }\n  },\n  {\n    \"title\": \"Reputation\",\n    \"name\": \"reputation\",\n    \"type\": \"select\",\n    \"tooltip\": \"Default Reputation to be set for the feeds\",\n    \"required\": true,\n    \"editable\": true,\n    \"visible\": true,\n    \"options\": [\"Good\", \"Suspicious\", \"Malicious\", \"No Reputation Available\", \"TBD\"],\n    \"value\": \"Good\"\n  },\n  {\n    \"title\": \"TLP\",\n    \"name\": \"tlp\",\n    \"type\": \"select\",\n    \"tooltip\": \"Default TLP to be set for the feeds\",\n    \"required\": false,\n    \"editable\": true,\n    \"visible\": true,\n    \"options\": [\"Red\", \"Amber\", \"Green\", \"White\"],\n    \"value\": \"White\"\n  },\n  {\n    \"title\": \"Maximum Age (in days)\",\n    \"name\": \"expiry\",\n    \"type\": \"integer\",\n    \"tooltip\": \"Default age for the feeds. The indicator expires on 'valid_until' date unless a different expiry is specified here. If specified, the indicator will be marked expired on valid_from + expiry.\",\n    \"required\": false,\n    \"editable\": true,\n    \"visible\": true\n  }\n]"
+                }
+              },
+              "status": null,
+              "top": "40",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "uuid": "bfb42714-5bf9-47de-95f3-36f3d2d135c4"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "Get Indicators -> Create Feed List",
+              "targetStep": "/api/3/workflow_steps/72ebde08-7332-475f-8531-0db4852215a9",
+              "sourceStep": "/api/3/workflow_steps/a3fe894f-1764-48ae-b7f6-89fd8e22cc14",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "1d14c239-6457-4f4f-9fc6-c9193b3146c8"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Create Record -> Save Result",
+              "targetStep": "/api/3/workflow_steps/6e69bfcf-4e31-45e6-a236-39781bb2c290",
+              "sourceStep": "/api/3/workflow_steps/ff9f3b17-cc0e-4be1-92c6-c5bf30507746",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "b5e9200b-3d57-425d-a176-6d4642b39cba"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Is data only for mapping -> Get Indicators",
+              "targetStep": "/api/3/workflow_steps/a3fe894f-1764-48ae-b7f6-89fd8e22cc14",
+              "sourceStep": "/api/3/workflow_steps/2225c278-5b84-4542-8cbf-b39c128e20d7",
+              "label": "No, For Ingestion",
+              "isExecuted": false,
+              "uuid": "495cc8d9-f848-441f-92f7-0e4fd8ec383c"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Resolve Range -> Is data only for mapping",
+              "targetStep": "/api/3/workflow_steps/2225c278-5b84-4542-8cbf-b39c128e20d7",
+              "sourceStep": "/api/3/workflow_steps/659738ae-62ad-44b6-8eed-59ff3f042a56",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "de93419c-8090-42e0-a5ee-2e2ef778ffb2"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Configuration -> Resolve Range",
+              "targetStep": "/api/3/workflow_steps/659738ae-62ad-44b6-8eed-59ff3f042a56",
+              "sourceStep": "/api/3/workflow_steps/3c113637-aacb-46b4-a9dc-b1f69879ab8e",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "6e43522b-2217-4008-8c1b-61c5e0725fbd"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Is data only for mapping -> Return Sample Data",
+              "targetStep": "/api/3/workflow_steps/5581b452-ab93-4fc2-867c-abf3b805c0ed",
+              "sourceStep": "/api/3/workflow_steps/2225c278-5b84-4542-8cbf-b39c128e20d7",
+              "label": "Yes, For Mapping",
+              "isExecuted": false,
+              "uuid": "fdfadb06-73ea-4281-815f-48266d683991"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> Configuration",
+              "targetStep": "/api/3/workflow_steps/3c113637-aacb-46b4-a9dc-b1f69879ab8e",
+              "sourceStep": "/api/3/workflow_steps/bfb42714-5bf9-47de-95f3-36f3d2d135c4",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "816f9377-ee3d-4211-b6f6-795de8b339b8"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Create Feed List -> Create Record",
+              "targetStep": "/api/3/workflow_steps/ff9f3b17-cc0e-4be1-92c6-c5bf30507746",
+              "sourceStep": "/api/3/workflow_steps/72ebde08-7332-475f-8531-0db4852215a9",
+              "label": null,
+              "isExecuted": false,
+              "uuid": "318c7afc-2398-4955-b576-c692d741a02c"
+            }
+          ],
+          "priority": "/api/3/picklists/2b563c61-ae2c-41c0-a85a-c9709585e3f2",
+          "uuid": "e1449b09-5dab-45cd-b51a-40dff704de6e",
+          "id": "556",
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1648531889.936339,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1648531889.936339,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": [
+            "dataingestion",
+            "create",
+            "fetch",
+            "aws-feed"
+          ]
+        }
+      ]
+    }
+  ],
+  "exported_tags": [
+    "AWS",
+    "aws-feed",
+    "dataingestion",
+    "ingest",
+    "create",
+    "fetch"
+  ]
+}

@@ -23,6 +23,7 @@ Run:
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -43,6 +44,12 @@ DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
 def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    try:
+        from probes.common import CATALOG_DB_PATH
+        if CATALOG_DB_PATH.exists():
+            conn.execute(f"ATTACH DATABASE '{CATALOG_DB_PATH}' AS catalog")
+    except Exception:
+        pass
     return conn
 
 
@@ -516,7 +523,20 @@ def run_op(
     data = resp.get("data", resp)
     shape = _infer_shape(data)
     _store_observed_schema(connector, op, data)
-    return {"ok": True, "data": data, "output_shape": shape}
+    # Surface the observed top-level keys inline so the agent can wire
+    # `{{ vars.steps.<step>.<key> }}` references in a follow-up step
+    # without a round-trip back to get_op_schema. List payloads expose
+    # the first element's keys (collection shape).
+    sample = data[0] if isinstance(data, list) and data else data
+    top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
+    return {
+        "ok": True,
+        "data": data,
+        "output_shape": shape,
+        "output_top_keys": top_keys,
+        "output_is_list": isinstance(data, list),
+        "schema_cached": True,
+    }
 
 
 def _record_verification(connector: str, op: str, status: str, notes: str) -> None:
@@ -1090,8 +1110,9 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
             on top so callers can override individual values for what-if tests.
 
     Returns:
-        `{output: str}` on success, or `{error: str}` if the engine errored
-        (template syntax issues, missing var, etc).
+        `{output: <value>}` on success — value preserves its native type
+        (str, int, float, bool, list, dict). `{error: str}` if the engine
+        errored (template syntax issues, missing var, etc).
 
     Typical use: after triggering a playbook via `run-playbook`, pass the
     task_id here with the candidate Jinja for the NEXT step's argument to
@@ -1131,10 +1152,10 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
         return {"output": r}
     if isinstance(r, dict):
         for k in ("result", "output", "rendered", "value"):
-            if isinstance(r.get(k), str):
+            if k in r:
                 return {"output": r[k]}
-        return {"output": json.dumps(r)}
-    return {"error": f"unexpected response type: {type(r).__name__}"}
+        return {"output": r}
+    return {"output": r}
 
 
 # ---------------------------------------------------------------------------
@@ -1217,6 +1238,141 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# resolve_yaml — L2 gate: structural validation + live prechecks
+# ---------------------------------------------------------------------------
+
+_PICKLIST_LITERAL = re.compile(
+    r"\{\{\s*['\"]([^'\"]+)['\"]\s*\|\s*picklist\(\s*['\"]([^'\"]+)['\"]\s*\)",
+)
+
+
+def _walk_strings_iter(value: Any):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _walk_strings_iter(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _walk_strings_iter(v)
+
+
+def _extract_connectors_and_picklists(yaml_text: str) -> tuple[
+    list[tuple[str, str | None]], list[tuple[str, str]]
+]:
+    """Parse YAML and return (connectors_used, picklist_literals).
+
+    connectors_used: list of (name, version_or_None) from steps where
+        type == 'connector'.
+    picklist_literals: list of (picklist_name, value) from any string
+        in the document matching `{{ 'PL' | picklist('value') }}`.
+    """
+    try:
+        import yaml as _yaml  # type: ignore
+        doc = _yaml.safe_load(yaml_text) or {}
+    except Exception:  # noqa: BLE001
+        return [], []
+
+    connectors: dict[tuple[str, str | None], None] = {}
+    picklists: dict[tuple[str, str], None] = {}
+
+    playbooks = doc.get("playbooks") or []
+    for pb in playbooks if isinstance(playbooks, list) else []:
+        for step in (pb.get("steps") or []) if isinstance(pb, dict) else []:
+            if not isinstance(step, dict):
+                continue
+            if step.get("type") == "connector":
+                cn = step.get("connector")
+                cv = step.get("version")
+                if isinstance(cn, str) and cn:
+                    connectors[(cn, cv if isinstance(cv, str) else None)] = None
+
+    for s in _walk_strings_iter(doc):
+        for m in _PICKLIST_LITERAL.finditer(s):
+            pl_name, val = m.group(1), m.group(2)
+            picklists[(pl_name, val)] = None
+
+    return list(connectors.keys()), list(picklists.keys())
+
+
+@mcp.tool()
+def resolve_yaml(yaml_text: str) -> dict[str, Any]:
+    """L2 success-ladder gate: full whole-YAML resolvability check.
+
+    Runs the structural validator (`validate_yaml` equivalent) and then,
+    if a live FSR is configured, verifies that every connector the
+    playbook uses is installed and every `{{ 'PL' | picklist('value') }}`
+    literal resolves. Returns one consolidated report so the agent can
+    fix everything in a single round-trip.
+
+    Response shape:
+      {
+        ok: bool,
+        structural: { ok, errors: [...] },        # from validate_yaml
+        prechecks:  [ {ok, code, message, suggestions, ...}, ... ],
+        summary:    { connectors_checked, picklists_checked, fails },
+      }
+
+    When no live FSR is configured the structural gate still runs and
+    `prechecks` is reported as skipped — failure here is not retroactively
+    fatal (the agent can re-run when an FSR is reachable).
+    """
+    structural = validate_yaml(yaml_text)
+    structural_ok = bool(structural.get("ok"))
+
+    client = _live_client()
+    prechecks: list[dict[str, Any]] = []
+    summary = {"connectors_checked": 0, "picklists_checked": 0,
+               "fails": 0, "live_fsr": client is not None}
+    if client is None:
+        return {
+            "ok": structural_ok,
+            "structural": structural,
+            "prechecks": [],
+            "summary": {**summary, "note": "no live FSR; prechecks skipped"},
+        }
+
+    connectors, picklists = _extract_connectors_and_picklists(yaml_text)
+    try:
+        from recipes.prechecks import (
+            check_connector_installed, check_picklist_value,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "structural": structural,
+            "prechecks": [{"ok": False, "code": "precheck_import_failed",
+                           "message": str(exc), "suggestions": []}],
+            "summary": {**summary, "fails": 1},
+        }
+
+    installed_connectors: set[str] = set()
+    for name, version in connectors:
+        r = check_connector_installed(client, name, version)
+        prechecks.append(r.to_dict())
+        summary["connectors_checked"] += 1
+        if r.ok:
+            installed_connectors.add(name)
+        else:
+            summary["fails"] += 1
+
+    for pl_name, val in picklists:
+        r = check_picklist_value(client, pl_name, val)
+        prechecks.append(r.to_dict())
+        summary["picklists_checked"] += 1
+        if not r.ok:
+            summary["fails"] += 1
+
+    overall_ok = structural_ok and summary["fails"] == 0
+    return {
+        "ok": overall_ok,
+        "structural": structural,
+        "prechecks": prechecks,
+        "summary": summary,
+    }
+
+
+# ---------------------------------------------------------------------------
 # compile_yaml
 # ---------------------------------------------------------------------------
 
@@ -1252,6 +1408,238 @@ def compile_yaml(yaml_text: str) -> dict[str, Any]:
             ],
         }
     return {"ok": True, "json": json.dumps(result.fsr_json, indent=2)}
+
+
+# ---------------------------------------------------------------------------
+# push / run / dry-run — closes the agent's authoring loop without dropping
+# out to the CLI. All three mutate state on the live FSR instance.
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def push_playbook(yaml_text: str) -> dict[str, Any]:
+    """Compile a YAML playbook and push it to the live FSR instance.
+
+    Idempotent: PUT first, POST on 404, hard-purge + POST on 409 (matches
+    `fsrpb push --mode replace`). Use after `validate_yaml` returns clean.
+
+    Returns:
+        {ok: true, collection_uuid, collection_name, workflows: [{name, uuid}],
+         action: "put"|"post"|"purge_post"} on success.
+        {ok: false, errors: [...]} on compile failure.
+        {ok: false, error: str} on push failure.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "python"))
+    try:
+        from compiler import compile_yaml as _compile
+        from probes._env import get_client, get_config
+        from e2e.runner import _push, _PushError
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"import failed: {e!r}"}
+    if not get_config().is_live():
+        return {"ok": False, "error": "FSR instance not configured"}
+    result = _compile(yaml_text, DB_PATH)
+    if not result.ok:
+        return {"ok": False, "errors": [
+            {"code": e.code.value, "path": e.path, "message": e.message,
+             "suggestion": e.suggestion or ""}
+            for e in result.errors
+        ]}
+    coll = result.fsr_json["data"][0]
+    client = get_client()
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            _push(client, coll, Path(td))
+        except _PushError as e:
+            return {"ok": False, "error": str(e)}
+    return {
+        "ok": True,
+        "collection_uuid": coll["uuid"],
+        "collection_name": coll["name"],
+        "workflows": [{"name": w.get("name"), "uuid": w.get("uuid")}
+                      for w in coll.get("workflows", [])],
+    }
+
+
+@mcp.tool()
+def run_playbook(playbook: str,
+                 input: dict[str, Any] | None = None,
+                 collection: str | None = None,
+                 record: str | None = None,
+                 follow: bool = True,
+                 timeout_s: int = 180,
+                 use_mock_output: bool = False) -> dict[str, Any]:
+    """Trigger a deployed playbook and (optionally) poll until terminal.
+
+    Args:
+        playbook: workflow name OR uuid OR `Collection:Name` shorthand
+        input: trigger params; FSR maps these to `vars.input.params.<k>`
+        collection: collection name to disambiguate duplicate workflow names
+        record: "<module>:<uuid>" for record-context (cybersponse.action)
+            triggers; omit for /notrigger style (designer Run button)
+        follow: if True, poll until terminal status (default 180s timeout)
+        timeout_s: poll timeout when follow=True
+        use_mock_output: honor each step's `arguments.mock_result` instead
+            of running live (good for dry-running without external API calls)
+
+    Returns:
+        {ok, status, task_id, wf_uuid, wf_pk, error_message?, failed_steps?}.
+        `ok` is True only when status == "finished"; "finished_with_error"
+        and "failed" return ok=False with diagnostics.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "python"))
+    try:
+        from probes._env import get_client, get_config
+        from cli import _resolve_workflow_ident
+        from e2e.runner import _fetch_trigger_route_uuid
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"import failed: {e!r}"}
+    if not get_config().is_live():
+        return {"ok": False, "error": "FSR instance not configured"}
+    client = get_client()
+    wf_uuid = _resolve_workflow_ident(client, playbook, collection)
+    if not wf_uuid:
+        return {"ok": False, "error": f"no playbook matching {playbook!r}"}
+
+    if record:
+        if ":" not in record:
+            return {"ok": False, "error": "record must be '<module>:<uuid>'"}
+        module, rec_uuid = record.split(":", 1)
+        route_uuid = _fetch_trigger_route_uuid(client, wf_uuid)
+        if not route_uuid:
+            return {"ok": False, "error": (
+                "no trigger.route on workflow — playbook is not a "
+                "record-action style trigger; omit `record`"
+            )}
+        path = f"/api/triggers/1/action/{route_uuid}"
+        body = {"singleRecordExecution": True, "__resource": module,
+                "__uuid": wf_uuid,
+                "records": [f"/api/3/{module}/{rec_uuid}"]}
+    else:
+        path = f"/api/triggers/1/notrigger/{wf_uuid}"
+        body = {"input": {}, "request": {"data": input or {}},
+                "useMockOutput": bool(use_mock_output), "globalMock": False}
+
+    try:
+        r = client.session.post(client.base_url + path, json=body,
+                                verify=client.verify_ssl)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"trigger failed: {e!r}"}
+    if r.status_code >= 400:
+        return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:300]}"}
+    try:
+        resp = r.json()
+    except Exception:  # noqa: BLE001
+        resp = {}
+    task_id = resp.get("task_id") if isinstance(resp, dict) else None
+    if not follow or not task_id:
+        return {"ok": True, "status": "triggered", "task_id": task_id,
+                "wf_uuid": wf_uuid}
+
+    import time
+    terminal = {"finished", "failed", "terminated", "skipped",
+                "finished_with_error", "rejected"}
+    poll_url = (client.base_url + "/api/wf/api/workflows/?format=json"
+                f"&limit=1&ordering=-modified&task_id={task_id}"
+                "&parent_wf__isnull=True")
+    start = time.time()
+    while time.time() - start < timeout_s:
+        try:
+            pr = client.session.get(poll_url, verify=client.verify_ssl)
+            members = (pr.json() or {}).get("hydra:member") or []
+        except Exception:  # noqa: BLE001
+            members = []
+        if members:
+            rec = members[0]
+            status = rec.get("status", "unknown")
+            if status in terminal:
+                wf_pk = (rec.get("@id") or "").rstrip("/").rsplit("/", 1)[-1]
+                ok = status == "finished"
+                out: dict[str, Any] = {"ok": ok, "status": status,
+                                       "task_id": task_id, "wf_uuid": wf_uuid,
+                                       "wf_pk": wf_pk}
+                if not ok:
+                    # Pull the full record for step-level diagnostics.
+                    try:
+                        fr = client.session.get(
+                            client.base_url + "/api" + (rec.get("@id") or ""),
+                            verify=client.verify_ssl)
+                        full = fr.json() if fr.status_code == 200 else rec
+                    except Exception:  # noqa: BLE001
+                        full = rec
+                    top = full.get("result") or {}
+                    out["error_message"] = (
+                        (top.get("Error message") if isinstance(top, dict) else None)
+                        or full.get("errorMessage") or full.get("error"))
+                    failed = []
+                    for s in full.get("steps") or []:
+                        if s.get("status") in ("failed", "finished_with_error",
+                                               "terminated"):
+                            res = s.get("result") or {}
+                            failed.append({
+                                "name": s.get("name"),
+                                "status": s.get("status"),
+                                "error": (res.get("Error message")
+                                          or res.get("error")
+                                          or res.get("message")
+                                          or json.dumps(res)[:300]
+                                          if isinstance(res, dict) else str(res)),
+                            })
+                    out["failed_steps"] = failed
+                return out
+        time.sleep(2)
+    return {"ok": False, "status": "timeout", "task_id": task_id,
+            "wf_uuid": wf_uuid,
+            "error_message": f"timeout after {timeout_s}s"}
+
+
+@mcp.tool()
+def dry_run_playbook(yaml_text: str, playbook: str,
+                     input: dict[str, Any] | None = None,
+                     timeout_s: int = 180,
+                     cleanup: bool = True,
+                     use_mock_output: bool = False) -> dict[str, Any]:
+    """Compile + push + run + auto-cleanup. The agent's full E2E loop in one tool.
+
+    Args:
+        yaml_text: full YAML source.
+        playbook: workflow name to trigger after push (one playbook in the
+            collection — the agent picks which one).
+        input: trigger params (mapped to `vars.input.params.<k>`).
+        timeout_s: poll timeout (default 180s).
+        cleanup: hard-purge the collection after the run (default True).
+            Set False to keep the collection on the instance for inspection.
+        use_mock_output: run with each step's `arguments.mock_result` instead
+            of live external calls.
+
+    Returns:
+        {ok, status, task_id, wf_pk, collection_uuid, error_message?,
+         failed_steps?, cleaned_up: bool}.
+    """
+    push = push_playbook(yaml_text)
+    if not push.get("ok"):
+        return {"ok": False, "stage": "push", **push}
+    run = run_playbook(playbook, input=input,
+                       collection=push.get("collection_name"),
+                       follow=True, timeout_s=timeout_s,
+                       use_mock_output=use_mock_output)
+    coll_uuid = push["collection_uuid"]
+    cleaned = False
+    if cleanup:
+        try:
+            from probes._env import get_client
+            from e2e.runner import _hard_purge
+            client = get_client()
+            # Re-fetch the workflow uuids in case the push reshaped them.
+            sys.path.insert(0, str(REPO_ROOT / "python"))
+            _hard_purge(client, coll_uuid,
+                        {"workflows": [{"uuid": w["uuid"]}
+                                       for w in push.get("workflows", [])]})
+            cleaned = True
+        except Exception:  # noqa: BLE001
+            cleaned = False
+    return {**run, "stage": "run", "collection_uuid": coll_uuid,
+            "cleaned_up": cleaned}
 
 
 @mcp.tool()
@@ -1291,20 +1679,27 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
         return {"error": "FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)"}
     client = get_client()
 
-    # task_id (UUID) → workflow PK
-    if "-" in pb_execution and not pb_execution.isdigit():
-        try:
-            pr = client.session.get(
-                client.base_url + "/api/wf/api/workflows/"
-                f"?task_id={pb_execution}&parent_wf__isnull=True&format=json&limit=1",
-                verify=client.verify_ssl,
-            )
-            members = pr.json().get("hydra:member") or []
-        except Exception as e:  # noqa: BLE001
-            return {"error": f"task_id lookup failed: {e!r}"}
-        if not members:
-            return {"error": f"no workflow run found for task_id {pb_execution!r}"}
-        pk_url = members[0].get("@id") or ""
+    # task_id (UUID) → workflow PK. Try live, then historical (purged after ~30-60 min).
+    is_uuid = "-" in pb_execution and not pb_execution.isdigit()
+    pk_url = None
+    base_path = None
+    if is_uuid:
+        for path in ("/api/wf/api/workflows/", "/api/wf/api/historical-workflows/"):
+            try:
+                pr = client.session.get(
+                    client.base_url + path
+                    + f"?task_id={pb_execution}&parent_wf__isnull=True&format=json&limit=1",
+                    verify=client.verify_ssl,
+                )
+                members = (pr.json() or {}).get("hydra:member") or []
+            except Exception:  # noqa: BLE001
+                continue
+            if members:
+                pk_url = members[0].get("@id") or ""
+                base_path = path
+                break
+        if not pk_url:
+            return {"error": f"no workflow run found for task_id {pb_execution!r} (checked live + historical)"}
         url = client.base_url + "/api" + pk_url + "?step_detail=true"
     else:
         url = client.base_url + f"/api/wf/api/workflows/{pb_execution}/?step_detail=true"
@@ -1313,6 +1708,13 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
         r = client.session.get(url, verify=client.verify_ssl)
     except Exception as e:  # noqa: BLE001
         return {"error": f"fetch failed: {e!r}"}
+    # Numeric PK can live in either table — fall back to historical on 404.
+    if r.status_code == 404 and not is_uuid:
+        url = client.base_url + f"/api/wf/api/historical-workflows/{pb_execution}/?step_detail=true"
+        try:
+            r = client.session.get(url, verify=client.verify_ssl)
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"historical fetch failed: {e!r}"}
     if r.status_code != 200:
         return {"error": f"HTTP {r.status_code}", "body": r.text[:300]}
     data = r.json()
@@ -1448,25 +1850,151 @@ def healthcheck_connector(name: str, version: str | None = None,
                 "raw": r.text[:500]}
 
 
+def _fetch_runs_both(client, *, limit: int, extra_qs: str = "") -> list[dict[str, Any]]:
+    """Fetch from /workflows/ AND /historical-workflows/, merge by modified desc.
+
+    FSR purges live workflow logs to the historical table every ~30-60 min for
+    performance, so any triage tool that only hits /workflows/ goes blind to
+    older failures. Historical also returns richer fields (`result`, `steps`,
+    `env`) inline. Dedup by `@id` in case a run is in both during the move.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in ("/api/wf/api/workflows/", "/api/wf/api/historical-workflows/"):
+        url = (client.base_url + path
+               + f"?format=json&limit={limit}&ordering=-modified"
+               + f"&parent_wf__isnull=True{extra_qs}")
+        try:
+            r = client.session.get(url, verify=client.verify_ssl)
+        except Exception:  # noqa: BLE001
+            continue
+        if r.status_code != 200:
+            continue
+        for m in (r.json().get("hydra:member") or []):
+            iri = m.get("@id") or ""
+            if iri and iri in seen:
+                continue
+            seen.add(iri)
+            m["_source"] = "historical" if "historical" in path else "live"
+            out.append(m)
+    out.sort(key=lambda m: m.get("modified") or "", reverse=True)
+    return out
+
+
+def _shape_run(m: dict) -> dict:
+    res = m.get("result") if isinstance(m.get("result"), dict) else {}
+    err = ((res.get("Error message") or res.get("error")
+            or res.get("message")) if isinstance(res, dict) else None)
+    pk_url = m.get("@id") or ""
+    pk = pk_url.rstrip("/").rsplit("/", 1)[-1] if pk_url else None
+    return {
+        "task_id": m.get("task_id"),
+        "name": m.get("name"),
+        "status": m.get("status"),
+        "error_message": err,
+        "modified": m.get("modified"),
+        "uuid": m.get("uuid"),
+        "pk": pk,
+        "source": m.get("_source"),  # "live" or "historical"
+    }
+
+
+@mcp.tool()
+def list_tags(prefix: str | None = None, limit: int = 50) -> dict[str, Any]:
+    """List FortiSOAR tag names; use to discover tags before filtering runs by them.
+
+    Backed by `GET /api/3/tags?$export=true`. The instance can have 10k+ tags
+    (most are auto-generated from threat-intel data), so always pass a prefix
+    when looking for workflow-noise tags like "system" or "testing".
+
+    Args:
+        prefix: case-insensitive tag prefix (uses `uuid$like=<prefix>%` —
+            the tag entity's primary key IS the tag string). Pass None to
+            page through everything.
+        limit: max tag names to return.
+
+    Returns:
+        {"total": <int>, "tags": [<name>, ...]}.
+    """
+    client = _live_client()
+    if client is None:
+        return {"error": "FSR instance not configured"}
+    qs = "$export=true"
+    if prefix:
+        import urllib.parse
+        # tag entity stores the tag string in the `uuid` column; use
+        # SQL LIKE wildcard which is `%` (URL-encoded `%25`).
+        qs += f"&uuid$like={urllib.parse.quote(prefix, safe='')}%25"
+    qs += f"&$limit={limit}"
+    try:
+        r = client.session.get(client.base_url + "/api/3/tags?" + qs,
+                               verify=client.verify_ssl)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"request failed: {e!r}"}
+    if r.status_code != 200:
+        return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+    body = r.json() or {}
+    tags = body.get("hydra:member") or []
+    return {"total": body.get("hydra:totalItems"), "tags": tags[:limit]}
+
+
+def _build_run_filter_qs(*, modified_after: str | None,
+                         modified_before: str | None,
+                         tags_include: str | None,
+                         tags_exclude: str | None,
+                         user_iri: str | None) -> str:
+    """Compose the optional server-side filter querystring shared by both
+    /workflows/ and /historical-workflows/ listings.
+    """
+    import urllib.parse
+    parts: list[str] = []
+    if modified_after:
+        parts.append("modified_after=" + urllib.parse.quote(modified_after, safe=":"))
+    if modified_before:
+        parts.append("modified_before=" + urllib.parse.quote(modified_before, safe=":"))
+    if tags_include is not None:
+        # CSV like "system,testing" — keep commas unencoded.
+        parts.append("tags_include=" + urllib.parse.quote(tags_include, safe=","))
+    if tags_exclude is not None:
+        parts.append("tags_exclude=" + urllib.parse.quote(tags_exclude, safe=","))
+    if user_iri:
+        # IRI like "/api/3/people/<uuid>" — keep slashes.
+        parts.append("user=" + urllib.parse.quote(user_iri, safe="/"))
+    return ("&" + "&".join(parts)) if parts else ""
+
+
 @mcp.tool()
 def list_recent_failed_runs(limit: int = 20,
                             playbook: str | None = None,
-                            include_finished: bool = False) -> list[dict[str, Any]]:
+                            include_finished: bool = False,
+                            modified_after: str | None = None,
+                            modified_before: str | None = None,
+                            tags_include: str | None = None,
+                            tags_exclude: str | None = "system",
+                            user_iri: str | None = None) -> list[dict[str, Any]]:
     """List recent workflow runs (default: failures only) for triage.
 
     Use this when the user says "my playbook is broken" without naming
     the playbook — fetches the most recently-modified failed/errored
-    runs across the instance, with their task_id, name, status, and
-    top-level error message.
+    runs across the instance from BOTH the live and historical workflow
+    tables (FSR purges live → historical every ~30-60 min).
 
     Args:
         limit: max rows to return (default 20)
         playbook: optional name filter (client-side substring match)
         include_finished: include finished runs too (default False —
             failed/finished_with_error/terminated only)
+        modified_after: ISO timestamp, e.g. "2026-05-01 05:00:00" (server-side)
+        modified_before: ISO timestamp (server-side)
+        tags_include: CSV of tag names to require (server-side)
+        tags_exclude: CSV of tag names to exclude (default "system" to hide
+            framework noise; pass "" to include them)
+        user_iri: full IRI like "/api/3/people/<uuid>" — filter by triggering
+            user (server-side)
 
     Returns:
-        List of {task_id, name, status, error_message, modified, uuid, pk}.
+        List of {task_id, name, status, error_message, modified, uuid,
+        pk, source} where source is "live" or "historical".
     """
     try:
         from probes._env import get_client, get_config
@@ -1476,49 +2004,34 @@ def list_recent_failed_runs(limit: int = 20,
     if not cfg.is_live():
         return [{"error": "FSR instance not configured"}]
     client = get_client()
-    # status__in= is silently ignored on this endpoint; fetch wider and
-    # filter client-side. Single status= works exactly though, so use it
-    # when caller is asking for a single status.
+    # Fetch wider when filtering client-side so we still hit the limit
+    # after the status filter trims rows.
     fetch = max(limit * 4, 50) if not include_finished else limit
-    url = (client.base_url + "/api/wf/api/workflows/?format=json"
-           f"&limit={fetch}&ordering=-modified&parent_wf__isnull=True")
-    try:
-        r = client.session.get(url, verify=client.verify_ssl)
-    except Exception as e:  # noqa: BLE001
-        return [{"error": f"request failed: {e!r}"}]
-    if r.status_code != 200:
-        return [{"error": f"HTTP {r.status_code}: {r.text[:200]}"}]
-    members = r.json().get("hydra:member") or []
+    extra = _build_run_filter_qs(
+        modified_after=modified_after, modified_before=modified_before,
+        tags_include=tags_include, tags_exclude=tags_exclude,
+        user_iri=user_iri,
+    )
+    members = _fetch_runs_both(client, limit=fetch, extra_qs=extra)
     if not include_finished:
         bad = {"failed", "finished_with_error", "terminated"}
         members = [m for m in members if m.get("status") in bad]
     if playbook:
         members = [m for m in members
                    if playbook.lower() in (m.get("name") or "").lower()]
-    out: list[dict[str, Any]] = []
-    for m in members[:limit]:
-        res = m.get("result") if isinstance(m.get("result"), dict) else {}
-        err = (res.get("Error message") or res.get("error")
-               or res.get("message")) if isinstance(res, dict) else None
-        pk_url = m.get("@id") or ""
-        pk = pk_url.rstrip("/").rsplit("/", 1)[-1] if pk_url else None
-        out.append({
-            "task_id": m.get("task_id"),
-            "name": m.get("name"),
-            "status": m.get("status"),
-            "error_message": err,
-            "modified": m.get("modified"),
-            "uuid": m.get("uuid"),
-            "pk": pk,
-        })
-    return out
+    return [_shape_run(m) for m in members[:limit]]
 
 
 @mcp.tool()
 def list_playbook_runs(playbook: str | None = None,
                        playbook_uuid: str | None = None,
                        limit: int = 20,
-                       include_finished: bool = False) -> dict[str, Any]:
+                       include_finished: bool = False,
+                       modified_after: str | None = None,
+                       modified_before: str | None = None,
+                       tags_include: str | None = None,
+                       tags_exclude: str | None = "system",
+                       user_iri: str | None = None) -> dict[str, Any]:
     """List runs of a single playbook, server-filtered by template_iri.
 
     Faster + more reliable than `list_recent_failed_runs(playbook=...)`
@@ -1554,33 +2067,21 @@ def list_playbook_runs(playbook: str | None = None,
             return {"error": f"no playbook named {playbook!r}"}
         playbook_uuid = members[0].get("uuid")
     template_iri = f"/api/3/workflows/{playbook_uuid}"
-    url = (client.base_url + "/api/wf/api/workflows/?format=json"
-           f"&limit={limit * 4 if not include_finished else limit}"
-           f"&ordering=-modified&parent_wf__isnull=True"
-           f"&template_iri={template_iri}")
-    r = client.session.get(url, verify=client.verify_ssl)
-    if r.status_code != 200:
-        return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
-    members = r.json().get("hydra:member") or []
+    fetch = limit * 4 if not include_finished else limit
+    extra = _build_run_filter_qs(
+        modified_after=modified_after, modified_before=modified_before,
+        tags_include=tags_include, tags_exclude=tags_exclude,
+        user_iri=user_iri,
+    )
+    members = _fetch_runs_both(
+        client, limit=fetch,
+        extra_qs=f"&template_iri={template_iri}{extra}",
+    )
     if not include_finished:
         bad = {"failed", "finished_with_error", "terminated"}
         members = [m for m in members if m.get("status") in bad]
-    out = []
-    for m in members[:limit]:
-        res = m.get("result") if isinstance(m.get("result"), dict) else {}
-        err = ((res.get("Error message") or res.get("error")
-                or res.get("message")) if isinstance(res, dict) else None)
-        pk_url = m.get("@id") or ""
-        pk = pk_url.rstrip("/").rsplit("/", 1)[-1] if pk_url else None
-        out.append({
-            "task_id": m.get("task_id"),
-            "name": m.get("name"),
-            "status": m.get("status"),
-            "error_message": err,
-            "modified": m.get("modified"),
-            "pk": pk,
-        })
-    return {"playbook_uuid": playbook_uuid, "count": len(out), "runs": out}
+    runs = [_shape_run(m) for m in members[:limit]]
+    return {"playbook_uuid": playbook_uuid, "count": len(runs), "runs": runs}
 
 
 # ---------------------------------------------------------------------------
@@ -1692,6 +2193,178 @@ def resolve_picklist_value(value: str, picklist_name: str | None = None,
         v.lower() in vl)]
     return {"ok": False, "picklist_name": pn, "value": value,
             "valid_values": valid, "suggestions": suggestions[:5]}
+
+
+# ---------------------------------------------------------------------------
+# api_examples_catalog integration (HTTP virtual-connector fallback)
+# ---------------------------------------------------------------------------
+# The reference DB ATTACHes the read-only catalog at common.py:62. These
+# tools surface 207k+ third-party API examples so the assistant can author
+# playbooks via the FortiSOAR HTTP connector when a native connector for
+# the target vendor is missing.
+#
+# Auth taxonomy: the catalog stores free-text auth_method strings; the
+# HTTP connector expects an `auth_type` enum. Mapping is deterministic.
+_HTTP_AUTH_MAP = {
+    "basic": "Basic",
+    "bearer": "Bearer Token",
+    "token": "Bearer Token",
+    "api key": "API Key in Header",
+    "apikey": "API Key in Header",
+    "oauth": "OAuth 2.0",
+    "oauth2": "OAuth 2.0",
+    "no auth": "No Auth",
+    "none": "No Auth",
+}
+
+
+def _map_http_auth(catalog_auth: str | None) -> str:
+    if not catalog_auth:
+        return "No Auth"
+    a = catalog_auth.lower()
+    for needle, mapped in _HTTP_AUTH_MAP.items():
+        if needle in a:
+            return mapped
+    return "No Auth"
+
+
+@mcp.tool()
+def search_api_examples(query: str, product: str | None = None,
+                        limit: int = 10) -> list[dict[str, Any]]:
+    """Search the api_examples_catalog (207k entries / 6,927 products).
+
+    Use when no native FortiSOAR connector exists for the target vendor.
+    Pair the result with `synthesize_http_step` to emit an HTTP-connector
+    step pre-filled with method/path/auth/params drawn from a real example.
+
+    Returns: list of {entry_id, product, action, http_method, http_path,
+    auth_method, description, source_url, code_snippet (if any)}.
+    """
+    with _db() as conn:
+        try:
+            sql = (
+                "SELECT e.id AS entry_id, p.name AS product, e.action, "
+                "e.http_method, e.http_path, e.auth_method, e.description, "
+                "e.source_url, e.code_snippet, e.code_lang "
+                "FROM catalog.entries_fts f "
+                "JOIN catalog.entries e ON e.rowid = f.rowid "
+                "JOIN catalog.products p ON p.id = e.product_id "
+                "WHERE entries_fts MATCH ? "
+            )
+            params: list[Any] = [query]
+            if product:
+                sql += "AND p.normalized LIKE ? "
+                params.append(f"%{product.lower()}%")
+            sql += "ORDER BY e.example_quality DESC LIMIT ?"
+            params.append(limit)
+            return _rows(conn, sql, tuple(params))
+        except sqlite3.OperationalError as exc:
+            return [{"error": f"catalog DB unavailable: {exc}"}]
+
+
+@mcp.tool()
+def synthesize_http_step(entry_id: int,
+                         step_name: str = "Call API") -> dict[str, Any]:
+    """Translate a catalog entry into a FortiSOAR HTTP-connector step.
+
+    Deterministic transformer (no LLM). Returns a YAML-ready dict shaped
+    like the simplified IR for a `connector` step targeting the `http`
+    connector's `http_request` op, with method/rest_api/auth_type/header/
+    parameter pre-filled from the catalog entry.
+
+    The agent should still review and fill in: secrets (basic_password,
+    bearer_token, api_key), the base URL (catalog stores path only),
+    response_path for nested payloads, and any body shape for write ops.
+    """
+    with _db() as conn:
+        try:
+            row = conn.execute(
+                "SELECT e.id, p.name AS product, e.action, e.http_method, "
+                "e.http_path, e.auth_method, e.parameters_json, "
+                "e.description, e.source_url "
+                "FROM catalog.entries e JOIN catalog.products p "
+                "ON p.id = e.product_id WHERE e.id = ?",
+                (entry_id,),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            return {"error": f"catalog DB unavailable: {exc}"}
+    if not row:
+        return {"error": f"entry_id {entry_id} not found"}
+    params_raw = row["parameters_json"] or "[]"
+    try:
+        params_list = json.loads(params_raw)
+    except (TypeError, ValueError):
+        params_list = []
+    query_params: dict[str, str] = {}
+    for p in params_list if isinstance(params_list, list) else []:
+        if not isinstance(p, dict):
+            continue
+        loc = (p.get("in") or "").lower()
+        nm = p.get("name")
+        if nm and loc in ("query", ""):
+            query_params[nm] = p.get("example") or f"<{nm}>"
+    return {
+        "step_type": "connector",
+        "name": step_name,
+        "connector": "http",
+        "operation": "http_request",
+        "args": {
+            "method": (row["http_method"] or "GET").upper(),
+            "rest_api": row["http_path"] or "",
+            "auth_type": _map_http_auth(row["auth_method"]),
+            "header": {},
+            "parameter": query_params,
+        },
+        "_note": (
+            f"Synthesized from {row['product']}/{row['action']}. "
+            "TODO: fill secrets, prefix rest_api with base URL, set "
+            "response_path for nested payloads, populate body for "
+            "write operations."
+        ),
+        "_source_url": row["source_url"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Recipe prechecks (success-ladder L2 building blocks)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def precheck_connector_installed(name: str,
+                                 version: str | None = None) -> dict[str, Any]:
+    """Verify a connector is installed on the live FSR before authoring
+    a recipe or playbook against it.
+
+    Catches the silent-failure case where a recipe ships compile-clean
+    but the first connector step fails at runtime with "configuration
+    not found." On miss, returns close-match suggestions drawn from the
+    appliance's actual catalog.
+    """
+    client = _live_client()
+    if client is None:
+        return {"ok": False, "code": "no_live_fsr",
+                "message": "FSR instance not configured"}
+    from recipes.prechecks import check_connector_installed
+    return check_connector_installed(client, name, version).to_dict()
+
+
+@mcp.tool()
+def precheck_picklist_value(picklist_name: str,
+                            value: str) -> dict[str, Any]:
+    """Verify a friendly value resolves to an IRI on the live FSR before
+    embedding `{{ 'PL' | picklist('value') }}` in a playbook.
+
+    Catches typos like 'In Progress' for AlertStatus (which only has
+    Open / Investigating / Pending / Closed / Active / Re-Opened).
+    Returns close-match suggestions when the value isn't an exact
+    itemValue.
+    """
+    client = _live_client()
+    if client is None:
+        return {"ok": False, "code": "no_live_fsr",
+                "message": "FSR instance not configured"}
+    from recipes.prechecks import check_picklist_value
+    return check_picklist_value(client, picklist_name, value).to_dict()
 
 
 # ---------------------------------------------------------------------------

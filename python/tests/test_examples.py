@@ -18,6 +18,9 @@ def _examples(repo_root):
     "find_and_update.yaml",
     "manual_input_then_act.yaml",
     "parent_calls_child.yaml",
+    "demo_for_each.yaml",
+    "recipe_threat_feed.yaml",
+    "recipe_data_ingestion.yaml",
 ])
 def test_example_compiles(repo_root, db_path, name):
     text = (repo_root / "examples" / name).read_text()

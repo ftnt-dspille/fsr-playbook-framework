@@ -15,7 +15,14 @@ import difflib
 import json
 import os
 import sys
+import warnings
 from pathlib import Path
+
+try:
+    from urllib3.exceptions import InsecureRequestWarning
+    warnings.simplefilter("ignore", InsecureRequestWarning)
+except Exception:
+    pass
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "store" / "fsr_reference.db"
 
@@ -1041,7 +1048,11 @@ def cmd_run_playbook(args: argparse.Namespace) -> int:
         body = {
             "input": {},
             "request": {"data": input_data},
-            "useMockOutput": False,
+            # `useMockOutput=true` makes each step honor its arguments.mock_result;
+            # `globalMock` must STAY FALSE for that to apply uniformly. With
+            # globalMock=true, certain handlers (notably IngestBulkFeed) ignore
+            # their mock_result and run live anyway. Verified 2026-05-04.
+            "useMockOutput": bool(getattr(args, "mock", False)),
             "globalMock": False,
         }
 
@@ -1757,6 +1768,47 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resolve(args: argparse.Namespace) -> int:
+    """Run the L2 success-ladder gate: structural + live prechecks.
+
+    Wraps the resolve_yaml MCP tool — useful for catching unresolved
+    picklists and missing connector installs before push, in CI, or in
+    a pre-commit hook.
+    """
+    text = Path(args.input).read_text()
+    from mcp_server import resolve_yaml
+    result = resolve_yaml(text)
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("ok") else 1
+    s = result.get("structural", {})
+    if s.get("ok"):
+        print("structural: OK", file=sys.stderr)
+    else:
+        print(f"structural: {len(s.get('errors', []))} error(s)",
+              file=sys.stderr)
+        for e in s.get("errors", []):
+            print(f"  [{e['code']}] {e['path']}: {e['message']}",
+                  file=sys.stderr)
+            if e.get("suggestion"):
+                print(f"    → {e['suggestion']}", file=sys.stderr)
+    summary = result.get("summary", {})
+    if not summary.get("live_fsr"):
+        print("prechecks: skipped (no live FSR configured)", file=sys.stderr)
+    else:
+        cc = summary.get("connectors_checked", 0)
+        pc = summary.get("picklists_checked", 0)
+        print(f"prechecks: {cc} connector(s), {pc} picklist value(s)",
+              file=sys.stderr)
+        for p in result.get("prechecks", []):
+            tag = "OK  " if p.get("ok") else "FAIL"
+            print(f"  {tag} [{p['code']}] {p['message']}", file=sys.stderr)
+            if p.get("suggestions"):
+                print(f"       did you mean: {', '.join(p['suggestions'])}",
+                      file=sys.stderr)
+    return 0 if result.get("ok") else 1
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     from compiler import compile_yaml
     text = Path(args.input).read_text()
@@ -1768,6 +1820,139 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return 1
     print("ok", file=sys.stderr)
     return 0
+
+
+def cmd_generate_recipe(args: argparse.Namespace) -> int:
+    from recipes import generate_threat_feed_recipe, generate_data_ingest_recipe
+    from recipes.prechecks import run_recipe_prechecks
+    from compiler import rulesets as rs
+
+    info = json.loads(Path(args.info_json).read_text())
+
+    # Pre-emission: confirm the target connector is installed on the live
+    # FSR and the picklist values we'll reference resolve. Catches silent
+    # runtime failures at generation time. Skippable for offline use.
+    if not args.skip_prechecks:
+        try:
+            from probes._env import get_client, get_config  # type: ignore
+            cfg = get_config()
+        except Exception:  # noqa: BLE001
+            cfg = None
+        if cfg and cfg.is_live():
+            client = get_client()
+            picklist_pairs: list[tuple[str, str]] = []
+            if args.kind == "data-ingest":
+                for v in (args.severity_enum.split(",")
+                          if args.severity_enum else []):
+                    if v.strip():
+                        picklist_pairs.append(("Severity", v.strip()))
+                for v in (args.status_enum.split(",")
+                          if args.status_enum else []):
+                    if v.strip():
+                        picklist_pairs.append(
+                            ("AlertStatus" if args.target_module == "alerts"
+                             else "IncidentStatus", v.strip()))
+            results = run_recipe_prechecks(
+                client,
+                connector_name=info.get("name") or "",
+                connector_version=info.get("version"),
+                picklist_values=picklist_pairs,
+            )
+            had_fail = False
+            for r in results:
+                tag = "OK  " if r.ok else "FAIL"
+                print(f"  {tag} [{r.code}] {r.message}", file=sys.stderr)
+                if r.suggestions:
+                    print(f"       did you mean: {', '.join(r.suggestions)}",
+                          file=sys.stderr)
+                if not r.ok:
+                    had_fail = True
+            if had_fail:
+                print("  prechecks failed; aborting. Re-run with "
+                      "--skip-prechecks to emit anyway.", file=sys.stderr)
+                return 2
+        else:
+            print("  prechecks skipped (no live FSR configured)",
+                  file=sys.stderr)
+
+    if args.kind == "threat-feed":
+        out = generate_threat_feed_recipe(info, connector_config_uuid=args.config_uuid)
+        ruleset = "feed-ingest"
+    elif args.kind == "data-ingest":
+        out = generate_data_ingest_recipe(
+            info,
+            target_module=args.target_module,
+            fetch_op_name=args.fetch_op,
+            dedup_field=args.dedup_field,
+            severity_field=args.severity_field,
+            status_field=args.status_field,
+            severity_enum=args.severity_enum.split(",") if args.severity_enum else None,
+            status_enum=args.status_enum.split(",") if args.status_enum else None,
+            connector_config_uuid=args.config_uuid,
+        )
+        ruleset = "data-ingest"
+    else:
+        print(f"unknown recipe kind {args.kind!r}", file=sys.stderr)
+        return 2
+
+    out_path = Path(args.output) if args.output else None
+    payload = json.dumps(out, indent=2)
+    if out_path:
+        out_path.write_text(payload)
+        print(f"wrote {out_path}", file=sys.stderr)
+    else:
+        print(payload)
+
+    # Self-validate against the ruleset bound to this kind
+    issues = rs.validate(out, [ruleset])
+    fails = [i for i in issues if i.severity == "fail"]
+    for i in issues:
+        tag = "FAIL" if i.severity == "fail" else "WARN"
+        print(f"  {tag} [{i.rule_id}] {i.message}", file=sys.stderr)
+    print(f"  generated; {len(issues)} validator issue(s) ({len(fails)} fail)", file=sys.stderr)
+    return 1 if fails else 0
+
+
+def cmd_validate_ingestion(args: argparse.Namespace) -> int:
+    import os as _os
+    from compiler import rulesets as rs
+
+    in_path = Path(args.input)
+    doc = json.loads(in_path.read_text())
+    # Auto-find sibling info.json (one dir up: connector_building/<conn>/playbooks/playbooks.json -> ../info.json)
+    info_path = args.info_json
+    if not info_path:
+        candidates = [
+            in_path.parent / "info.json",
+            in_path.parent.parent / "info.json",
+        ]
+        for c in candidates:
+            if c.exists():
+                info_path = str(c)
+                break
+    if info_path:
+        _os.environ["FSRPB_INFO_JSON"] = info_path
+    if args.rulesets == "auto":
+        chosen = rs.detect_rulesets(doc)
+        if not chosen:
+            print("auto-detect: no ingestion rulesets apply (no dataingestion-tagged workflow with Create Record/Ingest Bulk Feed found)", file=sys.stderr)
+            return 0
+        print(f"auto-detected rulesets: {chosen}", file=sys.stderr)
+    else:
+        chosen = [s.strip() for s in args.rulesets.split(",") if s.strip()]
+
+    issues = rs.validate(doc, chosen)
+    if args.json:
+        print(json.dumps([i.to_dict() for i in issues], indent=2))
+    else:
+        for i in issues:
+            tag = "FAIL" if i.severity == "fail" else "WARN"
+            print(f"{tag} [{i.rule_id}] {i.path}\n      {i.message}", file=sys.stderr)
+            if i.suggestion:
+                print(f"      → {i.suggestion}", file=sys.stderr)
+    fails = [i for i in issues if i.severity == "fail"]
+    print(f"{len(issues)} issue(s); {len(fails)} fail, {len(issues)-len(fails)} warn", file=sys.stderr)
+    return 1 if fails else 0
 
 
 def cmd_decompile(args: argparse.Namespace) -> int:
@@ -2194,13 +2379,113 @@ def cmd_e2e(args: argparse.Namespace) -> int:
         print(f"purged {n} collection(s) matching {patterns}", file=sys.stderr)
         return 0
 
-    print("usage: fsrpb e2e {run,cleanup} ...", file=sys.stderr)
+    if sub == "all":
+        # Discover and run every *.test.yaml under the search dir
+        # (default: examples/). Useful for "is anything broken?" before
+        # a release. Exit code = 0 iff every test passes.
+        cfg = _env.get_config()
+        if not cfg.is_live():
+            print("FSR_BASE_URL / auth not configured (.env)", file=sys.stderr)
+            return 2
+        search_dir = Path(getattr(args, "dir", None)
+                          or (Path(__file__).resolve().parents[1] / "examples"))
+        if not search_dir.is_dir():
+            print(f"search dir not found: {search_dir}", file=sys.stderr)
+            return 2
+        tests = sorted(search_dir.glob("*.test.yaml"))
+        if not tests:
+            print(f"no *.test.yaml files in {search_dir}", file=sys.stderr)
+            return 2
+
+        # Pre-pass cleanup (controllable) — clears stale collections from
+        # interrupted prior runs that would otherwise 409 on push.
+        if not getattr(args, "no_cleanup", False):
+            client = _env.get_client()
+            patterns = ["FSRPB Demo*", "Compiler Demo*", "*__fsrpb_probe__*"]
+            n = cleanup_all(client, patterns)
+            if n:
+                print(f"pre-cleanup: purged {n} stale collection(s)",
+                      file=sys.stderr)
+
+        keep = getattr(args, "keep", False)
+        verbose = getattr(args, "verbose", False)
+        results: list[tuple[str, bool, str]] = []
+        for t in tests:
+            name = t.stem.removesuffix(".test")
+            print(_ansi(f"\n── {name} ──", "1;36"), file=sys.stderr)
+            try:
+                res = run_test(t, keep=keep, verbose=verbose)
+                ok = res.ok
+                detail = res.status or ("pass" if ok else "fail")
+                if not ok and res.failures:
+                    detail = f"{detail}: {res.failures[0][:100]}"
+            except Exception as e:  # noqa: BLE001
+                ok = False
+                detail = f"EXC: {type(e).__name__}: {str(e)[:80]}"
+            results.append((name, ok, detail))
+            color = "32" if ok else "31"
+            mark = "✓" if ok else "✗"
+            print(_ansi(f"  {mark} {name}: {detail}", color), file=sys.stderr)
+
+        # Summary
+        passed = sum(1 for _, ok, _ in results if ok)
+        failed = len(results) - passed
+        print(_ansi(f"\n==== {passed} passed, {failed} failed of "
+                    f"{len(results)} ====", "1"), file=sys.stderr)
+        if failed:
+            print("Failed:", file=sys.stderr)
+            for name, ok, detail in results:
+                if not ok:
+                    print(_ansi(f"  ✗ {name}: {detail}", "31"), file=sys.stderr)
+        if getattr(args, "json", False):
+            print(json.dumps([
+                {"name": n, "ok": ok, "detail": d}
+                for n, ok, d in results
+            ], indent=2))
+        return 0 if failed == 0 else 1
+
+    print("usage: fsrpb e2e {run,all,cleanup} ...", file=sys.stderr)
     return 2
 
 
 def cmd_mcp(_args: argparse.Namespace) -> int:
     from mcp_server import main as mcp_main
     mcp_main()
+    return 0
+
+
+def cmd_inventory(args: argparse.Namespace) -> int:
+    """Audit what the SQLite reference store knows.
+
+    Subcommands:
+      summary        — row counts per table, trust ratio, last probe runs,
+                       attached api_examples_catalog status.
+      connectors     — list connectors with trust badges (filter via -q).
+      api-examples   — top products in the catalog by entry count.
+      stale          — probes that haven't run within --days (default 7).
+      search <q>     — cross-table search: connectors, ops, jinja, api examples.
+    """
+    import json as _json
+    import inventory as inv
+
+    sub = args.inv_cmd
+    if sub == "summary":
+        print(_json.dumps(inv.summary(), indent=2))
+    elif sub == "connectors":
+        rows = inv.list_connectors(limit=args.limit, q=args.q)
+        print(_json.dumps(rows, indent=2))
+    elif sub == "api-examples":
+        rows = inv.list_api_example_products(limit=args.limit, q=args.q)
+        print(_json.dumps(rows, indent=2))
+    elif sub == "stale":
+        rows = inv.stale_probes(max_age_days=args.days)
+        print(_json.dumps(rows, indent=2))
+    elif sub == "search":
+        out = inv.cross_search(args.q, per_table_limit=args.limit)
+        print(_json.dumps(out, indent=2))
+    else:
+        print(f"unknown inventory subcommand: {sub}")
+        return 2
     return 0
 
 
@@ -2461,6 +2746,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="poll task status until terminal (finished/failed/terminated/skipped)")
     sp.add_argument("--follow-interval", type=int, default=3, help="seconds between polls (default 3)")
     sp.add_argument("--follow-timeout", type=int, default=300, help="give up after N seconds (default 300)")
+    sp.add_argument("--mock", action="store_true",
+                    help="trigger with useMockOutput=true / globalMock=true so each step "
+                         "returns its arguments.mock_result instead of executing live; useful "
+                         "for validating playbook plumbing when the target connector is not "
+                         "yet configured. Default: off.")
     sp.set_defaults(func=cmd_run_playbook)
 
     sp = sub.add_parser("steps", help="inspect a playbook run's per-step audit log by task_id")
@@ -2486,6 +2776,60 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("input")
     sp.add_argument("--json", action="store_true", help="emit errors as JSON on stdout")
     sp.set_defaults(func=cmd_validate)
+
+    sp = sub.add_parser(
+        "resolve",
+        help="L2 gate: structural validation + live prechecks "
+             "(connector installed, picklist values resolvable)",
+    )
+    sp.add_argument("input")
+    sp.add_argument("--json", action="store_true",
+                    help="emit full result as JSON on stdout")
+    sp.set_defaults(func=cmd_resolve)
+
+    sp = sub.add_parser(
+        "generate-recipe",
+        help="generate an ingestion playbook collection from a connector info.json",
+    )
+    sp.add_argument("--kind", required=True, choices=["threat-feed", "data-ingest"], help="recipe kind")
+    sp.add_argument("--info-json", required=True, help="path to connector info.json")
+    sp.add_argument("--config-uuid", default="REPLACE_WITH_CONFIG_UUID",
+                    help="FSR connector instance UUID; user replaces post-import if omitted")
+    sp.add_argument("-o", "--output", default=None, help="write FSR JSON to this path; otherwise stdout")
+    # data-ingest only
+    sp.add_argument("--target-module", default="alerts",
+                    help="(data-ingest) module IRI segment, e.g. 'alerts' or 'incidents' (default: alerts)")
+    sp.add_argument("--fetch-op", default=None,
+                    help="(data-ingest) override fetch op name when auto-detect picks the wrong one")
+    sp.add_argument("--dedup-field", default=None,
+                    help="(data-ingest) vendor field used as sourceId for dedup (auto-detected from op output_schema)")
+    sp.add_argument("--severity-field", default="severity",
+                    help="(data-ingest) field on each item carrying the vendor severity enum")
+    sp.add_argument("--status-field", default="status",
+                    help="(data-ingest) field on each item carrying the vendor status enum")
+    sp.add_argument("--severity-enum", default=None,
+                    help="(data-ingest) comma-separated vendor severity values, e.g. 'CRITICAL,HIGH,MEDIUM,LOW'")
+    sp.add_argument("--status-enum", default=None,
+                    help="(data-ingest) comma-separated vendor status values, e.g. 'Open,Investigating,Closed'")
+    sp.add_argument("--skip-prechecks", action="store_true",
+                    help="skip live-FSR prechecks (connector installed, "
+                         "picklist values resolvable). Use offline.")
+    sp.set_defaults(func=cmd_generate_recipe)
+
+    sp = sub.add_parser(
+        "validate-ingestion",
+        help="run optional ingestion ruleset(s) against an FSR JSON collection export",
+    )
+    sp.add_argument("input", help="path to FSR workflow_collections JSON")
+    sp.add_argument(
+        "--rulesets",
+        default="auto",
+        help="comma list: data-ingest, feed-ingest, or 'auto' (detect from tags+steps). Default: auto",
+    )
+    sp.add_argument("--json", action="store_true", help="emit issues as JSON on stdout")
+    sp.add_argument("--info-json", default=None,
+                    help="connector info.json path (auto-detected next to or above the playbook file if omitted)")
+    sp.set_defaults(func=cmd_validate_ingestion)
 
     sp = sub.add_parser("decompile", help="FSR JSON -> YAML")
     sp.add_argument("input")
@@ -2589,6 +2933,18 @@ def build_parser() -> argparse.ArgumentParser:
     e_run.add_argument("test", help="path to <fixture>.test.yaml")
     e_run.add_argument("--keep", action="store_true",
                        help="leave the deployed collection in place after the run")
+    e_all = e2e_sub.add_parser("all",
+                               help="run every *.test.yaml in a directory and report PASS/FAIL summary")
+    e_all.add_argument("--dir", default=None,
+                       help="search dir for *.test.yaml (default: examples/)")
+    e_all.add_argument("--keep", action="store_true",
+                       help="leave deployed collections in place after each run")
+    e_all.add_argument("--no-cleanup", action="store_true",
+                       help="skip the pre-pass purge of stale demo/test collections")
+    e_all.add_argument("--json", action="store_true",
+                       help="emit machine-readable per-test results to stdout")
+    e_all.add_argument("--verbose", action="store_true",
+                       help="show per-step run output for each test (default: summary only)")
     e_cln = e2e_sub.add_parser("cleanup",
                                help="hard-purge demo/test collections by glob")
     e_cln.add_argument("patterns", nargs="*",
@@ -2597,6 +2953,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("mcp", help="start the MCP server (stdio transport)")
     sp.set_defaults(func=cmd_mcp)
+
+    sp = sub.add_parser("inventory",
+                        help="audit what the SQLite reference store knows")
+    isub = sp.add_subparsers(dest="inv_cmd", required=True)
+    isub.add_parser("summary", help="row counts, trust, last probes, catalog")
+    sp_c = isub.add_parser("connectors", help="list connectors with trust badges")
+    sp_c.add_argument("-q", default=None, help="filter substring")
+    sp_c.add_argument("--limit", type=int, default=50)
+    sp_a = isub.add_parser("api-examples",
+                           help="top products in api_examples_catalog")
+    sp_a.add_argument("-q", default=None, help="filter substring")
+    sp_a.add_argument("--limit", type=int, default=50)
+    sp_s = isub.add_parser("stale", help="probes older than --days")
+    sp_s.add_argument("--days", type=int, default=7)
+    sp_x = isub.add_parser("search",
+                           help="cross-table search: connectors/ops/jinja/api examples")
+    sp_x.add_argument("q", help="search needle")
+    sp_x.add_argument("--limit", type=int, default=5,
+                      help="per-table result cap")
+    sp.set_defaults(func=cmd_inventory)
 
     sp = sub.add_parser("chat-stats",
                         help="summarise web/backend/usage.jsonl token telemetry")

@@ -170,3 +170,37 @@ A 30-second `find /opt/cyops-api/config/api_platform -name '*.yaml' | xargs grep
    source inspection.
 4. Update this file: change 🔴/🟡 → 🟢, append the confirmed path to
    `pdf_conversion/pdfs/FortiSOAR API Guide REDUCED_CLEAN.md` Section 4.x.
+
+---
+
+## 7. Freshness / sync gaps (added 2026-05-06 architecture review)
+
+These aren't unknown endpoints — they're known data pipelines we don't yet
+have a freshness story for. Listed here because stale reference data
+silently turns deterministic lookups into hallucinations.
+
+| Pipeline | Refresh today | Gap |
+|---|---|---|
+| Connector catalog (RPM) | `probe_connectors` tier 3, on demand, fingerprint-diffed | No watcher; new RPMs appear in repo but `find_connector` doesn't see them until manual re-run |
+| Configured connectors on live FSR | Optional `list_configured_connectors(probe=True)` | Not cached in SQLite; agents re-probe per session. Add `connector_configs` table populated by tier 1. |
+| Picklists | Live-queried at recipe-gen time only | No precheck before emitting; broken IRIs emitted silently (closed by I1). |
+| Playbook corpus | `probe_jinja_corpus` mines all 1,669 workflows on demand | No incremental update; full re-mine each time. Fine for now. |
+| Jinja filters | `probe_jinja_backend` introspects `sealab.jinja` | Run on demand only; FSR upgrades can change signatures without our knowing. |
+| Step handlers (`workflow.eval.FUNCTION_MAP`) | One-time probe | Same — assumes appliance version is stable. |
+
+**HTTP connector v2 missing from reference DB**: our `connectors` table has
+`http v1.0.0`; `Miscellaneous/connector_building/http/info.json` is v2.0.0
+(adds `http_paginate`, `fetch_records`). Re-run `probe_connectors` pointed
+at that path so v2 ops are queryable — required before the HTTP
+virtual-connector + catalog work in TODO.md can land.
+
+**Catalog DB not queried**: `catalog.sqlite` (207,419 API entries, 6,927
+products) is ATTACHed but no MCP tool / recipe code consults it. Tools
+`search_api_examples` and `synthesize_http_step` are stubbed in
+`mcp_server.py` (2026-05-06) — fill them in before recipes can fall back
+to the HTTP connector for vendors we don't natively support.
+
+**Action**: stand up a background sync (hourly cron or change-notification
+driven) that re-runs the cheap probes (`probe_connectors` fingerprint check,
+`list_configured_connectors`, picklist diffs). Tracked in TODO.md under
+"Freshness / sync gaps".

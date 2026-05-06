@@ -125,11 +125,16 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str]) -> Pla
                 else:
                     unlabeled.append(tgt_id)
 
+        # for_each lives inside arguments on the wire; lift it out into
+        # its own IR field so authors see it as a step-level mapping.
+        raw_args = dict(s.get("arguments") or {})
+        fe_raw = raw_args.pop("for_each", None)
+        for_each = dict(fe_raw) if isinstance(fe_raw, dict) and fe_raw else None
         steps_out.append(Step(
             id=sid,
             type=short_by_uuid.get(u, "") or "unknown",
             name=s.get("name", "") or sid,
-            arguments=s.get("arguments") or {},
+            arguments=raw_args,
             next=nxt,
             branches=branches,
             unlabeled_next=unlabeled,
@@ -138,6 +143,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str]) -> Pla
                 else (s.get("stepType") or "").rsplit("/", 1)[-1] or None
             ),
             step_type_name=canonical_by_uuid.get(u),
+            for_each=for_each,
         ))
 
     trigger_uuid = _to_uuid(wf.get("triggerStep"))
@@ -188,9 +194,28 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str]) -> Pla
         else:
             contains = []
 
-        # Auto-comment heuristic for notes only: if title=="Note" and the
-        # note sits to the right of exactly one step at the same vertical
-        # position (within ±50px), fold into that step's .comment.
+        # Auto-comment fold for notes — title pattern is
+        # "<PREFIX>: <step display name>" where PREFIX ∈
+        # {Note, TODO, FIX, NOTE, WARN, HACK, XXX}. The prefix carries
+        # the comment category and is preserved in the body via the
+        # original first word, so we don't need to round-trip the
+        # prefix separately. Legacy "Note" (no colon) → positional.
+        _AUTO_PREFIXES = ("Note", "TODO", "FIX", "NOTE", "WARN", "HACK", "XXX")
+        if gtype == "note":
+            target_name = None
+            for p in _AUTO_PREFIXES:
+                if gtitle.startswith(p + ": "):
+                    target_name = gtitle[len(p) + 2:]
+                    break
+            if target_name:
+                matches = [sid for sid, st in step_by_id.items()
+                           if (st.name or sid) == target_name
+                           and st.comment is None]
+                if len(matches) == 1:
+                    step_by_id[matches[0]].comment = gbody
+                    continue
+                # Ambiguous or no match: keep as a regular note rather
+                # than dropping the body.
         if gtype == "note" and gtitle == "Note":
             candidates = [
                 sid for sid, (st_top, st_left) in step_pos.items()
@@ -201,7 +226,6 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str]) -> Pla
                 step_by_id[candidates[0]].comment = gbody
                 continue
             if len(candidates) > 1:
-                # Pick the closest one (smallest horizontal distance).
                 candidates.sort(key=lambda sid: left_v - step_pos[sid][1])
                 step_by_id[candidates[0]].comment = gbody
                 continue

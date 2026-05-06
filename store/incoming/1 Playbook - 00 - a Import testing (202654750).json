@@ -1,0 +1,143 @@
+{
+  "type": "workflow_collections",
+  "data": [
+    {
+      "@context": "/api/3/contexts/WorkflowCollection",
+      "@type": "WorkflowCollection",
+      "name": "00 - a Import testing",
+      "description": null,
+      "visible": true,
+      "image": null,
+      "uuid": "65ab88db-6ccc-4b45-890e-3d7c5bbf0228",
+      "id": 189,
+      "createDate": 1775924778.180994,
+      "modifyDate": 1775924784.561227,
+      "deletedAt": null,
+      "importedBy": [],
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "variable difference",
+          "aliasName": null,
+          "tag": null,
+          "description": null,
+          "isActive": true,
+          "debug": false,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1777898998,
+          "collection": "/api/3/workflow_collections/65ab88db-6ccc-4b45-890e-3d7c5bbf0228",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/7bb9a88c-a7c7-4155-8e44-1d309df738ea",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "real set variable step",
+              "description": null,
+              "arguments": {
+                "real_set_var_variable": "bar",
+                "real_set_var_variable2": "foo"
+              },
+              "status": null,
+              "top": "192",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "dda6be7e-e663-460d-bc4f-3079b577d4a2"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {
+                "__triggerLimit": true,
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  },
+                  "inline_step_variable1": "value1",
+                  "inline_step_variable2": "value2"
+                },
+                "triggerOnSource": true,
+                "triggerOnReplicate": false
+              },
+              "status": null,
+              "top": "40",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "group": null,
+              "uuid": "7bb9a88c-a7c7-4155-8e44-1d309df738ea"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "test",
+              "description": null,
+              "arguments": {
+                "name": "Fortinet FortiGate",
+                "config": "5ecf101a-135f-4c27-8b17-55dbf8834500",
+                "params": [],
+                "version": "5.4.0",
+                "connector": "fortigate-firewall",
+                "operation": "get_blocked_urls",
+                "operationTitle": "Get Blocked URLs",
+                "pickFromTenant": false,
+                "step_variables": {
+                  "inline_fortigate_set_var1": "food",
+                  "inline_fortigate_set_var2": "bar"
+                }
+              },
+              "status": null,
+              "top": "379",
+              "left": "453",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "218abe9b-39f9-4526-9909-974fa636bb74"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "real set variable step -> test",
+              "targetStep": "/api/3/workflow_steps/218abe9b-39f9-4526-9909-974fa636bb74",
+              "sourceStep": "/api/3/workflow_steps/dda6be7e-e663-460d-bc4f-3079b577d4a2",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "ba9fd7ae-4e48-41a3-b759-0911fc03916c"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> real set variable step",
+              "targetStep": "/api/3/workflow_steps/dda6be7e-e663-460d-bc4f-3079b577d4a2",
+              "sourceStep": "/api/3/workflow_steps/7bb9a88c-a7c7-4155-8e44-1d309df738ea",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "bf7e4ec2-72be-4511-9628-631c26bc3a2e"
+            }
+          ],
+          "groups": [],
+          "priority": "/api/3/picklists/2b563c61-ae2c-41c0-a85a-c9709585e3f2",
+          "playbookOrigin": "/api/3/picklists/15c1e8c9-22bf-4e66-8fbb-0a502d4a4a3f",
+          "isEditable": true,
+          "uuid": "3e4968b6-2fca-4e73-9d41-0762766f2ad5",
+          "id": 2677,
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1777898900.287987,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1777898998.443786,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": []
+        }
+      ]
+    }
+  ],
+  "exported_tags": []
+}

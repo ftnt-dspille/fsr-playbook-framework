@@ -2,8 +2,73 @@ export type Health = {
   ok: boolean;
   compiler: { ok: boolean; error: string | null };
   fsr: { ok: boolean | null; error?: string; base_url?: string; note?: string };
-  llm: { configured: boolean };
+  llm: { configured: boolean; provider?: string; model?: string | null };
+  secrets?: { ok: boolean; backend: string };
 };
+
+export type ProviderView = {
+  name: string;
+  base_url: string | null;
+  model: string;
+  api_key_set: boolean;
+  configured: boolean;
+};
+
+export type ProvidersResponse = {
+  active_provider: string;
+  providers: Record<string, ProviderView>;
+  secrets: { ok: boolean; backend: string };
+};
+
+export async function getProviders(): Promise<ProvidersResponse> {
+  const r = await fetch('/api/llm/providers');
+  if (!r.ok) throw new Error(`providers ${r.status}`);
+  return r.json();
+}
+
+export async function patchProvider(
+  name: string,
+  patch: { base_url?: string; api_key?: string; model?: string; clear_api_key?: boolean }
+): Promise<ProviderView> {
+  const r = await fetch(`/api/llm/providers/${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch)
+  });
+  if (!r.ok) throw new Error(`patch ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+export type ProbeResult = { ok: boolean; error?: string; latency_ms?: number; note?: string };
+
+export async function testProvider(
+  name: string,
+  body: { base_url?: string; api_key?: string }
+): Promise<ProbeResult> {
+  const r = await fetch(`/api/llm/providers/${encodeURIComponent(name)}/test`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error(`test ${r.status}`);
+  return r.json();
+}
+
+export async function listProviderModels(name: string): Promise<{ ok: boolean; models: string[]; error?: string }> {
+  const r = await fetch(`/api/llm/providers/${encodeURIComponent(name)}/models`);
+  if (!r.ok) throw new Error(`models ${r.status}`);
+  return r.json();
+}
+
+export async function setActiveProvider(name: string, model?: string): Promise<ProvidersResponse> {
+  const r = await fetch('/api/llm/active', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, model })
+  });
+  if (!r.ok) throw new Error(`active ${r.status}`);
+  return r.json();
+}
 
 export type ExampleEntry = { name: string; filename: string; preview: string };
 

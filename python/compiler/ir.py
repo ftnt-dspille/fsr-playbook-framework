@@ -30,6 +30,14 @@ class Step:
     # explicit `playbook.annotations` entries.
     comment: Optional[str] = None
 
+    # Per-iteration loop config. Wire shape is a dict at the step level
+    # (sibling of `arguments`). When set, the step body executes once per
+    # element of `item` (a Jinja list expression), with the current element
+    # bound as `{{ vars.item }}` (and `vars.item.<field>` for object items).
+    # Accepted keys: item (required), parallel, condition, __bulk,
+    # batch_size, break_loop. None means no looping.
+    for_each: Optional[dict] = None
+
     # Filled by the resolver:
     step_type_uuid: Optional[str] = None
     step_type_name: Optional[str] = None  # canonical FSR name e.g. 'Connectors'

@@ -1,8 +1,8 @@
 # FSR Playbook Studio — Web app plan
 
-**Status**: scoping / pre-Phase-0
+**Status**: Phase 5 in progress (LLM-modular + history backend done; UI routes pending)
 **Owner**: Dylan
-**Last updated**: 2026-05-03
+**Last updated**: 2026-05-04
 **Supersedes**: UI + shipping sections of `../CHAT_APP_PLAN.md` (Streamlit). Inherits everything else from that doc — LLM context strategy, hard rules, tool dispatcher design, offline/live data buckets, risks. Read `CHAT_APP_PLAN.md` first; this doc only covers the deltas for the SvelteKit + FastAPI stack.
 
 ---
@@ -150,7 +150,7 @@ Tool dispatcher inside `/api/chat` calls the same function set described in `CHA
 | 2 | Chat (Anthropic, SSE streaming, tool-use). In-process tool dispatcher importing from `mcp_server.py`. Buffer-replace into Monaco. System prompt + live instance context per `CHAT_APP_PLAN.md`. | "Build a hello-world playbook" produces YAML in the editor; tool calls visible. |
 | 3 | Push + Run + Run viewer. SSE status stream. Jinja-render box on Run tab. | One click compiles → pushes → runs `examples/hello_connector.yaml` and shows the step tree. ✅ Push subprocess + Run SSE stream + Run page with logs and `vars` env viewer landed; structured step tree + Jinja-render box deferred to Phase 3.5. |
 | 4 | Browse tab — connectors / step types / jinja / recipes. Cross-links from chat tool calls into Browse. | Search + drill-down works; tool-call cards link to `/browse/connector/<name>`. |
-| 5 | History (sessions + runs). `LLMProvider` abstraction; OpenAI provider added. | Restart preserves chats; `.env` flag switches provider. |
+| 5 | History (sessions + runs). `LLMProvider` abstraction; OpenAI provider added. | Restart preserves chats; `.env` flag switches provider. **🟡 PARTIAL (2026-05-04):** `LLMProvider` abstraction landed (UsageEvent in the event union, factory + registry, `STUDIO_LLM_PROVIDER` env, `FakeProvider` for tests). History backend wired (push + chat-turn → `web/backend/history.db`, per-playbook `cost_by_playbook()`, chat↔push correlation via `~/.fsrpb/active_session`). **Still TODO:** OpenAI provider impl; `/api/history` FastAPI routes; Svelte `/history` UI (route stub already exists). |
 | 6 | Hosting prep. Auth header, Dockerfile, externalize FSR creds + LLM keys, CSP. | Runs behind a reverse proxy on a non-laptop host. |
 
 ---
@@ -170,6 +170,21 @@ These are not re-explained here. Read the source.
 ## Follow-ups captured during Phase 2/3
 
 - **TS port of the Python compiler** — for tighter Monaco integration (in-browser validate/compile, hover schema from the connector store, completion). Today the editor round-trips to FastAPI for every keystroke; that's fine on localhost but limiting. Plan a port of `python/compiler/` to TypeScript so it can ship as a Web Worker the editor talks to directly, with the FSR reference DB exported as a JSON bundle. Scope: parser → resolver → validator → emitter; reuse the same error codes so server-side and client-side diagnostics interleave cleanly. Land after Phase 5 unless live-editing latency becomes a real complaint.
+
+## Phase 5 resume notes (2026-05-04)
+
+**Done:**
+- `LLMProvider` Protocol now emits `UsageEvent` per round-trip; route is the single telemetry consumer (`_persist_usage` in `routes/chat.py`).
+- Provider factory at `web/backend/llm/factory.py` (`STUDIO_LLM_PROVIDER` env). Built-in `anthropic`. Tests register `FakeProvider` (`web/backend/llm/fake_provider.py`) under the same name for plug-and-play.
+- `history.db` schema: `pushes`, `push_workflows`, `chat_sessions`, `chat_turns` (with `playbook_collection`/`yaml_sha`), `chat_tool_calls`. Helpers: `record_push`, `record_chat_turn`, `list_pushes`, `get_push`, `previous_push`, `list_chat_sessions`, `get_chat_session`, `cost_by_playbook`, `yaml_diff`, `write_active_session`/`read_active_session`.
+- `cli.py:cmd_push` wired (snapshots YAML, links workflows, correlates chat session via active marker).
+- Per-playbook attribution: chat route extracts `collection:` + sha from `current_yaml` and stamps into UsageEvent tags → persisted on every chat turn.
+- 192 tests passing (web 63, python 93, frontend 36).
+
+**Resume here for the UI:**
+1. Add `web/backend/routes/history.py` with: `GET /api/history` (timeline), `GET /api/history/push/{id}`, `GET /api/history/push/{id}/diff?against={id}` (uses `history.yaml_diff`), `GET /api/history/cost-by-playbook`, `GET /api/history/chat/{session_id}`. Mount in `app.py`.
+2. Flesh out `web/frontend/src/routes/history/+page.svelte` (currently a placeholder). Timeline first, then push detail with diff button, then per-playbook cost rollup.
+3. Add OpenAI provider: `web/backend/llm/openai_provider.py` mirroring `anthropic_provider.py`'s `UsageEvent` emission. Register via `factory.register("openai", OpenAIProvider)`.
 
 ## Open questions to revisit (not blocking Phase 0)
 

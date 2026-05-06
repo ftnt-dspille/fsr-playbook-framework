@@ -68,6 +68,88 @@ def list_connectors(q: str = "", limit: int = 50) -> list[dict[str, Any]]:
         return [dict(r) for r in c.execute(sql, args)]
 
 
+@router.get("/inventory")
+def inventory_summary() -> dict[str, Any]:
+    """Audit surface — what does the assistant know?
+
+    Powers the front-end inventory dashboard (the "we're not just an LLM"
+    proof). Reads through `python.inventory` so the CLI and web stay in
+    sync.
+    """
+    import sys as _sys
+    _py = REPO_ROOT / "python"
+    if str(_py) not in _sys.path:
+        _sys.path.insert(0, str(_py))
+    import inventory as inv
+    return {
+        "summary": inv.summary(),
+        "top_api_products": inv.list_api_example_products(limit=15),
+    }
+
+
+@router.get("/api-examples")
+def api_examples(q: str, product: str | None = None,
+                 limit: int = 10) -> list[dict[str, Any]]:
+    """FTS search over the api_examples_catalog. Returns entry_id so the
+    UI can call /synthesize-http-step on a specific row."""
+    import sys as _sys
+    _py = REPO_ROOT / "python"
+    if str(_py) not in _sys.path:
+        _sys.path.insert(0, str(_py))
+    from mcp_server import search_api_examples as _search  # type: ignore
+    return _search(query=q, product=product, limit=limit)
+
+
+@router.get("/synthesize-http-step")
+def synthesize_http_step(entry_id: int, step_name: str = "Call API") -> dict[str, Any]:
+    """Translate an api_examples_catalog entry into a YAML HTTP-connector step.
+
+    Powers the "Insert as HTTP step" button on the Inventory dashboard.
+    Calls through to the same deterministic synthesizer the MCP server
+    exposes — no LLM, just a catalog row → http_request step transform.
+    """
+    import sys as _sys
+    _py = REPO_ROOT / "python"
+    if str(_py) not in _sys.path:
+        _sys.path.insert(0, str(_py))
+    from mcp_server import synthesize_http_step as _synth  # type: ignore
+    step = _synth(entry_id=entry_id, step_name=step_name)
+    if step.get("error"):
+        raise HTTPException(404, step["error"])
+    args = step.get("args") or {}
+    yaml_lines = [
+        f"- id: call_api",
+        f"  type: connector",
+        f"  name: {step.get('name', step_name)!r}",
+        f"  connector: {step.get('connector', 'http')}",
+        f"  operation: {step.get('operation', 'http_request')}",
+        f"  args:",
+        f"    method: {args.get('method', 'GET')}",
+        f"    rest_api: {args.get('rest_api', '')!r}",
+        f"    auth_type: {args.get('auth_type', 'No Auth')!r}",
+    ]
+    if args.get("parameter"):
+        yaml_lines.append("    parameter:")
+        for k, v in args["parameter"].items():
+            yaml_lines.append(f"      {k}: {v!r}")
+    return {
+        "step": step,
+        "yaml": "\n".join(yaml_lines),
+        "note": step.get("_note", ""),
+        "source_url": step.get("_source_url", ""),
+    }
+
+
+@router.get("/inventory/search")
+def inventory_search(q: str, limit: int = 5) -> dict[str, Any]:
+    import sys as _sys
+    _py = REPO_ROOT / "python"
+    if str(_py) not in _sys.path:
+        _sys.path.insert(0, str(_py))
+    import inventory as inv
+    return inv.cross_search(q, per_table_limit=limit)
+
+
 @router.get("/connectors/{name}/operations")
 def list_operations(name: str, q: str = "", limit: int = 100) -> list[dict[str, Any]]:
     sql = (

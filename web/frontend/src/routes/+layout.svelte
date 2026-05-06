@@ -12,8 +12,11 @@
         <a href="/" class="hover:text-zinc-100">Design</a>
         <a href="/run" class="hover:text-zinc-100">Run</a>
         <a href="/browse" class="hover:text-zinc-100">Browse</a>
+        <a href="/inventory" class="hover:text-zinc-100">Inventory</a>
         <a href="/history" class="hover:text-zinc-100">History</a>
+        <a href="/capabilities" class="hover:text-zinc-100">Capabilities</a>
         <a href="/docs" class="hover:text-zinc-100">Docs</a>
+        <a href="/settings" class="hover:text-zinc-100">Settings</a>
       </nav>
     </div>
     <HealthPill />

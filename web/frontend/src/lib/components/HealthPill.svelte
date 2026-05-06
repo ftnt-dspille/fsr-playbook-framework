@@ -57,10 +57,17 @@
       <span class="text-zinc-500">{new URL(health.fsr.base_url).host}</span>
     {/if}
   </span>
-  <span
-    class="flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1.5 font-medium"
-    title={llm === 'ok' ? 'ANTHROPIC_API_KEY configured' : 'set ANTHROPIC_API_KEY to enable chat'}
+  <a
+    href="/settings"
+    class="flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1.5 font-medium hover:bg-zinc-900"
+    title={health?.llm.configured
+      ? `${health.llm.provider}${health.llm.model ? ' · ' + health.llm.model : ''}`
+      : 'click to configure an LLM provider'}
   >
-    <span class="h-2.5 w-2.5 rounded-full {dot(llm)}"></span> LLM
-  </span>
+    <span class="h-2.5 w-2.5 rounded-full {dot(llm)}"></span>
+    LLM
+    {#if health?.llm.provider}
+      <span class="text-zinc-500">{health.llm.provider}</span>
+    {/if}
+  </a>
 </div>

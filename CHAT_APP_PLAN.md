@@ -619,6 +619,113 @@ with "no — here's a Streamlit app I'm running locally".
 
 ---
 
+## Success ladder + LLM-agnostic strategy (added 2026-05-06)
+
+**Product principle to encode in every system prompt:**
+
+> Producing valid YAML is the start of the job, not the end. The job is
+> producing YAML that runs successfully on a real FortiSOAR instance and
+> produces the outcome the user asked for. Use the success ladder to prove
+> it works before declaring done.
+
+### The success ladder
+
+Today there is one gate (compile). Add four more, each enforced by
+deterministic code, each callable as an MCP tool. The LLM walks up; failure
+at any rung returns a structured `{ok, error_code, message, suggestions[]}`
+and a fix hint — never prose.
+
+| Rung | Question | Tool | Status |
+|---|---|---|---|
+| L1 Compile | Structurally valid YAML? | `compile_yaml` / `validate_yaml` | done |
+| L2 Static-resolve | Connectors / ops / picklists / step-types / Jinja vars exist? | `resolve_yaml` (new) | partial — picklists & Jinja vars missing |
+| L3 Dry-run | Step args render against expected upstream context? | `dry_run_playbook` (new; ties to I10 stepper) | missing |
+| L4 Live single-step | Step N executes against real FSR with real data? | `run_op` (done) + `step_dry_execute` (new wrapper) | half |
+| L5 Post-run assert | Did the playbook produce the expected outcome? | `assert_playbook_outcome` (new) | missing |
+
+### Silent-failure surfaces to close (each becomes a ruleset module)
+
+- **Picklist resolvability** (I1) — render every `{{ 'PL' | picklist(...) }}`
+  against live FSR; FAIL with valid alternatives.
+- **Connector installation** (I2) — `GET /api/integration/connectors/{name}/{version}`.
+- **Step argument coverage** — every required `operation_params` row must
+  appear in YAML `args` (today only structural validation runs).
+- **Trigger compatibility** — alert/incident triggers reference fields that
+  exist on the target module (cross-check `schema.json`).
+- **Variable reachability** — every `{{ vars.steps.X.Y }}` references a
+  step running *before* this one in the DAG, and `Y` exists in that step's
+  declared output. Source: `operations.output_schema_observed` cached by
+  `run_op`. **Highest-ROI single check we don't have.**
+- **Mock-output coverage** — every Fetch step in a recipe has `mock_result`
+  if the connector isn't configured.
+- **Jinja arg-type discipline** — filters expecting list/dict/str receive
+  matching types (signatures live in `jinja_macros` from `probe_jinja_backend`).
+
+### LLM-agnostic surface — three contracts to enforce
+
+1. **Structured tool I/O.** Audit every tool that returns prose errors;
+   convert to `{ok, error_code, message, suggestions[]}`. Promote difflib
+   hints into a dedicated `suggestions` field. Specifically: `compile_yaml`,
+   `validate_yaml`, `run_op`.
+2. **Externalized system prompt.** Move the implicit prompt to
+   `python/agent/system_prompt.md`, version it, document the contract: tools,
+   success-ladder discipline, when to ask the user, what counts as "done."
+   Any LLM consuming this product loads that prompt + the MCP tool list and
+   has everything needed.
+3. **Token-budget discipline.** Smaller models (gpt-4o-mini, Llama-70B,
+   local) can't afford 20k-token tool responses. Default `verbose=False`
+   everywhere; full payloads behind explicit flag. Already trimmed
+   `get_step_type` 4.9KB → 1.8KB; audit the rest.
+
+### The proof: an LLM evaluation harness
+
+"LLM-agnostic" is a claim until measured. Build `python/eval/harness.py`:
+- Inputs: 3 representative tasks (simple connector call, decision branch,
+  ingestion recipe).
+- Models: Claude Sonnet, GPT-4o-mini, a local model (LMStudio).
+- Score: L1 compile? L2 resolve? L3 dry-run? matches gold fixture?
+- Output: a per-model rubric so the demo can show "these 4 LLMs all produce
+  working playbooks via this product." ~6 hours.
+
+### MVP demo gaps (what's still needed beyond DEMO.md)
+
+- **L2 + L3 implemented** — without these, live demo hits silent failures.
+- **`fsrpb demo run <storyboard>`** — single command that walks each
+  storyboard end-to-end and asserts each leg.
+- **Conversation transcript capture** — save full turn log + tool calls per
+  session as a replayable artifact (token usage logging already exists;
+  extend to full turns).
+- **Inventory dashboard** — opens demo with "what does the assistant know?"
+  (CLI stub landed 2026-05-06; web route + page pending).
+- **Failure-recovery storyboard** — playbook fails → agent reads the run →
+  fixes YAML → re-runs → succeeds. Needs
+  `diagnose_yaml_against_pb_execution` MCP tool.
+- **Demo reset script** — pre-demo: reset known modules on `dev`, delete
+  test alerts/incidents, confirm required connectors configured.
+
+### Groundwork ordering for "next-level" + MVP demo
+
+Total to MVP-demo-ready: **~30–35 focused hours**. Load-bearing minimum is
+items 1, 2, and 4 — the rest is polish.
+
+1. **I1 + I2** (picklist + connector prechecks) — 1.5 hr; unblocks L2.
+2. **`resolve_yaml` MCP tool** — wraps L2 logic. ~2 hr.
+3. **`output_schema_observed` exposure** in `run_op` response — already
+   cached, surface inline. ~1 hr.
+4. **Variable-reachability ruleset** — DAG walk + output schema cross-check.
+   ~3 hr. **Highest single-check value.**
+5. **I10 stepper skeleton + `dry_run_playbook` MCP tool** — L3. ~4 hr
+   scaffold; ~11 hr full per-step-type handlers.
+6. **`assert_playbook_outcome` tool** — declarative expectations (record
+   exists, field equals, count > N). ~3 hr. Enables L5 + eval harness.
+7. **System prompt externalization + tool I/O audit** — ~2 hr.
+8. **LLM evaluation harness** — 3 storyboards × 3 models. ~6 hr.
+9. **`diagnose_yaml_against_pb_execution` tool** — failure-recovery loop. ~3 hr.
+10. **Demo reset script + transcript capture** — ~2 hr.
+11. **Inventory web dashboard** — fill in the route stubbed 2026-05-06. ~3 hr.
+
+---
+
 ## Files referenced (for context-loading after a /clear)
 
 When you come back to this, the relevant code lives at:
