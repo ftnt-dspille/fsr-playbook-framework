@@ -50,7 +50,7 @@
       // last yaml block the assistant emitted in the transcript.
       const deployed = detail.latest_push?.source_yaml as string | undefined;
       if (deployed) {
-        yamlStore.setText(deployed);
+        yamlStore.setText(deployed, `replay session ${sid}`);
       } else {
         // Fall back to scanning the transcript for the most recent
         // ```yaml block — same regex used by the live chat for buffer
@@ -63,7 +63,7 @@
         const match = tail.match(/```yaml\s*\n([\s\S]*?)```/g);
         if (match && match.length) {
           const last = match[match.length - 1].replace(/^```yaml\s*\n/, '').replace(/```$/, '');
-          if (last.trim()) yamlStore.setText(last);
+          if (last.trim()) yamlStore.setText(last, `replay session ${sid}`);
         }
       }
       const tag = detail.playbook_collection || sid;

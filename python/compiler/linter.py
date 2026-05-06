@@ -56,11 +56,11 @@ _BRANCH_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Match `option: <bare-token>` (no quotes around the value).
-_OPTION_BARE_RE = re.compile(
+# Match `display: <bare-token>` (decision/manual_input branch label).
+_DISPLAY_BARE_RE = re.compile(
     r"""(?mx)
     ^[ \t]*-?[ \t]*          # list-item or plain key
-    option [ \t]* :
+    display [ \t]* :
     [ \t]+
     ( yes | no | on | off | y | n | true | false )
     [ \t]*$                  # nothing else on the line
@@ -70,7 +70,7 @@ _OPTION_BARE_RE = re.compile(
 
 
 def _scan_norway(text: str) -> list[CompileError]:
-    """Find unquoted yes/no/etc. in `branches:` keys + `option:` values.
+    """Find unquoted yes/no/etc. in decision/manual_input `display:` values.
 
     The regex is intentionally textual: by the time we have the IR,
     `True`/`False` (Python booleans) are indistinguishable from a user
@@ -78,50 +78,16 @@ def _scan_norway(text: str) -> list[CompileError]:
     Working off the raw YAML lets us blame the original token.
     """
     errs: list[CompileError] = []
-
-    # Track which lines are inside a `branches:` block so we don't fire
-    # the rule on every yes-shaped key elsewhere (`name: yes`, etc.).
-    lines = text.split("\n")
-    in_branches = False
-    branches_indent = -1
-    for ln_no, line in enumerate(lines, start=1):
-        stripped = line.lstrip()
-        indent = len(line) - len(stripped)
-        if not stripped:
-            continue
-        if in_branches and indent <= branches_indent and not stripped.startswith("#"):
-            in_branches = False
-        if not in_branches and stripped.startswith("branches:"):
-            in_branches = True
-            branches_indent = indent
-            continue
-        if in_branches:
-            m = re.match(
-                r"([A-Za-z0-9_]+)\s*:",
-                stripped,
-            )
-            if m and m.group(1).lower() in _NORWAY_TOKENS:
-                tok = m.group(1)
-                errs.append(CompileError(
-                    code=ErrorCode.BAD_VALUE,
-                    message=(f"branches key {tok!r} is parsed as a YAML 1.1 "
-                             "boolean and won't match the Decision option "
-                             "label; quote it"),
-                    path=f"<line {ln_no}>",
-                    suggestion=f'use "{tok}": instead of bare {tok}:',
-                ))
-
-    # `option:` value scan (any context).
-    for m in _OPTION_BARE_RE.finditer(text):
+    for m in _DISPLAY_BARE_RE.finditer(text):
         tok = m.group(1)
         ln_no = text.count("\n", 0, m.start()) + 1
         errs.append(CompileError(
             code=ErrorCode.BAD_VALUE,
-            message=(f"option value {tok!r} is parsed as a YAML 1.1 "
-                     "boolean; the Decision route lookup will fail at "
-                     "runtime with CS-WF-10. Quote it."),
+            message=(f"display value {tok!r} is parsed as a YAML 1.1 "
+                     "boolean; the route label will not match at runtime. "
+                     "Quote it."),
             path=f"<line {ln_no}>",
-            suggestion=f'use option: "{tok}" instead of option: {tok}',
+            suggestion=f'use display: "{tok}" instead of display: {tok}',
         ))
     return errs
 

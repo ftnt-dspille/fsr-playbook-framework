@@ -13,36 +13,30 @@ playbooks:
   - name: Route By Severity
     description: Demonstrate decision branches.
     steps:
-      - id: start
-        type: start
-        next: read_severity
+      - type: start
+        next: Read severity
 
-      - id: read_severity
-        type: set_variable
+        name: start
+      - type: set_variable
         name: Read severity
-        arguments:
+        next: Branch on severity
+
+        vars:
           severity: "{{ vars.input.records[0].severity }}"
-        next: severity_decision
-
-      - id: severity_decision
-        type: decision
+      - type: decision
         name: Branch on severity
-        arguments:
-          conditions:
-            - option: high
-              condition: "{{ vars.severity in ['critical', 'high'] }}"
-        branches:
-          high: escalate
-        next: log_low      # default fall-through when no condition matches
-
-      - id: escalate
-        type: set_variable
+        conditions:
+          - display: high
+            when: "{{ vars.severity in ['critical', 'high'] }}"
+            next: Escalate to Tier 2
+          - display: Else
+            default: true
+            next: Log low severity
+      - type: set_variable
         name: Escalate to Tier 2
-        arguments:
+        vars:
           tier: "tier2"
-
-      - id: log_low
-        type: set_variable
+      - type: set_variable
         name: Log low severity
-        arguments:
+        vars:
           tier: "tier1"

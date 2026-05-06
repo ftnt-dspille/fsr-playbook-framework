@@ -8,10 +8,10 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: start
+      - name: start
         type: start
         next: f
-      - id: f
+      - name: f
         type: find_record
         arguments:
           module: alerts
@@ -23,22 +23,19 @@ playbooks:
 
 
 def test_set_variable_kwargs_permissive(db_path):
-    # set_multiple has **kwargs, so extras are accepted at validate time
-    # (FSR runtime permits arbitrary keys).
+    # set_multiple has **kwargs — arbitrary var names are fine.
     text = """
 collection: T
 playbooks:
   - name: P
     steps:
-      - id: start
+      - name: start
         type: start
         next: s
-      - id: s
+      - name: s
         type: set_variable
-        arguments:
-          arg_list:
-            - name: x
-              value: "1"
+        vars:
+          x: "1"
           extra_kw: ok
 """
     r = compile_yaml(text, db_path)
@@ -53,13 +50,12 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: start
+      - name: start
         type: start
         next: d
-      - id: d
+      - name: d
         type: decision
-        arguments:
-          conditions: []
+        conditions: []
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]
@@ -76,11 +72,11 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: stop
-      - id: stop
-        type: stop
+      - name: stop
+        type: end
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]
@@ -102,10 +98,10 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: noop
-      - id: noop
+      - name: noop
         type: connector
         arguments:
           connector: cyops_utilities
@@ -120,43 +116,36 @@ playbooks:
     ), msgs
 
 
-def test_decision_with_default_next_is_valid(db_path):
-    """One condition + decision-level `next:` for the fallthrough case is
-    the canonical FSR idiom. Inverse conditions for the default branch
-    are overspecified and not required by the validator.
-
-    The option / branch label is quoted ("yes") so YAML 1.1 doesn't
-    coerce it to a boolean — see linter.py for the Norway-problem rule.
+def test_decision_with_default_branch_is_valid(db_path):
+    """Canonical Decision: every branch in conditions, exactly one
+    `default: true`. Branch label "yes" is quoted to dodge YAML 1.1
+    boolean coercion (see linter.py for the Norway-problem rule).
     """
     text = """
 collection: T
 playbooks:
   - name: P
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: choose
-      - id: choose
+      - name: choose
         type: decision
-        arguments:
-          conditions:
-            - option: "yes"
-              condition: "{{ vars.input.params.go == 'yes' }}"
-        branches:
-          "yes": act
-        next: skip
-      - id: act
+        conditions:
+          - display: "yes"
+            when: "{{ vars.input.params.go == 'yes' }}"
+            next: act
+          - display: "Else"
+            default: true
+            next: skip
+      - name: act
         type: set_variable
-        arguments:
-          arg_list:
-            - name: outcome
-              value: acted
-      - id: skip
+        vars:
+          outcome: acted
+      - name: skip
         type: set_variable
-        arguments:
-          arg_list:
-            - name: outcome
-              value: skipped
+        vars:
+          outcome: skipped
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]
@@ -171,12 +160,11 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: ask
-      - id: ask
+      - name: ask
         type: manual_input
-        name: ask
         arguments:
           floopwidget: 42
           bogon: hi
@@ -197,12 +185,11 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: ask
-      - id: ask
+      - name: ask
         type: manual_input
-        name: ask
         arguments:
           record: "{{ vars.input.records[0]['@id'] }}"
           type: single-select
@@ -225,17 +212,21 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: ask
-      - id: ask
+      - name: ask
         type: manual_input
-        name: ask
         arguments:
           title: Block this?
-          options:
-            - {option: block, primary: true}
-            - {option: skip}
+        options:
+          - display: block
+            primary: true
+            next: done
+          - display: skip
+            next: done
+      - name: done
+        type: end
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]
@@ -243,40 +234,37 @@ playbooks:
 
 # ---- audit-driven Decision validator tests (2026-05-06, I15 refined) -----
 
-def _decision_yaml(conds_block: str, branches_block: str = "") -> str:
+def _decision_yaml(conds_block: str) -> str:
+    """conds_block is a step-level conditions: list. Each entry uses the
+    canonical surface keys: display / when / next / default."""
     return f"""
 collection: T
 playbooks:
   - name: P
     steps:
-      - id: start
+      - name: start
         type: start
         next: d
-      - id: d
+      - name: d
         type: decision
-        arguments:
-          conditions:
+        conditions:
 {conds_block}
-{branches_block}
-      - id: a
+      - name: a
         type: set_variable
-        arguments:
-          arg_list:
-            - {{name: x, value: '1'}}
-      - id: b
+        vars:
+          x: '1'
+      - name: b
         type: set_variable
-        arguments:
-          arg_list:
-            - {{name: x, value: '2'}}
+        vars:
+          x: '2'
 """
 
 
 def test_decision_two_default_branches_rejected(db_path):
     """Live FSR fires only the first default; >1 is an authoring bug."""
     text = _decision_yaml(
-        "            - {option: 'yes', condition: '{{ x }}', default: true}\n"
-        "            - {option: 'no',  condition: '{{ y }}', default: true}\n",
-        "        branches:\n          'yes': a\n          'no': b\n",
+        "          - {display: 'yes', when: '{{ x }}', default: true, next: a}\n"
+        "          - {display: 'no',  when: '{{ y }}', default: true, next: b}\n",
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -284,12 +272,11 @@ def test_decision_two_default_branches_rejected(db_path):
 
 
 def test_decision_default_with_condition_rejected(db_path):
-    """Default entries must NOT carry a `condition:` (defaults fire when
+    """Default entries must NOT carry a `when:` (defaults fire when
     every condition is false)."""
     text = _decision_yaml(
-        "            - {option: 'yes', condition: '{{ x }}'}\n"
-        "            - {option: 'no',  default: true, condition: '{{ y }}'}\n",
-        "        branches:\n          'yes': a\n          'no': b\n",
+        "          - {display: 'yes', when: '{{ x }}', next: a}\n"
+        "          - {display: 'no',  default: true, when: '{{ y }}', next: b}\n",
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -298,35 +285,30 @@ def test_decision_default_with_condition_rejected(db_path):
 
 def test_decision_non_default_missing_condition_rejected(db_path):
     text = _decision_yaml(
-        "            - {option: 'yes'}\n"
-        "            - {option: 'no', default: true}\n",
-        "        branches:\n          'yes': a\n          'no': b\n",
+        "          - {display: 'yes', next: a}\n"
+        "          - {display: 'no', default: true, next: b}\n",
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
     assert any("missing `condition:`" in e.message for e in r.errors)
 
 
-def test_decision_no_default_with_step_next_is_clean(db_path):
-    """The canonical FSR idiom: one condition + decision-level `next:`
-    for the false-fall-through case. No warning should fire — the
-    `next:` IS the implicit default. 8 of 352 live Decisions use this."""
+def test_decision_with_default_entry_is_clean(db_path):
+    """The canonical Decision shape: every branch in conditions, exactly
+    one with default: true. No warning should fire."""
     text = _decision_yaml(
-        "            - {option: 'yes', condition: '{{ x }}'}\n",
-        "        branches:\n          'yes': a\n        next: b\n",
+        "          - {display: 'yes', when: '{{ x }}', next: a}\n"
+        "          - {display: 'no', default: true, next: b}\n",
     )
     r = compile_yaml(text, db_path)
     assert r.ok, [str(e) for e in r.errors]
-    assert not any("no default/else branch" in e.message for e in r.errors), \
-        "next: fall-through is a valid default; should not warn"
+    assert not any("no default/else branch" in e.message for e in r.errors)
 
 
-def test_decision_no_default_no_next_warns(db_path):
-    """Truly stuck: no default entry AND no step-level next: — a
-    false-condition run has no target. Warn (don't error)."""
+def test_decision_no_default_warns(db_path):
+    """No `default: true` entry — a false-condition run has no target."""
     text = _decision_yaml(
-        "            - {option: 'yes', condition: '{{ x }}'}\n",
-        "        branches:\n          'yes': a\n",
+        "          - {display: 'yes', when: '{{ x }}', next: a}\n",
     )
     r = compile_yaml(text, db_path)
     assert r.ok, [str(e) for e in r.errors]
@@ -336,19 +318,18 @@ def test_decision_no_default_no_next_warns(db_path):
 
 # ---- I28 — set_variable typo trap (2026-05-06) -----------------------
 
-def test_set_variable_variables_key_caught(db_path):
-    """`variables:` is a common LLM typo; without the trap it gets passed
-    through as a single var literally named 'variables'. Real-world bug
-    from feedback session 60743f70."""
+def test_set_variable_legacy_arguments_rejected(db_path):
+    """Set-variable steps must use the top-level `vars:` mapping.
+    Anything else under `arguments:` is rejected at parse time."""
     text = """
 collection: T
 playbooks:
   - name: P
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: s
-      - id: s
+      - name: s
         type: set_variable
         arguments:
           variables:
@@ -356,35 +337,29 @@ playbooks:
 """
     r = compile_yaml(text, db_path)
     assert not r.ok
-    e = next(e for e in r.errors if e.code is ErrorCode.UNKNOWN_PARAM)
-    assert "'variables'" in e.message
-    assert "arg_list" in (e.suggestion or "")
+    assert any("top-level `vars:` mapping" in e.message for e in r.errors)
 
 
-def test_set_variable_canonical_arg_list_still_works(db_path):
+def test_set_variable_canonical_vars_works(db_path):
     text = """
 collection: T
 playbooks:
   - name: P
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: s
-      - id: s
+      - name: s
         type: set_variable
-        arguments:
-          arg_list:
-            - {name: greeting, value: 'hi'}
+        vars:
+          greeting: 'hi'
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [str(e) for e in r.errors]
 
 
-# ---- I29 — UUID step id linter (2026-05-06) --------------------------
-
-def test_step_id_uuid_warns(db_path):
-    """Real-world failure mode 60743f70 — agent emitted full UUIDs as
-    step `id:` slugs, breaking every cross-reference idiom."""
+def test_step_id_key_rejected(db_path):
+    """`id:` on a step is a hard parser error — only `name:` is allowed."""
     text = """
 collection: T
 playbooks:
@@ -392,14 +367,10 @@ playbooks:
     steps:
       - id: 550e8400-e29b-41d4-a716-446655440000
         type: start
-        next: 550e8400-e29b-41d4-a716-446655440001
-      - id: 550e8400-e29b-41d4-a716-446655440001
-        type: stop
 """
     r = compile_yaml(text, db_path)
-    # Doesn't block compilation (it's a warning) — just must surface.
-    msgs = [(e.message, e.severity) for e in r.errors]
-    assert any("UUID" in m and sev == "warning" for m, sev in msgs), msgs
+    assert not r.ok
+    assert any("step.id is not allowed" in e.message for e in r.errors)
 
 
 # ---- I31 — validate_yaml next_fix summary (2026-05-06) ---------------
@@ -414,7 +385,7 @@ def test_mcp_validate_yaml_returns_next_fix():
 playbooks:
   - name: P
     steps:
-      - id: s
+      - name: s
         type: start
 """
     r = mcp_validate(yaml)

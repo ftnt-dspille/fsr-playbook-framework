@@ -32,13 +32,11 @@ playbooks:
     tag: "dataingestion, fetch, todo_connector_api_name"
     parameters: [lastPullTime]
     steps:
-      - id: trigger
-        type: start
+      - type: start
         name: Start
-        next: fetch
+        next: Fetch records
 
-      - id: fetch
-        type: connector
+      - type: connector
         name: Fetch records
         comment: |
           TODO replace BOTH connector and operation. Placeholder
@@ -70,46 +68,38 @@ playbooks:
                 ]
               }
             }
-        next: capture
+        next: Capture data
 
-      - id: capture
-        type: set_variable
+      - type: set_variable
         name: Capture data
         comment: |
           TODO point `data` at the array path inside the fetch result
           (e.g. `vars.steps.Fetch_records.data.records`).
-        arguments:
-          # set_variable: variables are flat top-level keys under arguments.
+        vars:
           data: "{{ vars.steps.Fetch_records }}"
-
-  # ---------------------------------------------------------------- Create
   - name: "TODO Connector > Create"
     description: Create one Alert record per ingested item.
     is_active: true
     tag: "dataingestion, create, todo_connector_api_name"
     parameters: [ingestedData]
     steps:
-      - id: trigger
-        type: start
+      - type: start
         name: Start
-        next: any_records
+        next: Any records
 
-      - id: any_records
-        type: decision
+      - type: decision
         name: Any records
         comment: |
           Error gateway — if the parent passed an empty array, fail loud
           rather than silently looping zero times.
-        arguments:
-          conditions:
-            - option: "yes"
-              condition: "{{ (vars.input.params.ingestedData | length) > 0 }}"
-        branches:
-          "yes": create_each
-        next: raise_empty
-
-      - id: raise_empty
-        type: connector
+        conditions:
+          - display: "yes"
+            when: "{{ (vars.input.params.ingestedData | length) > 0 }}"
+            next: Create alert per item
+          - display: Else
+            default: true
+            next: Raise empty input
+      - type: connector
         name: Raise empty input
         arguments:
           connector: cyops_utilities
@@ -118,8 +108,7 @@ playbooks:
           params:
             msg: "Create called with empty ingestedData — Fetch returned no records."
 
-      - id: create_each
-        type: create_record
+      - type: create_record
         name: Create alert per item
         comment: |
           NON-bulk on purpose — on-create alert playbooks must fire.
@@ -151,43 +140,37 @@ playbooks:
     tag: "dataingestion, ingest, todo_connector_api_name"
     parameters: [env_setup, lastPullTime]
     steps:
-      - id: trigger
-        type: start
+      - type: start
         name: Start
-        next: env_decision
+        next: Mapping preview
 
-      - id: env_decision
-        type: decision
+      - type: decision
         name: Mapping preview
         comment: |
           The Wizard sets `env_setup=true` while users design the field
           mapping in the UI; in that mode we return a sample record
           shape instead of writing to Alerts. `false` (or missing) is
           the real ingestion path.
-        arguments:
-          conditions:
-            - option: preview
-              condition: "{{ vars.input.params.env_setup | default(false) | bool }}"
-        branches:
-          preview: return_sample
-        next: call_fetch
-
-      - id: return_sample
-        type: set_variable
+        conditions:
+          - display: preview
+            when: "{{ vars.input.params.env_setup | default(false) | bool }}"
+            next: Return sample shape
+          - display: Else
+            default: true
+            next: Call Fetch
+      - type: set_variable
         name: Return sample shape
         comment: |
           TODO replace this stub with a representative single-record
           sample so the Wizard's mapping preview shows real fields.
-        arguments:
-          # set_variable: variables are flat top-level keys under arguments.
+        vars:
           sample:
             id: "TODO-1"
             name: "TODO sample alert name"
             severity: "Medium"
             description: "TODO sample description"
 
-      - id: call_fetch
-        type: workflow_reference
+      - type: workflow_reference
         name: Call Fetch
         arguments:
           target: "TODO Connector > Fetch"
@@ -197,21 +180,18 @@ playbooks:
           pass_parent_env: false
           pass_input_record: false
           step_variables: []
-        next: fetch_ok
+        next: Fetch returned data
 
-      - id: fetch_ok
-        type: decision
+      - type: decision
         name: Fetch returned data
-        arguments:
-          conditions:
-            - option: "yes"
-              condition: "{{ (vars.steps.Call_Fetch.data | default([]) | length) > 0 }}"
-        branches:
-          "yes": call_create
-        next: raise_no_data
-
-      - id: raise_no_data
-        type: connector
+        conditions:
+          - display: "yes"
+            when: "{{ (vars.steps.Call_Fetch.data | default([]) | length) > 0 }}"
+            next: Call Create
+          - display: Else
+            default: true
+            next: Raise no data
+      - type: connector
         name: Raise no data
         arguments:
           connector: cyops_utilities
@@ -220,8 +200,7 @@ playbooks:
           params:
             msg: "Ingest: Fetch returned no records (lastPullTime={{ vars.input.params.lastPullTime }})"
 
-      - id: call_create
-        type: workflow_reference
+      - type: workflow_reference
         name: Call Create
         arguments:
           target: "TODO Connector > Create"

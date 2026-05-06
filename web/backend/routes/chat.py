@@ -164,9 +164,32 @@ def _current_turn(messages: list[Message]) -> int:
     return sum(1 for m in messages if m.role == "user")
 
 
+_PLACEHOLDER_MARKERS = (
+    "# Welcome — try one of these to get started:",
+    "# ... rest of your current workflow content ...",
+)
+
+
+def _is_meaningful_yaml(text: str | None) -> bool:
+    """Drop placeholder/empty buffers server-side. Sending the welcome
+    scaffold biases the agent into extending it rather than authoring
+    fresh — surfaced as an explicit failure mode by user feedback."""
+    if not text:
+        return False
+    for marker in _PLACEHOLDER_MARKERS:
+        if marker in text:
+            return False
+    # Strip comments + blank lines; require some non-trivial content.
+    body = "\n".join(
+        ln for ln in text.splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    )
+    return len(body) >= 40
+
+
 def _build_messages(body: ChatIn) -> list[Message]:
     out: list[Message] = []
-    if body.current_yaml:
+    if _is_meaningful_yaml(body.current_yaml):
         out.append(Message(
             role="user",
             content=f"Current editor YAML:\n```yaml\n{body.current_yaml}\n```",

@@ -33,19 +33,18 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
-        next: c
-      - id: c
+        next: Hello
+      - name: Hello
         type: connector
-        name: Hello
         arguments:
           connector: cyops_utilities
           operation: no_op
           config: ""
         next: stop
-      - id: stop
-        type: stop
+      - name: stop
+        type: end
 """
     res = compile_yaml(text, db_path)
     assert res.ok, [str(e) for e in res.errors]
@@ -55,7 +54,7 @@ playbooks:
 
 
 def test_stop_step_no_false_positives(db_path):
-    """`type: stop` resolves to handler='connector' under the hood
+    """`type: end` resolves to handler='connector' under the hood
     (no_op idiom). The skip-list is keyed on handler, so this works."""
     text = """
 collection: T
@@ -64,11 +63,11 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
         next: stop
-      - id: stop
-        type: stop
+      - name: stop
+        type: end
 """
     res = compile_yaml(text, db_path)
     assert res.ok, [str(e) for e in res.errors]
@@ -86,19 +85,18 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
         next: u
-      - id: u
+      - name: Update
         type: update_record
-        name: Update
         arguments:
           module: alerts
           resource:
             severity: "{{ 'High' | picklist('severity') }}"
         next: stop
-      - id: stop
-        type: stop
+      - name: stop
+        type: end
 """
     res = compile_yaml(text, db_path)
     bad = [w for w in _no_unknown_param_warnings(res)
@@ -115,17 +113,16 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
         next: d
-      - id: d
+      - name: Wait
         type: delay
-        name: Wait
         arguments:
           seconds: 5
         next: stop
-      - id: stop
-        type: stop
+      - name: stop
+        type: end
 """
     res = compile_yaml(text, db_path)
     bad = [w for w in _no_unknown_param_warnings(res)
@@ -144,18 +141,17 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
         next: s
-      - id: s
+      - name: Stash
         type: set_variable
-        name: Stash
         arguments:
           source_ip: "1.2.3.4"
           verdict: pending
         next: stop
-      - id: stop
-        type: stop
+      - name: stop
+        type: end
 """
     res = compile_yaml(text, db_path)
     bad = [w for w in _no_unknown_param_warnings(res)
@@ -173,18 +169,17 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
         next: c
-      - id: c
+      - name: Compute
         type: code_snippet
-        name: Compute
         arguments:
           code: |
             result = 1 + 1
         next: stop
-      - id: stop
-        type: stop
+      - name: stop
+        type: end
 """
     res = compile_yaml(text, db_path)
     bad = _no_unknown_param_warnings(res)

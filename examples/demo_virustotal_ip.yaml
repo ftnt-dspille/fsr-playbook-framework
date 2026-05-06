@@ -17,12 +17,11 @@ playbooks:
     is_active: true
     parameters: [ip]
     steps:
-      - id: start
-        type: start
-        next: lookup
+      - type: start
+        next: Query VirusTotal
 
-      - id: lookup
-        type: connector
+        name: start
+      - type: connector
         name: Query VirusTotal
         arguments:
           connector: virustotal
@@ -30,42 +29,28 @@ playbooks:
           config: ""
           params:
             ip: "{{ vars.input.params.ip }}"
-        next: extract_score
+        next: Extract malicious count
 
-      - id: extract_score
-        type: set_variable
+      - type: set_variable
         name: Extract malicious count
-        arguments:
-          arg_list:
-            - name: malicious_count
-              value: "{{ vars.steps.Query_VirusTotal.data.attributes.last_analysis_stats.malicious }}"
-        next: verdict_decision
+        next: Branch on verdict
 
-      - id: verdict_decision
-        type: decision
+        vars:
+          malicious_count: "{{ vars.steps.Query_VirusTotal.data.attributes.last_analysis_stats.malicious }}"
+      - type: decision
         name: Branch on verdict
-        arguments:
-          conditions:
-            - option: malicious
-              condition: "{{ (vars.malicious_count | int) > 0 }}"
-            - option: clean
-              condition: "{{ (vars.malicious_count | int) == 0 }}"
-        branches:
-          malicious: stamp_malicious
-          clean: stamp_clean
-
-      - id: stamp_malicious
-        type: set_variable
+        conditions:
+          - display: malicious
+            when: "{{ (vars.malicious_count | int) > 0 }}"
+            next: Stamp malicious
+          - display: clean
+            when: "{{ (vars.malicious_count | int) == 0 }}"
+            next: Stamp clean
+      - type: set_variable
         name: Stamp malicious
-        arguments:
-          arg_list:
-            - name: verdict
-              value: "malicious"
-
-      - id: stamp_clean
-        type: set_variable
+        vars:
+          verdict: "malicious"
+      - type: set_variable
         name: Stamp clean
-        arguments:
-          arg_list:
-            - name: verdict
-              value: "clean"
+        vars:
+          verdict: "clean"

@@ -186,3 +186,74 @@ describe('suggestedName', () => {
     expect(yamlStore.suggestedName()).toBe('');
   });
 });
+
+describe('appendDraftRevision', () => {
+  it('creates a new draft with one revision when none exists', () => {
+    yamlStore.appendDraftRevision('Chat: New', 'collection: A\n', 'agent', {
+      message: 'build hello world',
+      sessionId: 'sess1'
+    });
+    const d = yamlStore.drafts[0];
+    expect(d.name).toBe('Chat: New');
+    expect(d.text).toBe('collection: A\n');
+    expect(d.revisions).toHaveLength(1);
+    expect(d.revisions![0].source).toBe('agent');
+    expect(d.revisions![0].message).toBe('build hello world');
+    expect(d.revisions![0].sessionId).toBe('sess1');
+  });
+
+  it('appends new revisions newest-first to an existing draft', () => {
+    yamlStore.appendDraftRevision('Chat: Iterate', 'collection: A\n', 'agent');
+    yamlStore.appendDraftRevision('Chat: Iterate', 'collection: B\n', 'agent', {
+      message: 'rename it'
+    });
+    const d = yamlStore.drafts[0];
+    expect(d.text).toBe('collection: B\n');
+    expect(d.revisions).toHaveLength(2);
+    expect(d.revisions![0].text).toBe('collection: B\n');
+    expect(d.revisions![1].text).toBe('collection: A\n');
+  });
+
+  it('de-dupes adjacent identical text', () => {
+    yamlStore.appendDraftRevision('Chat: Same', 'X', 'agent');
+    yamlStore.appendDraftRevision('Chat: Same', 'X', 'agent');
+    expect(yamlStore.drafts[0].revisions).toHaveLength(1);
+  });
+
+  it('synthesizes a baseline revision when extending a legacy draft', () => {
+    // Legacy shape: no revisions[] field on the draft.
+    yamlStore.text = 'legacy yaml';
+    yamlStore.saveDraft('Legacy');
+    // Strip revisions to simulate pre-history-feature state.
+    const idx = yamlStore.drafts.findIndex((d) => d.name === 'Legacy');
+    yamlStore.drafts[idx] = {
+      name: 'Legacy',
+      text: 'legacy yaml',
+      savedAt: new Date().toISOString()
+    };
+    yamlStore.appendDraftRevision('Legacy', 'agent edit', 'agent', {
+      message: 'fix it'
+    });
+    const d = yamlStore.drafts.find((x) => x.name === 'Legacy')!;
+    expect(d.revisions).toHaveLength(2);
+    expect(d.revisions![0].text).toBe('agent edit');
+    expect(d.revisions![1].text).toBe('legacy yaml');
+    expect(d.revisions![1].source).toBe('user');
+  });
+});
+
+describe('loadDraftRevision', () => {
+  it('loads a specific historical revision into the buffer', () => {
+    yamlStore.text = 'before';
+    yamlStore.appendDraftRevision('Chat: H', 'rev0', 'agent');
+    yamlStore.appendDraftRevision('Chat: H', 'rev1', 'agent');
+    yamlStore.loadDraftRevision('Chat: H', 1);
+    expect(yamlStore.text).toBe('rev0');
+    expect(yamlStore.lastSnapshot?.reason).toMatch(/Chat: H revision 1/);
+  });
+
+  it('throws on out-of-range index', () => {
+    yamlStore.appendDraftRevision('Chat: H2', 'rev0', 'agent');
+    expect(() => yamlStore.loadDraftRevision('Chat: H2', 99)).toThrow();
+  });
+});

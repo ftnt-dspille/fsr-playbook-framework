@@ -43,19 +43,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
                 "is_active": pb.is_active,
                 "trigger_step_id": pb.trigger_step_id,
                 "parameters": list(pb.parameters) or None,
-                "steps": [
-                    {
-                        "id": s.id,
-                        "type": s.type,
-                        "name": s.name if s.name != s.id else None,
-                        "arguments": s.arguments or None,
-                        "next": s.next,
-                        "branches": dict(s.branches) or None,
-                        "unlabeled_next": list(s.unlabeled_next) or None,
-                        "comment": s.comment,
-                    }
-                    for s in pb.steps
-                ],
+                "steps": [_decompile_step(s) for s in pb.steps],
                 "annotations": [
                     {
                         "id": a.id,
@@ -86,6 +74,83 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
         return o
 
     return yaml.safe_dump(_clean(out), sort_keys=False, allow_unicode=True)
+
+
+def _decompile_step(s) -> dict:
+    """Emit a step in the canonical authoring surface:
+    `name:` only (no `id:`); `conditions:` / `options:` / `vars:` hoisted
+    to step level; legacy `arguments.{conditions,options,arg_list}` and
+    `branches:` collapsed away."""
+    out: dict = {"type": s.type, "name": s.name or s.id}
+    args = dict(s.arguments) if isinstance(s.arguments, dict) else None
+    branches_remaining = dict(s.branches)
+
+    if s.type == "decision" and isinstance(args, dict):
+        conds = args.pop("conditions", None) or []
+        new_conds = []
+        for c in conds:
+            if not isinstance(c, dict):
+                continue
+            entry = {}
+            label = c.get("option")
+            if label is not None:
+                entry["display"] = label
+            if c.get("default"):
+                entry["default"] = True
+            cond = c.get("condition")
+            if cond is not None and not c.get("default"):
+                entry["when"] = cond
+            tgt = branches_remaining.pop(label, None) if label else None
+            if tgt:
+                entry["next"] = tgt
+            new_conds.append(entry)
+        if new_conds:
+            out["conditions"] = new_conds
+        if args:
+            out["arguments"] = args
+    elif s.type == "manual_input" and isinstance(args, dict):
+        rmap = args.pop("response_mapping", None)
+        opts = []
+        if isinstance(rmap, dict):
+            opts = rmap.get("options") or []
+        new_opts = []
+        for o in opts:
+            if not isinstance(o, dict):
+                continue
+            entry = {}
+            label = o.get("option")
+            if label is not None:
+                entry["display"] = label
+            if o.get("primary"):
+                entry["primary"] = True
+            tgt = branches_remaining.pop(label, None) if label else None
+            if tgt:
+                entry["next"] = tgt
+            new_opts.append(entry)
+        if new_opts:
+            out["options"] = new_opts
+        if args:
+            out["arguments"] = args
+    elif s.type == "set_variable" and isinstance(args, dict):
+        # Resolver flattens arg_list into the args dict; treat every key
+        # as a variable assignment.
+        if args:
+            out["vars"] = args
+    elif args:
+        out["arguments"] = args
+
+    if s.next:
+        out["next"] = s.next
+    # Any leftover branches (no matching condition/option) — surface as
+    # an explicit `branches:` so info isn't lost; the parser rejects this
+    # shape so a user must rewrite by hand. Rare in practice.
+    if branches_remaining:
+        out["branches"] = branches_remaining
+    if s.unlabeled_next:
+        out["unlabeled_next"] = list(s.unlabeled_next)
+    if s.comment:
+        out["comment"] = s.comment
+    return out
 
 
 def _slugify(name: str, taken: set[str]) -> str:

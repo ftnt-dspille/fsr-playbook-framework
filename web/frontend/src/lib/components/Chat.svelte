@@ -7,6 +7,7 @@
   } from '$lib/api';
   import { postSse } from '$lib/sse';
   import { renderMarkdown } from '$lib/md';
+  import { yamlStore } from '$lib/yamlStore.svelte';
   import { tick } from 'svelte';
 
   type ToolCall = {
@@ -35,10 +36,50 @@
     initialTurns?: Turn[];
   } = $props();
 
-  let turns = $state<Turn[]>(initialTurns.length ? [...initialTurns] : []);
-  // Track which initialTurns reference we've consumed so a parent can
-  // load a different session by passing a new array.
-  let lastSeededRef = $state<Turn[] | null>(initialTurns);
+  // "Empty" YAML buffers we should NOT send as agent context — sending
+  // them causes the agent to extend the scaffold instead of authoring
+  // fresh. Heuristic: blank, comment-only, or the welcome placeholder
+  // (detected by the marker comment that yamlStore.PLACEHOLDER opens
+  // with). Authors with a real playbook in the editor pass the check.
+  function isMeaningfulYaml(text: string): boolean {
+    const stripped = text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'))
+      .join('\n');
+    if (stripped.length < 40) return false;
+    if (text.includes('# Welcome — try one of these to get started:')) return false;
+    if (text.includes('# ... rest of your current workflow content ...')) return false;
+    return true;
+  }
+
+  // User-controlled override. Defaults to "include only when the
+  // buffer looks meaningful". User can flip both ways. Initialized
+  // false; the effect below seeds it from the live `currentYaml`
+  // prop on first run (Svelte 5 won't track the prop in $state init).
+  let includeYaml = $state(false);
+  // Re-sync the default whenever the upstream buffer changes between
+  // empty and meaningful (e.g. user types real YAML, or resets back to
+  // placeholder). Only auto-flip when the current toggle matches the
+  // previous default — so an explicit user choice sticks.
+  let yamlPrevMeaningful = $state(false);
+  $effect(() => {
+    const nowMeaningful = isMeaningfulYaml(currentYaml);
+    if (nowMeaningful !== yamlPrevMeaningful) {
+      // Author flipped the buffer state; re-evaluate default unless
+      // they've explicitly diverged.
+      if (includeYaml === yamlPrevMeaningful) {
+        includeYaml = nowMeaningful;
+      }
+      yamlPrevMeaningful = nowMeaningful;
+    }
+  });
+
+  let turns = $state<Turn[]>([]);
+  // Re-seed `turns` whenever the parent passes a fresh `initialTurns`
+  // reference. Tracks identity (not contents) so live edits to a stable
+  // array don't clobber the running session.
+  let lastSeededRef = $state<Turn[] | null>(null);
 
   $effect(() => {
     if (initialTurns !== lastSeededRef) {
@@ -49,6 +90,24 @@
   let input = $state('');
   let busy = $state(false);
   let err = $state<string | null>(null);
+  // Session id of the active chat — captured from the first `usage`
+  // SSE event of the first turn. Used to name the draft this chat
+  // writes its agent revisions to. A reload mid-session keeps the same
+  // id only if the backend sends it; otherwise we fall back to a
+  // client-generated session-scoped id.
+  let chatSessionId = $state<string | null>(null);
+  // Display name of the draft this chat writes to. Picked once per
+  // session: the first non-trivial collection name we see in agent
+  // YAML output, fallback to a session-id based label.
+  let draftName = $state<string | null>(null);
+
+  function pickDraftName(yaml: string, sessionId: string | null): string {
+    const m = yaml.match(/^\s*collection\s*:\s*(.+?)\s*$/m);
+    const coll = m?.[1]?.replace(/['"]/g, '').trim();
+    if (coll) return `Chat: ${coll}`;
+    if (sessionId) return `Chat: ${sessionId.slice(0, 8)}`;
+    return 'Chat: (unnamed)';
+  }
 
   const STARTERS = [
     'Build a hello-world playbook with one set_variable step that stores the string "hi".',
@@ -81,7 +140,10 @@
     try {
       for await (const frame of postSse('/api/chat', {
         messages: history,
-        current_yaml: currentYaml
+        // Only send the editor YAML when the user wants it as context.
+        // Sending the placeholder scaffold biases the agent into
+        // extending it rather than authoring fresh.
+        current_yaml: includeYaml ? currentYaml : ''
       })) {
         const ev = parseChatEvent(frame.event, frame.data);
         if (!ev) continue;
@@ -91,8 +153,40 @@
       err = e?.message ?? String(e);
     } finally {
       busy = false;
-      const yaml = extractYamlBlock(turns[aIdx]?.text ?? '');
-      if (yaml) onYamlReplace(yaml);
+      const replyText = turns[aIdx]?.text ?? '';
+      const yaml = extractYamlBlock(replyText);
+      if (yaml) {
+        // Persist this turn's YAML as a new revision on the session's
+        // draft so the user can see how the agent iterated. Keeps the
+        // editor buffer in sync (legacy behavior); the revision history
+        // is in addition, not a replacement.
+        const name = draftName ?? pickDraftName(yaml, chatSessionId);
+        draftName = name;
+        try {
+          yamlStore.appendDraftRevision(name, yaml, 'agent', {
+            message: text,
+            sessionId: chatSessionId ?? undefined,
+          });
+        } catch (e) {
+          console.warn('appendDraftRevision failed', e);
+        }
+        onYamlReplace(yaml);
+      } else {
+        // Authoring intent + no extractable YAML = "didn't add the
+        // playbook to the UI" failure mode (chat_review detector
+        // `no_editor_update`). Surface it inline so the user sees it
+        // immediately instead of having to thumb-down + review later.
+        const looksLikeAuthoring = /\b(build|create|make|draft|add|write|edit|fix|update)\b.*\b(playbook|yaml|step|workflow)\b/i.test(text);
+        if (looksLikeAuthoring) {
+          // Likely cause: agent put YAML in a non-yaml fence (```yml is
+          // accepted, ```YAML is, but plain ``` and other tags aren't).
+          const wrongFence = /```(?!ya?ml\b)[A-Za-z0-9_+-]*\s*\n[\s\S]*?(collection:|playbooks:|type:\s+set_variable)[\s\S]*?```/i
+            .test(replyText);
+          err = wrongFence
+            ? "The reply contained YAML-shaped content but in a non-yaml code fence — the editor wasn't updated. Ask the agent to wrap it in ```yaml … ```."
+            : "The reply didn't include a ```yaml block — the editor wasn't updated. If you wanted a playbook, ask the agent to emit the full YAML inside a ```yaml fenced block.";
+        }
+      }
     }
   }
 
@@ -114,6 +208,12 @@
         if (tc) tc.result_preview = ev.result_preview;
         break;
       }
+      case 'usage':
+        // The very first usage event of the chat tells us the
+        // session id; subsequent turns reuse it so all revisions on
+        // the same session land under the same draft.
+        if (!chatSessionId) chatSessionId = ev.session_id;
+        break;
       case 'error':
         err = ev.message;
         break;
@@ -294,6 +394,19 @@
         disabled={busy}
       ></textarea>
       <div class="flex items-center justify-between border-t border-zinc-800 px-2.5 py-1.5">
+        <label
+          class="flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+          title="When on, the editor's current YAML is sent to the model as
+context. Turn off to author a brand-new playbook from scratch — sending
+a scaffold biases the model into extending it rather than starting fresh."
+        >
+          <input
+            type="checkbox"
+            bind:checked={includeYaml}
+            class="h-3 w-3 cursor-pointer accent-emerald-600"
+          />
+          include YAML as context
+        </label>
         <span class="text-[11px] text-zinc-500">⌘ / Ctrl + Enter</span>
         <button
           class="rounded-md bg-emerald-700 px-3 py-1 text-xs font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"

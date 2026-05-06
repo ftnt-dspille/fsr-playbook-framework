@@ -5,12 +5,56 @@ We don't try to validate references here — that's the resolver's job.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import yaml
 
 from .errors import CompileError, ErrorCode
 from .ir import Annotation, Collection, Playbook, Step
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _rewrite_condition_keys(c: Any) -> Any:
+    """Decision conditions: surface keys are `display` / `when` / `next` /
+    `default`. Rewrite to wire keys `option` / `condition` for the resolver."""
+    if not isinstance(c, dict):
+        return c
+    out: dict[str, Any] = {}
+    for k, v in c.items():
+        if k == "display":
+            out["option"] = v
+        elif k == "when":
+            out["condition"] = v
+        else:
+            out[k] = v
+    return out
+
+
+def _rewrite_option_keys(o: Any) -> Any:
+    """Manual_input options: surface key is `display`. Rewrite to wire key `option`."""
+    if not isinstance(o, dict):
+        return o
+    out: dict[str, Any] = {}
+    for k, v in o.items():
+        if k == "display":
+            out["option"] = v
+        else:
+            out[k] = v
+    return out
+
+
+def _slugify(s: str) -> str:
+    """Lowercase, replace runs of non-alphanumerics with `_`, strip edges.
+
+    Used to derive a step `id:` from `name:` when the author omitted the
+    explicit id. Collisions surface as duplicate-id errors with a hint to
+    set `id:` explicitly.
+    """
+    out = _SLUG_RE.sub("_", s.lower()).strip("_")
+    return out or "step"
 
 
 def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
@@ -60,6 +104,13 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 path=pb_path,
             ))
             continue
+        if "uid" in pb_raw:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="playbook.uid is not allowed — identify playbooks by `name:` only",
+                path=f"{pb_path}.uid",
+            ))
+            continue
         pb_name = pb_raw.get("name")
         if not isinstance(pb_name, str) or not pb_name:
             errors.append(CompileError(
@@ -89,13 +140,24 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     path=sp,
                 ))
                 continue
-            sid = s_raw.get("id")
+            if "id" in s_raw:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "step.id is not allowed — identify steps by `name:` "
+                        "only; references in `next:` use the name verbatim"
+                    ),
+                    path=f"{sp}.id",
+                ))
+                continue
+            sname = s_raw.get("name")
             stype = s_raw.get("type")
-            if not isinstance(sid, str) or not sid:
+            sid = _slugify(sname) if isinstance(sname, str) and sname else None
+            if not sid:
                 errors.append(CompileError(
                     code=ErrorCode.MISSING_FIELD,
-                    message="step.id is required",
-                    path=f"{sp}.id",
+                    message="step.name is required",
+                    path=f"{sp}.name",
                 ))
                 continue
             if not isinstance(stype, str) or not stype:
@@ -108,11 +170,22 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             if sid in seen_ids:
                 errors.append(CompileError(
                     code=ErrorCode.DUPLICATE_STEP_ID,
-                    message=f"duplicate step id: {sid}",
-                    path=f"{sp}.id",
+                    message=(
+                        f"two steps slugify to the same id ({sid!r}); "
+                        f"rename one of the colliding `name:` values"
+                    ),
+                    path=f"{sp}.name",
                 ))
                 continue
             seen_ids.add(sid)
+
+            if stype == "stop":
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message="step type 'stop' is not allowed — use 'end'",
+                    path=f"{sp}.type",
+                ))
+                continue
 
             args = s_raw.get("arguments") or {}
             if not isinstance(args, dict):
@@ -123,14 +196,96 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 ))
                 args = {}
 
-            branches = s_raw.get("branches") or {}
-            if not isinstance(branches, dict):
+            # Reject legacy nested shapes that have step-level shortcuts.
+            if stype == "decision" and "conditions" in args:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message="branches must be a mapping (option -> step id)",
+                    message=(
+                        "decision: write `conditions:` at the step level "
+                        "(not under `arguments:`)"
+                    ),
+                    path=f"{sp}.arguments.conditions",
+                ))
+                continue
+            if stype == "manual_input" and "options" in args:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "manual_input: write `options:` at the step level "
+                        "(not under `arguments:`)"
+                    ),
+                    path=f"{sp}.arguments.options",
+                ))
+                continue
+            if stype == "set_variable" and "arguments" in s_raw:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "set_variable: write a top-level `vars:` mapping; "
+                        "`arguments:` is not used"
+                    ),
+                    path=f"{sp}.arguments",
+                ))
+                continue
+
+            # Step-level shortcuts that hoist common nested shapes to the
+            # surface so authors don't have to nest under `arguments:`. The
+            # parser translates each shortcut into the canonical wire
+            # arguments the resolver/emitter already understand.
+            #
+            # decision:    step.conditions[] → arguments.conditions[]
+            #              with key renames display→option, when→condition
+            # manual_input: step.options[]   → arguments.options[]
+            #              with key rename   display→option
+            # set_variable: step.vars (dict) → arguments.arg_list[{name,value}]
+            if stype == "decision":
+                top_conds = s_raw.get("conditions")
+                if isinstance(top_conds, list):
+                    args["conditions"] = [
+                        _rewrite_condition_keys(c) for c in top_conds
+                    ]
+            if stype == "manual_input":
+                top_opts = s_raw.get("options")
+                if isinstance(top_opts, list):
+                    args["options"] = [
+                        _rewrite_option_keys(o) for o in top_opts
+                    ]
+            if stype == "set_variable":
+                top_vars = s_raw.get("vars")
+                if isinstance(top_vars, dict):
+                    args["arg_list"] = [
+                        {"name": k, "value": v} for k, v in top_vars.items()
+                    ]
+                elif top_vars is not None:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="set_variable.vars must be a mapping of name → value",
+                        path=f"{sp}.vars",
+                    ))
+
+            if "branches" in s_raw:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "step-level `branches:` is not allowed — write "
+                        "`next:` on each entry of `conditions:` (decision) "
+                        "or `options:` (manual_input)"
+                    ),
                     path=f"{sp}.branches",
                 ))
-                branches = {}
+                continue
+            if stype == "decision" and s_raw.get("next"):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "decision steps must not have a step-level `next:` — "
+                        "every branch goes in `conditions:` (include one "
+                        "entry with `default: true` for the else branch)"
+                    ),
+                    path=f"{sp}.next",
+                ))
+                continue
+            branches: dict[str, str] = {}
 
             cmt = s_raw.get("comment")
 
@@ -186,13 +341,48 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             steps.append(Step(
                 id=sid,
                 type=stype,
-                name=s_raw.get("name") or sid,
+                name=sname or sid,
                 arguments=args,
                 next=s_raw.get("next") if isinstance(s_raw.get("next"), str) else None,
                 branches={str(k): str(v) for k, v in branches.items()},
                 comment=cmt if isinstance(cmt, str) and cmt.strip() else None,
                 for_each=for_each,
             ))
+
+        # Resolve reference values against the playbook's step roster.
+        # Authors write references as the step's `name:` (canonical) or
+        # the slugified id; both work. After this pass, every reference
+        # holds the literal step.id so downstream resolver/emitter code
+        # never has to think about the duality.
+        name_to_id: dict[str, str] = {}
+        for s in steps:
+            name_to_id.setdefault(s.name, s.id)
+            name_to_id.setdefault(s.id, s.id)
+            name_to_id.setdefault(_slugify(s.name), s.id)
+
+        def _resolve_ref(v: Any) -> Any:
+            if isinstance(v, str) and v in name_to_id:
+                return name_to_id[v]
+            return v
+
+        for s in steps:
+            if s.next:
+                s.next = _resolve_ref(s.next)
+            s.branches = {k: _resolve_ref(v) for k, v in s.branches.items()}
+            # Inline `next:` on decision conditions and manual_input options
+            # is promoted into step.branches by the resolver — pre-resolve
+            # the string here so the resolver doesn't have to know names.
+            if isinstance(s.arguments, dict):
+                conds = s.arguments.get("conditions")
+                if isinstance(conds, list):
+                    for c in conds:
+                        if isinstance(c, dict) and isinstance(c.get("next"), str):
+                            c["next"] = _resolve_ref(c["next"])
+                opts = s.arguments.get("options")
+                if isinstance(opts, list):
+                    for o in opts:
+                        if isinstance(o, dict) and isinstance(o.get("next"), str):
+                            o["next"] = _resolve_ref(o["next"])
 
         params_raw = pb_raw.get("parameters") or []
         if not isinstance(params_raw, list) or not all(isinstance(p, str) for p in params_raw):

@@ -11,35 +11,26 @@ playbooks:
   - name: FSRPB Demo - Manual Input
     is_active: true
     steps:
-      - id: trigger
-        type: start
-        next: pause
+      - type: start
+        next: Approve action
 
-      - id: pause
-        type: manual_input
+        name: trigger
+      - type: manual_input
         name: Approve action
         arguments:
           title: "Approve the e2e action?"
           description: "Click **approve** to continue, **reject** to abort."
-          options:
-            - {option: approve, primary: true}
-            - {option: reject}
-        branches:
-          approve: stamp_ok
-          reject: stamp_no
-
-      - id: stamp_ok
-        type: set_variable
+        options:
+          - display: approve
+            primary: true
+            next: Stamp approved
+          - display: reject
+            next: Stamp rejected
+      - type: set_variable
         name: Stamp approved
-        arguments:
-          arg_list:
-            - name: verdict
-              value: approved
-
-      - id: stamp_no
-        type: set_variable
+        vars:
+          verdict: approved
+      - type: set_variable
         name: Stamp rejected
-        arguments:
-          arg_list:
-            - name: verdict
-              value: rejected
+        vars:
+          verdict: rejected

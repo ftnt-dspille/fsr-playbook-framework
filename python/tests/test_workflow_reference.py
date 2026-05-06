@@ -29,14 +29,14 @@ playbooks:
   - name: Child
     parameters: [x]
     steps:
-      - id: start
+      - name: start
         type: start
   - name: Parent
     steps:
-      - id: start
+      - name: start
         type: start
         next: c
-      - id: c
+      - name: c
         type: workflow_reference
         arguments:
           target: Chld
@@ -55,14 +55,14 @@ playbooks:
   - name: Child
     parameters: [hostname]
     steps:
-      - id: start
+      - name: start
         type: start
   - name: Parent
     steps:
-      - id: start
+      - name: start
         type: start
         next: c
-      - id: c
+      - name: c
         type: workflow_reference
         arguments:
           target: Child
@@ -84,11 +84,11 @@ collection: T
 playbooks:
   - name: Same Name
     steps:
-      - id: start
+      - name: start
         type: start
   - name: Same Name
     steps:
-      - id: start
+      - name: start
         type: start
 """
     r = compile_yaml(text, db_path)
@@ -104,10 +104,10 @@ collection: T
 playbooks:
   - name: Parent
     steps:
-      - id: start
+      - name: start
         type: start
         next: c
-      - id: c
+      - name: c
         type: workflow_reference
         arguments:
           workflowReference: /api/3/workflows/00000000-0000-0000-0000-000000000000

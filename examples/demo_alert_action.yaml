@@ -16,46 +16,33 @@ playbooks:
     description: Reads alert severity and tags the alert with a verdict.
     is_active: true
     steps:
-      - id: trigger
-        type: start
+      - type: start
         name: Triage Alert            # canvas/step name (what shows on the node)
         arguments:
           module: alerts
           button_label: "Triage Alert" # what shows on the Execute menu button
           requires_record: true
           run_mode: per_record
-        next: read_severity
+        next: Read severity
 
-      - id: read_severity
-        type: set_variable
+      - type: set_variable
         name: Read severity
-        arguments:
-          arg_list:
-            - name: severity
-              value: "{{ vars.input.records[0].severity.itemValue }}"
-        next: branch
+        next: Branch on severity
 
-      - id: branch
-        type: decision
+        vars:
+          severity: "{{ vars.input.records[0].severity.itemValue }}"
+      - type: decision
         name: Branch on severity
-        arguments:
-          conditions:
-            - option: high
-              condition: "{{ vars.severity in ['Critical', 'High'] }}"
-            - option: low
-              condition: "{{ vars.severity not in ['Critical', 'High'] }}"
-        branches:
-          high: stamp_high
-          low: end_low
-
-      - id: stamp_high
-        type: set_variable
+        conditions:
+          - display: high
+            when: "{{ vars.severity in ['Critical', 'High'] }}"
+            next: Stamp high verdict
+          - display: low
+            when: "{{ vars.severity not in ['Critical', 'High'] }}"
+            next: No action low severity
+      - type: set_variable
         name: Stamp high verdict
-        arguments:
-          arg_list:
-            - name: verdict
-              value: "escalate"
-
-      - id: end_low
-        type: stop
+        vars:
+          verdict: "escalate"
+      - type: end
         name: No action low severity

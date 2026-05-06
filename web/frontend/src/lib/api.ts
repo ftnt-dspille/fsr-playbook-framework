@@ -129,6 +129,13 @@ export type ChatEvent =
   | { kind: 'text'; text: string }
   | { kind: 'tool_use'; name: string; arguments: Record<string, unknown>; call_id: string }
   | { kind: 'tool_result'; call_id: string; result_preview: string }
+  | {
+      kind: 'usage';
+      session_id: string;
+      turn: number;
+      model: string;
+      tags: Record<string, unknown>;
+    }
   | { kind: 'done'; stop_reason: string }
   | { kind: 'error'; message: string };
 
@@ -142,6 +149,8 @@ export function parseChatEvent(event: string, data: string): ChatEvent | null {
         return { kind: 'tool_use', ...obj };
       case 'tool_result':
         return { kind: 'tool_result', ...obj };
+      case 'usage':
+        return { kind: 'usage', ...obj };
       case 'done':
         return { kind: 'done', ...obj };
       case 'error':

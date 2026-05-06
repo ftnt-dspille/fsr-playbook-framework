@@ -4,6 +4,9 @@
   let { onLoad }: { onLoad: (text: string, name: string) => void } = $props();
 
   let open = $state(false);
+  // Name of the draft whose revision history is currently expanded
+  // inside the menu. Null = list view.
+  let viewingRevisionsOf = $state<string | null>(null);
 
   function pick(d: Draft) {
     open = false;
@@ -11,10 +14,17 @@
     onLoad(yamlStore.text, d.name);
   }
 
+  function pickRevision(name: string, index: number) {
+    open = false;
+    yamlStore.loadDraftRevision(name, index);
+    onLoad(yamlStore.text, `${name} (rev ${index})`);
+  }
+
   function remove(e: MouseEvent, name: string) {
     e.stopPropagation();
     if (!confirm(`Delete draft "${name}"?`)) return;
     yamlStore.deleteDraft(name);
+    if (viewingRevisionsOf === name) viewingRevisionsOf = null;
   }
 
   function fmtAge(iso: string): string {
@@ -24,6 +34,14 @@
     if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
     if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
     return `${Math.floor(sec / 86400)}d ago`;
+  }
+
+  function sourceBadgeClass(s: 'agent' | 'user' | 'replay'): string {
+    return {
+      agent: 'border-amber-700/60 bg-amber-900/30 text-amber-300',
+      user: 'border-emerald-700/60 bg-emerald-900/30 text-emerald-300',
+      replay: 'border-blue-700/60 bg-blue-900/30 text-blue-300'
+    }[s];
   }
 </script>
 
@@ -42,8 +60,51 @@
     >
       {#if yamlStore.drafts.length === 0}
         <div class="p-3 text-xs text-zinc-500">No saved drafts.</div>
+      {:else if viewingRevisionsOf}
+        {@const draft = yamlStore.drafts.find((d) => d.name === viewingRevisionsOf)}
+        {#if draft}
+          <div class="border-b border-zinc-800 px-3 py-2 flex items-center justify-between bg-zinc-950">
+            <button
+              class="text-xs text-zinc-400 hover:text-zinc-100"
+              onclick={() => (viewingRevisionsOf = null)}
+            >
+              ← Back
+            </button>
+            <span class="text-xs font-medium text-zinc-200 truncate ml-2">
+              {draft.name}
+            </span>
+          </div>
+          {#if (draft.revisions ?? []).length === 0}
+            <div class="p-3 text-xs text-zinc-500">
+              No revision history (legacy draft saved before history was introduced).
+            </div>
+          {:else}
+            {#each draft.revisions ?? [] as rev, i}
+              <button
+                class="block w-full border-b border-zinc-800 px-3 py-2 text-left text-xs hover:bg-zinc-800"
+                onclick={() => pickRevision(draft.name, i)}
+                title="Load this revision into the editor"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-zinc-300">
+                    {i === 0 ? 'latest' : `rev ${i}`} · {fmtAge(rev.savedAt)}
+                  </span>
+                  <span class={`rounded border px-1.5 py-0 text-[10px] uppercase ${sourceBadgeClass(rev.source)}`}>
+                    {rev.source}
+                  </span>
+                </div>
+                {#if rev.message}
+                  <div class="mt-1 text-zinc-500 italic line-clamp-2">
+                    “{rev.message}”
+                  </div>
+                {/if}
+              </button>
+            {/each}
+          {/if}
+        {/if}
       {:else}
         {#each yamlStore.drafts as d}
+          {@const revCount = (d.revisions ?? []).length}
           <div
             class="group flex items-center justify-between border-b border-zinc-800 hover:bg-zinc-800"
           >
@@ -52,8 +113,26 @@
               onclick={() => pick(d)}
             >
               <div class="font-mono text-zinc-200 truncate">{d.name}</div>
-              <div class="mt-0.5 text-zinc-500">{fmtAge(d.savedAt)}</div>
+              <div class="mt-0.5 text-zinc-500">
+                {fmtAge(d.savedAt)}
+                {#if revCount > 1}
+                  · {revCount} revisions
+                {/if}
+              </div>
             </button>
+            {#if revCount > 1}
+              <button
+                class="mr-1 rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  viewingRevisionsOf = d.name;
+                }}
+                title="View revision history"
+                aria-label="View revisions of {d.name}"
+              >
+                ⏷
+              </button>
+            {/if}
             <button
               class="mr-2 rounded px-1.5 py-0.5 text-xs text-zinc-500 opacity-0 hover:bg-zinc-700 hover:text-red-300 group-hover:opacity-100"
               onclick={(e) => remove(e, d.name)}

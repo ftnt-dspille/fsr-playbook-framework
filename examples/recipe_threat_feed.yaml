@@ -24,20 +24,19 @@ playbooks:
     tag: "dataingestion, fetch, create, todo_connector_api_name"
     parameters: [lastPullTime]
     steps:
-      - id: trigger
-        type: start
+      - type: start
         name: Start
-        next: configuration
+        next: Configuration
 
-      - id: configuration
-        type: set_variable
+      - type: set_variable
         name: Configuration
         comment: |
           TODO replace picklist maps and feed-name. Picklist UUIDs MUST be
           resolved live against the configured FSR — do not hand-paste
           UUIDs from another instance, they will not match.
-        arguments:
-          # set_variable: each var is a flat top-level key under arguments.
+        next: Fetch indicators
+
+        vars:
           feed_source_name: "TODO replace with your feed display name"
           tlp_map:
             # Map source-feed TLP → FSR picklist UUID. Resolve via
@@ -45,17 +44,14 @@ playbooks:
             white: "TODO /api/3/picklists/<uuid-for-White>"
             green: "TODO /api/3/picklists/<uuid-for-Green>"
             amber: "TODO /api/3/picklists/<uuid-for-Amber>"
-            red:   "TODO /api/3/picklists/<uuid-for-Red>"
+            red: "TODO /api/3/picklists/<uuid-for-Red>"
           typeOfFeed_map:
             # Source-feed indicator type → FSR Type Of Feed picklist
             ipv4-addr: "TODO /api/3/picklists/<uuid-for-IP>"
             domain-name: "TODO /api/3/picklists/<uuid-for-Domain>"
             url: "TODO /api/3/picklists/<uuid-for-URL>"
           confidence_default: 50
-        next: fetch
-
-      - id: fetch
-        type: connector
+      - type: connector
         name: Fetch indicators
         comment: |
           TODO replace BOTH the connector and operation. This template
@@ -95,40 +91,32 @@ playbooks:
                 }
               ]
             }
-        next: map
+        next: Map to ingestedData
 
-      - id: map
-        type: set_variable
+      - type: set_variable
         name: Map to ingestedData
         comment: |
           TODO adjust the per-indicator field mapping below. Each item
           in the source list becomes one entry; `vars.item` is bound to
           the current source-feed record at IngestBulkFeed time, NOT
           here. This step just unboxes the array into `ingestedData`.
-        arguments:
-          # TODO replace this expression with the path to the indicator
-          # array in your fetch result. Common shapes:
-          #   {{ vars.steps.Fetch_indicators.indicators }}
-          #   {{ vars.steps.Fetch_indicators.data.objects }}
-          ingestedData: "{{ vars.steps.Fetch_indicators.indicators }}"
-        next: any_data
+        next: Any data
 
-      - id: any_data
-        type: decision
+        vars:
+          ingestedData: "{{ vars.steps.Fetch_indicators.indicators }}"
+      - type: decision
         name: Any data
         comment: |
           Error gateway — if the fetch produced nothing, raise so the
           run is visibly red instead of silently no-op'ing.
-        arguments:
-          conditions:
-            - option: "yes"
-              condition: "{{ (vars.ingestedData | length) > 0 }}"
-        branches:
-          "yes": ingest
-        next: raise_no_data
-
-      - id: raise_no_data
-        type: connector
+        conditions:
+          - display: "yes"
+            when: "{{ (vars.ingestedData | length) > 0 }}"
+            next: Ingest indicators
+          - display: Else
+            default: true
+            next: Raise no data
+      - type: connector
         name: Raise no data
         arguments:
           connector: cyops_utilities
@@ -137,8 +125,7 @@ playbooks:
           params:
             msg: "Feed fetch returned no indicators (lastPullTime={{ vars.input.params.lastPullTime }})"
 
-      - id: ingest
-        type: ingest_bulk_feed
+      - type: ingest_bulk_feed
         name: Ingest indicators
         comment: |
           IngestBulkFeed — POSTs to /api/ingest-feeds/threat_intel_feeds.

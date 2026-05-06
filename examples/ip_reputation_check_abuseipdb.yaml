@@ -15,27 +15,23 @@ playbooks:
       NOTE: This playbook demonstrates the desired abuseipdb integration.
       Currently fails validation because abuseipdb parameters are not in the reference store
       (they would need to be populated via run_op execution).
-    is_active: false
     steps:
-      - id: start
-        type: start
+      - type: start
         name: Start
-        next: extract_source_ip
+        next: Extract source IP
         comment: |
           Trigger on Alert records. Extract the source IP for reputation lookup.
 
-      - id: extract_source_ip
-        type: set_variable
+      - type: set_variable
         name: Extract source IP
-        arguments:
-          source_ip: "{{ vars.input.records[0].sourceIp }}"
-        next: lookup_ip_reputation
+        next: Check IP on AbuseIPDB
         comment: |
           Read the sourceIp field from the alert record and store it for use
           in the connector call.
 
-      - id: lookup_ip_reputation
-        type: connector
+        vars:
+          source_ip: "{{ vars.input.records[0].sourceIp }}"
+      - type: connector
         name: Check IP on AbuseIPDB
         arguments:
           connector: abuseipdb
@@ -43,55 +39,50 @@ playbooks:
           config: ""
           params:
             ip: "{{ vars.source_ip }}"
-        next: extract_abuse_score
+        next: Extract abuse confidence score
         comment: |
           Call the AbuseIPDB connector. Step output is keyed by step name:
           vars.steps.Check_IP_on_AbuseIPDB.
 
-      - id: extract_abuse_score
-        type: set_variable
+      - type: set_variable
         name: Extract abuse confidence score
-        arguments:
-          abuse_confidence_score: "{{ vars.steps.Check_IP_on_AbuseIPDB.abuseConfidenceScore | int }}"
-        next: severity_decision
+        next: Decide severity level
         comment: |
           Extract the abuseConfidenceScore from the connector response.
           Convert to integer for reliable comparison.
 
-      - id: severity_decision
-        type: decision
+        vars:
+          abuse_confidence_score: "{{ vars.steps.Check_IP_on_AbuseIPDB.abuseConfidenceScore | int }}"
+      - type: decision
         name: Decide severity level
-        arguments:
-          conditions:
-            - option: Critical
-              condition: "{{ vars.abuse_confidence_score >= 50 }}"
-        branches:
-          Critical: set_critical_severity
-        next: set_low_severity
         comment: |
           Branch on the abuse confidence score.
           If >= 50, route to Critical; otherwise fall through (next:) to Low.
 
-      - id: set_critical_severity
-        type: set_variable
+        conditions:
+          - display: Critical
+            when: "{{ vars.abuse_confidence_score >= 50 }}"
+            next: Set Critical severity
+          - display: Else
+            default: true
+            next: Set Low severity
+      - type: set_variable
         name: Set Critical severity
-        arguments:
-          new_severity: "Critical"
-        next: update_alert
+        next: Update alert severity
         comment: |
           Prepare to update the alert with Critical severity.
 
-      - id: set_low_severity
-        type: set_variable
+        vars:
+          new_severity: "Critical"
+      - type: set_variable
         name: Set Low severity
-        arguments:
-          new_severity: "Low"
-        next: update_alert
+        next: Update alert severity
         comment: |
           Prepare to update the alert with Low severity.
 
-      - id: update_alert
-        type: update_record
+        vars:
+          new_severity: "Low"
+      - type: update_record
         name: Update alert severity
         arguments:
           collection: alerts

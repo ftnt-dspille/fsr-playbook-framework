@@ -12,9 +12,12 @@ from compiler import compile_yaml
 from compiler.errors import ErrorCode
 
 
-def _wrap(args_block: str, branches_block: str = "") -> str:
+def _wrap(args_block: str, options_block: str = "") -> str:
     """Wrap a manual_input arguments block in a minimal compilable
-    playbook. Indented to match the test fixtures' 8-space step depth."""
+    playbook. `args_block` goes under `arguments:` (8-space-indented).
+    `options_block` goes at step level (6-space-indented) and provides
+    the options list when needed."""
+    opt = options_block if options_block else "        options:\n          - display: stop\n            next: stop\n"
     return f"""
 collection: T
 visible: true
@@ -22,16 +25,15 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
         next: ask
-      - id: ask
+      - name: ask
         type: manual_input
-        name: Ask
         arguments:
-{args_block}{branches_block}        next: stop
-      - id: stop
-        type: stop
+{args_block}{opt}
+      - name: stop
+        type: end
 """
 
 
@@ -40,14 +42,14 @@ playbooks:
 def test_friendly_form_compiles_clean(db_path):
     text = _wrap(
         "          title: Approve?\n"
-        "          description: Click approve\n"
-        "          options:\n"
-        "            - {option: approve, primary: true}\n"
-        "            - {option: reject}\n",
-        branches_block=(
-            "        branches:\n"
-            "          approve: stop\n"
-            "          reject: stop\n"
+        "          description: Click approve\n",
+        options_block=(
+            "        options:\n"
+            "          - display: approve\n"
+            "            primary: true\n"
+            "            next: stop\n"
+            "          - display: reject\n"
+            "            next: stop\n"
         ),
     )
     r = compile_yaml(text, db_path)
@@ -55,14 +57,15 @@ def test_friendly_form_compiles_clean(db_path):
 
 
 def test_friendly_form_options_string_shorthand(db_path):
-    """Options list of bare strings should expand."""
+    """Options list with display + next."""
     text = _wrap(
-        "          title: Pick\n"
-        "          options: [approve, reject]\n",
-        branches_block=(
-            "        branches:\n"
-            "          approve: stop\n"
-            "          reject: stop\n"
+        "          title: Pick\n",
+        options_block=(
+            "        options:\n"
+            "          - display: approve\n"
+            "            next: stop\n"
+            "          - display: reject\n"
+            "            next: stop\n"
         ),
     )
     r = compile_yaml(text, db_path)
@@ -71,7 +74,10 @@ def test_friendly_form_options_string_shorthand(db_path):
 
 def test_friendly_form_default_continue_when_no_options(db_path):
     """No options at all → resolver supplies a primary 'Continue'."""
-    text = _wrap("          title: Continue?\n")
+    text = _wrap(
+        "          title: Continue?\n",
+        options_block="        next: stop\n",
+    )
     r = compile_yaml(text, db_path)
     assert r.ok, [str(e) for e in r.errors]
 
@@ -163,9 +169,12 @@ def test_type_decision_based_accepted(db_path):
     """`type: DecisionBased` is real (button-only prompts, 26/168 live).
     Audit §2 — used to be a hard error."""
     text = _wrap(
-        "          type: DecisionBased\n"
-        "          options:\n"
-        "            - {option: Continue}\n"
+        "          type: DecisionBased\n",
+        options_block=(
+            "        options:\n"
+            "          - display: Continue\n"
+            "            next: stop\n"
+        ),
     )
     r = compile_yaml(text, db_path)
     assert r.ok, [str(e) for e in r.errors]
@@ -231,13 +240,6 @@ def test_kind_picklist_requires_picklist_name(db_path):
 
 def test_per_option_next_promoted_to_branches(db_path):
     """I22 — friendly `next:` per option used to be silently dropped."""
-    text = _wrap(
-        "          title: Approve?\n"
-        "          options:\n"
-        "            - {option: ok, primary: true, next: stop}\n"
-        "            - {option: cancel, next: cleanup}\n",
-    ) + "" 
-    # Need an extra step for `cleanup` — rewrite:
     text = """
 collection: T
 visible: true
@@ -245,22 +247,24 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
         next: ask
-      - id: ask
+      - name: ask
         type: manual_input
-        name: Ask
         arguments:
           title: Approve?
-          options:
-            - {option: ok, primary: true, next: stop}
-            - {option: cancel, next: cleanup}
-      - id: cleanup
-        type: stop
+        options:
+          - display: ok
+            primary: true
+            next: stop
+          - display: cancel
+            next: cleanup
+      - name: cleanup
+        type: end
         next: stop
-      - id: stop
-        type: stop
+      - name: stop
+        type: end
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [str(e) for e in r.errors]
@@ -275,9 +279,12 @@ playbooks:
 def test_mode_record_linked_requires_record(db_path):
     """I20 — Context mode coherence: isRecordLinked=true ⟹ record set."""
     text = _wrap(
-        "          isRecordLinked: true\n"
-        "          options:\n"
-        "            - {option: ok}\n"
+        "          isRecordLinked: true\n",
+        options_block=(
+            "        options:\n"
+            "          - display: ok\n"
+            "            next: stop\n"
+        ),
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -288,9 +295,12 @@ def test_mode_external_keys_in_internal_prompt_rejected(db_path):
     """I20 — Audience mode coherence: external email-distribution keys
     require unauthenticated_input or inputExternalUser to be true."""
     text = _wrap(
-        "          customEmailExternal: 'subj'\n"
-        "          options:\n"
-        "            - {option: ok}\n"
+        "          customEmailExternal: 'subj'\n",
+        options_block=(
+            "        options:\n"
+            "          - display: ok\n"
+            "            next: stop\n"
+        ),
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -303,9 +313,12 @@ def test_mode_external_with_unauthenticated_ok(db_path):
         "          unauthenticated_input: true\n"
         "          inputExternalUser: true\n"
         "          customEmailExternal: 'subj'\n"
-        "          external_channel_list: ['/api/3/picklists/abc']\n"
-        "          options:\n"
-        "            - {option: ok}\n"
+        "          external_channel_list: ['/api/3/picklists/abc']\n",
+        options_block=(
+            "        options:\n"
+            "          - display: ok\n"
+            "            next: stop\n"
+        ),
     )
     r = compile_yaml(text, db_path)
     assert r.ok, [str(e) for e in r.errors]
@@ -316,9 +329,12 @@ def test_mode_assignment_requires_exactly_one_target(db_path):
     of assignedToPerson/Team/Record/Field set."""
     text = _wrap(
         "          owner_detail:\n"
-        "            isAssigned: true\n"
-        "          options:\n"
-        "            - {option: ok}\n"
+        "            isAssigned: true\n",
+        options_block=(
+            "        options:\n"
+            "          - display: ok\n"
+            "            next: stop\n"
+        ),
     )
     r = compile_yaml(text, db_path)
     assert not r.ok

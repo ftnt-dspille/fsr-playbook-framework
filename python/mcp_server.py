@@ -1342,6 +1342,98 @@ def search_playbooks(q: str, limit: int = 10) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
+def review_chat_session(session_id: str) -> dict[str, Any]:
+    """Mine one chat session for known failure patterns and return a
+    structured report.
+
+    Use this when the user asks "why did session X go wrong?" or when
+    sweeping their thumbs-down feedback. Detectors covered:
+    user feedback rating, validate-fix-validate spirals, empty/heavy
+    tool results, UUID step ids, set_variable typos, missing
+    `collection:` recurrences, unknown connector/op references, and
+    sessions that never deployed. Source-of-truth for the patterns
+    is `python/chat_review.py`.
+
+    Returns: `{session_id, headline, findings[], stats}`. Each finding
+    has `{severity: error|warning|info, code, title, detail, turn?,
+    suggestion?}`. The headline is a one-liner suitable for chat output.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "python"))
+    try:
+        import chat_review
+    except ImportError as exc:
+        return _err("chat_review_unavailable", f"chat_review not importable: {exc}")
+    try:
+        report = chat_review.review_session(session_id)
+    except FileNotFoundError as e:
+        return _err("history_db_missing", str(e))
+    except LookupError as e:
+        return _err("session_not_found", str(e))
+    return report.to_dict()
+
+
+@mcp.tool()
+def review_recent_thumbs_down(limit: int = 10) -> dict[str, Any]:
+    """Sweep the most recent thumbs-down sessions and run the chat-review
+    pattern detectors against each. Useful for "what's been going wrong
+    recently?" — returns one row per session with its headline + top 3
+    findings, plus a cross-session pattern frequency map.
+
+    Returns:
+      {
+        sessions: [{session_id, rating, summary, headline, top_findings[]}, ...],
+        common_patterns: {<code>: <count>, ...}
+      }
+    """
+    import sqlite3 as _sql
+    sys.path.insert(0, str(REPO_ROOT / "python"))
+    try:
+        import chat_review
+    except ImportError as exc:
+        return _err("chat_review_unavailable", f"chat_review not importable: {exc}")
+    db_path = chat_review._DEFAULT_DB
+    if not db_path.exists():
+        return _err("history_db_missing", f"history db not found at {db_path}")
+    conn = _sql.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = _sql.Row
+    rows = conn.execute(
+        "SELECT session_id, rating, summary, ts FROM chat_feedback "
+        "WHERE rating='down' ORDER BY ts DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    out_sessions: list[dict[str, Any]] = []
+    pattern_counts: dict[str, int] = {}
+    for r in rows:
+        try:
+            rep = chat_review.review_session(r["session_id"])
+        except Exception as e:  # noqa: BLE001
+            out_sessions.append({
+                "session_id": r["session_id"],
+                "rating": r["rating"],
+                "summary": r["summary"],
+                "review_error": str(e),
+            })
+            continue
+        for f in rep.findings:
+            pattern_counts[f.code] = pattern_counts.get(f.code, 0) + 1
+        out_sessions.append({
+            "session_id": r["session_id"],
+            "rating": r["rating"],
+            "summary": r["summary"],
+            "ts": r["ts"],
+            "headline": rep.headline,
+            "top_findings": [f.to_dict() for f in rep.findings[:3]],
+            "stats": rep.stats,
+        })
+    common = sorted(pattern_counts.items(), key=lambda kv: -kv[1])
+    return {
+        "sessions": out_sessions,
+        "common_patterns": dict(common),
+    }
+
+
+@mcp.tool()
 def find_step_examples(step_type: str,
                        contains: str | None = None,
                        limit: int = 20) -> list[dict[str, Any]]:

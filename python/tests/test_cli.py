@@ -41,7 +41,7 @@ def test_validate_errors_json(repo_root, db_path, tmp_path):
     bad = tmp_path / "bad.yaml"
     bad.write_text(
         "collection: T\nplaybooks:\n  - name: P\n    steps:\n"
-        "      - id: s\n        type: connetor\n"
+        "      - name: s\n        type: connetor\n"
     )
     r = _run(repo_root, "validate", str(bad), "--json")
     assert r.returncode == 1

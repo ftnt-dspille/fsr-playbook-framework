@@ -255,6 +255,35 @@ def emit(collection: Collection) -> dict[str, Any]:
                         "step_iri": _step_iri(step_uuids[target_id]),
                         "step_name": step_name_by_id.get(target_id),
                     })
+                    seen_options.add(label)
+                # `next:` fall-through: FSR's Decision designer requires an
+                # explicit `default: true` row in conditions for the else
+                # branch — an unlabeled route from a Decision step renders
+                # as a broken edge with no else label. If the author wrote
+                # `next: <id>` on a Decision and didn't already supply a
+                # default condition row, synthesize one labeled "Else" and
+                # promote the target into `branches:` so the route emitted
+                # below carries the label too. Clearing `s.next` prevents
+                # a duplicate unlabeled route to the same target.
+                has_default = any(
+                    isinstance(c, dict) and c.get("default")
+                    for c in conds
+                )
+                if (not has_default) and s.next and s.next in step_uuids:
+                    else_label = "Else"
+                    suffix = 2
+                    while else_label in seen_options:
+                        else_label = f"Else {suffix}"
+                        suffix += 1
+                    target_id = s.next
+                    conds.append({
+                        "option": else_label,
+                        "default": True,
+                        "step_iri": _step_iri(step_uuids[target_id]),
+                        "step_name": step_name_by_id.get(target_id),
+                    })
+                    s.branches[else_label] = target_id
+                    s.next = None
             if s.type == "manual_input" and isinstance(s.arguments, dict):
                 rmap = s.arguments.get("response_mapping") or {}
                 opts = rmap.get("options") or []

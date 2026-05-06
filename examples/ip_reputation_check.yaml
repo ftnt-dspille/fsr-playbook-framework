@@ -8,29 +8,25 @@ playbooks:
       Enriches alerts by looking up organization information based on source IP domain.
       If organization is found, sets severity to Critical; otherwise Low.
       Demonstrates the complete workflow: extract data → connector call → decision → update.
-    is_active: false
     steps:
-      - id: start
-        type: start
+      - type: start
         name: Start
-        next: extract_source_ip
+        next: Extract source IP and domain
         comment: |
           Trigger on Alert records. Extract the source IP and domain information
           for organizational lookup.
 
-      - id: extract_source_ip
-        type: set_variable
+      - type: set_variable
         name: Extract source IP and domain
-        arguments:
-          source_ip: "{{ vars.input.records[0].sourceIp }}"
-          source_domain: "{{ vars.input.records[0].senderDomain | default('Fortinet') }}"
-        next: lookup_organization
+        next: Get Organization Details
         comment: |
           Read the sourceIp and senderDomain fields from the alert record.
           Store them as variables for use in the connector call.
 
-      - id: lookup_organization
-        type: connector
+        vars:
+          source_ip: "{{ vars.input.records[0].sourceIp }}"
+          source_domain: "{{ vars.input.records[0].senderDomain | default('Fortinet') }}"
+      - type: connector
         name: Get Organization Details
         arguments:
           connector: fortinet-fortisiem
@@ -38,60 +34,55 @@ playbooks:
           config: ""
           params:
             domain_id: "{{ vars.source_domain }}"
-        next: extract_org_result
+        next: Extract organization result
         comment: |
           Call the FortiSIEM connector to look up organization information.
           Step output is keyed by the step name: vars.steps.Get_Organization_Details.
 
-      - id: extract_org_result
-        type: set_variable
+      - type: set_variable
         name: Extract organization result
-        arguments:
-          org_found: "{{ vars.steps.Get_Organization_Details['@id'] is not none }}"
-          org_name: "{{ vars.steps.Get_Organization_Details['@xmlId'] | default('Unknown') }}"
-        next: severity_decision
+        next: Decide severity based on organization
         comment: |
           Pull the org identifier from the connector response. The recorded
           output schema for get_org_name_by_org_id exposes @id / @xmlId
           (not an `org_name` field), so use @id for the existence check
           and @xmlId as the human-readable label.
 
-      - id: severity_decision
-        type: decision
+        vars:
+          org_found: "{{ vars.steps.Get_Organization_Details['@id'] is not none }}"
+          org_name: "{{ vars.steps.Get_Organization_Details['@xmlId'] | default('Unknown') }}"
+      - type: decision
         name: Decide severity based on organization
-        arguments:
-          conditions:
-            - option: Critical
-              condition: "{{ vars.org_found }}"
-        branches:
-          Critical: set_critical_severity
-        next: set_low_severity
         comment: |
           Branch on whether organization was found.
           If org is known, route to Critical; otherwise fall through (next:) to Low.
 
-      - id: set_critical_severity
-        type: set_variable
+        conditions:
+          - display: Critical
+            when: "{{ vars.org_found }}"
+            next: Set Critical severity
+          - display: Else
+            default: true
+            next: Set Low severity
+      - type: set_variable
         name: Set Critical severity
-        arguments:
-          new_severity: "Critical"
-        next: update_alert
+        next: Update alert severity
         comment: |
           Prepare to update the alert with Critical severity
           because the organization was identified.
 
-      - id: set_low_severity
-        type: set_variable
+        vars:
+          new_severity: "Critical"
+      - type: set_variable
         name: Set Low severity
-        arguments:
-          new_severity: "Low"
-        next: update_alert
+        next: Update alert severity
         comment: |
           Prepare to update the alert with Low severity
           because the organization could not be identified.
 
-      - id: update_alert
-        type: update_record
+        vars:
+          new_severity: "Low"
+      - type: update_record
         name: Update alert severity
         arguments:
           collection: alerts

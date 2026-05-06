@@ -16,40 +16,28 @@ playbooks:
     is_active: true
     parameters: [severity]
     steps:
-      - id: start
-        type: start
-        next: read_severity
+      - type: start
+        next: Read severity
 
-      - id: read_severity
-        type: set_variable
+        name: start
+      - type: set_variable
         name: Read severity
-        arguments:
-          arg_list:
-            - name: severity
-              value: "{{ vars.input.params.severity }}"
-        next: severity_decision
+        next: Branch on severity
 
-      - id: severity_decision
-        type: decision
+        vars:
+          severity: "{{ vars.input.params.severity }}"
+      - type: decision
         name: Branch on severity
-        arguments:
-          conditions:
-            - option: high
-              condition: "{{ vars.severity in ['critical', 'high'] }}"
-            - option: low
-              condition: "{{ vars.severity not in ['critical', 'high'] }}"
-        branches:
-          high: escalate
-          low: end_low
-
-      - id: escalate
-        type: set_variable
+        conditions:
+          - display: high
+            when: "{{ vars.severity in ['critical', 'high'] }}"
+            next: Escalate to Tier 2
+          - display: low
+            when: "{{ vars.severity not in ['critical', 'high'] }}"
+            next: No action (low severity)
+      - type: set_variable
         name: Escalate to Tier 2
-        arguments:
-          arg_list:
-            - name: tier
-              value: "tier2"
-
-      - id: end_low
-        type: stop
+        vars:
+          tier: "tier2"
+      - type: end
         name: No action (low severity)

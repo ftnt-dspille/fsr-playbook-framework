@@ -11,20 +11,17 @@ playbooks:
     description: start → set_variable → manual_input → terminal.
     is_active: true
     steps:
-      - id: start
-        type: start
+      - type: start
         name: Run
-        next: prep
+        next: Pre-input vars
 
-      - id: prep
-        type: set_variable
+      - type: set_variable
         name: Pre-input vars
-        arguments:
-          before_input: "ready"
-        next: pause
+        next: Choose action
 
-      - id: pause
-        type: manual_input
+        vars:
+          before_input: "ready"
+      - type: manual_input
         name: Choose action
         # Schema mirrored from corpus minimum (store/MANUAL_INPUT.md §2).
         # All listed fields are present on every working ManualInput step
@@ -45,7 +42,7 @@ playbooks:
           step_variables: []
           response_mapping:
             options:
-              - { option: Continue, primary: true }
+              - {option: Continue, primary: true}
             duplicateOption: false
             customSuccessMessage: "Awaiting Playbook resumed successfully."
           email_notification:
@@ -54,11 +51,10 @@ playbooks:
           inline_channel_list: []
           external_channel_list: []
           unauthenticated_input: false
-        next: terminal
+        next: After input
 
-      - id: terminal
-        type: set_variable
+      - type: set_variable
         name: After input
-        arguments:
+        vars:
           after_input: "resumed"
           final_status: complete

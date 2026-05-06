@@ -2749,6 +2749,26 @@ _PROBES: dict[str, tuple[str, str]] = {
 }
 
 
+def cmd_chat_review(args: argparse.Namespace) -> int:
+    """Mine one chat session for known failure patterns. Prints a
+    structured report (or JSON with --json)."""
+    import json as _json
+    import chat_review
+    try:
+        report = chat_review.review_session(args.session_id, db_path=args.history_db)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except LookupError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(_json.dumps(report.to_dict(), indent=2))
+    else:
+        print(chat_review.render_text(report))
+    return 0
+
+
 def cmd_find_step_examples(args: argparse.Namespace) -> int:
     """Search the playbook_steps corpus by step type + optional sub-key."""
     import json as _json
@@ -3264,6 +3284,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp_x.add_argument("--limit", type=int, default=5,
                       help="per-table result cap")
     sp.set_defaults(func=cmd_inventory)
+
+    sp = sub.add_parser(
+        "chat-review",
+        help="mine one chat session for known failure patterns",
+    )
+    sp.add_argument("session_id",
+                    help="chat session id (from /api/history/sessions or "
+                         "the History tab)")
+    sp.add_argument("--history-db", default=None,
+                    help="path to web/backend/history.db (defaults to "
+                         "STUDIO_HISTORY_DB env or the standard location)")
+    sp.add_argument("--json", action="store_true",
+                    help="emit structured report as JSON on stdout")
+    sp.set_defaults(func=cmd_chat_review)
 
     sp = sub.add_parser(
         "find-step-examples",

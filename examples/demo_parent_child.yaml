@@ -16,28 +16,23 @@ playbooks:
     is_active: true
     parameters: [base]
     steps:
-      - id: start
-        type: start
-        next: compute
-      - id: compute
-        type: set_variable
+      - type: start
+        next: Compute product
+        name: start
+      - type: set_variable
         name: Compute product
-        arguments:
-          arg_list:
-            - name: product
-              value: "{{ (vars.input.params.base | int) * 10 }}"
-
+        vars:
+          product: "{{ (vars.input.params.base | int) * 10 }}"
   - name: FSRPB Parent Caller
     description: Parent — calls Score Multiplier with base=7, expects product=70.
     is_active: true
     parameters: [base]
     steps:
-      - id: start
-        type: start
-        next: call_child
+      - type: start
+        next: Call multiplier
 
-      - id: call_child
-        type: workflow_reference
+        name: start
+      - type: workflow_reference
         name: Call multiplier
         arguments:
           target: FSRPB Score Multiplier
@@ -47,15 +42,9 @@ playbooks:
           pass_parent_env: false
           pass_input_record: false
           step_variables: []
-        next: stamp_result
+        next: Stamp result
 
-      - id: stamp_result
-        type: set_variable
+      - type: set_variable
         name: Stamp result
-        arguments:
-          arg_list:
-            - name: final_product
-              # The child's vars land in the workflow_reference step's
-              # `result`, not auto-merged into the parent's top-level
-              # vars. Read via vars.steps.<step name underscored>.<key>.
-              value: "{{ vars.steps.Call_multiplier.product }}"
+        vars:
+          final_product: "{{ vars.steps.Call_multiplier.product }}"

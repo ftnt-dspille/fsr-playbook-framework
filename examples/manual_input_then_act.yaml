@@ -19,31 +19,26 @@ playbooks:
   - name: Confirm Before Block
     description: Ask SOC analyst to approve a block, then act.
     steps:
-      - id: start
-        type: start
-        next: ask
+      - type: start
+        next: Approve block
 
-      - id: ask
-        type: manual_input
+        name: start
+      - type: manual_input
         name: Approve block
         arguments:
           title: Block this IP?
           description: Click **block** to proceed, **skip** to abort.
-          options:
-            - {option: block, primary: true}
-            - {option: skip}
-        branches:
-          block: do_block
-          skip: noop
-
-      - id: do_block
-        type: set_variable
+        options:
+          - display: block
+            primary: true
+            next: Pretend we blocked
+          - display: skip
+            next: Skip
+      - type: set_variable
         name: Pretend we blocked
-        arguments:
+        vars:
           outcome: blocked
-
-      - id: noop
-        type: set_variable
+      - type: set_variable
         name: Skip
-        arguments:
+        vars:
           outcome: skipped

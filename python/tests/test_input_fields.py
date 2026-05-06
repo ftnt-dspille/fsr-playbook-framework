@@ -20,19 +20,20 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
-        next: ask
-      - id: ask
+        next: Ask
+      - name: Ask
         type: manual_input
-        name: Ask
         arguments:
           title: Form
           inputs:
 {inputs_yaml}
-        next: stop
-      - id: stop
-        type: stop
+        options:
+          - display: continue
+            next: stop
+      - name: stop
+        type: end
 """
     res = compile_yaml(text, db_path)
     assert res.ok, [str(e) for e in res.errors]
@@ -163,19 +164,20 @@ playbooks:
   - name: P
     is_active: false
     steps:
-      - id: start
+      - name: start
         type: start
-        next: ask
-      - id: ask
+        next: Ask
+      - name: Ask
         type: manual_input
-        name: Ask
         arguments:
           title: Form
           inputs:
 {inputs_yaml}
-        next: stop
-      - id: stop
-        type: stop
+        options:
+          - display: continue
+            next: stop
+      - name: stop
+        type: end
 """
 
 

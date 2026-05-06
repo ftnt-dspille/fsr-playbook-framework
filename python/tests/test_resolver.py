@@ -8,10 +8,10 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: start
+      - name: start
         type: start
         next: target
-      - id: target
+      - name: target
 {steps_block}
 """
 
@@ -71,7 +71,7 @@ collection: T
 playbooks:
   - name: P
     steps:
-      - id: start
+      - name: start
         type: start
         next: nowhere
 """
@@ -85,5 +85,5 @@ def test_connector_version_stamped(db_path, repo_root):
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]
     # Resolver stamps version onto the connector step's arguments.
-    lookup_step = next(s for s in r.ir.playbooks[0].steps if s.id == "lookup")
+    lookup_step = next(s for s in r.ir.playbooks[0].steps if s.id == "get_organization")
     assert lookup_step.arguments.get("version")  # set from connectors.version

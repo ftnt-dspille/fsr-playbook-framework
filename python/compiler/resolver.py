@@ -233,6 +233,8 @@ class Resolver:
 
         if step.type == "manual_input":
             self._normalize_manual_input_args(step, path, errors)
+        if step.type == "decision":
+            self._normalize_decision_args(step, path, errors)
 
         # `stop` / `end` synthesize the canonical Utils: No Operation call,
         # then fall through to connector arg resolution.
@@ -674,6 +676,45 @@ class Resolver:
             out.append(field)
         return out
 
+    def _normalize_decision_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Promote inline `next:` on each condition into `step.branches`.
+
+        Friendly authoring shape that avoids the parallel `branches:` map:
+
+            arguments:
+              conditions:
+                - option: "Greater Than 10"
+                  condition: "{{ vars.input.value > 10 }}"
+                  next: greater_step
+                - option: "Else"
+                  default: true
+                  next: not_greater_step
+
+        The `next:` key is stripped from the emitted condition entry and
+        copied into `step.branches[option] = next` so the existing emitter
+        path (which resolves label → step_iri off `step.branches`) handles
+        wiring without authors having to maintain a parallel map.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else None
+        if not a:
+            return
+        conds = a.get("conditions")
+        if not isinstance(conds, list):
+            return
+        cleaned = []
+        for c in conds:
+            if not isinstance(c, dict):
+                cleaned.append(c)
+                continue
+            opt_next = c.get("next")
+            opt_label = c.get("option")
+            if opt_next and opt_label:
+                step.branches.setdefault(opt_label, opt_next)
+            cleaned.append({k: v for k, v in c.items() if k != "next"})
+        a["conditions"] = cleaned
+
     def _normalize_manual_input_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
@@ -1011,53 +1052,21 @@ class Resolver:
         a.setdefault("step_variables", {"input": {"params": []}})
         step.arguments = a
 
-    # Friendly-form keys we accept on set_variable. Anything else (most
-    # common: `variables`, `vars`, `set`) gets caught with a "did you
-    # mean?" suggestion. Without this gate the FSR runtime silently
-    # drops the keys and the playbook ships with no variables set —
-    # the bug that produced the down-rated session 60743f70.
-    _SET_VARIABLE_FRIENDLY = {"arg_list"}
-    _SET_VARIABLE_TYPOS: dict[str, str] = {
-        "variables": "arg_list",
-        "vars": "arg_list",
-        "set": "arg_list",
-        "values": "arg_list",
-        "step_variables": "arg_list",
-    }
-
     def _normalize_set_variable_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
-        """Canonical SetVariable.arguments is a flat {var_name: value} dict.
+        """Unwrap the parser-emitted `arg_list:` list into a flat
+        {var_name: value} dict, matching FSR's wire format.
 
-        Verified against live import sample (Playbook - 00 - a Import
-        testing): `{var1, var2, var3}` flat dict. Accept the friendly
-        `arg_list: [{name, value}, ...]` form as back-compat sugar and
-        unwrap it.
-
-        Also flag common LLM typos (`variables:`, `vars:`, `set:`) that
-        would otherwise be silently passed through as opaque var names.
+        The parser converts top-level `vars:` into `arguments.arg_list =
+        [{name, value}, ...]`; we collapse that back into the flat shape
+        FSR expects on the wire. `arg_list` is an internal handoff key —
+        users write `vars:` at the step level (parser rejects anything
+        else for set_variable steps).
         """
         a = step.arguments
         if not isinstance(a, dict):
             return
-        # If the value is the friendly `[{name, value}, ...]` shape
-        # under a typo key, surface a clear fix.
-        for typo, canonical in self._SET_VARIABLE_TYPOS.items():
-            if typo in a and isinstance(a[typo], list) and a[typo] and \
-                    isinstance(a[typo][0], dict) and "name" in a[typo][0]:
-                errors.append(CompileError(
-                    code=ErrorCode.UNKNOWN_PARAM,
-                    message=(
-                        f"set_variable: {typo!r} is not a recognized key — "
-                        f"FSR drops it silently at runtime, leaving the "
-                        f"playbook with no variables set"
-                    ),
-                    path=f"{path}.arguments.{typo}",
-                    suggestion=f"rename {typo!r} → {canonical!r}",
-                    near=canonical,
-                ))
-                return
         if "arg_list" in a and isinstance(a["arg_list"], list):
             unwrapped: dict = {}
             for i, item in enumerate(a["arg_list"]):

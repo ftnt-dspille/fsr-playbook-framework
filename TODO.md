@@ -220,6 +220,104 @@ fuzzy-match against the catalog and surface the closest in the
 suggestion field. e.g. `kind: hostname` → suggest `domain`; `kind: ip`
 → suggest `ipv4`.
 
+**I37 — Detect "agent didn't add the playbook to the UI" failure. ✅ DONE 2026-05-06.**
+- Two new chat_review detectors:
+  - `no_editor_update`: agent finished an authoring turn but emitted no
+    ```yaml block, so `extractYamlBlock` returned null and the editor
+    was never replaced. Scoped to user prompts that match an authoring-
+    intent regex (build/create/make/add/edit/fix + playbook/step/yaml)
+    so chitchat turns don't false-fire.
+  - `yaml_in_wrong_fence`: agent put FSR-playbook-shaped content inside
+    a code fence with the wrong language tag (`text`, `python`, none),
+    so the extractor missed it. Different failure from the above —
+    here the YAML *was* produced, just unreachable.
+- Both detectors run against the live history.db; verified the
+  existing thumbs-down corpus already has 1 × `no_editor_update` row.
+- Live UX complement: Chat.svelte now surfaces an inline error
+  immediately when an authoring turn ends without YAML, distinguishing
+  the wrong-fence case from the no-fence case so the user gets an
+  actionable hint instead of a silent dropped turn.
+- 3 new chat_review tests (firing case, intent-scoped no-false-positive
+  case, wrong-fence case). Total backend suite: 170/170 passing.
+
+**I36 — Chat-review tool: investigate why a session went wrong. ✅ DONE 2026-05-06.**
+- New module `python/chat_review.py` with 8 pattern detectors that run
+  against one session loaded from `web/backend/history.db`:
+  user feedback (rating + summary), validate-fix-validate spiral, empty
+  search results, heavy tool results (>5KB), UUID-shaped step ids
+  emitted by the agent, set_variable typo (`variables:` etc.),
+  recurring `missing_field: collection`, unknown connector/op, no
+  successful push.
+- CLI: `fsrpb chat-review <session_id> [--json] [--history-db <path>]`.
+  Renders a per-session report with severity-tagged findings, evidence
+  excerpts, and links to the punch-list TODO id that addresses each.
+- MCP tools:
+  - `review_chat_session(session_id)` — same report, structured.
+  - `review_recent_thumbs_down(limit=10)` — sweeps the most recent
+    down-rated sessions and aggregates `common_patterns` across them
+    for "what's been going wrong recently?" macro view.
+- 6 fixture-driven tests covering each detector against a synthetic
+  history.db. Total backend suite: 167/167 passing.
+- Verified end-to-end against the two real thumbs-down sessions:
+  60743f70 catches uuid_step_ids + set_variable_typo (matching the
+  user's review summary verbatim); cabdaf00 catches the validate
+  spiral + recurring missing-collection + 8.8KB get_op_schema.
+
+**I35 — Stop biasing the agent with placeholder YAML + draft revisions. ✅ DONE 2026-05-06.**
+- *Bias fix.* Whenever the editor held the welcome placeholder (or any
+  empty/comment-only buffer), `/api/chat` was sending it as user
+  context, causing the agent to extend the scaffold instead of
+  authoring fresh. Two layers of defense:
+  - Frontend: Chat panel has a new `include YAML as context` checkbox
+    next to the Send button. Default is auto-determined by an
+    `isMeaningfulYaml()` heuristic (drops blank, comment-only, and
+    placeholder-marker buffers); auto-flips when the buffer transitions
+    between meaningful/empty, but an explicit user toggle sticks.
+  - Backend: `_is_meaningful_yaml()` in `routes/chat.py` defensively
+    drops the same shapes server-side even if the frontend regresses.
+- *Draft revision history.* Agent-emitted YAML now lands in a per-
+  session draft (named after the playbook collection or session id
+  prefix). Each new YAML block in a session appends to that draft's
+  revision list; identical adjacent revisions are de-duped. The UI:
+  - Extended `Draft` interface with `revisions: DraftRevision[]`
+    where each carries `{text, savedAt, source: 'agent'|'user'|'replay',
+    message?, sessionId?}`.
+  - New `appendDraftRevision()` and `loadDraftRevision()` methods on
+    `yamlStore` (legacy `saveDraft` shimmed onto append).
+  - `Chat.svelte` captures `chatSessionId` from the SSE `usage` event
+    (added to ChatEvent union), names the draft once per session via
+    the YAML's `collection:` field or the session id prefix, and
+    appends a new revision tagged `source: 'agent'` after every turn
+    that produces YAML.
+  - `DraftsMenu` shows a `N revisions` badge + an expand caret. The
+    expanded revision list shows newest-first, with relative time,
+    source badge (agent / user / replay), and the user's message that
+    drove the agent revision. Clicking a revision loads it into the
+    editor (snapshot still taken, so undo works).
+- 6 new vitest tests on `yamlStore` covering append / de-dupe / legacy
+  baseline / load-revision. Total: 26 store tests passing. Backend
+  tests still 161 passing.
+
+**I34 — Session replay: load history into Design page. ✅ DONE 2026-05-06.**
+- Confirmed every chat event is logged (chat_messages: user / assistant_text /
+  tool_use / tool_result with full content; 64 KB per-row cap with explicit
+  truncation marker for outliers).
+- New helper `web/frontend/src/lib/sessionReplay.ts` converts the saved
+  message rows into the Turn[] shape Chat.svelte renders. Handles both
+  modern logging (tool_use_id on tool_result) and the older shape that
+  pairs by sequence order.
+- `Chat.svelte` accepts a new `initialTurns` prop that pre-populates
+  the chat history; an `$effect` re-seeds when the parent passes a new
+  array reference.
+- Design page (`+page.svelte`) reads `?session=<id>` on mount, fetches
+  `/api/history/sessions/<id>`, hydrates the YAML editor (latest_push
+  source_yaml > last assistant ```yaml block) and the chat panel, and
+  shows an amber "Replaying session …" banner with an "Exit replay"
+  button that strips the URL param.
+- History detail pane gets an "Open in Design ↗" link next to the push
+  badge, so the user can jump from a thumbed-down session straight into
+  a live replay of how it played out.
+
 **I28–I32 — feedback-driven hardening pass. ✅ DONE 2026-05-06.**
 Mined the chat_feedback table + chat_tool_calls cost distribution; two
 down-rated sessions yielded six gaps. Implemented:

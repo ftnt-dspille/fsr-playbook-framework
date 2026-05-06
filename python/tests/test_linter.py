@@ -23,37 +23,34 @@ collection: Norway
 playbooks:
   - name: pb
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: choose
-      - id: choose
+      - name: choose
         type: decision
-        arguments:
-          conditions:
-            - option: yes
-              condition: "{{ vars.input.params.go == 'yes' }}"
-        branches:
-          yes: act
-        next: skip
-      - id: act
+        conditions:
+          - display: yes
+            when: "{{ vars.input.params.go == 'yes' }}"
+            next: act
+          - display: Else
+            default: true
+            next: skip
+      - name: act
         type: set_variable
-        arguments: { arg_list: { x: 1 } }
-      - id: skip
+        vars: { x: 1 }
+      - name: skip
         type: set_variable
-        arguments: { arg_list: { x: 0 } }
+        vars: { x: 0 }
 """
 
-NORWAY_OK = NORWAY_BAD.replace("option: yes", 'option: "yes"').replace(
-    "yes: act", '"yes": act'
-)
+NORWAY_OK = NORWAY_BAD.replace("display: yes", 'display: "yes"')
 
 
-def test_norway_bare_yes_in_branches_and_option_caught(db_path):
+def test_norway_bare_yes_in_display_caught(db_path):
     r = compile_yaml(NORWAY_BAD, db_path)
     assert not r.ok
     msgs = " ".join(_messages(r))
-    assert "branches key 'yes'" in msgs
-    assert "option value 'yes'" in msgs
+    assert "display value 'yes'" in msgs
 
 
 def test_norway_quoted_yes_passes(db_path):
@@ -68,18 +65,17 @@ collection: Names
 playbooks:
   - name: pb
     steps:
-      - id: trigger
+      - name: trigger
         type: start
-        next: bad
-      - id: bad
+        next: "Hello — World? (yes)"
+      - name: "Hello — World? (yes)"
         type: set_variable
-        name: "Hello — World? (yes)"
-        arguments: { arg_list: { x: 1 } }
+        vars: { x: 1 }
 """
 
 NAME_OK = NAME_BAD.replace(
-    'name: "Hello — World? (yes)"',
-    'name: "Hello World yes"',
+    'Hello — World? (yes)',
+    'Hello World yes',
 )
 
 
@@ -105,12 +101,11 @@ collection: F
 playbooks:
   - name: pb
     steps:
-      - id: trigger
+      - name: trigger
         type: start
-        next: f
-      - id: f
+        next: Fetch alerts from VirusTotal
+      - name: Fetch alerts from VirusTotal
         type: connector
-        name: Fetch alerts from VirusTotal
         arguments:
           connector: virustotal
           operation: query_url
@@ -142,23 +137,21 @@ def test_fetch_step_with_mock_clean(db_path):
 # ---- Sanity: linter ignores yes-shaped keys outside `branches:` ---------
 
 def test_linter_does_not_misfire_on_unrelated_yes_key(db_path):
-    """A `yes:` key in a generic dict (e.g. `arg_list`) is fine — the
-    Norway rule should only trigger inside Decision-step `branches:`."""
+    """A `yes:` key inside `vars:` is fine — the Norway rule only
+    fires for `display:` values on decision/manual_input branches."""
     text = """
 collection: T
 playbooks:
   - name: pb
     steps:
-      - id: trigger
+      - name: trigger
         type: start
         next: a
-      - id: a
+      - name: a
         type: set_variable
-        arguments:
-          arg_list:
-            ok_value: 1
+        vars:
+          ok_value: 1
 """
     r = compile_yaml(text, db_path)
-    # No Norway-rule violations expected.
     assert not any("YAML 1.1 boolean" in (e.message or "")
                    for e in r.errors)

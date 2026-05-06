@@ -15,18 +15,15 @@ playbooks:
   - name: FSRPB For Each Create
     is_active: true
     steps:
-      - id: trigger
-        type: start
-        next: build_list
+      - type: start
+        next: Build alerts
 
-      - id: build_list
-        type: set_variable
+        name: trigger
+      - type: set_variable
         name: Build alerts
-        arguments:
-          # set_variable: each variable is a flat top-level key under
-          # `arguments`. No `step_variables` wrapper, no list of
-          # {name,value}. The list of alerts here becomes the value of
-          # the `alerts_to_create` variable.
+        next: Create alert per item
+
+        vars:
           alerts_to_create:
             - name: "fsrpb_for_each marker A"
               severity: High
@@ -37,10 +34,7 @@ playbooks:
             - name: "fsrpb_for_each marker C"
               severity: Low
               description: "third looped alert"
-        next: create_each
-
-      - id: create_each
-        type: create_record
+      - type: create_record
         name: Create alert per item
         for_each:
           item: "{{ vars.steps.Build_alerts.alerts_to_create }}"

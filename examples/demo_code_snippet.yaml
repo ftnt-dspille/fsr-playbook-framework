@@ -14,24 +14,20 @@ playbooks:
     is_active: true
     parameters: [first_name]
     steps:
-      - id: trigger
-        type: start
-        next: greet
+      - type: start
+        next: Build greeting
 
-      - id: greet
-        type: code_snippet
+        name: trigger
+      - type: code_snippet
         name: Build greeting
         arguments:
           code: |
             name = "{{ vars.input.params.first_name }}"
             greeting = f"hello {name}"
             print(greeting)
-        next: stamp
+        next: Stamp greeting
 
-      - id: stamp
-        type: set_variable
+      - type: set_variable
         name: Stamp greeting
-        arguments:
-          arg_list:
-            - name: greeting_text
-              value: "{{ vars.steps.Build_greeting.output }}"
+        vars:
+          greeting_text: "{{ vars.steps.Build_greeting.output }}"

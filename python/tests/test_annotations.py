@@ -9,16 +9,15 @@ collection: Annotation Test
 playbooks:
   - name: pb
     steps:
-      - id: start
+      - name: start
         type: start
-      - id: noop
+      - name: noop
         type: set_variable
         comment: |
           Sets a flag the next step branches on.
           AI-added 2026-05-03.
-        arguments:
-          variables:
-            ready: 'true'
+        vars:
+          ready: 'true'
         next: start
 """
 
@@ -29,15 +28,15 @@ collection: Annotation Test
 playbooks:
   - name: pb
     steps:
-      - id: start
+      - name: start
         type: start
-      - id: a
+      - name: a
         type: set_variable
-        arguments: { variables: { x: '1' } }
+        vars: { x: '1' }
         next: b
-      - id: b
+      - name: b
         type: set_variable
-        arguments: { variables: { y: '2' } }
+        vars: { y: '2' }
     annotations:
       - id: setup_block
         kind: block

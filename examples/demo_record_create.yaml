@@ -14,12 +14,11 @@ playbooks:
     is_active: true
     parameters: [alert_name]
     steps:
-      - id: trigger
-        type: start
-        next: create
+      - type: start
+        next: Create alert
 
-      - id: create
-        type: create_record
+        name: trigger
+      - type: create_record
         name: Create alert
         arguments:
           module: alerts                # → collection: /api/3/alerts
