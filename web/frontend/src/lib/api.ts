@@ -189,6 +189,21 @@ export async function listOperations(connector: string, q = '', limit = 100): Pr
   return r.json();
 }
 
+export type JinjaFilterRef = {
+  name: string;
+  signature: string | null;
+  description: string | null;
+  output_type_observed: string | null;
+};
+
+export async function listJinjaFilters(q = '', limit = 200): Promise<JinjaFilterRef[]> {
+  const r = await fetch(
+    `/api/ref/jinja-filters?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
+  if (!r.ok) return [];
+  return r.json();
+}
+
 export type PushResult = { ok: boolean; stdout: string; stderr: string; exit_code: number };
 
 export async function pushPlaybook(text: string, mode = 'replace'): Promise<PushResult> {

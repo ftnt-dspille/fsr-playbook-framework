@@ -3,11 +3,19 @@
  * `type:`, `connector:`, `operation:`, plus step-type snippets that
  * scaffold the next required fields.
  */
-import { getStepTypes, listOperations, searchConnectors } from './api';
+import {
+  getStepTypes,
+  listJinjaFilters,
+  listOperations,
+  searchConnectors
+} from './api';
 
 let stepTypeCache: { name: string; detail: string }[] | null = null;
 let connectorCache: { name: string; label: string | null }[] | null = null;
 const opsCache = new Map<string, { op_name: string; title: string | null }[]>();
+let jinjaFilterCache:
+  | { name: string; signature: string | null; description: string | null }[]
+  | null = null;
 
 async function getStepTypesCached() {
   if (!stepTypeCache) stepTypeCache = await getStepTypes();
@@ -22,6 +30,10 @@ async function getOpsCached(connector: string) {
     opsCache.set(connector, await listOperations(connector, '', 500));
   }
   return opsCache.get(connector)!;
+}
+async function getJinjaFiltersCached() {
+  if (!jinjaFilterCache) jinjaFilterCache = await listJinjaFilters('', 500);
+  return jinjaFilterCache;
 }
 
 function findConnectorAbove(model: any, lineNumber: number): string | null {
@@ -86,7 +98,7 @@ export function buildSnippet(name: string, pad: string): string {
 
 export function registerYamlCompletions(monaco: any): { dispose: () => void } {
   return monaco.languages.registerCompletionItemProvider('yaml', {
-    triggerCharacters: [':', ' '],
+    triggerCharacters: [':', ' ', '|'],
     async provideCompletionItems(model: any, position: any) {
       const line = model.getLineContent(position.lineNumber);
       const before = line.slice(0, position.column - 1);
@@ -136,6 +148,29 @@ export function registerYamlCompletions(monaco: any): { dispose: () => void } {
             kind: monaco.languages.CompletionItemKind.Module,
             insertText: c.name,
             detail: c.label || '',
+            range
+          }))
+        };
+      }
+
+      // jinja filter — fires when the cursor is inside `{{ ... | }}`
+      // and the user has just typed a `|`. Match: the most recent `{{`
+      // is unclosed on this line AND a `|` (with optional whitespace)
+      // sits between it and the cursor.
+      if (
+        /\{\{[^}]*\|\s*[A-Za-z0-9_]*$/.test(before) &&
+        !/\}\}/.test(before.slice(before.lastIndexOf('{{')))
+      ) {
+        const filters = await getJinjaFiltersCached();
+        return {
+          suggestions: filters.map((f) => ({
+            label: f.name,
+            kind: monaco.languages.CompletionItemKind.Function,
+            insertText: f.name,
+            detail: f.signature || '',
+            documentation: f.description
+              ? { value: f.description }
+              : undefined,
             range
           }))
         };

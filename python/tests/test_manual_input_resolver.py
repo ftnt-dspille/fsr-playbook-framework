@@ -100,32 +100,28 @@ def test_canonical_form_passes_through(db_path):
     assert r.ok, [str(e) for e in r.errors]
 
 
-# ---- the trap: unknown keys ---------------------------------------
+# ---- previously-rejected keys now accepted (live corpus shows usage) -----
 
-def test_unknown_key_label_rejected(db_path):
-    """The bug from the screenshot: `label` is not a valid key."""
-    text = _wrap("          label: Message\n")
+def test_label_message_timeout_now_accepted(db_path):
+    """`label`, `message`, and `timeout` were originally rejected as
+    unknown — but the live FSR corpus shows real ManualInputs use all
+    three (label 1×, message 4×, timeout 20× across 168 live MIs). After
+    audit §0 the resolver accepts them. Junk keys still get caught
+    (test_unknown_key_truly_unknown_rejected below).
+    """
+    for friendly in ("label: Message", "message: hello", "timeout: 3600"):
+        text = _wrap(f"          {friendly}\n")
+        r = compile_yaml(text, db_path)
+        assert r.ok, [str(e) for e in r.errors]
+
+
+def test_unknown_key_truly_unknown_rejected(db_path):
+    """Genuine typos / nonsense keys are still caught."""
+    text = _wrap("          floopwidget: 42\n")
     r = compile_yaml(text, db_path)
     assert not r.ok
     e = next(e for e in r.errors if e.code is ErrorCode.UNKNOWN_PARAM)
-    assert "label" in e.message
-
-
-def test_unknown_key_message_rejected(db_path):
-    text = _wrap("          message: hello\n")
-    r = compile_yaml(text, db_path)
-    assert not r.ok
-    e = next(e for e in r.errors if e.code is ErrorCode.UNKNOWN_PARAM)
-    assert "message" in e.message
-
-
-def test_unknown_key_timeout_rejected(db_path):
-    """`timeout` is silently ignored by FSR — must surface to author."""
-    text = _wrap("          timeout: 3600\n")
-    r = compile_yaml(text, db_path)
-    assert not r.ok
-    e = next(e for e in r.errors if e.code is ErrorCode.UNKNOWN_PARAM)
-    assert "timeout" in e.message
+    assert "floopwidget" in e.message
 
 
 # ---- the trap: bad `type` value ----------------------------------
@@ -159,3 +155,171 @@ def test_input_string_rejected_with_pointer(db_path):
     assert not r.ok
     e = next(e for e in r.errors if e.code is ErrorCode.BAD_VALUE)
     assert "must be a mapping" in e.message
+
+
+# ---- audit-driven additions (2026-05-06): I17, I20, I21, I22, I23 ------
+
+def test_type_decision_based_accepted(db_path):
+    """`type: DecisionBased` is real (button-only prompts, 26/168 live).
+    Audit §2 — used to be a hard error."""
+    text = _wrap(
+        "          type: DecisionBased\n"
+        "          options:\n"
+        "            - {option: Continue}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+
+
+def test_kind_ipv4_compiles(db_path):
+    """I17 — formType=ipv4 was never in our whitelist, but live FSR
+    uses it (audit §4). Should now compile and emit the webAddress
+    template."""
+    text = _wrap(
+        "          title: Enter IP\n"
+        "          inputs:\n"
+        "            - {name: ip, kind: ipv4, label: Address, required: true}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+    iv = r.fsr_json["data"][0]["workflows"][0]["steps"][1]["arguments"]\
+        ["input"]["schema"]["inputVariables"]
+    assert iv[0]["formType"] == "ipv4"
+    assert iv[0]["templateUrl"].endswith("/webAddress.html")
+    assert iv[0]["title"] == "IPv4"
+
+
+def test_kind_lookup_requires_module(db_path):
+    """I23 — `kind: lookup` without a `module:` key has no target;
+    FSR's typeahead won't render."""
+    text = _wrap(
+        "          inputs:\n"
+        "            - {name: who, kind: lookup, label: Who}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert not r.ok
+    e = next(e for e in r.errors if e.code is ErrorCode.MISSING_FIELD
+             and "module" in e.message)
+    assert e is not None
+
+
+def test_kind_lookup_with_module_emits_module_as_type(db_path):
+    """Live FSR uses the module name as the `type` field on lookup
+    inputVariables (audit §5)."""
+    text = _wrap(
+        "          inputs:\n"
+        "            - {name: who, kind: lookup, module: people}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+    iv = r.fsr_json["data"][0]["workflows"][0]["steps"][1]["arguments"]\
+        ["input"]["schema"]["inputVariables"]
+    assert iv[0]["formType"] == "lookup"
+    assert iv[0]["type"] == "people"
+
+
+def test_kind_picklist_requires_picklist_name(db_path):
+    text = _wrap(
+        "          inputs:\n"
+        "            - {name: sev, kind: picklist}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert not r.ok
+    assert any(e.code is ErrorCode.MISSING_FIELD and "picklist" in e.message
+               for e in r.errors)
+
+
+def test_per_option_next_promoted_to_branches(db_path):
+    """I22 — friendly `next:` per option used to be silently dropped."""
+    text = _wrap(
+        "          title: Approve?\n"
+        "          options:\n"
+        "            - {option: ok, primary: true, next: stop}\n"
+        "            - {option: cancel, next: cleanup}\n",
+    ) + "" 
+    # Need an extra step for `cleanup` — rewrite:
+    text = """
+collection: T
+visible: true
+playbooks:
+  - name: P
+    is_active: false
+    steps:
+      - id: start
+        type: start
+        next: ask
+      - id: ask
+        type: manual_input
+        name: Ask
+        arguments:
+          title: Approve?
+          options:
+            - {option: ok, primary: true, next: stop}
+            - {option: cancel, next: cleanup}
+      - id: cleanup
+        type: stop
+        next: stop
+      - id: stop
+        type: stop
+"""
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+    # Two distinct step_iri targets emitted, one per option.
+    rmap = r.fsr_json["data"][0]["workflows"][0]["steps"][1]\
+        ["arguments"]["response_mapping"]
+    iris = [o.get("step_iri") for o in rmap["options"]]
+    assert all(iris)
+    assert iris[0] != iris[1]
+
+
+def test_mode_record_linked_requires_record(db_path):
+    """I20 — Context mode coherence: isRecordLinked=true ⟹ record set."""
+    text = _wrap(
+        "          isRecordLinked: true\n"
+        "          options:\n"
+        "            - {option: ok}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert not r.ok
+    assert any("isRecordLinked=true requires" in e.message for e in r.errors)
+
+
+def test_mode_external_keys_in_internal_prompt_rejected(db_path):
+    """I20 — Audience mode coherence: external email-distribution keys
+    require unauthenticated_input or inputExternalUser to be true."""
+    text = _wrap(
+        "          customEmailExternal: 'subj'\n"
+        "          options:\n"
+        "            - {option: ok}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert not r.ok
+    assert any("external-distribution key" in e.message for e in r.errors)
+
+
+def test_mode_external_with_unauthenticated_ok(db_path):
+    """Same keys are valid once unauthenticated_input is on."""
+    text = _wrap(
+        "          unauthenticated_input: true\n"
+        "          inputExternalUser: true\n"
+        "          customEmailExternal: 'subj'\n"
+        "          external_channel_list: ['/api/3/picklists/abc']\n"
+        "          options:\n"
+        "            - {option: ok}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+
+
+def test_mode_assignment_requires_exactly_one_target(db_path):
+    """I20 — Assignment mode coherence: isAssigned=true ⟹ exactly one
+    of assignedToPerson/Team/Record/Field set."""
+    text = _wrap(
+        "          owner_detail:\n"
+        "            isAssigned: true\n"
+        "          options:\n"
+        "            - {option: ok}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert not r.ok
+    assert any("isAssigned=true requires" in e.message for e in r.errors)

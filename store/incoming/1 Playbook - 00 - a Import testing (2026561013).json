@@ -1,0 +1,221 @@
+{
+  "type": "workflow_collections",
+  "data": [
+    {
+      "@context": "/api/3/contexts/WorkflowCollection",
+      "@type": "WorkflowCollection",
+      "name": "00 - a Import testing",
+      "description": null,
+      "visible": true,
+      "image": null,
+      "uuid": "65ab88db-6ccc-4b45-890e-3d7c5bbf0228",
+      "id": 189,
+      "createDate": 1775924778.180994,
+      "modifyDate": 1775924784.561227,
+      "deletedAt": null,
+      "importedBy": [],
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "test",
+          "aliasName": null,
+          "tag": null,
+          "description": null,
+          "isActive": true,
+          "debug": true,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1778080437,
+          "collection": "/api/3/workflow_collections/65ab88db-6ccc-4b45-890e-3d7c5bbf0228",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/cb26b969-ed12-4863-8ff0-cfa651b67969",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "no op",
+              "description": null,
+              "arguments": {
+                "params": [],
+                "version": "3.7.0",
+                "connector": "cyops_utilities",
+                "operation": "no_op",
+                "operationTitle": "Utils: No Operation",
+                "step_variables": []
+              },
+              "status": null,
+              "top": "164",
+              "left": "673",
+              "stepType": "/api/3/workflow_step_types/0109f35d-090b-4a2b-bd8a-94cbc3508562",
+              "group": null,
+              "uuid": "4016bb84-a106-4172-91d7-bde08036a6eb"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "prompt_for_ip",
+              "description": null,
+              "arguments": {
+                "type": "InputBased",
+                "input": {
+                  "schema": {
+                    "title": "prompt for ip",
+                    "description": "test",
+                    "inputVariables": [
+                      {
+                        "name": "ip",
+                        "type": "string",
+                        "label": "ip",
+                        "title": "IPv4",
+                        "usable": true,
+                        "tooltip": "",
+                        "dataType": "text",
+                        "formType": "ipv4",
+                        "required": false,
+                        "_expanded": true,
+                        "mmdUpdate": true,
+                        "collection": false,
+                        "searchable": true,
+                        "templateUrl": "app/components/form/fields/webAddress.html",
+                        "defaultValue": null,
+                        "_previousName": "ip",
+                        "playbookField": true,
+                        "lengthConstraint": false,
+                        "allowedEncryption": true,
+                        "allowedGridColumn": true,
+                        "requiredCondition": "notrequired",
+                        "jinjaExpressionView": true,
+                        "useRecordFieldDefault": false,
+                        "_addRequiredConditions": false
+                      }
+                    ]
+                  }
+                },
+                "record": "",
+                "is_approval": false,
+                "owner_detail": {
+                  "isAssigned": false
+                },
+                "isRecordLinked": false,
+                "step_variables": [],
+                "response_mapping": {
+                  "options": [
+                    {
+                      "option": "Ok",
+                      "primary": true,
+                      "step_iri": "/api/3/workflow_steps/d4772c6b-df58-49d3-8439-47c634f0370d"
+                    },
+                    {
+                      "option": "Cancel",
+                      "step_iri": "/api/3/workflow_steps/4016bb84-a106-4172-91d7-bde08036a6eb"
+                    }
+                  ],
+                  "duplicateOption": false,
+                  "customSuccessMessage": "Awaiting Playbook resumed successfully."
+                },
+                "email_notification": {
+                  "enabled": false,
+                  "smtpParameters": []
+                },
+                "inline_channel_list": [],
+                "external_channel_list": [],
+                "unauthenticated_input": false
+              },
+              "status": null,
+              "top": "156",
+              "left": "222",
+              "stepType": "/api/3/workflow_step_types/fc04082a-d7dc-4299-96fb-6837b1baa0fe",
+              "group": null,
+              "uuid": "5e1f74a1-fe62-461c-842f-2ff82ac2f3c5"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "set ip from input",
+              "description": null,
+              "arguments": {
+                "ip_input": "{{vars.steps.prompt_for_ip.input.ip}}"
+              },
+              "status": null,
+              "top": "346",
+              "left": "321",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "d4772c6b-df58-49d3-8439-47c634f0370d"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {
+                "__triggerLimit": true,
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  }
+                },
+                "triggerOnSource": true,
+                "triggerOnReplicate": false
+              },
+              "status": null,
+              "top": "40",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "group": null,
+              "uuid": "cb26b969-ed12-4863-8ff0-cfa651b67969"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "prompt_for_ip -> no op",
+              "targetStep": "/api/3/workflow_steps/4016bb84-a106-4172-91d7-bde08036a6eb",
+              "sourceStep": "/api/3/workflow_steps/5e1f74a1-fe62-461c-842f-2ff82ac2f3c5",
+              "label": "Cancel",
+              "isExecuted": false,
+              "group": null,
+              "uuid": "458eec10-a40d-4599-be65-6587b5856824"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> test",
+              "targetStep": "/api/3/workflow_steps/5e1f74a1-fe62-461c-842f-2ff82ac2f3c5",
+              "sourceStep": "/api/3/workflow_steps/cb26b969-ed12-4863-8ff0-cfa651b67969",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "2ed647a1-582c-4c5d-87f7-d39f1abfedb4"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "test -> set ip from input",
+              "targetStep": "/api/3/workflow_steps/d4772c6b-df58-49d3-8439-47c634f0370d",
+              "sourceStep": "/api/3/workflow_steps/5e1f74a1-fe62-461c-842f-2ff82ac2f3c5",
+              "label": "Ok",
+              "isExecuted": false,
+              "group": null,
+              "uuid": "733476ba-250b-4cf3-bcfb-b759e9e093db"
+            }
+          ],
+          "groups": [],
+          "priority": "/api/3/picklists/2b563c61-ae2c-41c0-a85a-c9709585e3f2",
+          "playbookOrigin": "/api/3/picklists/15c1e8c9-22bf-4e66-8fbb-0a502d4a4a3f",
+          "isEditable": true,
+          "uuid": "77590816-5c5e-4178-ae15-0f5ae754aa5d",
+          "id": 2826,
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1778013147.018901,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1778080437.353962,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": []
+        }
+      ]
+    }
+  ],
+  "exported_tags": []
+}

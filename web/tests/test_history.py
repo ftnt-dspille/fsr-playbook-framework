@@ -254,3 +254,43 @@ def test_yaml_diff_produces_unified_diff():
 
 def test_yaml_diff_identical_returns_empty():
     assert history.yaml_diff("a: 1\n", "a: 1\n") == ""
+
+
+# ---- full transcript capture ------------------------------------
+
+def test_record_chat_message_round_trip():
+    history.record_chat_message(
+        "sess-A", turn=1, seq=0, kind="user",
+        content="What does this connector do?",
+    )
+    history.record_chat_message(
+        "sess-A", turn=1, seq=1, kind="assistant_text",
+        content="It sends emails.",
+    )
+    history.record_chat_message(
+        "sess-A", turn=1, seq=2, kind="tool_use",
+        name="find_connector", content='{"q":"smtp"}',
+    )
+    rows = history.get_chat_messages("sess-A")
+    assert [r["kind"] for r in rows] == [
+        "user", "assistant_text", "tool_use",
+    ]
+    assert rows[2]["name"] == "find_connector"
+    assert rows[1]["content"] == "It sends emails."
+
+
+def test_record_chat_message_caps_oversize_content():
+    big = "x" * 200_000
+    history.record_chat_message(
+        "sess-B", turn=1, seq=0, kind="tool_result",
+        name="run_op", content=big,
+    )
+    rows = history.get_chat_messages("sess-B")
+    assert len(rows) == 1
+    assert "truncated" in rows[0]["content"]
+    assert len(rows[0]["content"]) < len(big)
+
+
+def test_record_chat_message_no_session_id_is_noop():
+    history.record_chat_message("", turn=1, seq=0, kind="user", content="hi")
+    assert history.get_chat_messages("") == []

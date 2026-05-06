@@ -47,7 +47,7 @@ def _yaml_mark_for(text: str, err) -> tuple[int, int]:
     return (1, 1)
 
 
-_PATH_INDEX_RE = re.compile(r"\[(\d+)\]")
+_STEPS_IDX_RE = re.compile(r"steps\[(\d+)\]")
 
 
 def _path_to_line(text: str, path: str) -> int:
@@ -56,15 +56,19 @@ def _path_to_line(text: str, path: str) -> int:
     We don't have real source positions on IR errors, so we fall back to
     finding the nth `- id:` line under the relevant playbook's `steps:`.
     Returns 1 if we can't pin it down.
+
+    NOTE: extract ONLY the `steps[N]` index — paths like
+    `playbooks[0].steps[2].arguments.conditions[0]` carry trailing
+    indices for the option/condition that aren't step indices. Reading
+    the last `[N]` would mis-attribute the marker to step 0.
     """
     if not path:
         return 1
     lines = text.splitlines()
     if "steps[" in path:
-        idx_match = _PATH_INDEX_RE.findall(path)
-        # last index is the step index
-        if idx_match:
-            step_n = int(idx_match[-1])
+        m = _STEPS_IDX_RE.search(path)
+        if m:
+            step_n = int(m.group(1))
             in_steps = False
             seen = -1
             for i, ln in enumerate(lines, start=1):

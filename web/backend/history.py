@@ -95,6 +95,40 @@ CREATE TABLE IF NOT EXISTS chat_tool_calls (
     result_chars INTEGER,
     PRIMARY KEY (session_id, turn, seq)
 );
+
+-- Full per-message transcript. One row per emitted text/tool block
+-- inside a session, so a complete chat replay is achievable from the
+-- DB alone (as opposed to chat_turns, which only carries token
+-- accounting). `kind` ∈ {user, assistant_text, tool_use, tool_result}.
+-- `content` is text for user/assistant_text, JSON for tool_use args /
+-- tool_result payloads. Capped at the column's TEXT limit.
+CREATE TABLE IF NOT EXISTS chat_messages (
+    session_id TEXT NOT NULL,
+    turn INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    ts TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT,
+    content TEXT,
+    PRIMARY KEY (session_id, turn, seq)
+);
+CREATE INDEX IF NOT EXISTS chat_messages_session
+    ON chat_messages(session_id);
+
+-- User feedback per chat session. One row per session; re-rating
+-- upserts. `rating` ∈ {up, down}. `summary` is the user's free-form
+-- review notes — what worked, what broke, what to investigate.
+-- `tags` is a comma-separated set of short labels (e.g. "wrong_step,
+-- missed_branch"); UI may build out of these later.
+CREATE TABLE IF NOT EXISTS chat_feedback (
+    session_id TEXT PRIMARY KEY,
+    rating TEXT NOT NULL,
+    summary TEXT,
+    tags TEXT,
+    ts TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS chat_feedback_rating ON chat_feedback(rating);
 """
 
 # Anthropic public list pricing (per million tokens). Update when
@@ -232,6 +266,54 @@ def record_chat_turn(record: dict[str, Any]) -> None:
         pass
 
 
+# ---- full transcript capture -------------------------------------
+
+# Cap any single message body at this many chars to keep the DB bounded
+# even when a tool returns a 200 KB JSON blob. The token-count row in
+# `chat_turns` already records the full size, so the cap here doesn't
+# lose accounting — only the textual replay tail.
+_MESSAGE_CHAR_CAP = 64_000
+
+
+def record_chat_message(
+    session_id: str, turn: int, seq: int,
+    kind: str, content: str, *, name: str | None = None,
+) -> None:
+    """Persist one transcript row (user prompt, assistant text, tool
+    use/result). Best-effort; never raises."""
+    if not session_id:
+        return
+    text = (content or "")
+    if len(text) > _MESSAGE_CHAR_CAP:
+        text = text[:_MESSAGE_CHAR_CAP] + f"\n…[truncated {len(content) - _MESSAGE_CHAR_CAP} chars]"
+    try:
+        conn = _connect()
+        conn.execute(
+            """INSERT OR REPLACE INTO chat_messages
+               (session_id, turn, seq, ts, kind, name, content)
+               VALUES (?,?,?,?,?,?,?)""",
+            (session_id, turn, seq, _now(), kind, name, text),
+        )
+        conn.close()
+    except Exception:
+        pass
+
+
+def get_chat_messages(session_id: str) -> list[dict[str, Any]]:
+    """Read all transcript rows for a session, in order."""
+    try:
+        conn = _connect()
+        rows = conn.execute(
+            "SELECT * FROM chat_messages WHERE session_id=? "
+            "ORDER BY turn, seq",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 # ---- chat ↔ push correlation -------------------------------------
 
 def _active_session_path() -> Path:
@@ -338,7 +420,15 @@ def list_chat_sessions(limit: int = 50) -> list[dict[str, Any]]:
     return out
 
 
-def get_chat_session(session_id: str) -> dict[str, Any] | None:
+def get_chat_session(session_id: str,
+                     include_messages: bool = True) -> dict[str, Any] | None:
+    """Return a full session record: token accounting, per-turn metadata,
+    every tool call, the message transcript, the latest push (carrying
+    the deployed YAML), and the user's feedback if any.
+
+    `include_messages=False` keeps the response small for list views
+    that don't need the full transcript.
+    """
     conn = _connect()
     row = conn.execute(
         "SELECT * FROM chat_sessions WHERE id=?", (session_id,),
@@ -360,8 +450,117 @@ def get_chat_session(session_id: str) -> dict[str, Any] | None:
             (session_id,),
         ).fetchall()
     ]
+    if include_messages:
+        sess["messages"] = [
+            dict(r) for r in conn.execute(
+                "SELECT * FROM chat_messages WHERE session_id=? "
+                "ORDER BY turn, seq",
+                (session_id,),
+            ).fetchall()
+        ]
+    # Latest push from this session (carries the YAML the agent landed on).
+    push_row = conn.execute(
+        "SELECT * FROM pushes WHERE chat_session_id=? "
+        "ORDER BY id DESC LIMIT 1",
+        (session_id,),
+    ).fetchone()
+    sess["latest_push"] = dict(push_row) if push_row else None
+    fb_row = conn.execute(
+        "SELECT * FROM chat_feedback WHERE session_id=?",
+        (session_id,),
+    ).fetchone()
+    sess["feedback"] = dict(fb_row) if fb_row else None
     conn.close()
     return sess
+
+
+def set_feedback(session_id: str, rating: str,
+                 summary: str | None = None,
+                 tags: str | None = None) -> dict[str, Any]:
+    """Upsert thumb-up/thumb-down + review summary for a session."""
+    if rating not in ("up", "down"):
+        raise ValueError(f"rating must be 'up' or 'down', got {rating!r}")
+    conn = _connect()
+    # Confirm the session exists; surface a friendly error if not.
+    if not conn.execute(
+        "SELECT 1 FROM chat_sessions WHERE id=?", (session_id,),
+    ).fetchone():
+        conn.close()
+        raise LookupError(f"no chat session {session_id!r}")
+    conn.execute(
+        "INSERT INTO chat_feedback (session_id, rating, summary, tags, ts) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(session_id) DO UPDATE SET "
+        "  rating=excluded.rating, "
+        "  summary=excluded.summary, "
+        "  tags=excluded.tags, "
+        "  ts=excluded.ts",
+        (session_id, rating, summary, tags, _now()),
+    )
+    row = conn.execute(
+        "SELECT * FROM chat_feedback WHERE session_id=?", (session_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def clear_feedback(session_id: str) -> bool:
+    conn = _connect()
+    cur = conn.execute(
+        "DELETE FROM chat_feedback WHERE session_id=?", (session_id,),
+    )
+    conn.close()
+    return cur.rowcount > 0
+
+
+def list_feedback(rating: str | None = None,
+                  limit: int = 100) -> list[dict[str, Any]]:
+    """List sessions that have feedback, joined with the session
+    summary fields the review UI needs (model, turn count, last_ts,
+    playbook collection if known)."""
+    conn = _connect()
+    where = "WHERE 1=1"
+    params: list[Any] = []
+    if rating:
+        where += " AND f.rating=?"
+        params.append(rating)
+    rows = conn.execute(
+        f"""SELECT f.session_id, f.rating, f.summary, f.tags, f.ts AS feedback_ts,
+                  s.model, s.turn_count, s.ts_last,
+                  (SELECT t.playbook_collection FROM chat_turns t
+                   WHERE t.session_id=f.session_id AND t.playbook_collection IS NOT NULL
+                   ORDER BY t.turn DESC LIMIT 1) AS playbook_collection
+           FROM chat_feedback f
+           JOIN chat_sessions s ON s.id = f.session_id
+           {where}
+           ORDER BY f.ts DESC LIMIT ?""",
+        (*params, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_chat_sessions_with_feedback(limit: int = 50) -> list[dict[str, Any]]:
+    """Variant of list_chat_sessions that joins in feedback for the
+    list view's thumb indicator + a count of tool calls per session."""
+    conn = _connect()
+    rows = conn.execute(
+        """SELECT s.*,
+                  (SELECT MAX(t.ts) FROM chat_turns t WHERE t.session_id=s.id) as last_turn_ts,
+                  (SELECT t.playbook_collection FROM chat_turns t
+                   WHERE t.session_id=s.id AND t.playbook_collection IS NOT NULL
+                   ORDER BY t.turn DESC LIMIT 1) AS playbook_collection,
+                  (SELECT COUNT(*) FROM chat_tool_calls c WHERE c.session_id=s.id) AS tool_call_count,
+                  f.rating AS feedback_rating,
+                  f.summary AS feedback_summary
+           FROM chat_sessions s
+           LEFT JOIN chat_feedback f ON f.session_id = s.id
+           ORDER BY ts_last DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    out = [_session_with_cost(dict(r)) for r in rows]
+    conn.close()
+    return out
 
 
 def _session_with_cost(s: dict[str, Any]) -> dict[str, Any]:

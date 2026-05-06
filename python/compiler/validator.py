@@ -132,13 +132,57 @@ def _step_output_top_keys(s: Step) -> set[str] | None:
     return None
 
 
+def _compute_predecessors(pb: Playbook) -> dict[str, set[str]]:
+    """For each step id, return the set of step ids that *can* run before it.
+
+    Computed by forward BFS from each start step: when we visit a step
+    via an edge from S, S is added to the predecessor set. We propagate
+    transitively so cycles fold in correctly. Lenient by design: a step
+    on *any* path reaching S counts as a predecessor; we don't try to
+    enforce all-paths dominance (FSR runtime would reject the playbook
+    on any path where the reference doesn't bind anyway).
+    """
+    by_id: dict[str, "Step"] = {s.id: s for s in pb.steps}
+    preds: dict[str, set[str]] = {s.id: set() for s in pb.steps}
+    starts = [s.id for s in pb.steps if s.type and s.type.startswith("start")]
+    if not starts and pb.steps:
+        starts = [pb.steps[0].id]
+    # Iterate to fixed point (handles cycles and multi-branch joins).
+    changed = True
+    seen_path: set[tuple[str, str]] = set()
+    while changed:
+        changed = False
+        for s in pb.steps:
+            for nxt in _step_outgoing(s):
+                if nxt not in by_id:
+                    continue
+                edge = (s.id, nxt)
+                # Add s itself as predecessor of nxt.
+                if s.id not in preds[nxt]:
+                    preds[nxt].add(s.id)
+                    changed = True
+                # Inherit s's predecessors.
+                inherited = preds[s.id] - preds[nxt]
+                if inherited:
+                    preds[nxt] |= inherited
+                    changed = True
+                seen_path.add(edge)
+    # Steps unreachable from a start get an empty predecessor set —
+    # references *into* them would fail; references *from* them won't
+    # be checked because those steps are dead code (a separate lint).
+    return preds
+
+
 def _check_jinja_paths(pb: Playbook, pi: int,
                        errors: list[CompileError]) -> None:
     """Catch `{{ vars.steps.<name>... }}` references that don't resolve.
 
-    Two failure modes:
+    Three failure modes:
       1. The named step doesn't exist (typo) — error.
-      2. The first attribute after the step name isn't in the step's
+      2. The named step exists but cannot run *before* the referencing
+         step in the DAG — error (the reference would be undefined at
+         runtime).
+      3. The first attribute after the step name isn't in the step's
          declared/observed output schema — warning (we may have the
          wrong shape; observed schemas are more authoritative).
     """
@@ -147,6 +191,10 @@ def _check_jinja_paths(pb: Playbook, pi: int,
     for s in pb.steps:
         sname = s.name or s.id
         by_jinja_key[sname.replace(" ", "_")] = s
+
+    # Reachability: which step ids could have run before each step?
+    preds = _compute_predecessors(pb)
+    id_by_jinja_key = {k: v.id for k, v in by_jinja_key.items()}
 
     # `vars.steps.input` is also a valid alias on some FSR versions;
     # treat the literal token 'input' as never-a-step.
@@ -176,6 +224,33 @@ def _check_jinja_paths(pb: Playbook, pi: int,
                             severity="error",
                         ))
                         continue
+                    # Reachability: target must be able to run *before* s.
+                    # Self-reference is always fine (e.g. delay step looking
+                    # at its own status).
+                    target_id = id_by_jinja_key.get(key)
+                    if target_id and target_id != s.id:
+                        if target_id not in preds.get(s.id, set()):
+                            # Suggest steps that ARE reachable.
+                            reachable_keys = sorted(
+                                k for k, v in id_by_jinja_key.items()
+                                if v in preds.get(s.id, set())
+                            )[:5]
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"Jinja reference vars.steps.{key}{rest} "
+                                    f"in step {s.id!r}: step {key!r} cannot "
+                                    f"run before {s.id!r} in any execution "
+                                    "path; the reference would be undefined "
+                                    "at runtime"),
+                                path=f"{spath}.arguments.{sub}",
+                                suggestion=(
+                                    f"available predecessors: "
+                                    f"{', '.join(reachable_keys)}"
+                                    if reachable_keys else None),
+                                severity="error",
+                            ))
+                            continue
                     # Validate first attribute against known top-level keys.
                     if not rest.startswith("."):
                         continue
@@ -364,8 +439,14 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
 
     dfs(trigger_id, [])
 
-    # 3. Decision branch coverage: every conditions[].option should have
-    # a branches[] entry or a default `next:` fall-through.
+    # 3. Decision branch coverage + per-condition coherence. Rules mined
+    # from the live FSR corpus (see MI_DECISION_VALIDATION_AUDIT.md §8):
+    #   - every conditions[].option needs a branch target (s.branches or
+    #     a default `next:`),
+    #   - non-default entries MUST have both `option` and `condition`,
+    #   - default entries (default: true) MUST omit `condition` and may
+    #     omit `option`,
+    #   - at most one entry may be marked default (warn if zero).
     for si, s in enumerate(pb.steps):
         if s.type != "decision":
             continue
@@ -373,10 +454,72 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
         conds = args.get("conditions") or []
         if not isinstance(conds, list):
             continue
-        option_labels = []
-        for c in conds:
-            if isinstance(c, dict) and "option" in c:
+        option_labels: list[str] = []
+        n_default = 0
+        for ci, c in enumerate(conds):
+            if not isinstance(c, dict):
+                continue
+            cpath = f"{path}.steps[{si}].arguments.conditions[{ci}]"
+            is_default = bool(c.get("default"))
+            if is_default:
+                n_default += 1
+                if c.get("condition"):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"decision {s.id!r}: default branch must not "
+                            f"carry a `condition:` (defaults fire when "
+                            f"every other condition is false)"
+                        ),
+                        path=f"{cpath}.condition",
+                        severity="error",
+                    ))
+            else:
+                if not c.get("option"):
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message=(
+                            f"decision {s.id!r}: non-default branch is "
+                            f"missing `option:` (button label)"
+                        ),
+                        path=f"{cpath}.option",
+                        severity="error",
+                    ))
+                if not c.get("condition"):
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message=(
+                            f"decision {s.id!r}: non-default branch is "
+                            f"missing `condition:` (jinja expression)"
+                        ),
+                        path=f"{cpath}.condition",
+                        severity="error",
+                    ))
+            if "option" in c:
                 option_labels.append(c["option"])
+        if n_default > 1:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"decision {s.id!r}: {n_default} branches marked "
+                         f"`default: true`; FSR only fires the first one"),
+                path=f"{path}.steps[{si}].arguments.conditions",
+                severity="error",
+            ))
+        elif n_default == 0 and not s.next:
+            # No `default: true` AND no step-level `next:` fall-through
+            # means a false-condition run has no target. Either is fine
+            # (8 live Decisions use the bare `next:` idiom); only warn
+            # when neither is present.
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"decision {s.id!r}: no default/else branch and "
+                         f"no fall-through `next:`; if every condition "
+                         f"evaluates false the run will stall. Either "
+                         f"add a branch with `default: true` or set "
+                         f"`next:` on the decision step"),
+                path=f"{path}.steps[{si}].arguments.conditions",
+                severity="warning",
+            ))
         for label in option_labels:
             if label not in s.branches and not s.next:
                 errors.append(CompileError(
@@ -394,6 +537,73 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
                     code=ErrorCode.BAD_VALUE,
                     message=(f"decision {s.id!r}: branch label {label!r} is "
                              f"not in conditions[].option (typo? unused?)"),
+                    path=f"{path}.steps[{si}].branches.{label}",
+                    severity="warning",
+                ))
+
+    # 4. ManualInput branch coverage — same idea as decision: every
+    # response_mapping option needs a branch target. Live data shows
+    # ~4% of options are intentionally terminal (button ends the run);
+    # warn-only for those if the prompt has multiple options.
+    for si, s in enumerate(pb.steps):
+        if s.type != "manual_input":
+            continue
+        args = s.arguments if isinstance(s.arguments, dict) else {}
+        rmap = args.get("response_mapping") or {}
+        if not isinstance(rmap, dict):
+            continue
+        opts = rmap.get("options") or []
+        if not isinstance(opts, list):
+            continue
+        labels: list[str] = []
+        n_primary = 0
+        for oi, o in enumerate(opts):
+            if not isinstance(o, dict):
+                continue
+            opath = f"{path}.steps[{si}].arguments.response_mapping.options[{oi}]"
+            label = o.get("option")
+            if not label:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message=(f"manual_input {s.id!r}: option is missing "
+                             f"`option:` (button label)"),
+                    path=f"{opath}.option",
+                    severity="error",
+                ))
+                continue
+            labels.append(label)
+            if o.get("primary"):
+                n_primary += 1
+            has_target = bool(o.get("step_iri")) or label in s.branches or bool(s.next)
+            if not has_target and len(opts) > 1:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"manual_input {s.id!r}: option {label!r} "
+                             f"has no target — multi-button prompts where "
+                             f"≥2 options end the run usually indicate "
+                             f"forgotten wiring"),
+                    path=f"{opath}.step_iri",
+                    severity="warning",
+                    suggestion=(f"add `next: <step_id>` on this option, "
+                                f"or branches: {{{label}: <step_id>}} on the step"),
+                ))
+        if n_primary > 1:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"manual_input {s.id!r}: {n_primary} options "
+                         f"marked `primary: true`; only one button can "
+                         f"be the styled default"),
+                path=f"{path}.steps[{si}].arguments.response_mapping.options",
+                severity="error",
+            ))
+        # Soft check: branches keys that don't match any option label.
+        for label in s.branches:
+            if labels and label not in labels:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"manual_input {s.id!r}: branch label "
+                             f"{label!r} doesn't match any option "
+                             f"(typo? unused?)"),
                     path=f"{path}.steps[{si}].branches.{label}",
                     severity="warning",
                 ))

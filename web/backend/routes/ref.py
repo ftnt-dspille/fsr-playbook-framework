@@ -52,6 +52,22 @@ def list_step_types() -> list[dict[str, str]]:
     return STEP_TYPE_HINTS
 
 
+@router.get("/step-args/{step_type}")
+def step_args_help(step_type: str) -> dict[str, Any]:
+    """Hover docs for a friendly step type — what `arguments:` accepts.
+
+    Powers the Monaco hover popup. Returns both the structured spec and
+    a pre-rendered markdown blob so the frontend can show either.
+    """
+    from step_args_help import get_help, render_markdown
+    spec = get_help(step_type)
+    if spec is None:
+        raise HTTPException(404, f"no help entry for step type {step_type!r}")
+    return {"type": step_type,
+            "spec": spec,
+            "markdown": render_markdown(step_type)}
+
+
 @router.get("/connectors")
 def list_connectors(q: str = "", limit: int = 50) -> list[dict[str, Any]]:
     sql = (
@@ -141,7 +157,7 @@ def synthesize_http_step(entry_id: int, step_name: str = "Call API") -> dict[str
 
 
 @router.get("/inventory/search")
-def inventory_search(q: str, limit: int = 5) -> dict[str, Any]:
+def inventory_search(q: str, limit: int = 15) -> dict[str, Any]:
     import sys as _sys
     _py = REPO_ROOT / "python"
     if str(_py) not in _sys.path:
@@ -161,6 +177,28 @@ def list_operations(name: str, q: str = "", limit: int = 100) -> list[dict[str, 
         sql += "AND (op_name LIKE ? OR title LIKE ?) "
         args += [f"%{q}%", f"%{q}%"]
     sql += "ORDER BY op_name LIMIT ?"
+    args.append(limit)
+    with _conn() as c:
+        return [dict(r) for r in c.execute(sql, args)]
+
+
+@router.get("/jinja-filters")
+def list_jinja_filters(q: str = "", limit: int = 200) -> list[dict[str, Any]]:
+    """Catalog of jinja filters for Monaco autocomplete inside `{{ … | }}`.
+
+    Read-only over `jinja_macros`. Returns name + signature + a one-line
+    description so the IDE can render hover docs without a second
+    fetch. Limited to ~200 since the full corpus is ~170 filters.
+    """
+    sql = (
+        "SELECT name, signature, description, output_type_observed "
+        "FROM jinja_macros "
+    )
+    args: list[Any] = []
+    if q:
+        sql += "WHERE name LIKE ? OR description LIKE ? "
+        args += [f"%{q}%", f"%{q}%"]
+    sql += "ORDER BY name LIMIT ?"
     args.append(limit)
     with _conn() as c:
         return [dict(r) for r in c.execute(sql, args)]

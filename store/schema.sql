@@ -117,6 +117,34 @@ CREATE TABLE IF NOT EXISTS step_examples (
 );
 CREATE INDEX IF NOT EXISTS idx_step_examples_type ON step_examples(step_type_name);
 
+-- Full per-step corpus, ingested from FSR playbook JSON exports (SP bundles,
+-- store/incoming drops, live FSR pulls). Unlike step_examples (which is a
+-- 3-row sampling per type used for quick LLM context), this table holds
+-- EVERY step from EVERY playbook we've seen — used to mine real-world
+-- argument shapes when tightening linting/validation.
+--
+-- step_type_name is denormalized at ingest time by joining stepType (an IRI
+-- ending in a step_types.uuid) against step_types. Rows where the step type
+-- can't be resolved get step_type_name=NULL and step_type_uuid populated.
+CREATE TABLE IF NOT EXISTS playbook_steps (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source          TEXT NOT NULL,            -- 'sp_export' | 'incoming' | 'live_fsr'
+    source_path     TEXT NOT NULL,            -- file path or live-FSR base url
+    collection      TEXT,
+    playbook_name   TEXT,
+    playbook_uuid   TEXT,
+    step_uuid       TEXT,
+    step_name       TEXT,
+    step_type_uuid  TEXT,
+    step_type_name  TEXT,                     -- resolved name e.g. 'ManualInput'
+    arguments_json  TEXT NOT NULL,            -- raw step.arguments dict
+    ingested_at     TEXT NOT NULL,
+    UNIQUE (source, source_path, step_uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_pbs_type ON playbook_steps(step_type_name);
+CREATE INDEX IF NOT EXISTS idx_pbs_pb   ON playbook_steps(playbook_uuid);
+CREATE INDEX IF NOT EXISTS idx_pbs_src  ON playbook_steps(source);
+
 -- ---------- Modules ----------
 CREATE TABLE IF NOT EXISTS modules (
     name        TEXT PRIMARY KEY,             -- 'threat_intel_feeds'

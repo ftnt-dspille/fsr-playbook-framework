@@ -157,6 +157,13 @@ def _yaml_tags(yaml_text: str | None) -> dict[str, Any]:
     return out
 
 
+def _current_turn(messages: list[Message]) -> int:
+    """Approximate turn index = number of user messages submitted in
+    this request. Good enough for transcript ordering; the canonical
+    turn lives on UsageEvent and lands in chat_turns."""
+    return sum(1 for m in messages if m.role == "user")
+
+
 def _build_messages(body: ChatIn) -> list[Message]:
     out: list[Message] = []
     if body.current_yaml:
@@ -194,6 +201,10 @@ async def chat(body: ChatIn) -> EventSourceResponse:
 
     async def gen() -> AsyncIterator[dict[str, Any]]:
         active_session_written = False
+        # Per-turn transcript buffer: full message texts get persisted
+        # to chat_messages on each UsageEvent (turn boundary).
+        seq_in_turn = 0
+        session_id: str | None = None
         try:
             # tools=[] → provider self-fills with the right schema shape
             # (Anthropic input_schema vs OpenAI function-calling).
@@ -203,12 +214,43 @@ async def chat(body: ChatIn) -> EventSourceResponse:
             ):
                 if isinstance(ev, UsageEvent):
                     _persist_usage(ev)
-                    # Write the active-session marker once per stream,
-                    # so a follow-up `fsrpb push` from the CLI can
-                    # correlate the push to this chat session.
                     if not active_session_written:
                         history_db.write_active_session(ev.session_id)
                         active_session_written = True
+                    # First UsageEvent of a chat: capture the user
+                    # prompt(s) that led to this turn so the transcript
+                    # is self-contained on replay.
+                    if session_id is None:
+                        session_id = ev.session_id
+                        for i, m in enumerate(messages):
+                            if m.role == "user" and isinstance(m.content, str):
+                                history_db.record_chat_message(
+                                    session_id, ev.turn, -100 + i,
+                                    kind="user", content=m.content,
+                                )
+                    seq_in_turn = 0
+                elif session_id and isinstance(ev, TextEvent):
+                    history_db.record_chat_message(
+                        session_id, _current_turn(messages), seq_in_turn,
+                        kind="assistant_text", content=ev.text,
+                    )
+                    seq_in_turn += 1
+                elif session_id and isinstance(ev, ToolUseEvent):
+                    history_db.record_chat_message(
+                        session_id, _current_turn(messages), seq_in_turn,
+                        kind="tool_use", name=ev.name,
+                        content=json.dumps(ev.arguments, default=str),
+                    )
+                    seq_in_turn += 1
+                elif session_id and isinstance(ev, ToolResultEvent):
+                    payload = ev.result if isinstance(ev.result, str) \
+                        else json.dumps(ev.result, default=str)
+                    history_db.record_chat_message(
+                        session_id, _current_turn(messages), seq_in_turn,
+                        kind="tool_result", name=ev.call_id,
+                        content=payload,
+                    )
+                    seq_in_turn += 1
                 yield _serialize(ev)
         finally:
             if active_session_written:

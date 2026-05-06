@@ -43,6 +43,6 @@ playbooks:
 
       - id: log_low
         type: set_variable
-        name: Log low-severity
+        name: Log low severity
         arguments:
           tier: "tier1"

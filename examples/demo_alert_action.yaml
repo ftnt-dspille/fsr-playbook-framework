@@ -58,4 +58,4 @@ playbooks:
 
       - id: end_low
         type: stop
-        name: No action (low severity)
+        name: No action low severity

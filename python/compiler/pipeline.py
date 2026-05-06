@@ -12,6 +12,7 @@ from .arg_validator import ArgValidator
 from .emitter import emit
 from .errors import CompileError
 from .ir import Collection
+from .linter import lint
 from .parser import parse_yaml
 from .resolver import Resolver
 from .validator import validate
@@ -36,9 +37,17 @@ class CompileResult:
 def compile_yaml(text: str, db_path: Path) -> CompileResult:
     coll, errs = parse_yaml(text)
     if errs or coll is None:
-        return CompileResult(errors=errs, ir=coll)
+        # Even on parse failure we attempt the raw-text linter so the
+        # caller sees the foot-gun cause when the parser bails out on
+        # a derived symptom (e.g. branches mapping that became {True:}).
+        lint_errs = lint(text, coll)
+        return CompileResult(errors=errs + lint_errs, ir=coll)
 
     all_warnings: list[CompileError] = []
+    lint_errs = lint(text, coll)
+    if any(e.severity != "warning" for e in lint_errs):
+        return CompileResult(errors=lint_errs, ir=coll)
+    all_warnings.extend(lint_errs)
 
     def _has_blocking(errs: list[CompileError]) -> bool:
         blocking = [e for e in errs if e.severity != "warning"]

@@ -124,37 +124,116 @@ def stale_probes(max_age_days: int = 7) -> list[dict[str, Any]]:
             return []
 
 
-def cross_search(q: str, per_table_limit: int = 5) -> dict[str, list[dict[str, Any]]]:
-    """Run the same query across connectors, ops, jinja, playbooks, api examples.
+def _tokens_clause(fields: list[str], tokens: list[str]) -> tuple[str, list[str]]:
+    """Build an AND-of-OR LIKE clause: every token must appear in at
+    least one of the provided fields. So `ip address` matches rows
+    where some field has 'ip' AND some (possibly different) field has
+    'address' — closer to user expectation than naive substring."""
+    parts: list[str] = []
+    params: list[str] = []
+    for tok in tokens:
+        ors = " OR ".join(f"{f} LIKE ?" for f in fields)
+        parts.append(f"({ors})")
+        params.extend(f"%{tok}%" for _ in fields)
+    return " AND ".join(parts) if parts else "1=1", params
 
-    Useful when the user asks "what do we know about X?" and we don't yet
-    know which table holds the answer.
+
+def cross_search(q: str, per_table_limit: int = 15) -> dict[str, list[dict[str, Any]]]:
+    """Run the same query across every cataloged surface: connectors,
+    operations, jinja filters, step types, modules, module fields,
+    playbook step examples, and API examples.
+
+    Multi-token queries are AND-matched: `ip address` requires both
+    tokens to appear (each in any of the searched fields). Single-token
+    queries are simple substring.
+
+    Useful when the user asks "what do we know about X?" and we don't
+    yet know which table holds the answer.
     """
-    needle = f"%{q}%"
+    tokens = [t for t in q.strip().split() if t]
+    if not tokens:
+        return {}
     out: dict[str, list[dict[str, Any]]] = {}
     with open_db(create=False) as conn:
+        # Connectors — search name + label + description.
+        clause, params = _tokens_clause(
+            ["name", "label", "description"], tokens)
         out["connectors"] = [dict(r) for r in conn.execute(
-            "SELECT name, version, category FROM connectors "
-            "WHERE name LIKE ? OR label LIKE ? LIMIT ?",
-            (needle, needle, per_table_limit))]
+            f"SELECT name, version, category, label "
+            f"FROM connectors WHERE {clause} LIMIT ?",
+            (*params, per_table_limit))]
+        # Operations — name + title + description (and prefer the
+        # connector's name match too).
+        clause, params = _tokens_clause(
+            ["op_name", "title", "description", "connector_name"], tokens)
         out["operations"] = [dict(r) for r in conn.execute(
-            "SELECT connector_name, op_name, title FROM operations "
-            "WHERE op_name LIKE ? OR title LIKE ? LIMIT ?",
-            (needle, needle, per_table_limit))]
+            f"SELECT connector_name, op_name, title, category "
+            f"FROM operations WHERE {clause} LIMIT ?",
+            (*params, per_table_limit))]
+        # Step types.
         try:
+            clause, params = _tokens_clause(
+                ["name", "label", "description"], tokens)
+            out["step_types"] = [dict(r) for r in conn.execute(
+                f"SELECT name, label, description "
+                f"FROM step_types WHERE {clause} LIMIT ?",
+                (*params, per_table_limit))]
+        except sqlite3.OperationalError:
+            out["step_types"] = []
+        # Jinja macros / filters.
+        try:
+            clause, params = _tokens_clause(["name", "signature"], tokens)
             out["jinja_macros"] = [dict(r) for r in conn.execute(
-                "SELECT name, signature FROM jinja_macros "
-                "WHERE name LIKE ? LIMIT ?", (needle, per_table_limit))]
+                f"SELECT name, signature FROM jinja_macros "
+                f"WHERE {clause} LIMIT ?",
+                (*params, per_table_limit))]
         except sqlite3.OperationalError:
             out["jinja_macros"] = []
+        # Modules + module fields.
         try:
+            clause, params = _tokens_clause(["name", "label", "plural"], tokens)
+            out["modules"] = [dict(r) for r in conn.execute(
+                f"SELECT name, label, plural FROM modules "
+                f"WHERE {clause} LIMIT ?",
+                (*params, per_table_limit))]
+        except sqlite3.OperationalError:
+            out["modules"] = []
+        try:
+            clause, params = _tokens_clause(
+                ["field_name", "label", "module_name"], tokens)
+            out["module_fields"] = [dict(r) for r in conn.execute(
+                f"SELECT module_name, field_name, label, type "
+                f"FROM module_fields WHERE {clause} LIMIT ?",
+                (*params, per_table_limit))]
+        except sqlite3.OperationalError:
+            out["module_fields"] = []
+        # Playbook step corpus (live + sp_export). Match step name +
+        # playbook + collection so authors can find prior examples.
+        try:
+            clause, params = _tokens_clause(
+                ["step_name", "step_type_name", "playbook_name", "collection"],
+                tokens,
+            )
+            out["playbook_steps"] = [dict(r) for r in conn.execute(
+                f"SELECT step_type_name, step_name, playbook_name, "
+                f"collection, source FROM playbook_steps "
+                f"WHERE {clause} LIMIT ?",
+                (*params, per_table_limit))]
+        except sqlite3.OperationalError:
+            out["playbook_steps"] = []
+        # API examples (cross-vendor catalog, when attached).
+        try:
+            clause, params = _tokens_clause(
+                ["p.normalized", "e.action_normalized", "e.action", "e.http_path"],
+                [t.lower() for t in tokens],
+            )
             out["api_examples"] = [dict(r) for r in conn.execute(
-                "SELECT p.name AS product, e.action, e.http_method, "
-                "e.http_path FROM catalog.entries e "
-                "JOIN catalog.products p ON p.id = e.product_id "
-                "WHERE p.normalized LIKE ? OR e.action_normalized LIKE ? "
-                "LIMIT ?",
-                (needle.lower(), needle.lower(), per_table_limit))]
+                f"SELECT p.name AS product, e.action, e.http_method, "
+                f"e.http_path, e.id AS entry_id "
+                f"FROM catalog.entries e "
+                f"JOIN catalog.products p ON p.id = e.product_id "
+                f"WHERE {clause} LIMIT ?",
+                (*params, per_table_limit))]
         except sqlite3.OperationalError as exc:
             out["api_examples"] = [{"error": str(exc)}]
     return out

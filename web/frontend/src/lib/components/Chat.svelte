@@ -24,13 +24,28 @@
 
   let {
     currentYaml,
-    onYamlReplace
+    onYamlReplace,
+    initialTurns = []
   }: {
     currentYaml: string;
     onYamlReplace: (yaml: string) => void;
+    /** Pre-populate the chat history (e.g. when replaying a session
+     *  loaded from /api/history). Mutating this array after mount has
+     *  no effect; pass a fresh prop value to replace. */
+    initialTurns?: Turn[];
   } = $props();
 
-  let turns = $state<Turn[]>([]);
+  let turns = $state<Turn[]>(initialTurns.length ? [...initialTurns] : []);
+  // Track which initialTurns reference we've consumed so a parent can
+  // load a different session by passing a new array.
+  let lastSeededRef = $state<Turn[] | null>(initialTurns);
+
+  $effect(() => {
+    if (initialTurns !== lastSeededRef) {
+      turns = [...initialTurns];
+      lastSeededRef = initialTurns;
+    }
+  });
   let input = $state('');
   let busy = $state(false);
   let err = $state<string | null>(null);

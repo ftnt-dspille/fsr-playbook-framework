@@ -8,6 +8,8 @@
   import { yamlStore } from '$lib/yamlStore.svelte';
   import { postSse } from '$lib/sse';
   import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
+  import { messagesToTurns, type ReplayTurn } from '$lib/sessionReplay';
 
   // Two-way bind: editor edits the store directly via the effect below.
   // Wholesale replacements (load example, load draft, reset) MUST call
@@ -23,6 +25,60 @@
   $effect(() => {
     if (yamlStore.text !== yaml) yaml = yamlStore.text;
   });
+
+  // Replay mode: when the URL carries `?session=<id>`, hydrate the
+  // editor + chat with the saved transcript so the user can see how
+  // the original conversation played out. Replay is read-only on the
+  // chat side — sending a new message starts a fresh session.
+  let replayTurns = $state<ReplayTurn[]>([]);
+  let replayBanner = $state<string | null>(null);
+
+  onMount(async () => {
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('session');
+    if (!sid) return;
+    try {
+      const r = await fetch(`/api/history/sessions/${encodeURIComponent(sid)}`);
+      if (!r.ok) {
+        replayBanner = `Could not load session ${sid} (HTTP ${r.status})`;
+        return;
+      }
+      const detail = await r.json();
+      const turns = messagesToTurns(detail.messages || []);
+      replayTurns = turns;
+      // Pull the YAML in priority order: deployed (latest_push) →
+      // last yaml block the assistant emitted in the transcript.
+      const deployed = detail.latest_push?.source_yaml as string | undefined;
+      if (deployed) {
+        yamlStore.setText(deployed);
+      } else {
+        // Fall back to scanning the transcript for the most recent
+        // ```yaml block — same regex used by the live chat for buffer
+        // replacement. Cheap inline copy to avoid pulling extractYaml
+        // into this layer.
+        const tail = (detail.messages || [])
+          .filter((m: any) => m.kind === 'assistant_text')
+          .map((m: any) => m.content || '')
+          .join('\n');
+        const match = tail.match(/```yaml\s*\n([\s\S]*?)```/g);
+        if (match && match.length) {
+          const last = match[match.length - 1].replace(/^```yaml\s*\n/, '').replace(/```$/, '');
+          if (last.trim()) yamlStore.setText(last);
+        }
+      }
+      const tag = detail.playbook_collection || sid;
+      replayBanner = `Replaying session ${tag} (${turns.length} turn${turns.length === 1 ? '' : 's'})`;
+    } catch (e: any) {
+      replayBanner = `Replay failed: ${e?.message ?? e}`;
+    }
+  });
+
+  function exitReplay() {
+    replayTurns = [];
+    replayBanner = null;
+    // Strip the query param so a refresh doesn't re-load.
+    goto('/', { replaceState: true, keepFocus: true });
+  }
 
   let markers = $state<Marker[]>([]);
   let compileJson = $state<string | null>(null);
@@ -377,6 +433,22 @@
   </div>
 
   <aside class="flex min-h-0 flex-col">
-    <Chat currentYaml={yaml} onYamlReplace={(y) => (yaml = y)} />
+    {#if replayBanner}
+      <div class="flex items-center justify-between border-b border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+        <span>↻ {replayBanner}</span>
+        <button
+          onclick={exitReplay}
+          class="rounded border border-amber-700/60 px-2 py-0.5 hover:border-amber-500 hover:text-amber-50"
+          title="Clear replay and start fresh"
+        >
+          Exit replay
+        </button>
+      </div>
+    {/if}
+    <Chat
+      currentYaml={yaml}
+      onYamlReplace={(y) => (yaml = y)}
+      initialTurns={replayTurns}
+    />
   </aside>
 </div>

@@ -48,6 +48,7 @@ from .routes.playbook import router as playbook_router  # noqa: E402
 from .routes.ref import router as ref_router  # noqa: E402
 from .routes.examples import router as examples_router  # noqa: E402
 from .routes.llm_config import router as llm_config_router  # noqa: E402
+from .routes.history import router as history_router  # noqa: E402
 
 app.include_router(yaml_router)
 app.include_router(chat_router)
@@ -55,10 +56,11 @@ app.include_router(playbook_router)
 app.include_router(ref_router)
 app.include_router(examples_router)
 app.include_router(llm_config_router)
+app.include_router(history_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:47822"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

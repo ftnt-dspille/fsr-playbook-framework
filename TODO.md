@@ -27,35 +27,100 @@ Full strategy in `CHAT_APP_PLAN.md` "Success ladder + LLM-agnostic strategy
    Verified end-to-end against `dev` FSR: catches `'In Progress'` →
    `'Investigating'` for AlertStatus, resolves `Severity/Critical` to its
    real IRI. Jinja-var reachability still pending (see item 4 below).
-3. **Surface `output_schema_observed` inline in `run_op`** — already cached
-   at `mcp_server.py:81-96`; agent should not need a follow-up
-   `get_op_schema` call. ~1 hr.
-4. **Variable-reachability ruleset** — DAG walk: every `{{ vars.steps.X.Y }}`
-   references a prior step whose declared output contains `Y`. Source:
-   `operations.output_schema_observed`. ~3 hr. **Highest-ROI single check
-   we don't have today.** New module under `python/compiler/rulesets/`.
-5. **I10 stepper skeleton + `dry_run_playbook` MCP tool** — L3 of the
-   ladder. ~4 hr scaffold; ~11 hr full per-step-type handlers.
-6. **`assert_playbook_outcome` MCP tool** — declarative expectations
-   (record exists, field equals, count > N). Enables L5 + eval harness.
-   ~3 hr.
-7. **Externalize system prompt + structured tool I/O audit** — move
-   implicit web prompt to `python/agent/system_prompt.md`; convert prose
-   errors in `compile_yaml`/`validate_yaml`/`run_op` to
-   `{ok, error_code, message, suggestions[]}`. Promote difflib hints to
-   `suggestions`. ~2 hr. *Required for any LLM to drive the product.*
-8. **LLM evaluation harness** — `python/eval/harness.py`: 3 tasks × 3
-   models (Claude / GPT-4o-mini / LMStudio local), scores L1→L4 +
-   gold-fixture match. Proves "LLM-agnostic" is a measurement, not a
-   claim. ~6 hr.
-9. **`diagnose_yaml_against_pb_execution` MCP tool** — pull failed run env,
-   render each step's args, surface shape mismatches. Closes the
-   failure-recovery loop. ~3 hr.
-10. **Demo reset script + full-transcript capture** — `fsrpb demo prep`
-    resets `dev` FSR known state; web backend persists full turn log per
-    session (token usage logging already exists). ~2 hr.
-11. **Inventory web dashboard** — fill in the route alongside the CLI
-    stubbed 2026-05-06 (`python/inventory.py` + `fsrpb inventory`). ~3 hr.
+3. ~~**Surface `output_schema_observed` inline in `run_op`**~~ ✅ DONE 2026-05-06.
+   `run_op` now returns `output_top_keys`, `output_is_list`, `schema_cached`
+   alongside `output_shape`. Agent gets the keys it needs to wire
+   `{{ vars.steps.<step>.<key> }}` references without a follow-up
+   `get_op_schema` round-trip.
+4. ~~**Variable-reachability ruleset**~~ ✅ DONE 2026-05-06.
+   `_compute_predecessors` does a fixed-point BFS over each playbook's
+   step graph; `_check_jinja_paths` now flags any `{{ vars.steps.X.Y }}`
+   where step X cannot run before the referencing step in any execution
+   path. Includes "available predecessors: a, b, c" suggestions.
+   Verified end-to-end: orphaned-step references caught with the right
+   error; happy-path references still pass; all 35 example fixtures
+   still compile clean.
+5. ~~**I10 stepper skeleton**~~ ✅ DONE 2026-05-06.
+   New MCP tool `step_through_playbook(yaml_text, playbook?, input?,
+   branch_choices?, execute_safe_ops=True)` walks the playbook
+   step-by-step in DAG order, rendering each step's args via the live
+   FSR Jinja engine (`/api/wf/api/jinja-editor/`) against accumulated
+   `vars.steps.*` + `vars.input.*` context. Safe (query-class) connector
+   ops execute live; destructive ops are simulated to keep the stepper
+   read-only. set_variable populates the upstream context realistically;
+   trigger/stop are recognized; unknown step types fall through to
+   simulated. `dry_run_playbook` (compile + push + run) already exists
+   and now complements the stepper. Verified: nested `{{ vars.steps.X.Y }}`
+   references resolve correctly across simulated upstream steps.
+   Per-step-type handler taxonomy (full I10 stepper) still pending.
+6. ~~**`assert_playbook_outcome` MCP tool**~~ ✅ DONE 2026-05-06.
+   New MCP tool + `fsrpb assert <file|-|inline-json>` CLI for L5 of
+   the success ladder. Three assertion kinds:
+   `record_exists` (≥1 match), `record_count` (eq|ne|gt|gte|lt|lte vs
+   `hydra:totalItems`), `field_equals` (exactly-one match + dotted-path
+   field check, returns `observed`/`expected` on mismatch + `ambiguous`
+   when filters match >1). Filters accept a friendly `{field: value}`
+   dict (AND-eq) or pre-shaped `{logic, filters[]}` body for OR/range.
+   All errors are structured `{ok, code, message, ...}`. 11 hermetic
+   tests in `test_assert_outcome.py` (107 passed total).
+7. ~~**Externalize system prompt + structured tool I/O audit**~~ ✅ DONE 2026-05-06.
+   Prompt moved to `python/agent/system_prompt.md` + loaded via
+   `agent.load_system_prompt()`. `web/backend/system_prompt.py` is now a
+   thin re-export so existing import paths still work. Added a "Tool
+   error contract" section to the prompt so the LLM knows to read
+   `code` + `suggestions`. Introduced `_err(code, message, suggestions,
+   **extra)` envelope helper + `_serialize_compiler_error` in
+   `mcp_server.py`. Retrofitted `compile_yaml` (`compile_failed`),
+   `validate_yaml` (`validation_failed`), and `run_op`
+   (`probes_unavailable` / `no_live_fsr` / `unknown_connector` w/ LIKE
+   suggestions / `requires_confirmation` / `transport_failed` /
+   `bad_response_shape` / `execution_failed`) to emit
+   `{ok, code, message, suggestions: [...]}`. Per-error items keep the
+   legacy singular `suggestion` for frontend Monaco markers + CLI
+   pretty-printers while exposing `suggestions: [s]` for LLM consumers.
+   7 new tests in `test_tool_error_envelope.py` (114 python + 101 web
+   passing). LLM-agnostic groundwork now in place for item 8.
+8. ~~**LLM evaluation harness**~~ ✅ DONE 2026-05-06.
+   New `python/evals/` package (renamed from `eval/` to avoid shadowing
+   the builtin) with `scoring.py` (L1 compile / L2 live-resolve /
+   L3 var-reachability / L4 dry-run / gold byte-equal), `tasks.py`
+   (loads JSON fixtures from `python/evals/tasks/`), `providers.py`
+   (lazy factories for `anthropic`, `openai`, `lmstudio` — only
+   imports SDKs on first call — plus deterministic `gold` and `echo`
+   for hermetic tests), and `harness.py` (`run_matrix` + `render_text`
+   for the CLI). Three task fixtures: `hello_connector`,
+   `decision_branch`, `alert_action_var_chain` with gold pointers
+   into `examples/`. New CLI: `fsrpb evals --models a,b,c [--tasks ...]
+   [--live] [--json]` — verified end-to-end producing `gold 9/9
+   (100%) / echo 0/9 (0%)` matrix offline. 8 hermetic tests in
+   `test_evals_harness.py` (122 python + 101 web passing). LLM-agnostic
+   is now a measurement.
+9. ~~**`diagnose_yaml_against_pb_execution` MCP tool**~~ ✅ DONE 2026-05-06.
+   New MCP tool walks every Jinja-bearing arg in the YAML, renders each
+   against the failed run's `vars` env (via existing `get_run_env` +
+   `render_jinja`), and surfaces structured `step_diagnostics` rows
+   with codes `ok`/`empty_render`/`render_error`/`render_threw`. Top-
+   level `hints` distill `vars.steps.<key>` references to steps that
+   never executed (printing the available step keys for the agent to
+   match against). Structured failure envelopes for `run_env_unavailable`
+   + `yaml_parse_failed`. 5 hermetic tests in `test_diagnose.py`.
+10. ~~**Demo reset script + full-transcript capture**~~ ✅ DONE 2026-05-06.
+    `fsrpb demo prep [--pattern GLOB]` wraps `probes.probe_cleanup`
+    (FSR_ALLOW_E2E gated; honors `FSRPB_CLEANUP_PATTERNS` env hand-off).
+    Full transcript capture: new `chat_messages` table
+    (`session_id, turn, seq, ts, kind, name, content`) with 64 KB
+    per-message cap; `record_chat_message` + `get_chat_messages`
+    helpers in `web/backend/history.py`; chat route now persists user
+    prompts on first UsageEvent and every TextEvent / ToolUseEvent /
+    ToolResultEvent inline so a session can be replayed from the DB
+    alone. 3 new tests in `test_history.py` (104 web tests passing).
+11. ~~**Inventory web dashboard**~~ ✅ DONE earlier.
+    Backend `GET /api/ref/inventory` + `/inventory/search` are live in
+    `web/backend/routes/ref.py`; SvelteKit page at
+    `web/frontend/src/routes/inventory/+page.svelte` renders the
+    summary, top API-example products, and cross-table search.
+    `python/inventory.py` + `fsrpb inventory` CLI predate the route.
+    No remaining work for the success ladder.
 
 **Token-budget audit**: smaller / local models can't afford 20K-token tool
 responses. `get_step_type` was trimmed 4.9KB → 1.8KB on 2026-05-04; audit
@@ -63,6 +128,241 @@ remaining tools and default `verbose=False` everywhere with full payload
 behind an explicit flag.
 
 **Estimated total to MVP-demo-ready: ~30–35 focused hours.**
+
+## Step-corpus + branch-validator follow-ups (added 2026-05-06)
+
+Context: built `playbook_steps` table + `probe_playbook_steps` ingester +
+`fsrpb find-step-examples` CLI + `find_step_examples` MCP tool. Currently
+indexes 320 steps across 37 files (SP bundles + store/incoming). One
+sample (`store/incoming/1 Playbook - 00 - a Import testing (2026561013).json`)
+proved `formType: ipv4` exists in FSR — it's a *subtype of `text`* sharing
+`dataType=text, type=string, templateUrl=webAddress.html`. The 25-SP-only
+sweep had missed it. These TODOs assume that corpus as the input.
+
+**I12 — Live-FSR ingestion path for `playbook_steps`.** ✅ DONE 2026-05-06.
+`fsrpb probe playbook-steps --live` pages `/api/3/workflows?$relationships=true`
+and writes rows with `source='live_fsr'`. Reuses `_env.get_client()` like
+other live probes. Handles the expanded `stepType` dict shape (vs. the
+SP-export IRI string). First live run on dev FSR ingested 1,690 workflows
+→ 7,122 steps; per-type live counts: SetVariable 1564, Connectors 1332,
+cybersponse.action 840, abstract_trigger 766, WorkflowReference 624,
+CyopsUtilites 525, UpdateRecord 385, **Decision 380**, FindRecords 305,
+InsertData 300, **ManualInput 190**, post_update 59, post_create 37,
+Delay 32, CodeSnippet 28, SendMail 23, IngestBulkFeed 18, api_call 18,
+ManualTask 6, RunScript 4, ApprovalManualInput 3, SetAPIKeys 2,
+post_delete 1. 14 distinct ManualInput `formType` values observed live
+(text, dynamicList, textarea, picklist, checkbox, richtext, lookup,
+ipv4, password, object, ipv6, html, file, domain) — directly unblocks
+I14/I17. Records a verification row on `GET /api/3/workflows
+(step_detail)` when at least one page comes back.
+
+**I13 — Random-playbook coverage audit.** Pick N (=20) random rows from
+`playbook_steps` per step type, diff their `arguments_json` keys against
+the resolver's known-key whitelists in `python/compiler/resolver.py`
+(`_FRIENDLY`, `_CANONICAL` for manual_input; the equivalent sets for
+decision, set_variable, connectors, etc.). Any key seen ≥3 times in the
+corpus but unknown to the resolver is a *missed shape* — emit a report.
+Run quarterly, or whenever the SP corpus is refreshed. Goal: confirm
+we're not silently dropping keys at compile time. Likely homes:
+`python/probes/probe_corpus_audit.py` + `fsrpb audit-shapes` CLI.
+
+**I14 — Auto-derive the manual_input kind catalog from the corpus.** The
+hardcoded `_INPUT_FIELD_KINDS` map in resolver.py:468 is missing `ipv4`,
+`ipv6`, `domain`, `phone`, `filehash`, `decimal`, `date`, `multiselect`,
+`picklist`, `multiselectpicklist`, `lookup`, `file`, `image` (per
+`store/MANUAL_INPUT.md`). Replace the hardcoded map with a build step
+that does
+`SELECT DISTINCT formType, dataType, type, templateUrl FROM
+ (json_each over playbook_steps WHERE step_type_name='ManualInput')`
+and writes the table to `store/MANUAL_INPUT.md` + a generated
+`python/compiler/_input_kinds.py`. Same approach for the per-kind title
+strings (`_INPUT_FIELD_TITLE`).
+
+**I15 — Shared branch-validator helper.** ManualInput's
+`response_mapping.options[]` and Decision's `arguments.conditions[]` are
+structurally the same: a list of branches, each with a target (`step_iri`)
+and an exclusivity marker (`primary: true` for MI / `default: true` for
+Decision). Refactor `python/compiler/validator.py` to share a single
+`_check_branch_fan_out` helper. Rules to enforce (each row mined from
+the corpus, see `find_step_examples`):
+  - Every branch entry has a non-empty target.
+  - Decision: exactly one entry has `default: true` AND no `condition:`;
+    all others have `condition:` set.
+  - ManualInput: exactly one option has `primary: true`; if there are
+    2+ options every option needs a target (button without a step_iri
+    crashes the FSR runtime).
+  - Warn (not error) when two branches point to the same target — user
+    said "typically not the same button" but it's a soft rule.
+  - Reachability: every branch target must resolve to a step in the same
+    playbook (already done for Decision via `branches:`; extend to MI's
+    `step_iri`).
+
+**I16 — Friendly `next:` per-option in manual_input.** Today
+resolver.py:701 silently strips `next:` off each option. Lift it so
+authors write
+```yaml
+options:
+  - {option: Ok,     primary: true, next: do_block}
+  - {option: Cancel,                 next: end_pb}
+```
+and the resolver emits the canonical `step_iri` for each. Symmetrical
+to Decision's existing `branches:` mapping.
+
+**I17 — `kind: ipv4` / `ipv6` / `domain` / `phone` / `filehash` aliases.**
+Add to the resolver's kind catalog (after I14 lands they're auto-derived,
+but ship the aliases now). All five share the `webAddress.html` template
+and differ only in `formType` + `title`. Each needs a
+`_INPUT_FIELD_TITLE` entry: `IPv4`, `IPv6`, `Domain`, `Phone Number`,
+`File Hash`.
+
+**I18 — "Did you mean" on unknown kind.** When `kind:` doesn't match,
+fuzzy-match against the catalog and surface the closest in the
+suggestion field. e.g. `kind: hostname` → suggest `domain`; `kind: ip`
+→ suggest `ipv4`.
+
+**I28–I32 — feedback-driven hardening pass. ✅ DONE 2026-05-06.**
+Mined the chat_feedback table + chat_tool_calls cost distribution; two
+down-rated sessions yielded six gaps. Implemented:
+- **I28** `set_variable` typo trap — `variables:` / `vars:` / `set:` /
+  `values:` / `step_variables:` carrying a friendly arg-list shape now
+  hard-error with a `did you mean 'arg_list'?` suggestion. Real-world
+  bug from feedback session 60743f70.
+- **I29** UUID step-id linter warning — when `id:` matches the UUID
+  regex, lint suggests a slug derived from the step name. Same session.
+- **I31** `validate_yaml` MCP response now carries a `next_fix` field
+  naming the single most actionable error (priority: missing_field →
+  unknown_connector → unknown_operation → unknown_param → bad_value).
+  Stops the validate-fix-validate token spiral seen in session
+  cabdaf00 (8 prior tool calls before giving up).
+- **I32** `find_connector` / `find_operation` default to terse output
+  (drop description columns); `verbose=true` opt-in restores them.
+  Empty-result responses now carry a `suggestion` + `near[]` close-
+  matches list using difflib, so the agent doesn't loop guessing
+  vendor / op names. (Old tool corpus showed 40% of `find_operation`
+  calls returned <50 chars with no hint where to go next.)
+- **I30** system-prompt updates: 3 new hard rules covering the
+  failure modes (must declare `collection:`, step ids are slugs not
+  UUIDs, `set_variable` only accepts `arg_list:`); a new "Validation
+  loop" section telling the agent to fix `next_fix` first; a tool-use
+  note on `verbose` and the empty-result `near[]` retry pattern.
+- 4 new tests — set_variable typo trap, canonical arg_list, UUID id
+  linter, MCP `next_fix` end-to-end. Suite: 161/161 passing.
+
+I33 (richer "did you mean" mining for empty searches) is partially
+covered by the I32 difflib pass; revisit after more thumbs-down rows
+land.
+
+**I27 — History tab: full chat replay + thumb up/down + review summary. ✅ DONE 2026-05-06.**
+- New `chat_feedback` table in `web/backend/history.py` (session_id PK,
+  rating up/down, summary, tags, ts; cascading FK on chat_sessions).
+- `web/backend/history.py` extensions: `set_feedback`, `clear_feedback`,
+  `list_feedback`, `list_chat_sessions_with_feedback`, and
+  `get_chat_session(include_messages=True)` now returns the full
+  message transcript + `latest_push` (with deployed YAML) + feedback.
+- New `web/backend/routes/history.py` exposing GET/POST/DELETE on
+  `/api/history/{sessions,feedback,pushes,timeline}`. Wired into
+  `app.py`.
+- Frontend `web/frontend/src/routes/history/+page.svelte` rewrite:
+  master list (sessions with thumb badges + cost + tool counts +
+  inline feedback teaser) + detail pane (header, feedback editor with
+  ▲/▼ buttons + textarea, final YAML drawer, full per-message
+  transcript with collapsible tool_use/tool_result payloads, tool-
+  sequence summary).
+- Round-trip verified end-to-end against history.db.
+
+**I26 — Hover docs for `arguments:` per step type. ✅ DONE 2026-05-06.**
+Curated specs in `web/backend/step_args_help.py` (17 step types incl.
+manual_input with mode-grouped keys, decision, connector, …). Backend
+route `GET /api/ref/step-args/{type}` returns both the structured spec
+and a pre-rendered markdown blob. Frontend Monaco hover provider in
+`web/frontend/src/lib/yamlHover.ts` walks up the YAML to find the
+enclosing step's `type:` and shows the markdown popup over `arguments:`
+or any key under it. Wired into `MonacoYaml.svelte`.
+
+**I15/I17/I20/I21/I22/I23 — landed 2026-05-06.** ✅ DONE.
+- I17: full FSR `formType` catalog incl. ipv4/ipv6/domain/phone/filehash/
+  picklist/multiselect/multiselectpicklist/lookup/file/image/decimal/date/
+  object — corrected richtext/password templateUrls against live data.
+- I20: mode-aware co-presence checker for ManualInput (Context, Audience,
+  Assignment dimensions). Replaces the flat `_CANONICAL` whitelist.
+  Lives in `resolver.py:_check_manual_input_modes`.
+- I21: accept `type: DecisionBased` (button-only flows).
+- I22: per-option `next:` lifted into `step.branches`; first option only
+  auto-promoted to `primary` when author left every option unmarked AND
+  there are 2+ options.
+- I23: `kind: lookup` requires `module:` (emitted as the inputVariable
+  `type` field — live FSR keys typeahead off this); `kind: picklist` /
+  `multiselectpicklist` requires `picklist:`.
+- I15 (refined): Decision validator enforces — exactly-zero-or-one
+  `default: true`, default entries omit `condition`, non-default
+  entries require both `option` + `condition`. ManualInput got a
+  parallel branch-coverage check (every option needs a target unless
+  it's the only option; multi-button prompts where ≥2 options have
+  no target warn).
+- 14 new tests added under `python/tests/test_manual_input_resolver.py`
+  + `python/tests/test_arg_validator.py`. Suite: 156/156 passing.
+
+**I24** (round-trip an MI through FSR's form-builder to identify which
+inputVariable keys are author-required vs. UI-cosmetic) — **deprioritized**:
+user confirmed `searchable`/`collection`/`mmdUpdate`/`lengthConstraint`/
+`allowedEncryption` etc. are UI-cosmetic. Re-open if a different
+inputVariable shape misbehaves.
+
+**I20–I25 — MI/Decision validation gaps mined from the corpus.** See
+`MI_DECISION_VALIDATION_AUDIT.md` for the full reproducible analysis.
+Headlines:
+- **I20 (revised)** replace the flat MI `_CANONICAL` whitelist with a
+  **mode-aware co-presence checker** — see audit §0. The "extra"
+  top-level keys aren't free-form; they're gated by three discrete UI
+  modes:
+  - **Context** — Record Linked vs Record Independent. `isRecordLinked`,
+    `record`, `resources` move together.
+  - **Audience** — Internal vs External. `unauthenticated_input`,
+    `inputExternalUser`, `external_channel_list`, `customEmailExternal`,
+    `external_email_subject`, `external_email_attachments`,
+    `custom_email_body_external` only valid together; flag external-mode
+    keys present in internal-mode prompts.
+  - **Assignment** — `owner_detail.isAssigned` gates exactly-one-of
+    `assignedToPerson` / `assignedToTeam` / `assignedToRecord` /
+    `assignedToField`.
+  - Plus orthogonal overlays: `is_approval`, `timeout` (whose
+    `timeout.step_iri` is another branch target → folds into I15).
+  Implementation: new `_check_manual_input_modes(args)` in
+  validator.py, wired alongside the existing `_normalize_manual_input_args`.
+  Today's flat whitelist errors on ~50% of live MIs and would also
+  *accept* incoherent prompts (internal-only with external email
+  recipients populated). The mode model fixes both.
+- **I21** accept `type: DecisionBased` for button-only MIs (26 live
+  cases rejected today). When DecisionBased, require empty
+  inputVariables.
+- **I22** in friendly MI form, lift per-option `next:` into `step_iri`
+  resolution (mirrors Decision `branches:`); don't auto-promote first
+  option to `primary` if author omitted it; allow null/missing
+  `step_iri` as terminal-button (4% of live options).
+- **I23** `kind: lookup` requires a `module:` key; emit as
+  `type: <module>` (live FSR uses module name, not "array"). Same idea
+  for `kind: picklist`.
+- **I15 (refined)** Decision branch validator: exactly one
+  `default: true` entry (warn if zero, error if ≥2); default entries
+  MUST omit `condition`; non-default entries MUST have both `condition`
+  and `option`; every entry MUST have non-empty `step_iri`. Demote
+  "≥2 branches" to a warning — 8 live single-branch Decisions exist.
+- **I24** round-trip an emitted MI prompt through the FSR form-builder
+  (push → load → save unchanged → compare). Resolves which
+  inputVariable keys (`searchable`, `collection`, `mmdUpdate`,
+  `lengthConstraint`, `allowedEncryption`, etc.) are author-required
+  vs. UI-cosmetic.
+- **I25** friendly `default: <step_id>` key on the decision step,
+  parallel to `branches:`. Compiles to a `default: true` entry.
+
+**I19 — Auto-replay for "why did the playbook fail?".** The MCP tools
+`list_recent_failed_runs`, `get_run_env`, `diagnose_yaml_against_pb_execution`
+already exist (mcp_server.py:2042/1721/3074). Wrap them into a single
+convenience tool `why_did_playbook_fail(playbook_or_id)` that chains:
+list-recent → pick the latest failed run for that name → get-run-env →
+diagnose. So the chat agent can answer the literal question without
+juggling three tools. Also tighten the descriptions on the existing
+three so the LLM reaches for them.
 
 ## Architecture review findings (2026-05-06)
 
@@ -80,12 +380,32 @@ below; cross-reference the existing I1–I10 list in the next section.
 2. **I2 — connector-installed precheck** (~30 min). `GET
    /api/integration/connectors/{name}/{version}` before emitting; fail with
    "solution pack X needed" if missing.
-3. **I3 — recipe persistence + `generate_recipe` MCP tool** (~1.5 hr). Add
-   `recipes` table; expose tool so agents can emit/retrieve recipes inline
-   (today it's CLI-only via `fsrpb generate-recipe`).
-4. **Linter v1 core 3** (~2 hr; subset of TODO #9). Bare `yes/no` in decision
-   branches, step-name charset (`[A-Za-z0-9 _]` only), missing `mock_result`
-   on Fetch in templates.
+3. ~~**I3 — recipe persistence + `generate_recipe` MCP tool**~~ ✅ DONE 2026-05-06.
+   New `generate_recipe(kind, info_json_path, …, persist=False,
+   when_to_use=None)` MCP tool wraps the existing
+   `generate_threat_feed_recipe` / `generate_data_ingest_recipe`
+   generators; returns `{ok, kind, name, connector, fsr_json, yaml,
+   persisted}` with structured error envelope on `bad_kind` /
+   `info_json_missing` / `info_json_invalid` / `generator_failed`.
+   `persist=True` writes through to the existing `recipes` table
+   (`<kind>:<connector>` PK, decompiled YAML body). New
+   `find_recipe(query, kind, limit)` reader returns rows for the
+   agent. Refactor: `_decompile_to_yaml` extracted from `cli.py` →
+   `compiler/decompiler.decompile_to_yaml` so CLI pull/diff and MCP
+   tool emit identical YAML. 5 hermetic tests in `test_mcp_recipe.py`.
+4. ~~**Linter v1 core 3**~~ ✅ DONE 2026-05-06.
+   New `python/compiler/linter.py` with three rules wired into the
+   pipeline: (a) Norway problem — bare `yes/no/on/off/y/n/true/false`
+   in Decision `branches:` keys or `option:` values (raw-text scan,
+   blocking error); (b) step-name charset `[A-Za-z0-9 _]` (IR walk,
+   blocking error w/ sanitised "rename to" suggestion); (c) Fetch /
+   IngestBulkFeed step missing `mock_result` (warning only — doesn't
+   block compile, but flags `--mock` plumbing gaps). Caught real
+   foot-guns in shipped fixtures (`decision_branch.yaml` → `Log low
+   severity`, `demo_alert_action.yaml` → `No action low severity`)
+   plus the `test_decision_with_default_next_is_valid` test (now
+   uses quoted `"yes"` keys). 7 hermetic tests in `test_linter.py`
+   (134 python + 104 web passing).
 5. **I10 stepper skeleton** (~2 hr research, 11 hr full). Unblocks
    `dry_run_playbook` MCP tool and agent self-correction loop.
 
@@ -311,12 +631,16 @@ I10. **Interactive playbook stepper with live feedback.**
     `fsrpb env`, `render_jinja`, compiler IR, and run_op's
     destructive-op confirm guard.
 
-I7. **Recipe gold-standard test fixtures.**
-    Today calibration relies on live `/tmp/*_generated.json` runs.
-    Bake known-good generator outputs as fixtures
-    (`tests/fixtures/recipes/threat_feed_taxii.json`, …) and a pytest
-    that asserts byte-equality. Catches accidental changes to the
-    generator's output shape. ~1 hr.
+I7. ~~**Recipe gold-standard test fixtures**~~ ✅ DONE 2026-05-06.
+    Created `python/tests/fixtures/recipes/` with two synthetic
+    info.json inputs (`synthetic_threat_feed_info.json` +
+    `synthetic_data_ingest_info.json`) and their baked-in
+    `*.gold.json` outputs from the current generators (sort_keys=True,
+    indent=2 for diff stability). New `test_recipe_gold.py` asserts
+    byte-equality on each invocation plus a determinism test that runs
+    the threat-feed generator twice and confirms identical UUIDs (the
+    whole reason `_uuid_from(seed)` exists). Any silent change to
+    step ordering / arg shapes / picklist macros now breaks loudly.
 
 ## Backlog (open)
 

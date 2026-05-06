@@ -463,32 +463,70 @@ class Resolver:
         step.arguments = a
 
     # Friendly `kind:` → canonical (formType, dataType, type, templateUrl)
-    # for the inputVariables section of a manual_input step. Verified
-    # against live FSR exports under fortisoar/SPs/playbooks/.
+    # for the inputVariables section of a manual_input step. Each row was
+    # picked by querying live FSR (`probe playbook-steps --live`) for the
+    # dominant (formType, dataType, type, templateUrl) tuple — see the
+    # SQL in MI_DECISION_VALIDATION_AUDIT.md §4.
+    _WEBADDR = "app/components/form/fields/webAddress.html"
+    _INPUT_HTML = "app/components/form/fields/input.html"
     _INPUT_FIELD_KINDS: dict[str, dict[str, Any]] = {
-        "text":     {"formType": "text",     "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
-        "textarea": {"formType": "textarea", "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
-        "richtext": {"formType": "html",     "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/htmlEditor.html"},
-        "html":     {"formType": "html",     "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/htmlEditor.html"},
-        "email":    {"formType": "email",    "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
-        "url":      {"formType": "url",      "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
-        "password": {"formType": "password", "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
-        "integer":  {"formType": "integer",  "dataType": "text",        "type": "integer", "templateUrl": "app/components/form/fields/input.html"},
-        "number":   {"formType": "integer",  "dataType": "text",        "type": "integer", "templateUrl": "app/components/form/fields/input.html"},
-        "checkbox": {"formType": "checkbox", "dataType": "checkbox",    "type": "boolean", "templateUrl": "app/components/form/fields/checkbox.html"},
-        "boolean":  {"formType": "checkbox", "dataType": "checkbox",    "type": "boolean", "templateUrl": "app/components/form/fields/checkbox.html"},
-        "select":   {"formType": "dynamicList", "dataType": "dynamicList", "type": "array",  "templateUrl": "app/components/form/fields/dynamicList.html"},
-        "datetime": {"formType": "datetime", "dataType": "text",        "type": "string",  "templateUrl": "app/components/form/fields/input.html"},
-        "json":     {"formType": "object",   "dataType": "lookup",      "type": "object",  "templateUrl": "app/components/form/fields/json.html"},
+        # text family
+        "text":     {"formType": "text",     "dataType": "text", "type": "string",  "templateUrl": _INPUT_HTML},
+        "textarea": {"formType": "textarea", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/textarea.html"},
+        "richtext": {"formType": "richtext", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/markdownEditor.html"},
+        "html":     {"formType": "html",     "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/htmlEditor.html"},
+        "password": {"formType": "password", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/password.html"},
+        # webAddress.html family — text dataType but typed sub-formats. Confirmed
+        # against live FSR (ipv4/ipv6/domain present in store/fsr_reference.db).
+        "ipv4":     {"formType": "ipv4",     "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "ipv6":     {"formType": "ipv6",     "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "domain":   {"formType": "domain",   "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "email":    {"formType": "email",    "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "url":      {"formType": "url",      "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "phone":    {"formType": "phone",    "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "filehash": {"formType": "filehash", "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        # numeric
+        "integer":  {"formType": "integer",  "dataType": "text", "type": "integer", "templateUrl": _INPUT_HTML},
+        "number":   {"formType": "integer",  "dataType": "text", "type": "integer", "templateUrl": _INPUT_HTML},
+        "decimal":  {"formType": "decimal",  "dataType": "text", "type": "number",  "templateUrl": _INPUT_HTML},
+        # bool
+        "checkbox": {"formType": "checkbox", "dataType": "checkbox", "type": "boolean", "templateUrl": "app/components/form/fields/checkbox.html"},
+        "boolean":  {"formType": "checkbox", "dataType": "checkbox", "type": "boolean", "templateUrl": "app/components/form/fields/checkbox.html"},
+        # date / time
+        "datetime": {"formType": "datetime", "dataType": "text", "type": "string",  "templateUrl": _INPUT_HTML},
+        "date":     {"formType": "date",     "dataType": "text", "type": "string",  "templateUrl": _INPUT_HTML},
+        # selectors. `select` is the friendly name for FSR's "Dynamic List"
+        # (static enum). Distinct from `picklist` (FSR-managed list) and
+        # `multiselect`/`multiselectpicklist` (their multi-value variants).
+        "select":             {"formType": "dynamicList",         "dataType": "dynamicList", "type": "array",     "templateUrl": "app/components/form/fields/dynamicList.html"},
+        "multiselect":        {"formType": "multiselect",         "dataType": "dynamicList", "type": "array",     "templateUrl": "app/components/form/fields/dynamicList.html"},
+        "picklist":           {"formType": "picklist",            "dataType": "picklist",    "type": "picklists", "templateUrl": "app/components/form/fields/typeahead.html"},
+        "multiselectpicklist":{"formType": "multiselectpicklist", "dataType": "picklist",    "type": "picklists", "templateUrl": "app/components/form/fields/typeahead.html"},
+        # lookup — `type` is overridden per-field with the target module name
+        # (people / indicators / alerts / etc.); see _expand_input_variables.
+        "lookup":   {"formType": "lookup", "dataType": "lookup", "type": "lookup", "templateUrl": "app/components/form/fields/typeahead.html"},
+        # files / structured
+        "file":     {"formType": "file",   "dataType": "file",   "type": "string", "templateUrl": "app/components/form/fields/file.html"},
+        "image":    {"formType": "image",  "dataType": "file",   "type": "string", "templateUrl": "app/components/form/fields/file.html"},
+        "json":     {"formType": "object", "dataType": "object", "type": "object", "templateUrl": "app/components/form/fields/json.html"},
+        "object":   {"formType": "object", "dataType": "object", "type": "object", "templateUrl": "app/components/form/fields/json.html"},
     }
 
     # Per-kind humanised "title" shown next to the field in the FSR UI.
     _INPUT_FIELD_TITLE: dict[str, str] = {
-        "text": "Text", "textarea": "Text Area", "richtext": "Rich Text (HTML)",
-        "html": "Rich Text (HTML)", "email": "Email", "url": "URL",
-        "password": "Password", "integer": "Integer", "number": "Integer",
-        "checkbox": "Checkbox", "boolean": "Checkbox", "select": "Dynamic List",
-        "datetime": "Datetime", "json": "JSON",
+        "text": "Text", "textarea": "Text Area", "richtext": "Rich Text",
+        "html": "Rich Text (HTML)", "password": "Password",
+        "ipv4": "IPv4", "ipv6": "IPv6", "domain": "Domain",
+        "email": "Email", "url": "URL", "phone": "Phone Number",
+        "filehash": "File Hash",
+        "integer": "Integer", "number": "Integer", "decimal": "Decimal",
+        "checkbox": "Checkbox", "boolean": "Checkbox",
+        "datetime": "Datetime", "date": "Date",
+        "select": "Dynamic List", "multiselect": "Multi Select",
+        "picklist": "Picklist", "multiselectpicklist": "Multi Picklist",
+        "lookup": "Lookup",
+        "file": "File", "image": "Image",
+        "json": "JSON", "object": "JSON",
     }
 
     def _expand_input_variables(
@@ -560,7 +598,8 @@ class Resolver:
             spec = self._INPUT_FIELD_KINDS[kind]
             # Strict per-entry whitelist — surface obvious typos.
             allowed = {"name", "kind", "type", "label", "tooltip",
-                       "required", "default", "options"}
+                       "required", "default", "options", "module",
+                       "picklist", "tooltip"}
             unknown = sorted(set(item) - allowed)
             if unknown:
                 errors.append(CompileError(
@@ -594,16 +633,44 @@ class Resolver:
                 "jinjaExpressionView": True,
                 "useRecordFieldDefault": False,
             }
-            if kind == "select":
+            if kind in ("select", "multiselect"):
                 opts = item.get("options")
                 if opts is None:
                     errors.append(CompileError(
                         code=ErrorCode.MISSING_FIELD,
-                        message="`kind: select` needs `options:` (list or jinja)",
+                        message=f"`kind: {kind}` needs `options:` (list or jinja)",
                         path=f"{ipath}.options",
                     ))
                     continue
                 field["options"] = opts
+            # lookup → `type` carries the FSR module name (people, alerts,
+            # indicators, etc.). Live FSR keys typeahead lookups off this.
+            if kind == "lookup":
+                module = item.get("module") or item.get("type")
+                if not module or module == "lookup":
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message=("`kind: lookup` needs `module: <name>` "
+                                 "(e.g. people, alerts, indicators) — FSR "
+                                 "keys the typeahead off this module"),
+                        path=f"{ipath}.module",
+                        suggestion="module: people",
+                    ))
+                    continue
+                field["type"] = module
+            # picklist → `picklist:` names the FSR-managed list to bind to.
+            if kind in ("picklist", "multiselectpicklist"):
+                pl = item.get("picklist") or item.get("options")
+                if not pl:
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message=(f"`kind: {kind}` needs `picklist: "
+                                 "<name>` to bind a managed FSR picklist"),
+                        path=f"{ipath}.picklist",
+                        suggestion="picklist: Severity",
+                    ))
+                    continue
+                field["picklist"] = pl
             out.append(field)
         return out
 
@@ -643,16 +710,25 @@ class Resolver:
                 suggestion='use: input: { title: "...", options: [...] }',
             ))
             return
-        # Strict whitelist — every working ManualInput in the corpus uses
-        # only these keys. Unknown keys (`label`, `message`, `textarea`,
-        # `timeout`, etc.) compile but get dropped at runtime; flag them
-        # so the author sees the mistake before push.
-        _FRIENDLY = {"title", "description", "options", "inputs"}
+        # Whitelist — friendly + canonical (incl. mode-driven extensions).
+        # Each canonical key is permitted at the syntax level; the
+        # mode-aware co-presence checker below catches incoherent
+        # combinations (e.g. external email keys in an internal-only
+        # prompt). See MI_DECISION_VALIDATION_AUDIT.md §0 for the model.
+        _FRIENDLY = {"title", "description", "options", "inputs",
+                     "mode", "audience", "assignee"}
         _CANONICAL = {
             "type", "input", "record", "is_approval", "isRecordLinked",
             "owner_detail", "step_variables", "response_mapping",
             "email_notification", "inline_channel_list",
             "external_channel_list", "unauthenticated_input", "resources",
+            # Audience-mode + email-template keys (live in 13–142 of 168 MIs)
+            "agent_id", "timeout", "inputExternalUser", "inputInternalUsers",
+            "internal_email_subject", "external_email_subject",
+            "customEmailExternal", "customEmailInternal",
+            "custom_email_body_external", "custom_email_body_internal",
+            "external_email_attachments", "internal_email_attachments",
+            "message", "label",
         }
         unknown = sorted(set(a) - _FRIENDLY - _CANONICAL)
         if unknown:
@@ -666,24 +742,28 @@ class Resolver:
                 path=f"{path}.arguments",
                 suggestion=(
                     "friendly form: title, description, options, inputs · "
-                    "canonical form: type=InputBased, input.schema, "
-                    "response_mapping, record, owner_detail, …"
+                    "canonical form: type=InputBased|DecisionBased, "
+                    "input.schema, response_mapping, record, owner_detail, "
+                    "agent_id, timeout, …"
                 ),
             ))
             return
-        # `type` if provided must be a known FSR ManualInput dispatch
-        # value. Corpus only ever shows "InputBased"; reject anything
-        # else (covers `type: textarea`, `type: single-select`, etc.).
+        # `type` if provided must be one of the two FSR ManualInput
+        # dispatch values. Live FSR uses both: InputBased for any
+        # form-collecting prompt, DecisionBased for button-only flows
+        # (no input form). Anything else is junk.
         t = a.get("type")
-        if t is not None and t != "InputBased":
+        if t is not None and t not in ("InputBased", "DecisionBased"):
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(
                     f"manual_input.arguments.type must be 'InputBased' "
-                    f"(got {t!r}); FSR has no other dispatch path"
+                    f"or 'DecisionBased' (got {t!r}); FSR has no other "
+                    f"dispatch paths"
                 ),
                 path=f"{path}.arguments.type",
-                suggestion="omit `type:` to let the compiler fill it in",
+                suggestion="omit `type:` to let the compiler choose "
+                           "InputBased (the default for any form-collecting prompt)",
             ))
             return
         if isinstance(a.get("input"), dict) and isinstance(
@@ -694,12 +774,27 @@ class Resolver:
         description = a.pop("description", "")
         raw_options = a.pop("options", None) or [{"option": "Continue", "primary": True}]
         options = []
+        # Per-option `next:` — promote into the step's branch map so the
+        # emitter can resolve label → step_iri the same way it does for
+        # decision steps. Previously the key was silently stripped, leaving
+        # multi-button prompts with no targets. See audit §3.
+        author_set_primary = False
         for o in raw_options:
             if isinstance(o, str):
                 options.append({"option": o})
             elif isinstance(o, dict):
+                if o.get("primary"):
+                    author_set_primary = True
+                opt_next = o.get("next")
+                opt_label = o.get("option")
+                if opt_next and opt_label:
+                    step.branches.setdefault(opt_label, opt_next)
                 options.append({k: v for k, v in o.items() if k != "next"})
-        if options and not any(o.get("primary") for o in options):
+        # Only auto-promote the first option to primary when the author
+        # left every option unmarked. ~31% of live MIs ship with no
+        # primary marker at all (FSR renders them as plain buttons).
+        if options and not author_set_primary and len(options) > 1:
+            # Multi-option prompts in the wild always pick a primary.
             options[0]["primary"] = True
         inputs = a.pop("inputs", None) or []
         expanded_inputs = self._expand_input_variables(inputs, path, errors)
@@ -725,7 +820,112 @@ class Resolver:
         a.setdefault("inline_channel_list", [])
         a.setdefault("external_channel_list", [])
         a.setdefault("unauthenticated_input", False)
+        # Mode-aware co-presence checks (audit §0). Run after canonical
+        # form is in place so we test the same shape that ships to FSR.
+        self._check_manual_input_modes(a, path, errors)
         step.arguments = a
+
+    # External-distribution keys gated by audience=external. Internal-only
+    # prompts shouldn't carry these; flag if they do.
+    _MI_EXTERNAL_KEYS = (
+        "customEmailExternal", "external_email_subject",
+        "external_email_attachments", "custom_email_body_external",
+    )
+
+    def _check_manual_input_modes(
+        self, a: dict[str, Any], path: str, errors: list[CompileError],
+    ) -> None:
+        """Enforce co-presence rules across the three UI-mode dimensions
+        documented in MI_DECISION_VALIDATION_AUDIT.md §0:
+          - Context: Record Linked vs Record Independent.
+          - Audience: Internal vs External (open form to non-FSR users).
+          - Assignment: owner_detail.isAssigned + exactly-one-target.
+        """
+        # Context — `isRecordLinked` ↔ `record`.
+        is_linked = bool(a.get("isRecordLinked"))
+        record = a.get("record")
+        if is_linked and not record:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=("manual_input: isRecordLinked=true requires a "
+                         "non-empty `record:` (the record IRI to attach "
+                         "the prompt to)"),
+                path=f"{path}.arguments.record",
+                suggestion='record: "{{ vars.input.records[0][\'@id\'] }}"',
+            ))
+        if not is_linked and record:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=("manual_input: `record:` is set but "
+                         "isRecordLinked=false; FSR ignores `record` "
+                         "in Record-Independent mode"),
+                path=f"{path}.arguments.isRecordLinked",
+                severity="warning",
+                suggestion="set isRecordLinked: true to attach the "
+                           "prompt to the record",
+            ))
+        # Audience — internal vs external. External = unauthenticated_input
+        # (link is publicly resolvable) OR inputExternalUser (form opens to
+        # non-FSR users via channel).
+        is_external = bool(a.get("unauthenticated_input")) or bool(a.get("inputExternalUser"))
+        bad_ext = [k for k in self._MI_EXTERNAL_KEYS if a.get(k)]
+        if not is_external and bad_ext:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"manual_input: external-distribution key(s) "
+                    f"{', '.join(repr(k) for k in bad_ext)} are set, but "
+                    f"the prompt is internal-only (unauthenticated_input "
+                    f"+ inputExternalUser are both false). FSR will "
+                    f"silently drop these at runtime."
+                ),
+                path=f"{path}.arguments",
+                suggestion="set unauthenticated_input: true (and usually "
+                           "inputExternalUser: true) to enable external "
+                           "delivery, or remove the customEmail*/external_* keys",
+            ))
+        if is_external and not (a.get("external_channel_list") or
+                                 a.get("inline_channel_list")):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=("manual_input: external-mode prompt has no "
+                         "delivery channels (external_channel_list and "
+                         "inline_channel_list both empty); recipients "
+                         "won't be notified"),
+                path=f"{path}.arguments.external_channel_list",
+                severity="warning",
+            ))
+        # Assignment — owner_detail.isAssigned ↔ exactly-one-target.
+        od = a.get("owner_detail") if isinstance(a.get("owner_detail"), dict) else {}
+        is_assigned = bool(od.get("isAssigned"))
+        targets = {
+            "assignedToPerson": od.get("assignedToPerson"),
+            "assignedToTeam":   od.get("assignedToTeam"),
+            "assignedToRecord": od.get("assignedToRecord"),
+            "assignedToField":  od.get("assignedToField"),
+        }
+        populated = [k for k, v in targets.items()
+                     if v not in (None, [], False, "")]
+        if is_assigned and len(populated) != 1:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"manual_input: owner_detail.isAssigned=true requires "
+                    f"exactly one of assignedToPerson/Team/Record/Field "
+                    f"populated (got {populated or 'none'})"
+                ),
+                path=f"{path}.arguments.owner_detail",
+            ))
+        if not is_assigned and populated:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"manual_input: owner_detail.isAssigned=false but "
+                    f"{', '.join(populated)} populated; either set "
+                    f"isAssigned=true or clear those keys"
+                ),
+                path=f"{path}.arguments.owner_detail",
+            ))
 
     def _normalize_code_snippet_args(self, step: Step) -> None:
         """Friendly Python-snippet step:
@@ -811,6 +1011,20 @@ class Resolver:
         a.setdefault("step_variables", {"input": {"params": []}})
         step.arguments = a
 
+    # Friendly-form keys we accept on set_variable. Anything else (most
+    # common: `variables`, `vars`, `set`) gets caught with a "did you
+    # mean?" suggestion. Without this gate the FSR runtime silently
+    # drops the keys and the playbook ships with no variables set —
+    # the bug that produced the down-rated session 60743f70.
+    _SET_VARIABLE_FRIENDLY = {"arg_list"}
+    _SET_VARIABLE_TYPOS: dict[str, str] = {
+        "variables": "arg_list",
+        "vars": "arg_list",
+        "set": "arg_list",
+        "values": "arg_list",
+        "step_variables": "arg_list",
+    }
+
     def _normalize_set_variable_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
@@ -820,10 +1034,30 @@ class Resolver:
         testing): `{var1, var2, var3}` flat dict. Accept the friendly
         `arg_list: [{name, value}, ...]` form as back-compat sugar and
         unwrap it.
+
+        Also flag common LLM typos (`variables:`, `vars:`, `set:`) that
+        would otherwise be silently passed through as opaque var names.
         """
         a = step.arguments
         if not isinstance(a, dict):
             return
+        # If the value is the friendly `[{name, value}, ...]` shape
+        # under a typo key, surface a clear fix.
+        for typo, canonical in self._SET_VARIABLE_TYPOS.items():
+            if typo in a and isinstance(a[typo], list) and a[typo] and \
+                    isinstance(a[typo][0], dict) and "name" in a[typo][0]:
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    message=(
+                        f"set_variable: {typo!r} is not a recognized key — "
+                        f"FSR drops it silently at runtime, leaving the "
+                        f"playbook with no variables set"
+                    ),
+                    path=f"{path}.arguments.{typo}",
+                    suggestion=f"rename {typo!r} → {canonical!r}",
+                    near=canonical,
+                ))
+                return
         if "arg_list" in a and isinstance(a["arg_list"], list):
             unwrapped: dict = {}
             for i, item in enumerate(a["arg_list"]):

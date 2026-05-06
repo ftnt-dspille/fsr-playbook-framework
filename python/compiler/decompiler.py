@@ -20,6 +20,74 @@ from .resolver import SHORT_TYPE_TO_FSR
 _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 
 
+def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
+    """Decompile FSR WorkflowCollection JSON into authored-style YAML.
+
+    Single-source-of-truth for the YAML serialization shape — the CLI
+    pull/diff/decompile commands and the `generate_recipe` MCP tool
+    both go through here so a recipe stored to the DB looks identical
+    to a recipe pulled from a live FSR.
+    """
+    import yaml
+
+    ir = decompile(fsr_json, db_path)
+    out = {
+        "collection": ir.name,
+        "description": ir.description,
+        "visible": ir.visible,
+        "playbooks": [
+            {
+                "name": pb.name,
+                "description": pb.description or None,
+                "tag": pb.tag or None,
+                "is_active": pb.is_active,
+                "trigger_step_id": pb.trigger_step_id,
+                "parameters": list(pb.parameters) or None,
+                "steps": [
+                    {
+                        "id": s.id,
+                        "type": s.type,
+                        "name": s.name if s.name != s.id else None,
+                        "arguments": s.arguments or None,
+                        "next": s.next,
+                        "branches": dict(s.branches) or None,
+                        "unlabeled_next": list(s.unlabeled_next) or None,
+                        "comment": s.comment,
+                    }
+                    for s in pb.steps
+                ],
+                "annotations": [
+                    {
+                        "id": a.id,
+                        "kind": a.kind if a.kind != "note" else None,
+                        "title": a.title if a.title != "Note" else None,
+                        "body": a.body or None,
+                        "contains": list(a.contains) or None,
+                        "position": (
+                            {"top": a.top, "left": a.left,
+                             "height": a.height or None, "width": a.width}
+                            if a.top is not None or a.left is not None
+                            else None
+                        ),
+                        "collapsed": a.collapsed or None,
+                    }
+                    for a in pb.annotations
+                ] or None,
+            }
+            for pb in ir.playbooks
+        ],
+    }
+
+    def _clean(o):
+        if isinstance(o, dict):
+            return {k: _clean(v) for k, v in o.items() if v is not None}
+        if isinstance(o, list):
+            return [_clean(x) for x in o]
+        return o
+
+    return yaml.safe_dump(_clean(out), sort_keys=False, allow_unicode=True)
+
+
 def _slugify(name: str, taken: set[str]) -> str:
     s = re.sub(r"[^a-z0-9_]+", "_", (name or "step").lower()).strip("_") or "step"
     base = s

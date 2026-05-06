@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { Marker } from '$lib/api';
   import { registerYamlCompletions } from '$lib/yamlCompletions';
+  import { registerYamlHover } from '$lib/yamlHover';
 
   let {
     value = '',
@@ -24,6 +25,7 @@
   let monacoRef = $state<any>(null);
   let modelRef = $state<any>(null);
   let completionDisposer: { dispose: () => void } | null = null;
+  let hoverDisposer: { dispose: () => void } | null = null;
   let internalUpdate = false;
 
   onMount(async () => {
@@ -42,6 +44,7 @@
     });
     modelRef = editor.getModel();
     completionDisposer = registerYamlCompletions(monaco);
+    hoverDisposer = registerYamlHover(monaco);
     editor.onDidChangeModelContent(() => {
       if (internalUpdate) return;
       onInput(editor.getValue());
@@ -51,6 +54,7 @@
 
   onDestroy(() => {
     completionDisposer?.dispose();
+    hoverDisposer?.dispose();
     editor?.dispose();
   });
 

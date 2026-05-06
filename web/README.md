@@ -18,13 +18,13 @@ web/
 Backend (from `web/`):
 ```
 uv pip install -e .[web]      # or: pip install fastapi uvicorn sse-starlette anthropic
-uvicorn backend.app:app --reload --port 8787
+uvicorn backend.app:app --reload --port 47821
 ```
 
 Frontend (from `web/frontend/`):
 ```
 pnpm install
-pnpm dev          # http://localhost:5173, proxies /api → :8787
+pnpm dev          # http://localhost:47822, proxies /api → :47821
 ```
 
-Health check: open `http://localhost:5173` — the header pill should go green when both processes are up.
+Health check: open `http://localhost:47822` — the header pill should go green when both processes are up.

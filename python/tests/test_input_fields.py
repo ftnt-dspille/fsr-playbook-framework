@@ -90,9 +90,21 @@ def test_kind_checkbox_expands(db_path):
     assert f["defaultValue"] is False
 
 
-def test_kind_richtext_expands_to_html_editor(db_path):
+def test_kind_richtext_expands_to_markdown_editor(db_path):
+    # Live FSR maps `richtext` to formType=richtext + markdownEditor.html.
+    # `kind: html` is the legacy alias that retains the old WYSIWYG shape
+    # (formType=html, htmlEditor.html). Verified against the live
+    # ManualInput corpus 2026-05-06.
     fields = _compile_and_get_inputs(
         db_path, "            - {name: body, kind: richtext}\n",
+    )
+    assert fields[0]["formType"] == "richtext"
+    assert fields[0]["templateUrl"].endswith("/markdownEditor.html")
+
+
+def test_kind_html_uses_html_editor(db_path):
+    fields = _compile_and_get_inputs(
+        db_path, "            - {name: body, kind: html}\n",
     )
     assert fields[0]["formType"] == "html"
     assert fields[0]["templateUrl"].endswith("/htmlEditor.html")

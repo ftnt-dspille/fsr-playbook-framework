@@ -15,9 +15,19 @@
     top_api_products: { name: string; category: string; entry_count: number }[];
   };
 
-  type ConnectorHit = { name: string; version: string; category: string };
-  type OperationHit = { connector_name: string; op_name: string; title: string };
+  type ConnectorHit = { name: string; version: string; category: string; label?: string };
+  type OperationHit = { connector_name: string; op_name: string; title: string; category?: string };
+  type StepTypeHit = { name: string; label: string | null; description: string | null };
   type JinjaHit = { name: string; signature: string };
+  type ModuleHit = { name: string; label: string | null; plural: string | null };
+  type ModuleFieldHit = { module_name: string; field_name: string; label: string | null; type: string };
+  type PlaybookStepHit = {
+    step_type_name: string | null;
+    step_name: string | null;
+    playbook_name: string | null;
+    collection: string | null;
+    source: string;
+  };
   type ApiExampleHit = {
     product: string;
     action: string;
@@ -29,7 +39,11 @@
   type SearchHit = {
     connectors: ConnectorHit[];
     operations: OperationHit[];
+    step_types: StepTypeHit[];
     jinja_macros: JinjaHit[];
+    modules: ModuleHit[];
+    module_fields: ModuleFieldHit[];
+    playbook_steps: PlaybookStepHit[];
     api_examples: ApiExampleHit[];
   };
 
@@ -42,7 +56,96 @@
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
   let toastTimeout: ReturnType<typeof setTimeout> | undefined;
 
-  const SUGGESTIONS = ['virustotal', 'fortigate', 'slack', 'picklist', 'http_request', 'github'];
+  // Curated, click-to-search browse chips. Each group targets a slice
+  // of the index so a user can explore "what's in here?" without ever
+  // typing — the most common request when demoing the dashboard.
+  type BrowseGroup = {
+    label: string;
+    blurb: string;
+    items: { term: string; alias?: string }[];
+  };
+  const BROWSE_GROUPS: BrowseGroup[] = [
+    {
+      label: 'Security & EDR connectors',
+      blurb: 'Endpoint, network, threat-intel vendors',
+      items: [
+        { term: 'virustotal' },
+        { term: 'crowdstrike' },
+        { term: 'sentinelone', alias: 'SentinelOne' },
+        { term: 'fortigate' },
+        { term: 'fortianalyzer' },
+        { term: 'paloalto', alias: 'Palo Alto' },
+        { term: 'splunk' },
+        { term: 'recorded future' },
+      ],
+    },
+    {
+      label: 'Identity, ticketing & chat',
+      blurb: 'IAM, ITSM, collaboration',
+      items: [
+        { term: 'okta' },
+        { term: 'azure ad', alias: 'Azure AD' },
+        { term: 'jira' },
+        { term: 'servicenow' },
+        { term: 'pagerduty' },
+        { term: 'slack' },
+        { term: 'teams' },
+        { term: 'github' },
+      ],
+    },
+    {
+      label: 'Common operations',
+      blurb: 'Action verbs across connectors',
+      items: [
+        { term: 'get_reputation' },
+        { term: 'scan_url' },
+        { term: 'isolate_endpoint' },
+        { term: 'block_ip' },
+        { term: 'send_message' },
+        { term: 'create_ticket' },
+        { term: 'http_request' },
+        { term: 'fetch_records' },
+      ],
+    },
+    {
+      label: 'Jinja filters',
+      blurb: 'Templating idioms used inside steps',
+      items: [
+        { term: 'picklist' },
+        { term: 'json_query' },
+        { term: 'fromIRI' },
+        { term: 'resolveRange' },
+        { term: 'b64encode' },
+        { term: 'regex_search' },
+        { term: 'tojson' },
+        { term: 'yaql' },
+      ],
+    },
+    {
+      label: 'Picklists',
+      blurb: 'Drop-down value sets the compiler resolves',
+      items: [
+        { term: 'Severity' },
+        { term: 'AlertStatus' },
+        { term: 'IncidentStatus' },
+        { term: 'TrafficLightProtocol', alias: 'TLP' },
+        { term: 'IndicatorType' },
+        { term: 'ThreatType' },
+      ],
+    },
+    {
+      label: 'API example verbs',
+      blurb: 'HTTP virtual-connector recipes',
+      items: [
+        { term: 'list users' },
+        { term: 'create incident' },
+        { term: 'update ticket' },
+        { term: 'search alerts' },
+        { term: 'send alert' },
+        { term: 'export report' },
+      ],
+    },
+  ];
 
   onMount(async () => {
     try {
@@ -81,14 +184,14 @@
         // We need entry_id on api_examples for the insert button — fetch
         // a richer search via the api-examples-aware endpoint when needed.
         const r = await fetch(
-          `/api/ref/inventory/search?q=${encodeURIComponent(needle)}&limit=5`
+          `/api/ref/inventory/search?q=${encodeURIComponent(needle)}&limit=15`
         );
         hits = r.ok ? await r.json() : null;
         // Enrich api_examples with entry_id by hitting search_api_examples.
         if (hits && needle.length > 1) {
           try {
             const r2 = await fetch(
-              `/api/ref/api-examples?q=${encodeURIComponent(needle)}&limit=5`
+              `/api/ref/api-examples?q=${encodeURIComponent(needle)}&limit=15`
             );
             if (r2.ok) {
               const richer = await r2.json();
@@ -131,8 +234,9 @@
   };
 </script>
 
-<div class="mx-auto max-w-6xl space-y-8 p-6">
-  <header>
+<div class="h-full overflow-y-auto">
+  <div class="mx-auto max-w-6xl space-y-8 p-6 pb-16">
+    <header>
     <h1 class="text-2xl font-semibold text-zinc-100">What the assistant knows</h1>
     <p class="mt-1 text-sm text-zinc-400">
       Every number here is a real row in a queryable index — not a guess.
@@ -212,24 +316,55 @@
       <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
         Cross-store search
       </h2>
-      <input
-        type="text"
-        bind:value={q}
-        placeholder="virustotal, ip reputation, picklist…"
-        class="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none"
-      />
-      {#if !q && !searching}
-        <div class="mt-2 flex flex-wrap gap-2 text-xs">
-          <span class="text-zinc-500">Try:</span>
-          {#each SUGGESTIONS as s}
-            <button
-              type="button"
-              class="rounded border border-zinc-800 px-2 py-0.5 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-              onclick={() => runSearch(s)}
-            >{s}</button>
+      <div class="flex items-center gap-2">
+        <input
+          type="text"
+          bind:value={q}
+          placeholder="virustotal, ip reputation, picklist…"
+          class="flex-1 rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none"
+        />
+        {#if q}
+          <button
+            type="button"
+            class="rounded border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+            onclick={() => runSearch('')}
+            title="Clear search"
+          >Clear</button>
+        {/if}
+      </div>
+
+      <!-- Always-visible browse panel. The whole point: zero typing
+           required. Each chip fires the same search the input would. -->
+      <div class="mt-4 rounded border border-zinc-800 bg-zinc-900/30 p-3">
+        <div class="mb-2 flex items-baseline justify-between">
+          <div class="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            Browse the index
+          </div>
+          <div class="text-[11px] text-zinc-600">
+            click any term to search across connectors, ops, filters & API examples
+          </div>
+        </div>
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {#each BROWSE_GROUPS as g}
+            <div>
+              <div class="mb-1 text-[11px] font-semibold uppercase text-zinc-300">
+                {g.label}
+              </div>
+              <div class="mb-2 text-[11px] text-zinc-500">{g.blurb}</div>
+              <div class="flex flex-wrap gap-1.5">
+                {#each g.items as it}
+                  <button
+                    type="button"
+                    class="rounded border px-2 py-0.5 text-xs transition-colors {q.trim().toLowerCase() === it.term.toLowerCase() ? 'border-emerald-600 bg-emerald-900/30 text-emerald-200' : 'border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}"
+                    onclick={() => runSearch(it.term)}
+                    title={`Search for "${it.term}"`}
+                  >{it.alias ?? it.term}</button>
+                {/each}
+              </div>
+            </div>
           {/each}
         </div>
-      {/if}
+      </div>
       {#if searching}
         <div class="mt-2 text-xs text-zinc-500">Searching…</div>
       {/if}
@@ -273,6 +408,26 @@
             {/if}
           </div>
 
+          <!-- Step types -->
+          {#if hits.step_types?.length}
+            <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3">
+              <div class="mb-2 text-xs font-semibold uppercase text-zinc-400">
+                Step types · {hits.step_types.length}
+              </div>
+              <ul class="space-y-1 text-sm">
+                {#each hits.step_types as t}
+                  <li>
+                    <span class="font-mono text-zinc-200">{t.name}</span>
+                    {#if t.label}<span class="text-xs text-zinc-500"> · {t.label}</span>{/if}
+                    {#if t.description}
+                      <div class="text-xs text-zinc-500 truncate">{t.description}</div>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+
           <!-- Jinja macros -->
           <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3">
             <div class="mb-2 text-xs font-semibold uppercase text-zinc-400">
@@ -290,6 +445,69 @@
               </ul>
             {/if}
           </div>
+
+          <!-- Modules -->
+          {#if hits.modules?.length}
+            <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3">
+              <div class="mb-2 text-xs font-semibold uppercase text-zinc-400">
+                Modules · {hits.modules.length}
+              </div>
+              <ul class="space-y-1 text-sm">
+                {#each hits.modules as m}
+                  <li>
+                    <span class="font-mono text-zinc-200">{m.name}</span>
+                    {#if m.label}<span class="text-xs text-zinc-500"> · {m.label}</span>{/if}
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+
+          <!-- Module fields -->
+          {#if hits.module_fields?.length}
+            <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3">
+              <div class="mb-2 text-xs font-semibold uppercase text-zinc-400">
+                Module fields · {hits.module_fields.length}
+              </div>
+              <ul class="space-y-1 text-sm">
+                {#each hits.module_fields as f}
+                  <li>
+                    <span class="font-mono text-zinc-200">
+                      {f.module_name}.{f.field_name}
+                    </span>
+                    <span class="text-xs text-zinc-500">
+                      · {f.type}{f.label ? ` · ${f.label}` : ''}
+                    </span>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+
+          <!-- Playbook step examples -->
+          {#if hits.playbook_steps?.length}
+            <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3">
+              <div class="mb-2 text-xs font-semibold uppercase text-zinc-400">
+                Playbook step examples · {hits.playbook_steps.length}
+              </div>
+              <ul class="space-y-1 text-sm">
+                {#each hits.playbook_steps as s}
+                  <li>
+                    <span class="font-mono text-zinc-200">
+                      {s.step_name || '(unnamed)'}
+                    </span>
+                    <span class="text-xs text-zinc-500">
+                      · {s.step_type_name || '?'}
+                    </span>
+                    <div class="text-xs text-zinc-500 truncate">
+                      {s.collection ? `${s.collection} / ` : ''}{s.playbook_name || ''}
+                      <span class="text-zinc-600"> · {s.source}</span>
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
 
           <!-- API examples — actionable -->
           <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3">
@@ -351,11 +569,12 @@
     </section>
   {/if}
 
-  {#if toast}
-    <div
-      class="fixed bottom-6 right-6 rounded border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg"
-    >
-      {toast}
-    </div>
-  {/if}
+    {#if toast}
+      <div
+        class="fixed bottom-6 right-6 rounded border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg"
+      >
+        {toast}
+      </div>
+    {/if}
+  </div>
 </div>

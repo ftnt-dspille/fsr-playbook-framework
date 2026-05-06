@@ -448,66 +448,11 @@ def _fetch_workflow_with_refs(client, ident: str) -> dict | None:
 
 
 def _decompile_to_yaml(coll, db_path: Path) -> str:
-    """Same shape as cmd_decompile output, factored for reuse by pull/diff."""
-    import yaml
-    from compiler.decompiler import decompile
-
-    ir = decompile(coll, db_path)
-    out = {
-        "collection": ir.name,
-        "description": ir.description,
-        "visible": ir.visible,
-        "playbooks": [
-            {
-                "name": pb.name,
-                "description": pb.description or None,
-                "tag": pb.tag or None,
-                "is_active": pb.is_active,
-                "trigger_step_id": pb.trigger_step_id,
-                "parameters": list(pb.parameters) or None,
-                "steps": [
-                    {
-                        "id": s.id,
-                        "type": s.type,
-                        "name": s.name if s.name != s.id else None,
-                        "arguments": s.arguments or None,
-                        "next": s.next,
-                        "branches": dict(s.branches) or None,
-                        "unlabeled_next": list(s.unlabeled_next) or None,
-                        "comment": s.comment,
-                    }
-                    for s in pb.steps
-                ],
-                "annotations": [
-                    {
-                        "id": a.id,
-                        "kind": a.kind if a.kind != "note" else None,
-                        "title": a.title if a.title != "Note" else None,
-                        "body": a.body or None,
-                        "contains": list(a.contains) or None,
-                        "position": (
-                            {"top": a.top, "left": a.left,
-                             "height": a.height or None, "width": a.width}
-                            if a.top is not None or a.left is not None
-                            else None
-                        ),
-                        "collapsed": a.collapsed or None,
-                    }
-                    for a in pb.annotations
-                ] or None,
-            }
-            for pb in ir.playbooks
-        ],
-    }
-
-    def _clean(o):
-        if isinstance(o, dict):
-            return {k: _clean(v) for k, v in o.items() if v is not None}
-        if isinstance(o, list):
-            return [_clean(x) for x in o]
-        return o
-
-    return yaml.safe_dump(_clean(out), sort_keys=False, allow_unicode=True)
+    """Thin shim — kept for call-site stability; logic lives in
+    `compiler.decompiler.decompile_to_yaml` so the MCP recipe tool and
+    the CLI emit identical YAML."""
+    from compiler.decompiler import decompile_to_yaml as _impl
+    return _impl(coll, db_path)
 
 
 def cmd_pull(args: argparse.Namespace) -> int:
@@ -1768,6 +1713,204 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_diagnose(args: argparse.Namespace) -> int:
+    """Diagnose a failed playbook run by re-rendering each step's
+    arguments against the run's actual `vars` env. Pure read; mutates
+    nothing on the FSR. Pairs with `fsrpb runs` to find the pb_execution
+    id of a failure."""
+    text = Path(args.yaml).read_text()
+    from mcp_server import diagnose_yaml_against_pb_execution
+    out = diagnose_yaml_against_pb_execution(text, args.pb_execution)
+    if args.json:
+        print(json.dumps(out, indent=2, default=str))
+        return 0 if out.get("ok") else 1
+    if not out.get("ok") and "code" in out and "step_diagnostics" not in out:
+        print(f"FAIL [{out.get('code')}] {out.get('message')}", file=sys.stderr)
+        return 1
+    print(f"run_status: {out.get('run_status')!r}", file=sys.stderr)
+    for d in out.get("step_diagnostics", []):
+        tag = "OK  " if d.get("ok") else "FAIL"
+        print(f"  {tag} [{d.get('code')}] {d['step']!r} {d['arg_path']}",
+              file=sys.stderr)
+        if not d.get("ok"):
+            print(f"       template: {d['template']!r}", file=sys.stderr)
+            if "message" in d:
+                print(f"       message:  {d['message']}", file=sys.stderr)
+    for h in out.get("hints", []):
+        print(f"\nhint: {h}", file=sys.stderr)
+    return 0 if out.get("ok") else 1
+
+
+def cmd_picklist(args: argparse.Namespace) -> int:
+    """Picklist exploration / resolution against the live FSR.
+
+    Subcommands:
+      list                       — every picklist `listName.name`
+      show <name>                — items of one picklist
+      for-field <module> <field> — auto-discover picklist behind a field
+      resolve <value> [--name]   — friendly value -> IRI
+    """
+    sub = args.picklist_cmd
+    if sub == "list":
+        from mcp_server import list_picklists
+        out = list_picklists()
+    elif sub == "show":
+        from mcp_server import get_picklist
+        out = get_picklist(args.name)
+    elif sub == "for-field":
+        from mcp_server import picklist_for_field
+        out = picklist_for_field(args.module, args.field)
+    elif sub == "resolve":
+        from mcp_server import resolve_picklist_value
+        out = resolve_picklist_value(
+            value=args.value,
+            picklist_name=args.name, module=args.module, field=args.field,
+        )
+    else:
+        print(f"unknown picklist subcommand {sub!r}", file=sys.stderr)
+        return 2
+    print(json.dumps(out, indent=2, default=str))
+    return 0 if not out.get("error") else 1
+
+
+def cmd_jinja_filter(args: argparse.Namespace) -> int:
+    """Search the jinja filter catalog and (optionally) show real
+    corpus examples. Pure local DB read."""
+    from mcp_server import find_jinja_filter, get_filter_examples
+    if args.examples:
+        out = get_filter_examples(args.query, limit=args.limit)
+    else:
+        out = find_jinja_filter(args.query, limit=args.limit)
+    print(json.dumps(out, indent=2, default=str))
+    return 0 if isinstance(out, list) or not out.get("error") else 1
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    """FTS over the live playbook corpus. Same as `find` but a single
+    one-positional shorthand for `search_playbooks(q)`."""
+    from mcp_server import search_playbooks
+    out = search_playbooks(args.query, limit=args.limit)
+    if args.json:
+        print(json.dumps(out, indent=2, default=str))
+        return 0
+    for hit in out:
+        print(f"  {hit.get('name', '?')}  ({hit.get('collection', '?')})",
+              file=sys.stderr)
+        snip = hit.get("snippet", "")
+        if snip:
+            print(f"    {snip[:140]}", file=sys.stderr)
+    return 0
+
+
+def cmd_recipe(args: argparse.Namespace) -> int:
+    """Recipe lookup. `fsrpb generate-recipe` mints; this reads back."""
+    sub = args.recipe_cmd
+    if sub == "find":
+        from mcp_server import find_recipe
+        out = find_recipe(query=args.query or "", kind=args.kind,
+                          limit=args.limit)
+    elif sub == "show":
+        from mcp_server import find_recipe
+        rs = find_recipe(query=args.name, limit=1)
+        out = (rs["recipes"][0] if rs.get("recipes")
+               else {"error": f"no recipe named {args.name!r}"})
+    else:
+        print(f"unknown recipe subcommand {sub!r}", file=sys.stderr)
+        return 2
+    if args.yaml and isinstance(out, dict) and out.get("yaml_template"):
+        print(out["yaml_template"])
+        return 0
+    print(json.dumps(out, indent=2, default=str))
+    return 0 if not (isinstance(out, dict) and out.get("error")) else 1
+
+
+def cmd_demo_prep(args: argparse.Namespace) -> int:
+    """Reset the configured FSR to a known demo state.
+
+    Wraps `probe_cleanup` to delete leftover `fsrpb` test collections
+    (`Compiler Demo*`, `*__fsrpb_probe__*`, `Compiler Examples*`) and
+    any extra glob the user passes via `--pattern`. Gated on the same
+    `FSR_ALLOW_E2E=true` envvar the probe enforces — accidental import
+    can't run this.
+    """
+    if os.environ.get("FSR_ALLOW_E2E", "").lower() not in (
+        "1", "true", "yes",
+    ):
+        print("FSR_ALLOW_E2E not set — refusing to mutate the live FSR. "
+              "Set FSR_ALLOW_E2E=true and re-run.", file=sys.stderr)
+        return 2
+    extra = list(args.pattern or [])
+    if extra:
+        # Append user-provided globs to probe_cleanup's defaults
+        # (the env var is the documented hand-off the probe already
+        # honors at probe_cleanup.py:67).
+        os.environ["FSRPB_CLEANUP_PATTERNS"] = ",".join(extra)
+    from probes import probe_cleanup
+    return probe_cleanup.main()
+
+
+def cmd_evals(args: argparse.Namespace) -> int:
+    """Run the LLM-evaluation harness over the task corpus.
+
+    Prints a per-cell score table (L1 compile / L2 resolve / L3 var-
+    reachability / L4 dry-run / gold byte-equal) plus per-model totals.
+    Use `--json` to capture the full matrix for archiving.
+    """
+    from evals.harness import render_text, run_matrix
+    models = [m.strip() for m in args.models.split(",") if m.strip()]
+    task_filter = ([t.strip() for t in args.tasks.split(",")]
+                   if args.tasks else None)
+    matrix = run_matrix(
+        model_names=models, task_names=task_filter, live=args.live,
+    )
+    if args.json:
+        print(json.dumps(matrix, indent=2, default=str))
+        return 0 if all(r.get("score", 0) > 0 for r in matrix["rows"]) else 1
+    print(render_text(matrix))
+    # Exit 0 if any model got a non-zero score (sanity check), else 1.
+    any_progress = any(s.get("score", 0) > 0
+                       for s in matrix["summary"].values())
+    return 0 if any_progress else 1
+
+
+def cmd_assert(args: argparse.Namespace) -> int:
+    """Run declarative outcome assertions against the live FSR.
+
+    Reads a JSON list of assertions (file path, `-` for stdin, or
+    inline JSON) and dispatches to the assert_playbook_outcome MCP
+    tool. Exit 0 if all pass, 1 otherwise.
+    """
+    raw = args.input
+    if raw == "-":
+        payload = sys.stdin.read()
+    elif raw.lstrip().startswith("[") or raw.lstrip().startswith("{"):
+        payload = raw
+    else:
+        payload = Path(raw).read_text()
+    try:
+        assertions = json.loads(payload)
+    except json.JSONDecodeError as e:
+        print(f"failed to parse assertions JSON: {e}", file=sys.stderr)
+        return 2
+    if isinstance(assertions, dict):
+        assertions = [assertions]
+    from mcp_server import assert_playbook_outcome
+    result = assert_playbook_outcome(assertions)
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("ok") else 1
+    if "results" not in result:
+        print(f"FAIL [{result.get('code')}] {result.get('message')}",
+              file=sys.stderr)
+        return 1
+    for r in result["results"]:
+        tag = "PASS" if r.get("ok") else "FAIL"
+        print(f"{tag} [{r.get('code')}] {r.get('message')}", file=sys.stderr)
+    print(f"\n{result['passed']}/{result['total']} assertion(s) passed",
+          file=sys.stderr)
+    return 0 if result.get("ok") else 1
+
+
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Run the L2 success-ladder gate: structural + live prechecks.
 
@@ -2602,7 +2745,38 @@ _PROBES: dict[str, tuple[str, str]] = {
     "constraints":   ("probes.probe_playbook_constraints", "playbook constraint rules"),
     "cleanup":       ("probes.probe_cleanup",           "remove fsrpb test artifacts from FSR"),
     "jinja-corpus":  ("probes.probe_jinja_corpus",       "mine all Jinja blocks (expr/set/for/if/macro) + filter usage from live workflows"),
+    "playbook-steps":("probes.probe_playbook_steps",     "index every step from every FSR playbook JSON export on disk"),
 }
+
+
+def cmd_find_step_examples(args: argparse.Namespace) -> int:
+    """Search the playbook_steps corpus by step type + optional sub-key."""
+    import json as _json
+    import sqlite3
+    conn = sqlite3.connect(args.db)
+    conn.row_factory = sqlite3.Row
+    sql = ("SELECT step_name, playbook_name, source, source_path, "
+           "arguments_json FROM playbook_steps WHERE step_type_name = ?")
+    params: list[object] = [args.step_type]
+    if args.contains:
+        sql += " AND arguments_json LIKE ?"
+        params.append(f"%{args.contains}%")
+    sql += " LIMIT ?"
+    params.append(args.limit)
+    rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    for r in rows:
+        try:
+            r["arguments"] = _json.loads(r.pop("arguments_json"))
+        except _json.JSONDecodeError:
+            pass
+    if args.json:
+        print(_json.dumps(rows, indent=2))
+        return 0
+    print(f"{len(rows)} matches for step_type={args.step_type!r}"
+          + (f" containing {args.contains!r}" if args.contains else ""))
+    for r in rows:
+        print(f"  - {r['step_name']!r}  ({r['playbook_name']}, {r['source']})")
+    return 0
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
@@ -2652,6 +2826,8 @@ def cmd_probe(args: argparse.Namespace) -> int:
         try:
             import importlib
             mod = importlib.import_module(module_path)
+            if getattr(args, "live", False):
+                os.environ["FSRPB_PROBE_LIVE"] = "1"
             rc = mod.main()
             if rc:
                 print(f"[{name}] exited with code {rc}", file=sys.stderr)
@@ -2786,6 +2962,121 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true",
                     help="emit full result as JSON on stdout")
     sp.set_defaults(func=cmd_resolve)
+
+    sp = sub.add_parser(
+        "diagnose",
+        help="diagnose a failed run by re-rendering step args against "
+             "the run's vars env (read-only)",
+    )
+    sp.add_argument("yaml", help="path to the playbook YAML")
+    sp.add_argument("pb_execution",
+                    help="workflow PK or task_id of the run")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_diagnose)
+
+    sp = sub.add_parser(
+        "picklist",
+        help="picklist exploration + resolution against the live FSR",
+    )
+    psub = sp.add_subparsers(dest="picklist_cmd", required=True)
+    psub.add_parser("list", help="every picklist listName.name") \
+       .set_defaults(func=cmd_picklist)
+    pl_show = psub.add_parser("show", help="items of one picklist")
+    pl_show.add_argument("name")
+    pl_show.set_defaults(func=cmd_picklist)
+    pl_ff = psub.add_parser("for-field",
+                            help="auto-discover picklist behind a field")
+    pl_ff.add_argument("module")
+    pl_ff.add_argument("field")
+    pl_ff.set_defaults(func=cmd_picklist)
+    pl_res = psub.add_parser("resolve", help="friendly value -> IRI")
+    pl_res.add_argument("value")
+    pl_res.add_argument("--name", default=None,
+                        help="picklist listName.name (overrides discovery)")
+    pl_res.add_argument("--module", default=None)
+    pl_res.add_argument("--field", default=None)
+    pl_res.set_defaults(func=cmd_picklist)
+
+    sp = sub.add_parser(
+        "jinja-filter",
+        help="search the jinja filter catalog (and corpus examples)",
+    )
+    sp.add_argument("query", help="filter name or substring")
+    sp.add_argument("--examples", action="store_true",
+                    help="show real corpus expressions instead of hits")
+    sp.add_argument("--limit", type=int, default=8)
+    sp.set_defaults(func=cmd_jinja_filter)
+
+    sp = sub.add_parser(
+        "search",
+        help="FTS over the live playbook corpus (one-positional)",
+    )
+    sp.add_argument("query")
+    sp.add_argument("--limit", type=int, default=10)
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_search)
+
+    sp = sub.add_parser(
+        "recipe",
+        help="look up persisted recipes (use generate-recipe to create)",
+    )
+    rsub = sp.add_subparsers(dest="recipe_cmd", required=True)
+    rf = rsub.add_parser("find", help="search by name/connector/kind")
+    rf.add_argument("query", nargs="?", default="")
+    rf.add_argument("--kind", default=None,
+                    help="threat_feed | data_ingest")
+    rf.add_argument("--limit", type=int, default=10)
+    rf.add_argument("--yaml", action="store_true",
+                    help="print just the yaml_template if exactly one hit")
+    rf.set_defaults(func=cmd_recipe)
+    rs_show = rsub.add_parser("show",
+                              help="print one recipe by exact name")
+    rs_show.add_argument("name")
+    rs_show.add_argument("--yaml", action="store_true",
+                         help="print yaml_template only")
+    rs_show.set_defaults(func=cmd_recipe, query=None, kind=None, limit=1)
+
+    sp = sub.add_parser(
+        "demo",
+        help="reset the configured FSR to a clean demo state",
+    )
+    dsub = sp.add_subparsers(dest="demo_cmd", required=True)
+    sp_prep = dsub.add_parser(
+        "prep",
+        help="purge leftover fsrpb-test collections (FSR_ALLOW_E2E gated)",
+    )
+    sp_prep.add_argument("--pattern", action="append", default=[],
+                         help="extra glob to purge (repeatable)")
+    sp_prep.set_defaults(func=cmd_demo_prep)
+
+    sp = sub.add_parser(
+        "evals",
+        help="LLM-evaluation harness: score each model's authoring on "
+             "the task corpus (L1..L4 + gold-fixture byte-equal)",
+    )
+    sp.add_argument("--models", default="gold,echo",
+                    help="comma-separated provider names "
+                         "(gold, echo, anthropic, openai, lmstudio)")
+    sp.add_argument("--tasks", default=None,
+                    help="comma-separated task names; default = all")
+    sp.add_argument("--live", action="store_true",
+                    help="enable L2 (resolve) + L4 (dry-run) gates "
+                         "against the live FSR")
+    sp.add_argument("--json", action="store_true",
+                    help="emit the full matrix as JSON on stdout")
+    sp.set_defaults(func=cmd_evals)
+
+    sp = sub.add_parser(
+        "assert",
+        help="L5 gate: assert post-run outcomes (record exists, "
+             "field equals, count) against the live FSR",
+    )
+    sp.add_argument("input",
+                    help="path to JSON file with a list of assertions, "
+                         "'-' for stdin, or an inline JSON array")
+    sp.add_argument("--json", action="store_true",
+                    help="emit full result as JSON on stdout")
+    sp.set_defaults(func=cmd_assert)
 
     sp = sub.add_parser(
         "generate-recipe",
@@ -2974,6 +3265,19 @@ def build_parser() -> argparse.ArgumentParser:
                       help="per-table result cap")
     sp.set_defaults(func=cmd_inventory)
 
+    sp = sub.add_parser(
+        "find-step-examples",
+        help="search the playbook_steps corpus for real-world examples of a step type",
+    )
+    sp.add_argument("step_type",
+                    help="step_types.name e.g. ManualInput, Decision, SetVariable")
+    sp.add_argument("--contains", default=None,
+                    help="optional substring that must appear in arguments_json "
+                         "(e.g. 'ipv4', 'formType\":\"lookup', 'default\":true')")
+    sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_find_step_examples)
+
     sp = sub.add_parser("chat-stats",
                         help="summarise web/backend/usage.jsonl token telemetry")
     sp.add_argument("path", nargs="?", default=None,
@@ -2995,6 +3299,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="probe name(s) to run (omit with --all)")
     sp.add_argument("--all", action="store_true", help="run all probes in order")
     sp.add_argument("--list", action="store_true", help="list available probes and exit")
+    sp.add_argument("--live", action="store_true",
+                    help="pass through to probes that support a live-FSR mode "
+                         "(currently: playbook-steps)")
     sp.set_defaults(func=cmd_probe)
 
     return p

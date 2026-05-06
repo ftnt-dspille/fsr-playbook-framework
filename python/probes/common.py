@@ -108,6 +108,7 @@ PROBE_TABLES: dict[str, tuple[str, ...]] = {
     "probe_playbook_constraints": (),
     "probe_cleanup": (),
     "probe_jinja_corpus": ("jinja_expressions", "jinja_filter_usage"),
+    "probe_playbook_steps": ("playbook_steps",),
 }
 
 
