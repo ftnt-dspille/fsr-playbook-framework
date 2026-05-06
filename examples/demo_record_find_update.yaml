@@ -28,12 +28,12 @@ playbooks:
     is_active: true
     parameters: [target_uuid]
     steps:
-      - type: start
+      - name: trigger
+        type: start
         next: Find target alert
-
-        name: trigger
-      - type: find_record
-        name: Find target alert
+      - name: Find target alert
+        type: find_record
+        next: Stamp description
         arguments:
           module: alerts
           query:
@@ -46,10 +46,8 @@ playbooks:
                 _operator: eq
             __selectFields: [uuid, name, description]
           step_variables: []
-        next: Stamp description
-
-      - type: update_record
-        name: Stamp description
+      - name: Stamp description
+        type: update_record
         arguments:
           collection: "{{ vars.steps.Find_target_alert[0]['@id'] }}"
           collectionType: /api/3/alerts

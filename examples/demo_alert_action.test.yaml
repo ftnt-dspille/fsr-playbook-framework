@@ -32,5 +32,4 @@ expects:
       status: finished
     No_action_(low_severity):
       status: skipped
-
 cleanup: true

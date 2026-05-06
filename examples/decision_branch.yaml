@@ -1,9 +1,6 @@
-# Branching: a Decision step routes to different next-steps based on a condition.
-# Each entry under `branches:` maps a `conditions[].option` label to a step id.
-# The default fall-through ("else") path goes on the decision step's `next:`.
-#
-# `set_variable.arguments` is a flat {var_name: value} dict — the keys are
-# the variables to set.
+# Branching: a Decision step routes to different next-steps based on
+# a condition. Each entry under `conditions:` has a `when:` expression
+# and `next:` target; one entry has `default: true` for the else path.
 
 collection: Compiler Examples
 description: Decision branching with high/low severity routing.
@@ -13,18 +10,16 @@ playbooks:
   - name: Route By Severity
     description: Demonstrate decision branches.
     steps:
-      - type: start
+      - name: start
+        type: start
         next: Read severity
-
-        name: start
-      - type: set_variable
-        name: Read severity
+      - name: Read severity
+        type: set_variable
         next: Branch on severity
-
         vars:
           severity: "{{ vars.input.records[0].severity }}"
-      - type: decision
-        name: Branch on severity
+      - name: Branch on severity
+        type: decision
         conditions:
           - display: high
             when: "{{ vars.severity in ['critical', 'high'] }}"
@@ -32,11 +27,11 @@ playbooks:
           - display: Else
             default: true
             next: Log low severity
-      - type: set_variable
-        name: Escalate to Tier 2
+      - name: Escalate to Tier 2
+        type: set_variable
         vars:
           tier: "tier2"
-      - type: set_variable
-        name: Log low severity
+      - name: Log low severity
+        type: set_variable
         vars:
           tier: "tier1"

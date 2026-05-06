@@ -6,18 +6,16 @@ playbooks:
   - name: Hello Connector
     description: Demonstrates start -> set_variable -> connector flow.
     steps:
-      - type: start
-        name: Start
+      - name: Start
+        type: start
         next: Prepare inputs
-
-      - type: set_variable
-        name: Prepare inputs
+      - name: Prepare inputs
+        type: set_variable
         next: Get organization
-
         vars:
           target_org: "Fortinet"
-      - type: connector
-        name: Get organization
+      - name: Get organization
+        type: connector
         arguments:
           connector: fortinet-fortisiem
           operation: get_org_name_by_org_id

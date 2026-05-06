@@ -14,18 +14,17 @@ playbooks:
   - name: FSRPB Demo - On Alert Status Change
     is_active: true
     steps:
-      - type: start_on_update
-        name: On Alert Status Change
+      - name: On Alert Status Change
+        type: start_on_update
+        next: Stamp marker
         arguments:
           module: alerts
           when:
             logic: OR
             filters:
               - {field: status, op: changed}
-        next: Stamp marker
-
-      - type: update_record
-        name: Stamp marker
+      - name: Stamp marker
+        type: update_record
         arguments:
           collection: "{{ vars.input.records[0]['@id'] }}"
           module: alerts                # → collectionType: /api/3/alerts

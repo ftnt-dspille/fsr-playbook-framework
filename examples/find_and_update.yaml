@@ -23,12 +23,12 @@ playbooks:
       - indicator_value
       - tag
     steps:
-      - type: start
+      - name: start
+        type: start
         next: find
-
-        name: start
-      - type: find_record
-        name: find
+      - name: find
+        type: find_record
+        next: Apply tag
         arguments:
           module: indicators
           query:
@@ -38,10 +38,8 @@ playbooks:
                 operator: eq
                 value: "{{ vars.input.params.indicator_value }}"
           partial: true
-        next: Apply tag
-
-      - type: update_record
-        name: Apply tag
+      - name: Apply tag
+        type: update_record
         arguments:
           collection: indicators
           resource:

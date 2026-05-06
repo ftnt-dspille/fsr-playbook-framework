@@ -12,8 +12,9 @@ playbooks:
   - name: FSRPB Demo - On Alert Create
     is_active: true
     steps:
-      - type: start_on_create
-        name: On Alert Create
+      - name: On Alert Create
+        type: start_on_create
+        next: Stamp marker
         arguments:
           module: alerts
           when:
@@ -23,10 +24,8 @@ playbooks:
               # like `type`/`severity` store IRIs, not display values,
               # so a literal-string `like` filter on them never matches.
               - {field: name, op: like, value: "%fsrpb_e2e_on_create%"}
-        next: Stamp marker
-
-      - type: update_record
-        name: Stamp marker
+      - name: Stamp marker
+        type: update_record
         arguments:
           collection: "{{ vars.input.records[0]['@id'] }}"
           module: alerts

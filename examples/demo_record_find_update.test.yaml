@@ -26,5 +26,4 @@ expects:
     capture: alert
     contains:                         # substring match (use `fields:` for exact)
       description: "fsrpb e2e — stamped at"
-
 cleanup: true

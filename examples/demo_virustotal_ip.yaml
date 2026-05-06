@@ -17,28 +17,25 @@ playbooks:
     is_active: true
     parameters: [ip]
     steps:
-      - type: start
+      - name: start
+        type: start
         next: Query VirusTotal
-
-        name: start
-      - type: connector
-        name: Query VirusTotal
+      - name: Query VirusTotal
+        type: connector
+        next: Extract malicious count
         arguments:
           connector: virustotal
           operation: query_ip
           config: ""
           params:
             ip: "{{ vars.input.params.ip }}"
-        next: Extract malicious count
-
-      - type: set_variable
-        name: Extract malicious count
+      - name: Extract malicious count
+        type: set_variable
         next: Branch on verdict
-
         vars:
           malicious_count: "{{ vars.steps.Query_VirusTotal.data.attributes.last_analysis_stats.malicious }}"
-      - type: decision
-        name: Branch on verdict
+      - name: Branch on verdict
+        type: decision
         conditions:
           - display: malicious
             when: "{{ (vars.malicious_count | int) > 0 }}"
@@ -46,11 +43,11 @@ playbooks:
           - display: clean
             when: "{{ (vars.malicious_count | int) == 0 }}"
             next: Stamp clean
-      - type: set_variable
-        name: Stamp malicious
+      - name: Stamp malicious
+        type: set_variable
         vars:
           verdict: "malicious"
-      - type: set_variable
-        name: Stamp clean
+      - name: Stamp clean
+        type: set_variable
         vars:
           verdict: "clean"

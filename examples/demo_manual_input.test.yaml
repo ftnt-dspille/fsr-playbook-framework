@@ -19,5 +19,4 @@ expects:
       status: finished
     Stamp_approved:
       status: finished
-
 cleanup: true

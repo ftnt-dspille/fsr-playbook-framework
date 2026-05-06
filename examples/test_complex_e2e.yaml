@@ -10,19 +10,17 @@ playbooks:
     is_active: true
     parameters: [score]
     steps:
-      - type: start
-        name: Run
+      - name: Run
+        type: start
         next: Pull from input
-
-      - type: set_variable
-        name: Pull from input
+      - name: Pull from input
+        type: set_variable
         next: Final
-
         vars:
           score_int: "{{ vars.input.params.score }}"
           label_seed: "score-{{ vars.input.params.score }}"
-      - type: set_variable
-        name: Final
+      - name: Final
+        type: set_variable
         vars:
           final_label: "{{ vars.label_seed }}-final"
           final_status: complete

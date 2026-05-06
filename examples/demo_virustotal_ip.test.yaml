@@ -24,5 +24,4 @@ expects:
       status: finished
     Stamp_malicious:
       status: skipped
-
 cleanup: true

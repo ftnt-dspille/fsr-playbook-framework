@@ -16,11 +16,11 @@ playbooks:
     is_active: true
     parameters: [base]
     steps:
-      - type: start
+      - name: start
+        type: start
         next: Compute product
-        name: start
-      - type: set_variable
-        name: Compute product
+      - name: Compute product
+        type: set_variable
         vars:
           product: "{{ (vars.input.params.base | int) * 10 }}"
   - name: FSRPB Parent Caller
@@ -28,12 +28,12 @@ playbooks:
     is_active: true
     parameters: [base]
     steps:
-      - type: start
+      - name: start
+        type: start
         next: Call multiplier
-
-        name: start
-      - type: workflow_reference
-        name: Call multiplier
+      - name: Call multiplier
+        type: workflow_reference
+        next: Stamp result
         arguments:
           target: FSRPB Score Multiplier
           arguments:
@@ -42,9 +42,7 @@ playbooks:
           pass_parent_env: false
           pass_input_record: false
           step_variables: []
-        next: Stamp result
-
-      - type: set_variable
-        name: Stamp result
+      - name: Stamp result
+        type: set_variable
         vars:
           final_product: "{{ vars.steps.Call_multiplier.product }}"

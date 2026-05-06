@@ -8,21 +8,21 @@ playbooks:
       - hostname
       - dns_server
     steps:
-      - type: start
+      - name: start
+        type: start
         next: Stub lookup
-        name: start
-      - type: set_variable
-        name: Stub lookup
+      - name: Stub lookup
+        type: set_variable
         vars:
           ip: "10.0.0.1  # would be {{vars.input.params.hostname}} resolved via {{vars.input.params.dns_server}}"
   - name: Add Host And Resolve
     description: Parent — calls Resolve Hostname with input args.
     steps:
-      - type: start
+      - name: start
+        type: start
         next: Resolve via child playbook
-        name: start
-      - type: workflow_reference
-        name: Resolve via child playbook
+      - name: Resolve via child playbook
+        type: workflow_reference
         arguments:
           target: Resolve Hostname        # local-name reference; emitter rewrites to IRI
           arguments:

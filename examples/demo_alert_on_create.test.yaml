@@ -26,5 +26,4 @@ expects:
     capture: alert
     contains:
       description: fsrpb_e2e_on_create_marker
-
 cleanup: true

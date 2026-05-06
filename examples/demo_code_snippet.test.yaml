@@ -13,5 +13,4 @@ expects:
       status: finished
     Stamp_greeting:
       status: finished
-
 cleanup: true

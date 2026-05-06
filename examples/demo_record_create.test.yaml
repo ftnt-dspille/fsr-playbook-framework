@@ -11,7 +11,6 @@ expects:
   steps:
     Create_alert:
       status: finished
-
 # Cleanup pattern — the playbook creates a record we don't capture as a
 # setup record, so the runner can't auto-delete it. After the run, query
 # alerts by marker and hard-purge.

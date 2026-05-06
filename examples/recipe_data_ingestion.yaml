@@ -32,12 +32,12 @@ playbooks:
     tag: "dataingestion, fetch, todo_connector_api_name"
     parameters: [lastPullTime]
     steps:
-      - type: start
-        name: Start
+      - name: Start
+        type: start
         next: Fetch records
-
-      - type: connector
-        name: Fetch records
+      - name: Fetch records
+        type: connector
+        next: Capture data
         comment: |
           TODO replace BOTH connector and operation. Placeholder
           (cyops_utilities.get_macro_list) keeps this recipe compilable
@@ -68,10 +68,8 @@ playbooks:
                 ]
               }
             }
-        next: Capture data
-
-      - type: set_variable
-        name: Capture data
+      - name: Capture data
+        type: set_variable
         comment: |
           TODO point `data` at the array path inside the fetch result
           (e.g. `vars.steps.Fetch_records.data.records`).
@@ -83,12 +81,11 @@ playbooks:
     tag: "dataingestion, create, todo_connector_api_name"
     parameters: [ingestedData]
     steps:
-      - type: start
-        name: Start
+      - name: Start
+        type: start
         next: Any records
-
-      - type: decision
-        name: Any records
+      - name: Any records
+        type: decision
         comment: |
           Error gateway — if the parent passed an empty array, fail loud
           rather than silently looping zero times.
@@ -99,17 +96,16 @@ playbooks:
           - display: Else
             default: true
             next: Raise empty input
-      - type: connector
-        name: Raise empty input
+      - name: Raise empty input
+        type: connector
         arguments:
           connector: cyops_utilities
           operation: raise_exception
           config: ""
           params:
             msg: "Create called with empty ingestedData — Fetch returned no records."
-
-      - type: create_record
-        name: Create alert per item
+      - name: Create alert per item
+        type: create_record
         comment: |
           NON-bulk on purpose — on-create alert playbooks must fire.
           TODO adjust the resource field mapping below to match your
@@ -132,7 +128,6 @@ playbooks:
             sourceId: "{{ vars.item.id }}"                # required for dedupe
             sourceData: "{{ vars.item | toJSON }}"
           step_variables: []
-
   # ---------------------------------------------------------------- Ingest
   - name: "TODO Connector > Ingest"
     description: Orchestrator — pulls Fetch, hands records to Create.
@@ -140,12 +135,11 @@ playbooks:
     tag: "dataingestion, ingest, todo_connector_api_name"
     parameters: [env_setup, lastPullTime]
     steps:
-      - type: start
-        name: Start
+      - name: Start
+        type: start
         next: Mapping preview
-
-      - type: decision
-        name: Mapping preview
+      - name: Mapping preview
+        type: decision
         comment: |
           The Wizard sets `env_setup=true` while users design the field
           mapping in the UI; in that mode we return a sample record
@@ -158,8 +152,8 @@ playbooks:
           - display: Else
             default: true
             next: Call Fetch
-      - type: set_variable
-        name: Return sample shape
+      - name: Return sample shape
+        type: set_variable
         comment: |
           TODO replace this stub with a representative single-record
           sample so the Wizard's mapping preview shows real fields.
@@ -169,9 +163,9 @@ playbooks:
             name: "TODO sample alert name"
             severity: "Medium"
             description: "TODO sample description"
-
-      - type: workflow_reference
-        name: Call Fetch
+      - name: Call Fetch
+        type: workflow_reference
+        next: Fetch returned data
         arguments:
           target: "TODO Connector > Fetch"
           arguments:
@@ -180,10 +174,8 @@ playbooks:
           pass_parent_env: false
           pass_input_record: false
           step_variables: []
-        next: Fetch returned data
-
-      - type: decision
-        name: Fetch returned data
+      - name: Fetch returned data
+        type: decision
         conditions:
           - display: "yes"
             when: "{{ (vars.steps.Call_Fetch.data | default([]) | length) > 0 }}"
@@ -191,17 +183,16 @@ playbooks:
           - display: Else
             default: true
             next: Raise no data
-      - type: connector
-        name: Raise no data
+      - name: Raise no data
+        type: connector
         arguments:
           connector: cyops_utilities
           operation: raise_exception
           config: ""
           params:
             msg: "Ingest: Fetch returned no records (lastPullTime={{ vars.input.params.lastPullTime }})"
-
-      - type: workflow_reference
-        name: Call Create
+      - name: Call Create
+        type: workflow_reference
         arguments:
           target: "TODO Connector > Create"
           arguments:

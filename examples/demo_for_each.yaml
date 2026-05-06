@@ -15,14 +15,12 @@ playbooks:
   - name: FSRPB For Each Create
     is_active: true
     steps:
-      - type: start
+      - name: trigger
+        type: start
         next: Build alerts
-
-        name: trigger
-      - type: set_variable
-        name: Build alerts
+      - name: Build alerts
+        type: set_variable
         next: Create alert per item
-
         vars:
           alerts_to_create:
             - name: "fsrpb_for_each marker A"
@@ -34,8 +32,8 @@ playbooks:
             - name: "fsrpb_for_each marker C"
               severity: Low
               description: "third looped alert"
-      - type: create_record
-        name: Create alert per item
+      - name: Create alert per item
+        type: create_record
         for_each:
           item: "{{ vars.steps.Build_alerts.alerts_to_create }}"
           parallel: false

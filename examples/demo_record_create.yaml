@@ -14,12 +14,11 @@ playbooks:
     is_active: true
     parameters: [alert_name]
     steps:
-      - type: start
+      - name: trigger
+        type: start
         next: Create alert
-
-        name: trigger
-      - type: create_record
-        name: Create alert
+      - name: Create alert
+        type: create_record
         arguments:
           module: alerts                # → collection: /api/3/alerts
           operation: Replace
