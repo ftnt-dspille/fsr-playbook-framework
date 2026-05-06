@@ -18,6 +18,7 @@ playbooks:
       - name: trigger
         type: start
         next: Build alerts
+
       - name: Build alerts
         type: set_variable
         next: Create alert per item
@@ -32,6 +33,7 @@ playbooks:
             - name: "fsrpb_for_each marker C"
               severity: Low
               description: "third looped alert"
+
       - name: Create alert per item
         type: create_record
         for_each:

@@ -31,6 +31,7 @@ playbooks:
       - name: trigger
         type: start
         next: Find target alert
+
       - name: Find target alert
         type: find_record
         next: Stamp description
@@ -46,6 +47,7 @@ playbooks:
                 _operator: eq
             __selectFields: [uuid, name, description]
           step_variables: []
+
       - name: Stamp description
         type: update_record
         arguments:

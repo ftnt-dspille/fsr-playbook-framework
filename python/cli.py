@@ -55,6 +55,76 @@ def cmd_compile(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_purge(args: argparse.Namespace) -> int:
+    """Hard-delete one or more playbooks (workflows) by name or UUID.
+
+    Targets the workflow record only — never the parent collection
+    (which may hold unrelated playbooks) and never individual
+    workflow_step rows (cascade is FSR's responsibility, not ours).
+    """
+    from probes import _env  # type: ignore
+
+    cfg = _env.get_config()
+    if not cfg.is_live():
+        print("FSR_BASE_URL / auth not configured (.env)", file=sys.stderr)
+        return 2
+    client = _env.get_client()
+
+    # Resolve every target to one or more workflow UUIDs
+    to_delete: list[tuple[str, str]] = []  # (display_name, uuid)
+    for ident in args.target:
+        if _is_uuid(ident):
+            r = client.session.get(
+                client.base_url + f"/api/3/workflows/{ident}",
+                verify=client.verify_ssl,
+            )
+            if r.status_code == 200:
+                w = r.json()
+                to_delete.append((w.get("name") or ident, ident))
+            else:
+                print(f"{ident}: not found", file=sys.stderr)
+            continue
+        r = client.session.get(
+            client.base_url + "/api/3/workflows",
+            params={"name": ident, "$limit": 50}, verify=client.verify_ssl,
+        )
+        members = r.json().get("hydra:member", []) if r.status_code == 200 else []
+        exact = [m for m in members if m.get("name") == ident] or members
+        if not exact:
+            print(f"{ident}: not found", file=sys.stderr)
+            continue
+        for m in exact:
+            to_delete.append((m.get("name") or ident, m["uuid"]))
+
+    if not to_delete:
+        return 1
+
+    if args.dry_run:
+        for name, uuid in to_delete:
+            print(f"would purge: {name}  uuid={uuid}")
+        return 0
+
+    uuids = [u for _, u in to_delete]
+    r = client.session.delete(
+        client.base_url + "/api/3/delete/workflows?$hardDelete=true",
+        json={"ids": uuids}, verify=client.verify_ssl,
+    )
+    if r.status_code >= 400 and r.status_code != 207:
+        print(f"delete failed: HTTP {r.status_code}\n{r.text[:400]}",
+              file=sys.stderr)
+        return 1
+    # 207 = multi-status; report any per-id failures from the body
+    failures = []
+    if r.status_code == 207:
+        body = r.json() if r.text else {}
+        failures = body.get("failure") or []
+    for name, uuid in to_delete:
+        print(f"purged: {name}  uuid={uuid}")
+    for f in failures:
+        print(f"  WARN per-id failure: {f}", file=sys.stderr)
+    return 0
+
+
 def cmd_push(args: argparse.Namespace) -> int:
     """Compile YAML and POST/PUT the unwrapped collection to /api/3/workflow_collections.
 
@@ -128,30 +198,80 @@ def cmd_push(args: argparse.Namespace) -> int:
 
     def _purge_soft_deleted() -> bool:
         """Hard-purge by UUID via the canonical UI endpoint.
-        `DELETE /api/3/delete/workflow_collections?$hardDelete=true` body
-        `{ids:[<uuid>]}` — what the FSR web UI uses for "permanently delete".
-        Returns True on success. Idempotent.
+        `DELETE /api/3/delete/<entity>?$hardDelete=true` body `{ids:[<uuid>]}`
+        — what the FSR web UI uses for "permanently delete". Idempotent.
 
-        Also purges every child workflow UUID in the payload — collection
-        hard-delete does NOT cascade to workflows that ended up orphaned by
-        a previous failed import (verified live 2026-05-03).
+        Sweeps four entity tables because cascade is unreliable:
+        collection → workflow → step → route. Compiler emits deterministic
+        UUIDv5 for every entity (emitter.py), so re-pushing the same YAML
+        re-uses the same IDs; any orphan row left from a prior failed/
+        partial purge collides on POST with HTTP 409 and silently breaks
+        canvas rendering on PUT (orphan routes survive Doctrine cascade
+        and reference vanished steps).
         """
+        wf_uuids = [w.get("uuid") for w in coll_entity.get("workflows", []) if w.get("uuid")]
+        step_uuids: list[str] = []
+        route_uuids: list[str] = []
+        for w in coll_entity.get("workflows", []):
+            for s in w.get("steps", []):
+                if s.get("uuid"):
+                    step_uuids.append(s["uuid"])
+            for r in w.get("routes", []):
+                if r.get("uuid"):
+                    route_uuids.append(r["uuid"])
+
+        # Workflow UUIDs are randomized per compile (emitter.py) so we can't
+        # derive prior-push UUIDs from the YAML — discover them by listing
+        # workflows attached to the (deterministic) collection UUID and
+        # matching by name. Also pull each prior workflow's child step + route
+        # rows so we hard-delete the full subtree, not just the workflow row.
         try:
-            client.session.delete(
+            r = client.session.get(
                 client.base_url
-                + "/api/3/delete/workflow_collections?$hardDelete=true",
-                json={"ids": [coll_uuid]},
-                verify=client.verify_ssl,
+                + f"/api/3/workflow_collections/{coll_uuid}/workflows",
+                verify=client.verify_ssl, timeout=10,
             )
+            if r.status_code == 200:
+                wanted = {w.get("name") for w in coll_entity.get("workflows", [])}
+                live = (r.json() or {}).get("hydra:member", []) or []
+                for w in live:
+                    if w.get("name") not in wanted:
+                        continue
+                    u = w.get("uuid")
+                    if u and u not in wf_uuids:
+                        wf_uuids.append(u)
+                    for sub, bucket in (("steps", step_uuids), ("routes", route_uuids)):
+                        try:
+                            sr = client.session.get(
+                                client.base_url
+                                + f"/api/3/workflows/{u}/{sub}",
+                                verify=client.verify_ssl, timeout=10,
+                            )
+                            if sr.status_code == 200:
+                                for m in (sr.json() or {}).get("hydra:member", []) or []:
+                                    mu = m.get("uuid")
+                                    if mu and mu not in bucket:
+                                        bucket.append(mu)
+                        except Exception:  # noqa: BLE001
+                            pass
         except Exception:  # noqa: BLE001
             pass
-        wf_uuids = [w.get("uuid") for w in coll_entity.get("workflows", []) if w.get("uuid")]
-        if wf_uuids:
+
+        # Order: routes → steps → workflows → collection. Child-first so
+        # FK references on the parent side disappear before we hit it.
+        for entity, ids in (
+            ("workflow_routes", route_uuids),
+            ("workflow_steps", step_uuids),
+            ("workflows", wf_uuids),
+            ("workflow_collections", [coll_uuid]),
+        ):
+            if not ids:
+                continue
             try:
                 client.session.delete(
                     client.base_url
-                    + "/api/3/delete/workflows?$hardDelete=true",
-                    json={"ids": wf_uuids},
+                    + f"/api/3/delete/{entity}?$hardDelete=true",
+                    json={"ids": ids},
                     verify=client.verify_ssl,
                 )
             except Exception:  # noqa: BLE001
@@ -167,26 +287,17 @@ def cmd_push(args: argparse.Namespace) -> int:
     elif args.mode == "upsert":
         ok, payload_or_err = _upsert()
         action = "BULKUPSERT"
-    else:  # replace — PUT, then POST, then (purge+POST) for soft-delete collision
-        ok, payload_or_err = _put()
-        action = "PUT"
-        if not ok:
-            r = getattr(payload_or_err, "response", None)
-            status = getattr(r, "status_code", None)
-            if status == 404:
-                ok, payload_or_err = _post()
-                action = "POST"
-                if not ok:
-                    r2 = getattr(payload_or_err, "response", None)
-                    status2 = getattr(r2, "status_code", None)
-                    if status2 == 409 and _purge_soft_deleted():
-                        ok, payload_or_err = _post()
-                        action = "PURGE+POST"
-            elif status == 409:
-                # PUT 409 also indicates soft-deleted UUID lock — same recovery
-                if _purge_soft_deleted():
-                    ok, payload_or_err = _post()
-                    action = "PURGE+POST"
+    else:  # replace — clean-slate: hard-purge unconditionally, then POST.
+        # Compiler emits deterministic UUIDv5 (emitter.py), so step/route
+        # rows from prior pushes can outlive their parent collection and
+        # collide on POST (409) or — worse — survive a PUT and render
+        # broken edges in the canvas (orphan routes referencing vanished
+        # steps). GET on the collection is unreliable as a "needs purge"
+        # signal: it returns 404 even when child step rows are still live.
+        # So always sweep before POST.
+        _purge_soft_deleted()
+        ok, payload_or_err = _post()
+        action = "PURGE+POST"
     # Best-effort import of the history store. The CLI must keep
     # working even if the web/backend tree isn't available (e.g. the
     # core compile/push path is sometimes invoked from a stripped
@@ -505,6 +616,332 @@ def cmd_pull_collection(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(yaml_text)
     return 0
+
+
+def _fetch_one_workflow(client, ident: str) -> dict | None:
+    """Resolve `ident` (name | UUID | 'Collection:Name') and return the
+    single workflow dict with steps + routes expanded inline (export shape)."""
+    uuid = _resolve_workflow_ident(client, ident)
+    if not uuid:
+        return None
+    members = _fetch_workflow_export(client, [uuid])
+    return members[0] if members else None
+
+
+def cmd_routes(args: argparse.Namespace) -> int:
+    """List a playbook's workflow_routes with source/target step *names*.
+
+    The raw API returns sourceStep/targetStep as IRIs; resolving them to
+    step names is what you actually need when debugging why the canvas
+    isn't drawing edges (orphan routes, mismatched UUIDs, missing labels).
+    """
+    from probes import _env  # type: ignore
+
+    cfg = _env.get_config()
+    if not cfg.is_live():
+        print("FSR_BASE_URL / auth not configured (.env)", file=sys.stderr)
+        return 2
+    wf = _fetch_one_workflow(_env.get_client(), args.playbook)
+    if wf is None:
+        print(f"no playbook matching {args.playbook!r}", file=sys.stderr)
+        return 1
+
+    name_by_iri: dict[str, str] = {}
+    for s in wf.get("steps") or []:
+        iri = s.get("@id") or f"/api/3/workflow_steps/{s.get('uuid')}"
+        name_by_iri[iri] = s.get("name") or "?"
+
+    rows = []
+    for r in wf.get("routes") or []:
+        src_iri = r.get("sourceStep") or ""
+        tgt_iri = r.get("targetStep") or ""
+        rows.append({
+            "name": r.get("name"),
+            "source_name": name_by_iri.get(src_iri, "<orphan>"),
+            "target_name": name_by_iri.get(tgt_iri, "<orphan>"),
+            "label": r.get("label"),
+            "condition": r.get("condition"),
+            "group": r.get("group"),
+            "source_iri": src_iri,
+            "target_iri": tgt_iri,
+            "uuid": r.get("uuid"),
+        })
+
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+
+    print(f"playbook: {wf.get('name')}  uuid={wf.get('uuid')}", file=sys.stderr)
+    print(f"routes: {len(rows)}\n", file=sys.stderr)
+    for r in rows:
+        label = f" [{r['label']}]" if r['label'] else ""
+        cond = f"  when={r['condition']}" if r['condition'] else ""
+        flag = "  ORPHAN" if "<orphan>" in (r["source_name"], r["target_name"]) else ""
+        print(f"  {r['source_name']:<32} -> {r['target_name']:<32}{label}{cond}{flag}")
+    return 0
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    """Dump a live playbook's steps + routes + layout for canvas debugging.
+
+    Emits the structural data the FSR designer reads to draw the graph:
+    every step with its top/left/group, every route with resolved
+    source/target names. JSON by default, table with --table.
+    """
+    from probes import _env  # type: ignore
+
+    cfg = _env.get_config()
+    if not cfg.is_live():
+        print("FSR_BASE_URL / auth not configured (.env)", file=sys.stderr)
+        return 2
+    wf = _fetch_one_workflow(_env.get_client(), args.playbook)
+    if wf is None:
+        print(f"no playbook matching {args.playbook!r}", file=sys.stderr)
+        return 1
+
+    # Optional: overlay per-step execution status from a past run, so we can
+    # see which routes COULD have fired (source executed AND target executed)
+    # vs which weren't traversed. Uses the same step_detail=true endpoint
+    # `fsrpb env` reads from — historical-steps is empty on some FSR
+    # instances so fall back to name-based lookup.
+    exec_status_by_uuid: dict[str, str] = {}
+    exec_status_by_name: dict[str, str] = {}
+    if getattr(args, "task", None):
+        client = _env.get_client()
+        ident = args.task
+        if "-" in ident and not ident.isdigit():
+            # task_id UUID -> workflow PK
+            pr = client.session.get(
+                client.base_url + "/api/wf/api/workflows/"
+                f"?task_id={ident}&parent_wf__isnull=True&format=json&limit=1",
+                verify=client.verify_ssl,
+            )
+            members = (pr.json().get("hydra:member") or []) if pr.status_code == 200 else []
+            if members:
+                pk_url = members[0].get("@id") or ""
+                url = client.base_url + "/api" + pk_url + "?step_detail=true"
+            else:
+                url = None
+                print(f"warning: no run found for task_id {ident!r}", file=sys.stderr)
+        else:
+            url = client.base_url + f"/api/wf/api/workflows/{ident}/?step_detail=true"
+        if url:
+            r = client.session.get(url, verify=client.verify_ssl)
+            if r.status_code == 200:
+                for s in r.json().get("steps") or []:
+                    nm = s.get("name") or ""
+                    st = s.get("status") or "?"
+                    if nm:
+                        exec_status_by_name[nm] = st
+                    u = s.get("uuid") or s.get("template_uuid")
+                    if u:
+                        exec_status_by_uuid[u] = st
+            else:
+                print(f"warning: run fetch failed HTTP {r.status_code}",
+                      file=sys.stderr)
+
+    name_by_iri: dict[str, str] = {}
+    executed_iris: set[str] = set()
+    steps = []
+    for s in wf.get("steps") or []:
+        iri = s.get("@id") or f"/api/3/workflow_steps/{s.get('uuid')}"
+        name_by_iri[iri] = s.get("name") or "?"
+        exec_st = (exec_status_by_uuid.get(s.get("uuid") or "")
+                   or exec_status_by_name.get(s.get("name") or ""))
+        if exec_st:
+            executed_iris.add(iri)
+        steps.append({
+            "name": s.get("name"),
+            "uuid": s.get("uuid"),
+            "top": s.get("top"),
+            "left": s.get("left"),
+            "group": s.get("group"),
+            "status": s.get("status"),
+            "executed": exec_st,
+            "arguments_keys": sorted((s.get("arguments") or {}).keys())
+                if isinstance(s.get("arguments"), dict) else None,
+        })
+
+    routes = []
+    for r in wf.get("routes") or []:
+        src_iri = r.get("sourceStep") or ""
+        tgt_iri = r.get("targetStep") or ""
+        # Inferred-traversed: both endpoints executed in the run. Not the
+        # same as "this route fired" (FSR doesn't expose that directly per
+        # task), but close enough to highlight which routes the canvas
+        # SHOULD have an executed-edge style for.
+        # Treat "skipped" status as not-traversed (FSR records every step
+        # in the run env including ones the Decision branched away from).
+        def _ran(iri: str) -> bool:
+            if iri not in executed_iris:
+                return False
+            nm = name_by_iri.get(iri, "")
+            st = exec_status_by_name.get(nm) or ""
+            return st not in ("skipped", "")
+        traversed = bool(executed_iris) and _ran(src_iri) and _ran(tgt_iri)
+        routes.append({
+            "name": r.get("name"),
+            "source": name_by_iri.get(src_iri, "<orphan>"),
+            "target": name_by_iri.get(tgt_iri, "<orphan>"),
+            "label": r.get("label"),
+            "condition": r.get("condition"),
+            "group": r.get("group"),
+            "source_iri": src_iri,
+            "target_iri": tgt_iri,
+            "uuid": r.get("uuid"),
+            "traversed": traversed if executed_iris else None,
+        })
+
+    out = {
+        "name": wf.get("name"),
+        "uuid": wf.get("uuid"),
+        "triggerStep": wf.get("triggerStep"),
+        "groups": wf.get("groups"),
+        "steps": steps,
+        "routes": routes,
+    }
+
+    if args.json or not args.table:
+        print(json.dumps(out, indent=2, default=str))
+        return 0
+
+    print(f"playbook: {out['name']}  uuid={out['uuid']}\n", file=sys.stderr)
+    print(f"steps: {len(steps)}", file=sys.stderr)
+    for s in steps:
+        ex = f"  exec={s['executed']}" if s.get("executed") else ""
+        print(f"  {s['name']:<36} top={s['top']:<6} left={s['left']:<6} "
+              f"group={s['group']}{ex}  uuid={s['uuid']}")
+    print(f"\nroutes: {len(routes)}", file=sys.stderr)
+    for r in routes:
+        flag = "  ORPHAN" if "<orphan>" in (r["source"], r["target"]) else ""
+        trav = ""
+        if r.get("traversed") is True:
+            trav = "  TRAVERSED"
+        elif r.get("traversed") is False:
+            trav = "  not-traversed"
+        print(f"  {r['source']:<32} -> {r['target']:<32}  "
+              f"label={r['label']}  group={r['group']}{flag}{trav}")
+    return 0
+
+
+def cmd_canvas_check(args: argparse.Namespace) -> int:
+    """Sanity-check a live playbook's graph for canvas-rendering bugs.
+
+    Catches the class of issue where the run/editor viewer shows step
+    boxes but no edges between them — orphan routes, missing layout
+    coords, Decision branches without matching routes, duplicate or
+    mismatched references. Pure data-shape lint; does not run anything.
+    """
+    from probes import _env  # type: ignore
+
+    cfg = _env.get_config()
+    if not cfg.is_live():
+        print("FSR_BASE_URL / auth not configured (.env)", file=sys.stderr)
+        return 2
+    wf = _fetch_one_workflow(_env.get_client(), args.playbook)
+    if wf is None:
+        print(f"no playbook matching {args.playbook!r}", file=sys.stderr)
+        return 1
+
+    steps = wf.get("steps") or []
+    routes = wf.get("routes") or []
+    step_iris: set[str] = set()
+    name_by_iri: dict[str, str] = {}
+    for s in steps:
+        iri = s.get("@id") or f"/api/3/workflow_steps/{s.get('uuid')}"
+        step_iris.add(iri)
+        name_by_iri[iri] = s.get("name") or "?"
+
+    findings: list[dict] = []
+
+    def add(severity: str, code: str, message: str, **extra) -> None:
+        findings.append({"severity": severity, "code": code,
+                         "message": message, **extra})
+
+    # 1. Steps missing layout coords — designer needs these to place nodes.
+    for s in steps:
+        if s.get("top") is None or s.get("left") is None:
+            add("error", "missing_layout",
+                f"step {s.get('name')!r} has top={s.get('top')} left={s.get('left')}",
+                step=s.get("name"))
+
+    # 2. Routes pointing at steps that aren't in this workflow.
+    for r in routes:
+        for end in ("sourceStep", "targetStep"):
+            iri = r.get(end)
+            if iri and iri not in step_iris:
+                add("error", "orphan_route",
+                    f"route {r.get('name')!r} {end}={iri} is not a step in this workflow",
+                    route=r.get("name"))
+
+    # 3. Duplicate (source, target, label) triples — designer dedups silently
+    #    and the second edge can vanish.
+    seen: dict[tuple, str] = {}
+    for r in routes:
+        key = (r.get("sourceStep"), r.get("targetStep"), r.get("label"))
+        if key in seen:
+            add("warning", "duplicate_route",
+                f"duplicate route {r.get('name')!r} (same source/target/label "
+                f"as {seen[key]!r})", route=r.get("name"))
+        else:
+            seen[key] = r.get("name")
+
+    # 4. Decision branch coherence: every conditions[].step_iri should
+    #    have a matching route from this Decision step. Missing routes
+    #    are exactly what makes the canvas show no edge for a branch.
+    for s in steps:
+        args_d = s.get("arguments") if isinstance(s.get("arguments"), dict) else None
+        if not args_d:
+            continue
+        conds = args_d.get("conditions")
+        if not isinstance(conds, list):
+            continue
+        src_iri = s.get("@id") or f"/api/3/workflow_steps/{s.get('uuid')}"
+        outgoing = {(r.get("targetStep"), r.get("label")) for r in routes
+                    if r.get("sourceStep") == src_iri}
+        for ci, c in enumerate(conds):
+            if not isinstance(c, dict):
+                continue
+            tgt = c.get("step_iri")
+            label = c.get("option")
+            if not tgt:
+                add("warning", "decision_missing_step_iri",
+                    f"decision {s.get('name')!r} conditions[{ci}] has no step_iri",
+                    step=s.get("name"))
+                continue
+            if tgt not in step_iris:
+                add("error", "decision_branch_orphan",
+                    f"decision {s.get('name')!r} conditions[{ci}].step_iri={tgt} "
+                    f"is not a step in this workflow", step=s.get("name"))
+                continue
+            if (tgt, label) not in outgoing and (tgt, None) not in outgoing:
+                add("error", "decision_route_missing",
+                    f"decision {s.get('name')!r} branch option={label!r} -> "
+                    f"{name_by_iri.get(tgt, tgt)} has no matching workflow_route "
+                    f"(canvas will not draw this edge)", step=s.get("name"))
+
+    # 5. Trigger step must exist in this workflow.
+    trig = wf.get("triggerStep")
+    if trig and trig not in step_iris:
+        add("error", "trigger_orphan",
+            f"triggerStep={trig} is not a step in this workflow")
+
+    if args.json:
+        print(json.dumps({"playbook": wf.get("name"), "uuid": wf.get("uuid"),
+                          "findings": findings}, indent=2))
+        return 0 if not any(f["severity"] == "error" for f in findings) else 1
+
+    print(f"playbook: {wf.get('name')}  uuid={wf.get('uuid')}", file=sys.stderr)
+    if not findings:
+        print("canvas-check: OK", file=sys.stderr)
+        return 0
+    n_err = sum(1 for f in findings if f["severity"] == "error")
+    n_warn = sum(1 for f in findings if f["severity"] == "warning")
+    print(f"canvas-check: {n_err} error(s), {n_warn} warning(s)", file=sys.stderr)
+    for f in findings:
+        tag = "ERROR" if f["severity"] == "error" else "WARN "
+        print(f"  {tag} [{f['code']}] {f['message']}")
+    return 1 if n_err else 0
 
 
 def cmd_diff(args: argparse.Namespace) -> int:
@@ -2887,6 +3324,33 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-o", "--output", default=None)
     sp.set_defaults(func=cmd_pull_collection)
 
+    sp = sub.add_parser("routes",
+                        help="list a playbook's workflow_routes with resolved step names")
+    sp.add_argument("playbook", help="workflow name, UUID, or 'Collection:Name'")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_routes)
+
+    sp = sub.add_parser("inspect",
+                        help="dump a live playbook's steps + routes + layout (canvas debug)")
+    sp.add_argument("playbook", help="workflow name, UUID, or 'Collection:Name'")
+    sp.add_argument("--json", action="store_true",
+                    help="JSON output (default)")
+    sp.add_argument("--table", action="store_true",
+                    help="human-readable two-table layout instead of JSON")
+    sp.add_argument("--task", default=None,
+                    help="overlay execution status from this task_id "
+                         "(historical-steps); marks each route TRAVERSED if "
+                         "both endpoints executed in the run")
+    sp.set_defaults(func=cmd_inspect)
+
+    sp = sub.add_parser("canvas-check",
+                        help="lint a live playbook for canvas-rendering bugs "
+                             "(orphan routes, missing layout, decision branches "
+                             "with no matching route)")
+    sp.add_argument("playbook", help="workflow name, UUID, or 'Collection:Name'")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_canvas_check)
+
     sp = sub.add_parser("diff", help="semantic diff: local YAML vs live collection")
     sp.add_argument("input", help="local YAML")
     sp.add_argument("-c", "--collection", default=None,
@@ -2958,6 +3422,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("status", help="list recent import_jobs and their state")
     sp.add_argument("-n", "--limit", type=int, default=10)
     sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("purge",
+                        help="hard-delete one or more playbooks (workflows) "
+                             "by name or UUID; never touches the parent "
+                             "collection or step rows")
+    sp.add_argument("target", nargs="+",
+                    help="workflow name(s) or UUID(s)")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="show counts without deleting")
+    sp.set_defaults(func=cmd_purge)
 
     sp = sub.add_parser("push", help="compile + POST to /api/3/import_jobs (upsert)")
     sp.add_argument("input")

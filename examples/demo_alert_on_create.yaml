@@ -24,6 +24,7 @@ playbooks:
               # like `type`/`severity` store IRIs, not display values,
               # so a literal-string `like` filter on them never matches.
               - {field: name, op: like, value: "%fsrpb_e2e_on_create%"}
+
       - name: Stamp marker
         type: update_record
         arguments:

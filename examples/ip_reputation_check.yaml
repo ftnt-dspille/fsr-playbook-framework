@@ -15,6 +15,7 @@ playbooks:
         comment: |
           Trigger on Alert records. Extract the source IP and domain information
           for organizational lookup.
+
       - name: Extract source IP and domain
         type: set_variable
         next: Get Organization Details
@@ -24,6 +25,7 @@ playbooks:
         vars:
           source_ip: "{{ vars.input.records[0].sourceIp }}"
           source_domain: "{{ vars.input.records[0].senderDomain | default('Fortinet') }}"
+
       - name: Get Organization Details
         type: connector
         next: Extract organization result
@@ -36,6 +38,7 @@ playbooks:
           config: ""
           params:
             domain_id: "{{ vars.source_domain }}"
+
       - name: Extract organization result
         type: set_variable
         next: Decide severity based on organization
@@ -47,6 +50,7 @@ playbooks:
         vars:
           org_found: "{{ vars.steps.Get_Organization_Details['@id'] is not none }}"
           org_name: "{{ vars.steps.Get_Organization_Details['@xmlId'] | default('Unknown') }}"
+
       - name: Decide severity based on organization
         type: decision
         comment: |
@@ -59,6 +63,7 @@ playbooks:
           - display: Else
             default: true
             next: Set Low severity
+
       - name: Set Critical severity
         type: set_variable
         next: Update alert severity
@@ -67,6 +72,7 @@ playbooks:
           because the organization was identified.
         vars:
           new_severity: "Critical"
+
       - name: Set Low severity
         type: set_variable
         next: Update alert severity
@@ -75,6 +81,7 @@ playbooks:
           because the organization could not be identified.
         vars:
           new_severity: "Low"
+
       - name: Update alert severity
         type: update_record
         comment: |

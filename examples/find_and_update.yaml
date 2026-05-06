@@ -26,6 +26,7 @@ playbooks:
       - name: start
         type: start
         next: find
+
       - name: find
         type: find_record
         next: Apply tag
@@ -38,6 +39,7 @@ playbooks:
                 operator: eq
                 value: "{{ vars.input.params.indicator_value }}"
           partial: true
+
       - name: Apply tag
         type: update_record
         arguments:

@@ -27,6 +27,7 @@ playbooks:
       - name: Start
         type: start
         next: Configuration
+
       - name: Configuration
         type: set_variable
         next: Fetch indicators
@@ -49,6 +50,7 @@ playbooks:
             domain-name: "TODO /api/3/picklists/<uuid-for-Domain>"
             url: "TODO /api/3/picklists/<uuid-for-URL>"
           confidence_default: 50
+
       - name: Fetch indicators
         type: connector
         next: Map to ingestedData
@@ -90,6 +92,7 @@ playbooks:
                 }
               ]
             }
+
       - name: Map to ingestedData
         type: set_variable
         next: Any data
@@ -100,6 +103,7 @@ playbooks:
           here. This step just unboxes the array into `ingestedData`.
         vars:
           ingestedData: "{{ vars.steps.Fetch_indicators.indicators }}"
+
       - name: Any data
         type: decision
         comment: |
@@ -112,6 +116,7 @@ playbooks:
           - display: Else
             default: true
             next: Raise no data
+
       - name: Raise no data
         type: connector
         arguments:
@@ -120,6 +125,7 @@ playbooks:
           config: ""
           params:
             msg: "Feed fetch returned no indicators (lastPullTime={{ vars.input.params.lastPullTime }})"
+
       - name: Ingest indicators
         type: ingest_bulk_feed
         comment: |

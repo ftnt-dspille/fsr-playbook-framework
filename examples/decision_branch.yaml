@@ -13,11 +13,13 @@ playbooks:
       - name: start
         type: start
         next: Read severity
+
       - name: Read severity
         type: set_variable
         next: Branch on severity
         vars:
           severity: "{{ vars.input.records[0].severity }}"
+
       - name: Branch on severity
         type: decision
         conditions:
@@ -27,10 +29,12 @@ playbooks:
           - display: Else
             default: true
             next: Log low severity
+
       - name: Escalate to Tier 2
         type: set_variable
         vars:
           tier: "tier2"
+
       - name: Log low severity
         type: set_variable
         vars:

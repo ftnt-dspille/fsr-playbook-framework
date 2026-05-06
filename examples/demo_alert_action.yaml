@@ -24,11 +24,13 @@ playbooks:
           button_label: "Triage Alert" # what shows on the Execute menu button
           requires_record: true
           run_mode: per_record
+
       - name: Read severity
         type: set_variable
         next: Branch on severity
         vars:
           severity: "{{ vars.input.records[0].severity.itemValue }}"
+
       - name: Branch on severity
         type: decision
         conditions:
@@ -38,9 +40,11 @@ playbooks:
           - display: low
             when: "{{ vars.severity not in ['Critical', 'High'] }}"
             next: No action low severity
+
       - name: Stamp high verdict
         type: set_variable
         vars:
           verdict: "escalate"
+
       - name: No action low severity
         type: end

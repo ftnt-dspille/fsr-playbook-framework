@@ -35,6 +35,7 @@ playbooks:
       - name: Start
         type: start
         next: Fetch records
+
       - name: Fetch records
         type: connector
         next: Capture data
@@ -68,6 +69,7 @@ playbooks:
                 ]
               }
             }
+
       - name: Capture data
         type: set_variable
         comment: |
@@ -84,6 +86,7 @@ playbooks:
       - name: Start
         type: start
         next: Any records
+
       - name: Any records
         type: decision
         comment: |
@@ -96,6 +99,7 @@ playbooks:
           - display: Else
             default: true
             next: Raise empty input
+
       - name: Raise empty input
         type: connector
         arguments:
@@ -104,6 +108,7 @@ playbooks:
           config: ""
           params:
             msg: "Create called with empty ingestedData — Fetch returned no records."
+
       - name: Create alert per item
         type: create_record
         comment: |
@@ -138,6 +143,7 @@ playbooks:
       - name: Start
         type: start
         next: Mapping preview
+
       - name: Mapping preview
         type: decision
         comment: |
@@ -152,6 +158,7 @@ playbooks:
           - display: Else
             default: true
             next: Call Fetch
+
       - name: Return sample shape
         type: set_variable
         comment: |
@@ -163,6 +170,7 @@ playbooks:
             name: "TODO sample alert name"
             severity: "Medium"
             description: "TODO sample description"
+
       - name: Call Fetch
         type: workflow_reference
         next: Fetch returned data
@@ -174,6 +182,7 @@ playbooks:
           pass_parent_env: false
           pass_input_record: false
           step_variables: []
+
       - name: Fetch returned data
         type: decision
         conditions:
@@ -183,6 +192,7 @@ playbooks:
           - display: Else
             default: true
             next: Raise no data
+
       - name: Raise no data
         type: connector
         arguments:
@@ -191,6 +201,7 @@ playbooks:
           config: ""
           params:
             msg: "Ingest: Fetch returned no records (lastPullTime={{ vars.input.params.lastPullTime }})"
+
       - name: Call Create
         type: workflow_reference
         arguments:

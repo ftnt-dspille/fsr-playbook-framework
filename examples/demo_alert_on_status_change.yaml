@@ -23,6 +23,7 @@ playbooks:
             logic: OR
             filters:
               - {field: status, op: changed}
+
       - name: Stamp marker
         type: update_record
         arguments:

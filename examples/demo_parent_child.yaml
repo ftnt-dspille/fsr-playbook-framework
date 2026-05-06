@@ -19,6 +19,7 @@ playbooks:
       - name: start
         type: start
         next: Compute product
+
       - name: Compute product
         type: set_variable
         vars:
@@ -31,6 +32,7 @@ playbooks:
       - name: start
         type: start
         next: Call multiplier
+
       - name: Call multiplier
         type: workflow_reference
         next: Stamp result
@@ -42,6 +44,7 @@ playbooks:
           pass_parent_env: false
           pass_input_record: false
           step_variables: []
+
       - name: Stamp result
         type: set_variable
         vars:

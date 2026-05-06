@@ -20,6 +20,7 @@ playbooks:
         next: Extract source IP
         comment: |
           Trigger on Alert records. Extract the source IP for reputation lookup.
+
       - name: Extract source IP
         type: set_variable
         next: Check IP on AbuseIPDB
@@ -28,6 +29,7 @@ playbooks:
           in the connector call.
         vars:
           source_ip: "{{ vars.input.records[0].sourceIp }}"
+
       - name: Check IP on AbuseIPDB
         type: connector
         next: Extract abuse confidence score
@@ -40,6 +42,7 @@ playbooks:
           config: ""
           params:
             ip: "{{ vars.source_ip }}"
+
       - name: Extract abuse confidence score
         type: set_variable
         next: Decide severity level
@@ -48,6 +51,7 @@ playbooks:
           Convert to integer for reliable comparison.
         vars:
           abuse_confidence_score: "{{ vars.steps.Check_IP_on_AbuseIPDB.abuseConfidenceScore | int }}"
+
       - name: Decide severity level
         type: decision
         comment: |
@@ -60,6 +64,7 @@ playbooks:
           - display: Else
             default: true
             next: Set Low severity
+
       - name: Set Critical severity
         type: set_variable
         next: Update alert severity
@@ -67,6 +72,7 @@ playbooks:
           Prepare to update the alert with Critical severity.
         vars:
           new_severity: "Critical"
+
       - name: Set Low severity
         type: set_variable
         next: Update alert severity
@@ -74,6 +80,7 @@ playbooks:
           Prepare to update the alert with Low severity.
         vars:
           new_severity: "Low"
+
       - name: Update alert severity
         type: update_record
         comment: |

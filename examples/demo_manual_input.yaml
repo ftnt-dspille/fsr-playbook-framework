@@ -14,6 +14,7 @@ playbooks:
       - name: trigger
         type: start
         next: Approve action
+
       - name: Approve action
         type: manual_input
         options:
@@ -25,10 +26,12 @@ playbooks:
         arguments:
           title: "Approve the e2e action?"
           description: "Click **approve** to continue, **reject** to abort."
+
       - name: Stamp approved
         type: set_variable
         vars:
           verdict: approved
+
       - name: Stamp rejected
         type: set_variable
         vars:

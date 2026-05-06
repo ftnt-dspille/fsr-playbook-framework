@@ -17,6 +17,7 @@ playbooks:
       - name: trigger
         type: start
         next: Create alert
+
       - name: Create alert
         type: create_record
         arguments:

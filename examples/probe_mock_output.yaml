@@ -20,6 +20,7 @@ playbooks:
       - name: trigger
         type: start
         next: Fetch mocked
+
       - name: Fetch mocked
         # recorded-future-feed.get_riskrules — chosen because it's
         # unlikely to be configured on the dev FSR. Without --mock,
@@ -34,6 +35,7 @@ playbooks:
           params: {}
           mock_result: |
             {"mock_marker": "fsrpb-mock-probe-OK", "items": [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]}
+
       - name: Capture mock
         # set_variable shape: each variable is a flat top-level key
         # directly under `arguments`. No wrapper. (Authoring as

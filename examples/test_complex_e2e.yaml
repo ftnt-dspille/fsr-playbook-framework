@@ -13,12 +13,14 @@ playbooks:
       - name: Run
         type: start
         next: Pull from input
+
       - name: Pull from input
         type: set_variable
         next: Final
         vars:
           score_int: "{{ vars.input.params.score }}"
           label_seed: "score-{{ vars.input.params.score }}"
+
       - name: Final
         type: set_variable
         vars:

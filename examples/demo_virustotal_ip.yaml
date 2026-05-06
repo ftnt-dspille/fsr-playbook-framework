@@ -20,6 +20,7 @@ playbooks:
       - name: start
         type: start
         next: Query VirusTotal
+
       - name: Query VirusTotal
         type: connector
         next: Extract malicious count
@@ -29,11 +30,13 @@ playbooks:
           config: ""
           params:
             ip: "{{ vars.input.params.ip }}"
+
       - name: Extract malicious count
         type: set_variable
         next: Branch on verdict
         vars:
           malicious_count: "{{ vars.steps.Query_VirusTotal.data.attributes.last_analysis_stats.malicious }}"
+
       - name: Branch on verdict
         type: decision
         conditions:
@@ -43,10 +46,12 @@ playbooks:
           - display: clean
             when: "{{ (vars.malicious_count | int) == 0 }}"
             next: Stamp clean
+
       - name: Stamp malicious
         type: set_variable
         vars:
           verdict: "malicious"
+
       - name: Stamp clean
         type: set_variable
         vars:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from .ir import Annotation, Collection, Playbook, Step
@@ -334,28 +335,44 @@ def emit(collection: Collection) -> dict[str, Any]:
             groups_out.append(_emit_group(ann, step_layout))
 
         # Pass 2: emit routes from .next + .branches
+        # Route `name` follows FSR's UI convention "<src display> -> <tgt display>"
+        # (spaces around the arrow, display names not snake_case ids). The JS
+        # canvas seems to derive lookup ids from this string and silently
+        # fails — `addRoute` throws and the whole jsPlumb batch aborts so no
+        # edges render — when it deviates (e.g. "src->tgt" or "src:label->tgt").
+        # Verified empirically: every playbook we'd pushed with the old
+        # `f"{s.id}->{tgt_id}"` format failed to render; FSR-UI-built
+        # playbooks with the spaced display-name format work.
+        name_by_id = {s.id: s.name or s.id for s in pb.steps}
         for s in pb.steps:
             src_iri = _step_iri(step_uuids[s.id])
+            src_disp = name_by_id[s.id]
             if s.next:
                 tgt = step_uuids.get(s.next)
                 if tgt:
+                    tgt_disp = name_by_id.get(s.next, s.next)
                     routes_out.append(_emit_route(
                         collection.name, pb.name, s.id, s.next,
                         src_iri, _step_iri(tgt),
+                        display_name=f"{src_disp} -> {tgt_disp}",
                     ))
             for option, target in s.branches.items():
                 tgt = step_uuids.get(target)
                 if tgt:
+                    tgt_disp = name_by_id.get(target, target)
                     routes_out.append(_emit_route(
                         collection.name, pb.name, f"{s.id}:{option}", target,
                         src_iri, _step_iri(tgt), label=option,
+                        display_name=f"{src_disp} -> {tgt_disp}",
                     ))
             for target in s.unlabeled_next:
                 tgt = step_uuids.get(target)
                 if tgt:
+                    tgt_disp = name_by_id.get(target, target)
                     routes_out.append(_emit_route(
                         collection.name, pb.name, f"{s.id}:_{target}", target,
                         src_iri, _step_iri(tgt),
+                        display_name=f"{src_disp} -> {tgt_disp}",
                     ))
 
         workflows_out.append({
@@ -370,7 +387,13 @@ def emit(collection: Collection) -> dict[str, Any]:
             "remoteExecutableFlag": 0,
             "parameters": list(pb.parameters),
             "synchronous": False,
-            "lastModifyDate": None,
+            # wf-engine reads this when materializing workflow_wfmetadata.wf_modified;
+            # leaving it null makes it stamp the 1990-01-19 sentinel which makes
+            # "is this row stale?" diagnostics impossible.
+            # Format: integer Unix epoch seconds (NOT ISO-8601 — Doctrine rejects
+            # string formats with NotNormalizableValueException, verified live
+            # 2026-05-06 against /api/3/workflow_collections).
+            "lastModifyDate": int(datetime.now(timezone.utc).timestamp()),
             "collection": None,  # populated by FSR import
             "versions": [],
             "triggerStep": trigger_step_iri,
@@ -485,10 +508,11 @@ def _emit_group(ann: Annotation, step_layout: dict[str, tuple[int, int]]) -> dic
 def _emit_route(
     coll: str, pb: str, src_id: str, tgt_id: str,
     src_iri: str, tgt_iri: str, label: str | None = None,
+    display_name: str | None = None,
 ) -> dict[str, Any]:
     return {
         "@type": "WorkflowRoute",
-        "name": f"{src_id}->{tgt_id}",
+        "name": display_name or f"{src_id} -> {tgt_id}",
         "targetStep": tgt_iri,
         "sourceStep": src_iri,
         "label": label,

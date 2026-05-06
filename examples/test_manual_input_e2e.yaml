@@ -14,11 +14,13 @@ playbooks:
       - name: Run
         type: start
         next: Pre-input vars
+
       - name: Pre-input vars
         type: set_variable
         next: Choose action
         vars:
           before_input: "ready"
+
       - name: Choose action
         # Schema mirrored from corpus minimum (store/MANUAL_INPUT.md §2).
         # All listed fields are present on every working ManualInput step
@@ -50,6 +52,7 @@ playbooks:
           inline_channel_list: []
           external_channel_list: []
           unauthenticated_input: false
+
       - name: After input
         type: set_variable
         vars:

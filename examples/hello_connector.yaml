@@ -9,11 +9,13 @@ playbooks:
       - name: Start
         type: start
         next: Prepare inputs
+
       - name: Prepare inputs
         type: set_variable
         next: Get organization
         vars:
           target_org: "Fortinet"
+
       - name: Get organization
         type: connector
         arguments:

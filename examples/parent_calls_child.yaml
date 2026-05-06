@@ -11,6 +11,7 @@ playbooks:
       - name: start
         type: start
         next: Stub lookup
+
       - name: Stub lookup
         type: set_variable
         vars:
@@ -21,6 +22,7 @@ playbooks:
       - name: start
         type: start
         next: Resolve via child playbook
+
       - name: Resolve via child playbook
         type: workflow_reference
         arguments:
