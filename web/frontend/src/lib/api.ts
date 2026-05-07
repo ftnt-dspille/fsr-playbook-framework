@@ -54,8 +54,15 @@ export async function testProvider(
   return r.json();
 }
 
-export async function listProviderModels(name: string): Promise<{ ok: boolean; models: string[]; error?: string }> {
-  const r = await fetch(`/api/llm/providers/${encodeURIComponent(name)}/models`);
+export async function listProviderModels(
+  name: string,
+  body: { base_url?: string; api_key?: string } = {}
+): Promise<{ ok: boolean; models: string[]; error?: string }> {
+  const r = await fetch(`/api/llm/providers/${encodeURIComponent(name)}/models`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  });
   if (!r.ok) throw new Error(`models ${r.status}`);
   return r.json();
 }

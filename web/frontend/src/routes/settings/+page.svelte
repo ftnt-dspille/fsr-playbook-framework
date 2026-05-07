@@ -97,7 +97,10 @@
   async function loadModels() {
     modelsErr = null;
     try {
-      const r = await listProviderModels(selected);
+      const r = await listProviderModels(selected, {
+        base_url: formBase || undefined,
+        api_key: formKey || undefined
+      });
       if (r.ok) {
         models = r.models;
         if (formModel === '' && models.length > 0) formModel = models[0];

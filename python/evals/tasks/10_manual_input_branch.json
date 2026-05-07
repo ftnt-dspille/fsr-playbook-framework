@@ -1,0 +1,6 @@
+{
+  "name": "manual_input_branch",
+  "prompt": "Author a FortiSOAR playbook with a manual trigger that pauses on a manual_input step with two options ('approve' and 'reject'). Each option routes to a different set_variable step that stamps the chosen verdict. Output complete YAML.",
+  "gold_yaml_path": "examples/demo_manual_input.yaml",
+  "notes": "manual_input step branching"
+}

@@ -23,6 +23,21 @@ def _validate(yaml_text: str) -> dict[str, Any]:
     return validate_yaml(yaml_text)
 
 
+def _compile_warnings(yaml_text: str) -> list[dict[str, Any]]:
+    """Return the compiler's `warnings` list (UNKNOWN_PARAM, corpus
+    drift, lint hints). validate_yaml swallows these because
+    CompileResult.ok already excludes them — we re-run via the
+    library to surface them for the L1.5 gate."""
+    from pathlib import Path as _P
+    from compiler import compile_yaml as _compile
+    db_path = _P(__file__).resolve().parents[2] / "store" / "fsr_reference.db"
+    result = _compile(yaml_text, db_path)
+    return [
+        {"code": w.code.value, "path": w.path, "message": w.message}
+        for w in result.warnings
+    ]
+
+
 def _resolve(yaml_text: str) -> dict[str, Any]:
     from mcp_server import resolve_yaml
     return resolve_yaml(yaml_text)
@@ -83,6 +98,18 @@ def score(
         "code": val.get("code"),
         "errors": val.get("errors", []),
     }
+
+    # L1.5 — strict-whitelist (no UNKNOWN_PARAM / corpus-drift warnings)
+    if val.get("ok"):
+        warnings = _compile_warnings(yaml_text)
+        out["levels"]["L1.5"] = {
+            "passed": not warnings,
+            "skipped": False,
+            "warnings": warnings,
+        }
+    else:
+        # Don't double-penalize: if L1 fails, the warning gate is meaningless.
+        out["levels"]["L1.5"] = {"passed": False, "skipped": True}
 
     # L3 — variable reachability (computable even when L1 fails)
     has_var_err = _has_var_reachability_error(val)

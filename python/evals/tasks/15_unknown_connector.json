@@ -1,0 +1,5 @@
+{
+  "name": "unknown_connector",
+  "prompt": "Author a FortiSOAR playbook with a manual trigger that calls a connector named 'totally-made-up-connector' for an operation called 'do_thing'. If you don't know that connector exists in the reference store, do NOT fabricate one — instead respond explaining the connector isn't available and suggest the user verify the name. If you do produce YAML, this task is intentionally a failure case.",
+  "notes": "graceful failure mode"
+}

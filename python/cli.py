@@ -2293,18 +2293,46 @@ def cmd_evals(args: argparse.Namespace) -> int:
     reachability / L4 dry-run / gold byte-equal) plus per-model totals.
     Use `--json` to capture the full matrix for archiving.
     """
-    from evals.harness import render_text, run_matrix
+    from evals.harness import (
+        delta_vs, list_runs, load_run, render_delta, render_text,
+        run_matrix, save_run,
+    )
+    if args.list_runs:
+        runs = list_runs()
+        if not runs:
+            print("no archived eval runs", file=sys.stderr)
+            return 0
+        for r in runs:
+            print(r)
+        return 0
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     task_filter = ([t.strip() for t in args.tasks.split(",")]
                    if args.tasks else None)
     matrix = run_matrix(
         model_names=models, task_names=task_filter, live=args.live,
     )
+    run_dir = None
+    if args.save or args.baseline:
+        run_dir = save_run(matrix)
+        matrix["run_id"] = run_dir.name
+
     if args.json:
         print(json.dumps(matrix, indent=2, default=str))
-        return 0 if all(r.get("score", 0) > 0 for r in matrix["rows"]) else 1
-    print(render_text(matrix))
-    # Exit 0 if any model got a non-zero score (sanity check), else 1.
+    else:
+        print(render_text(matrix))
+
+    if run_dir is not None:
+        print(f"\narchived: {run_dir}", file=sys.stderr)
+
+    if args.baseline:
+        try:
+            prior = load_run(args.baseline)
+        except FileNotFoundError as e:
+            print(f"warning: {e}", file=sys.stderr)
+        else:
+            print()
+            print(render_delta(delta_vs(prior, matrix)))
+
     any_progress = any(s.get("score", 0) > 0
                        for s in matrix["summary"].values())
     return 0 if any_progress else 1
@@ -3170,6 +3198,29 @@ def cmd_chat_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent_stats(args: argparse.Namespace) -> int:
+    """Phase-1 analyzer for AGENT_QUALITY_PLAN.md.
+
+    Scans `web/backend/history.db` and writes three artifacts:
+      - docs/AGENT_TOOL_USAGE.md       per-tool census
+      - docs/AGENT_DATA_GAPS.md        empty/repeated lookup needles
+      - docs/AGENT_PROMPT_ADHERENCE.md structural prompt-rule checks
+    Read-only against history.db.
+    """
+    import agent_stats
+    out_dir = Path(args.out_dir) if args.out_dir else (
+        Path(__file__).resolve().parents[1] / "docs"
+    )
+    try:
+        paths = agent_stats.run(out_dir, db_path=args.history_db)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    for label, p in paths.items():
+        print(f"{label:10} -> {p}")
+    return 0
+
+
 # Registry of all runnable probes.  Each entry: (module_path, description).
 _PROBES: dict[str, tuple[str, str]] = {
     "connectors":    ("probes.probe_connectors",       "connectors / operations / operation_params"),
@@ -3675,6 +3726,15 @@ def build_parser() -> argparse.ArgumentParser:
                          "against the live FSR")
     sp.add_argument("--json", action="store_true",
                     help="emit the full matrix as JSON on stdout")
+    sp.add_argument("--save", action="store_true",
+                    help="archive matrix.json + report.md under "
+                         "store/eval_runs/<run_id>/ (auto-implied by "
+                         "--baseline)")
+    sp.add_argument("--baseline", default=None,
+                    help="prior run id to diff against; prints a "
+                         "per-cell delta table after the matrix")
+    sp.add_argument("--list-runs", action="store_true",
+                    help="list archived eval run ids and exit")
     sp.set_defaults(func=cmd_evals)
 
     sp = sub.add_parser(
@@ -3930,6 +3990,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--top", type=int, default=10,
                     help="rows to show in tool-cost ranking (default 10)")
     sp.set_defaults(func=cmd_chat_stats)
+
+    sp = sub.add_parser(
+        "agent-stats",
+        help="mine history.db for tool census, data gaps, prompt adherence",
+        description=cmd_agent_stats.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sp.add_argument("--out-dir", default=None,
+                    help="docs output dir (default: <repo>/docs)")
+    sp.add_argument("--history-db", default=None,
+                    help="history.db path (default: web/backend/history.db)")
+    sp.set_defaults(func=cmd_agent_stats)
 
     sp = sub.add_parser(
         "probe",

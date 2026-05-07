@@ -132,7 +132,7 @@ def test_lmstudio_models_lists_advertised(client):
     fake_models.list = AsyncMock(return_value=MagicMock(data=fake_data))
     fake_client = MagicMock(models=fake_models)
     with patch("openai.AsyncOpenAI", return_value=fake_client):
-        r = client.get("/api/llm/providers/lmstudio/models")
+        r = client.post("/api/llm/providers/lmstudio/models", json={})
     assert r.json() == {"ok": True, "models": ["qwen2.5-coder-32b", "llama-3.3-70b"]}
 
 
@@ -141,13 +141,13 @@ def test_lmstudio_models_without_url_returns_error(client, monkeypatch):
     surface a friendly message instead of letting AsyncOpenAI raise."""
     from backend import settings as _s
     monkeypatch.setitem(_s._DEFAULTS["lmstudio"], "base_url", "")
-    r = client.get("/api/llm/providers/lmstudio/models")
+    r = client.post("/api/llm/providers/lmstudio/models", json={})
     assert r.json()["ok"] is False
     assert "base_url" in r.json()["error"]
 
 
 def test_anthropic_models_returns_curated_catalog(client):
-    r = client.get("/api/llm/providers/anthropic/models")
+    r = client.post("/api/llm/providers/anthropic/models", json={})
     body = r.json()
     assert body["ok"] is True
     assert any("sonnet" in m for m in body["models"])

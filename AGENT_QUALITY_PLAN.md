@@ -16,6 +16,21 @@ Every phase ends in a concrete artifact you can read and act on.
 
 > Build the evidence base. No code changes to tools yet — only readers.
 
+**Status (2026-05-07):** Phase 1A/1B/1C landed as `fsrpb agent-stats`
+(`python/agent_stats.py`). Re-run any time to regenerate the three
+artifacts under `docs/`. First run on 9 sessions / 74 tool calls
+surfaced two real adherence violations:
+
+- 22% of sessions called `get_op_schema` without a prior
+  `find_connector` (rule 1).
+- 44% referenced `vars.steps.X.Y` without a prior `find_step_examples`
+  / `get_op_schema` lookup (rule 2).
+
+Caveat: only 8/74 tool calls have full `tool_use` content rows in
+`chat_messages`, so the args-shape histogram and the validate-spiral
+detector are sparse until more sessions accumulate (or until the
+backend starts persisting full args/results for every call).
+
 ### 1A. Tool-call census from `history.db`
 
 Add `fsrpb chat-stats --tool-detail` (or extend the existing
@@ -92,6 +107,14 @@ prompt isn't sticking.
 
 ## Phase 2 — Audit data coverage for the top lookups
 
+**Status (2026-05-07):** audit at `docs/AGENT_DATA_AUDIT.md`. Top-5
+tools assessed; quick-wins #1–#4 landed in `python/mcp_server.py`
+(error envelopes for `get_step_type` + `get_op_schema`,
+slim `verbose=False` mode for `get_op_schema`, lower default limit
+on `find_operation`). Deferred: `output_schema_observed` backfill via
+a sandboxed `run_op` sweep.
+
+
 > Phase 1 told us what the agent reaches for. Now make sure those
 > reaches actually find a good answer.
 
@@ -141,6 +164,23 @@ include the diff inline so it can be applied immediately.
 ---
 
 ## Phase 3 — Eval harness for measurable improvements
+
+**Status (2026-05-07): Phase 3A + 3B (partial) + 3C landed.**
+- 3A: corpus expanded from 3 → 15 tasks under `python/evals/tasks/`
+  (gold pointers map to existing `examples/*.yaml`; one negative
+  task `unknown_connector` has no gold for graceful-failure testing).
+- 3B: added L1.5 strict-whitelist gate in `python/evals/scoring.py`
+  (fails if compiler emits any UNKNOWN_PARAM / corpus-drift
+  warnings). Tool-budget + no-error-spiral assertions deferred —
+  they need an agentic eval loop the providers don't yet have.
+- 3C: `python/evals/harness.py` gained `save_run`, `load_run`,
+  `list_runs`, `delta_vs`, `render_delta`. `fsrpb evals` CLI now
+  takes `--save`, `--baseline <run_id>`, `--list-runs`. Archives
+  matrix.json + report.md under `store/eval_runs/<run_id>/`.
+
+First baseline run on the gold provider scored **49/58 (84%)** —
+L1.5 surfaced 7/15 fixtures with compiler warnings, useful follow-up.
+
 
 > Now that we know what to fix, build the rig that tells us our
 > fixes actually helped.

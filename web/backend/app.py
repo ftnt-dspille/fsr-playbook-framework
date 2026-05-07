@@ -67,29 +67,52 @@ app.add_middleware(
 )
 
 
+_FSR_PROBE_CACHE: dict = {"ts": 0.0, "result": None}
+_FSR_PROBE_TTL_SECONDS = 5.0
+
+
 def _probe_fsr() -> dict:
-    """Live ping of FSR. Cheap and non-throwing; surfaces in the UI as a pill."""
+    """Live ping of FSR. Cheap and non-throwing; surfaces in the UI as a pill.
+
+    Result cached for 5 seconds so concurrent /api/health calls don't pile up
+    on the sync threadpool when FSR is slow or unreachable (each probe waits
+    up to 4 s on the network round-trip).
+    """
+    import time as _t
+    now = _t.monotonic()
+    cached = _FSR_PROBE_CACHE.get("result")
+    if cached is not None and (now - _FSR_PROBE_CACHE["ts"]) < _FSR_PROBE_TTL_SECONDS:
+        return cached
+
     try:
         from probes import _env  # type: ignore
     except Exception as e:
-        return {"ok": False, "error": f"probes import failed: {e}"}
+        result = {"ok": False, "error": f"probes import failed: {e}"}
+        _FSR_PROBE_CACHE["result"] = result
+        _FSR_PROBE_CACHE["ts"] = now
+        return result
     try:
         cfg = _env.get_config()
         if not cfg.is_live():
-            return {"ok": False, "error": "FSR_BASE_URL / auth missing in .env"}
-        client = _env.get_client()
-        # /api/3/picklists is universally available across FSR versions and
-        # cheap (one row). Auth-required, so a 200 also confirms the JWT is good.
-        r = client.session.get(
-            client.base_url + "/api/3/picklists/?$limit=1",
-            verify=client.verify_ssl,
-            timeout=4,
-        )
-        if r.status_code == 200:
-            return {"ok": True, "base_url": cfg.base_url}
-        return {"ok": False, "error": f"HTTP {r.status_code}", "base_url": cfg.base_url}
+            result = {"ok": False, "error": "FSR_BASE_URL / auth missing in .env"}
+        else:
+            client = _env.get_client()
+            r = client.session.get(
+                client.base_url + "/api/3/picklists/?$limit=1",
+                verify=client.verify_ssl,
+                timeout=4,
+            )
+            if r.status_code == 200:
+                result = {"ok": True, "base_url": cfg.base_url}
+            else:
+                result = {"ok": False, "error": f"HTTP {r.status_code}",
+                          "base_url": cfg.base_url}
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    _FSR_PROBE_CACHE["result"] = result
+    _FSR_PROBE_CACHE["ts"] = now
+    return result
 
 
 @app.get("/api/health")

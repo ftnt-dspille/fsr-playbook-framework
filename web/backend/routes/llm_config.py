@@ -110,9 +110,13 @@ async def test_provider(name: str, body: ProbeIn) -> dict[str, Any]:
     return {"ok": False, "error": f"no test handler for provider {name!r}"}
 
 
-@router.get("/providers/{name}/models")
-async def list_models(name: str) -> dict[str, Any]:
+@router.post("/providers/{name}/models")
+async def list_models(name: str, body: ProbeIn | None = None) -> dict[str, Any]:
     """List models advertised by the configured endpoint.
+
+    Accepts the same form overrides as `/test` so the UI can list
+    models without forcing the user to Save first. Body fields fall
+    back to saved config when blank.
 
     LM Studio / OpenAI-compatible: /v1/models. Anthropic: hardcoded
     catalog (their public list-models requires admin keys some users
@@ -120,14 +124,18 @@ async def list_models(name: str) -> dict[str, Any]:
     if name not in _settings.list_provider_names():
         raise HTTPException(404, f"unknown provider: {name}")
 
+    body = body or ProbeIn()
+    saved = _settings.load_provider(name)
+    base_url = body.base_url or saved.base_url
+    api_key = body.api_key or saved.api_key
+
     if name == "lmstudio":
-        cfg = _settings.load_provider(name)
-        if not cfg.base_url:
+        if not base_url:
             return {"ok": False, "models": [], "error": "base_url not configured"}
         try:
             from openai import AsyncOpenAI
             client = AsyncOpenAI(
-                base_url=cfg.base_url, api_key=cfg.api_key or "lm-studio", timeout=8.0,
+                base_url=base_url, api_key=api_key or "lm-studio", timeout=8.0,
             )
             page = await client.models.list()
             ids = [m.id for m in page.data]

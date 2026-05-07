@@ -236,7 +236,7 @@ def find_connector(q: str, limit: int = 15,
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def find_operation(connector: str, q: str = "", limit: int = 20,
+def find_operation(connector: str, q: str = "", limit: int = 10,
                    verbose: bool = False) -> dict[str, Any]:
     """List or search operations for a connector.
 
@@ -304,18 +304,22 @@ def find_operation(connector: str, q: str = "", limit: int = 20,
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def get_op_schema(connector: str, op: str) -> dict[str, Any]:
-    """Return the full parameter schema for a connector operation.
+def get_op_schema(connector: str, op: str,
+                  verbose: bool = False) -> dict[str, Any]:
+    """Return the parameter schema for a connector operation.
 
-    Includes:
-    - `params` — input parameters with required/type/picklist info
-    - `output_schema_json` — static shape from the connector's info.json (may be
-      absent or incomplete for many connectors)
-    - `output_schema_observed` — live-run inferred shape from a real FSR execution;
-      populated by `run_op` the first time the op is exercised.  This is the most
-      reliable source of truth for what the step actually returns.
-    - `output_schema_hint` — set to "run run_op to observe real output" when neither
-      schema is available, so callers know to execute the op once.
+    Slim by default (~1.5 KB): `op_name`, `title`, `description`, and a
+    trimmed `params` list (name/type/required/options/description). The
+    raw `output_schema_json` and `conditional_output_schema_json` blobs
+    are summarized to top-level keys only. Pass `verbose=True` for the
+    full row with all output schemas.
+
+    Returns the canonical `_err()` envelope (`ok:false, code, ...`) on
+    miss:
+    - `code: "connector_not_found"` when the connector itself is
+      unknown — call `find_connector` first.
+    - `code: "not_found"` when the connector exists but the op doesn't
+      — the response includes a `near` list of close op names.
     """
     with _db() as conn:
         op_row = _rows(
@@ -324,7 +328,39 @@ def get_op_schema(connector: str, op: str) -> dict[str, Any]:
             (connector, op),
         )
         if not op_row:
-            return {"error": f"operation '{op}' not found on connector '{connector}'"}
+            connector_ops = [r["op_name"] for r in _rows(
+                conn,
+                "SELECT op_name FROM operations WHERE connector_name=?",
+                (connector,),
+            )]
+            if not connector_ops:
+                all_connectors = [r["name"] for r in _rows(
+                    conn, "SELECT name FROM connectors", ()
+                )]
+                near = difflib.get_close_matches(
+                    connector, all_connectors, n=3, cutoff=0.5
+                )
+                return _err(
+                    "connector_not_found",
+                    f"connector {connector!r} has no operations in the "
+                    f"reference store",
+                    suggestions=[
+                        "call find_connector first to confirm the name"
+                        + (f" — close matches: {near}" if near else "")
+                    ],
+                    near=near,
+                )
+            near = difflib.get_close_matches(op, connector_ops, n=5, cutoff=0.4)
+            return _err(
+                "not_found",
+                f"operation {op!r} not found on connector {connector!r}",
+                suggestions=[
+                    f"closest ops: {near}" if near else
+                    f"call find_operation(connector={connector!r}) to "
+                    f"list its {len(connector_ops)} ops"
+                ],
+                near=near,
+            )
 
         params = _rows(
             conn,
@@ -342,20 +378,57 @@ def get_op_schema(connector: str, op: str) -> dict[str, Any]:
                     p["options_json"] = json.loads(p["options_json"])
                 except (json.JSONDecodeError, TypeError):
                     pass
-        result = dict(op_row[0])
-        for col in ("output_schema_json", "conditional_output_schema_json",
-                    "output_schema_observed"):
-            if result.get(col):
+
+        if verbose:
+            result = dict(op_row[0])
+            for col in ("output_schema_json", "conditional_output_schema_json",
+                        "output_schema_observed"):
+                if result.get(col):
+                    try:
+                        result[col] = json.loads(result[col])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            result["params"] = params
+        else:
+            row = op_row[0]
+            slim_params = [
+                {k: p[k] for k in (
+                    "param_name", "title", "type", "required",
+                    "options_json", "description"
+                ) if p.get(k) not in (None, "")}
+                for p in params
+            ]
+            result = {
+                "op_name": row.get("op_name"),
+                "connector_name": row.get("connector_name"),
+                "title": row.get("title"),
+                "description": row.get("description"),
+                "annotation": row.get("annotation"),
+                "params": slim_params,
+            }
+            for col in ("output_schema_json", "conditional_output_schema_json",
+                        "output_schema_observed"):
+                blob = row.get(col)
+                if not blob:
+                    continue
                 try:
-                    result[col] = json.loads(result[col])
+                    parsed = json.loads(blob)
+                    if isinstance(parsed, dict):
+                        result[f"{col}_keys"] = sorted(parsed.keys())[:30]
+                    else:
+                        result[f"{col}_summary"] = (
+                            f"<{type(parsed).__name__}, "
+                            f"{len(blob)} chars — pass verbose=True>"
+                        )
                 except (json.JSONDecodeError, TypeError):
                     pass
-        result["params"] = params
-        # Surface a hint when no output shape is known at all
-        if not result.get("output_schema_json") and not result.get("output_schema_observed"):
+
+        if not op_row[0].get("output_schema_json") and \
+                not op_row[0].get("output_schema_observed"):
             result["output_schema_hint"] = (
-                "No output schema available. Call run_op with sample params to observe "
-                "the real output shape and populate output_schema_observed."
+                "No output schema available. Call run_op with sample "
+                "params to observe the real output shape and populate "
+                "output_schema_observed."
             )
         return result
 
@@ -1065,7 +1138,22 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
                 (canonical,),
             )
         if not rows:
-            return {"error": f"step type '{name}' not found"}
+            known = list(_SHORT_TO_CANONICAL.keys()) + [
+                r["name"] for r in _rows(
+                    conn, "SELECT name FROM step_types", ()
+                )
+            ]
+            near = difflib.get_close_matches(name, known, n=3, cutoff=0.4)
+            return _err(
+                "not_found",
+                f"step type {name!r} not found",
+                suggestions=[
+                    f"did you mean {', '.join(near)}?" if near else
+                    "use a canonical FSR name like ManualInput, "
+                    "Decision, SetVariable, Connectors, UpdateRecord"
+                ],
+                near=near,
+            )
 
         st = rows[0]
         for col in ("args_schema_json", "ui_schema_json"):

@@ -1,0 +1,6 @@
+{
+  "name": "record_find_update",
+  "prompt": "Author a FortiSOAR playbook with a manual trigger that finds an alert record by name (using find_records) then updates that alert's severity field via update_record on the matched IRI. Output complete YAML.",
+  "gold_yaml_path": "examples/demo_record_find_update.yaml",
+  "notes": "find_records + update_record"
+}
