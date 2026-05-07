@@ -79,9 +79,39 @@ class UsageEvent:
     kind: Literal["usage"] = "usage"
 
 
+@dataclass
+class LadderRung:
+    """One step on the L1→L5 success ladder for the current YAML.
+
+    `id` is one of `compile`, `prechecks`, `reachability`, `dry_run`,
+    `outcome`. `state` is `passed`, `failed`, `skipped`, or `pending`.
+    `summary` is a short human string the UI renders verbatim.
+    """
+    id: str
+    label: str
+    state: Literal["passed", "failed", "skipped", "pending"]
+    summary: str = ""
+
+
+@dataclass
+class LadderEvent:
+    """Emitted at the end of each chat turn when there's a meaningful
+    YAML to score. Powers the in-chat ladder strip.
+
+    `error_count` is the count of blocking compile errors (used by the
+    UI to show the error trend ↘ → ↗ across turns).
+    """
+    rungs: list[LadderRung]
+    error_count: int
+    warning_count: int
+    achieved: int
+    """Highest rung index passed (1-based; 0 means even L1 failed)."""
+    kind: Literal["ladder"] = "ladder"
+
+
 Event = (
     TextEvent | ToolUseEvent | ToolResultEvent
-    | DoneEvent | ErrorEvent | UsageEvent
+    | DoneEvent | ErrorEvent | UsageEvent | LadderEvent
 )
 
 

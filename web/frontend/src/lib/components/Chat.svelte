@@ -3,12 +3,14 @@
     extractYamlBlock,
     parseChatEvent,
     type ChatEvent,
-    type ChatMessage
+    type ChatMessage,
+    type LadderRung
   } from '$lib/api';
   import { postSse } from '$lib/sse';
   import { renderMarkdown } from '$lib/md';
   import { yamlStore } from '$lib/yamlStore.svelte';
   import { tick } from 'svelte';
+  import LoopTelemetry from '$lib/components/LoopTelemetry.svelte';
 
   type ToolCall = {
     call_id: string;
@@ -96,6 +98,38 @@
   // id only if the backend sends it; otherwise we fall back to a
   // client-generated session-scoped id.
   let chatSessionId = $state<string | null>(null);
+
+  // ── Loop telemetry ────────────────────────────────────────────────
+  // Tracks the per-session AI authoring loop so the user can see what
+  // the agent is doing in real time (validate count, error trend, ladder
+  // rung, tokens, elapsed). Reset alongside the conversation.
+  let ladderRungs = $state<LadderRung[]>([]);
+  let ladderAchieved = $state(0);
+  let ladderErrors = $state(0);
+  let ladderWarnings = $state(0);
+  let ladderHistory = $state<number[]>([]); // last few error counts for trend
+  let validateCount = $state(0);
+  let inputTokens = $state(0);
+  let outputTokens = $state(0);
+  let sessionStart = $state<number | null>(null);
+  let elapsedMs = $state(0);
+
+  const errorTrend = $derived.by<-1 | 0 | 1 | null>(() => {
+    if (ladderHistory.length < 2) return null;
+    const a = ladderHistory[ladderHistory.length - 2];
+    const b = ladderHistory[ladderHistory.length - 1];
+    if (b < a) return -1;
+    if (b > a) return 1;
+    return 0;
+  });
+
+  $effect(() => {
+    if (!sessionStart) return;
+    const id = setInterval(() => {
+      elapsedMs = Date.now() - (sessionStart ?? Date.now());
+    }, 1000);
+    return () => clearInterval(id);
+  });
   // Display name of the draft this chat writes to. Picked once per
   // session: the first non-trivial collection name we see in agent
   // YAML output, fallback to a session-id based label.
@@ -213,6 +247,22 @@
         // session id; subsequent turns reuse it so all revisions on
         // the same session land under the same draft.
         if (!chatSessionId) chatSessionId = ev.session_id;
+        if (sessionStart === null) sessionStart = Date.now();
+        inputTokens += ev.input_tokens ?? 0;
+        outputTokens += ev.output_tokens ?? 0;
+        // Count validate calls so the user sees the loop's effort.
+        for (const tc of ev.tool_calls ?? []) {
+          if (tc.name === 'validate_yaml' || tc.name === 'compile_yaml') {
+            validateCount += 1;
+          }
+        }
+        break;
+      case 'ladder':
+        ladderRungs = ev.rungs;
+        ladderAchieved = ev.achieved;
+        ladderErrors = ev.error_count;
+        ladderWarnings = ev.warning_count;
+        ladderHistory = [...ladderHistory.slice(-5), ev.error_count];
         break;
       case 'error':
         err = ev.message;
@@ -230,6 +280,16 @@
   function reset() {
     turns = [];
     err = null;
+    ladderRungs = [];
+    ladderAchieved = 0;
+    ladderErrors = 0;
+    ladderWarnings = 0;
+    ladderHistory = [];
+    validateCount = 0;
+    inputTokens = 0;
+    outputTokens = 0;
+    sessionStart = null;
+    elapsedMs = 0;
   }
 
   // Auto-scroll the conversation pane as content streams in.
@@ -254,20 +314,33 @@
   });
 </script>
 
-<div class="flex h-full min-h-0 flex-col bg-zinc-950">
-  <header class="flex items-center justify-between border-b border-zinc-800 px-4 py-2.5">
+<div class="flex h-full min-h-0 flex-col bg-[var(--bg-canvas)]">
+  <header class="flex items-center justify-between border-b border-[var(--border-soft)] px-4 py-2.5">
     <div class="flex items-center gap-2">
       <span class="inline-block h-2 w-2 rounded-full {busy
         ? 'animate-pulse bg-emerald-400'
-        : 'bg-zinc-600'}"></span>
-      <span class="text-sm font-semibold text-zinc-200">Chat</span>
-      <span class="text-xs text-zinc-500">{busy ? 'streaming…' : 'ready'}</span>
+        : 'bg-[var(--text-faint)]'}"></span>
+      <span class="text-sm font-semibold text-[var(--text-default)]">Chat</span>
+      <span class="text-xs text-[var(--text-faint)]">{busy ? 'streaming…' : 'ready'}</span>
     </div>
     <button
-      class="text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+      class="text-xs text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)]"
       onclick={reset}>reset</button
     >
   </header>
+
+  <LoopTelemetry
+    rungs={ladderRungs}
+    achieved={ladderAchieved}
+    errorCount={ladderErrors}
+    warningCount={ladderWarnings}
+    errorTrend={errorTrend}
+    {validateCount}
+    {inputTokens}
+    {outputTokens}
+    {elapsedMs}
+    {busy}
+  />
 
   <div
     bind:this={scrollEl}
@@ -277,18 +350,18 @@
     <div class="space-y-5 px-4 py-4">
       {#if !turns.length && !busy}
         <div class="space-y-3 py-2">
-          <p class="text-sm leading-relaxed text-zinc-400">
+          <p class="text-sm leading-relaxed text-[var(--text-muted)]">
             Ask the model to build or modify the YAML. It can call tools to look up
             connectors, operations, step types, and Jinja filters from the local
             reference store.
           </p>
           <div class="space-y-2 pt-1">
-            <div class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
               Try
             </div>
             {#each STARTERS as s}
               <button
-                class="block w-full rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-left text-sm text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800/60 hover:text-zinc-100"
+                class="block w-full rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 px-3 py-2 text-left text-sm text-[var(--text-muted)] transition-colors hover:border-[var(--border)] hover:bg-[var(--bg-elevated)]/60 hover:text-[var(--text-default)]"
                 onclick={() => useStarter(s)}
               >
                 {s}
@@ -303,7 +376,7 @@
           <div
             class="flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-semibold {t.role ===
             'user'
-              ? 'bg-zinc-800 text-zinc-300'
+              ? 'bg-[var(--bg-elevated)] text-[var(--text-muted)]'
               : 'bg-emerald-900/60 text-emerald-200 ring-1 ring-emerald-800'}"
             title={t.role}
           >
@@ -314,39 +387,39 @@
               <div class="mb-2 space-y-1.5">
                 {#each t.tools as tc}
                   <details
-                    class="group rounded-md border border-zinc-800 bg-zinc-900/40 transition-colors hover:border-zinc-700"
+                    class="group rounded-md border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 transition-colors hover:border-[var(--border)]"
                   >
                     <summary
-                      class="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-xs text-zinc-300"
+                      class="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-muted)]"
                     >
                       <span class="text-blue-400">⚙</span>
                       <span class="font-mono text-blue-300">{tc.name}</span>
-                      <span class="text-zinc-500"
+                      <span class="text-[var(--text-faint)]"
                         >· {Object.keys(tc.arguments).length}
                         {Object.keys(tc.arguments).length === 1 ? 'arg' : 'args'}</span
                       >
                       {#if tc.result_preview}
                         <span class="ml-auto text-[10px] text-emerald-400">✓</span>
                       {:else}
-                        <span class="ml-auto inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500"></span>
+                        <span class="ml-auto inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--text-faint)]"></span>
                       {/if}
                     </summary>
-                    <div class="border-t border-zinc-800 px-2.5 py-2">
-                      <div class="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+                    <div class="border-t border-[var(--border-soft)] px-2.5 py-2">
+                      <div class="text-[9px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
                         Arguments
                       </div>
                       <pre
-                        class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950/60 p-2 font-mono text-[11px] text-zinc-300">{JSON.stringify(
+                        class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--bg-canvas)]/60 p-2 font-mono text-[11px] text-[var(--text-muted)]">{JSON.stringify(
                           tc.arguments,
                           null,
                           2
                         )}</pre>
                       {#if tc.result_preview}
-                        <div class="mt-2 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+                        <div class="mt-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
                           Result
                         </div>
                         <pre
-                          class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950/60 p-2 font-mono text-[11px] text-zinc-300">{tc.result_preview}</pre>
+                          class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--bg-canvas)]/60 p-2 font-mono text-[11px] text-[var(--text-muted)]">{tc.result_preview}</pre>
                       {/if}
                     </div>
                   </details>
@@ -356,19 +429,19 @@
 
             {#if t.text}
               {#if t.role === 'assistant'}
-                <div class="markdown-body text-[15px] leading-relaxed text-zinc-100">
+                <div class="markdown-body text-[15px] leading-relaxed text-[var(--text-default)]">
                   {@html renderMarkdown(t.text)}
                 </div>
               {:else}
-                <div class="rounded-lg bg-zinc-900/60 px-3 py-2 text-[15px] leading-relaxed text-zinc-100">
+                <div class="rounded-lg bg-[var(--bg-panel)]/60 px-3 py-2 text-[15px] leading-relaxed text-[var(--text-default)]">
                   {t.text}
                 </div>
               {/if}
             {:else if t.role === 'assistant' && busy && i === turns.length - 1}
-              <div class="flex items-center gap-1.5 py-1 text-zinc-500">
-                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style="animation-delay:0ms"></span>
-                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style="animation-delay:150ms"></span>
-                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style="animation-delay:300ms"></span>
+              <div class="flex items-center gap-1.5 py-1 text-[var(--text-faint)]">
+                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-faint)]" style="animation-delay:0ms"></span>
+                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-faint)]" style="animation-delay:150ms"></span>
+                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-faint)]" style="animation-delay:300ms"></span>
               </div>
             {/if}
           </div>
@@ -383,19 +456,19 @@
     </div>
   </div>
 
-  <div class="border-t border-zinc-800 bg-zinc-950 p-3">
-    <div class="rounded-lg border border-zinc-800 bg-zinc-900 focus-within:border-zinc-600 focus-within:ring-1 focus-within:ring-zinc-700">
+  <div class="border-t border-[var(--border-soft)] bg-[var(--bg-canvas)] p-3">
+    <div class="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)] focus-within:border-[var(--border)] focus-within:ring-1 focus-within:ring-zinc-700">
       <textarea
-        class="block w-full resize-none rounded-lg bg-transparent px-3 py-2 text-[15px] text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+        class="block w-full resize-none rounded-lg bg-transparent px-3 py-2 text-[15px] text-[var(--text-default)] placeholder:text-[var(--text-faint)] focus:outline-none"
         placeholder="Ask the model to build or edit the YAML…"
         rows="3"
         bind:value={input}
         onkeydown={onKey}
         disabled={busy}
       ></textarea>
-      <div class="flex items-center justify-between border-t border-zinc-800 px-2.5 py-1.5">
+      <div class="flex items-center justify-between border-t border-[var(--border-soft)] px-2.5 py-1.5">
         <label
-          class="flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+          class="flex items-center gap-1.5 text-[11px] text-[var(--text-faint)] hover:text-[var(--text-muted)] cursor-pointer"
           title="When on, the editor's current YAML is sent to the model as
 context. Turn off to author a brand-new playbook from scratch — sending
 a scaffold biases the model into extending it rather than starting fresh."
@@ -407,9 +480,9 @@ a scaffold biases the model into extending it rather than starting fresh."
           />
           include YAML as context
         </label>
-        <span class="text-[11px] text-zinc-500">⌘ / Ctrl + Enter</span>
+        <span class="text-[11px] text-[var(--text-faint)]">⌘ / Ctrl + Enter</span>
         <button
-          class="rounded-md bg-emerald-700 px-3 py-1 text-xs font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+          class="rounded-md bg-emerald-700 px-3 py-1 text-xs font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)] disabled:text-[var(--text-faint)]"
           onclick={send}
           disabled={busy || !input.trim()}
         >

@@ -1,13 +1,23 @@
 <!doctype html>
-<html lang="en" class="h-full">
+<html lang="en" class="h-full" data-theme="forest">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />
     <title>FSR Playbook Studio</title>
+    <script>
+      // Pre-paint theme application — avoids a flash of the default theme
+      // when the saved preference is something else.
+      try {
+        var t = localStorage.getItem('fsrpb.theme');
+        if (t === 'cobalt' || t === 'light' || t === 'forest' || t === 'aurora') {
+          document.documentElement.setAttribute('data-theme', t);
+        }
+      } catch (_) {}
+    </script>
     %sveltekit.head%
   </head>
-  <body class="h-full bg-zinc-950 text-zinc-100 antialiased">
+  <body class="h-full antialiased">
     <div class="h-full">%sveltekit.body%</div>
   </body>
 </html>

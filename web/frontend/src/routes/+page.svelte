@@ -3,6 +3,8 @@
   import Chat from '$lib/components/Chat.svelte';
   import ExamplesMenu from '$lib/components/ExamplesMenu.svelte';
   import DraftsMenu from '$lib/components/DraftsMenu.svelte';
+  import Console from '$lib/components/Console.svelte';
+  import DiagnosticsList from '$lib/components/DiagnosticsList.svelte';
   import { compileYaml, pushPlaybook, validateYaml, type Marker } from '$lib/api';
   import { runStore } from '$lib/runStore.svelte';
   import { yamlStore } from '$lib/yamlStore.svelte';
@@ -233,7 +235,7 @@
         ? 'bg-red-500'
         : status.kind === 'busy'
           ? 'bg-yellow-500'
-          : 'bg-zinc-600'
+          : 'bg-[var(--text-faint)]'
   );
 
   const errCount = $derived(markers.filter((m) => m.severity === 'error').length);
@@ -241,20 +243,20 @@
 </script>
 
 <div class="grid h-full grid-cols-[minmax(0,1fr)_minmax(320px,28rem)]">
-  <div class="flex min-h-0 flex-col border-r border-zinc-800">
+  <div class="flex min-h-0 flex-col border-r border-[var(--border-soft)]">
     <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-3 py-1.5 text-xs">
+    <div class="flex flex-wrap items-center gap-2 border-b border-[var(--border-soft)] px-3 py-1.5 text-xs">
       <ExamplesMenu onLoad={loadExampleText} />
       <DraftsMenu onLoad={loadDraftText} />
       <button
-        class="rounded border border-zinc-700 px-2 py-0.5 text-zinc-200 hover:bg-zinc-800"
+        class="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--text-default)] hover:bg-[var(--bg-elevated)]"
         onclick={saveCurrentDraft}
         title="Save current YAML as a named draft (stored in this browser)"
       >
         Save
       </button>
       <button
-        class="rounded border border-zinc-800 px-2 py-0.5 text-zinc-400 hover:bg-zinc-900"
+        class="rounded border border-[var(--border-soft)] px-2 py-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-panel)]"
         onclick={() => {
           yamlStore.reset();
         }}
@@ -271,19 +273,19 @@
       {/if}
       <span class="ml-2 flex items-center gap-1.5">
         <span class="h-2 w-2 rounded-full {dot}"></span>
-        <span class="text-zinc-300">{status.msg}</span>
+        <span class="text-[var(--text-muted)]">{status.msg}</span>
       </span>
       <div class="ml-auto flex gap-2">
         <button
-          class="rounded border border-zinc-700 px-2 py-0.5 hover:bg-zinc-800"
+          class="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--bg-elevated)]"
           onclick={runValidate}>Validate</button
         >
         <button
-          class="rounded border border-zinc-700 px-2 py-0.5 hover:bg-zinc-800"
+          class="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--bg-elevated)]"
           onclick={runCompile}>Compile</button
         >
         <button
-          class="rounded border border-zinc-700 px-2 py-0.5 hover:bg-zinc-800"
+          class="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--bg-elevated)]"
           onclick={pushNow}>Push</button
         >
         <button
@@ -299,133 +301,92 @@
     </div>
 
     <!-- Output drawer -->
-    <div class="border-t border-zinc-800 bg-zinc-950/60">
-      <div class="flex items-center gap-1 border-b border-zinc-800 px-2 text-xs">
+    <div class="border-t border-[var(--border-soft)] bg-[var(--bg-panel)]">
+      <div class="flex items-center gap-1 border-b border-[var(--border-soft)] px-2 py-1.5">
+        {#each [
+          { id: 'diagnostics', label: 'Diagnostics' },
+          { id: 'compile', label: 'Compile' },
+          { id: 'push', label: 'Push' },
+          { id: 'run', label: 'Run' }
+        ] as t}
+          {@const active = drawerTab === t.id && drawerOpen}
+          <button
+            class={'group relative flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ' +
+              (active
+                ? 'bg-[var(--bg-elevated)] text-[var(--text-default)] shadow-[0_0_0_1px_var(--border)]'
+                : 'text-[var(--text-muted)] hover:bg-[var(--bg-elevated)]/50 hover:text-[var(--text-default)]')}
+            onclick={() => {
+              drawerTab = t.id as typeof drawerTab;
+              drawerOpen = true;
+            }}
+          >
+            <span>{t.label}</span>
+            {#if t.id === 'diagnostics'}
+              {#if errCount}
+                <span class="rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-rose-300">{errCount}</span>
+              {/if}
+              {#if warnCount}
+                <span class="rounded-md border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-amber-200">{warnCount}</span>
+              {/if}
+            {:else if t.id === 'run' && (runStore.status === 'running' || runStore.status === 'pushing')}
+              <span class="relative flex h-1.5 w-1.5">
+                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-70"></span>
+                <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-400"></span>
+              </span>
+            {/if}
+          </button>
+        {/each}
         <button
-          class={'border-b-2 px-2 py-1 ' +
-            (drawerTab === 'diagnostics' && drawerOpen
-              ? 'border-zinc-300 text-zinc-100'
-              : 'border-transparent text-zinc-400 hover:text-zinc-200')}
-          onclick={() => {
-            drawerTab = 'diagnostics';
-            drawerOpen = true;
-          }}
-        >
-          Diagnostics
-          {#if errCount}<span class="ml-1 rounded bg-red-900/60 px-1 text-red-200">{errCount}</span
-            >{/if}
-          {#if warnCount}<span class="ml-1 rounded bg-yellow-900/60 px-1 text-yellow-200"
-              >{warnCount}</span
-            >{/if}
-        </button>
-        <button
-          class={'border-b-2 px-2 py-1 ' +
-            (drawerTab === 'compile' && drawerOpen
-              ? 'border-zinc-300 text-zinc-100'
-              : 'border-transparent text-zinc-400 hover:text-zinc-200')}
-          onclick={() => {
-            drawerTab = 'compile';
-            drawerOpen = true;
-          }}>Compile output</button
-        >
-        <button
-          class={'border-b-2 px-2 py-1 ' +
-            (drawerTab === 'push' && drawerOpen
-              ? 'border-zinc-300 text-zinc-100'
-              : 'border-transparent text-zinc-400 hover:text-zinc-200')}
-          onclick={() => {
-            drawerTab = 'push';
-            drawerOpen = true;
-          }}>Push log</button
-        >
-        <button
-          class={'border-b-2 px-2 py-1 ' +
-            (drawerTab === 'run' && drawerOpen
-              ? 'border-zinc-300 text-zinc-100'
-              : 'border-transparent text-zinc-400 hover:text-zinc-200')}
-          onclick={() => {
-            drawerTab = 'run';
-            drawerOpen = true;
-          }}
-        >
-          Run log
-          {#if runStore.status === 'running' || runStore.status === 'pushing'}
-            <span class="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-yellow-400"
-            ></span>
-          {/if}
-        </button>
-        <button
-          class="ml-auto flex items-center gap-1 rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+          class="ml-auto flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-muted)] hover:border-[var(--text-faint)] hover:text-[var(--text-default)]"
           onclick={() => (drawerOpen = !drawerOpen)}
           title={drawerOpen ? 'collapse drawer' : 'expand drawer'}
+          aria-expanded={drawerOpen}
         >
-          <span class="text-sm">{drawerOpen ? '▾' : '▴'}</span>
-          <span>{drawerOpen ? 'collapse' : 'expand'}</span>
+          <svg viewBox="0 0 12 12" class="h-2.5 w-2.5 transition-transform {drawerOpen ? '' : 'rotate-180'}" fill="currentColor" aria-hidden="true">
+            <path d="M2 7.5l4-3 4 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+          <span>{drawerOpen ? 'Collapse' : 'Expand'}</span>
         </button>
       </div>
       {#if drawerOpen}
-        <div class="h-96 overflow-auto px-4 py-3 text-sm">
+        <div class="h-96 fade-in">
           {#if drawerTab === 'diagnostics'}
-            {#if !markers.length}
-              <div class="text-zinc-500">No diagnostics. The YAML parses, resolves, and validates clean.</div>
-            {:else}
-              <ul class="space-y-1.5">
-                {#each markers as m}
-                  <li class="rounded border border-zinc-800 p-2">
-                    <div class="flex items-center gap-2">
-                      <span
-                        class={'rounded px-1.5 py-0.5 text-[10px] uppercase ' +
-                          (m.severity === 'error'
-                            ? 'bg-red-900/60 text-red-200'
-                            : m.severity === 'warning'
-                              ? 'bg-yellow-900/60 text-yellow-200'
-                              : 'bg-zinc-800 text-zinc-300')}>{m.severity}</span
-                      >
-                      <span class="text-zinc-500">L{m.line}</span>
-                      <span class="font-mono text-zinc-400">{m.code}</span>
-                      {#if m.path}<span class="text-zinc-600">· {m.path}</span>{/if}
-                    </div>
-                    <div class="mt-1 text-zinc-200">{m.message}</div>
-                    {#if m.suggestion}
-                      <div class="mt-1 text-zinc-400">→ {m.suggestion}</div>
-                    {/if}
-                  </li>
-                {/each}
-              </ul>
-            {/if}
+            <div class="h-full overflow-auto">
+              <DiagnosticsList {markers} />
+            </div>
           {:else if drawerTab === 'compile'}
-            {#if compileJson}
-              <pre class="whitespace-pre-wrap font-mono text-[13px] text-zinc-200">{compileJson}</pre>
-            {:else}
-              <div class="text-zinc-500">Click Compile to produce the FSR JSON.</div>
-            {/if}
+            <Console
+              text={compileJson ?? ''}
+              emptyTitle="No compile output yet"
+              emptyHint="Press Compile to produce the FortiSOAR JSON the wire format pushes to /api/3/workflow_collections."
+            />
           {:else if drawerTab === 'push'}
-            {#if runStore.pushOutput}
-              <pre
-                class="whitespace-pre-wrap font-mono text-[13px] text-zinc-200">{runStore.pushOutput}</pre>
-            {:else}
-              <div class="text-zinc-500">
-                Push uses the FSRPlaybookYaml CLI to PUT/POST your compiled
-                collection at <code>/api/3/workflow_collections/&lt;uuid&gt;</code>. Requires the
-                <code>.env</code>'s FSR_BASE_URL + creds (set already if FSR pill is green).
-              </div>
-            {/if}
+            <Console
+              text={runStore.pushOutput ?? ''}
+              emptyTitle="No push attempted"
+              emptyHint="Push compiles the YAML and PUTs/POSTs the collection. Requires FSR creds in .env (the FSR pill goes green when ready)."
+            />
           {:else if drawerTab === 'run'}
-            {#if runStore.logs.length}
-              <pre
-                class="whitespace-pre-wrap font-mono text-[13px] text-zinc-200">{runStore.logs.join('\n')}</pre>
-              {#if runStore.taskId}
-                <div class="mt-2 text-zinc-500">
-                  task_id <span class="font-mono">{runStore.taskId}</span> · open the Run tab for
-                  the env viewer
-                </div>
-              {/if}
-            {:else}
-              <div class="text-zinc-500">
-                Push & Run pushes first, then triggers the playbook via
-                <code>fsrpb run-playbook --follow</code>. Output streams here.
-              </div>
-            {/if}
+            <Console
+              lines={runStore.logs}
+              autoScroll
+              emptyTitle="No active run"
+              emptyHint="Push & Run pushes the playbook then triggers it via fsrpb run-playbook --follow. Stream output appears here."
+            >
+              {#snippet metaLeft()}
+                {#if runStore.taskId}
+                  <span class="rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-0.5 font-mono text-[10px] text-[var(--text-muted)]" title={runStore.taskId}>
+                    task {runStore.taskId.slice(0, 8)}…
+                  </span>
+                {/if}
+                {#if runStore.exitCode !== null}
+                  {@const okExit = runStore.exitCode === 0}
+                  <span class={'rounded-full border px-2 py-0.5 font-mono text-[10px] ' + (okExit ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300')}>
+                    exit {runStore.exitCode}
+                  </span>
+                {/if}
+              {/snippet}
+            </Console>
           {/if}
         </div>
       {/if}

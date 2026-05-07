@@ -34,23 +34,23 @@
         ? 'bg-red-500'
         : runStore.status === 'running' || runStore.status === 'pushing'
           ? 'bg-yellow-500 animate-pulse'
-          : 'bg-zinc-600'
+          : 'bg-[var(--text-faint)]'
   );
 </script>
 
 <div class="grid h-full grid-cols-[minmax(0,1fr)_minmax(320px,30rem)]">
-  <div class="flex min-h-0 flex-col border-r border-zinc-800">
-    <div class="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5 text-xs">
+  <div class="flex min-h-0 flex-col border-r border-[var(--border-soft)]">
+    <div class="flex items-center gap-2 border-b border-[var(--border-soft)] px-3 py-1.5 text-xs">
       <span class="h-2 w-2 rounded-full {dotColor}"></span>
-      <span class="text-zinc-300">{runStore.status}</span>
+      <span class="text-[var(--text-muted)]">{runStore.status}</span>
       {#if runStore.taskId}
-        <span class="text-zinc-500">task {runStore.taskId.slice(0, 8)}…</span>
+        <span class="text-[var(--text-faint)]">task {runStore.taskId.slice(0, 8)}…</span>
       {/if}
       {#if runStore.exitCode !== null}
-        <span class="text-zinc-500">exit {runStore.exitCode}</span>
+        <span class="text-[var(--text-faint)]">exit {runStore.exitCode}</span>
       {/if}
       <button
-        class="ml-auto rounded border border-zinc-700 px-2 py-0.5 hover:bg-zinc-800"
+        class="ml-auto rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--bg-elevated)]"
         onclick={() => runStore.reset()}
       >
         clear
@@ -59,17 +59,17 @@
     <div bind:this={logEl} class="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs">
       {#if runStore.pushOutput}
         <div class="mb-2">
-          <div class="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">push</div>
-          <pre class="whitespace-pre-wrap text-zinc-300">{runStore.pushOutput}</pre>
+          <div class="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-faint)]">push</div>
+          <pre class="whitespace-pre-wrap text-[var(--text-muted)]">{runStore.pushOutput}</pre>
         </div>
       {/if}
       {#if runStore.logs.length}
-        <div class="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">run logs</div>
+        <div class="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-faint)]">run logs</div>
         {#each runStore.logs as line}
-          <div class="whitespace-pre-wrap text-zinc-200">{line}</div>
+          <div class="whitespace-pre-wrap text-[var(--text-default)]">{line}</div>
         {/each}
       {:else if runStore.status === 'idle'}
-        <div class="text-zinc-500">No active run. Press Run on the Author tab.</div>
+        <div class="text-[var(--text-faint)]">No active run. Press Run on the Author tab.</div>
       {/if}
       {#if runStore.errorMsg}
         <div class="mt-2 rounded border border-red-900 bg-red-950/40 p-2 text-red-300">
@@ -80,18 +80,18 @@
   </div>
 
   <aside class="flex min-h-0 flex-col p-4">
-    <h2 class="text-sm font-semibold text-zinc-300">Run env</h2>
-    <p class="mt-1 text-xs text-zinc-500">
+    <h2 class="text-sm font-semibold text-[var(--text-muted)]">Run env</h2>
+    <p class="mt-1 text-xs text-[var(--text-faint)]">
       Rebuilt <code>vars</code> tree from <code>fsrpb env</code> (workflow PK or task UUID).
     </p>
     <div class="mt-3 flex gap-2">
       <input
-        class="flex-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs"
+        class="flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-xs"
         placeholder="task_id or pk"
         bind:value={manualPk}
       />
       <button
-        class="rounded border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-800"
+        class="rounded border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--bg-elevated)]"
         onclick={() => loadEnv(manualPk)}>load</button
       >
     </div>
@@ -102,7 +102,7 @@
     {/if}
     {#if env?.ok && env.env}
       <pre
-        class="mt-3 min-h-0 flex-1 overflow-auto rounded border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] text-zinc-200">{JSON.stringify(
+        class="mt-3 min-h-0 flex-1 overflow-auto rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] p-2 font-mono text-[11px] text-[var(--text-default)]">{JSON.stringify(
           env.env,
           null,
           2

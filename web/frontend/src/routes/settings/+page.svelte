@@ -5,6 +5,7 @@
     type ProvidersResponse, type ProviderView
   } from '$lib/api';
 
+  import PageHeader from '$lib/components/PageHeader.svelte';
   let snapshot = $state<ProvidersResponse | null>(null);
   let loading = $state(false);
   let err = $state<string | null>(null);
@@ -133,12 +134,13 @@
   const isActive = $derived(snapshot?.active_provider === selected);
 </script>
 
-<div class="mx-auto max-w-3xl p-6 text-zinc-100">
-  <h1 class="mb-1 text-2xl font-semibold">Settings</h1>
-  <p class="mb-6 text-sm text-zinc-400">
-    Configure which LLM the chat uses. Keys are stored in your OS secret store
-    ({snapshot?.secrets?.backend ?? '…'}), never in the browser.
-  </p>
+<div class="flex h-full flex-col text-[var(--text-default)]">
+  <PageHeader
+    eyebrow="Configuration"
+    title="Settings"
+    subtitle="Configure which LLM the chat uses. Keys are stored in your OS secret store ({snapshot?.secrets?.backend ?? '…'}), never in the browser."
+  />
+  <div class="mx-auto w-full max-w-3xl flex-1 overflow-auto p-6 fade-in">
 
   {#if err}
     <div class="mb-4 rounded border border-red-700 bg-red-900/40 p-3 text-sm">
@@ -161,38 +163,38 @@
         onclick={() => changeProvider(p.name)}
         class="rounded border px-3 py-1.5 text-sm
                {selected === p.name
-                 ? 'border-zinc-300 bg-zinc-800'
-                 : 'border-zinc-700 hover:bg-zinc-900'}"
+                 ? 'border-[var(--brand)] bg-[var(--bg-elevated)]'
+                 : 'border-[var(--border)] hover:bg-[var(--bg-panel)]'}"
       >
         {p.name}
         {#if snapshot?.active_provider === p.name}
           <span class="ml-1 rounded bg-green-700 px-1.5 text-xs">active</span>
         {:else if p.configured}
-          <span class="ml-1 rounded bg-zinc-700 px-1.5 text-xs">ready</span>
+          <span class="ml-1 rounded bg-[var(--border)] px-1.5 text-xs">ready</span>
         {/if}
       </button>
     {/each}
   </div>
 
   {#if current}
-    <div class="space-y-5 rounded border border-zinc-800 bg-zinc-900/50 p-5">
+    <div class="space-y-5 rounded border border-[var(--border-soft)] bg-[var(--bg-panel)]/50 p-5">
       {#if selected === 'lmstudio'}
         <label class="block">
-          <span class="mb-1 block text-sm text-zinc-300">Base URL</span>
+          <span class="mb-1 block text-sm text-[var(--text-muted)]">Base URL</span>
           <input
             type="text"
             bind:value={formBase}
             placeholder="http://localhost:1234/v1"
-            class="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-mono"
+            class="w-full rounded border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2 text-sm font-mono"
           />
         </label>
       {/if}
 
       <label class="block">
-        <span class="mb-1 block flex items-center justify-between text-sm text-zinc-300">
+        <span class="mb-1 block flex items-center justify-between text-sm text-[var(--text-muted)]">
           <span>API key</span>
           {#if current.api_key_set}
-            <button type="button" onclick={clearKey} class="text-xs text-zinc-400 underline hover:text-zinc-200">
+            <button type="button" onclick={clearKey} class="text-xs text-[var(--text-muted)] underline hover:text-[var(--text-default)]">
               clear saved key
             </button>
           {/if}
@@ -205,7 +207,7 @@
             : selected === 'lmstudio'
             ? 'lm-studio (placeholder; LM Studio ignores it)'
             : 'sk-ant-…'}
-          class="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-mono"
+          class="w-full rounded border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2 text-sm font-mono"
         />
       </label>
 
@@ -213,7 +215,7 @@
         <button
           type="button"
           onclick={runTest}
-          class="rounded bg-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-600"
+          class="rounded bg-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--text-faint)]"
           disabled={testStatus === 'testing'}
         >
           {testStatus === 'testing' ? 'Testing…' : 'Test connection'}
@@ -225,14 +227,14 @@
         {/if}
       </div>
 
-      <div class="border-t border-zinc-800 pt-4">
+      <div class="border-t border-[var(--border-soft)] pt-4">
         <div class="flex items-center gap-3">
           <label class="flex-1 block">
-            <span class="mb-1 block text-sm text-zinc-300">Model</span>
+            <span class="mb-1 block text-sm text-[var(--text-muted)]">Model</span>
             {#if models.length > 0}
               <select
                 bind:value={formModel}
-                class="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-mono"
+                class="w-full rounded border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2 text-sm font-mono"
               >
                 {#each models as m}
                   <option value={m}>{m}</option>
@@ -243,14 +245,14 @@
                 type="text"
                 bind:value={formModel}
                 placeholder={selected === 'lmstudio' ? 'load models to choose' : 'claude-sonnet-4-5-…'}
-                class="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-mono"
+                class="w-full rounded border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2 text-sm font-mono"
               />
             {/if}
           </label>
           <button
             type="button"
             onclick={loadModels}
-            class="mt-5 rounded border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-900"
+            class="mt-5 rounded border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--bg-panel)]"
             disabled={selected === 'lmstudio' && testStatus !== 'ok' && !current.configured}
             title={selected === 'lmstudio' && testStatus !== 'ok' && !current.configured
               ? 'Test the connection first'
@@ -264,7 +266,7 @@
         {/if}
       </div>
 
-      <div class="flex items-center gap-3 border-t border-zinc-800 pt-4">
+      <div class="flex items-center gap-3 border-t border-[var(--border-soft)] pt-4">
         <button
           type="button"
           onclick={save}
@@ -275,19 +277,20 @@
         <button
           type="button"
           onclick={makeActive}
-          class="rounded border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
+          class="rounded border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-panel)]"
           disabled={isActive}
         >
           {isActive ? 'Active' : 'Set as active'}
         </button>
         {#if saveMsg}
-          <span class="text-sm text-zinc-400">{saveMsg}</span>
+          <span class="text-sm text-[var(--text-muted)]">{saveMsg}</span>
         {/if}
       </div>
     </div>
   {/if}
 
   {#if loading && !snapshot}
-    <p class="text-sm text-zinc-500">Loading…</p>
+    <p class="text-sm text-[var(--text-faint)]">Loading…</p>
   {/if}
+  </div>
 </div>

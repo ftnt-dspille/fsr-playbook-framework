@@ -3206,6 +3206,123 @@ def cmd_chat_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _indent(text: str, prefix: str = "    ") -> str:
+    return "\n".join(prefix + ln for ln in text.splitlines())
+
+
+def cmd_chat_transcript(args: argparse.Namespace) -> int:
+    """Dump a clean chronological transcript of a chat session for
+    auditing — user messages, assistant text, tool calls, tool results,
+    and the per-turn ladder snapshots that drive the in-app loop UI.
+
+    Reads `web/backend/history.db.chat_messages` (and friends) via
+    `chat_review.load_session`, so anything visible in the History
+    tab is also dumpable here without touching the running server.
+    """
+    import json as _json
+    import chat_review
+    try:
+        s = chat_review.load_session(args.session_id, db_path=args.history_db)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except LookupError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    turn_meta = {t["turn"]: t for t in s.get("turns", [])}
+    messages = s.get("messages", [])
+
+    if args.json:
+        print(_json.dumps({
+            "session_id": s["id"],
+            "model": s.get("model"),
+            "ts_first": s.get("ts_first"),
+            "ts_last": s.get("ts_last"),
+            "turn_count": s.get("turn_count"),
+            "playbook_collection": s.get("playbook_collection"),
+            "feedback": s.get("feedback"),
+            "latest_push": s.get("latest_push"),
+            "turns": [
+                {**turn_meta[t], "messages": [
+                    m for m in messages if m["turn"] == t
+                ]} for t in sorted(turn_meta)
+            ],
+        }, indent=2, default=str))
+        return 0
+
+    print(f"# chat session {s['id']}")
+    if s.get("playbook_collection"):
+        print(f"# playbook: {s['playbook_collection']}")
+    if s.get("model"):
+        print(f"# model:    {s['model']}")
+    if s.get("ts_first"):
+        print(f"# first:    {s['ts_first']}")
+    if s.get("ts_last"):
+        print(f"# last:     {s['ts_last']}")
+    fb = s.get("feedback")
+    if fb:
+        print(f"# feedback: {fb.get('rating')} — {fb.get('summary') or ''}")
+    push = s.get("latest_push")
+    if push:
+        print(f"# pushed:   {push.get('collection_name')} ({push.get('ts')})")
+    print()
+
+    cur_turn: int | None = None
+    for m in messages:
+        t = m["turn"]
+        if t != cur_turn:
+            cur_turn = t
+            tm = turn_meta.get(t, {})
+            cost = ""
+            if tm.get("input_tokens") is not None:
+                cost = (
+                    f"  in={tm.get('input_tokens')} out={tm.get('output_tokens')}"
+                    f" cache_read={tm.get('cache_read', 0)}"
+                )
+            print(f"── turn {t}{cost} ──")
+        kind = m["kind"]
+        ts = (m.get("ts") or "")[:19]
+        if kind == "user":
+            print(f"[{ts}] user:")
+            print(_indent(m.get("content") or ""))
+        elif kind == "assistant_text":
+            print(f"[{ts}] assistant:")
+            print(_indent(m.get("content") or ""))
+        elif kind == "tool_use":
+            args_text = m.get("content") or ""
+            if not args.full and len(args_text) > 280:
+                args_text = args_text[:280] + " …"
+            print(f"[{ts}] tool_use {m.get('name')}({args_text})")
+        elif kind == "tool_result":
+            payload = m.get("content") or ""
+            if not args.full and len(payload) > 280:
+                payload = payload[:280] + " …"
+            print(f"[{ts}] tool_result #{m.get('name')}: {payload}")
+        elif kind == "ladder":
+            try:
+                snap = _json.loads(m.get("content") or "{}")
+            except Exception:
+                snap = {}
+            rungs = snap.get("rungs") or []
+            glyphs = []
+            for r in rungs:
+                state = r.get("state")
+                tag = {"passed": "✓", "failed": "✗",
+                       "skipped": "–", "pending": "·"}.get(state, "·")
+                glyphs.append(f"{r.get('id', '?')[:5]}{tag}")
+            print(
+                f"[{ts}] ladder  errs={snap.get('error_count')}"
+                f" warns={snap.get('warning_count')}"
+                f" achieved=L{snap.get('achieved')}"
+                f"  [{' '.join(glyphs)}]"
+            )
+        else:
+            print(f"[{ts}] {kind}: {(m.get('content') or '')[:200]}")
+        print()
+    return 0
+
+
 def cmd_find_step_examples(args: argparse.Namespace) -> int:
     """Search the playbook_steps corpus by step type + optional sub-key."""
     import json as _json
@@ -3772,6 +3889,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true",
                     help="emit structured report as JSON on stdout")
     sp.set_defaults(func=cmd_chat_review)
+
+    sp = sub.add_parser(
+        "chat-transcript",
+        help="dump a clean chronological transcript (user / assistant / tools / "
+             "ladder snapshots) for a chat session — for auditing",
+    )
+    sp.add_argument("session_id",
+                    help="chat session id (from /api/history/sessions or "
+                         "the History tab)")
+    sp.add_argument("--history-db", default=None,
+                    help="path to web/backend/history.db (defaults to "
+                         "STUDIO_HISTORY_DB env or the standard location)")
+    sp.add_argument("--json", action="store_true",
+                    help="emit structured transcript as JSON on stdout")
+    sp.add_argument("--full", action="store_true",
+                    help="don't truncate tool args / results (default caps at 280 chars)")
+    sp.set_defaults(func=cmd_chat_transcript)
 
     sp = sub.add_parser(
         "find-step-examples",

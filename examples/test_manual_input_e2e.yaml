@@ -13,9 +13,9 @@ playbooks:
     steps:
       - name: Run
         type: start
-        next: Pre-input vars
+        next: Pre input vars
 
-      - name: Pre-input vars
+      - name: Pre input vars
         type: set_variable
         next: Choose action
         vars:

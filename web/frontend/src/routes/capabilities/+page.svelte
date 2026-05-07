@@ -268,40 +268,40 @@
   ];
 </script>
 
-<div class="h-full overflow-auto bg-zinc-950 text-zinc-100">
+<div class="h-full overflow-auto bg-[var(--bg-canvas)] text-[var(--text-default)]">
   <div class="mx-auto max-w-6xl px-8 py-12">
     <header class="mb-12">
-      <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">
+      <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-[var(--text-faint)]">
         Capabilities
       </p>
-      <h1 class="text-4xl font-semibold leading-tight text-zinc-50">
+      <h1 class="text-4xl font-semibold leading-tight text-[var(--text-default)]">
         Author, run, and triage FortiSOAR playbooks
-        <span class="text-zinc-400">— without the Designer.</span>
+        <span class="text-[var(--text-muted)]">— without the Designer.</span>
       </h1>
-      <p class="mt-4 max-w-3xl text-lg text-zinc-400">
+      <p class="mt-4 max-w-3xl text-lg text-[var(--text-muted)]">
         Pick the entry point that matches what you are trying to do. Each card lands you on a working tool, sample, or chat prompt.
       </p>
 
       <div class="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {#each headlineStats as s}
-          <div class="rounded-md border border-zinc-800 bg-zinc-900/40 px-3 py-2.5">
-            <div class="text-2xl font-semibold tabular-nums text-zinc-100">{s.v}</div>
-            <div class="text-xs uppercase tracking-wide text-zinc-500">{s.l}</div>
+          <div class="rounded-md border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 px-3 py-2.5">
+            <div class="text-2xl font-semibold tabular-nums text-[var(--text-default)]">{s.v}</div>
+            <div class="text-xs uppercase tracking-wide text-[var(--text-faint)]">{s.l}</div>
           </div>
         {/each}
       </div>
     </header>
 
     <div class="mb-5 flex items-baseline justify-between">
-      <h2 class="text-xs font-semibold uppercase tracking-widest text-zinc-500">Available now</h2>
-      <a href="/docs" class="text-xs text-zinc-500 hover:text-zinc-300">Full tool reference →</a>
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--text-faint)]">Available now</h2>
+      <a href="/docs" class="text-xs text-[var(--text-faint)] hover:text-[var(--text-muted)]">Full tool reference →</a>
     </div>
 
     <div class="grid gap-4 md:grid-cols-2">
       {#each cards as c}
         {@const a = accentClasses[c.accent]}
         <article
-          class="group relative flex flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 transition hover:border-zinc-700 hover:bg-zinc-900/60"
+          class="group relative flex flex-col overflow-hidden rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 p-6 transition hover:border-[var(--border)] hover:bg-[var(--bg-panel)]/60"
         >
           <div class="mb-3 flex items-center gap-3">
             <div
@@ -309,13 +309,13 @@
             >
               {c.code}
             </div>
-            <h3 class="text-lg font-semibold text-zinc-100">{c.title}</h3>
+            <h3 class="text-lg font-semibold text-[var(--text-default)]">{c.title}</h3>
           </div>
 
-          <p class="mb-4 text-sm leading-relaxed text-zinc-400">{c.blurb}</p>
+          <p class="mb-4 text-sm leading-relaxed text-[var(--text-muted)]">{c.blurb}</p>
 
           {#if c.bullets}
-            <ul class="mb-4 space-y-1.5 text-sm text-zinc-300">
+            <ul class="mb-4 space-y-1.5 text-sm text-[var(--text-muted)]">
               {#each c.bullets as b}
                 <li class="flex gap-2">
                   <span class="mt-1.5 h-1 w-1 shrink-0 rounded-full {a.dot}"></span>
@@ -329,7 +329,7 @@
             <div class="mb-4 flex flex-wrap gap-1.5">
               {#each c.tools as t}
                 <span
-                  class="inline-flex items-center rounded border border-zinc-800 bg-zinc-950/60 px-2 py-0.5 font-mono text-xs text-zinc-400"
+                  class="inline-flex items-center rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)]/60 px-2 py-0.5 font-mono text-xs text-[var(--text-muted)]"
                 >
                   {t.name}
                 </span>
@@ -350,7 +350,7 @@
             {#if c.secondary}
               <a
                 href={c.secondary.href}
-                class="text-sm text-zinc-500 hover:text-zinc-300"
+                class="text-sm text-[var(--text-faint)] hover:text-[var(--text-muted)]"
               >
                 {c.secondary.label}
               </a>
@@ -363,39 +363,39 @@
     <!-- Roadmap / coming soon -->
     <section class="mt-16">
       <div class="mb-5 flex items-baseline justify-between">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-zinc-500">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--text-faint)]">
           On the roadmap
         </h2>
-        <span class="text-xs text-zinc-600">
+        <span class="text-xs text-[var(--text-faint)]">
           Tracked in TODO.md and CHAT_APP_PLAN.md
         </span>
       </div>
-      <p class="mb-5 max-w-3xl text-sm text-zinc-400">
+      <p class="mb-5 max-w-3xl text-sm text-[var(--text-muted)]">
         The success ladder is the spine of the next phase: a playbook that compiles is not a playbook that works. Each item below closes one of the silent-failure surfaces that today only surface at runtime.
       </p>
 
       <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {#each upcoming as u}
           <article
-            class="relative flex flex-col rounded-md border border-dashed border-zinc-800 bg-zinc-950/40 p-5"
+            class="relative flex flex-col rounded-md border border-dashed border-[var(--border-soft)] bg-[var(--bg-canvas)]/40 p-5"
           >
             <div class="mb-3 flex items-center justify-between gap-2">
               <span
-                class="rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-zinc-400"
+                class="rounded border border-[var(--border-soft)] bg-[var(--bg-panel)] px-2 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-[var(--text-muted)]"
               >
                 {u.code}
               </span>
-              <span class="text-[10px] uppercase tracking-widest text-zinc-600">
+              <span class="text-[10px] uppercase tracking-widest text-[var(--text-faint)]">
                 {u.eta ?? 'Planned'}
               </span>
             </div>
-            <h4 class="mb-1.5 text-sm font-semibold text-zinc-200">{u.title}</h4>
-            <p class="mb-3 text-sm leading-relaxed text-zinc-400">{u.body}</p>
+            <h4 class="mb-1.5 text-sm font-semibold text-[var(--text-default)]">{u.title}</h4>
+            <p class="mb-3 text-sm leading-relaxed text-[var(--text-muted)]">{u.body}</p>
             {#if u.notes}
-              <ul class="space-y-1 text-xs text-zinc-500">
+              <ul class="space-y-1 text-xs text-[var(--text-faint)]">
                 {#each u.notes as n}
                   <li class="flex gap-2">
-                    <span class="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-zinc-700"></span>
+                    <span class="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--border)]"></span>
                     <span>{n}</span>
                   </li>
                 {/each}
@@ -409,8 +409,8 @@
     <!-- Demo storyboards -->
     <section class="mt-16">
       <div class="mb-5 flex items-baseline justify-between">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-zinc-500">Demo storyboards</h2>
-        <span class="text-xs text-zinc-600">~3–5 min each</span>
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--text-faint)]">Demo storyboards</h2>
+        <span class="text-xs text-[var(--text-faint)]">~3–5 min each</span>
       </div>
       <div class="grid gap-3 md:grid-cols-2">
         {#each [
@@ -419,31 +419,31 @@
           { tag: 'C', title: 'Triage and fix a broken playbook', body: 'list_recent_failed_runs → get_run_env → spot the shape mismatch → pull / edit / push / re-run. Not possible from the FSR Designer.' },
           { tag: 'D', title: 'Reverse-engineer an existing playbook', body: 'pull → narrate steps in plain English → cross-reference idioms via find_jinja_pattern.' }
         ] as d}
-          <div class="flex gap-4 rounded-md border border-zinc-800 bg-zinc-900/40 p-4">
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-700 bg-zinc-950 font-mono text-sm font-semibold text-zinc-300">
+          <div class="flex gap-4 rounded-md border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 p-4">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-canvas)] font-mono text-sm font-semibold text-[var(--text-muted)]">
               {d.tag}
             </div>
             <div>
-              <h4 class="font-medium text-zinc-100">{d.title}</h4>
-              <p class="mt-1 text-sm text-zinc-400">{d.body}</p>
+              <h4 class="font-medium text-[var(--text-default)]">{d.title}</h4>
+              <p class="mt-1 text-sm text-[var(--text-muted)]">{d.body}</p>
             </div>
           </div>
         {/each}
       </div>
-      <p class="mt-4 text-sm text-zinc-500">
+      <p class="mt-4 text-sm text-[var(--text-faint)]">
         Pre-talk smoke:
-        <code class="rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-xs text-zinc-300">fsrpb e2e all</code>
+        <code class="rounded bg-[var(--bg-panel)] px-1.5 py-0.5 font-mono text-xs text-[var(--text-muted)]">fsrpb e2e all</code>
         runs all 11 demo fixtures end-to-end.
       </p>
     </section>
 
-    <footer class="mt-16 border-t border-zinc-800 pt-6 text-xs text-zinc-600">
+    <footer class="mt-16 border-t border-[var(--border-soft)] pt-6 text-xs text-[var(--text-faint)]">
       Sources:
-      <a href="/docs" class="hover:text-zinc-400">Docs</a> ·
-      <code class="rounded bg-zinc-900 px-1 text-zinc-400">CAPABILITIES.md</code> ·
-      <code class="rounded bg-zinc-900 px-1 text-zinc-400">CHAT_APP_PLAN.md</code> ·
-      <code class="rounded bg-zinc-900 px-1 text-zinc-400">TODO.md</code> ·
-      <code class="rounded bg-zinc-900 px-1 text-zinc-400">DEMO.md</code>
+      <a href="/docs" class="hover:text-[var(--text-muted)]">Docs</a> ·
+      <code class="rounded bg-[var(--bg-panel)] px-1 text-[var(--text-muted)]">CAPABILITIES.md</code> ·
+      <code class="rounded bg-[var(--bg-panel)] px-1 text-[var(--text-muted)]">CHAT_APP_PLAN.md</code> ·
+      <code class="rounded bg-[var(--bg-panel)] px-1 text-[var(--text-muted)]">TODO.md</code> ·
+      <code class="rounded bg-[var(--bg-panel)] px-1 text-[var(--text-muted)]">DEMO.md</code>
     </footer>
   </div>
 </div>

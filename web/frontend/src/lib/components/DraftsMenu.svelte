@@ -47,7 +47,7 @@
 
 <div class="relative">
   <button
-    class="rounded border border-zinc-700 px-2 py-0.5 text-xs hover:bg-zinc-800 disabled:opacity-50"
+    class="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--bg-elevated)] disabled:opacity-50"
     onclick={() => (open = !open)}
     disabled={yamlStore.drafts.length === 0}
     title={yamlStore.drafts.length === 0 ? 'No saved drafts yet' : 'Open a saved draft'}
@@ -56,37 +56,37 @@
   </button>
   {#if open}
     <div
-      class="absolute left-0 top-full z-50 mt-1 max-h-96 w-80 overflow-auto rounded border border-zinc-700 bg-zinc-900 shadow-lg"
+      class="absolute left-0 top-full z-50 mt-1 max-h-96 w-80 overflow-auto rounded border border-[var(--border)] bg-[var(--bg-panel)] shadow-lg"
     >
       {#if yamlStore.drafts.length === 0}
-        <div class="p-3 text-xs text-zinc-500">No saved drafts.</div>
+        <div class="p-3 text-xs text-[var(--text-faint)]">No saved drafts.</div>
       {:else if viewingRevisionsOf}
         {@const draft = yamlStore.drafts.find((d) => d.name === viewingRevisionsOf)}
         {#if draft}
-          <div class="border-b border-zinc-800 px-3 py-2 flex items-center justify-between bg-zinc-950">
+          <div class="border-b border-[var(--border-soft)] px-3 py-2 flex items-center justify-between bg-[var(--bg-canvas)]">
             <button
-              class="text-xs text-zinc-400 hover:text-zinc-100"
+              class="text-xs text-[var(--text-muted)] hover:text-[var(--text-default)]"
               onclick={() => (viewingRevisionsOf = null)}
             >
               ← Back
             </button>
-            <span class="text-xs font-medium text-zinc-200 truncate ml-2">
+            <span class="text-xs font-medium text-[var(--text-default)] truncate ml-2">
               {draft.name}
             </span>
           </div>
           {#if (draft.revisions ?? []).length === 0}
-            <div class="p-3 text-xs text-zinc-500">
+            <div class="p-3 text-xs text-[var(--text-faint)]">
               No revision history (legacy draft saved before history was introduced).
             </div>
           {:else}
             {#each draft.revisions ?? [] as rev, i}
               <button
-                class="block w-full border-b border-zinc-800 px-3 py-2 text-left text-xs hover:bg-zinc-800"
+                class="block w-full border-b border-[var(--border-soft)] px-3 py-2 text-left text-xs hover:bg-[var(--bg-elevated)]"
                 onclick={() => pickRevision(draft.name, i)}
                 title="Load this revision into the editor"
               >
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-zinc-300">
+                  <span class="text-[var(--text-muted)]">
                     {i === 0 ? 'latest' : `rev ${i}`} · {fmtAge(rev.savedAt)}
                   </span>
                   <span class={`rounded border px-1.5 py-0 text-[10px] uppercase ${sourceBadgeClass(rev.source)}`}>
@@ -94,7 +94,7 @@
                   </span>
                 </div>
                 {#if rev.message}
-                  <div class="mt-1 text-zinc-500 italic line-clamp-2">
+                  <div class="mt-1 text-[var(--text-faint)] italic line-clamp-2">
                     “{rev.message}”
                   </div>
                 {/if}
@@ -106,14 +106,14 @@
         {#each yamlStore.drafts as d}
           {@const revCount = (d.revisions ?? []).length}
           <div
-            class="group flex items-center justify-between border-b border-zinc-800 hover:bg-zinc-800"
+            class="group flex items-center justify-between border-b border-[var(--border-soft)] hover:bg-[var(--bg-elevated)]"
           >
             <button
               class="min-w-0 flex-1 px-3 py-2 text-left text-xs"
               onclick={() => pick(d)}
             >
-              <div class="font-mono text-zinc-200 truncate">{d.name}</div>
-              <div class="mt-0.5 text-zinc-500">
+              <div class="font-mono text-[var(--text-default)] truncate">{d.name}</div>
+              <div class="mt-0.5 text-[var(--text-faint)]">
                 {fmtAge(d.savedAt)}
                 {#if revCount > 1}
                   · {revCount} revisions
@@ -122,7 +122,7 @@
             </button>
             {#if revCount > 1}
               <button
-                class="mr-1 rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+                class="mr-1 rounded px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-default)]"
                 onclick={(e) => {
                   e.stopPropagation();
                   viewingRevisionsOf = d.name;
@@ -134,7 +134,7 @@
               </button>
             {/if}
             <button
-              class="mr-2 rounded px-1.5 py-0.5 text-xs text-zinc-500 opacity-0 hover:bg-zinc-700 hover:text-red-300 group-hover:opacity-100"
+              class="mr-2 rounded px-1.5 py-0.5 text-xs text-[var(--text-faint)] opacity-0 hover:bg-[var(--border)] hover:text-red-300 group-hover:opacity-100"
               onclick={(e) => remove(e, d.name)}
               title="Delete draft"
               aria-label="Delete draft {d.name}"

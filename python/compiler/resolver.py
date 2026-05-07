@@ -71,6 +71,41 @@ class Resolver:
     def close(self) -> None:
         self.conn.close()
 
+    @staticmethod
+    def _check_unknown_keys(
+        a: dict,
+        kind: str,
+        friendly: set[str],
+        canonical: set[str],
+        path: str,
+        errors: list[CompileError],
+    ) -> bool:
+        """Strict-whitelist guard. Mirrors `_normalize_manual_input_args`.
+
+        Returns True when an unknown key was found (caller bails out so we
+        don't run the normalizer on a malformed dict). Without this guard
+        unknown keys are silently dropped — a recurring class of bug where
+        a misspelled friendly key (e.g. `mins:` instead of `minutes:`)
+        compiles green but produces the wrong wire shape.
+        """
+        unknown = sorted(set(a) - friendly - canonical)
+        if not unknown:
+            return False
+        errors.append(CompileError(
+            code=ErrorCode.UNKNOWN_PARAM,
+            message=(
+                f"{kind}: unknown argument(s) "
+                f"{', '.join(repr(k) for k in unknown)}; "
+                f"FSR drops these silently at runtime"
+            ),
+            path=f"{path}.arguments",
+            suggestion=(
+                f"friendly: {', '.join(sorted(friendly)) or '(none)'} · "
+                f"canonical: {', '.join(sorted(canonical)) or '(none)'}"
+            ),
+        ))
+        return True
+
     # ---- step types ----
 
     def step_type(self, short_or_canonical: str) -> Optional[sqlite3.Row]:
@@ -223,13 +258,13 @@ class Resolver:
             self._normalize_post_create_update_args(step, path, errors)
 
         if step.type in ("create_record", "insert_record", "update_record"):
-            self._normalize_record_crud_args(step)
+            self._normalize_record_crud_args(step, path, errors)
 
         if step.type == "delay":
-            self._normalize_delay_args(step)
+            self._normalize_delay_args(step, path, errors)
 
         if step.type == "code_snippet":
-            self._normalize_code_snippet_args(step)
+            self._normalize_code_snippet_args(step, path, errors)
 
         if step.type == "manual_input":
             self._normalize_manual_input_args(step, path, errors)
@@ -346,6 +381,16 @@ class Resolver:
         fieldbasedtrigger.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        _FRIENDLY = {"module", "modules", "when", "mock_result"}
+        _CANONICAL = {
+            "resource", "resources", "step_variables", "triggerOnSource",
+            "triggerOnReplicate", "__triggerLimit", "fieldbasedtrigger",
+            "useMockOutput",
+        }
+        if self._check_unknown_keys(
+            a, step.type, _FRIENDLY, _CANONICAL, path, errors,
+        ):
+            return
         modules_raw = a.pop("module", None) or a.pop("modules", None) \
             or a.get("resources") or a.get("resource")
         if isinstance(modules_raw, str):
@@ -440,7 +485,9 @@ class Resolver:
                 })
         return {"sort": [], "limit": 30, "logic": logic, "filters": out_filters}
 
-    def _normalize_record_crud_args(self, step: Step) -> None:
+    def _normalize_record_crud_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
         """Friendly `module: alerts` → canonical IRI keys.
 
         - create_record / insert_record (InsertData):
@@ -453,6 +500,16 @@ class Resolver:
         Already-set canonical keys win — never clobber an explicit value.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        _FRIENDLY = {"module", "mock_result"}
+        _CANONICAL = {
+            "collection", "collectionType", "resource", "operation",
+            "fieldOperation", "__recommend", "_showJson", "step_variables",
+            "__bulk", "for_each",
+        }
+        if self._check_unknown_keys(
+            a, step.type, _FRIENDLY, _CANONICAL, path, errors,
+        ):
+            return
         module = a.pop("module", None)
         if not module or not isinstance(module, str):
             step.arguments = a
@@ -968,7 +1025,9 @@ class Resolver:
                 path=f"{path}.arguments.owner_detail",
             ))
 
-    def _normalize_code_snippet_args(self, step: Step) -> None:
+    def _normalize_code_snippet_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
         """Friendly Python-snippet step:
 
             arguments:
@@ -991,6 +1050,15 @@ class Resolver:
         if a.get("connector") and a.get("operation") and a.get("params"):
             step.arguments = a
             return
+        _FRIENDLY = {"code", "python", "config", "mock_result"}
+        _CANONICAL = {
+            "connector", "operation", "operationTitle", "version",
+            "params", "step_variables", "pickFromTenant",
+        }
+        if self._check_unknown_keys(
+            a, "code_snippet", _FRIENDLY, _CANONICAL, path, errors,
+        ):
+            return
         code = a.pop("code", None) or a.pop("python", None) or ""
         config_name = a.pop("config", None) if isinstance(
             a.get("config"), str) and not _looks_like_uuid(a.get("config")) \
@@ -1007,7 +1075,9 @@ class Resolver:
         a.setdefault("step_variables", [])
         step.arguments = a
 
-    def _normalize_delay_args(self, step: Step) -> None:
+    def _normalize_delay_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
         """Friendly delay step:
 
             arguments:
@@ -1021,6 +1091,12 @@ class Resolver:
         # Don't clobber explicit canonical input.
         if "rule" in a and "delay" in a:
             step.arguments = a
+            return
+        _FRIENDLY = {"seconds", "minutes", "hours", "days", "mock_result"}
+        _CANONICAL = {"type", "delay", "rule", "step_variables"}
+        if self._check_unknown_keys(
+            a, "delay", _FRIENDLY, _CANONICAL, path, errors,
+        ):
             return
         delay = {"days": 0, "hours": 0, "minutes": 0, "seconds": 0}
         for k in ("days", "hours", "minutes", "seconds"):

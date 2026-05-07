@@ -30,6 +30,6 @@ expects:
       status: finished
     Stamp_high_verdict:
       status: finished
-    No_action_(low_severity):
+    No_action_low_severity:
       status: skipped
 cleanup: true

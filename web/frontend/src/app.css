@@ -1,10 +1,137 @@
 @import 'tailwindcss';
 
-/* Fluid base font: scales between 14px on narrow screens and 18px on
-   wide ones. Tailwind's rem-based utilities track this, so spacing,
-   padding, and component widths scale proportionally with the window. */
+/* ---------------------------------------------------------------------------
+ * Theme tokens
+ * Three palettes are switchable via `data-theme` on <html>:
+ *   forest  — current default (zinc canvas, teal brand, amber accent)
+ *   cobalt  — navy canvas, electric-blue brand, lime status
+ *   light   — bone canvas, dark text, teal brand
+ *
+ * Components consume the variables (--bg-canvas, --text-default, --brand,
+ * etc.) so flipping data-theme updates the chrome without rebuilding any
+ * Tailwind utilities. Pages with hardcoded zinc-* classes won't fully flip
+ * in light mode yet; tracked as a follow-up.
+ * -------------------------------------------------------------------------*/
+@theme {
+  --color-brand-50: #f0fdfa;
+  --color-brand-100: #ccfbf1;
+  --color-brand-200: #99f6e4;
+  --color-brand-300: #5eead4;
+  --color-brand-400: #2dd4bf;
+  --color-brand-500: #14b8a6;
+  --color-brand-600: #0d9488;
+  --color-brand-700: #0f766e;
+  --color-brand-800: #115e59;
+  --color-brand-900: #134e4a;
+  --color-accent-amber: #fbbf24;
+}
+
+/* Default (forest dark) — matches the previous palette so unswitched
+   sessions look identical to before. */
+:root,
+:root[data-theme='forest'] {
+  --brand: #2dd4bf;
+  --brand-soft: rgba(45, 212, 191, 0.12);
+  --brand-ring: rgba(45, 212, 191, 0.45);
+  --brand-fg: #042c28;
+  --accent: #fbbf24;
+  --bg-canvas: #09090b;
+  --bg-panel: #0c0c0f;
+  --bg-elevated: #111114;
+  --border-soft: #1d1d22;
+  --border: #26262d;
+  --text-default: #e4e4e7;
+  --text-muted: #a1a1aa;
+  --text-faint: #71717a;
+  --status-ok: #4ade80;
+  --status-warn: #fbbf24;
+  --status-err: #f87171;
+  color-scheme: dark;
+}
+
+:root[data-theme='cobalt'] {
+  --brand: #3b82f6;
+  --brand-soft: rgba(59, 130, 246, 0.14);
+  --brand-ring: rgba(59, 130, 246, 0.5);
+  --brand-fg: #03122c;
+  --accent: #a3e635;
+  --bg-canvas: #070b18;
+  --bg-panel: #0a1124;
+  --bg-elevated: #0f1733;
+  --border-soft: #1a2347;
+  --border: #233063;
+  --text-default: #e8edff;
+  --text-muted: #8ea1d8;
+  --text-faint: #5a6fa3;
+  --status-ok: #a3e635;
+  --status-warn: #fbbf24;
+  --status-err: #f472b6;
+  color-scheme: dark;
+}
+
+:root[data-theme='aurora'] {
+  --brand: #c084fc;
+  --brand-soft: rgba(192, 132, 252, 0.16);
+  --brand-ring: rgba(192, 132, 252, 0.5);
+  --brand-fg: #1a0833;
+  --accent: #2dd4bf;
+  --bg-canvas: #08080c;
+  --bg-panel: #0d0b14;
+  --bg-elevated: #14111e;
+  --border-soft: #1f1a2c;
+  --border: #2c2540;
+  --text-default: #ece9f4;
+  --text-muted: #a298c0;
+  --text-faint: #6c6485;
+  --status-ok: #2dd4bf;
+  --status-warn: #fbbf24;
+  --status-err: #fb7185;
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --brand: #0d9488;
+  --brand-soft: rgba(13, 148, 136, 0.14);
+  --brand-ring: rgba(13, 148, 136, 0.45);
+  --brand-fg: #ffffff;
+  --accent: #d97706;
+  --bg-canvas: #fafaf9;
+  --bg-panel: #f4f4f5;
+  --bg-elevated: #ffffff;
+  --border-soft: #e7e5e4;
+  --border: #d4d4d8;
+  --text-default: #18181b;
+  --text-muted: #52525b;
+  --text-faint: #71717a;
+  --status-ok: #16a34a;
+  --status-warn: #d97706;
+  --status-err: #dc2626;
+  color-scheme: light;
+}
+
+/* ---------------------------------------------------------------------------
+ * Type
+ * -------------------------------------------------------------------------*/
 html {
+  font-family:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   font-size: clamp(14px, calc(0.65rem + 0.6vw), 18px);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code,
+pre,
+kbd,
+samp,
+.font-mono {
+  font-family:
+    'JetBrains Mono', ui-monospace, 'SFMono-Regular', 'Menlo', 'Monaco',
+    'Consolas', 'Liberation Mono', monospace;
+  font-feature-settings: 'calt', 'liga';
 }
 
 html,
@@ -13,4 +140,172 @@ body {
   width: 100%;
   margin: 0;
   overflow: hidden;
+  background: var(--bg-canvas);
+  color: var(--text-default);
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+::selection {
+  background: var(--brand-soft);
+  color: var(--text-default);
+}
+
+/* ---------------------------------------------------------------------------
+ * Scrollbar
+ * -------------------------------------------------------------------------*/
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 2px solid var(--bg-canvas);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+ * Focus
+ * -------------------------------------------------------------------------*/
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Motion
+ * -------------------------------------------------------------------------*/
+@media (prefers-reduced-motion: no-preference) {
+  a,
+  button,
+  [role='button'],
+  .transition-colors,
+  .transition-opacity,
+  .transition-all {
+    transition-property:
+      color, background-color, border-color, opacity, transform, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-in {
+  animation: fade-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--brand-ring);
+  }
+  70% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.pulse-ring {
+  animation: pulse-ring 1.8s ease-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 0%,
+    var(--border) 50%,
+    var(--bg-elevated) 100%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Helpers
+ * -------------------------------------------------------------------------*/
+.glass {
+  background: color-mix(in oklab, var(--bg-canvas) 78%, transparent);
+  backdrop-filter: saturate(140%) blur(10px);
+  -webkit-backdrop-filter: saturate(140%) blur(10px);
+}
+
+.text-brand {
+  color: var(--brand);
+}
+.bg-brand {
+  background: var(--brand);
+}
+.border-brand {
+  border-color: var(--brand);
+}
+.ring-brand {
+  --tw-ring-color: var(--brand-ring);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 8px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-default);
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--text-faint);
+  background: color-mix(in oklab, var(--bg-elevated) 88%, var(--text-default) 4%);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-fg);
+  border-color: var(--brand);
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--bg-elevated);
+  color: var(--text-default);
 }

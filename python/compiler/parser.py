@@ -228,6 +228,52 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 ))
                 continue
 
+            # Step-level cross-cutting fields hoisted into `arguments:` so
+            # downstream resolver/emitter code (and the wire shape) sees
+            # them where it expects. Authors get to write them next to the
+            # step instead of buried under `arguments:`. Both forms are
+            # accepted transitionally; supplying both is an error so the
+            # author doesn't accidentally end up with two values.
+            #
+            #   step.mock_result    → arguments.mock_result
+            #   step.when           → arguments.when (start_on_* only — the
+            #                         resolver pops it back out)
+            #   step.step_variables → arguments.step_variables
+            #   step.set            → arguments.step_variables (sugar — same
+            #                         spelling whether you're on set_variable
+            #                         (`vars:`) or a connector/create step)
+            for hoist_key in ("mock_result", "when", "step_variables"):
+                if hoist_key in s_raw:
+                    if hoist_key in args:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"{hoist_key!r} set both at step level and "
+                                f"under arguments — pick one"
+                            ),
+                            path=f"{sp}.{hoist_key}",
+                        ))
+                    else:
+                        args[hoist_key] = s_raw[hoist_key]
+            if "set" in s_raw:
+                if "step_variables" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            "step.set: conflicts with step_variables "
+                            "(both compile to arguments.step_variables) — pick one"
+                        ),
+                        path=f"{sp}.set",
+                    ))
+                elif not isinstance(s_raw["set"], dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.set must be a mapping of name → value",
+                        path=f"{sp}.set",
+                    ))
+                else:
+                    args["step_variables"] = dict(s_raw["set"])
+
             # Step-level shortcuts that hoist common nested shapes to the
             # surface so authors don't have to nest under `arguments:`. The
             # parser translates each shortcut into the canonical wire

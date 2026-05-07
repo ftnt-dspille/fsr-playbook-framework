@@ -125,6 +125,13 @@ export async function compileYaml(text: string): Promise<CompileResult> {
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
+export type LadderRung = {
+  id: 'compile' | 'prechecks' | 'reachability' | 'dry_run' | 'outcome';
+  label: string;
+  state: 'passed' | 'failed' | 'skipped' | 'pending';
+  summary: string;
+};
+
 export type ChatEvent =
   | { kind: 'text'; text: string }
   | { kind: 'tool_use'; name: string; arguments: Record<string, unknown>; call_id: string }
@@ -135,6 +142,18 @@ export type ChatEvent =
       turn: number;
       model: string;
       tags: Record<string, unknown>;
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read?: number;
+      cache_write?: number;
+      tool_calls?: { name: string; args_chars: number; result_chars: number }[];
+    }
+  | {
+      kind: 'ladder';
+      rungs: LadderRung[];
+      error_count: number;
+      warning_count: number;
+      achieved: number;
     }
   | { kind: 'done'; stop_reason: string }
   | { kind: 'error'; message: string };
@@ -151,6 +170,8 @@ export function parseChatEvent(event: string, data: string): ChatEvent | null {
         return { kind: 'tool_result', ...obj };
       case 'usage':
         return { kind: 'usage', ...obj };
+      case 'ladder':
+        return { kind: 'ladder', ...obj };
       case 'done':
         return { kind: 'done', ...obj };
       case 'error':

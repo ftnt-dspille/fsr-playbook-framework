@@ -99,9 +99,10 @@ CREATE TABLE IF NOT EXISTS chat_tool_calls (
 -- Full per-message transcript. One row per emitted text/tool block
 -- inside a session, so a complete chat replay is achievable from the
 -- DB alone (as opposed to chat_turns, which only carries token
--- accounting). `kind` ∈ {user, assistant_text, tool_use, tool_result}.
+-- accounting). `kind` ∈ {user, assistant_text, tool_use, tool_result, ladder}.
 -- `content` is text for user/assistant_text, JSON for tool_use args /
--- tool_result payloads. Capped at the column's TEXT limit.
+-- tool_result payloads / per-turn ladder snapshots. Capped at the
+-- column's TEXT limit.
 CREATE TABLE IF NOT EXISTS chat_messages (
     session_id TEXT NOT NULL,
     turn INTEGER NOT NULL,

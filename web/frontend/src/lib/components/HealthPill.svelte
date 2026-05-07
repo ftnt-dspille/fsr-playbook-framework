@@ -34,32 +34,32 @@
         ? 'bg-red-500'
         : state === 'degraded'
           ? 'bg-yellow-500'
-          : 'bg-zinc-600';
+          : 'bg-[var(--text-faint)]';
   }
 </script>
 
-<div class="flex items-center gap-3 text-sm text-zinc-200">
+<div class="flex items-center gap-3 text-sm text-[var(--text-default)]">
   <button
     type="button"
     onclick={refresh}
-    class="flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1.5 font-medium hover:bg-zinc-900"
+    class="flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1.5 font-medium hover:bg-[var(--bg-panel)]"
     title={err ?? 'click to refresh'}
   >
     <span class="h-2.5 w-2.5 rounded-full {dot(backend)}"></span> backend
   </button>
   <span
-    class="flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1.5 font-medium"
+    class="flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1.5 font-medium"
     title={health?.fsr.error || health?.fsr.base_url || 'FSR connection status'}
   >
     <span class="h-2.5 w-2.5 rounded-full {dot(fsr)}"></span>
     FSR
     {#if health?.fsr.base_url}
-      <span class="text-zinc-500">{new URL(health.fsr.base_url).host}</span>
+      <span class="text-[var(--text-faint)]">{new URL(health.fsr.base_url).host}</span>
     {/if}
   </span>
   <a
     href="/settings"
-    class="flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1.5 font-medium hover:bg-zinc-900"
+    class="flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1.5 font-medium hover:bg-[var(--bg-panel)]"
     title={health?.llm.configured
       ? `${health.llm.provider}${health.llm.model ? ' · ' + health.llm.model : ''}`
       : 'click to configure an LLM provider'}
@@ -67,7 +67,7 @@
     <span class="h-2.5 w-2.5 rounded-full {dot(llm)}"></span>
     LLM
     {#if health?.llm.provider}
-      <span class="text-zinc-500">{health.llm.provider}</span>
+      <span class="text-[var(--text-faint)]">{health.llm.provider}</span>
     {/if}
   </a>
 </div>

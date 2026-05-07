@@ -185,6 +185,36 @@ The compiler synthesizes a `WorkflowRoute` per `next` and per `branches`
 entry — labels become FSR's edge labels. Empty-string labels are
 normalized to null on round-trip.
 
+## Step-level cross-cutting fields (siblings of `arguments:`)
+
+Four concepts apply across step types and can be written at the step
+level instead of buried under `arguments:`. The compiler folds them into
+the canonical wire shape — both forms are accepted, but pick one:
+
+```yaml
+- name: Lookup
+  type: connector
+  for_each: { item: "{{ vars.ips }}" }   # loop config
+  mock_result:                            # used by --mock runs
+    data: { score: 0 }
+  set:                                    # inline vars stamped after step
+    last_lookup_at: "{{ now() }}"
+  arguments:
+    connector: my-conn
+    operation: lookup
+    params: { ip: "{{ vars.item }}" }
+```
+
+- `for_each:` — loop the step over a list (full reference below).
+- `mock_result:` — the payload `--mock` runs return for this step.
+- `when:` — `start_on_create` / `start_on_update` only; field-based
+  trigger filter (`{logic: AND|OR, filters: [{field, op, value?}]}`).
+- `set:` — sugar for `arguments.step_variables`. Same spelling whether
+  the step is `set_variable` (where it's `vars:`) or anything else.
+
+Setting the same value at step level *and* under `arguments:` is an
+error so authors don't accidentally end up with two values.
+
 ## Setting variables: where they go under `arguments`
 
 Two distinct cases — easy to confuse, and the wrong shape silently

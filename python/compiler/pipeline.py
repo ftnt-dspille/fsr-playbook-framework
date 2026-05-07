@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .arg_validator import ArgValidator
+from .corpus_validator import CorpusValidator
 from .emitter import emit
 from .errors import CompileError
 from .ir import Collection
@@ -60,6 +61,8 @@ def compile_yaml(text: str, db_path: Path) -> CompileResult:
         if _has_blocking(errs):
             return CompileResult(errors=errs, ir=coll)
         errs = ArgValidator(resolver.conn).validate(coll)
+        if not _has_blocking(errs):
+            errs = CorpusValidator(resolver.conn).validate(coll)
     finally:
         resolver.close()
     if _has_blocking(errs):

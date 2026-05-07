@@ -33,6 +33,22 @@ def _compile_obj(yaml_text: str) -> dict[str, Any]:
     return compile_yaml(yaml_text)
 
 
+_VOLATILE_KEYS = frozenset({"lastModifyDate"})
+
+
+def _strip_volatile(obj: Any) -> Any:
+    """Recursively drop fields that are time-stamped (wf-engine
+    bookkeeping) so byte-equality comparisons aren't second-bound."""
+    if isinstance(obj, dict):
+        return {
+            k: _strip_volatile(v)
+            for k, v in obj.items() if k not in _VOLATILE_KEYS
+        }
+    if isinstance(obj, list):
+        return [_strip_volatile(x) for x in obj]
+    return obj
+
+
 def _has_var_reachability_error(validate_out: dict[str, Any]) -> bool:
     """The validator emits BAD_VALUE with a message phrase for both
     Jinja-step-not-found and not-reachable cases. Match on phrase so
@@ -122,10 +138,17 @@ def score(
                 got = json.loads(comp["json"])
             except Exception:  # noqa: BLE001
                 got = {}
+            # `lastModifyDate` is `int(datetime.now().timestamp())` written
+            # by emitter.py — it ticks per second so two compiles spanning
+            # a second boundary produce different output. Strip it on both
+            # sides of the gold comparison; the field is wf-engine
+            # bookkeeping, not part of the playbook semantics.
+            a = _strip_volatile(got)
+            b = _strip_volatile(gold_json)
             out["levels"]["gold"] = {
-                "passed": got == gold_json,
+                "passed": a == b,
                 "skipped": False,
-                "detail": ("match" if got == gold_json
+                "detail": ("match" if a == b
                            else "compiled JSON differs from gold"),
             }
         else:
