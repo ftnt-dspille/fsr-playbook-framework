@@ -17,6 +17,24 @@ from .ir import Annotation, Collection, Playbook, Step
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
+def _coerce_label(v: Any) -> tuple[Any, bool]:
+    """YAML 1.1 'Norway problem': bare `yes`/`no`/`on`/`off` are parsed as
+    booleans. When such a value lands in a label position (decision
+    `display:`, manual_input option `display:`), FSR's branch lookup
+    keys off the literal string and silently fails. Coerce True→"yes",
+    False→"no" so the playbook compiles, and signal a warning to the
+    caller (return tuple second element).
+    """
+    if v is True:
+        return "yes", True
+    if v is False:
+        return "no", True
+    return v, False
+
+
+_norway_warnings: list[str] = []  # populated transiently by callers below
+
+
 def _rewrite_condition_keys(c: Any) -> Any:
     """Decision conditions: surface keys are `display` / `when` / `next` /
     `default`. Rewrite to wire keys `option` / `condition` for the resolver."""
@@ -25,7 +43,10 @@ def _rewrite_condition_keys(c: Any) -> Any:
     out: dict[str, Any] = {}
     for k, v in c.items():
         if k == "display":
-            out["option"] = v
+            v2, fixed = _coerce_label(v)
+            if fixed:
+                _norway_warnings.append(str(v2))
+            out["option"] = v2
         elif k == "when":
             out["condition"] = v
         else:
@@ -40,7 +61,10 @@ def _rewrite_option_keys(o: Any) -> Any:
     out: dict[str, Any] = {}
     for k, v in o.items():
         if k == "display":
-            out["option"] = v
+            v2, fixed = _coerce_label(v)
+            if fixed:
+                _norway_warnings.append(str(v2))
+            out["option"] = v2
         else:
             out[k] = v
     return out
@@ -180,12 +204,20 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             seen_ids.add(sid)
 
             if stype == "stop":
+                # Auto-rewrite: `stop` and `end` map to the same FSR
+                # canonical (Connectors → cyops_utilities.no_op). Rather
+                # than hard-erroring on a near-synonym the author had
+                # every reason to expect to work, rewrite it to `end`
+                # and emit a warning. Mechanical translation > prompt
+                # rule.
+                stype = "end"
+                s_raw["type"] = "end"
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message="step type 'stop' is not allowed — use 'end'",
+                    severity="warning",
+                    message="step type 'stop' auto-rewritten to 'end'",
                     path=f"{sp}.type",
                 ))
-                continue
 
             args = s_raw.get("arguments") or {}
             if not isinstance(args, dict):
@@ -287,15 +319,43 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             if stype == "decision":
                 top_conds = s_raw.get("conditions")
                 if isinstance(top_conds, list):
+                    _norway_warnings.clear()
                     args["conditions"] = [
                         _rewrite_condition_keys(c) for c in top_conds
                     ]
+                    for label in _norway_warnings:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            severity="warning",
+                            message=(
+                                f"decision branch label parsed as YAML "
+                                f"boolean (Norway problem) — coerced to "
+                                f"{label!r}; quote bare yes/no/on/off in "
+                                f"`display:` to avoid this"
+                            ),
+                            path=f"{sp}.conditions",
+                        ))
+                    _norway_warnings.clear()
             if stype == "manual_input":
                 top_opts = s_raw.get("options")
                 if isinstance(top_opts, list):
+                    _norway_warnings.clear()
                     args["options"] = [
                         _rewrite_option_keys(o) for o in top_opts
                     ]
+                    for label in _norway_warnings:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            severity="warning",
+                            message=(
+                                f"manual_input option label parsed as YAML "
+                                f"boolean (Norway problem) — coerced to "
+                                f"{label!r}; quote bare yes/no/on/off in "
+                                f"`display:` to avoid this"
+                            ),
+                            path=f"{sp}.options",
+                        ))
+                    _norway_warnings.clear()
             if stype == "set_variable":
                 top_vars = s_raw.get("vars")
                 if isinstance(top_vars, dict):
@@ -321,16 +381,23 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 ))
                 continue
             if stype == "decision" and s_raw.get("next"):
+                # Warn-and-fix: a bare step-level `next:` on a Decision is
+                # ambiguous (FSR's designer needs an explicit `default: true`
+                # row to render the else edge with a label). Rather than
+                # hard-fail the compile, let the value through — the emitter
+                # auto-synthesizes an "Else" default condition pointing at
+                # the same target. Match the user's standing preference for
+                # mechanical translation over prompt rules.
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
+                    severity="warning",
                     message=(
-                        "decision steps must not have a step-level `next:` — "
-                        "every branch goes in `conditions:` (include one "
-                        "entry with `default: true` for the else branch)"
+                        "decision step has a step-level `next:` — auto-"
+                        "synthesizing an `Else` default condition pointing "
+                        "at that target"
                     ),
                     path=f"{sp}.next",
                 ))
-                continue
             branches: dict[str, str] = {}
 
             cmt = s_raw.get("comment")
@@ -401,10 +468,17 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
         # holds the literal step.id so downstream resolver/emitter code
         # never has to think about the duality.
         name_to_id: dict[str, str] = {}
+        # Mirror the linter's charset substitution so `next:` references
+        # written with disallowed chars (em-dash, hyphen, etc) still
+        # resolve after the linter auto-renames the target step.
+        _bad_char_runs = re.compile(r"[^A-Za-z0-9 _]+")
         for s in steps:
             name_to_id.setdefault(s.name, s.id)
             name_to_id.setdefault(s.id, s.id)
             name_to_id.setdefault(_slugify(s.name), s.id)
+            charset_fixed = _bad_char_runs.sub("_", s.name).strip("_")
+            if charset_fixed:
+                name_to_id.setdefault(charset_fixed, s.id)
 
         def _resolve_ref(v: Any) -> Any:
             if isinstance(v, str) and v in name_to_id:
@@ -513,7 +587,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             annotations=annotations,
         ))
 
-    if errors:
+    if any(e.severity != "warning" for e in errors):
         return None, errors
 
     return Collection(

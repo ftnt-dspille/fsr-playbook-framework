@@ -57,6 +57,8 @@
     messages: Message[];
     latest_push: Push | null;
     feedback: Feedback | null;
+    final_yaml: string | null;
+    final_yaml_source: string | null;
   };
 
   let sessions = $state<Session[]>([]);
@@ -70,6 +72,14 @@
   let pendingRating = $state<'up' | 'down' | null>(null);
   let pendingSummary = $state('');
   let savingFeedback = $state(false);
+  // Inline feedback error (replaces window.alert) + inline confirm
+  // toggle (replaces window.confirm) for the Clear button.
+  let feedbackErr = $state<string | null>(null);
+  let confirmingClearFeedback = $state(false);
+  // Inline delete-session confirm + error.
+  let confirmingDeleteSession = $state(false);
+  let deletingSession = $state(false);
+  let deleteErr = $state<string | null>(null);
 
   async function loadList() {
     loadingList = true;
@@ -106,6 +116,7 @@
   async function saveFeedback() {
     if (!selectedId || !pendingRating) return;
     savingFeedback = true;
+    feedbackErr = null;
     try {
       const r = await fetch(
         `/api/history/sessions/${encodeURIComponent(selectedId)}/feedback`,
@@ -118,7 +129,7 @@
       if (!r.ok) throw new Error(await r.text());
       await Promise.all([loadList(), loadDetail(selectedId)]);
     } catch (e: any) {
-      alert(`Failed to save feedback: ${e?.message || e}`);
+      feedbackErr = `Failed to save feedback: ${e?.message || e}`;
     } finally {
       savingFeedback = false;
     }
@@ -126,8 +137,9 @@
 
   async function clearFeedback() {
     if (!selectedId) return;
-    if (!confirm('Clear feedback for this session?')) return;
+    confirmingClearFeedback = false;
     savingFeedback = true;
+    feedbackErr = null;
     try {
       const r = await fetch(
         `/api/history/sessions/${encodeURIComponent(selectedId)}/feedback`,
@@ -139,6 +151,34 @@
       await Promise.all([loadList(), loadDetail(selectedId)]);
     } finally {
       savingFeedback = false;
+    }
+  }
+
+  async function deleteSession() {
+    if (!selectedId) return;
+    deletingSession = true;
+    deleteErr = null;
+    const id = selectedId;
+    try {
+      const r = await fetch(
+        `/api/history/sessions/${encodeURIComponent(id)}`,
+        { method: 'DELETE' }
+      );
+      if (!r.ok) throw new Error(await r.text());
+      // Drop the detail pane and refresh the list. Reset all the
+      // per-session state we were holding for the now-gone row.
+      selectedId = null;
+      detail = null;
+      pendingRating = null;
+      pendingSummary = '';
+      confirmingDeleteSession = false;
+      confirmingClearFeedback = false;
+      feedbackErr = null;
+      await loadList();
+    } catch (e: any) {
+      deleteErr = `Failed to delete session: ${e?.message || e}`;
+    } finally {
+      deletingSession = false;
     }
   }
 
@@ -287,8 +327,41 @@
             >
               Open in Design ↗
             </a>
+            {#if confirmingDeleteSession}
+              <span class="flex items-center gap-1.5 text-xs">
+                <span class="text-[var(--text-muted)]">Delete this session?</span>
+                <button
+                  onclick={deleteSession}
+                  disabled={deletingSession}
+                  class="rounded border border-red-700/60 bg-red-900/40 px-2 py-1 text-red-200 hover:bg-red-900/60 disabled:opacity-50"
+                >
+                  {deletingSession ? 'Deleting…' : 'Yes'}
+                </button>
+                <button
+                  onclick={() => (confirmingDeleteSession = false)}
+                  disabled={deletingSession}
+                  class="rounded border border-[var(--border)] px-2 py-1 text-[var(--text-muted)] hover:bg-[var(--bg-panel)] disabled:opacity-50"
+                >
+                  No
+                </button>
+              </span>
+            {:else}
+              <button
+                onclick={() => (confirmingDeleteSession = true)}
+                class="rounded border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-faint)] hover:border-rose-700/60 hover:text-rose-300"
+                title="Delete this chat session and its transcript"
+              >
+                Delete
+              </button>
+            {/if}
           </div>
         </div>
+        {#if deleteErr}
+          <div class="mt-2 rounded border border-red-700/60 bg-red-900/30 px-2 py-1 text-xs text-red-200">
+            {deleteErr}
+            <button class="ml-2 underline hover:text-red-100" onclick={() => (deleteErr = null)}>dismiss</button>
+          </div>
+        {/if}
       </div>
 
       <div class="px-6 py-4 border-b border-[var(--border-soft)] bg-[var(--bg-canvas)]/40">
@@ -341,15 +414,33 @@
                   Not yet rated.
                 {/if}
               </span>
-              <div class="flex gap-2">
+              <div class="flex items-center gap-2">
                 {#if detail.feedback}
-                  <button
-                    onclick={clearFeedback}
-                    disabled={savingFeedback}
-                    class="text-xs text-[var(--text-faint)] hover:text-rose-400 disabled:opacity-50"
-                  >
-                    Clear
-                  </button>
+                  {#if confirmingClearFeedback}
+                    <span class="flex items-center gap-1.5 text-xs">
+                      <span class="text-[var(--text-muted)]">Clear feedback?</span>
+                      <button
+                        onclick={clearFeedback}
+                        class="rounded border border-red-700/60 bg-red-900/40 px-1.5 py-0.5 text-red-200 hover:bg-red-900/60"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onclick={() => (confirmingClearFeedback = false)}
+                        class="rounded border border-[var(--border)] px-1.5 py-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-panel)]"
+                      >
+                        No
+                      </button>
+                    </span>
+                  {:else}
+                    <button
+                      onclick={() => (confirmingClearFeedback = true)}
+                      disabled={savingFeedback}
+                      class="text-xs text-[var(--text-faint)] hover:text-rose-400 disabled:opacity-50"
+                    >
+                      Clear
+                    </button>
+                  {/if}
                 {/if}
                 <button
                   onclick={saveFeedback}
@@ -360,16 +451,25 @@
                 </button>
               </div>
             </div>
+            {#if feedbackErr}
+              <div class="mt-2 rounded border border-red-700/60 bg-red-900/30 px-2 py-1 text-xs text-red-200">
+                {feedbackErr}
+                <button class="ml-2 underline hover:text-red-100" onclick={() => (feedbackErr = null)}>dismiss</button>
+              </div>
+            {/if}
           </div>
         </div>
       </div>
 
-      {#if detail.latest_push?.source_yaml}
+      {#if detail.final_yaml}
         <details class="px-6 py-3 border-b border-[var(--border-soft)]" open>
           <summary class="cursor-pointer text-sm font-medium text-[var(--text-muted)]">
-            Final playbook YAML (push #{detail.latest_push.id})
+            Final playbook YAML
+            <span class="ml-1 text-xs text-[var(--text-faint)]">
+              ({detail.final_yaml_source ?? 'unknown source'})
+            </span>
           </summary>
-          <pre class="mt-3 max-h-[400px] overflow-auto rounded bg-[var(--bg-panel)] p-3 text-xs text-[var(--text-default)]">{detail.latest_push.source_yaml}</pre>
+          <pre class="mt-3 max-h-[400px] overflow-auto rounded bg-[var(--bg-panel)] p-3 text-xs text-[var(--text-default)]">{detail.final_yaml}</pre>
         </details>
       {/if}
 
@@ -398,9 +498,14 @@
                   <span>turn {m.turn} · {fmtTs(m.ts)}</span>
                 </div>
                 {#if m.kind === 'tool_use' || m.kind === 'tool_result'}
-                  <details class="mt-1">
+                  <details class="mt-1" open>
                     <summary class="cursor-pointer text-xs text-[var(--text-faint)] hover:text-[var(--text-muted)]">
-                      {m.content ? `${m.content.length.toLocaleString()} chars` : 'no payload'}
+                      {m.kind === 'tool_use' ? 'Arguments' : 'Result'}
+                      {#if m.content}
+                        · {m.content.length.toLocaleString()} chars
+                      {:else}
+                        · no payload
+                      {/if}
                     </summary>
                     <pre class="mt-2 max-h-[300px] overflow-auto rounded bg-[var(--bg-canvas)]/60 p-2 text-xs text-[var(--text-muted)] whitespace-pre-wrap">{m.content || ''}</pre>
                   </details>

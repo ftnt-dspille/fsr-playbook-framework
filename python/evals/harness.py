@@ -35,7 +35,7 @@ def _gold_lookup_for(tasks: list[Task]):
 
 def _compile_gold_json(yaml_text: str) -> dict[str, Any] | None:
     from mcp_server import compile_yaml
-    out = compile_yaml(yaml_text)
+    out = compile_yaml(yaml_text, verbose=True)
     if not out.get("ok"):
         return None
     try:
@@ -90,19 +90,35 @@ def run_matrix(
                     "levels": {},
                 })
                 continue
-            yaml_text = extract_yaml(raw)
+            # Agentic providers return a dict {text, trace, turns}; classic
+            # providers return a string. Detect and route.
+            if isinstance(raw, dict):
+                final_text = raw.get("text", "")
+                trace = raw.get("trace")
+                turns = raw.get("turns")
+            else:
+                final_text = raw or ""
+                trace = None
+                turns = None
+            yaml_text = extract_yaml(final_text)
             scored = score(
                 yaml_text,
                 gold_json=gold_json_by_task.get(t.name),
                 live=live,
+                trace=trace,
+                final_text=final_text,
             )
-            rows.append({
+            row = {
                 "model": model_name,
                 "task": t.name,
                 "yaml": yaml_text,
                 "elapsed_ms": int((time.time() - t0) * 1000),
                 **scored,
-            })
+            }
+            if turns is not None:
+                row["turns"] = turns
+                row["tool_calls"] = len(trace or [])
+            rows.append(row)
 
     summary: dict[str, dict[str, float]] = {}
     for m in model_names:

@@ -56,7 +56,7 @@ def test_score_gold_match():
     tasks = load_tasks(["hello_connector"])
     gold_yaml = tasks[0].gold_yaml_text()
     from mcp_server import compile_yaml
-    gold_json = __import__("json").loads(compile_yaml(gold_yaml)["json"])
+    gold_json = __import__("json").loads(compile_yaml(gold_yaml, verbose=True)["json"])
     out = score(gold_yaml, gold_json=gold_json, live=False)
     assert out["levels"]["L1"]["passed"] is True
     assert out["levels"]["L3"]["passed"] is True

@@ -268,11 +268,11 @@ def test_compile_errors_helper_returns_none_on_clean_yaml():
         "playbooks:\n"
         "  - name: Hello\n"
         "    steps:\n"
-        "      - id: trigger\n"
+        "      - name: trigger\n"
         "        type: start\n"
-        "        next: stop\n"
-        "      - id: stop\n"
-        "        type: stop\n"
+        "        next: end\n"
+        "      - name: end\n"
+        "        type: end\n"
     )
     assert compile_errors(good) is None
 

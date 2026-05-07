@@ -79,14 +79,17 @@ NAME_OK = NAME_BAD.replace(
 )
 
 
-def test_step_name_with_dash_paren_em_dash_rejected(db_path):
+def test_step_name_with_dash_paren_em_dash_auto_rewritten(db_path):
     r = compile_yaml(NAME_BAD, db_path)
-    assert not r.ok
-    msgs = " ".join(_messages(r))
-    assert "outside [A-Za-z0-9 _]" in msgs
-    # Suggestion sanitises the bad chars to underscores/spaces.
-    sugs = [e.suggestion for e in r.errors if e.suggestion]
-    assert any("rename to" in s for s in sugs)
+    assert r.ok, [e.to_dict() for e in r.errors]
+    # Linter emits a warning explaining the auto-rename.
+    warnings = [e for e in r.errors if e.severity == "warning"]
+    msgs = " ".join(w.message for w in warnings)
+    assert "auto-renamed" in msgs
+    # The compiled JSON has the cleaned name (no em-dash / paren / ?).
+    steps = r.fsr_json["data"][0]["workflows"][0]["steps"]
+    assert any(_BAD_CHAR not in s["name"]
+               for s in steps for _BAD_CHAR in "—()?")
 
 
 def test_step_name_clean_passes(db_path):

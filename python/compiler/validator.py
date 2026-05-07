@@ -32,12 +32,37 @@ _VARS_STEPS_RE = re.compile(
 # silently, breaking later steps that read it. Sourced from the corpus
 # + live runs (see store/JINJA_IDIOMS.md, /api/wf/api/workflows env dump).
 _RESERVED_VARS_KEYS = {
-    "input",          # trigger payload: records, params
+    # Authoritative list per FSR docs ("Reserved Keywords"). Setting any
+    # of these via SetVariable either silently shadows the FSR-provided
+    # value OR makes the runtime crash (e.g. setting `message` to a
+    # plain string triggers `'str' object has no attribute 'get'` because
+    # the engine treats it as a structured envelope).
+    "items",
+    "result",
+    "input",
+    "request",
+    "values",
+    "keys",
+    "files",
+    "env",
+    "message",
+    "resources",
+    "step_variables",
+    "do_until",
+    "ignore_errors",
+    "when",
+    "for_each",
+    "cyops_playbook_iri",
+    "cyops_playbook_name",
+    "collaborationNote",
+    "inputVariables",
+    "displayConditions",
+    "task_id",
+    "wf_id",
+    # Inferred-from-corpus additions (not in the public list, but
+    # observed to break or silently shadow):
     "steps",          # per-step output namespace
-    "task_id",        # current workflow task uuid
-    "env",            # workflow environment dict
-    "result",         # last step's result (set automatically by some types)
-    "vars",           # self-reference (would create infinite loop)
+    "vars",           # self-reference (infinite loop)
     "globalVars",     # collection-level globals
     "globals",        # alias used by some step handlers
     "parent_wf",      # set when invoked via workflow_reference
@@ -344,16 +369,9 @@ def _check_reserved_names(pb: Playbook, pi: int,
                     if k in {"step_variables"}:  # framework key, not a var
                         continue
                     names.append((k, k))
-            for n, sub in names:
-                if n in _RESERVED_VARS_KEYS:
-                    errors.append(CompileError(
-                        code=ErrorCode.BAD_VALUE,
-                        message=(f"SetVariable {n!r} shadows FSR's reserved "
-                                 f"vars.{n} — pick a different name (downstream "
-                                 f"steps that read vars.{n} will break)"),
-                        path=f"{spath}.arguments.{sub}",
-                        severity="error",
-                    ))
+            # Reserved-name collisions are auto-renamed in resolver
+            # (_auto_rename_reserved_set_var_keys) which emits a warning.
+            # No re-check here — the auto-renamer guarantees they're gone.
 
 
 def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:

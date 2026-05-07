@@ -107,10 +107,10 @@ def test_code_snippet_default_avoids_18k_blob():
 
 def test_default_omits_raw_corpus_examples_when_friendly_form_present():
     r = mcp_server.get_step_type("manual_input")
-    # examples either absent OR replaced with a small note
-    if "examples" in r:
-        assert not r["examples"]
-    assert "examples_note" in r
+    # Slim path drops the corpus examples entirely — friendly_form has
+    # the only example the LLM needs.
+    assert "examples" not in r
+    assert "friendly_form" in r
 
 
 def test_verbose_returns_full_corpus():

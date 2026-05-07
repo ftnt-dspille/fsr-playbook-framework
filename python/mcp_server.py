@@ -1101,6 +1101,37 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
 }
 
 
+def _render_yaml_example(example: Any) -> str | None:
+    """Render a friendly_form `example` dict as a YAML string.
+
+    Authoring is YAML; the agent translating a Python/JSON dict to YAML
+    is exactly where indentation and scalar-quoting bugs creep in.
+    Pre-rendering removes that step.
+    """
+    if not isinstance(example, dict):
+        return None
+    try:
+        import yaml as _yaml
+        return _yaml.safe_dump(
+            example,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        ).rstrip() + "\n"
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# Inject `yaml_example` next to every `example` so the agent can copy
+# the YAML form directly. Done at import time so the cost is paid once.
+for _entry in _FRIENDLY_FORMS.values():
+    _ex = _entry.get("example")
+    if _ex is not None:
+        _y = _render_yaml_example(_ex)
+        if _y:
+            _entry["yaml_example"] = _y
+
+
 @mcp.tool()
 def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
     """Return schema and examples for a playbook step type.
@@ -1163,20 +1194,22 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        # Examples are noisy for the LLM — one corpus playbook can drag
-        # in a whole 18 KB Python code blob (verified: code_snippet).
-        # When we have a friendly_form, that block already contains a
-        # concise example, so skip the corpus dump unless verbose=True.
-        # Otherwise, return at most one example and cap it.
+        # Slim path: friendly_form is the only field the LLM authors
+        # against. Drop everything that's either internal plumbing
+        # (args_schema_json's handler script path), null, or pure meta
+        # (examples_note, common_pitfalls). Halves the response size on
+        # the most-called tool. Verbose mode keeps the full row +
+        # corpus examples for debugging unusual cases.
+        if short in _FRIENDLY_FORMS and not verbose:
+            return {
+                "name": st["name"],
+                "label": st.get("label"),
+                "occurrences": st.get("occurrences"),
+                "friendly_form": _FRIENDLY_FORMS[short],
+            }
         if short in _FRIENDLY_FORMS:
             st["friendly_form"] = _FRIENDLY_FORMS[short]
-            if not verbose:
-                st["examples_note"] = (
-                    "raw corpus examples omitted; use the example in "
-                    "friendly_form. Call get_step_type(verbose=True) "
-                    "to fetch them."
-                )
-                return st
+
         limit = 3 if verbose else 1
         examples = _rows(
             conn,
@@ -1198,6 +1231,12 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
                         f"verbose=True for full payload>"
                     )
         st["examples"] = examples
+        if not verbose:
+            # Strip null / internal fields the LLM doesn't author against.
+            for k in ("uuid", "category", "description", "common_pitfalls",
+                      "ui_schema_json", "args_schema_json"):
+                if st.get(k) in (None, "", {}):
+                    st.pop(k, None)
         return st
 
 
@@ -1206,17 +1245,22 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def find_jinja_filter(q: str, limit: int = 15) -> list[dict[str, Any]]:
+def find_jinja_filter(q: str, limit: int = 15,
+                      verbose: bool = False) -> list[dict[str, Any]]:
     """Search the Jinja filter catalog by name, description, or example.
 
     Returns name, signature, description, example, output_type_observed,
-    is_trusted (1 = live-tested), corpus_uses (real-world occurrence count
-    in the live playbook corpus), and curated_doc when present (rich
-    long-form notes for complex filters like json_query, picklist,
-    fromIRI, resolveRange).
+    is_trusted (1 = live-tested), and corpus_uses (real-world occurrence
+    count in the live playbook corpus).
 
-    Use `get_filter_examples(name)` after this to pull more real-world
-    usages for a specific filter.
+    Use `get_filter_examples(name)` after this to pull the curated
+    long-form doc and more real-world usages for a specific filter.
+
+    Args:
+        verbose: when True, include `curated_doc` (rich long-form notes
+            for complex filters like json_query, picklist, fromIRI,
+            resolveRange) inline. Default omits it — fetch via
+            `get_filter_examples` once you've picked a filter.
     """
     with _db() as conn:
         rows = _rows(
@@ -1236,6 +1280,9 @@ def find_jinja_filter(q: str, limit: int = 15) -> list[dict[str, Any]]:
                LIMIT ?""",
             (q, q, q, q, limit),
         )
+        if not verbose:
+            for r in rows:
+                r.pop("curated_doc", None)
         return rows
 
 
@@ -1392,11 +1439,18 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def search_playbooks(q: str, limit: int = 10) -> list[dict[str, Any]]:
+def search_playbooks(q: str, limit: int = 10,
+                     verbose: bool = False) -> list[dict[str, Any]]:
     """Full-text search over playbook patterns seen in production.
 
-    Returns matching playbook names, collection names, and the connectors
-    they use — useful for 'how do others do X' pattern mining.
+    Returns matching playbook names + collections — useful for 'how do
+    others do X' pattern mining.
+
+    Args:
+        verbose: when True, include `description` (FTS) /
+            `uses_connectors_csv` + `step_count` (fallback). Default
+            returns the slim row set so a top-of-funnel "what playbooks
+            mention X" lookup costs few tokens.
     """
     with _db() as conn:
         # First try FTS table
@@ -1410,6 +1464,9 @@ def search_playbooks(q: str, limit: int = 10) -> list[dict[str, Any]]:
                 (q, limit),
             )
             if rows:
+                if not verbose:
+                    for r in rows:
+                        r.pop("description", None)
                 return rows
         except sqlite3.OperationalError:
             pass
@@ -1426,6 +1483,10 @@ def search_playbooks(q: str, limit: int = 10) -> list[dict[str, Any]]:
                LIMIT ?""",
             (q, q, q, limit),
         )
+        if not verbose:
+            for r in rows:
+                r.pop("uses_connectors_csv", None)
+                r.pop("step_count", None)
         return rows
 
 
@@ -1576,7 +1637,12 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
     returns structured errors.  Each error has: code, path, message,
     suggestion (may be empty).
 
-    Returns `{ok: true}` when the playbook is valid.
+    Returns `{ok: true}` when the playbook compiles. When the playbook
+    compiles but the graph linter raised non-blocking issues (e.g.
+    unreachable step, missing default branch), the response is
+    `{ok: true, warnings: [...]}`. Treat warnings as authoring bugs
+    to fix before declaring done — they don't block compile but they
+    almost always mean the playbook won't behave correctly at runtime.
     """
     sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
@@ -1586,6 +1652,13 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
 
     result = _compile(yaml_text, DB_PATH)
     if result.ok:
+        warnings = [_serialize_compiler_error(w) for w in result.warnings]
+        if warnings:
+            return {
+                "ok": True,
+                "warnings": warnings,
+                "next_fix": _pick_next_fix(warnings),
+            }
         return {"ok": True}
     errs = [_serialize_compiler_error(e) for e in result.errors]
     return _err(
@@ -1778,15 +1851,16 @@ def resolve_yaml(yaml_text: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def compile_yaml(yaml_text: str) -> dict[str, Any]:
+def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
     """Compile a YAML playbook to FortiSOAR WorkflowCollection JSON.
 
-    Returns `{ok: true, json: "..."}` where `json` is the importable
-    FSR JSON string, or `{ok: false, errors: [...]}` with structured
-    compiler errors.
+    Returns `{ok: true, summary: {workflows, steps, uuid, name}}` by
+    default — the agent rarely needs the full JSON body, just a
+    confirmation that compile succeeds. Pass `verbose=True` to also get
+    the importable FSR JSON string under `json`.
 
-    The returned JSON can be pushed to FSR via `fsrpb push` or imported
-    through the FSR UI (Administration → Import Wizard).
+    On failure: `{ok: false, errors: [...]}` with structured compiler
+    errors regardless of verbose.
     """
     sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
@@ -1802,7 +1876,18 @@ def compile_yaml(yaml_text: str) -> dict[str, Any]:
             "and suggestions",
             errors=[_serialize_compiler_error(e) for e in result.errors],
         )
-    return {"ok": True, "json": json.dumps(result.fsr_json, indent=2)}
+    coll = (result.fsr_json.get("data") or [{}])[0]
+    workflows = coll.get("workflows") or []
+    summary = {
+        "name": coll.get("name"),
+        "uuid": coll.get("uuid"),
+        "workflows": len(workflows),
+        "steps": sum(len(w.get("steps") or []) for w in workflows),
+    }
+    out: dict[str, Any] = {"ok": True, "summary": summary}
+    if verbose:
+        out["json"] = json.dumps(result.fsr_json, indent=2)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2128,7 +2213,8 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def list_configured_connectors(probe: bool = False) -> dict[str, Any]:
+def list_configured_connectors(probe: bool = False,
+                               verbose: bool = False) -> dict[str, Any]:
     """List connectors that are configured AND active on the live FSR instance.
 
     A connector with no configuration cannot be called — it'll fail at runtime
@@ -2139,9 +2225,11 @@ def list_configured_connectors(probe: bool = False) -> dict[str, Any]:
         probe: when True, also healthcheck each one (one HTTP call per
             connector — slower but gives live "Available"/"Disconnected"
             status). When False (default), just lists the configured set.
+        verbose: when True, include label, version, and config_count.
+            Default returns only name + status to keep tool-result tokens low.
 
     Returns:
-        {configured: [{name, version, label, config_count, status}], probed: bool}
+        {configured: [{name, status[, version, label, config_count]}], probed: bool}
         With probe=True, status is "Available", "Disconnected", or an error.
         With probe=False, status comes from the listing endpoint
         ("Completed" = config saved successfully).
@@ -2166,18 +2254,21 @@ def list_configured_connectors(probe: bool = False) -> dict[str, Any]:
 
     out: list[dict] = []
     for x in rows:
-        item = {
+        item: dict[str, Any] = {
             "name": x.get("name"),
-            "version": x.get("version"),
-            "label": x.get("label"),
-            "config_count": x.get("config_count"),
             "status": x.get("status"),
         }
-        if probe and item["name"] and item["version"]:
+        # `version` is needed locally for the probe call regardless of verbose.
+        x_version = x.get("version")
+        if verbose:
+            item["version"] = x_version
+            item["label"] = x.get("label")
+            item["config_count"] = x.get("config_count")
+        if probe and item["name"] and x_version:
             try:
                 hr = client.session.get(
                     client.base_url
-                    + f"/api/integration/connectors/healthcheck/{item['name']}/{item['version']}/",
+                    + f"/api/integration/connectors/healthcheck/{item['name']}/{x_version}/",
                     verify=client.verify_ssl,
                 )
                 item["status"] = (hr.json().get("status") if hr.status_code == 200 else f"http_{hr.status_code}")

@@ -18,8 +18,9 @@ def test_anthropic_schema_shape():
 
 def test_dispatch_find_connector():
     out = dispatch("find_connector", {"q": "jira", "limit": 3})
-    assert isinstance(out, list)
-    assert len(out) <= 3
+    assert isinstance(out, dict)
+    assert isinstance(out["matches"], list)
+    assert len(out["matches"]) <= 3
 
 
 def test_dispatch_unknown_tool_returns_error():

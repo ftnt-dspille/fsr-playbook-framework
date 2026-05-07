@@ -28,16 +28,17 @@ collection: Hello World
 playbooks:
   - name: Hello
     steps:
-      - id: trigger
+      - name: trigger
         type: start
-        next: stop
-      - id: stop
-        type: stop
+        next: end
+      - name: end
+        type: end
 `;
 
 const LS_TEXT = 'fsrpb.editor.text';
 const LS_DRAFTS = 'fsrpb.editor.drafts';
 const LS_SNAPSHOT = 'fsrpb.editor.snapshot';
+const LS_ACTIVE_DRAFT = 'fsrpb.editor.activeDraftName';
 
 /** One revision of a draft. The latest revision is the draft's
  *  "current" text; older revisions form the history users browse to
@@ -112,6 +113,14 @@ class YamlStore {
   text = $state<string>(lsGetString(LS_TEXT) ?? PLACEHOLDER);
   drafts = $state<Draft[]>(lsGet<Draft[]>(LS_DRAFTS, []));
   lastSnapshot = $state<Snapshot | null>(lsGet<Snapshot | null>(LS_SNAPSHOT, null));
+  /** Name of the draft the buffer is currently tracking, if any. Set
+   *  by `loadDraft` / `loadDraftRevision` / `saveDraft`; cleared on
+   *  `reset()` so a fresh canvas doesn't silently overwrite an old
+   *  draft. The Save button uses this to update-in-place instead of
+   *  prompting for a new name on every click. */
+  activeDraftName = $state<string | null>(
+    lsGetString(LS_ACTIVE_DRAFT) ?? null,
+  );
 
   constructor() {
     // Persist live edits to LS. $effect.root keeps this alive for the
@@ -127,6 +136,13 @@ class YamlStore {
         });
         $effect(() => {
           lsSet(LS_SNAPSHOT, this.lastSnapshot);
+        });
+        $effect(() => {
+          if (this.activeDraftName) {
+            lsSetString(LS_ACTIVE_DRAFT, this.activeDraftName);
+          } else {
+            try { localStorage.removeItem(LS_ACTIVE_DRAFT); } catch {}
+          }
         });
       });
     }
@@ -148,6 +164,9 @@ class YamlStore {
   /** Reset to the placeholder welcome YAML, snapshotting current. */
   reset(): void {
     this.setText(PLACEHOLDER, 'reset');
+    // A reset is a fresh canvas — don't keep a stale draft tracking
+    // pointer that would later cause Save to overwrite an unrelated draft.
+    this.activeDraftName = null;
   }
 
   /** Append a revision to a named draft, creating the draft if it
@@ -205,7 +224,9 @@ class YamlStore {
 
   /** Backward-compat shorthand: a manual user save = one revision tagged 'user'. */
   saveDraft(name: string): Draft {
-    return this.appendDraftRevision(name, this.text, 'user');
+    const d = this.appendDraftRevision(name, this.text, 'user');
+    this.activeDraftName = d.name;
+    return d;
   }
 
   /** Load a named draft's current (latest) revision into the buffer. */
@@ -213,6 +234,7 @@ class YamlStore {
     const draft = this.drafts.find((d) => d.name === name);
     if (!draft) throw new Error(`no draft named ${name}`);
     this.setText(draft.text, `loaded draft: ${name}`);
+    this.activeDraftName = draft.name;
   }
 
   /** Load a specific historical revision of a draft into the buffer.
@@ -227,10 +249,12 @@ class YamlStore {
       draft.revisions[index].text,
       `loaded ${name} revision ${index}`,
     );
+    this.activeDraftName = draft.name;
   }
 
   deleteDraft(name: string): void {
     this.drafts = this.drafts.filter((d) => d.name !== name);
+    if (this.activeDraftName === name) this.activeDraftName = null;
   }
 
   /** Restore the auto-snapshot taken before the last destructive

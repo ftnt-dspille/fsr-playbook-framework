@@ -11,11 +11,11 @@ collection: Hello
 playbooks:
   - name: Hello
     steps:
-      - id: trigger
+      - name: trigger
         type: start
-        next: stop
-      - id: stop
-        type: stop
+        next: end
+      - name: end
+        type: end
 """
 
 

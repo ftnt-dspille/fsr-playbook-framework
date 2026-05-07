@@ -1,6 +1,23 @@
 # FSRPlaybookYaml — TODO / resume state
 
-**Last touched**: 2026-05-06. Live FSR target: `https://10.99.249.205` (label `dev`).
+**Last touched**: 2026-05-07. Live FSR target: `https://10.99.249.205` (label `dev`).
+
+## Pending — agentic eval re-baseline (2026-05-07)
+
+Track A landed the agentic provider + scoring gates (tool_budget /
+no_spiral / adherence) but the actual baseline run was deferred — it
+costs API calls. Run when ready:
+
+```
+ANTHROPIC_API_KEY=… fsrpb evals --models gold,agentic_anthropic --save
+LMSTUDIO_BASE_URL=… fsrpb evals --models gold,agentic_lmstudio --save
+fsrpb evals --baseline 20260507T132623Z   # delta vs the gold-only smoke
+```
+
+Compare cells to see whether the Track-B slimming + Track-C auto-fixes
+moved the agentic providers' p95 tool count / spiral counts. Archive
+under `store/eval_runs/`; if regressions appear, the gates will surface
+them per-cell.
 
 ## Success ladder + LLM-agnostic groundwork (added 2026-05-06)
 

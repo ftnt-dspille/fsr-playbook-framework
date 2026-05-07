@@ -19,6 +19,7 @@ from compiler.parser import parse_yaml
 from compiler.resolver import Resolver
 from compiler.validator import validate as _validate
 from compiler.arg_validator import ArgValidator
+from compiler.source_fixer import collect_fixes as _collect_fixes
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB = REPO_ROOT / "store" / "fsr_reference.db"
@@ -137,7 +138,22 @@ def validate(body: YamlIn) -> dict[str, Any]:
         markers += [_err_to_marker(text, e) for e in _validate(coll)]
 
     ok = not any(m.severity == "error" for m in markers)
-    return {"ok": ok, "markers": [m.model_dump() for m in markers]}
+    # Bundle source-level auto-fixes inline so the editor's Fixes panel
+    # can render without a second roundtrip per keystroke.
+    fixes = [f.to_dict() for f in _collect_fixes(text)]
+    return {"ok": ok, "markers": [m.model_dump() for m in markers], "fixes": fixes}
+
+
+@router.post("/fixes")
+def fixes(body: YamlIn) -> dict[str, Any]:
+    """Source-level auto-fixes for the editor's "Fix warnings" UI.
+
+    Returns one entry per known foot-gun (em-dash step name, bare `yes`
+    in `display:`, `vars.input.<param>` missing the `.params.` segment,
+    `type: stop`). Each entry carries a Monaco-shaped range so the
+    editor can apply the patch as a normal edit (undoable via Cmd-Z).
+    """
+    return {"fixes": [f.to_dict() for f in _collect_fixes(body.text)]}
 
 
 @router.post("/compile")

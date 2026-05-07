@@ -1,0 +1,1752 @@
+{
+  "live": false,
+  "tasks": [
+    "hello_connector",
+    "decision_branch",
+    "alert_action_var_chain",
+    "record_action_trigger",
+    "alert_on_create",
+    "alert_on_status_change",
+    "code_snippet",
+    "delay_step",
+    "for_each_loop",
+    "manual_input_branch",
+    "record_create",
+    "record_find_update",
+    "virustotal_ip",
+    "manual_input_then_act",
+    "unknown_connector"
+  ],
+  "models": [
+    "gold",
+    "echo"
+  ],
+  "rows": [
+    {
+      "model": "gold",
+      "task": "hello_connector",
+      "yaml": "collection: Compiler Demo\ndescription: Smallest possible end-to-end \u2014 start, set a variable, call a connector.\nvisible: true\n\nplaybooks:\n  - name: Hello Connector\n    description: Demonstrates start -> set_variable -> connector flow.\n    steps:\n      - name: Start\n        type: start\n        next: Prepare inputs\n\n      - name: Prepare inputs\n        type: set_variable\n        next: Get organization\n        vars:\n          target_org: \"Fortinet\"\n\n      - name: Get organization\n        type: connector\n        arguments:\n          connector: fortinet-fortisiem\n          operation: get_org_name_by_org_id\n          config: \"\"\n          params:\n            domain_id: \"{{ vars.target_org }}\"",
+      "elapsed_ms": 37,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": true,
+          "skipped": false,
+          "warnings": []
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 4,
+      "max": 4,
+      "fraction": 1.0
+    },
+    {
+      "model": "gold",
+      "task": "decision_branch",
+      "yaml": "# Branching: a Decision step routes to different next-steps based on\n# a condition. Each entry under `conditions:` has a `when:` expression\n# and `next:` target; one entry has `default: true` for the else path.\n\ncollection: Compiler Examples\ndescription: Decision branching with high/low severity routing.\nvisible: true\n\nplaybooks:\n  - name: Route By Severity\n    description: Demonstrate decision branches.\n    steps:\n      - name: start\n        type: start\n        next: Read severity\n\n      - name: Read severity\n        type: set_variable\n        next: Branch on severity\n        vars:\n          severity: \"{{ vars.input.records[0].severity }}\"\n\n      - name: Branch on severity\n        type: decision\n        conditions:\n          - display: high\n            when: \"{{ vars.severity in ['critical', 'high'] }}\"\n            next: Escalate to Tier 2\n          - display: Else\n            default: true\n            next: Log low severity\n\n      - name: Escalate to Tier 2\n        type: set_variable\n        vars:\n          tier: \"tier2\"\n\n      - name: Log low severity\n        type: set_variable\n        vars:\n          tier: \"tier1\"",
+      "elapsed_ms": 37,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": true,
+          "skipped": false,
+          "warnings": []
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 4,
+      "max": 4,
+      "fraction": 1.0
+    },
+    {
+      "model": "gold",
+      "task": "alert_action_var_chain",
+      "yaml": "# Record-context trigger demo (cybersponse.action). Half of all\n# real-world FSR playbooks fire this way \u2014 right-click an alert,\n# pick \"Execute\". The playbook receives the record at vars.input.records[0]\n# and stamps a verdict.\n#\n# `type: record_action` compiles to cybersponse.action with the canonical\n# dozen-key argument dict (route uuid, resources, displayConditions,\n# triggerOnSource, etc.) auto-filled.\n\ncollection: FSRPB Demo Alert Action\ndescription: Right-click action on alerts \u2014 read severity, decide, stamp.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - Triage Alert\n    description: Reads alert severity and tags the alert with a verdict.\n    is_active: true\n    steps:\n      - name: Triage Alert            # canvas/step name (what shows on the node)\n        type: start\n        next: Read severity\n        arguments:\n          module: alerts\n          button_label: \"Triage Alert\" # what shows on the Execute menu button\n          requires_record: true\n          run_mode: per_record\n\n      - name: Read severity\n        type: set_variable\n        next: Branch on severity\n        vars:\n          severity: \"{{ vars.input.records[0].severity.itemValue }}\"\n\n      - name: Branch on severity\n        type: decision\n        conditions:\n          - display: high\n            when: \"{{ vars.severity in ['Critical', 'High'] }}\"\n            next: Stamp high verdict\n          - display: low\n            when: \"{{ vars.severity not in ['Critical', 'High'] }}\"\n            next: No action low severity\n\n      - name: Stamp high verdict\n        type: set_variable\n        vars:\n          verdict: \"escalate\"\n\n      - name: No action low severity\n        type: end",
+      "elapsed_ms": 38,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": false,
+          "warnings": [
+            {
+              "code": "bad_value",
+              "path": "playbooks[0].steps[2].arguments.conditions",
+              "message": "decision 'branch_on_severity': no default/else branch and no fall-through `next:`; if every condition evaluates false the run will stall. Either add a branch with `default: true` or set `next:` on the decision step"
+            }
+          ]
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 3,
+      "max": 4,
+      "fraction": 0.75
+    },
+    {
+      "model": "gold",
+      "task": "record_action_trigger",
+      "yaml": "# Record-context trigger demo (cybersponse.action). Half of all\n# real-world FSR playbooks fire this way \u2014 right-click an alert,\n# pick \"Execute\". The playbook receives the record at vars.input.records[0]\n# and stamps a verdict.\n#\n# `type: record_action` compiles to cybersponse.action with the canonical\n# dozen-key argument dict (route uuid, resources, displayConditions,\n# triggerOnSource, etc.) auto-filled.\n\ncollection: FSRPB Demo Alert Action\ndescription: Right-click action on alerts \u2014 read severity, decide, stamp.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - Triage Alert\n    description: Reads alert severity and tags the alert with a verdict.\n    is_active: true\n    steps:\n      - name: Triage Alert            # canvas/step name (what shows on the node)\n        type: start\n        next: Read severity\n        arguments:\n          module: alerts\n          button_label: \"Triage Alert\" # what shows on the Execute menu button\n          requires_record: true\n          run_mode: per_record\n\n      - name: Read severity\n        type: set_variable\n        next: Branch on severity\n        vars:\n          severity: \"{{ vars.input.records[0].severity.itemValue }}\"\n\n      - name: Branch on severity\n        type: decision\n        conditions:\n          - display: high\n            when: \"{{ vars.severity in ['Critical', 'High'] }}\"\n            next: Stamp high verdict\n          - display: low\n            when: \"{{ vars.severity not in ['Critical', 'High'] }}\"\n            next: No action low severity\n\n      - name: Stamp high verdict\n        type: set_variable\n        vars:\n          verdict: \"escalate\"\n\n      - name: No action low severity\n        type: end",
+      "elapsed_ms": 38,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": false,
+          "warnings": [
+            {
+              "code": "bad_value",
+              "path": "playbooks[0].steps[2].arguments.conditions",
+              "message": "decision 'branch_on_severity': no default/else branch and no fall-through `next:`; if every condition evaluates false the run will stall. Either add a branch with `default: true` or set `next:` on the decision step"
+            }
+          ]
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 3,
+      "max": 4,
+      "fraction": 0.75
+    },
+    {
+      "model": "gold",
+      "task": "alert_on_create",
+      "yaml": "# post_create trigger demo. Fires automatically when an alert is\n# created where `type` matches a known suspicious-email value (uses\n# the `when:` shorthand \u2192 fieldbasedtrigger). Single-step playbook\n# stamps the new alert with a marker so the e2e runner can verify the\n# trigger fired.\n\ncollection: FSRPB Demo Alert On Create\ndescription: Auto-trigger when a Phishing alert is created.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - On Alert Create\n    is_active: true\n    steps:\n      - name: On Alert Create\n        type: start_on_create\n        next: Stamp marker\n        arguments:\n          module: alerts\n          when:\n            logic: AND\n            filters:\n              # `name` is a plain string field; picklist-typed fields\n              # like `type`/`severity` store IRIs, not display values,\n              # so a literal-string `like` filter on them never matches.\n              - {field: name, op: like, value: \"%fsrpb_e2e_on_create%\"}\n\n      - name: Stamp marker\n        type: update_record\n        arguments:\n          collection: \"{{ vars.input.records[0]['@id'] }}\"\n          module: alerts\n          resource:\n            description: \"fsrpb_e2e_on_create_marker\"\n          operation: Replace\n          step_variables: []",
+      "elapsed_ms": 35,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": false,
+          "warnings": [
+            {
+              "code": "bad_value",
+              "path": "playbooks[0].steps[1].arguments.operation",
+              "message": "UpdateRecord.arguments.operation='Replace' not seen in any of the corpus samples for this step type"
+            }
+          ]
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 3,
+      "max": 4,
+      "fraction": 0.75
+    },
+    {
+      "model": "gold",
+      "task": "alert_on_status_change",
+      "yaml": "# post_update trigger demo (cybersponse.post_update). Fires automatically\n# whenever an alert is updated AND the `status` field changed. Single-step\n# playbook stamps the alert with a marker so the e2e runner can verify\n# the trigger fired.\n#\n# `type: start_on_update` + `when:` shorthand expands to FSR's canonical\n# `fieldbasedtrigger` block with `operator: changed`.\n\ncollection: FSRPB Demo Alert On Status Change\ndescription: Auto-trigger when an alert's status field changes.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - On Alert Status Change\n    is_active: true\n    steps:\n      - name: On Alert Status Change\n        type: start_on_update\n        next: Stamp marker\n        arguments:\n          module: alerts\n          when:\n            logic: OR\n            filters:\n              - {field: status, op: changed}\n\n      - name: Stamp marker\n        type: update_record\n        arguments:\n          collection: \"{{ vars.input.records[0]['@id'] }}\"\n          module: alerts                # \u2192 collectionType: /api/3/alerts\n          resource:\n            description: \"fsrpb_e2e_on_update_marker\"\n          operation: Replace\n          step_variables: []",
+      "elapsed_ms": 37,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": false,
+          "warnings": [
+            {
+              "code": "bad_value",
+              "path": "playbooks[0].steps[1].arguments.operation",
+              "message": "UpdateRecord.arguments.operation='Replace' not seen in any of the corpus samples for this step type"
+            }
+          ]
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 3,
+      "max": 4,
+      "fraction": 0.75
+    },
+    {
+      "model": "gold",
+      "task": "code_snippet",
+      "yaml": "# CodeSnippet (Python inline) demo. Runs a small Python block through\n# FSR's `code-snippet` connector. Compiler resolves the connector config\n# UUID via connector_configs.resolve_config_id (live + cached).\n#\n# Authoring shape: just `code:` (multiline string). Optional `config:`\n# selects a non-default connector configuration by friendly name.\n\ncollection: FSRPB Demo Code Snippet\ndescription: Run a Python snippet, capture output, branch on result.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - Code Snippet\n    is_active: true\n    parameters: [first_name]\n    steps:\n      - name: trigger\n        type: start\n        next: Build greeting\n\n      - name: Build greeting\n        type: code_snippet\n        next: Stamp greeting\n        arguments:\n          code: |\n            name = \"{{ vars.input.params.first_name }}\"\n            greeting = f\"hello {name}\"\n            print(greeting)\n\n      - name: Stamp greeting\n        type: set_variable\n        vars:\n          greeting_text: \"{{ vars.steps.Build_greeting.output }}\"",
+      "elapsed_ms": 34,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": true,
+          "skipped": false,
+          "warnings": []
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 4,
+      "max": 4,
+      "fraction": 1.0
+    },
+    {
+      "model": "gold",
+      "task": "delay_step",
+      "yaml": "# Delay step demo. Single-step body that pauses for 2 seconds, then a\n# set_variable stamps a marker so we can verify the step actually ran.\n# Compiler expands `arguments: {seconds: 2}` to the canonical FSR\n# TimeBased rule shape (resume_playbook channel + crudhub event source).\n\ncollection: FSRPB Demo Delay\ndescription: Verify the delay step runs to completion.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - Delay\n    is_active: true\n    steps:\n      - name: trigger\n        type: start\n        next: Wait 2s\n\n      - name: Wait 2s\n        type: delay\n        next: Stamp done\n        arguments:\n          seconds: 2\n\n      - name: Stamp done\n        type: set_variable\n        vars:\n          marker: \"delay_passed\"",
+      "elapsed_ms": 34,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": true,
+          "skipped": false,
+          "warnings": []
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 4,
+      "max": 4,
+      "fraction": 1.0
+    },
+    {
+      "model": "gold",
+      "task": "for_each_loop",
+      "yaml": "# for_each demo. A Set Variables step builds a static list of three\n# alert payloads; the next step loops over them with `for_each`,\n# creating one alert per element. Each iteration's element is bound\n# as `{{ vars.item }}` (object fields under `vars.item.<field>`).\n#\n# Note: this uses non-bulk Create Record so on-create alert playbook\n# triggers fire normally \u2014 the ingestion-recipe pattern. Threat-feed\n# recipes use IngestBulkFeed with for_each.__bulk=true instead.\n\ncollection: FSRPB Demo For Each\ndescription: Loops a create_record over a list with for_each / vars.item.\nvisible: true\n\nplaybooks:\n  - name: FSRPB For Each Create\n    is_active: true\n    steps:\n      - name: trigger\n        type: start\n        next: Build alerts\n\n      - name: Build alerts\n        type: set_variable\n        next: Create alert per item\n        vars:\n          alerts_to_create:\n            - name: \"fsrpb_for_each marker A\"\n              severity: High\n              description: \"first looped alert\"\n            - name: \"fsrpb_for_each marker B\"\n              severity: Medium\n              description: \"second looped alert\"\n            - name: \"fsrpb_for_each marker C\"\n              severity: Low\n              description: \"third looped alert\"\n\n      - name: Create alert per item\n        type: create_record\n        for_each:\n          item: \"{{ vars.steps.Build_alerts.alerts_to_create }}\"\n          parallel: false\n          condition: \"\"\n        arguments:\n          module: alerts\n          operation: Replace\n          resource:\n            name: \"{{ vars.item.name }}\"\n            severity: \"{{ vars.item.severity }}\"\n            description: \"{{ vars.item.description }}\"",
+      "elapsed_ms": 37,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": false,
+          "warnings": [
+            {
+              "code": "missing_field",
+              "path": "playbooks[0].steps[2].arguments.step_variables",
+              "message": "InsertData.arguments.step_variables is missing \u2014 every corpus sample for this step type sets this key"
+            }
+          ]
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 3,
+      "max": 4,
+      "fraction": 0.75
+    },
+    {
+      "model": "gold",
+      "task": "manual_input_branch",
+      "yaml": "# Manual-input (human-in-the-loop) demo. Pauses with two options;\n# whichever the user clicks routes to a different next step. The e2e\n# runner picks the option programmatically via `resume_input:` in the\n# .test.yaml so the demo can run unattended.\n\ncollection: FSRPB Demo Manual Input\ndescription: Pause for an approve/reject decision, then branch.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - Manual Input\n    is_active: true\n    steps:\n      - name: trigger\n        type: start\n        next: Approve action\n\n      - name: Approve action\n        type: manual_input\n        options:\n          - display: approve\n            primary: true\n            next: Stamp approved\n          - display: reject\n            next: Stamp rejected\n        arguments:\n          title: \"Approve the e2e action?\"\n          description: \"Click **approve** to continue, **reject** to abort.\"\n\n      - name: Stamp approved\n        type: set_variable\n        vars:\n          verdict: approved\n\n      - name: Stamp rejected\n        type: set_variable\n        vars:\n          verdict: rejected",
+      "elapsed_ms": 39,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": true,
+          "skipped": false,
+          "warnings": []
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 4,
+      "max": 4,
+      "fraction": 1.0
+    },
+    {
+      "model": "gold",
+      "task": "record_create",
+      "yaml": "# create_record demo. The playbook itself creates an alert (rather than\n# the test sidecar's setup) \u2014 exercises the InsertData step type.\n#\n# Cleanup: the playbook tags the new alert's `description` with a known\n# fsrpb_e2e_create marker; the .test.yaml's cleanup_query then deletes\n# any alert with that marker so repeat runs don't accumulate.\n\ncollection: FSRPB Demo Record Create\ndescription: Single-step playbook that creates an alert.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Create Alert\n    is_active: true\n    parameters: [alert_name]\n    steps:\n      - name: trigger\n        type: start\n        next: Create alert\n\n      - name: Create alert\n        type: create_record\n        arguments:\n          module: alerts                # \u2192 collection: /api/3/alerts\n          operation: Replace\n          resource:\n            name: \"{{ vars.input.params.alert_name }}\"\n            severity: /api/3/picklists/40187287-89fc-4e9c-b717-e9443d57eedb   # High\n            description: \"fsrpb_e2e_create marker\"\n          step_variables: []",
+      "elapsed_ms": 36,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": true,
+          "skipped": false,
+          "warnings": []
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 4,
+      "max": 4,
+      "fraction": 1.0
+    },
+    {
+      "model": "gold",
+      "task": "record_find_update",
+      "yaml": "# Find + Update record CRUD demo. Covers ~38% of corpus (FindRecords +\n# UpdateRecord). Setup inserts a tagged test alert; this playbook\n# finds it by uuid, then updates its description field.\n#\n# FSR canonical shapes (verified live 2026-05-03):\n#   find_record arguments:\n#     module:    'alerts'    \u2014 the module name. Suffix `?$limit=N`\n#                              optional but the API Platform respects it.\n#     query:                  \u2014 query DSL\n#       logic:    'AND' | 'OR'\n#       filters:  [{type:'primitive', field, value, operator, _operator}]\n#       __selectFields: list of fields to fetch (optional)\n#     step_variables: []\n#\n#   update_record arguments:\n#     collection:     IRI of the record to update (Jinja from find_record output)\n#     collectionType: module IRI (e.g. /api/3/alerts)\n#     resource:       {field: value, ...} fields to set\n#     operation:      'Replace' | 'Append'\n#     step_variables: []\n\ncollection: FSRPB Demo Record CRUD\ndescription: Find a tagged alert and update it.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Find And Update Alert\n    is_active: true\n    parameters: [target_uuid]\n    steps:\n      - name: trigger\n        type: start\n        next: Find target alert\n\n      - name: Find target alert\n        type: find_record\n        next: Stamp description\n        arguments:\n          module: alerts\n          query:\n            logic: AND\n            filters:\n              - type: primitive\n                field: uuid\n                value: \"{{ vars.input.params.target_uuid }}\"\n                operator: eq\n                _operator: eq\n            __selectFields: [uuid, name, description]\n          step_variables: []\n\n      - name: Stamp description\n        type: update_record\n        arguments:\n          collection: \"{{ vars.steps.Find_target_alert[0]['@id'] }}\"\n          collectionType: /api/3/alerts\n          resource:\n            description: \"fsrpb e2e \u2014 stamped at {{ vars.task_id }}\"\n          operation: Replace\n          step_variables: []",
+      "elapsed_ms": 37,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": false,
+          "warnings": [
+            {
+              "code": "bad_value",
+              "path": "playbooks[0].steps[2].arguments.operation",
+              "message": "UpdateRecord.arguments.operation='Replace' not seen in any of the corpus samples for this step type"
+            }
+          ]
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 3,
+      "max": 4,
+      "fraction": 0.75
+    },
+    {
+      "model": "gold",
+      "task": "virustotal_ip",
+      "yaml": "# Demo A backbone: real VirusTotal IP-reputation lookup, branched on the\n# real `last_analysis_stats.malicious` count, no hardcoding. The runner\n# passes an IP via parameters; the playbook calls VT live and stamps a\n# verdict.\n#\n# This is the smallest playbook that actually demonstrates the full\n# SOAR pattern (input \u2192 enrichment \u2192 decision \u2192 action) end-to-end on\n# a real connector against a real API.\n\ncollection: FSRPB Demo VirusTotal\ndescription: Look up an IP on VirusTotal and stamp a verdict by malicious count.\nvisible: true\n\nplaybooks:\n  - name: VT IP Reputation\n    description: Real VT lookup \u2192 branch on last_analysis_stats.malicious.\n    is_active: true\n    parameters: [ip]\n    steps:\n      - name: start\n        type: start\n        next: Query VirusTotal\n\n      - name: Query VirusTotal\n        type: connector\n        next: Extract malicious count\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: \"\"\n          params:\n            ip: \"{{ vars.input.params.ip }}\"\n\n      - name: Extract malicious count\n        type: set_variable\n        next: Branch on verdict\n        vars:\n          malicious_count: \"{{ vars.steps.Query_VirusTotal.data.attributes.last_analysis_stats.malicious }}\"\n\n      - name: Branch on verdict\n        type: decision\n        conditions:\n          - display: malicious\n            when: \"{{ (vars.malicious_count | int) > 0 }}\"\n            next: Stamp malicious\n          - display: clean\n            when: \"{{ (vars.malicious_count | int) == 0 }}\"\n            next: Stamp clean\n\n      - name: Stamp malicious\n        type: set_variable\n        vars:\n          verdict: \"malicious\"\n\n      - name: Stamp clean\n        type: set_variable\n        vars:\n          verdict: \"clean\"",
+      "elapsed_ms": 41,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": false,
+          "warnings": [
+            {
+              "code": "bad_value",
+              "path": "playbooks[0].steps[3].arguments.conditions",
+              "message": "decision 'branch_on_verdict': no default/else branch and no fall-through `next:`; if every condition evaluates false the run will stall. Either add a branch with `default: true` or set `next:` on the decision step"
+            }
+          ]
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 3,
+      "max": 4,
+      "fraction": 0.75
+    },
+    {
+      "model": "gold",
+      "task": "manual_input_then_act",
+      "yaml": "# manual_input \u2014 pause execution and ask a human a question.\n# Common in approval flows: bot proposes an action, user confirms.\n#\n# Prompt body under `arguments:` \u2014 `title:` is the heading,\n# `description:` is the markdown body, `inputs:` is an optional\n# inputVariables list. Step-level `options:` is the button list; each\n# entry has `display:` (label) and `next:` (target step). The choice\n# IS the branch taken \u2014 there is no `vars.steps.<name>.input.choice`\n# at runtime.\n\ncollection: Compiler Examples\ndescription: Approval loop \u2014 ask a human, then act based on their response.\nvisible: true\n\nplaybooks:\n  - name: Confirm Before Block\n    description: Ask SOC analyst to approve a block, then act.\n    steps:\n      - name: start\n        type: start\n        next: Approve block\n\n      - name: Approve block\n        type: manual_input\n        options:\n          - display: block\n            primary: true\n            next: Pretend we blocked\n          - display: skip\n            next: Skip\n        arguments:\n          title: Block this IP?\n          description: Click **block** to proceed, **skip** to abort.\n\n      - name: Pretend we blocked\n        type: set_variable\n        vars:\n          outcome: blocked\n\n      - name: Skip\n        type: set_variable\n        vars:\n          outcome: skipped",
+      "elapsed_ms": 38,
+      "levels": {
+        "L1": {
+          "passed": true,
+          "skipped": false,
+          "code": null,
+          "errors": []
+        },
+        "L1.5": {
+          "passed": true,
+          "skipped": false,
+          "warnings": []
+        },
+        "L3": {
+          "passed": true,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": true,
+          "skipped": false,
+          "detail": "match"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 4,
+      "max": 4,
+      "fraction": 1.0
+    },
+    {
+      "model": "gold",
+      "task": "unknown_connector",
+      "yaml": "",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "parse_error",
+              "path": "",
+              "message": "top level must be a mapping (collection: ..., playbooks: [...])",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": true
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 2,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "hello_connector",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "decision_branch",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "alert_action_var_chain",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "record_action_trigger",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "alert_on_create",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "alert_on_status_change",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "code_snippet",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "delay_step",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "for_each_loop",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "manual_input_branch",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "record_create",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "record_find_update",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "virustotal_ip",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "manual_input_then_act",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see L1 errors"
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 3,
+      "fraction": 0.0
+    },
+    {
+      "model": "echo",
+      "task": "unknown_connector",
+      "yaml": "collection: Echo\nplaybooks: []",
+      "elapsed_ms": 0,
+      "levels": {
+        "L1": {
+          "passed": false,
+          "skipped": false,
+          "code": "validation_failed",
+          "errors": [
+            {
+              "code": "missing_field",
+              "path": "playbooks",
+              "message": "at least one playbook is required",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "L1.5": {
+          "passed": false,
+          "skipped": true
+        },
+        "L3": {
+          "passed": false,
+          "skipped": false,
+          "detail": "ok"
+        },
+        "L2": {
+          "passed": false,
+          "skipped": true
+        },
+        "L4": {
+          "passed": false,
+          "skipped": true
+        },
+        "gold": {
+          "passed": false,
+          "skipped": true
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 2,
+      "fraction": 0.0
+    }
+  ],
+  "summary": {
+    "gold": {
+      "score": 49,
+      "max": 58,
+      "fraction": 0.8448275862068966
+    },
+    "echo": {
+      "score": 0,
+      "max": 44,
+      "fraction": 0.0
+    }
+  },
+  "run_id": "20260507T132623Z",
+  "ts": "2026-05-07T13:26:23.086663+00:00"
+}

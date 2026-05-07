@@ -107,7 +107,7 @@ export type Marker = {
   suggestion: string | null;
 };
 
-export type ValidateResult = { ok: boolean; markers: Marker[] };
+export type ValidateResult = { ok: boolean; markers: Marker[]; fixes?: Fix[] };
 export type CompileResult = { ok: boolean; fsr_json: unknown | null; markers: Marker[] };
 
 export async function validateYaml(text: string): Promise<ValidateResult> {
@@ -119,6 +119,18 @@ export async function validateYaml(text: string): Promise<ValidateResult> {
   if (!r.ok) throw new Error(`validate ${r.status}`);
   return r.json();
 }
+
+export type Fix = {
+  line: number;
+  col: number;
+  end_line: number;
+  end_col: number;
+  original: string;
+  replacement: string;
+  code: string;
+  message: string;
+  severity: 'warning' | 'error' | 'info';
+};
 
 export async function compileYaml(text: string): Promise<CompileResult> {
   const r = await fetch('/api/yaml/compile', {
@@ -269,4 +281,18 @@ export function extractYamlBlock(text: string): string | null {
   let last: string | null = null;
   while ((m = re.exec(text))) last = m[1];
   return last;
+}
+
+
+export interface ExamplePrompt {
+  name: string;
+  prompt: string;
+  notes: string;
+  has_gold: boolean;
+}
+
+export async function listExamplePrompts(): Promise<ExamplePrompt[]> {
+  const r = await fetch('/api/ref/example-prompts');
+  if (!r.ok) throw new Error(`example-prompts ${r.status}`);
+  return r.json();
 }

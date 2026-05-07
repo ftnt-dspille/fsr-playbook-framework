@@ -15,7 +15,11 @@ Levels:
 from __future__ import annotations
 
 import json
+import os
+import re
 from typing import Any
+
+_YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n", re.IGNORECASE)
 
 
 def _validate(yaml_text: str) -> dict[str, Any]:
@@ -45,7 +49,7 @@ def _resolve(yaml_text: str) -> dict[str, Any]:
 
 def _compile_obj(yaml_text: str) -> dict[str, Any]:
     from mcp_server import compile_yaml
-    return compile_yaml(yaml_text)
+    return compile_yaml(yaml_text, verbose=True)
 
 
 _VOLATILE_KEYS = frozenset({"lastModifyDate"})
@@ -75,12 +79,69 @@ def _has_var_reachability_error(validate_out: dict[str, Any]) -> bool:
     return False
 
 
+# Agentic gate thresholds. Sourced from docs/AGENT_TOOL_USAGE.md p95s —
+# raise via env if a model is intentionally chatty.
+TOOL_BUDGET_MAX = int(os.environ.get("EVAL_TOOL_BUDGET_MAX", "20"))
+NO_SPIRAL_MAX_CONSECUTIVE = int(
+    os.environ.get("EVAL_NO_SPIRAL_MAX_CONSECUTIVE", "4"))
+
+
+def _score_agentic(
+    *, trace: list[dict[str, Any]], text: str,
+) -> dict[str, dict[str, Any]]:
+    """Three gates over the agentic provider's trace.
+
+    - tool_budget: total tool calls <= TOOL_BUDGET_MAX (default 20).
+    - no_spiral: no tool called > NO_SPIRAL_MAX_CONSECUTIVE times in a
+      row (caught the validate→validate×23 spiral in session
+      60743f70). Default 4.
+    - adherence: final assistant text contains a fenced ```yaml block —
+      proxies "agent ended with a deliverable, not just chatter".
+    """
+    n = len(trace)
+    # consecutive run length
+    longest = 0
+    cur_name = None
+    cur_run = 0
+    longest_name = ""
+    for call in trace:
+        name = call.get("name", "")
+        if name == cur_name:
+            cur_run += 1
+        else:
+            cur_name = name
+            cur_run = 1
+        if cur_run > longest:
+            longest = cur_run
+            longest_name = name
+
+    has_yaml = bool(_YAML_BLOCK_RE.search(text or ""))
+    return {
+        "tool_budget": {
+            "passed": n <= TOOL_BUDGET_MAX, "skipped": False,
+            "calls": n, "limit": TOOL_BUDGET_MAX,
+        },
+        "no_spiral": {
+            "passed": longest <= NO_SPIRAL_MAX_CONSECUTIVE, "skipped": False,
+            "longest_run": longest, "tool": longest_name,
+            "limit": NO_SPIRAL_MAX_CONSECUTIVE,
+        },
+        "adherence": {
+            "passed": has_yaml, "skipped": False,
+            "detail": ("yaml block present" if has_yaml
+                       else "no fenced ```yaml block in final text"),
+        },
+    }
+
+
 def score(
     yaml_text: str,
     *,
     gold_json: dict[str, Any] | None = None,
     live: bool = False,
     dry_run_kwargs: dict[str, Any] | None = None,
+    trace: list[dict[str, Any]] | None = None,
+    final_text: str | None = None,
 ) -> dict[str, Any]:
     """Run all available scoring gates and return a result row.
 
@@ -185,6 +246,16 @@ def score(
             }
     else:
         out["levels"]["gold"] = {"passed": False, "skipped": True}
+
+    # Agentic gates — only when the provider returned a tool-use trace.
+    # Skipped (not failing) for non-agentic providers so their score
+    # max stays comparable to historical runs.
+    if trace is not None:
+        out["levels"].update(_score_agentic(
+            trace=trace, text=final_text or ""))
+    else:
+        for k in ("tool_budget", "no_spiral", "adherence"):
+            out["levels"][k] = {"passed": False, "skipped": True}
 
     # Aggregate: passed-non-skipped / total-non-skipped
     counted = [v for v in out["levels"].values() if not v["skipped"]]

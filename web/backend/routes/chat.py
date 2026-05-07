@@ -247,6 +247,32 @@ async def chat(body: ChatIn) -> EventSourceResponse:
         # Buffer the latest YAML the assistant emitted so we can score
         # the ladder against the freshest draft after the turn completes.
         latest_assistant_yaml: str | None = None
+        # Coalesce consecutive `TextEvent`s into one transcript row.
+        # Streaming providers (esp. OpenAI-compat / LM Studio) emit
+        # one delta per token, so persisting each as a row turns the
+        # history view into hundreds of tiny bordered fragments. We
+        # accumulate and flush at turn / tool / stream boundaries.
+        assistant_buf: list[str] = []
+        assistant_buf_turn: int | None = None
+        assistant_buf_seq: int | None = None
+
+        def _flush_assistant_text() -> None:
+            nonlocal assistant_buf, assistant_buf_turn, assistant_buf_seq
+            if not assistant_buf or session_id is None:
+                assistant_buf = []
+                assistant_buf_turn = None
+                assistant_buf_seq = None
+                return
+            history_db.record_chat_message(
+                session_id,
+                assistant_buf_turn or _current_turn(messages),
+                assistant_buf_seq if assistant_buf_seq is not None else 0,
+                kind="assistant_text",
+                content="".join(assistant_buf),
+            )
+            assistant_buf = []
+            assistant_buf_turn = None
+            assistant_buf_seq = None
         try:
             # tools=[] → provider self-fills with the right schema shape
             # (Anthropic input_schema vs OpenAI function-calling).
@@ -255,6 +281,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                 tools=[], tags=tags,
             ):
                 if isinstance(ev, UsageEvent):
+                    _flush_assistant_text()
                     _persist_usage(ev)
                     if not active_session_written:
                         history_db.write_active_session(ev.session_id)
@@ -270,20 +297,30 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                                     session_id, ev.turn, -100 + i,
                                     kind="user", content=m.content,
                                 )
-                    seq_in_turn = 0
+                    # NOTE: do NOT reset seq_in_turn here. The transcript
+                    # row's `turn` column is `_current_turn(messages)` —
+                    # constant for the whole POST request — while
+                    # UsageEvent fires once per *LLM* round-trip inside
+                    # the tool-use loop. Resetting seq each round caused
+                    # later rounds' rows to collide with earlier ones on
+                    # (session_id, turn, seq) and INSERT OR REPLACE
+                    # silently overwrote the earlier text/tool_use/
+                    # tool_result rows, leaving only the final round
+                    # visible in the transcript and in replay.
                 elif session_id and isinstance(ev, TextEvent):
-                    history_db.record_chat_message(
-                        session_id, _current_turn(messages), seq_in_turn,
-                        kind="assistant_text", content=ev.text,
-                    )
-                    seq_in_turn += 1
-                    # Sniff out a fenced ```yaml block so we can score
-                    # the ladder against what the user is about to see.
+                    if not assistant_buf:
+                        assistant_buf_turn = _current_turn(messages)
+                        assistant_buf_seq = seq_in_turn
+                        seq_in_turn += 1
+                    assistant_buf.append(ev.text)
+                    # Sniff out a fenced ```yaml block from the running
+                    # buffer so a block split across deltas still scores.
                     from backend.llm._loop_helpers import extract_yaml_block
-                    found = extract_yaml_block(ev.text)
+                    found = extract_yaml_block("".join(assistant_buf))
                     if found:
                         latest_assistant_yaml = found
                 elif session_id and isinstance(ev, ToolUseEvent):
+                    _flush_assistant_text()
                     history_db.record_chat_message(
                         session_id, _current_turn(messages), seq_in_turn,
                         kind="tool_use", name=ev.name,
@@ -291,6 +328,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                     )
                     seq_in_turn += 1
                 elif session_id and isinstance(ev, ToolResultEvent):
+                    _flush_assistant_text()
                     payload = ev.result if isinstance(ev.result, str) \
                         else json.dumps(ev.result, default=str)
                     history_db.record_chat_message(
@@ -300,6 +338,10 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                     )
                     seq_in_turn += 1
                 yield _serialize(ev)
+
+            # Final flush in case the stream ended without a terminal
+            # UsageEvent (e.g. ErrorEvent / DoneEvent without usage).
+            _flush_assistant_text()
 
             # End-of-turn: score the ladder against the freshest YAML
             # we have. Prefer the assistant's just-emitted block; fall

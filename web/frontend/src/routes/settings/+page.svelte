@@ -113,10 +113,18 @@
     }
   }
 
-  async function clearKey() {
-    if (!confirm('Delete the saved API key for this provider?')) return;
+  let confirmingClearKey = $state(false);
+
+  function askClearKey() {
+    confirmingClearKey = true;
+  }
+  async function confirmClearKey() {
+    confirmingClearKey = false;
     await patchProvider(selected, { clear_api_key: true });
     await refresh();
+  }
+  function cancelClearKey() {
+    confirmingClearKey = false;
   }
 
   async function makeActive() {
@@ -197,9 +205,23 @@
         <span class="mb-1 block flex items-center justify-between text-sm text-[var(--text-muted)]">
           <span>API key</span>
           {#if current.api_key_set}
-            <button type="button" onclick={clearKey} class="text-xs text-[var(--text-muted)] underline hover:text-[var(--text-default)]">
-              clear saved key
-            </button>
+            {#if confirmingClearKey}
+              <span class="flex items-center gap-1.5 text-xs">
+                <span class="text-[var(--text-muted)]">Delete saved key?</span>
+                <button type="button" onclick={confirmClearKey}
+                  class="rounded border border-red-700/60 bg-red-900/40 px-1.5 py-0.5 text-red-200 hover:bg-red-900/60">
+                  Yes
+                </button>
+                <button type="button" onclick={cancelClearKey}
+                  class="rounded border border-[var(--border)] px-1.5 py-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-panel)]">
+                  No
+                </button>
+              </span>
+            {:else}
+              <button type="button" onclick={askClearKey} class="text-xs text-[var(--text-muted)] underline hover:text-[var(--text-default)]">
+                clear saved key
+              </button>
+            {/if}
           {/if}
         </span>
         <input

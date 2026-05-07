@@ -505,6 +505,22 @@ def set_feedback(session_id: str, rating: str,
     return dict(row)
 
 
+def delete_session(session_id: str) -> bool:
+    """Delete a chat session and everything that hangs off it.
+    `chat_turns` and `chat_feedback` cascade via FKs; `chat_messages`
+    has no FK (composite PK without `REFERENCES`), so we delete it
+    explicitly. Returns True if a session was deleted."""
+    conn = _connect()
+    conn.execute(
+        "DELETE FROM chat_messages WHERE session_id=?", (session_id,),
+    )
+    cur = conn.execute(
+        "DELETE FROM chat_sessions WHERE id=?", (session_id,),
+    )
+    conn.close()
+    return cur.rowcount > 0
+
+
 def clear_feedback(session_id: str) -> bool:
     conn = _connect()
     cur = conn.execute(

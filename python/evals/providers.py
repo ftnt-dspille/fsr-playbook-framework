@@ -120,10 +120,152 @@ def _lmstudio_provider() -> ProviderFn:
     return _call
 
 
+# ---------------------------------------------------------------------------
+# Agentic providers — full tool-use loop with the same MCP tool registry the
+# Studio chat uses. Output is a dict {text, trace, turns} so the harness can
+# score tool-budget / no-spiral / adherence empirically. The harness detects
+# the dict return and routes it through the agentic gates.
+# ---------------------------------------------------------------------------
+
+# Cap on tool-use turns per agentic eval task. Mirrors MAX_TOOL_TURNS in
+# web/backend/llm/_loop_helpers.py — the eval provider should hit the same
+# wall the chat path hits, so a runaway scoring config matches production.
+_AGENTIC_MAX_TURNS = 8
+
+
+def _import_studio_tools():
+    """Pull the same SAFE_TOOLS registry the chat backend uses, so agentic
+    evals exercise the exact tool surface end users hit."""
+    import sys
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    backend = repo / "web" / "backend"
+    if str(backend) not in sys.path:
+        sys.path.insert(0, str(backend))
+    from llm.tools import anthropic_tools, openai_tools, dispatch  # type: ignore
+    return anthropic_tools, openai_tools, dispatch
+
+
+def _agentic_anthropic_provider() -> Callable:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+    import anthropic  # type: ignore[import-not-found]
+    import json as _json
+    client = anthropic.Anthropic()
+    model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    anthropic_tools, _, dispatch = _import_studio_tools()
+    tools = anthropic_tools()
+
+    def _call(system: str, prompt: str) -> dict:
+        history: list[dict] = [{"role": "user", "content": prompt}]
+        trace: list[dict] = []
+        text_chunks: list[str] = []
+        turns = 0
+        for _ in range(_AGENTIC_MAX_TURNS):
+            turns += 1
+            resp = client.messages.create(
+                model=model, max_tokens=4096, system=system,
+                messages=history, tools=tools,
+            )
+            assistant_blocks: list[dict] = []
+            tool_uses: list[tuple[str, str, dict]] = []
+            for b in resp.content:
+                if b.type == "text":
+                    assistant_blocks.append({"type": "text", "text": b.text})
+                    text_chunks.append(b.text)
+                elif b.type == "tool_use":
+                    assistant_blocks.append({
+                        "type": "tool_use", "id": b.id,
+                        "name": b.name, "input": dict(b.input),
+                    })
+                    tool_uses.append((b.id, b.name, dict(b.input)))
+            history.append({"role": "assistant", "content": assistant_blocks})
+            if resp.stop_reason != "tool_use" or not tool_uses:
+                break
+            tool_results: list[dict] = []
+            for call_id, name, args in tool_uses:
+                result = dispatch(name, args)
+                content = result if isinstance(result, str) else _json.dumps(
+                    result, default=str)
+                trace.append({
+                    "name": name,
+                    "args_chars": len(_json.dumps(args, default=str)),
+                    "result_chars": len(content),
+                })
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": call_id,
+                    "content": content,
+                })
+            history.append({"role": "user", "content": tool_results})
+        return {"text": "\n".join(text_chunks), "trace": trace, "turns": turns}
+    return _call
+
+
+def _agentic_lmstudio_provider() -> Callable:
+    """LM Studio's OpenAI-compatible chat-completions endpoint with
+    function-calling. Mirrors `_agentic_anthropic_provider` so the same
+    gates apply."""
+    base_url = os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
+    model = os.environ.get("LMSTUDIO_MODEL", "local-model")
+    import json as _json
+    import requests  # type: ignore[import-untyped]
+    _, openai_tools, dispatch = _import_studio_tools()
+    tools = openai_tools()
+
+    def _call(system: str, prompt: str) -> dict:
+        history: list[dict] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+        trace: list[dict] = []
+        text_chunks: list[str] = []
+        turns = 0
+        for _ in range(_AGENTIC_MAX_TURNS):
+            turns += 1
+            r = requests.post(
+                f"{base_url}/chat/completions",
+                json={"model": model, "messages": history, "tools": tools,
+                      "temperature": 0.0},
+                timeout=180,
+            )
+            r.raise_for_status()
+            msg = r.json()["choices"][0]["message"]
+            history.append(msg)
+            if msg.get("content"):
+                text_chunks.append(msg["content"])
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                break
+            for tc in calls:
+                fn = tc.get("function") or {}
+                name = fn.get("name") or ""
+                try:
+                    args = _json.loads(fn.get("arguments") or "{}")
+                except Exception:
+                    args = {}
+                result = dispatch(name, args)
+                content = result if isinstance(result, str) else _json.dumps(
+                    result, default=str)
+                trace.append({
+                    "name": name,
+                    "args_chars": len(_json.dumps(args, default=str)),
+                    "result_chars": len(content),
+                })
+                history.append({
+                    "role": "tool", "tool_call_id": tc.get("id", ""),
+                    "content": content,
+                })
+        return {"text": "\n".join(text_chunks), "trace": trace, "turns": turns}
+    return _call
+
+
 _LAZY_FACTORIES: dict[str, Callable[[], ProviderFn]] = {
     "anthropic": _anthropic_provider,
     "openai": _openai_provider,
     "lmstudio": _lmstudio_provider,
+    "agentic_anthropic": _agentic_anthropic_provider,
+    "agentic_lmstudio": _agentic_lmstudio_provider,
 }
 
 

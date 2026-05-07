@@ -214,7 +214,9 @@ playbooks:
     assert any("top-level `vars:` mapping" in e.message for e in errs)
 
 
-def test_stop_step_type_rejected():
+def test_stop_step_type_auto_rewritten_to_end():
+    """`stop` and `end` are equivalent (both map to no_op); the parser
+    rewrites `stop` → `end` and emits a warning rather than failing."""
     text = """
 collection: A
 playbooks:
@@ -224,11 +226,16 @@ playbooks:
         name: bye
 """
     coll, errs = parse_yaml(text)
-    assert coll is None
-    assert any("'stop' is not allowed" in e.message for e in errs)
+    assert coll is not None
+    assert coll.playbooks[0].steps[0].type == "end"
+    assert any(e.severity == "warning" and "auto-rewritten" in e.message
+               for e in errs)
 
 
-def test_decision_step_level_next_rejected():
+def test_decision_step_level_next_warns_and_synthesizes():
+    """Bare step-level `next:` on a Decision is auto-converted to an
+    `Else` default condition by the emitter — parser emits a warning
+    instead of hard-failing."""
     text = """
 collection: A
 playbooks:
@@ -243,8 +250,10 @@ playbooks:
             next: somewhere
 """
     coll, errs = parse_yaml(text)
-    assert coll is None
-    assert any("step-level `next:`" in e.message for e in errs)
+    assert coll is not None
+    warnings = [e for e in errs if e.severity == "warning"]
+    assert any("auto-synthesizing" in w.message for w in warnings)
+    assert not any(e.severity != "warning" for e in errs)
 
 
 def test_uid_rejected():

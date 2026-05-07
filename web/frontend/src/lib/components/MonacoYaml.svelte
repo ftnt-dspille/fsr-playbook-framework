@@ -8,12 +8,17 @@
     value = '',
     onInput,
     markers = [] as Marker[],
-    readOnly = false
+    readOnly = false,
+    onEditor
   }: {
     value: string;
     onInput: (v: string) => void;
     markers?: Marker[];
     readOnly?: boolean;
+    /** Optional: parent receives the Monaco editor instance for
+     * programmatic edits (e.g. the Fix-warnings panel uses
+     * `editor.executeEdits` so each apply lands in the undo stack). */
+    onEditor?: (editor: any, monaco: any) => void;
   } = $props();
 
   let host: HTMLDivElement;
@@ -50,6 +55,7 @@
       onInput(editor.getValue());
     });
     applyMarkers();
+    onEditor?.(editor, monaco);
   });
 
   onDestroy(() => {

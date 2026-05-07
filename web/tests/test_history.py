@@ -279,6 +279,90 @@ def test_record_chat_message_round_trip():
     assert rows[1]["content"] == "It sends emails."
 
 
+def test_delete_session_cascades_to_turns_messages_and_feedback():
+    history.record_chat_turn({
+        "session": "del-1", "turn": 1, "model": "m",
+        "input_tokens": 1, "output_tokens": 1,
+        "cache_read": 0, "cache_write": 0,
+        "stop_reason": "end_turn", "history_chars": 10,
+        "tool_calls": [], "tags": {},
+    })
+    history.record_chat_message(
+        "del-1", turn=1, seq=0, kind="user", content="hi",
+    )
+    history.set_feedback("del-1", "up", "good", None)
+
+    assert history.delete_session("del-1") is True
+    assert history.get_chat_session("del-1") is None
+    assert history.get_chat_messages("del-1") == []
+    # Feedback row should have cascaded too.
+    assert history.list_feedback() == [] or all(
+        r["session_id"] != "del-1" for r in history.list_feedback()
+    )
+    # Re-deleting reports false (idempotent caller behaviour).
+    assert history.delete_session("del-1") is False
+
+
+def test_get_session_derives_final_yaml_from_compile_tool_call():
+    """No push happened, but the agent ran compile_yaml — the route
+    should surface that yaml_text as final_yaml."""
+    from fastapi.testclient import TestClient
+    from backend.app import app
+    client = TestClient(app)
+
+    history.record_chat_turn({
+        "session": "fy-1", "turn": 1, "model": "m",
+        "input_tokens": 1, "output_tokens": 1,
+        "cache_read": 0, "cache_write": 0,
+        "stop_reason": "end_turn", "history_chars": 10,
+        "tool_calls": [], "tags": {},
+    })
+    history.record_chat_message(
+        "fy-1", turn=1, seq=0, kind="user", content="build it",
+    )
+    history.record_chat_message(
+        "fy-1", turn=1, seq=1, kind="assistant_text",
+        content="Here's a draft:",
+    )
+    history.record_chat_message(
+        "fy-1", turn=1, seq=2, kind="tool_use", name="validate_yaml",
+        content='{"yaml_text":"playbooks:\\n  - name: Old\\n"}',
+    )
+    history.record_chat_message(
+        "fy-1", turn=1, seq=3, kind="tool_use", name="compile_yaml",
+        content='{"yaml_text":"playbooks:\\n  - name: Final\\n"}',
+    )
+    r = client.get("/api/history/sessions/fy-1")
+    assert r.status_code == 200
+    data = r.json()
+    # Most recent YAML-bearing tool wins — compile_yaml not validate_yaml.
+    assert data["final_yaml"] == "playbooks:\n  - name: Final\n"
+    assert data["final_yaml_source"] == "tool: compile_yaml"
+
+
+def test_get_session_derives_final_yaml_from_fenced_block():
+    from fastapi.testclient import TestClient
+    from backend.app import app
+    client = TestClient(app)
+
+    history.record_chat_turn({
+        "session": "fy-2", "turn": 1, "model": "m",
+        "input_tokens": 1, "output_tokens": 1,
+        "cache_read": 0, "cache_write": 0,
+        "stop_reason": "end_turn", "history_chars": 10,
+        "tool_calls": [], "tags": {},
+    })
+    history.record_chat_message(
+        "fy-2", turn=1, seq=0, kind="assistant_text",
+        content="Here you go:\n```yaml\nplaybooks:\n  - name: Fenced\n```\n",
+    )
+    r = client.get("/api/history/sessions/fy-2")
+    assert r.status_code == 200
+    data = r.json()
+    assert "name: Fenced" in (data["final_yaml"] or "")
+    assert data["final_yaml_source"] == "assistant fenced block"
+
+
 def test_record_chat_message_caps_oversize_content():
     big = "x" * 200_000
     history.record_chat_message(

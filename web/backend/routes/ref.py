@@ -202,3 +202,30 @@ def list_jinja_filters(q: str = "", limit: int = 200) -> list[dict[str, Any]]:
     args.append(limit)
     with _conn() as c:
         return [dict(r) for r in c.execute(sql, args)]
+
+
+@router.get("/example-prompts")
+def list_example_prompts() -> list[dict[str, Any]]:
+    """Sample chat prompts for testing the agent.
+
+    Sourced from `python/evals/tasks/*.json` so the eval corpus and the
+    UI picker stay in lockstep — adding a task file gives you a new
+    option in the chat starter dropdown automatically.
+    """
+    import json as _json
+    tasks_dir = REPO_ROOT / "python" / "evals" / "tasks"
+    if not tasks_dir.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for p in sorted(tasks_dir.glob("*.json")):
+        try:
+            data = _json.loads(p.read_text(encoding="utf-8"))
+        except _json.JSONDecodeError:
+            continue
+        out.append({
+            "name": data.get("name", p.stem),
+            "prompt": data.get("prompt", ""),
+            "notes": data.get("notes", ""),
+            "has_gold": bool(data.get("gold_yaml_path")),
+        })
+    return out

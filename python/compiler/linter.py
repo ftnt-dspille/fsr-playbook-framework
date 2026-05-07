@@ -129,19 +129,26 @@ def _check_step_id_uuid(s: Step, pi: int, si: int) -> CompileError | None:
 
 
 def _check_step_name(s: Step, pi: int, si: int) -> CompileError | None:
-    """Reject step names that the FSR designer would refuse to save."""
+    """Auto-fix step names that the FSR designer would refuse to save.
+
+    The designer rejects any character outside `[A-Za-z0-9 _]` on save
+    (em-dash, hyphen, ?, :, parens, etc). We rewrite the name in place
+    by substituting disallowed runs with `_`, and emit a warning. The
+    parser's `name_to_id` map already includes the substituted form so
+    `next:` references with the original chars still resolve.
+    """
     name = s.name or s.id
     if not name or _STEP_NAME_OK.match(name):
         return None
-    suggestion = _DISALLOWED_RUNS.sub("_", name).strip("_") or "step"
+    fixed = _DISALLOWED_RUNS.sub("_", name).strip("_") or "step"
+    s.name = fixed
     return CompileError(
         code=ErrorCode.BAD_VALUE,
+        severity="warning",
         message=(f"step name {name!r} contains characters outside "
-                 "[A-Za-z0-9 _]; the FSR designer rejects this on save "
-                 "with 'Only alphanumeric character, space and _ is "
-                 "allowed'"),
+                 "[A-Za-z0-9 _] (the FSR designer rejects these on save) "
+                 f"— auto-renamed to {fixed!r}"),
         path=f"playbooks[{pi}].steps[{si}].name",
-        suggestion=f'rename to "{suggestion}"',
     )
 
 

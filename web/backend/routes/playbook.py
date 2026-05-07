@@ -88,6 +88,24 @@ class PushOut(BaseModel):
 def push(body: PushIn) -> PushOut:
     if body.mode not in ("replace", "create", "update", "upsert"):
         raise HTTPException(400, "mode must be replace|create|update|upsert")
+    # Fail fast when FSR isn't configured — without this the user
+    # waits for the 120 s subprocess timeout before getting feedback.
+    try:
+        from probes import _env  # type: ignore
+        if not _env.get_config().is_live():
+            return PushOut(
+                ok=False,
+                stdout="",
+                stderr="FSR_BASE_URL / auth not configured in .env — "
+                       "push has nothing to push to.",
+                exit_code=2,
+            )
+    except Exception as e:
+        return PushOut(
+            ok=False, stdout="",
+            stderr=f"FSR config probe failed: {type(e).__name__}: {e}",
+            exit_code=2,
+        )
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".yaml", delete=False, dir=str(REPO_ROOT)
     ) as f:

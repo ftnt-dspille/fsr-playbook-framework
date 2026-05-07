@@ -6,6 +6,7 @@ export const MarkerSeverity = { Error: 8, Warning: 4, Info: 2 };
 
 export const languages = {
   registerCompletionItemProvider: () => ({ dispose: () => {} }),
+  registerHoverProvider: () => ({ dispose: () => {} }),
   CompletionItemKind: {
     Snippet: 27,
     Module: 8,

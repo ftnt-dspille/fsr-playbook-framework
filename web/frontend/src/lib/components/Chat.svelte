@@ -1,15 +1,17 @@
 <script lang="ts">
   import {
     extractYamlBlock,
+    listExamplePrompts,
     parseChatEvent,
     type ChatEvent,
     type ChatMessage,
+    type ExamplePrompt,
     type LadderRung
   } from '$lib/api';
   import { postSse } from '$lib/sse';
   import { renderMarkdown } from '$lib/md';
   import { yamlStore } from '$lib/yamlStore.svelte';
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import LoopTelemetry from '$lib/components/LoopTelemetry.svelte';
 
   type ToolCall = {
@@ -64,7 +66,10 @@
   // empty and meaningful (e.g. user types real YAML, or resets back to
   // placeholder). Only auto-flip when the current toggle matches the
   // previous default — so an explicit user choice sticks.
-  let yamlPrevMeaningful = $state(false);
+  // Non-reactive tracker — only read/written from inside the effect
+  // below. Marking this $state would cause a self-triggering update
+  // loop (effect_update_depth_exceeded).
+  let yamlPrevMeaningful = false;
   $effect(() => {
     const nowMeaningful = isMeaningfulYaml(currentYaml);
     if (nowMeaningful !== yamlPrevMeaningful) {
@@ -81,7 +86,9 @@
   // Re-seed `turns` whenever the parent passes a fresh `initialTurns`
   // reference. Tracks identity (not contents) so live edits to a stable
   // array don't clobber the running session.
-  let lastSeededRef = $state<Turn[] | null>(null);
+  // Non-reactive identity tracker — same reasoning as
+  // yamlPrevMeaningful: read+written only inside the effect below.
+  let lastSeededRef: Turn[] | null = null;
 
   $effect(() => {
     if (initialTurns !== lastSeededRef) {
@@ -90,6 +97,21 @@
     }
   });
   let input = $state('');
+  let textareaEl = $state<HTMLTextAreaElement | null>(null);
+  // Auto-grow the composer up to ~12 lines so short prompts stay compact
+  // and long ones don't force an internal scrollbar before the outer
+  // page can scroll. Cap matches the previous max behaviour roughly.
+  function autosize(el: HTMLTextAreaElement | null) {
+    if (!el) return;
+    el.style.height = 'auto';
+    const max = 320; // px — ~12 lines at 15px/1.5
+    el.style.height = Math.min(el.scrollHeight, max) + 'px';
+  }
+  $effect(() => {
+    // Re-run whenever the bound value changes.
+    void input;
+    autosize(textareaEl);
+  });
   let busy = $state(false);
   let err = $state<string | null>(null);
   // Session id of the active chat — captured from the first `usage`
@@ -143,15 +165,34 @@
     return 'Chat: (unnamed)';
   }
 
-  const STARTERS = [
+  // Sample prompts for testing the agent. Sourced from the eval-task
+  // corpus (python/evals/tasks/*.json) via /api/ref/example-prompts so
+  // the picker stays in sync with the harness — adding a task file
+  // shows up here automatically.
+  let examplePrompts = $state<ExamplePrompt[]>([]);
+  let promptPickerOpen = $state(false);
+
+  // A few quick-pick prompts kept inline as a fallback for the empty
+  // state when the eval list hasn't loaded yet (or the backend is
+  // misconfigured).
+  const FALLBACK_STARTERS = [
     'Build a hello-world playbook with one set_variable step that stores the string "hi".',
     'Add a decision step that branches on the input value being greater than 10.',
     'Why is my current YAML invalid? Walk through the diagnostics.',
     'Explain what each step in the current playbook does.'
   ];
 
+  onMount(async () => {
+    try {
+      examplePrompts = await listExamplePrompts();
+    } catch (e) {
+      console.warn('listExamplePrompts failed', e);
+    }
+  });
+
   function useStarter(s: string) {
     input = s;
+    promptPickerOpen = false;
   }
 
   async function send() {
@@ -171,6 +212,11 @@
       .slice(0, -1)
       .map((t) => ({ role: t.role, content: t.text }));
 
+    // Capture the most recently validated YAML during this turn so the
+    // editor can fall back to it when the final reply omits a fenced
+    // block. Eliminates the double-emit pattern (validate-then-emit).
+    let lastValidatedYaml: string | null = null;
+
     try {
       for await (const frame of postSse('/api/chat', {
         messages: history,
@@ -181,6 +227,13 @@
       })) {
         const ev = parseChatEvent(frame.event, frame.data);
         if (!ev) continue;
+        if (
+          ev.kind === 'tool_use' &&
+          (ev.name === 'validate_yaml' || ev.name === 'compile_yaml') &&
+          typeof ev.arguments?.yaml_text === 'string'
+        ) {
+          lastValidatedYaml = ev.arguments.yaml_text;
+        }
         applyEvent(aIdx, ev);
       }
     } catch (e: any) {
@@ -188,7 +241,11 @@
     } finally {
       busy = false;
       const replyText = turns[aIdx]?.text ?? '';
-      const yaml = extractYamlBlock(replyText);
+      // Prefer a fenced block in the reply (explicit handoff). Fall
+      // back to the last YAML the agent validated this turn — it's
+      // the same content, just delivered via tool args instead of
+      // duplicated into prose.
+      const yaml = extractYamlBlock(replyText) ?? lastValidatedYaml;
       if (yaml) {
         // Persist this turn's YAML as a new revision on the session's
         // draft so the user can see how the agent iterated. Keeps the
@@ -356,17 +413,44 @@
             reference store.
           </p>
           <div class="space-y-2 pt-1">
-            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
-              Try
+            <div class="flex items-center justify-between">
+              <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
+                Try
+              </div>
+              {#if examplePrompts.length > 0}
+                <button
+                  type="button"
+                  class="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-default)]"
+                  onclick={() => (promptPickerOpen = !promptPickerOpen)}
+                  title="Browse all sample prompts from the eval corpus"
+                >
+                  {promptPickerOpen ? '× close' : `${examplePrompts.length} samples ▾`}
+                </button>
+              {/if}
             </div>
-            {#each STARTERS as s}
-              <button
-                class="block w-full rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 px-3 py-2 text-left text-sm text-[var(--text-muted)] transition-colors hover:border-[var(--border)] hover:bg-[var(--bg-elevated)]/60 hover:text-[var(--text-default)]"
-                onclick={() => useStarter(s)}
-              >
-                {s}
-              </button>
-            {/each}
+            {#if promptPickerOpen && examplePrompts.length > 0}
+              {#each examplePrompts as p}
+                <button
+                  class="block w-full rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 px-3 py-2 text-left text-xs text-[var(--text-muted)] transition-colors hover:border-[var(--border)] hover:bg-[var(--bg-elevated)]/60 hover:text-[var(--text-default)]"
+                  onclick={() => useStarter(p.prompt)}
+                  title={p.notes}
+                >
+                  <div class="font-mono text-[11px] text-[var(--text-faint)]">
+                    {p.name}{p.has_gold ? ' · gold' : ''}
+                  </div>
+                  <div class="mt-0.5 line-clamp-2 leading-snug">{p.prompt}</div>
+                </button>
+              {/each}
+            {:else}
+              {#each FALLBACK_STARTERS as s}
+                <button
+                  class="block w-full rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 px-3 py-2 text-left text-sm text-[var(--text-muted)] transition-colors hover:border-[var(--border)] hover:bg-[var(--bg-elevated)]/60 hover:text-[var(--text-default)]"
+                  onclick={() => useStarter(s)}
+                >
+                  {s}
+                </button>
+              {/each}
+            {/if}
           </div>
         </div>
       {/if}
@@ -437,11 +521,18 @@
                   {t.text}
                 </div>
               {/if}
-            {:else if t.role === 'assistant' && busy && i === turns.length - 1}
-              <div class="flex items-center gap-1.5 py-1 text-[var(--text-faint)]">
+            {/if}
+            {#if t.role === 'assistant' && busy && i === turns.length - 1}
+              <!-- Keep the bouncing dots visible for the entire turn
+                   while we're still streaming, even after some text
+                   has arrived. Otherwise the gap between paragraphs,
+                   between text and a tool call, or while a local
+                   model is mid-thought looks frozen. -->
+              <div class="mt-1 flex items-center gap-1.5 py-1 text-[var(--text-faint)]">
                 <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-faint)]" style="animation-delay:0ms"></span>
                 <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-faint)]" style="animation-delay:150ms"></span>
                 <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-faint)]" style="animation-delay:300ms"></span>
+                <span class="ml-1 text-[11px] italic">thinking…</span>
               </div>
             {/if}
           </div>
@@ -457,8 +548,23 @@
   </div>
 
   <div class="border-t border-[var(--border-soft)] bg-[var(--bg-canvas)] p-3">
+    {#if promptPickerOpen && examplePrompts.length > 0 && turns.length > 0}
+      <div class="mb-2 max-h-56 space-y-1 overflow-auto rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 p-2">
+        {#each examplePrompts as p}
+          <button
+            class="block w-full rounded border border-transparent px-2 py-1.5 text-left text-xs text-[var(--text-muted)] hover:border-[var(--border-soft)] hover:bg-[var(--bg-elevated)]/60 hover:text-[var(--text-default)]"
+            onclick={() => useStarter(p.prompt)}
+            title={p.notes}
+          >
+            <span class="font-mono text-[10px] text-[var(--text-faint)]">{p.name}</span>
+            <span class="ml-2">{p.prompt.length > 90 ? p.prompt.slice(0, 90) + '…' : p.prompt}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
     <div class="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)] focus-within:border-[var(--border)] focus-within:ring-1 focus-within:ring-zinc-700">
       <textarea
+        bind:this={textareaEl}
         class="block w-full resize-none rounded-lg bg-transparent px-3 py-2 text-[15px] text-[var(--text-default)] placeholder:text-[var(--text-faint)] focus:outline-none"
         placeholder="Ask the model to build or edit the YAML…"
         rows="3"
@@ -481,13 +587,25 @@ a scaffold biases the model into extending it rather than starting fresh."
           include YAML as context
         </label>
         <span class="text-[11px] text-[var(--text-faint)]">⌘ / Ctrl + Enter</span>
-        <button
-          class="rounded-md bg-emerald-700 px-3 py-1 text-xs font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)] disabled:text-[var(--text-faint)]"
-          onclick={send}
-          disabled={busy || !input.trim()}
-        >
-          {busy ? '…' : 'Send'}
-        </button>
+        <div class="flex items-center gap-1.5">
+          {#if examplePrompts.length > 0}
+            <button
+              type="button"
+              class="rounded-md border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] text-[var(--text-muted)] hover:border-[var(--border)] hover:text-[var(--text-default)]"
+              onclick={() => (promptPickerOpen = !promptPickerOpen)}
+              title="Browse {examplePrompts.length} sample prompts from the eval corpus"
+            >
+              {promptPickerOpen ? '× samples' : `samples (${examplePrompts.length})`}
+            </button>
+          {/if}
+          <button
+            class="rounded-md bg-emerald-700 px-3 py-1 text-xs font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)] disabled:text-[var(--text-faint)]"
+            onclick={send}
+            disabled={busy || !input.trim()}
+          >
+            {busy ? '…' : 'Send'}
+          </button>
+        </div>
       </div>
     </div>
   </div>
