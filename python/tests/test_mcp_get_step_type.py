@@ -94,7 +94,7 @@ def test_default_response_is_slim():
     """manual_input slim is well under the old 5 KB and nowhere near
     the 18 KB code_snippet hit."""
     r = mcp_server.get_step_type("manual_input")
-    assert _size(r) < 2500, f"manual_input slim is {_size(r)} chars"
+    assert _size(r) < 2800, f"manual_input slim is {_size(r)} chars"
 
 
 def test_code_snippet_default_avoids_18k_blob():

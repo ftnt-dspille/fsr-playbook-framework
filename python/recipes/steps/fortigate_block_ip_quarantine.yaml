@@ -1,0 +1,30 @@
+name: fortigate_block_ip_quarantine
+description: |
+  Block one or more IPs on FortiGate using the Quarantine Based method
+  (banned-IP list with TTL). Pre-set to the valid param set under
+  method='Quarantine Based'; no validation cascade.
+intent_keywords:
+  - quarantine ip fortigate
+  - fortigate quarantine
+  - banned ip
+  - block ip ttl
+  - quarantine based
+connector: fortigate-firewall
+operation: block_ip_new
+step_types:
+  - connector
+notes: |
+  Replace <ADDRESS_GROUP> and the IP Jinja expression. time_to_live can
+  be one of: '1 Hour', '6 Hour', '12 Hour', '1 Day', '6 Months', '1 Year',
+  'Never', 'Custom Time'. If you pick 'Custom Time' you must also add
+  `duration: <seconds>` to params.
+steps_yaml: |
+  - type: connector
+    name: Quarantine IP on FortiGate
+    arguments:
+      connector: fortigate-firewall
+      operation: block_ip_new
+      params:
+        method: Quarantine Based
+        ip_addresses: "{{ vars.steps.Collect_Input.input.target_value }}"
+        time_to_live: 12 Hour

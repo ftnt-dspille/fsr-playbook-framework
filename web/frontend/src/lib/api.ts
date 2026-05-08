@@ -296,3 +296,82 @@ export async function listExamplePrompts(): Promise<ExamplePrompt[]> {
   if (!r.ok) throw new Error(`example-prompts ${r.status}`);
   return r.json();
 }
+
+// --- Visual editor (Phase 1 of VISUAL_EDITOR_PLAN) -------------------
+
+export type VisualNode = {
+  id: string;
+  type: string;
+  family: 'trigger' | 'connector_op' | 'decision' | 'utility'
+        | 'record_crud' | 'manual_input' | 'workflow_ref' | 'terminal';
+  name: string;
+  arguments: Record<string, unknown>;
+  for_each: Record<string, unknown> | null;
+  comment: string | null;
+  position: { x: number; y: number } | null;
+};
+
+export type VisualEdge = {
+  source: string;
+  target: string;
+  label: string | null;
+  branch_kind: 'next' | 'branch' | 'unlabeled';
+};
+
+export type VisualPlaybook = {
+  name: string;
+  description: string;
+  parameters: string[];
+  trigger: string;
+  trigger_step_id: string | null;
+  nodes: VisualNode[];
+  edges: VisualEdge[];
+};
+
+export type VisualGraph = {
+  collection: { name: string; description: string; visible: boolean } | null;
+  playbooks: VisualPlaybook[];
+  layout_present: boolean;
+  errors: { code: string | null; message: string; path: string | null }[];
+  source: { path: string | null; yaml: string };
+};
+
+export async function listVisualFiles(): Promise<{ count: number; files: { name: string; size: number }[] }> {
+  const r = await fetch('/api/visual/list');
+  if (!r.ok) throw new Error(`visual/list ${r.status}`);
+  return r.json();
+}
+
+export async function getVisualFile(path: string): Promise<VisualGraph> {
+  const r = await fetch(`/api/visual/file?path=${encodeURIComponent(path)}`);
+  if (!r.ok) throw new Error(`visual/file ${r.status}`);
+  return r.json();
+}
+
+export async function getVisualFromBuffer(text: string): Promise<VisualGraph> {
+  const r = await fetch('/api/visual/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+  if (!r.ok) throw new Error(`visual/buffer ${r.status}`);
+  return r.json();
+}
+
+export async function callMcpTool<T = unknown>(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; result?: T; error?: string }> {
+  const r = await fetch(`/api/mcp/${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args)
+  });
+  if (!r.ok) throw new Error(`mcp/${name} ${r.status}`);
+  return r.json();
+}
+
+export type RecipeRef = { name: string; kind: string; when_to_use: string | null };
+
+export async function listRecipes(): Promise<RecipeRef[]> {
+  const r = await fetch('/api/ref/recipes');
+  if (!r.ok) throw new Error(`recipes ${r.status}`);
+  return r.json();
+}

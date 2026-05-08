@@ -1,0 +1,192 @@
+{
+  "type": "workflow_collections",
+  "data": [
+    {
+      "@context": "/api/3/contexts/WorkflowCollection",
+      "@type": "WorkflowCollection",
+      "name": "FSRPB Manual-Input Test",
+      "description": "Stage 4 — adds a manual_input pause between two set_variable steps.\nThe integration test fires this playbook, finds the pending input via\n`fsrpb inputs list`, responds with the primary option via `fsrpb\ninputs respond`, and asserts the run finishes.\n",
+      "visible": true,
+      "image": null,
+      "uuid": "94eb7655-21a1-547f-9208-eef12174a4b1",
+      "id": 600,
+      "createDate": 1778168129.621144,
+      "modifyDate": 1778168129.621144,
+      "deletedAt": null,
+      "importedBy": [],
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "E2E - Manual Input",
+          "aliasName": null,
+          "tag": "",
+          "description": "start → set_variable → manual_input → terminal.",
+          "isActive": true,
+          "debug": false,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1778168832,
+          "collection": "/api/3/workflow_collections/94eb7655-21a1-547f-9208-eef12174a4b1",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/bb3f669f-4359-5468-a50e-87455009333c",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "After input",
+              "description": null,
+              "arguments": {
+                "message": {
+                  "tags": [
+                    "/api/3/tags/test_tag"
+                  ],
+                  "type": "/api/3/picklists/ff599189-3eeb-4c86-acb0-a7915e85ac3b",
+                  "thread": false,
+                  "content": "<p><strong>Contents:</strong></p>\n<p>&nbsp;</p>\n<p>input: {{vars.resumed}}</p>\n<p>&nbsp;</p>\n<p>status: {{vars.final_status}}</p>\n<p>&nbsp;</p>",
+                  "records": "{{vars.alert_iri}}"
+                },
+                "after_input": "resumed",
+                "final_status": "complete"
+              },
+              "status": null,
+              "top": "420",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "e491edd4-7eb5-5ab3-a206-e99ef05933ec"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Choose action",
+              "description": null,
+              "arguments": {
+                "type": "InputBased",
+                "input": {
+                  "schema": {
+                    "title": "E2E test gate",
+                    "description": "Click Continue to resume the test playbook.",
+                    "inputVariables": []
+                  }
+                },
+                "record": "",
+                "is_approval": false,
+                "owner_detail": {
+                  "isAssigned": false
+                },
+                "isRecordLinked": false,
+                "step_variables": [],
+                "response_mapping": {
+                  "options": [
+                    {
+                      "option": "Continue",
+                      "primary": true,
+                      "step_iri": "/api/3/workflow_steps/e491edd4-7eb5-5ab3-a206-e99ef05933ec"
+                    }
+                  ],
+                  "duplicateOption": false,
+                  "customSuccessMessage": "Awaiting Playbook resumed successfully."
+                },
+                "email_notification": {
+                  "enabled": false,
+                  "smtpParameters": []
+                },
+                "inline_channel_list": [],
+                "external_channel_list": [],
+                "unauthenticated_input": false
+              },
+              "status": null,
+              "top": "320",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/fc04082a-d7dc-4299-96fb-6837b1baa0fe",
+              "group": null,
+              "uuid": "43ccdd95-b6a4-57b0-a32b-444c9f4db602"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Pre input vars",
+              "description": null,
+              "arguments": {
+                "before_input": "ready"
+              },
+              "status": null,
+              "top": "220",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "2050fbb6-ef03-5d20-b80d-d25958f9e94b"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Run",
+              "description": null,
+              "arguments": {
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  }
+                }
+              },
+              "status": null,
+              "top": "120",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "group": null,
+              "uuid": "bb3f669f-4359-5468-a50e-87455009333c"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "Choose action -> After input",
+              "targetStep": "/api/3/workflow_steps/e491edd4-7eb5-5ab3-a206-e99ef05933ec",
+              "sourceStep": "/api/3/workflow_steps/43ccdd95-b6a4-57b0-a32b-444c9f4db602",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "a8d0808b-4eb6-54fe-ae9b-7bd926a03d94"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Pre input vars -> Choose action",
+              "targetStep": "/api/3/workflow_steps/43ccdd95-b6a4-57b0-a32b-444c9f4db602",
+              "sourceStep": "/api/3/workflow_steps/2050fbb6-ef03-5d20-b80d-d25958f9e94b",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "e1e77aee-6321-5cea-a27b-99b2644f7b06"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Run -> Pre input vars",
+              "targetStep": "/api/3/workflow_steps/2050fbb6-ef03-5d20-b80d-d25958f9e94b",
+              "sourceStep": "/api/3/workflow_steps/bb3f669f-4359-5468-a50e-87455009333c",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "d8d5f2b6-77c8-5dac-a339-13e9ca81d134"
+            }
+          ],
+          "groups": [],
+          "priority": null,
+          "playbookOrigin": "/api/3/picklists/15c1e8c9-22bf-4e66-8fbb-0a502d4a4a3f",
+          "isEditable": true,
+          "uuid": "2742aa59-ac0e-5545-aa1e-8195adcff411",
+          "id": 3008,
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1778168129.62146,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1778168831.82558,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": []
+        }
+      ]
+    }
+  ],
+  "exported_tags": []
+}

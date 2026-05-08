@@ -2,6 +2,189 @@
 
 **Last touched**: 2026-05-07. Live FSR target: `https://10.99.249.205` (label `dev`).
 
+## Pending — distributability & user personalization (added 2026-05-07)
+
+These two are about turning fsrpb from a personal tool into something
+others can install and shape to their environment.
+
+D1. **Distribution: thin base image + `fsrpb train` ingestion command**.
+    Today `store/fsr_reference.db` is checked in pre-populated (58 MB)
+    with every connector, operation, op param, picklist and playbook
+    from the dev FSR — that's customer-specific data and blocks open
+    distribution. Three SQLite files exist on this machine; plan
+    handles each:
+
+    **`store/fsr_reference.db` (58 MB)** — split the tables:
+    - SHIP IN BASE IMAGE (environment-agnostic, broadly useful):
+      `step_types`, `step_examples`, `step_handlers`, `jinja_macros`,
+      `jinja_globals`, `jinja_tests`, `jinja_context_vars`,
+      `jinja_filter_usage`, `jinja_expressions`, `api_endpoints`,
+      `api_endpoint_params`, `api_endpoint_examples`, `recipes` (the
+      generator + step recipe metadata, not playbooks_seen).
+    - POPULATE VIA `fsrpb train` (tenant-specific):
+      `connectors`, `operations`, `operation_params` (incl.
+      parent_param_name/condition_value visibility rules — load-bearing
+      for `param_groups_by_select`), `modules`, `module_fields`,
+      `playbooks_seen`, `playbook_steps`, `verifications`, `_probe_runs`,
+      and the FTS shadow tables (`fsr_fts*`) which rebuild from
+      playbooks_seen anyway.
+    - The 3rd-party API tables (`api_endpoints*`) are gold for custom
+      HTTP connector authoring and have NO tenant linkage — keep them
+      shipped.
+
+    **`web/backend/history.db` (692 KB)** — per-user runtime state
+    (chat_sessions, chat_turns, chat_tool_calls, chat_messages,
+    chat_feedback, pushes, push_workflows). Never ship populated.
+    Initialize empty on first run; document path override via env
+    (`FSRPB_HISTORY_DB` already partially supported — verify).
+
+    **`store/store.db` and `python/store/playbooks.db`** — both 0
+    bytes. Stale stubs from earlier iterations; just delete them
+    and remove any code paths still pointing at them.
+
+    **`Miscellaneous/api_examples_catalog/catalog.sqlite` (339 MB,
+    6,927 products / 207,419 entries with FTS)** — generic 3rd-party
+    API command catalog. Environment-agnostic and high-value for
+    custom HTTP connector authoring (Splunk, ServiceNow, AWS,
+    Crowdstrike, …). Currently NOT wired into fsrpb — sitting in a
+    sibling project. Distribution options:
+    - Ship a slimmed `catalog.base.sqlite` in the base image (top
+      products only, e.g. the ~500 with the most entries) — keeps
+      the package small, covers the long tail via on-demand fetch.
+    - OR keep the full 339 MB as an *optional* sidecar download
+      gated behind `fsrpb train --with-api-catalog` so users who
+      don't author HTTP connectors don't pay for it.
+    - Either way, define a stable schema-versioned download URL so
+      the catalog can be refreshed independently of the fsrpb
+      release. See D3 for the integration work.
+
+    Action items:
+    - New `fsrpb train` (or `fsrpb learn`) verb that points at a
+      configured FSR and populates the tenant tables above. Reuse
+      probes under `python/probes/`; goal is one verb that
+      orchestrates connectors → operations → operation_params →
+      modules → playbooks_seen → playbook_steps in dependency order.
+    - Build script that produces the base-image db: copy the schema
+      from the current store, retain only the SHIP-tagged tables'
+      rows, vacuum, and emit `store/fsr_reference.base.db`. Lives in
+      `python/probes/build_base_image.py`.
+    - Make data dirs configurable via env (`FSRPB_DB`, `FSRPB_CACHE_DIR`,
+      `FSRPB_HISTORY_DB`) so hosted/ephemeral installs aren't forced
+      to write into the package.
+    - `.gitignore` the populated `store/fsr_reference.db`; check in
+      only the base image. First-time users run `fsrpb train` once.
+    - Bonus: `fsrpb train --since <ts>` incremental refresh so reruns
+      aren't full rescans.
+
+D2. **User context preferences that influence every chat session**.
+    Per-user (or per-workspace) preferences the agent reads at the
+    top of every chat so it doesn't re-derive house style each time.
+    Examples the user called out:
+    - "When we block on an endpoint, we use CrowdStrike + endpoint
+      quarantine."
+    - "Default ticketing system is ServiceNow incidents."
+    - "All approvals route through the SOC analyst queue."
+    Plan:
+    - Storage: a `user_preferences` table (or YAML file under the
+      user's profile dir) with rows like `{scope, intent_pattern,
+      preferred_connector, preferred_operation, notes}`. Free-form
+      `notes` field too — anything the user wants the agent to know.
+    - Surface: prepend a compact preferences block to the system
+      prompt at chat start (cap size; cache-friendly so this doesn't
+      blow the prompt cache).
+    - Hookpoints: when the agent calls `find_step_recipe` /
+      `find_connector` / `find_operation`, post-filter or up-rank
+      results that match the user's preferences. (E.g. "block ip on
+      endpoint" should surface CrowdStrike before the alphabetical
+      first match.)
+    - UI: simple settings page under the History tab to add/edit/
+      delete preferences; CLI `fsrpb prefs` mirror.
+    - Test: an eval harness scenario that runs the same prompt
+      with/without a preference and asserts the right connector got
+      selected.
+
+D3. **Wire `api_examples_catalog/catalog.sqlite` into fsrpb as a
+    first-class lookup**. Today the catalog (6,927 products /
+    207,419 API command entries with FTS, in
+    `~/PycharmProjects/Miscellaneous/api_examples_catalog/`) is a
+    standalone artifact with its own `query.py`. The agent never
+    sees it. With HTTP virtual-connector authoring on the roadmap,
+    this is the highest-leverage external corpus we have for
+    grounding 3rd-party API calls in real examples. Plan:
+    - Adopt the file: move or symlink the catalog under
+      `store/api_catalog.db` (or attach via `ATTACH DATABASE` like
+      we do for the playbook-steps catalog) so fsrpb can read it
+      without absolute paths.
+    - New MCP tool `find_api_example(product, intent, limit=5)`:
+      maps product (Splunk, ServiceNow, CrowdStrike, …) +
+      natural-language intent → top entries with action,
+      http_method, http_path, code_snippet, source_url. Use the
+      existing `entries_fts` virtual table for relevance ranking.
+    - New MCP tool `find_api_product(name)`: fuzzy-search the 6,927
+      products since users will misspell vendor names.
+    - System-prompt addition: when authoring an HTTP virtual
+      connector or a `connector` step against a connector that
+      isn't in the FSR catalog (or where the FSR op is missing
+      params we need), call `find_api_example` to ground the
+      request shape in a real example.
+    - Tie-in with D2 user prefs: if the user has "block on endpoint
+      → CrowdStrike", auto-call `find_api_example("crowdstrike",
+      "quarantine endpoint")` when block-on-endpoint intent matches.
+    - Tie-in with D1 distribution: see the catalog notes in D1 —
+      decide ship-slim vs optional-sidecar before exposing the tool
+      to non-dev users.
+    - Tests: assert top-1 hit for a few canned queries (e.g.
+      "splunk run search", "servicenow create incident") so corpus
+      drift is caught.
+
+## Pending — chat-review landings follow-ups (added 2026-05-07, session c44c6e36)
+
+Five resolver fixes shipped this session (trigger defaults, ipv4-kind
+lint, connector-arg auto-lift, conditional-visibility checker,
+set_variable `message:` sugar). Next-session follow-ups:
+
+1. ~~**Regression tests for the new behaviors**~~ ✅ DONE 2026-05-07.
+   `python/tests/test_chat_review_landings.py` — 12 cases covering
+   trigger defaults (record-action + post-create), ipv4/email kind
+   hints (incl. negative-case no-warn), connector flat-arg lift,
+   `_check_param_visibility` (positive + negative branches on
+   block_ip_new), and `message:` sugar (auto-wrap, tag IRI synthesis,
+   record override, reserved-key collision, missing-content error).
+   254/254 suite green.
+
+2. **`get_op_schema` MCP — group fields by visibility predicate**.
+   Today it returns a flat list; the visibility checker landed in the
+   resolver but the agent doesn't see the structure until validate
+   fires. Have the tool emit
+   `{always: [...], when: {"method=Policy Based": [...], …}}` so the
+   agent picks the right branch on first draft.
+
+3. **`get_step_type(set_variable) / friendly_form`** must now surface
+   the `message:` block and its keys (content, tags, record, type,
+   thread). Agent discovers the new sugar via the tool, not the prompt.
+
+4. **Live picklist resolution for `message.type`** — currently defaults
+   to a hardcoded IRI (`/api/3/picklists/ff599189-…`). Should probe the
+   live FSR's message-type picklist by name (`comment` etc.) so the
+   sugar works against any FSR install, not just the one we sampled.
+
+5. **`message.tags` resolution** — today we just synthesize
+   `/api/3/tags/<name>`. Need to (a) verify the tag exists on live FSR,
+   (b) warn or auto-create when missing, (c) accept full IRIs as
+   pass-through (already done).
+
+6. **Eval re-baseline against session c44c6e36 task** — re-run the
+   agentic_anthropic + agentic_lmstudio harness on a "Confirm Before
+   Block" task (paste the user's exact prompt into a new eval task)
+   and confirm: trigger now has manual flavour, IP field uses `ipv4`
+   kind, block_ip_new uses only the active-mode params, and the
+   message gets emitted via the `message:` sugar. Compare to the
+   c44c6e36 transcript as a before/after.
+
+7. **Linter parity for `validate-ingestion`** — mirror the conditional
+   visibility check into the ingestion ruleset so corpus + recipe
+   ingestion playbooks get the same protection as authored YAMLs.
+
 ## Pending — agentic eval re-baseline (2026-05-07)
 
 Track A landed the agentic provider + scoring gates (tool_budget /

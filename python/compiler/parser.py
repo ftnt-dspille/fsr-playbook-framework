@@ -274,7 +274,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             #   step.set            → arguments.step_variables (sugar — same
             #                         spelling whether you're on set_variable
             #                         (`vars:`) or a connector/create step)
-            for hoist_key in ("mock_result", "when", "step_variables"):
+            for hoist_key in ("mock_result", "when", "step_variables", "message"):
                 if hoist_key in s_raw:
                     if hoist_key in args:
                         errors.append(CompileError(
@@ -368,6 +368,26 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                         message="set_variable.vars must be a mapping of name → value",
                         path=f"{sp}.vars",
                     ))
+
+            if stype == "connector":
+                # Step-level `connector:` / `operation:` siblings of
+                # `arguments:` are a recurring agent typo (session
+                # 0eb8c6a6 burned a validate round on this). FSR's wire
+                # format keeps them under arguments; auto-hoist with a
+                # warning so the agent learns instead of cycling.
+                for hk in ("connector", "operation"):
+                    if hk in s_raw and hk not in args:
+                        args[hk] = s_raw[hk]
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            severity="warning",
+                            message=(
+                                f"connector step has step-level `{hk}:` — "
+                                f"hoisted into `arguments.{hk}`. Put it "
+                                f"under `arguments:` next time."
+                            ),
+                            path=f"{sp}.{hk}",
+                        ))
 
             if "branches" in s_raw:
                 errors.append(CompileError(

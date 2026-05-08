@@ -13,6 +13,7 @@
   import { yamlStore } from '$lib/yamlStore.svelte';
   import { onMount, tick } from 'svelte';
   import LoopTelemetry from '$lib/components/LoopTelemetry.svelte';
+  import { runStore } from '$lib/runStore.svelte';
 
   type ToolCall = {
     call_id: string;
@@ -21,10 +22,31 @@
     result_preview?: string;
   };
 
+  type PushOffer = { yaml: string; hasWarnings: boolean };
+  type PushResult = { ok: boolean; stdout: string; stderr: string };
+  type PushState = {
+    offer: PushOffer | null;
+    busy: boolean;
+    mode: 'replace' | 'create' | 'update' | 'upsert';
+    result: PushResult | null;
+  };
+
+  type TurnSegment =
+    | { kind: 'text'; text: string }
+    | { kind: 'tool'; tool: ToolCall };
+
   type Turn = {
     role: 'user' | 'assistant';
+    /** Full concatenated text — kept for YAML extraction, history,
+     *  and replays. Rendering uses `segments` instead so text blocks
+     *  emitted between tool calls don't collapse into one paragraph. */
     text: string;
+    /** Chronological list of (text | tool) segments as the model
+     *  produced them. Successive text deltas merge into the trailing
+     *  text segment; a tool_use event closes the current text segment. */
+    segments?: TurnSegment[];
     tools?: ToolCall[];
+    push?: PushState;
   };
 
   let {
@@ -285,18 +307,63 @@
     const a = turns[idx];
     if (!a) return;
     switch (ev.kind) {
-      case 'text':
+      case 'text': {
         a.text += ev.text;
+        // Svelte 5 deep proxy: read the proxied array AFTER ensuring it
+        // exists (the value returned by `a.x = []` is the raw array,
+        // not the proxy, so push() on it doesn't trigger reactivity).
+        if (!a.segments) a.segments = [];
+        const segs = a.segments;
+        const lastIdx = segs.length - 1;
+        const last = segs[lastIdx];
+        if (last && last.kind === 'text') {
+          segs[lastIdx] = { kind: 'text', text: last.text + ev.text };
+        } else {
+          segs.push({ kind: 'text', text: ev.text });
+        }
         break;
-      case 'tool_use':
-        a.tools = [
-          ...(a.tools ?? []),
-          { call_id: ev.call_id, name: ev.name, arguments: ev.arguments }
-        ];
+      }
+      case 'tool_use': {
+        const tool: ToolCall = {
+          call_id: ev.call_id,
+          name: ev.name,
+          arguments: ev.arguments
+        };
+        a.tools = [...(a.tools ?? []), tool];
+        if (!a.segments) a.segments = [];
+        a.segments.push({ kind: 'tool', tool });
         break;
+      }
       case 'tool_result': {
         const tc = a.tools?.find((t) => t.call_id === ev.call_id);
         if (tc) tc.result_preview = ev.result_preview;
+        // When the agent's validate/compile call returns clean, offer
+        // a Push button inline. The push itself is user-initiated —
+        // the AI doesn't have access to the push tool. Latest clean
+        // validate wins; we want the most recent draft, not the first.
+        if (
+          tc &&
+          (tc.name === 'validate_yaml' || tc.name === 'compile_yaml') &&
+          typeof tc.arguments?.yaml_text === 'string'
+        ) {
+          try {
+            const parsed = JSON.parse(ev.result_preview ?? '');
+            if (parsed && parsed.ok === true) {
+              const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+              a.push = {
+                offer: {
+                  yaml: tc.arguments.yaml_text as string,
+                  hasWarnings: warnings.length > 0
+                },
+                busy: false,
+                mode: a.push?.mode ?? 'replace',
+                result: null
+              };
+            }
+          } catch {
+            /* truncated/non-JSON preview — skip */
+          }
+        }
         break;
       }
       case 'usage':
@@ -334,6 +401,40 @@
     }
   }
 
+  async function pushTurn(idx: number) {
+    const t = turns[idx];
+    if (!t?.push?.offer || t.push.busy) return;
+    t.push.busy = true;
+    t.push.result = null;
+    // Mirror the action into the global Deploy console so the user
+    // sees the same push status from both surfaces. Reset first so a
+    // previous push's output doesn't bleed into this one.
+    runStore.reset();
+    runStore.status = 'pushing';
+    try {
+      const res = await fetch('/api/playbook/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: t.push.offer.yaml, mode: t.push.mode })
+      });
+      const body = (await res.json()) as PushResult & { exit_code?: number };
+      t.push.result = body;
+      const combined = [body.stdout, body.stderr].filter(Boolean).join('\n').trimEnd();
+      runStore.pushOutput = combined;
+      runStore.exitCode = typeof body.exit_code === 'number' ? body.exit_code : body.ok ? 0 : 1;
+      runStore.status = body.ok ? 'done' : 'error';
+      if (!body.ok) runStore.errorMsg = body.stderr?.split('\n')[0] || 'push failed';
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      t.push.result = { ok: false, stdout: '', stderr: msg };
+      runStore.pushOutput = msg;
+      runStore.status = 'error';
+      runStore.errorMsg = msg;
+    } finally {
+      t.push.busy = false;
+    }
+  }
+
   function reset() {
     turns = [];
     err = null;
@@ -347,6 +448,11 @@
     outputTokens = 0;
     sessionStart = null;
     elapsedMs = 0;
+    // Drop the session + draft identifiers so the next send starts a
+    // brand-new history.db session row and a brand-new draft, rather
+    // than appending to whatever the user just walked away from.
+    chatSessionId = null;
+    draftName = null;
   }
 
   // Auto-scroll the conversation pane as content streams in.
@@ -467,60 +573,136 @@
             {t.role === 'user' ? 'You' : 'AI'}
           </div>
           <div class="min-w-0 flex-1">
-            {#if t.tools && t.tools.length}
-              <div class="mb-2 space-y-1.5">
-                {#each t.tools as tc}
-                  <details
-                    class="group rounded-md border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 transition-colors hover:border-[var(--border)]"
+            {#snippet toolCard(tc: ToolCall)}
+              <details
+                class="group rounded-md border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 transition-colors hover:border-[var(--border)]"
+              >
+                <summary
+                  class="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-muted)]"
+                >
+                  <span class="text-blue-400">⚙</span>
+                  <span class="font-mono text-blue-300">{tc.name}</span>
+                  <span class="text-[var(--text-faint)]"
+                    >· {Object.keys(tc.arguments).length}
+                    {Object.keys(tc.arguments).length === 1 ? 'arg' : 'args'}</span
                   >
-                    <summary
-                      class="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-muted)]"
-                    >
-                      <span class="text-blue-400">⚙</span>
-                      <span class="font-mono text-blue-300">{tc.name}</span>
-                      <span class="text-[var(--text-faint)]"
-                        >· {Object.keys(tc.arguments).length}
-                        {Object.keys(tc.arguments).length === 1 ? 'arg' : 'args'}</span
-                      >
-                      {#if tc.result_preview}
-                        <span class="ml-auto text-[10px] text-emerald-400">✓</span>
-                      {:else}
-                        <span class="ml-auto inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--text-faint)]"></span>
-                      {/if}
-                    </summary>
-                    <div class="border-t border-[var(--border-soft)] px-2.5 py-2">
-                      <div class="text-[9px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
-                        Arguments
-                      </div>
-                      <pre
-                        class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--bg-canvas)]/60 p-2 font-mono text-[11px] text-[var(--text-muted)]">{JSON.stringify(
-                          tc.arguments,
-                          null,
-                          2
-                        )}</pre>
-                      {#if tc.result_preview}
-                        <div class="mt-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
-                          Result
-                        </div>
-                        <pre
-                          class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--bg-canvas)]/60 p-2 font-mono text-[11px] text-[var(--text-muted)]">{tc.result_preview}</pre>
-                      {/if}
+                  {#if tc.result_preview}
+                    <span class="ml-auto text-[10px] text-emerald-400">✓</span>
+                  {:else}
+                    <span class="ml-auto inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--text-faint)]"></span>
+                  {/if}
+                </summary>
+                <div class="border-t border-[var(--border-soft)] px-2.5 py-2">
+                  <div class="text-[9px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
+                    Arguments
+                  </div>
+                  <pre
+                    class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--bg-canvas)]/60 p-2 font-mono text-[11px] text-[var(--text-muted)]">{JSON.stringify(
+                      tc.arguments,
+                      null,
+                      2
+                    )}</pre>
+                  {#if tc.result_preview}
+                    <div class="mt-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
+                      Result
                     </div>
-                  </details>
-                {/each}
-              </div>
-            {/if}
+                    <pre
+                      class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--bg-canvas)]/60 p-2 font-mono text-[11px] text-[var(--text-muted)]">{tc.result_preview}</pre>
+                  {/if}
+                </div>
+              </details>
+            {/snippet}
 
-            {#if t.text}
-              {#if t.role === 'assistant'}
-                <div class="markdown-body text-[15px] leading-relaxed text-[var(--text-default)]">
-                  {@html renderMarkdown(t.text)}
+            {#if t.role === 'assistant'}
+              {#if t.segments && t.segments.length}
+                <!-- Chronological interleave: each text chunk emitted
+                     between tool calls becomes its own paragraph block,
+                     so prefaces like "Now let me find …" don't collapse
+                     into one run-on paragraph with the next preface. -->
+                <div class="space-y-2">
+                  {#each t.segments as seg}
+                    {#if seg.kind === 'text'}
+                      {#if seg.text.trim()}
+                        <div class="markdown-body text-[15px] leading-relaxed text-[var(--text-default)]">
+                          {@html renderMarkdown(seg.text)}
+                        </div>
+                      {/if}
+                    {:else}
+                      {@render toolCard(seg.tool)}
+                    {/if}
+                  {/each}
                 </div>
               {:else}
-                <div class="rounded-lg bg-[var(--bg-panel)]/60 px-3 py-2 text-[15px] leading-relaxed text-[var(--text-default)]">
-                  {t.text}
-                </div>
+                <!-- Legacy path for replayed history (no segments) -->
+                {#if t.tools && t.tools.length}
+                  <div class="mb-2 space-y-1.5">
+                    {#each t.tools as tc}
+                      {@render toolCard(tc)}
+                    {/each}
+                  </div>
+                {/if}
+                {#if t.text}
+                  <div class="markdown-body text-[15px] leading-relaxed text-[var(--text-default)]">
+                    {@html renderMarkdown(t.text)}
+                  </div>
+                {/if}
               {/if}
+            {:else if t.text}
+              <div class="rounded-lg bg-[var(--bg-panel)]/60 px-3 py-2 text-[15px] leading-relaxed text-[var(--text-default)]">
+                {t.text}
+              </div>
+            {/if}
+            {#if t.role === 'assistant' && t.push?.offer && !(busy && i === turns.length - 1)}
+              <div
+                class="mt-2 rounded-lg border border-emerald-900/60 bg-emerald-950/30 px-3 py-2.5"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="text-emerald-400">✓</span>
+                  <span class="text-xs font-medium text-emerald-200">
+                    Playbook validates clean{t.push.offer.hasWarnings ? ' (with warnings)' : ''}
+                  </span>
+                  <span class="ml-auto flex items-center gap-1.5">
+                    <select
+                      bind:value={t.push.mode}
+                      disabled={t.push.busy || !!t.push.result?.ok}
+                      class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-1.5 py-0.5 text-[11px] text-[var(--text-muted)]"
+                      title="replace = overwrite by name; create = new only; update = existing only; upsert = either"
+                    >
+                      <option value="replace">replace</option>
+                      <option value="create">create</option>
+                      <option value="update">update</option>
+                      <option value="upsert">upsert</option>
+                    </select>
+                    <button
+                      class="rounded-md bg-emerald-700 px-2.5 py-1 text-[11px] font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)] disabled:text-[var(--text-faint)]"
+                      onclick={() => pushTurn(i)}
+                      disabled={t.push.busy || t.push.result?.ok === true}
+                    >
+                      {t.push.busy ? 'Pushing…' : t.push.result?.ok ? 'Pushed' : 'Push to FortiSOAR'}
+                    </button>
+                  </span>
+                </div>
+                {#if t.push.result}
+                  <div class="mt-2 border-t border-emerald-900/40 pt-2 text-[11px]">
+                    {#if t.push.result.ok}
+                      <div class="text-emerald-300">Push succeeded.</div>
+                      {#if t.push.result.stdout}
+                        <pre class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-[var(--bg-canvas)]/60 p-1.5 font-mono text-[10px] text-[var(--text-muted)]">{t.push.result.stdout}</pre>
+                      {/if}
+                    {:else}
+                      <div class="text-red-300">
+                        Push failed (exit {t.push.result.stdout || t.push.result.stderr ? '' : '?'}).
+                      </div>
+                      {#if t.push.result.stderr}
+                        <pre class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-red-950/30 p-1.5 font-mono text-[10px] text-red-200">{t.push.result.stderr}</pre>
+                      {/if}
+                      {#if t.push.result.stdout}
+                        <pre class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-[var(--bg-canvas)]/60 p-1.5 font-mono text-[10px] text-[var(--text-muted)]">{t.push.result.stdout}</pre>
+                      {/if}
+                    {/if}
+                  </div>
+                {/if}
+              </div>
             {/if}
             {#if t.role === 'assistant' && busy && i === turns.length - 1}
               <!-- Keep the bouncing dots visible for the entire turn

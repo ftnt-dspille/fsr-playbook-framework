@@ -327,6 +327,19 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                         content=json.dumps(ev.arguments, default=str),
                     )
                     seq_in_turn += 1
+                    # If the assistant is validating/compiling a YAML body,
+                    # tag this and subsequent turns with its collection +
+                    # sha — so sessions that authored a playbook in chat
+                    # but never round-tripped through the editor still
+                    # show up in the History list with a real title.
+                    # Mutating `tags` in place propagates to UsageEvents
+                    # since the provider keeps the same dict reference.
+                    if ev.name in ("validate_yaml", "compile_yaml"):
+                        yaml_arg = ev.arguments.get("yaml_text") \
+                            if isinstance(ev.arguments, dict) else None
+                        derived = _yaml_tags(yaml_arg)
+                        if derived:
+                            tags.update(derived)
                 elif session_id and isinstance(ev, ToolResultEvent):
                     _flush_assistant_text()
                     payload = ev.result if isinstance(ev.result, str) \

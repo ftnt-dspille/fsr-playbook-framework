@@ -1,0 +1,21 @@
+name: set_variable_log
+description: |
+  Record an action+target pair in workflow vars for later inspection or
+  audit. Writes named vars via the top-level `vars:` shape (the canonical
+  set_variable surface — DO NOT use `arguments:` here, the compiler
+  rejects it).
+intent_keywords:
+  - record action
+  - audit log
+  - set variable
+  - log decision
+  - track action
+connector: null
+step_types:
+  - set_variable
+steps_yaml: |
+  - type: set_variable
+    name: Record Action
+    vars:
+      action: approved
+      target: "{{ vars.steps.Collect_Input.input.target_value }}"

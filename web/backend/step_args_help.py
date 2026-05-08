@@ -20,9 +20,10 @@ Each entry is a dict shaped like:
   }
 
 Why a hand-curated dict and not introspection? Friendly-form keys
-(`title`, `inputs`, `module`, `branches`) don't exist in the canonical
-JSON shape — they only live in the resolver normalizers. The agent
-needs *authoring* docs, not runtime schema.
+(`title`, `inputs`, `module`, step-level `options:`/`conditions:`)
+don't exist in the canonical JSON shape — they only live in the
+resolver normalizers. The agent needs *authoring* docs, not runtime
+schema.
 """
 from __future__ import annotations
 
@@ -31,20 +32,23 @@ from typing import Any
 
 _MANUAL_INPUT: dict[str, Any] = {
     "summary": (
-        "Pause the playbook for a human response. Friendly form: "
-        "`title`, `description`, `options`, `inputs`. Mode-aware: see "
-        "Context (record-linked vs independent), Audience (internal vs "
-        "external), Assignment (owner_detail)."
+        "Pause the playbook for a human response. Friendly form: prompt "
+        "body (`title`, `description`, `inputs`) under `arguments:`; "
+        "branch buttons under a STEP-LEVEL `options:` list, each with "
+        "its own `next:`. Mode-aware: see Context (record-linked vs "
+        "independent), Audience (internal vs external), Assignment "
+        "(owner_detail)."
     ),
     "args": [
         {"name": "title", "required": False, "kind": "string",
          "description": "Prompt heading shown to the user. Jinja-templated."},
         {"name": "description", "required": False, "kind": "markdown string",
          "description": "Body text. Markdown allowed."},
-        {"name": "options", "required": False, "kind": "list[str|dict]",
-         "description": "Buttons. Each: `{option, primary?, next?}`. "
-                        "`next:` per option points at the next step "
-                        "(lifted into branches at compile time)."},
+        {"name": "options", "required": False, "kind": "list[dict]",
+         "description": "Buttons. Lives at the STEP level (NOT under "
+                        "`arguments:`). Each: `{display, next, primary?}`. "
+                        "`next:` per option routes the playbook on that "
+                        "button click."},
         {"name": "inputs", "required": False, "kind": "list[dict]",
          "description": "Form fields. Each: `{name, kind, label?, "
                         "tooltip?, required?, default?, options?, "
@@ -132,9 +136,9 @@ _MANUAL_INPUT: dict[str, Any] = {
         {"name": "inputInternalUsers", "required": False, "kind": "list"},
     ],
     "examples": [
-        "title: Approve?\noptions:\n  - {option: yes, primary: true, next: do_block}\n  - {option: no,  next: end_pb}",
-        "title: Enter IP\ninputs:\n  - {name: ip, kind: ipv4, label: Address, required: true}",
-        "title: Pick reviewer\ninputs:\n  - {name: who, kind: lookup, module: people, required: true}",
+        "# step-level options:, each carries its own next:\narguments:\n  title: Approve?\noptions:\n  - {display: 'Yes', primary: true, next: Do Block}\n  - {display: 'No',  next: End Pb}",
+        "arguments:\n  title: Enter IP\n  inputs:\n    - {name: ip, kind: ipv4, label: Address, required: true}",
+        "arguments:\n  title: Pick reviewer\n  inputs:\n    - {name: who, kind: lookup, module: people, required: true}",
     ],
 }
 
@@ -142,23 +146,25 @@ _MANUAL_INPUT: dict[str, Any] = {
 _DECISION: dict[str, Any] = {
     "summary": (
         "Branch the playbook on Jinja conditions. Each entry in "
-        "`conditions[]` is either a non-default branch (with both "
-        "`option` and `condition`) or the single default fall-through "
-        "(`default: true`, no condition). Branch targets are wired via "
-        "`branches:` on the step or a step-level `next:` fall-through."
+        "`conditions[]` is either a non-default branch (with `display`, "
+        "`when`, `next`) or the single default fall-through "
+        "(`default: true`, no `when`, with `next:` for the else target). "
+        "Do NOT use a step-level `branches:` dict — the parser hard-"
+        "errors on it. `conditions:` may be written at the step level "
+        "(sugar) or under `arguments:` (wire form)."
     ),
     "args": [
         {"name": "conditions", "required": True, "kind": "list[dict]",
          "description": "List of branches. Each non-default entry: "
-                        "`{option, condition, [step_name?]}`. The single "
-                        "default entry: `{option?, default: true, "
-                        "[step_name?]}` — must omit `condition`."},
+                        "`{display, when, next}`. The single default "
+                        "entry: `{display?, default: true, next}` — must "
+                        "omit `when`."},
         {"name": "step_variables", "required": False, "kind": "list",
          "description": "Scratch vars exposed downstream."},
     ],
     "examples": [
-        "conditions:\n  - {option: 'yes', condition: \"{{ x > 5 }}\"}\n  - {option: 'no', default: true}\nbranches:\n  'yes': handle_high\n  'no':  handle_low",
-        "conditions:\n  - {option: 'yes', condition: \"{{ x }}\"}\nbranches:\n  'yes': handle_yes\nnext: handle_no   # implicit default fall-through",
+        "conditions:\n  - {display: 'Yes', when: \"{{ x > 5 }}\", next: Handle High}\n  - {display: 'No', default: true, next: Handle Low}",
+        "conditions:\n  - {display: Critical, when: \"{{ vars.score > 50 }}\", next: Set Critical}\n  - {display: Else, default: true, next: Set Low}",
     ],
 }
 

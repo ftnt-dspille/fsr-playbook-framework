@@ -102,6 +102,48 @@ def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict]:
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
+# Status precedence: tested_pass and tested_fail beat 'seen'; among those,
+# the most recent ts wins. 'seen' is a weak signal (we catalogued the
+# row, never exercised it).
+_VERIF_RANK = {"tested_pass": 3, "tested_fail": 3, "seen": 1}
+
+
+def _verifications_for(conn: sqlite3.Connection, kind: str,
+                        keys: list[str]) -> dict[str, dict]:
+    """Batch-load the strongest verification per key for one kind.
+
+    Returns `{key: {status, method, ts, notes_excerpt}}`. Missing keys
+    are absent. Picks tested_* over seen, then newest ts wins.
+    """
+    if not keys:
+        return {}
+    placeholders = ",".join("?" * len(keys))
+    rows = conn.execute(
+        f"""SELECT key, status, method, ts, notes
+            FROM verifications
+            WHERE kind=? AND key IN ({placeholders})""",
+        (kind, *keys),
+    ).fetchall()
+    best: dict[str, dict] = {}
+    for r in rows:
+        cur = best.get(r["key"])
+        rank = _VERIF_RANK.get(r["status"], 0)
+        if cur is None or rank > cur["_rank"] or (
+            rank == cur["_rank"] and (r["ts"] or "") > (cur["ts"] or "")
+        ):
+            notes = r["notes"] or ""
+            best[r["key"]] = {
+                "status": r["status"],
+                "method": r["method"],
+                "ts": r["ts"],
+                "notes_excerpt": (notes[:160] + "…") if len(notes) > 160 else notes,
+                "_rank": rank,
+            }
+    for v in best.values():
+        v.pop("_rank", None)
+    return best
+
+
 def _infer_shape(value: Any, _depth: int = 0) -> Any:
     """Recursively replace leaf values with their type names.
 
@@ -209,7 +251,27 @@ def find_connector(q: str, limit: int = 15,
                        ORDER BY name LIMIT ?""",
                     (w, w, limit),
                 )
+        failed: list[str] = []
+        if rows:
+            verifs = _verifications_for(
+                conn, "connector", [r["name"] for r in rows]
+            )
+            for r in rows:
+                v = verifs.get(r["name"])
+                if v:
+                    r["verification"] = v
+                    if v["status"] == "tested_fail":
+                        failed.append(r["name"])
+            rows.sort(key=lambda r: (
+                0 if (r.get("verification") or {}).get("status") == "tested_pass" else
+                2 if (r.get("verification") or {}).get("status") == "tested_fail" else 1
+            ))
         out: dict[str, Any] = {"matches": rows}
+        if failed:
+            out["warning"] = (
+                f"connector(s) {failed} have a tested_fail verification "
+                "in the reference store; investigate before authoring."
+            )
         if not rows:
             # Surface a near-match so the agent doesn't loop guessing
             # connector names. Same difflib pass the resolver uses.
@@ -246,6 +308,11 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
     Default response is terse (op_name + title only). Pass `verbose=True`
     for descriptions. Returns `{matches, suggestion?}`. On zero hits,
     suggests near-matching ops so the agent doesn't loop guessing.
+
+    When the query matches exactly one op, the response also embeds a
+    slim `schema` — skip the follow-up `get_op_schema` call in that
+    case. Multi-match responses stay terse so the agent can still
+    disambiguate before pulling a schema.
     """
     with _db() as conn:
         cols = ("op_name, title, description, annotation" if verbose
@@ -271,7 +338,29 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                    ORDER BY op_name LIMIT ?""",
                 (connector, limit),
             )
+        op_failed: list[str] = []
+        if rows:
+            keys = [f"{connector}:{r['op_name']}" for r in rows]
+            verifs = _verifications_for(conn, "operation", keys)
+            for r in rows:
+                v = verifs.get(f"{connector}:{r['op_name']}")
+                if v:
+                    r["verification"] = {k: vv for k, vv in v.items()
+                                          if k != "notes_excerpt"
+                                          or v["status"] == "tested_fail"}
+                    if v["status"] == "tested_fail":
+                        op_failed.append(r["op_name"])
+            rows.sort(key=lambda r: (
+                0 if (r.get("verification") or {}).get("status") == "tested_pass" else
+                2 if (r.get("verification") or {}).get("status") == "tested_fail" else 1
+            ))
         out: dict[str, Any] = {"matches": rows}
+        if op_failed:
+            out["warning"] = (
+                f"op(s) {op_failed} on {connector!r} have a tested_fail "
+                "verification (live execution failed previously); confirm "
+                "params or pick another op."
+            )
         if not rows:
             all_ops = [r["op_name"] for r in _rows(
                 conn,
@@ -296,7 +385,163 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                 )
                 if close:
                     out["near"] = close
+        # When the search narrows to a single op, fold the slim schema
+        # into the response so the agent can skip the follow-up
+        # get_op_schema round-trip (saves ~1 LLM turn + ~6KB of cache).
+        # Only triggers when there is exactly one match — multi-match
+        # results stay terse so the agent can still disambiguate.
+        if len(rows) == 1 and rows[0].get("op_name"):
+            try:
+                schema = get_op_schema(connector, rows[0]["op_name"],
+                                       verbose=False)
+                if isinstance(schema, dict) and schema.get("ok") is not False:
+                    out["schema"] = schema
+            except Exception:
+                pass
         return out
+
+
+# ---------------------------------------------------------------------------
+# get_op_schema helpers — param dedup + per-select param groups
+# ---------------------------------------------------------------------------
+
+def _dedupe_params(params: list[dict]) -> list[dict]:
+    """Collapse duplicate param_name rows into one entry per name.
+
+    The reference store has one row per (param_name, parent_param_name,
+    condition_value) — so a param visible under multiple conditions
+    appears two or three times with the same name. The agent only needs
+    one entry; aggregate the visibility rules into `applies_when`.
+    """
+    out: list[dict] = []
+    by_name: dict[str, dict] = {}
+    for p in params:
+        name = p.get("param_name")
+        if not name:
+            out.append(p)
+            continue
+        existing = by_name.get(name)
+        rule = None
+        # Surface visibility predicates only when both columns exist on the
+        # row (verbose path). Slim path drops parent/condition columns, so
+        # this is a no-op there — applies_when stays empty.
+        parent = p.get("parent_param_name")
+        cond = p.get("condition_value")
+        if parent:
+            rule = {"parent": parent, "value": cond}
+        if existing is None:
+            entry = {k: v for k, v in p.items()
+                     if k not in ("parent_param_name", "condition_value")}
+            entry["applies_when"] = [rule] if rule else []
+            by_name[name] = entry
+            out.append(entry)
+        else:
+            if rule and rule not in existing["applies_when"]:
+                existing["applies_when"].append(rule)
+    # Drop empty applies_when so unconditional params stay clean.
+    for entry in out:
+        if entry.get("applies_when") == []:
+            entry.pop("applies_when", None)
+    return out
+
+
+def _build_param_groups_by_select(
+    rules: list[tuple[str, str | None, str | None]],
+    param_types: dict[str, str],
+    param_options: dict[str, list[str]],
+    param_defaults: dict[str, str | None],
+) -> dict[str, Any]:
+    """Compute {select_param: {option_value: {params, nested_selects}}}.
+
+    Walks the parent_param→child adjacency. For each top-level select
+    (parent is None, type='select'), enumerates each option value and
+    lists every param that becomes visible under that choice. Nested
+    selects (selects whose own visibility depends on the parent option)
+    are surfaced with their own option→param map so the agent can see
+    the whole feasible neighborhood without iterating.
+
+    Returns {} when no top-level select gates other params — most ops.
+    """
+    from collections import defaultdict
+    children_of: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for name, parent, cond in rules:
+        if parent is not None:
+            children_of[(parent, str(cond))].append(name)
+    # Top-level params (no parent rule).
+    parents_with_rule = {n for n, p, _ in rules if p is not None}
+    top_level = [n for n, p, _ in rules if p is None]
+    # Top-level params that are NOT themselves conditioned by anyone are
+    # the candidate gating selects. Among them, pick the ones of type
+    # 'select' that have at least one child rule.
+    gating: list[str] = []
+    for n in top_level:
+        if param_types.get(n) != "select":
+            continue
+        if any(parent == n for _, parent, _ in rules):
+            gating.append(n)
+
+    # Always-visible (top-level) non-select params and unconditional
+    # nested params get included in every group too.
+    unconditional = [n for n in top_level if n not in gating]
+
+    groups: dict[str, Any] = {}
+    for sel in gating:
+        options = param_options.get(sel) or []
+        per_option: dict[str, Any] = {}
+        for opt in options:
+            visible = list(unconditional)
+            nested: dict[str, dict[str, list[str]]] = {}
+            # Direct children of this select+option.
+            direct = list(children_of.get((sel, opt), []))
+            for child in direct:
+                if child in visible:
+                    continue
+                visible.append(child)
+                # If a child is itself a select with its own option-keyed
+                # children, expose them as a nested map.
+                if param_types.get(child) == "select":
+                    child_options = param_options.get(child) or []
+                    child_map: dict[str, list[str]] = {}
+                    for c_opt in child_options:
+                        c_kids = children_of.get((child, c_opt), [])
+                        if c_kids:
+                            child_map[c_opt] = list(c_kids)
+                    if child_map:
+                        nested[child] = child_map
+            entry: dict[str, Any] = {"params": visible}
+            if nested:
+                entry["nested_selects"] = nested
+            per_option[opt] = entry
+        per_option["_options"] = options
+        if param_defaults.get(sel):
+            per_option["_default"] = param_defaults[sel]
+        groups[sel] = per_option
+    return groups
+
+
+def _parse_options(blob: Any) -> list[str]:
+    if not blob:
+        return []
+    if isinstance(blob, list):
+        return [str(x) for x in blob]
+    try:
+        parsed = json.loads(blob)
+        return [str(x) for x in parsed] if isinstance(parsed, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _strip_default(raw: Any) -> str | None:
+    """default_value rows in the store are JSON-quoted strings."""
+    if raw in (None, ""):
+        return None
+    if isinstance(raw, str):
+        try:
+            v = json.loads(raw)
+            return str(v) if v is not None else None
+        except (json.JSONDecodeError, TypeError):
+            return raw
+    return str(raw)
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +611,7 @@ def get_op_schema(connector: str, op: str,
             conn,
             """SELECT param_name, title, type, required, editable, visible,
                       description, tooltip, placeholder, default_value,
-                      options_json
+                      options_json, parent_param_name, condition_value
                FROM operation_params
                WHERE connector_name=? AND op_name=?
                ORDER BY ord""",
@@ -379,6 +624,29 @@ def get_op_schema(connector: str, op: str,
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+        # Build the rules tuple list once; used for param_groups_by_select
+        # (callable from both verbose and slim branches below). Param-name
+        # → type / options / default lookups for groups.
+        rules_for_groups: list[tuple[str, str | None, str | None]] = [
+            (p["param_name"], p.get("parent_param_name"), p.get("condition_value"))
+            for p in params
+        ]
+        param_types: dict[str, str] = {}
+        param_options: dict[str, list[str]] = {}
+        param_defaults: dict[str, str | None] = {}
+        for p in params:
+            name = p["param_name"]
+            if name not in param_types and p.get("type"):
+                param_types[name] = p["type"]
+            opts = p.get("options_json")
+            if name not in param_options and opts:
+                param_options[name] = _parse_options(opts)
+            if name not in param_defaults:
+                param_defaults[name] = _strip_default(p.get("default_value"))
+        param_groups = _build_param_groups_by_select(
+            rules_for_groups, param_types, param_options, param_defaults,
+        )
+
         if verbose:
             result = dict(op_row[0])
             for col in ("output_schema_json", "conditional_output_schema_json",
@@ -388,7 +656,7 @@ def get_op_schema(connector: str, op: str,
                         result[col] = json.loads(result[col])
                     except (json.JSONDecodeError, TypeError):
                         pass
-            result["params"] = params
+            result["params"] = _dedupe_params(params)
         else:
             row = op_row[0]
             slim_params = [
@@ -396,7 +664,7 @@ def get_op_schema(connector: str, op: str,
                     "param_name", "title", "type", "required",
                     "options_json", "description"
                 ) if p.get(k) not in (None, "")}
-                for p in params
+                for p in _dedupe_params(params)
             ]
             result = {
                 "op_name": row.get("op_name"),
@@ -422,6 +690,15 @@ def get_op_schema(connector: str, op: str,
                         )
                 except (json.JSONDecodeError, TypeError):
                     pass
+
+        if param_groups:
+            result["param_groups_by_select"] = param_groups
+            result["param_groups_hint"] = (
+                "This op has gating select param(s); pick a value for each "
+                "key in `param_groups_by_select` and use ONLY the params "
+                "listed under that option (plus any nested_selects). Mixing "
+                "params across groups produces hidden-field errors at runtime."
+            )
 
         if not op_row[0].get("output_schema_json") and \
                 not op_row[0].get("output_schema_observed"):
@@ -860,38 +1137,55 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         },
     },
     "set_variable": {
-        "accepted_keys": "flat dict of {var_name: value}",
+        "accepted_keys_step_level": ["vars", "message", "record"],
+        "shape": (
+            "Variables go under a step-level `vars:` mapping (not under "
+            "`arguments:`). The parser hoists `vars:` into the wire-form "
+            "`arg_list`. Optional `message:` posts a comment to the "
+            "triggered record's collaboration panel; `record:` is only "
+            "needed when the playbook has no triggered record."
+        ),
         "example": {
             "type": "set_variable",
-            "name": "Stash inputs",
-            "arguments": {
+            "name": "Stash Inputs",
+            "vars": {
                 "source_ip": "{{ vars.input.records[0].sourceIp }}",
                 "verdict": "pending",
             },
         },
         "do_not_use": [
-            "arg_list: [{name, value}, ...] — legacy sugar; use flat dict",
+            "set: / values: / variables: at step level — only `vars:` is "
+            "the recognized sugar key",
+            "putting variables under `arguments:` — use step-level `vars:`",
+            "arg_list: [{name, value}, ...] at step level — legacy wire "
+            "form, the parser writes it for you",
         ],
     },
     "decision": {
         "accepted_keys": ["conditions"],
-        "branches": (
-            "every conditions[].option must have a branches[label] entry; "
-            "fall-through goes on the decision step's `next:`, NOT a branch"
+        "shape": (
+            "`conditions:` lives at the step level (sugar) or under "
+            "`arguments:` (wire form). Each non-default entry has "
+            "`display`, `when`, `next`. Exactly one entry must be the "
+            "default (`default: true`, no `when`) and supply `next:` for "
+            "the else branch. Do NOT use a step-level `branches:` dict — "
+            "the parser hard-errors on it."
         ),
         "example": {
             "type": "decision",
-            "arguments": {
-                "conditions": [
-                    {"option": "Critical", "condition": "{{ vars.score > 50 }}"},
-                ],
-            },
-            "branches": {"Critical": "set_critical"},
-            "next": "set_low",
+            "name": "Score Check",
+            "conditions": [
+                {"display": "Critical",
+                 "when": "{{ vars.score > 50 }}",
+                 "next": "Set Critical"},
+                {"display": "Else", "default": True, "next": "Set Low"},
+            ],
         },
         "do_not_use": [
-            "branch labels that aren't in conditions[].option — "
-            "use `next:` for the catch-all default instead",
+            "step-level `branches:` dict — write `next:` on each "
+            "conditions[] entry instead",
+            "bare step-level `next:` — declare an explicit `default: true` "
+            "row in `conditions:` and put `next:` on it",
         ],
     },
     "connector": {
@@ -1020,21 +1314,33 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         },
     },
     "manual_input": {
-        "accepted_keys": ["title", "description", "options", "inputs"],
+        "accepted_keys_arguments": ["title", "description", "inputs"],
+        "accepted_keys_step_level": ["options"],
+        "shape": (
+            "Prompt body (title, description, inputs) goes under "
+            "`arguments:`. Branch buttons go under a STEP-LEVEL `options:` "
+            "list (NOT under `arguments:`). Each option carries its own "
+            "`next:` — do not use a step-level `branches:` dict."
+        ),
         "type_value": "InputBased (only valid value; omit to let compiler fill)",
-        "options_shape": "list of strings or {option, primary?} dicts",
-        "branches": "each option label becomes a branches: key on the step",
+        "options_shape": (
+            "list of {display, next, primary?} dicts. The first option "
+            "is treated as primary unless another carries `primary: true`."
+        ),
         "inputs_shape": (
             "list of {name, kind, label?, tooltip?, required?, default?, "
             "options?} — kind is one of: text, textarea, richtext, email, "
-            "url, password, integer, checkbox, select, datetime, json. "
-            "After the operator submits, fields are read at "
-            "`vars.steps.<step_name>.input.<name>`. `kind: select` requires "
-            "`options:` (list of strings or jinja that resolves to a list)."
+            "url, password, ipv4, ipv6, domain, filehash, integer, "
+            "checkbox, select, datetime, json, picklist, lookup. After "
+            "the operator submits, fields are read at "
+            "`vars.steps.<step_name>.input.<name>`. `kind: select` "
+            "requires `options:` (list of strings or jinja that resolves "
+            "to a list). Prefer the most specific kind for typed values "
+            "(ipv4 over text for IP addresses, etc.)."
         ),
         "example": {
             "type": "manual_input",
-            "name": "Triage decision",
+            "name": "Triage Decision",
             "arguments": {
                 "title": "Confirm triage",
                 "description": "Review the alert details and approve.",
@@ -1045,19 +1351,22 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
                      "label": "Severity",
                      "options": ["Low", "Medium", "High"]},
                 ],
-                "options": [
-                    {"option": "approve", "primary": True},
-                    {"option": "reject"},
-                ],
             },
-            "branches": {"approve": "act", "reject": "drop"},
+            "options": [
+                {"display": "Approve", "primary": True, "next": "Act"},
+                {"display": "Reject", "next": "Drop"},
+            ],
         },
         "do_not_use": [
+            "step-level `branches:` dict — put `next:` on each option",
+            "`options:` nested under `arguments:` — it must be at the "
+            "step level (the parser hard-errors on this)",
             "type: textarea / single-select / free-text (no such dispatch — "
             "use `inputs: [{kind: textarea, ...}]` for a textarea field)",
             "label, message (not valid keys — use title/description)",
             "timeout (FSR ignores it)",
-            "vars.steps.<id>.input.choice (does not exist; route via branches)",
+            "vars.steps.<id>.input.choice (does not exist; the option's "
+            "`next:` is what routes the playbook)",
         ],
     },
     "code_snippet": {
@@ -1623,6 +1932,66 @@ def find_step_examples(step_type: str,
         except (json.JSONDecodeError, KeyError):
             pass
     return rows
+
+
+# ---------------------------------------------------------------------------
+# find_step_recipe — prebuilt + validated step fragments
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def find_step_recipe(intent: str = "",
+                     connector: str | None = None,
+                     step_type: str | None = None,
+                     limit: int = 5) -> dict[str, Any]:
+    """Look up prebuilt YAML step fragments by intent.
+
+    Each recipe is a small block of one or more steps that is known to
+    compile clean (CI-validated). Use this BEFORE drafting common
+    patterns from scratch — it eliminates the validate-fix-validate
+    cascade for things like:
+
+      - manual_input as the trigger (no `start` step)
+      - approve/reject gates
+      - FortiGate block_ip with the correct param set per method
+      - set_variable shape (arg_list, not step_variables)
+
+    Args:
+        intent: natural-language description of what you're trying to
+                build, e.g. "block an ip on fortigate using a policy".
+        connector: optional filter — only return recipes bound to this
+                   connector (e.g. 'fortigate-firewall'). Generic
+                   recipes (no connector binding) still match.
+        step_type: optional filter — only recipes that include this step
+                   type (e.g. 'manual_input', 'connector', 'set_variable').
+        limit: max recipes to return (default 5).
+
+    Returns: {ok: true, matches: [{name, description, intent_keywords,
+             connector, step_types, steps_yaml, notes}, ...]}.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "python"))
+    from recipes import step_lookup
+    matches = step_lookup.find(
+        intent=intent, connector=connector, step_type=step_type, limit=limit,
+    )
+    return {
+        "ok": True,
+        "matches": [r.to_dict() for r in matches],
+        "hint": (
+            "Each `steps_yaml` block is paste-ready. Replace placeholders "
+            "(<UPPER_CASE> tokens) with your values; update step names "
+            "and `next:` targets to fit your playbook. Recipes are "
+            "compile-validated — no validation cascade if you keep the "
+            "selected param values consistent with the recipe's group."
+        ),
+    } if matches else {
+        "ok": True,
+        "matches": [],
+        "hint": (
+            f"No recipes matched intent={intent!r}. Fall back to "
+            f"find_operation + get_op_schema; check `param_groups_by_select` "
+            f"on the schema to pick a coherent param set in one shot."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -3093,7 +3462,9 @@ def precheck_connector_installed(name: str,
         return {"ok": False, "code": "no_live_fsr",
                 "message": "FSR instance not configured"}
     from recipes.prechecks import check_connector_installed
-    return check_connector_installed(client, name, version).to_dict()
+    result = check_connector_installed(client, name, version).to_dict()
+    _persist_precheck_verification("connector", name, "live_api_get", result)
+    return result
 
 
 @mcp.tool()
@@ -3112,7 +3483,197 @@ def precheck_picklist_value(picklist_name: str,
         return {"ok": False, "code": "no_live_fsr",
                 "message": "FSR instance not configured"}
     from recipes.prechecks import check_picklist_value
-    return check_picklist_value(client, picklist_name, value).to_dict()
+    result = check_picklist_value(client, picklist_name, value).to_dict()
+    _persist_precheck_verification(
+        "picklist", f"{picklist_name}:{value}", "live_api_get", result,
+    )
+    return result
+
+
+def _persist_precheck_verification(kind: str, key: str, method: str,
+                                    result: dict[str, Any]) -> None:
+    """Record a verification row from a precheck result.
+
+    `result.ok` truthy → tested_pass; explicit False → tested_fail; any
+    other shape (no live FSR, etc.) is skipped so we don't pollute the
+    table with environmental misses.
+    """
+    ok = result.get("ok")
+    if ok is True:
+        status = "tested_pass"
+    elif ok is False and result.get("code") not in {"no_live_fsr"}:
+        status = "tested_fail"
+    else:
+        return
+    import datetime
+    ts = datetime.datetime.utcnow().isoformat()
+    notes = (result.get("message") or result.get("code") or "")[:500]
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO verifications
+                   (kind, key, method, status, ts, notes)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (kind, key, method, status, ts, notes),
+            )
+    except Exception:
+        pass
+
+
+@mcp.tool()
+def find_jinja_example(filter: str | None = None,
+                        var_path: str | None = None,
+                        intent: str | None = None,
+                        step_type: str | None = None,
+                        limit: int = 8) -> dict[str, Any]:
+    """Search 7,789 real `{{…}}` / `{%…%}` expressions observed in
+    actual FSR playbooks plus 1,690 indexed filter usages.
+
+    At least one of `filter`, `var_path`, or `intent` must be set.
+    - `filter`: filter name (`replace`, `tojson`, `picklist`,
+      `json_query`, …) — narrows to expressions using that filter.
+    - `var_path`: substring match against normalized `vars_csv`
+      (e.g. `vars.input.records`, `vars.steps.fetch_alerts`).
+    - `intent`: substring against the raw expression — useful for
+      finding patterns like `replace('T', ' ')` or
+      `picklist('AlertStatus'`.
+    - `step_type`: optional filter to expressions found in a given
+      step type (`SetVariable`, `Decision`, `UpdateRecord`, …).
+
+    Results ranked by observed `occurrences` (most-used first) so the
+    agent gets the idiomatic form rather than a one-off.
+    """
+    if not (filter or var_path or intent):
+        return {"ok": False, "code": "missing_query",
+                "message": "pass at least one of filter / var_path / intent"}
+    where: list[str] = []
+    args: list[Any] = []
+    if filter:
+        where.append("(filters_csv LIKE '%'||?||'%')")
+        args.append(filter)
+    if var_path:
+        where.append("(vars_csv LIKE '%'||?||'%')")
+        args.append(var_path)
+    if intent:
+        where.append("(raw LIKE '%'||?||'%')")
+        args.append(intent)
+    if step_type:
+        where.append("step_type = ?")
+        args.append(step_type)
+    args.append(limit)
+    sql = (
+        "SELECT raw, kind, filters_csv, vars_csv, step_type, "
+        "from_playbook, from_step, occurrences "
+        "FROM jinja_expressions WHERE "
+        + " AND ".join(where)
+        + " ORDER BY occurrences DESC, length(raw) ASC LIMIT ?"
+    )
+    with _db() as conn:
+        rows = _rows(conn, sql, tuple(args))
+        out: dict[str, Any] = {"matches": rows, "count": len(rows)}
+        if filter and not rows:
+            usage = _rows(
+                conn,
+                """SELECT expression, from_playbook, from_step, occurrences
+                   FROM jinja_filter_usage
+                   WHERE filter_name=?
+                   ORDER BY occurrences DESC LIMIT ?""",
+                (filter, limit),
+            )
+            if usage:
+                out["matches"] = usage
+                out["count"] = len(usage)
+                out["note"] = (
+                    f"no jinja_expressions hit; falling back to "
+                    f"jinja_filter_usage rows for filter {filter!r}."
+                )
+        if filter and not out["count"]:
+            out["suggestion"] = (
+                f"no usage of filter {filter!r} on record. Check "
+                f"get_jinja_filters for the canonical name."
+            )
+    return out
+
+
+@mcp.tool()
+def find_operation_example(connector: str, op: str | None = None,
+                            limit: int = 5) -> dict[str, Any]:
+    """Return real-world (connector, op) param snippets observed in
+    actual playbooks indexed in this store.
+
+    Sourced from `playbook_steps`-derived `operation_examples`. When
+    `op` is omitted, returns one example per op for the connector.
+    Use this BEFORE `get_op_schema` if the agent wants idiomatic
+    params (e.g. typical jinja patterns, common picklist literals)
+    rather than just the schema's required/optional split.
+    """
+    with _db() as conn:
+        if op:
+            rows = _rows(
+                conn,
+                """SELECT op_name, snippet, notes
+                   FROM operation_examples
+                   WHERE connector_name=? AND op_name=? AND source='pb_examples'
+                   LIMIT ?""",
+                (connector, op, limit),
+            )
+        else:
+            rows = _rows(
+                conn,
+                """SELECT op_name, snippet, notes
+                   FROM operation_examples
+                   WHERE connector_name=? AND source='pb_examples'
+                   GROUP BY op_name
+                   LIMIT ?""",
+                (connector, limit),
+            )
+    out: dict[str, Any] = {"matches": rows, "count": len(rows)}
+    if not rows:
+        out["suggestion"] = (
+            f"no playbook examples stored for {connector}"
+            + (f":{op}" if op else "")
+            + ". Use get_op_schema for the param contract instead."
+        )
+    return out
+
+
+@mcp.tool()
+def verification_status(kind: str, key: str) -> dict[str, Any]:
+    """Look up the strongest recorded verification for a (kind, key).
+
+    Lets the agent ask 'has anyone successfully run jira:get_issue on
+    this FSR before?' without an extra DB roundtrip from chat.
+
+    Common kinds: 'connector' (key=name), 'operation'
+    (key='<connector>:<op>'), 'picklist' (key='<name>:<value>'),
+    'module', 'module_field', 'jinja_filter', 'api_endpoint',
+    'step_type', 'recipe', 'workflow'.
+
+    Returns `{found: bool, status?, method?, ts?, notes_excerpt?,
+    history_count}`. Status is one of tested_pass / tested_fail / seen.
+    """
+    with _db() as conn:
+        rows = _rows(
+            conn,
+            """SELECT status, method, ts, notes
+               FROM verifications WHERE kind=? AND key=?
+               ORDER BY ts DESC""",
+            (kind, key),
+        )
+    if not rows:
+        return {"found": False, "history_count": 0}
+    best = max(rows, key=lambda r: (
+        _VERIF_RANK.get(r["status"], 0), r["ts"] or "",
+    ))
+    notes = best["notes"] or ""
+    return {
+        "found": True,
+        "status": best["status"],
+        "method": best["method"],
+        "ts": best["ts"],
+        "notes_excerpt": (notes[:160] + "…") if len(notes) > 160 else notes,
+        "history_count": len(rows),
+    }
 
 
 def _build_query_filters(filters: Any) -> dict[str, Any]:

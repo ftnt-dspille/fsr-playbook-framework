@@ -31,6 +31,7 @@ from ._loop_helpers import (
     MAX_TOOL_TURNS,
     compile_errors as _compile_errors,
     extract_yaml_block as _extract_yaml_block,
+    shrink_history as _shrink_history,
 )
 from .tools import anthropic_tools, dispatch
 
@@ -108,6 +109,16 @@ class AnthropicProvider:
 
         for _turn in range(MAX_TOOL_TURNS):
             turn_idx += 1
+            # Compact older turns: dedupe idempotent-tool results and
+            # cap older validate_yaml/compile_yaml bodies. Only mutates
+            # historical blocks — the most recent assistant + tool_result
+            # stay byte-identical so prompt cache is preserved.
+            try:
+                _shrink_history(history)
+            except Exception:
+                # Never let compaction break a chat turn.
+                import logging
+                logging.exception("shrink_history failed")
             # Snapshot history size BEFORE the LLM round-trip so we can
             # see what we paid to send. Cached system+tools aren't in
             # this number — Anthropic's `cache_read_input_tokens` is.
@@ -281,6 +292,60 @@ class AnthropicProvider:
                 tool_calls=tool_call_usage, tags=tags,
             )
 
+        # Tool-turn budget exhausted. Without a final assistant message
+        # the chat just goes silent — the user can't tell whether the
+        # agent finished or got cut off. Force one more no-tools round
+        # so the model can summarize where it landed and what's left.
+        history.append(Message(
+            role="user",
+            content=(
+                f"You've used the full tool-turn budget "
+                f"({MAX_TOOL_TURNS} rounds) without finishing. Stop "
+                f"calling tools. In 2-4 sentences, tell the user: "
+                f"(1) what state the YAML is in (valid? warnings? "
+                f"errors?), (2) what specifically is left to do, and "
+                f"(3) one concrete next step they can take. Do not "
+                f"re-emit the YAML."
+            ),
+        ))
+        turn_idx += 1
+        try:
+            history_chars = len(json.dumps(
+                _to_anthropic_messages(history), default=str
+            ))
+        except Exception:
+            history_chars = 0
+        try:
+            async with self._client.messages.stream(
+                model=self.model,
+                max_tokens=512,
+                system=cached_system,
+                messages=_to_anthropic_messages(history),
+            ) as stream:
+                async for event in stream:
+                    if event.type == "content_block_delta" and getattr(
+                        event.delta, "type", None
+                    ) == "text_delta":
+                        yield TextEvent(text=event.delta.text)
+                final = await stream.get_final_message()
+            usage = getattr(final, "usage", None)
+            yield UsageEvent(
+                session_id=session_id, turn=turn_idx, model=self.model,
+                input_tokens=getattr(usage, "input_tokens", 0) or 0 if usage else 0,
+                output_tokens=getattr(usage, "output_tokens", 0) or 0 if usage else 0,
+                cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0 if usage else 0,
+                cache_write=getattr(usage, "cache_creation_input_tokens", 0) or 0 if usage else 0,
+                history_chars=history_chars,
+                stop_reason="max_tool_turns_summary",
+                self_repair_turn=self_repair_turns,
+                tool_calls=[], tags=tags,
+            )
+        except Exception:
+            # If the wrap-up call fails, fall through to DoneEvent —
+            # the user still gets *something* (the prior assistant
+            # text from turn N-1).
+            import logging
+            logging.exception("max-tool-turns summary call failed")
         yield DoneEvent(stop_reason="max_tool_turns")
 
 

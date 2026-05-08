@@ -6,11 +6,159 @@ honor. A new provider can opt in to self-repair by importing these.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 
-MAX_TOOL_TURNS = 8
+# Read-only reference tools: results are deterministic for the same
+# args, so we can replace duplicate tool_results with a stub pointing
+# back at the first call. Excludes anything that mutates remote state
+# or depends on time-varying data (validate_yaml, run_op, push_*).
+_IDEMPOTENT_TOOLS: frozenset[str] = frozenset({
+    "find_connector",
+    "find_operation",
+    "get_op_schema",
+    "get_step_type",
+    "find_step_examples",
+    "find_step_recipe",
+    "find_jinja_filter",
+    "find_jinja_pattern",
+    "get_filter_examples",
+    "picklist_for_field",
+    "search_playbooks",
+    "list_configured_connectors",
+    "resolve_picklist_value",
+})
+
+# Tools whose `yaml_text` argument is large and re-sent every retry. We
+# keep only the most recent N of each in the LLM context; older ones
+# get their yaml_text stubbed since the agent only repairs from the
+# latest draft.
+_YAML_BODY_TOOLS: frozenset[str] = frozenset({"validate_yaml", "compile_yaml"})
+_YAML_BODY_KEEP_LATEST = 1
+
+
+def _args_hash(args: Any) -> str:
+    try:
+        blob = json.dumps(args, sort_keys=True, default=str)
+    except Exception:
+        blob = str(args)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def shrink_history(history: list[Any]) -> int:
+    """Compact the conversation in place to cut redundant tokens.
+
+    Two passes, both cache-friendly (we only modify *older* turns; the
+    most recent assistant + tool_result blocks stay byte-identical so
+    Anthropic's prompt cache is preserved):
+
+    1. Idempotent tool dedup — for whitelisted read-only tools, when the
+       same (name, args) appears more than once, replace later
+       tool_result blocks with a stub pointing at the first call. The
+       agent still sees the call happened; it doesn't re-pay for the
+       body.
+    2. YAML body cap — for `validate_yaml`/`compile_yaml`, replace the
+       `yaml_text` argument in older tool_use blocks with a stub. Only
+       the latest call needs the full body; the agent repairs from
+       there.
+
+    Returns the number of bytes saved (rough estimate, useful for
+    telemetry / tests).
+    """
+    saved = 0
+
+    # Walk every assistant turn's tool_use blocks in order, indexing by
+    # call_id → (name, args_hash). Then walk user turns' tool_result
+    # blocks; if a tool_use has an earlier matching twin AND the tool is
+    # idempotent, stub the duplicate's tool_result.
+    seen_by_signature: dict[tuple[str, str], str] = {}
+    canonical_for: dict[str, str] = {}  # call_id → original call_id (when dup)
+    yaml_call_ids: list[str] = []  # in encounter order
+
+    for msg in history:
+        content = getattr(msg, "content", None)
+        if not isinstance(content, list):
+            continue
+        if msg.role == "assistant":
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_use":
+                    continue
+                name = block.get("name") or ""
+                cid = block.get("id") or ""
+                if not cid:
+                    continue
+                if name in _YAML_BODY_TOOLS:
+                    yaml_call_ids.append(cid)
+                if name in _IDEMPOTENT_TOOLS:
+                    sig = (name, _args_hash(block.get("input")))
+                    prior = seen_by_signature.get(sig)
+                    if prior:
+                        canonical_for[cid] = prior
+                    else:
+                        seen_by_signature[sig] = cid
+
+    # Stub duplicate tool_results.
+    for msg in history:
+        content = getattr(msg, "content", None)
+        if msg.role != "user" or not isinstance(content, list):
+            continue
+        for i, block in enumerate(content):
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") != "tool_result":
+                continue
+            cid = block.get("tool_use_id")
+            orig = canonical_for.get(cid)
+            if not orig:
+                continue
+            old = block.get("content") or ""
+            if not isinstance(old, str):
+                continue
+            stub = (
+                f'{{"_cached_dup_of": "{orig}", '
+                f'"note": "identical args to an earlier call this session — '
+                f'reuse that result"}}'
+            )
+            if old != stub:
+                saved += max(0, len(old) - len(stub))
+                block["content"] = stub
+
+    # Cap older yaml_text bodies. Keep the most recent N call ids intact.
+    keep = set(yaml_call_ids[-_YAML_BODY_KEEP_LATEST:]) if yaml_call_ids else set()
+    if len(yaml_call_ids) > _YAML_BODY_KEEP_LATEST:
+        for msg in history:
+            content = getattr(msg, "content", None)
+            if msg.role != "assistant" or not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_use":
+                    continue
+                if block.get("name") not in _YAML_BODY_TOOLS:
+                    continue
+                if block.get("id") in keep:
+                    continue
+                inp = block.get("input")
+                if not isinstance(inp, dict):
+                    continue
+                body = inp.get("yaml_text")
+                if not isinstance(body, str) or len(body) < 200:
+                    continue
+                stub = "<elided — superseded by a later validate_yaml call>"
+                saved += len(body) - len(stub)
+                inp["yaml_text"] = stub
+
+    return saved
+
+
+MAX_TOOL_TURNS = 12
 # Cap on extra "fix the YAML" turns auto-issued when the assistant's
 # final message contains a yaml block that fails to compile. Each repair
 # turn is roughly one extra LLM round-trip; 2 keeps cost bounded.

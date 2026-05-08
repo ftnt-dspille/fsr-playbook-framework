@@ -203,6 +203,25 @@ class Resolver:
         ).fetchall()
         return [r["param_name"] for r in rows]
 
+    def operation_param_rules(
+        self, connector: str, op: str,
+    ) -> list[tuple[str, str | None, str | None]]:
+        """Return (param_name, parent_param_name, condition_value) rows.
+
+        A param is visible iff parent_param_name IS NULL, or the parent
+        param is itself visible AND the parent's *provided value* equals
+        condition_value. Used to reject mutually-exclusive arg sets like
+        block_ip_new(method=Quarantine Based, ip_block_policy=…).
+        """
+        rows = self.conn.execute(
+            "SELECT param_name, parent_param_name, condition_value "
+            "FROM operation_params "
+            "WHERE connector_name = ? AND op_name = ?",
+            (connector, op),
+        ).fetchall()
+        return [(r["param_name"], r["parent_param_name"], r["condition_value"])
+                for r in rows]
+
     # ---- main entry ----
 
     def resolve(self, collection: Collection) -> list[CompileError]:
@@ -220,7 +239,7 @@ class Resolver:
             seen_ids = {s.id for s in pb.steps}
             for si, step in enumerate(pb.steps):
                 path = f"playbooks[{pi}].steps[{si}]"
-                self._resolve_step(step, path, errors, pb_by_name)
+                self._resolve_step(step, path, errors, pb_by_name, pb.name)
                 self._check_routing(step, seen_ids, path, errors)
         return errors
 
@@ -472,6 +491,11 @@ class Resolver:
             else:
                 for old in list(args.keys()):
                     if old in _RESERVED_VARS_KEYS and old != "step_variables":
+                        # `message` as a dict is the record-message sugar
+                        # (not a user var) — leave it for the message
+                        # normalizer downstream.
+                        if old == "message" and isinstance(args[old], dict):
+                            continue
                         new = self._safe_rename(old, _RESERVED_VARS_KEYS)
                         args[new] = args.pop(old)
                         renames[old] = new
@@ -558,6 +582,7 @@ class Resolver:
     def _resolve_step(
         self, step: Step, path: str, errors: list[CompileError],
         pb_by_name: dict[str, "Playbook"] | None = None,
+        pb_name: str | None = None,
     ) -> None:
         st = self.step_type(step.type)
         if st is None:
@@ -590,10 +615,10 @@ class Resolver:
                     step.step_type_uuid = action_row["uuid"]
                     step.step_type_name = action_row["name"]
                     step.handler = self.handler_for_step_type(action_row)
-                self._normalize_record_action_args(step, path, errors)
+                self._normalize_record_action_args(step, path, errors, pb_name)
 
         if step.type in ("start_on_create", "start_on_update"):
-            self._normalize_post_create_update_args(step, path, errors)
+            self._normalize_post_create_update_args(step, path, errors, pb_name)
 
         if step.type in ("create_record", "insert_record", "update_record"):
             self._normalize_record_crud_args(step, path, errors)
@@ -633,6 +658,7 @@ class Resolver:
 
     def _normalize_record_action_args(
         self, step: Step, path: str, errors: list[CompileError],
+        pb_name: str | None = None,
     ) -> None:
         """Fill canonical args for record-bound triggers.
 
@@ -658,6 +684,16 @@ class Resolver:
         # Trigger Button Label — separate from step.name. Empty means
         # FSR will show the playbook name in the Execute menu.
         button_label = a.pop("button_label", None) or a.pop("title", None) or ""
+        if not button_label and pb_name:
+            button_label = pb_name
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message=(f"`button_label:` not set on {step.type} — "
+                         f"defaulting to playbook name {pb_name!r}; set "
+                         "`button_label:` explicitly to override"),
+                path=f"{path}.arguments.button_label",
+                severity="warning",
+            ))
         modules_raw = a.pop("module", None) or a.pop("modules", None) or a.get("resources")
         if isinstance(modules_raw, str):
             modules = [modules_raw]
@@ -666,12 +702,15 @@ class Resolver:
         else:
             modules = []
         if not modules:
+            modules = ["alerts", "incidents"]
             errors.append(CompileError(
                 code=ErrorCode.MISSING_FIELD,
-                message=f"{step.type} requires `module:` (or `modules:`)",
+                message=(f"`module:` not set on {step.type} — defaulting to "
+                         "[alerts, incidents]; set `module:` explicitly to "
+                         "override"),
                 path=f"{path}.arguments.module",
+                severity="warning",
             ))
-            modules = ["alerts"]  # let downstream emit succeed for diagnostics
         requires_record = bool(a.pop("requires_record", True))
         run_mode = a.pop("run_mode", "per_record")
         # FSR's `title` is the persisted Trigger Button Label.
@@ -704,6 +743,7 @@ class Resolver:
 
     def _normalize_post_create_update_args(
         self, step: Step, path: str, errors: list[CompileError],
+        pb_name: str | None = None,
     ) -> None:
         """Canonical args for cybersponse.post_create / post_update.
 
@@ -738,12 +778,15 @@ class Resolver:
         else:
             modules = []
         if not modules:
+            modules = ["alerts", "incidents"]
             errors.append(CompileError(
                 code=ErrorCode.MISSING_FIELD,
-                message=f"{step.type} requires `module:` (or `modules:`)",
+                message=(f"`module:` not set on {step.type} — defaulting to "
+                         "[alerts, incidents]; set `module:` explicitly to "
+                         "override"),
                 path=f"{path}.arguments.module",
+                severity="warning",
             ))
-            modules = ["alerts"]
         a["resource"] = modules[0]
         a["resources"] = modules
         a.setdefault("step_variables",
@@ -926,6 +969,26 @@ class Resolver:
         "json": "JSON", "object": "JSON",
     }
 
+    # Name/label substring → more specific input `kind:`. Order matters —
+    # ipv4 must beat the bare "ip" rule for ip_address-style fields.
+    _KIND_HINTS = (
+        ("ipv6", "ipv6"),
+        ("ipv4", "ipv4"),
+        ("ip_address", "ipv4"), ("ipaddress", "ipv4"), ("ip address", "ipv4"),
+        ("email", "email"), ("e-mail", "email"),
+        ("url", "url"),
+        ("domain", "domain"), ("hostname", "domain"), ("fqdn", "domain"),
+        ("filehash", "filehash"), ("sha256", "filehash"), ("sha1", "filehash"),
+        ("md5", "filehash"), ("file_hash", "filehash"),
+    )
+
+    def _suggest_specific_kind(self, name: str, label: str) -> str | None:
+        hay = f"{name} {label}".lower()
+        for needle, kind in self._KIND_HINTS:
+            if needle in hay:
+                return kind
+        return None
+
     def _expand_input_variables(
         self, raw: Any, path: str, errors: list[CompileError],
     ) -> list[dict[str, Any]]:
@@ -992,6 +1055,24 @@ class Resolver:
                     path=f"{ipath}.kind",
                 ))
                 continue
+            # Hint: warn when a text-typed field's name/label clearly maps
+            # to a more specific kind (ipv4, email, url, domain, filehash).
+            # FSR validates the user's input against formType, so picking
+            # the wrong kind silently accepts garbage.
+            if kind == "text":
+                hint = self._suggest_specific_kind(
+                    str(item.get("name", "")),
+                    str(item.get("label", "")),
+                )
+                if hint:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"input field {name!r} looks like a {hint!r} "
+                                 f"value but kind is 'text' — switch to "
+                                 f"kind: {hint} so FSR validates the format"),
+                        path=f"{ipath}.kind",
+                        severity="warning",
+                    ))
             spec = self._INPUT_FIELD_KINDS[kind]
             # Strict per-entry whitelist — surface obvious typos.
             allowed = {"name", "kind", "type", "label", "tooltip",
@@ -1494,6 +1575,256 @@ class Resolver:
                 unwrapped[item["name"]] = item.get("value", "")
             siblings = {k: v for k, v in a.items() if k != "arg_list"}
             step.arguments = {**unwrapped, **siblings}
+        # Normalize the message-to-record sugar block. The wire shape FSR
+        # expects (observed in store/incoming/.../FSRPB Manual-Input Test):
+        #   message: {tags: [iri…], type: <picklist iri>, thread: bool,
+        #             content: "<html>", records: "<iri or jinja>"}
+        # When a manual-trigger playbook fires on a record context, FSR
+        # automatically attaches the message to that record; in that case
+        # `records:` is omitted. If there's no triggered-record context
+        # (e.g. designer Run button with no record), the author MUST set
+        # `record:` (single) or `records:` (jinja list) to a record IRI.
+        if isinstance(step.arguments.get("message"), dict):
+            self._normalize_message_block(step, path, errors)
+
+    # FSR's built-in "Comment Type" picklist — drives the message kind on
+    # the record's collaboration panel. Two stock values:
+    #   Comment    → shows as a normal comment (default for set-variable
+    #                message: blocks)
+    #   ActionLog  → shows in the Action Log feed instead
+    # UUIDs are stable across stock FSR installs; sourced from
+    # `fsrpb picklist show "Comment Type"`. If a deployment customizes
+    # this picklist, authors should pass a full IRI instead of a name.
+    _MESSAGE_TYPE_IRIS = {
+        "comment":   "/api/3/picklists/ff599189-3eeb-4c86-acb0-a7915e85ac3b",
+        "actionlog": "/api/3/picklists/1165899b-7091-4291-aafc-487c4309e8ff",
+    }
+    _DEFAULT_MESSAGE_TYPE_IRI = _MESSAGE_TYPE_IRIS["comment"]
+
+    def _normalize_message_block(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        a = step.arguments
+        msg = a["message"]
+        mpath = f"{path}.arguments.message"
+        _ALLOWED = {"content", "tags", "type", "thread", "record", "records"}
+        unknown = sorted(set(msg) - _ALLOWED)
+        if unknown:
+            errors.append(CompileError(
+                code=ErrorCode.UNKNOWN_PARAM,
+                message=(f"set_variable.message: unknown key(s) "
+                         f"{', '.join(repr(k) for k in unknown)}"),
+                path=mpath,
+                suggestion="allowed: content, tags, record(s), type, thread",
+            ))
+            return
+        content = msg.get("content")
+        if not content or not isinstance(content, str):
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message="set_variable.message requires `content:` (string)",
+                path=f"{mpath}.content",
+            ))
+            return
+        # Wrap plain text in a <p> block — the FSR comment widget renders
+        # HTML and a bare string shows as one inline run.
+        if "<" not in content:
+            content = f"<p>{content}</p>"
+        # Tags: friendly names → /api/3/tags/<name>. Already-IRI strings
+        # pass through. FSR resolves the slug at import time.
+        raw_tags = msg.get("tags") or []
+        if not isinstance(raw_tags, list):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="set_variable.message.tags must be a list",
+                path=f"{mpath}.tags",
+            ))
+            return
+        tag_iris: list[str] = []
+        for t in raw_tags:
+            if not isinstance(t, str):
+                continue
+            tag_iris.append(t if t.startswith("/api/") else f"/api/3/tags/{t}")
+        msg_type_raw = msg.get("type")
+        if msg_type_raw is None:
+            msg_type = self._DEFAULT_MESSAGE_TYPE_IRI
+        elif str(msg_type_raw).startswith("/api/"):
+            msg_type = msg_type_raw
+        else:
+            # Friendly name (e.g. "Comment", "ActionLog") — case-insensitive
+            # lookup against the stock Comment Type picklist.
+            key = str(msg_type_raw).strip().lower().replace(" ", "")
+            if key in self._MESSAGE_TYPE_IRIS:
+                msg_type = self._MESSAGE_TYPE_IRIS[key]
+            else:
+                msg_type = self._DEFAULT_MESSAGE_TYPE_IRI
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"set_variable.message.type {msg_type_raw!r} is "
+                             "not a known Comment Type value (Comment, "
+                             "ActionLog) or an IRI; defaulting to Comment"),
+                    path=f"{mpath}.type",
+                    severity="warning",
+                ))
+        thread = bool(msg.get("thread", False))
+        # Record IRI: friendly `record:` (single) → `records:` jinja
+        # string. The wire field is `records:` (singular IRI value, not a
+        # list — FSR templates the IRI in directly).
+        rec_single = msg.get("record")
+        rec_explicit = msg.get("records")
+        rec_value: str | None
+        if rec_explicit is not None:
+            rec_value = rec_explicit
+        elif rec_single is not None:
+            rec_value = rec_single
+        else:
+            rec_value = None
+        wire: dict = {
+            "tags": tag_iris,
+            "type": msg_type,
+            "thread": thread,
+            "content": content,
+        }
+        if rec_value is not None:
+            wire["records"] = rec_value
+        a["message"] = wire
+
+    def _summarize_visible_set(
+        self, rules: list[tuple[str, str | None, str | None]],
+        select_param: str, value: str,
+    ) -> list[str]:
+        """Param names that become visible when `select_param == value`.
+
+        Includes unconditional siblings (no parent rule) and the direct
+        and transitive children gated by this choice. Used for consolidated
+        param_set_conflict suggestions so the agent can replace a whole
+        argument set in one pass.
+        """
+        from collections import defaultdict
+        children_of: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for n, p, c in rules:
+            if p is not None:
+                children_of[(p, str(c))].append(n)
+        all_names = {n for n, _, _ in rules}
+        # Unconditional names that are not the select itself.
+        cond_names = {n for n, p, _ in rules if p is not None}
+        unconditional = sorted(all_names - cond_names - {select_param})
+        visible = list(unconditional)
+        seen = set(visible)
+        # Walk gated children; include every option of any nested select
+        # so the agent sees the full feasible neighborhood.
+        frontier = [(select_param, value)]
+        while frontier:
+            sp, sv = frontier.pop()
+            for child in children_of.get((sp, sv), []):
+                if child in seen:
+                    continue
+                visible.append(child)
+                seen.add(child)
+                # Nested select: enqueue all of its options to expand
+                # transitive children.
+                for (ssp, ssv) in list(children_of.keys()):
+                    if ssp == child:
+                        frontier.append((ssp, ssv))
+        return visible
+
+    def _check_param_visibility(
+        self, connector: str, operation: str,
+        provided: dict, path: str, errors: list[CompileError],
+    ) -> None:
+        """Flag provided params whose visibility predicate is false.
+
+        Each operation_params row that has a parent_param_name is only
+        visible when that parent's value equals condition_value. If the
+        author provides a conditional param without satisfying its rule,
+        FSR still ships the value but the field is hidden in the UI and
+        the operation typically rejects it at runtime — silent failures.
+        """
+        rules = self.operation_param_rules(connector, operation)
+        if not rules:
+            return
+        # Group by param name; a param can have multiple visibility rules
+        # (any one of them being satisfied makes the param visible).
+        from collections import defaultdict
+        rules_by_name: dict[str, list[tuple[str | None, str | None]]] = defaultdict(list)
+        for name, parent, cond in rules:
+            rules_by_name[name].append((parent, cond))
+        # Track conflicts grouped by their *gating* parent param so we can
+        # emit one consolidated `param_set_conflict` summary at the end.
+        conflicts_by_parent: dict[str, list[str]] = {}
+        for p_name, p_value in provided.items():
+            entries = rules_by_name.get(p_name)
+            if not entries:
+                continue  # already handled by unknown-param branch
+            # Top-level param (parent is NULL) → always visible.
+            if any(parent is None for parent, _ in entries):
+                continue
+            # Conditional — at least one rule must match the provided
+            # parent value. If parent isn't provided, we can't satisfy.
+            satisfied = False
+            for parent, cond in entries:
+                if parent in provided and str(provided[parent]) == str(cond):
+                    satisfied = True
+                    break
+            if satisfied:
+                continue
+            # Build a "valid only when …" hint from all the rules.
+            conds = ", ".join(
+                f"{parent}={cond!r}" for parent, cond in entries
+            )
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"param {p_name!r} on {connector}.{operation} is only "
+                    f"valid when {conds}; FSR will hide the field at "
+                    f"runtime and likely reject the call"
+                ),
+                path=f"{path}.arguments.params.{p_name}",
+                suggestion=f"set the parent param to match, or remove {p_name!r}",
+                severity="warning",
+            ))
+            # Pick the first parent listed as the gating select for
+            # grouping; visibility cascades, so the top-of-chain parent
+            # gives the agent the most actionable feasible-set view.
+            gating = entries[0][0]
+            conflicts_by_parent.setdefault(gating, []).append(p_name)
+
+        # One consolidated diagnostic per gating select — lists the full
+        # feasible param neighborhood under each option so the agent can
+        # converge in one fix instead of cascading turn-by-turn.
+        for gating, conflicting in conflicts_by_parent.items():
+            chosen = provided.get(gating)
+            # Discover all option values this select can take from rules.
+            option_values = sorted({
+                str(c) for n, p, c in rules if p == gating and c is not None
+            })
+            sets_by_option = {
+                opt: self._summarize_visible_set(rules, gating, opt)
+                for opt in option_values
+            }
+            chosen_str = (
+                f"chosen value {gating}={chosen!r}"
+                if chosen is not None else
+                f"{gating!r} not provided"
+            )
+            valid_sets_blob = "; ".join(
+                f"{gating}={opt!r} → {sets_by_option[opt]}"
+                for opt in option_values
+            )
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"param-set conflict on {connector}.{operation}: "
+                    f"{chosen_str} is incompatible with provided "
+                    f"params {conflicting!r}"
+                ),
+                path=f"{path}.arguments.params",
+                suggestion=(
+                    f"pick one option for {gating!r} and use ONLY the "
+                    f"params under it. Feasible sets: {valid_sets_blob}"
+                ),
+                severity="warning",
+            ))
 
     def _resolve_connector_args(
         self, step: Step, path: str, errors: list[CompileError],
@@ -1554,6 +1885,39 @@ class Resolver:
         # installed on the probe instance), skip validation and emit a
         # warning so the playbook still compiles.
         valid_params = set(self.operation_params(connector, operation))
+        # Auto-lift flat args: agent often writes connector params at the
+        # `arguments:` top level instead of under `arguments.params:`.
+        # Lift any top-level key that matches a known op param into the
+        # params dict (with a warning so the rule sticks). Reserved
+        # canonical keys are left where they are.
+        _CONNECTOR_RESERVED = {
+            "connector", "operation", "operationTitle", "version", "config",
+            "params", "step_variables", "pickFromTenant", "name",
+            "mock_result", "useMockOutput",
+        }
+        if valid_params:
+            lifted: list[str] = []
+            existing_params = a.get("params") if isinstance(a.get("params"), dict) else None
+            for k in list(a.keys()):
+                if k in _CONNECTOR_RESERVED:
+                    continue
+                if k in valid_params:
+                    if existing_params is None:
+                        existing_params = {}
+                        a["params"] = existing_params
+                    existing_params.setdefault(k, a.pop(k))
+                    lifted.append(k)
+            if lifted:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        f"connector params {', '.join(repr(k) for k in lifted)} "
+                        f"were at `arguments:` top level — lifted into "
+                        f"`arguments.params:` (write them there directly)"
+                    ),
+                    path=f"{path}.arguments",
+                    severity="warning",
+                ))
         provided = a.get("params") or {}
         if not isinstance(provided, dict):
             errors.append(CompileError(
@@ -1601,6 +1965,12 @@ class Resolver:
                         near=sug,
                         suggestion=suggestion,
                     ))
+            # Conditional-visibility check: a known param may still be
+            # invalid in the current arg set (e.g. block_ip_new's
+            # ip_block_policy is only valid when method='Policy Based').
+            self._check_param_visibility(
+                connector, operation, provided, path, errors,
+            )
 
         # Stamp the connector version onto the step (FSR JSON requires it).
         if "version" not in a and crow["version"]:

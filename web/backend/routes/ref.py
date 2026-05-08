@@ -52,6 +52,17 @@ def list_step_types() -> list[dict[str, str]]:
     return STEP_TYPE_HINTS
 
 
+@router.get("/recipes")
+def list_recipes() -> list[dict[str, Any]]:
+    """Recipes available for drag/drop into the visual editor."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT name, kind, when_to_use FROM recipes ORDER BY kind, name"
+        ).fetchall()
+    return [{"name": r["name"], "kind": r["kind"], "when_to_use": r["when_to_use"]}
+            for r in rows]
+
+
 @router.get("/step-args/{step_type}")
 def step_args_help(step_type: str) -> dict[str, Any]:
     """Hover docs for a friendly step type — what `arguments:` accepts.
