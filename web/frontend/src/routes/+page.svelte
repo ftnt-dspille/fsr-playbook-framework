@@ -1,16 +1,14 @@
 <script lang="ts">
   import MonacoYaml from '$lib/components/MonacoYaml.svelte';
   import Chat from '$lib/components/Chat.svelte';
-  import ExamplesMenu from '$lib/components/ExamplesMenu.svelte';
-  import DraftsMenu from '$lib/components/DraftsMenu.svelte';
-  import Console from '$lib/components/Console.svelte';
-  import DeployPanel from '$lib/components/DeployPanel.svelte';
-  import DiagnosticsList from '$lib/components/DiagnosticsList.svelte';
-  import FixesPanel from '$lib/components/FixesPanel.svelte';
-  import { compileYaml, pushPlaybook, validateYaml, type Marker, type Fix } from '$lib/api';
-  import { runStore } from '$lib/runStore.svelte';
+  import EditWorkspace from '$lib/components/EditWorkspace.svelte';
+  import PlaybookHeader from '$lib/components/PlaybookHeader.svelte';
+  import BuildBar from '$lib/components/BuildBar.svelte';
+  import DiagnosticsDrawer from '$lib/components/DiagnosticsDrawer.svelte';
+  import { visualStore } from '$lib/visualEditStore.svelte';
+  import { playbookStore } from '$lib/playbookStore.svelte';
+  import { playbookActions } from '$lib/playbookActions.svelte';
   import { yamlStore } from '$lib/yamlStore.svelte';
-  import { postSse } from '$lib/sse';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { messagesToTurns, type ReplayTurn } from '$lib/sessionReplay';
@@ -30,6 +28,42 @@
     if (yamlStore.text !== yaml) yaml = yamlStore.text;
   });
 
+  // playbookStore is the unified active-document source. When the user
+  // picks a playbook in the PlaybookHeader, mirror the YAML into the
+  // legacy yamlStore (which Chat / DiagnosticsList / DeployPanel read)
+  // so existing wiring keeps working without a wholesale refactor.
+  // Tracks `playbookStore.state.active?.name` as the change key so we
+  // only sync on document change, not on every keystroke (which would
+  // fight the user-edit effect above).
+  let lastSyncedKey: string | null = $state(null);
+  $effect(() => {
+    const a = playbookStore.state.active;
+    const key = a ? `${a.kind}:${a.name}` : null;
+    if (key === lastSyncedKey) return;
+    lastSyncedKey = key;
+    if (a) {
+      yamlStore.setText(a.yaml, `loaded ${a.kind}: ${a.name}`);
+      yaml = a.yaml;
+      // Push into visualStore too so flipping to Design shows the
+      // newly-picked playbook on the canvas instead of whatever was
+      // loaded last. Fire-and-forget — parse errors are surfaced by
+      // the canvas itself.
+      void visualStore.loadFromYaml(a.yaml).catch(() => {});
+    }
+  });
+
+  /** Flush hook for PlaybookHeader.save(): grab the freshest YAML from
+   * whichever mode is active so the buffer doesn't lag behind the UI. */
+  async function getActiveYaml(): Promise<string> {
+    if (mode === 'design' && visualStore.state.graph) {
+      const rendered = visualStore.state.dirty
+        ? await visualStore.renderToYaml()
+        : null;
+      return rendered ?? visualStore.state.graph.source.yaml;
+    }
+    return yamlStore.text;
+  }
+
   // Replay mode: when the URL carries `?session=<id>`, hydrate the
   // editor + chat with the saved transcript so the user can see how
   // the original conversation played out. Replay is read-only on the
@@ -37,8 +71,153 @@
   let replayTurns = $state<ReplayTurn[]>([]);
   let replayBanner = $state<string | null>(null);
 
+  // First-visit greeting: when Chat opens with no replay session, seed
+  // a single assistant turn so the panel isn't a blank prompt-and-pray.
+  // Using `as any` because the Chat component owns its richer Turn shape
+  // (segments + tools + push); this lightweight greeting only needs the
+  // shared `role` + `text` fields ReplayTurn already covers.
+  const GREETING_TURNS: ReplayTurn[] = [
+    {
+      role: 'assistant',
+      text:
+        "Hi — I'm here to help you author FortiSOAR playbooks.\n\n" +
+        "I've loaded a sample playbook on the canvas to get you started. " +
+        "You can:\n" +
+        "  • describe what you want and I'll write/edit YAML for you,\n" +
+        "  • ask me to compile, validate, or push the current draft,\n" +
+        "  • or paste an existing FSR playbook and I'll explain it.\n\n" +
+        "Switch to Design at any time to see the visual graph."
+    } as ReplayTurn
+  ];
+
+  /** Pick the freshest turn list for Chat: replay turns when a session
+   * is being replayed (banner non-null), greeting turns on first
+   * visit, empty list once the user has typed something. */
+  let chatInitialTurns = $derived(
+    replayTurns.length > 0 ? replayTurns : GREETING_TURNS
+  );
+
+  // Studio top-level mode toggle: Design (visual canvas) or CLI
+  // (chat-driven YAML authoring + console). The legacy `/edit` route
+  // redirects here with `?mode=design`. Default is Design.
+  let mode: 'design' | 'cli' = $state('design');
+  let modeError: string | null = $state(null);
+  let switching = $state(false);
+
+  /** Sync the active YAML across the two stores when toggling mode so
+   * the same playbook follows the user. Without this, Design loads
+   * from `/api/visual/list` and CLI reads `yamlStore.text` — two
+   * disconnected buckets. */
+  async function setMode(target: 'design' | 'cli') {
+    if (target === mode || switching) return;
+    modeError = null;
+    switching = true;
+    try {
+      if (target === 'cli') {
+        // Design → CLI: pull current visual graph YAML into yamlStore
+        // (rendering through the emitter when there are unsaved canvas
+        // edits so CLI sees the latest).
+        if (visualStore.state.graph) {
+          const rendered = visualStore.state.dirty
+            ? await visualStore.renderToYaml()
+            : null;
+          const next = rendered ?? visualStore.state.graph.source.yaml;
+          if (next && next !== yamlStore.text) {
+            yamlStore.setText(next, 'switch from Design');
+            yaml = next;
+          }
+        }
+      } else {
+        // CLI → Design: push the CLI buffer through the parser into
+        // visualStore so the canvas reflects it. Fall back gracefully
+        // when the buffer is empty/placeholder.
+        const text = yamlStore.text;
+        const current = visualStore.state.graph?.source.yaml;
+        if (text && text !== current) {
+          const r = await visualStore.loadFromYaml(text);
+          if (!r.ok) { modeError = r.message ?? 'parse failed'; return; }
+        }
+      }
+      mode = target;
+      const url = target === 'cli' ? '/?mode=cli' : '/';
+      if (typeof history !== 'undefined') history.replaceState(null, '', url);
+    } finally {
+      switching = false;
+    }
+  }
+
   onMount(async () => {
     const params = new URLSearchParams(window.location.search);
+    const m = params.get('mode');
+    if (m === 'cli') mode = 'cli';
+    else if (m === 'design' || m === 'edit') mode = 'design';
+
+    // One-time migration: copy any localStorage drafts into the server
+    // drafts table so they show up in PlaybookHeader's bucketed picker
+    // alongside Design's drafts. The migration flag lives in localStorage
+    // so we only run it once per browser. Existing server drafts with
+    // the same name win (we don't overwrite); migration is best-effort
+    // and logs to status on failure rather than blocking page mount.
+    if (typeof localStorage !== 'undefined' && !localStorage.getItem('fsrpb.drafts.migrated_v1')) {
+      try {
+        const r = await playbookStore.migrateLocalDrafts(yamlStore.drafts);
+        if (r.migrated > 0) {
+          // Surface the migration count through the shared status pill
+          // (BuildBar reads playbookActions.status). The user sees
+          // `migrated N local draft(s)` once and can move on.
+          playbookActions.state.status = {
+            kind: 'ok',
+            msg: `migrated ${r.migrated} local draft${r.migrated === 1 ? '' : 's'}`
+          };
+        }
+        localStorage.setItem('fsrpb.drafts.migrated_v1', new Date().toISOString());
+      } catch (e) {
+        console.warn('localStorage drafts migration failed:', e);
+      }
+    }
+
+    // Refresh-aware autoload. PlaybookHeader runs its own refresh on
+    // mount; wait one tick so its bucket lists are populated, then:
+    //   1. prefer the playbook the user was last editing (persisted by
+    //      `playbookStore.open`),
+    //   2. fall back to the most recently modified draft,
+    //   3. fall back to the first example for true first-visit users.
+    // Any branch is skipped when the user already has something active
+    // (e.g. arrived via a deep link / replay session).
+    setTimeout(async () => {
+      if (playbookStore.state.active) return;
+
+      const last = playbookStore.readLastOpened();
+      if (last) {
+        // The pointer can dangle (draft was deleted on another browser /
+        // example was renamed). Validate against the live buckets first.
+        const stillExists =
+          last.kind === 'draft'
+            ? playbookStore.state.drafts.some((d) => d.name === last.name)
+            : playbookStore.state.examples.some((e) => e.name === last.name);
+        if (stillExists) {
+          await playbookStore.open(last.kind, last.name);
+          return;
+        }
+      }
+
+      // No (valid) pointer — open the most recently modified draft so a
+      // dev-db restart or a fresh browser still lands the user on real
+      // work instead of the welcome example.
+      if (playbookStore.state.drafts.length > 0) {
+        const newest = [...playbookStore.state.drafts].sort((a, b) =>
+          (b.updated_ts ?? '').localeCompare(a.updated_ts ?? '')
+        )[0];
+        await playbookStore.open('draft', newest.name);
+        return;
+      }
+
+      // True first-visit: drop on the first example so the canvas isn't blank.
+      if (playbookStore.state.examples.length > 0) {
+        await playbookStore.open('example', playbookStore.state.examples[0].name);
+      }
+    }, 50);
+
     const sid = params.get('session');
     if (!sid) return;
     try {
@@ -79,16 +258,22 @@
     goto('/', { replaceState: true, keepFocus: true });
   }
 
-  let markers = $state<Marker[]>([]);
-  let fixes = $state<Fix[]>([]);
-  let compileJson = $state<string | null>(null);
+  // Diagnostics / Fixes / Compile-JSON state lives on `playbookActions`
+  // so Design and CLI share one source of truth (the BuildBar fires
+  // actions, the DiagnosticsDrawer reads results). Markers also feed
+  // the Monaco gutter when the user is on CLI.
   let drawerTab = $state<'diagnostics' | 'fixes' | 'compile' | 'deploy'>('diagnostics');
   // Monaco editor + namespace handles, populated via MonacoYaml's onEditor.
   // FixesPanel uses these to apply text edits with executeEdits so each
   // fix lands in the editor's own undo stack (Cmd-Z reverts cleanly).
+  // Only the CLI-mounted Monaco populates these; in Design mode they
+  // stay null and DiagnosticsDrawer disables the Fixes apply button.
   let monacoEditor = $state<any>(null);
   let monacoNs = $state<any>(null);
-  let drawerOpen = $state(true);
+  // Drawer starts collapsed so the canvas/Monaco gets the full viewport
+  // on first paint. User opens it explicitly (Compile / Push / a marker
+  // surfaces or via the Diagnostics tab in BuildBar).
+  let drawerOpen = $state(false);
   // User-resizable drawer height. Stored in px (clamped on every drag).
   // Defaults to ~55vh on first paint so there's room to read; persists
   // across reloads via localStorage.
@@ -127,392 +312,89 @@
     window.addEventListener('pointerup', onUp);
   }
 
-  let status = $state<{ kind: 'idle' | 'ok' | 'err' | 'busy'; msg: string }>({
-    kind: 'idle',
-    msg: 'editing'
-  });
-
+  // Auto-validate on every YAML edit, debounced. Drives the markers
+   // surface for both Monaco's gutter and the diagnostics drawer.
   let debounceId: ReturnType<typeof setTimeout> | undefined;
-
   $effect(() => {
     void yaml;
     if (debounceId) clearTimeout(debounceId);
-    debounceId = setTimeout(runValidate, 400);
+    debounceId = setTimeout(() => playbookActions.validate(), 400);
   });
 
-  async function runValidate() {
-    try {
-      const r = await validateYaml(yaml);
-      markers = r.markers;
-      fixes = r.fixes ?? [];
-      const errs = markers.filter((m) => m.severity === 'error').length;
-      const warns = markers.filter((m) => m.severity === 'warning').length;
-      status = r.ok
-        ? { kind: 'ok', msg: warns ? `valid · ${warns} warning${warns > 1 ? 's' : ''}` : 'valid' }
-        : { kind: 'err', msg: `${errs} error${errs !== 1 ? 's' : ''}` };
-    } catch (e: any) {
-      status = { kind: 'err', msg: e?.message ?? String(e) };
-    }
-  }
-
-  async function runCompile() {
-    drawerTab = 'compile';
+  function showDrawer(tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy') {
+    drawerTab = tab;
     drawerOpen = true;
-    status = { kind: 'busy', msg: 'compiling…' };
-    try {
-      const r = await compileYaml(yaml);
-      markers = r.markers;
-      compileJson = r.fsr_json ? JSON.stringify(r.fsr_json, null, 2) : null;
-      status = r.ok ? { kind: 'ok', msg: 'compiled' } : { kind: 'err', msg: 'compile failed' };
-    } catch (e: any) {
-      status = { kind: 'err', msg: e?.message ?? String(e) };
-    }
   }
 
-  function extractCollectionName(text: string): string | null {
-    const m = text.match(/^\s*collection:\s*(.+?)\s*$/m);
-    return m?.[1]?.replace(/^["']|["']$/g, '') ?? null;
-  }
-
-  function firstPlaybookName(text: string): string | null {
-    const m = text.match(/playbooks:[\s\S]*?-\s*name:\s*(.+?)\s*$/m);
-    return m?.[1]?.replace(/^["']|["']$/g, '') ?? null;
-  }
-
-  async function pushNow() {
-    runStore.reset();
-    runStore.status = 'pushing';
-    drawerTab = 'deploy';
-    drawerOpen = true;
-    try {
-      const r = await pushPlaybook(yaml);
-      // Merge stdout + stderr into one clean stream. Most fsrpb push
-      // output goes to stderr (status lines), and the leading "[stderr]"
-      // label was just visual noise when stdout was empty. Trim outer
-      // whitespace so the console doesn't open with a blank top line.
-      const out = (r.stdout || '').trim();
-      const errBlock = (r.stderr || '').trim();
-      runStore.pushOutput = [out, errBlock].filter(Boolean).join('\n');
-      if (!r.ok) {
-        runStore.status = 'error';
-        runStore.errorMsg = `push failed (exit ${r.exit_code})`;
-        status = { kind: 'err', msg: `push failed (exit ${r.exit_code})` };
-        return false;
-      }
-      status = { kind: 'ok', msg: 'pushed' };
-      runStore.status = 'idle';
-      return true;
-    } catch (e: any) {
-      runStore.status = 'error';
-      runStore.errorMsg = e?.message ?? String(e);
-      status = { kind: 'err', msg: runStore.errorMsg ?? 'push error' };
-      return false;
-    }
-  }
-
-  async function pushAndRun() {
-    const ok = await pushNow();
-    if (!ok) return;
-    const coll = extractCollectionName(yaml);
-    const pb = firstPlaybookName(yaml);
-    if (!coll || !pb) {
-      status = { kind: 'err', msg: 'cannot infer collection / playbook name' };
-      return;
-    }
-    runStore.status = 'running';
-    drawerTab = 'deploy';
-    drawerOpen = true;
-    try {
-      for await (const frame of postSse('/api/playbook/run', { name: `${coll}:${pb}` })) {
-        if (frame.event === 'log') {
-          const { line } = JSON.parse(frame.data);
-          runStore.logs = [...runStore.logs, line];
-        } else if (frame.event === 'task_id') {
-          runStore.taskId = JSON.parse(frame.data).task_id;
-        } else if (frame.event === 'done') {
-          const { exit_code } = JSON.parse(frame.data);
-          runStore.exitCode = exit_code;
-          runStore.status = exit_code === 0 ? 'done' : 'error';
-        } else if (frame.event === 'error') {
-          runStore.errorMsg = JSON.parse(frame.data).message;
-          runStore.status = 'error';
-        }
-      }
-    } catch (e: any) {
-      runStore.errorMsg = e?.message ?? String(e);
-      runStore.status = 'error';
-    }
-  }
-
-  function loadExampleText(text: string, name: string) {
-    yamlStore.setText(text, `loaded example: ${name}`);
-    status = { kind: 'idle', msg: `loaded ${name}` };
-  }
-
-  function loadDraftText(_text: string, name: string) {
-    // The DraftsMenu component already called yamlStore.loadDraft(),
-    // which performs its own snapshot. Just update the status pill.
-    status = { kind: 'idle', msg: `loaded draft: ${name}` };
-  }
-
-  // Inline rename UI state — replaces window.prompt for first-save.
-  let namingDraft = $state(false);
-  let draftNameInput = $state('');
-  let draftNameInputEl = $state<HTMLInputElement | null>(null);
-
-  function saveCurrentDraft() {
-    // If the buffer is already tracking a draft (loaded from drafts menu
-    // or saved earlier this session), update it in place — no prompt.
-    if (yamlStore.activeDraftName) {
-      try {
-        const d = yamlStore.saveDraft(yamlStore.activeDraftName);
-        status = { kind: 'ok', msg: `saved draft: ${d.name}` };
-      } catch (e: any) {
-        status = { kind: 'err', msg: e?.message ?? String(e) };
-      }
-      return;
-    }
-    // Fresh canvas — open the inline naming row instead of window.prompt.
-    draftNameInput = yamlStore.suggestedName();
-    namingDraft = true;
-    queueMicrotask(() => draftNameInputEl?.focus());
-  }
-
-  function commitDraftName() {
-    const name = draftNameInput.trim();
-    if (!name) {
-      namingDraft = false;
-      return;
-    }
-    try {
-      const d = yamlStore.saveDraft(name);
-      status = { kind: 'ok', msg: `saved draft: ${d.name}` };
-      namingDraft = false;
-    } catch (e: any) {
-      status = { kind: 'err', msg: e?.message ?? String(e) };
-    }
-  }
-
-  function onDraftNameKey(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      commitDraftName();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      namingDraft = false;
-    }
-  }
-
-  function undoLastReplace() {
-    const snap = yamlStore.lastSnapshot;
-    if (!snap) return;
-    const reason = snap.reason;
-    yamlStore.restoreSnapshot();
-    status = { kind: 'idle', msg: `undone (${reason})` };
-  }
-
-  const dot = $derived(
-    status.kind === 'ok'
-      ? 'bg-green-500'
-      : status.kind === 'err'
-        ? 'bg-red-500'
-        : status.kind === 'busy'
-          ? 'bg-yellow-500'
-          : 'bg-[var(--text-faint)]'
-  );
-
-  const errCount = $derived(markers.filter((m) => m.severity === 'error').length);
-  const warnCount = $derived(markers.filter((m) => m.severity === 'warning').length);
 </script>
 
-<div class="grid h-full grid-cols-[minmax(0,1fr)_minmax(320px,28rem)]">
-  <div class="flex min-h-0 flex-col border-r border-[var(--border-soft)]">
-    <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-2 border-b border-[var(--border-soft)] px-3 py-1.5 text-xs">
-      <ExamplesMenu onLoad={loadExampleText} />
-      <DraftsMenu onLoad={loadDraftText} />
-      {#if namingDraft}
-        <input
-          bind:this={draftNameInputEl}
-          bind:value={draftNameInput}
-          onkeydown={onDraftNameKey}
-          onblur={commitDraftName}
-          placeholder="Draft name…"
-          class="rounded border border-[var(--border)] bg-[var(--bg-panel)] px-2 py-0.5 text-[var(--text-default)] focus:outline-none focus:ring-1 focus:ring-zinc-600"
-          size="22"
-        />
-      {:else}
-        <button
-          class="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--text-default)] hover:bg-[var(--bg-elevated)]"
-          onclick={saveCurrentDraft}
-          title={yamlStore.activeDraftName
-            ? `Update draft: ${yamlStore.activeDraftName}`
-            : 'Save current YAML as a named draft (stored in this browser)'}
-        >
-          {yamlStore.activeDraftName ? `Save · ${yamlStore.activeDraftName}` : 'Save'}
-        </button>
-      {/if}
-      <button
-        class="rounded border border-[var(--border-soft)] px-2 py-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-panel)]"
-        onclick={() => {
-          yamlStore.reset();
-        }}
-        title="Reset to placeholder (snapshot taken; click Undo to restore)"
-        >Reset</button
-      >
-      {#if yamlStore.lastSnapshot}
-        <button
-          class="rounded border border-amber-700/60 bg-amber-950/30 px-2 py-0.5 text-amber-200 hover:bg-amber-900/40"
-          onclick={undoLastReplace}
-          title="Restore the buffer from before: {yamlStore.lastSnapshot.reason}"
-          >↶ Undo {yamlStore.lastSnapshot.reason}</button
-        >
-      {/if}
-      <span class="ml-2 flex items-center gap-1.5">
-        <span class="h-2 w-2 rounded-full {dot}"></span>
-        <span class="text-[var(--text-muted)]">{status.msg}</span>
-      </span>
-      <div class="ml-auto flex gap-2">
-        <button
-          class="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--bg-elevated)]"
-          onclick={runValidate}>Validate</button
-        >
-        <button
-          class="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--bg-elevated)]"
-          onclick={runCompile}>Compile</button
-        >
-        <button
-          class="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--bg-elevated)]"
-          onclick={pushNow}>Push</button
-        >
-        <button
-          class="rounded border border-orange-900 bg-orange-950/50 px-2 py-0.5 text-orange-200 hover:bg-orange-900/40"
-          onclick={pushAndRun}>Push & Run</button
-        >
-      </div>
-    </div>
-
-    <!-- Editor -->
-    <div class="min-h-0 flex-1">
-      <MonacoYaml
-        value={yaml}
-        onInput={(v) => (yaml = v)}
-        {markers}
-        onEditor={(ed, mn) => {
-          monacoEditor = ed;
-          monacoNs = mn;
-        }}
-      />
-    </div>
-
-    <!-- Output drawer -->
-    <div class="border-t border-[var(--border-soft)] bg-[var(--bg-panel)]">
-      {#if drawerOpen}
-        <!-- Drag handle: pull up to grow the drawer, down to shrink. -->
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize output drawer"
-          class="group relative flex h-1.5 cursor-ns-resize items-center justify-center bg-transparent hover:bg-[var(--brand)]/20"
-          onpointerdown={startDrawerDrag}
-        >
-          <span class="h-0.5 w-12 rounded-full bg-[var(--border)] group-hover:bg-[var(--brand)]"></span>
-        </div>
-      {/if}
-      <div class="flex items-center gap-1 border-b border-[var(--border-soft)] px-2 py-1.5">
-        {#each [
-          { id: 'diagnostics', label: 'Diagnostics' },
-          { id: 'fixes', label: 'Fixes' },
-          { id: 'compile', label: 'Compile' },
-          { id: 'deploy', label: 'Deploy' }
-        ] as t}
-          {@const active = drawerTab === t.id && drawerOpen}
-          <button
-            class={'group relative flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ' +
-              (active
-                ? 'bg-[var(--bg-elevated)] text-[var(--text-default)] shadow-[0_0_0_1px_var(--border)]'
-                : 'text-[var(--text-muted)] hover:bg-[var(--bg-elevated)]/50 hover:text-[var(--text-default)]')}
-            onclick={() => {
-              drawerTab = t.id as typeof drawerTab;
-              drawerOpen = true;
-            }}
-          >
-            <span>{t.label}</span>
-            {#if t.id === 'fixes' && fixes.length}
-              <span class="rounded-md border border-emerald-400/30 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-emerald-200">{fixes.length}</span>
-            {:else if t.id === 'diagnostics'}
-              {#if errCount}
-                <span class="rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-rose-300">{errCount}</span>
-              {/if}
-              {#if warnCount}
-                <span class="rounded-md border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-amber-200">{warnCount}</span>
-              {/if}
-            {:else if t.id === 'deploy' && (runStore.status === 'running' || runStore.status === 'pushing')}
-              <span class="relative flex h-1.5 w-1.5">
-                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-70"></span>
-                <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-400"></span>
-              </span>
-            {/if}
-          </button>
-        {/each}
-        <button
-          class="ml-auto flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-muted)] hover:border-[var(--text-faint)] hover:text-[var(--text-default)]"
-          onclick={() => (drawerOpen = !drawerOpen)}
-          title={drawerOpen ? 'collapse drawer' : 'expand drawer'}
-          aria-expanded={drawerOpen}
-        >
-          <svg viewBox="0 0 12 12" class="h-2.5 w-2.5 transition-transform {drawerOpen ? '' : 'rotate-180'}" fill="currentColor" aria-hidden="true">
-            <path d="M2 7.5l4-3 4 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
-          <span>{drawerOpen ? 'Collapse' : 'Expand'}</span>
-        </button>
-      </div>
-      {#if drawerOpen}
-        <div class="fade-in" style="height: {drawerHeightPx}px">
-          {#if drawerTab === 'diagnostics'}
-            <div class="h-full overflow-auto">
-              <DiagnosticsList {markers} />
-            </div>
-          {:else if drawerTab === 'fixes'}
-            <div class="h-full overflow-hidden">
-              <FixesPanel
-                {fixes}
-                editor={monacoEditor}
-                monaco={monacoNs}
-                onApplied={(v) => (yaml = v)}
-              />
-            </div>
-          {:else if drawerTab === 'compile'}
-            <Console
-              text={compileJson ?? ''}
-              emptyTitle="No compile output yet"
-              emptyHint="Press Compile to produce the FortiSOAR JSON the wire format pushes to /api/3/workflow_collections."
-            />
-          {:else if drawerTab === 'deploy'}
-            <DeployPanel />
-          {/if}
-        </div>
-      {/if}
-    </div>
+<div class="flex h-full flex-col">
+<PlaybookHeader
+  {getActiveYaml}
+  {mode}
+  modeBusy={switching}
+  onModeChange={setMode}
+/>
+{#if modeError}
+  <div class="border-b border-red-300 bg-red-50 px-4 py-1 text-[11px] text-red-800">
+    Mode switch failed: {modeError}
   </div>
+{/if}
 
-  <aside class="flex min-h-0 flex-col">
-    {#if replayBanner}
-      <div class="flex items-center justify-between border-b border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
-        <span>↻ {replayBanner}</span>
-        <button
-          onclick={exitReplay}
-          class="rounded border border-amber-700/60 px-2 py-0.5 hover:border-amber-500 hover:text-amber-50"
-          title="Clear replay and start fresh"
-        >
-          Exit replay
-        </button>
+<div class="flex min-h-0 flex-1 flex-col">
+  {#if mode === 'design'}
+    <div class="flex min-h-0 flex-1 overflow-hidden">
+      <EditWorkspace onShowDrawer={showDrawer} />
+    </div>
+  {:else}
+    <BuildBar onShowDrawer={showDrawer} />
+    <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(320px,28rem)] overflow-hidden">
+      <div class="flex min-h-0 flex-col border-r border-[var(--border-soft)]">
+        <div class="min-h-0 flex-1">
+          <MonacoYaml
+            value={yaml}
+            onInput={(v) => (yaml = v)}
+            markers={playbookActions.markers}
+            onEditor={(ed, mn) => {
+              monacoEditor = ed;
+              monacoNs = mn;
+            }}
+          />
+        </div>
       </div>
-    {/if}
-    <Chat
-      currentYaml={yaml}
-      onYamlReplace={(y) => (yaml = y)}
-      initialTurns={replayTurns}
-    />
-  </aside>
+
+      <aside class="flex min-h-0 flex-col">
+        {#if replayBanner}
+          <div class="flex items-center justify-between border-b border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+            <span>↻ {replayBanner}</span>
+            <button
+              onclick={exitReplay}
+              class="rounded border border-amber-700/60 px-2 py-0.5 hover:border-amber-500 hover:text-amber-50"
+              title="Clear replay and start fresh"
+            >
+              Exit replay
+            </button>
+          </div>
+        {/if}
+        <Chat
+          currentYaml={yaml}
+          onYamlReplace={(y) => (yaml = y)}
+          initialTurns={chatInitialTurns}
+        />
+      </aside>
+    </div>
+  {/if}
+
+  <DiagnosticsDrawer
+    open={drawerOpen}
+    tab={drawerTab}
+    heightPx={drawerHeightPx}
+    onTabChange={(t) => { drawerTab = t; drawerOpen = true; }}
+    onToggle={() => (drawerOpen = !drawerOpen)}
+    onResize={startDrawerDrag}
+    monacoEditor={mode === 'cli' ? monacoEditor : null}
+    monacoNs={mode === 'cli' ? monacoNs : null}
+    onYamlReplace={(v) => (yaml = v)}
+  />
+</div>
 </div>

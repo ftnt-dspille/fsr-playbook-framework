@@ -225,7 +225,11 @@
   onMount(loadList);
 </script>
 
-<div class="flex h-[calc(100vh-3rem)]">
+<!-- Use the layout's available height directly; the global StatusBar
+     and header subtract their own space via the flex-column layout
+     wrapper, so a hard `100vh - 3rem` calc here would overlap the
+     footer. -->
+<div class="flex h-full min-h-0">
   <aside class="w-96 shrink-0 border-r border-[var(--border-soft)] overflow-y-auto">
     <div class="sticky top-0 bg-[var(--bg-canvas)] border-b border-[var(--border-soft)] px-4 py-3 flex items-center justify-between">
       <h2 class="font-semibold">Chat sessions</h2>

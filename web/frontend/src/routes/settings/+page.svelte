@@ -6,6 +6,7 @@
   } from '$lib/api';
 
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import ThemeSwitcher from '$lib/components/ThemeSwitcher.svelte';
   let snapshot = $state<ProvidersResponse | null>(null);
   let loading = $state(false);
   let err = $state<string | null>(null);
@@ -152,6 +153,27 @@
     subtitle="Configure which LLM the chat uses. Keys are stored in your OS secret store ({snapshot?.secrets?.backend ?? '…'}), never in the browser."
   />
   <div class="mx-auto w-full max-w-3xl flex-1 overflow-auto p-6 fade-in">
+
+  <!-- Quick links to reference pages that used to live in the top nav.
+       Capabilities + Docs got demoted (rare-use); keeping them in the
+       top nav cluttered the chrome for everyone. -->
+  <section class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <a href="/capabilities" class="rounded-md border border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-2 text-xs hover:bg-[var(--bg-canvas)]">
+      <div class="font-medium text-[var(--text-default)]">Capabilities</div>
+      <div class="mt-0.5 text-[10px] text-[var(--text-faint)]">FSR connectors / step types / picklists indexed in the reference store.</div>
+    </a>
+    <a href="/docs" class="rounded-md border border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-2 text-xs hover:bg-[var(--bg-canvas)]">
+      <div class="font-medium text-[var(--text-default)]">Docs</div>
+      <div class="mt-0.5 text-[10px] text-[var(--text-faint)]">Studio reference + authoring guides.</div>
+    </a>
+    <div class="flex items-center justify-between rounded-md border border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-2 text-xs">
+      <div>
+        <div class="font-medium text-[var(--text-default)]">Theme</div>
+        <div class="mt-0.5 text-[10px] text-[var(--text-faint)]">Editor color scheme.</div>
+      </div>
+      <ThemeSwitcher />
+    </div>
+  </section>
 
   {#if err}
     <div class="mb-4 rounded border border-red-700 bg-red-900/40 p-3 text-sm">

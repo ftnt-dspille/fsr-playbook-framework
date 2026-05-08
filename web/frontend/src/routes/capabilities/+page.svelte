@@ -92,7 +92,7 @@
         'Filter by tag, user, or time window',
         'render_jinja against a real past run before committing the fix'
       ],
-      primary: { label: 'Open Run tab', href: '/run' },
+      primary: { label: 'Open History', href: '/history' },
       tools: [
         { name: 'list_recent_failed_runs' },
         { name: 'get_run_env' },
@@ -149,7 +149,7 @@
       blurb:
         'See which connectors are configured, healthcheck a single config, list picklists, discover tags before filtering by them.',
       accent: 'cyan',
-      primary: { label: 'Health view', href: '/run' },
+      primary: { label: 'Health view', href: '/inventory' },
       tools: [
         { name: 'list_configured_connectors' },
         { name: 'healthcheck_connector' },

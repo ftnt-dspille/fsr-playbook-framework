@@ -1,9 +1,11 @@
 /**
- * End-to-end-ish: ExamplesMenu click → onLoad → state assignment →
- * MonacoYaml's value prop updates → Monaco's setValue called.
+ * Parent-state → MonacoYaml setValue wiring.
  *
- * Uses the monaco-editor stub aliased in vitest.config.ts. We instrument
- * `editor.create` once at module load to record every setValue.
+ * Originally tested ExamplesMenu → onLoad → state → MonacoYaml. The
+ * menu was retired when PlaybookHeader took over playbook loading;
+ * the underlying prop-propagation contract is what this test now
+ * pins (any state change pushed to MonacoYaml's `value` prop calls
+ * editor.setValue).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/svelte';
@@ -26,47 +28,28 @@ const realCreate = monaco.editor.create;
   return inst;
 };
 
-describe('Examples → editor wiring', () => {
-  let originalFetch: typeof fetch;
-
+describe('Parent-state → MonacoYaml wiring', () => {
   beforeEach(() => {
     setValueSpy.mockClear();
     valueByEditor.current = '';
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith('/api/examples')) {
-        return new Response(
-          JSON.stringify([
-            { name: 'fixture_a', filename: 'fixture_a.yaml', preview: 'collection: A' }
-          ]),
-          { status: 200 }
-        );
-      }
-      if (url.includes('/api/examples/fixture_a')) {
-        return new Response(
-          JSON.stringify({ name: 'fixture_a', text: 'collection: A\nplaybooks: []\n' }),
-          { status: 200 }
-        );
-      }
-      return new Response('nope', { status: 404 });
-    }) as any;
   });
 
-  afterEach(() => {
-    cleanup();
-    globalThis.fetch = originalFetch;
-  });
+  afterEach(() => cleanup());
 
-  it('clicking an example pushes its YAML into the Monaco editor', async () => {
+  it('a state mutation in the parent triggers Monaco setValue', async () => {
     const Harness = (await import('./__test_harness/EditorWiring.svelte')).default;
     render(Harness);
 
     expect(screen.getByTestId('yaml-mirror').textContent).toBe('initial');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Examples ▾' }));
-    const item = await screen.findByRole('button', { name: /fixture_a/ });
-    fireEvent.click(item);
+    // MonacoYaml.onMount does an async import of `monaco-editor` before
+    // calling editor.create — so the click below MUST happen after the
+    // editor exists, otherwise the harness state mutates before
+    // editor.setValue is even hookable. Spin until the constructor has
+    // recorded the initial value through our instrumented stub.
+    await waitFor(() => expect(valueByEditor.current).toBe('initial'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load YAML' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('yaml-mirror').textContent).toContain('collection: A');

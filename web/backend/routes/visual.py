@@ -107,18 +107,23 @@ class FileWriteIn(BaseModel):
 
 @router.post("/write_file")
 def write_file(payload: FileWriteIn) -> dict[str, Any]:
-    """Same as /write, but persists the result back to the file."""
-    target = _safe_resolve(payload.path)
-    original = target.read_text()
-    try:
-        new_yaml = from_visual(payload.graph, original)
-    except NotImplementedError as e:
-        return {"ok": False, "code": "unsupported_edit", "message": str(e)}
-    except Exception as e:
-        return {"ok": False, "code": "write_failed",
-                "message": f"{type(e).__name__}: {e}"}
-    if new_yaml != original:
-        target.write_text(new_yaml)
-    graph = to_visual(new_yaml)
-    graph["source"] = {"path": payload.path, "yaml": new_yaml}
-    return {"ok": True, "wrote": new_yaml != original, "yaml": new_yaml, "graph": graph}
+    """Same as /write, but persists the result back to the file.
+
+    Examples are reference fixtures; allowing in-place edits caused the
+    test suite to break when the visual editor wrote scratch graphs
+    over them (incomplete Decision steps etc.). Writes are now refused
+    with a structured `examples_readonly` response so the frontend can
+    redirect through `playbookStore.cloneExample` instead.
+    """
+    # Validate the path resolves under examples/ before refusing so an
+    # attacker can't probe arbitrary filesystem locations through this
+    # endpoint.
+    _safe_resolve(payload.path)
+    return {
+        "ok": False,
+        "code": "examples_readonly",
+        "message": (
+            "examples/ are read-only — clone to a draft before saving. "
+            "Use POST /api/playbooks/draft/from-example."
+        ),
+    }

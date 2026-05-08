@@ -347,8 +347,8 @@ Closed gaps the original Phase 3 / 4 plan claimed shipped but didn't:
 
 Remaining post-audit work, tracked here so it doesn't fall off:
 
-- [ ] **G9**  Audit older phase mentions across plans / TODOs — strike
-      what didn't ship, or implement the residual.
+- [x] **G9**  Audit older phase mentions across plans / TODOs — done as
+      part of the Studio unification rewrite. (2026-05-08)
 - [ ] **G11** Pane-click create-step popover with corpus-driven next-
       step suggestions (mining `playbook_steps` for what usually
       follows the selected anchor) + "Suggest with AI" fallback that
@@ -484,12 +484,14 @@ Remaining post-audit work, tracked here so it doesn't fall off:
 
 ### Phase 6 — Toolbar (replaces fsrpb CLI for 95% of work)
 
-- [ ] **6.1** Validate → `validate_yaml` + lint; problems panel with
-      click-to-jump.
+- [x] **6.1** Validate → `validate_yaml` + lint; debounced auto-validate
+      drives a click-to-jump diagnostics drawer. (2026-05-08, BuildBar)
 - [ ] **6.2** Resolve → `resolve_yaml`.
 - [ ] **6.3** Dry-run → `dry_run_playbook`.
 - [ ] **6.4** Assert → form builder for the 3 existing assertion kinds.
-- [ ] **6.5** Push → `fsrpb push` flow with confirmation.
+- [x] **6.5** Push → `fsrpb push` flow surfaced via the Run split-button
+      (Push only / Push & Run / Mock / Live). Logs stream into the
+      Diagnostics drawer's Deploy tab. (2026-05-08, RunButton)
 - [ ] **6.6** Recipe export → write selected subgraph to `recipes`.
 
 #### Utility toolbar (G19, 2026-05-08 ask)
@@ -510,16 +512,18 @@ the user rarely touches the CLI / external tabs:
       button shipped** in the toolbar; modal port pending — base
       logic in `WebstormProjects/widget-jinja-editor/widget/` (Angular
       controller + Monaco service to translate to Svelte/TS).
-- [ ] **G19/T4** Play (Mock) button (G24) — runs
-      `step_through_playbook` in a bottom drawer; per-step rendered
-      args + simulated output. Safe with no live FSR. **Stub button
-      shipped**; drawer pending.
-- [ ] **G19/T5** Play (Live) button (G25) — push current draft → FSR,
-      trigger a run, poll/SSE workflow execution; per-node status
-      badges sync in real time. **Stub button shipped**; backend
-      wiring pending.
-- [ ] **G19/T6** Save / Discard already in header today; consider
-      promoting into the toolbar for visibility.
+- [ ] **G19/T4** Play (Mock) — variant in the Run split-button surfaces
+      a "not yet implemented" status. Backend wiring pending: should
+      invoke `step_through_playbook` and stream into the Diagnostics
+      Deploy tab. (2026-05-08 — split-button shipped, mock branch is
+      the gap.)
+- [x] **G19/T5** Play (Live) — Run split-button's "Live run" / "Push & Run"
+      variants do `pushPlaybook` then `postSse('/api/playbook/run')`;
+      logs / task_id / exit_code stream into runStore and the Diagnostics
+      Deploy tab. (2026-05-08, RunButton + playbookActions.pushAndRun.)
+- [x] **G19/T6** Save / Discard live in the unified PlaybookHeader at
+      the top of the page (Save / Save as… / Revisions / + New / Delete).
+      Visible in BOTH Design and CLI. (2026-05-08, PlaybookHeader.)
 
 #### Command palette + shortcuts
 
@@ -558,9 +562,13 @@ on-demand `run_op` probe) into clickable jinja insertions.
       caret of the most-recently-focused arg field. Handles textarea
       and input. Selection tracked across blur for one-click flows.
 
-### Phase 7 — Polish (split view, "no FSR" mode, etc.)
+### Phase 7 — Polish
 
-- [ ] **7.1** Split YAML/visual mode with bidirectional cursor sync.
+- [x] **7.1** ~~Split YAML/visual mode with bidirectional cursor sync.~~
+      **Superseded** by the page-level Design/CLI mode toggle: each
+      mode is a full workspace, the same playbook follows the user via
+      `playbookStore`, and the in-Design Visual/YAML sub-toggle was
+      retired. (2026-05-08)
 - [ ] **7.2** Graceful "no FSR configured" mode: Verify/Debug buttons
       explain what they would have done; record `seen` verifications
       where possible.
@@ -569,6 +577,171 @@ on-demand `run_op` probe) into clickable jinja insertions.
       F10 = step over).
 - [ ] **7.5** Per-user preferences (D2 from TODO.md) feed into palette
       ranking and example surfacing.
+
+---
+
+## Studio playbook unification (landed 2026-05-08)
+
+Major chrome rewrite that consolidated Design (visual) + CLI (chat/YAML)
+into a single Studio page with shared lifecycle. Recording here so the
+plan reflects the actual state of the world.
+
+### Architecture — four stores, one active doc
+
+- `playbookStore.svelte.ts` — **source of truth for the active YAML.**
+  `{kind, name, savedYaml, yaml}` + `dirty` derived. Backed by
+  `/api/playbooks` (server-side drafts table with revisions).
+- `visualStore.svelte.ts` — parsed graph + edit ops only. No longer
+  owns YAML; `loadFromYaml` consumes from playbookStore, `renderToYaml`
+  flushes back via the emitter.
+- `yamlStore.svelte.ts` — legacy mirror kept alive so Chat /
+  DiagnosticsList / DeployPanel keep working without a wholesale
+  rewire. The page-level `$effect` syncs `playbookStore.state.active.yaml`
+  → `yamlStore.text` on every doc change.
+- `playbookActions.svelte.ts` — validate / compile / push / pushAndRun
+  pipeline. Both modes call into it; reads YAML from `playbookStore`
+  (no caller-passed buffer to go stale).
+
+The `getActiveYaml` flush hook on `PlaybookHeader.save()` calls into
+the page so Design renders its dirty graph through the emitter and
+CLI returns the Monaco buffer — without it, save-while-on-Design lags
+behind unsaved canvas edits.
+
+### Backend — Phase A
+
+- `web/backend/routes/playbooks.py`: 7 endpoints under `/api/playbooks`
+  (list combined, get example, get draft, PUT draft, DELETE draft,
+  list revisions, get revision, POST clone-from-example).
+- `store/drafts.db` — separate SQLite from `fsr_reference.db` so user
+  data lives apart from the curated reference store. Schema:
+  `drafts(name PK, yaml, created/updated_ts)` +
+  `draft_revisions(id, draft_name FK CASCADE, yaml, reason, is_auto, created_ts)`.
+- Save semantics: every PUT writes a revision; `auto=true` distinguishes
+  system snapshots (mode switch / picker change / deploy) from named
+  user saves so the Revisions UI can bucket them.
+- `/api/visual/write_file` hardened: refuses to mutate `examples/`
+  fixtures (`code: "examples_readonly"`) so visual edits can't corrupt
+  test reference YAML.
+
+### Frontend — Phase B + consolidation
+
+- `PlaybookHeader.svelte` — single picker with **two visual buckets**
+  (My drafts / Examples), Save / Save as… / Revisions drawer / + New /
+  Delete / Clone & Edit (for examples). Mode toggle is a right-aligned
+  segmented control inside the header (saved a full row of chrome).
+- `EditorToolbar.svelte` — Design's only chrome row, absorbed BuildBar:
+  `↶ ↷ · ↧↦ · ƒ Jinja · | · Validate · Compile · ▶ Run▾ · status · [N err / N warn]`.
+- `BuildBar.svelte` — kept as a thin row for **CLI mode** (no editor
+  toolbar to merge into).
+- `RunButton.svelte` — split-button (Push only / Push & Run / Mock /
+  Live). Last-used variant persists in localStorage.
+- `DiagnosticsDrawer.svelte` — diagnostics / fixes / compile / deploy
+  tabs visible in BOTH modes. Closed by default. Fixes tab gracefully
+  self-disables in Design (no Monaco refs to apply edits through).
+- `EditWorkspace.svelte` — visual canvas + popover palette (left edge
+  toggle) + popover inspector (right edge tab, only surfaces when a
+  node is selected and the panel was manually closed).
+- `StatusBar.svelte` — VS Code-style ~22px footer with backend / FSR /
+  LLM / secrets pills. Replaced the right-side header health pills.
+
+### Retired / superseded
+
+- `/run` route — log surface lives in DiagnosticsDrawer's Deploy tab.
+  Route survives only as a redirect to `/`.
+- `/edit` route — folded into `/`.
+- `ExamplesMenu.svelte`, `DraftsMenu.svelte`, `ExamplesMenu.test.ts` —
+  PlaybookHeader supersedes them; deleted.
+- Top-nav: Capabilities + Docs moved under Settings (sub-page links);
+  ThemeSwitcher moved into Settings; HealthPill replaced by StatusBar.
+  Final nav: Studio · Browse · Inventory · History · Settings.
+- Inline draft-naming row, "Save · <draft>" button, Reset, Undo
+  Loaded-Draft banner — all dead code, removed.
+- Visual/YAML sub-toggle inside Design — Design is canvas-only; YAML
+  authoring is the CLI mode.
+
+### Autoload behavior
+
+- First-visit: opens `examples[0]` so the canvas isn't blank; seeds
+  Chat with a single greeting turn explaining what the agent does.
+- Subsequent visits: `playbookStore.open()` writes
+  `localStorage['fsrpb.last_opened']` on every load, and the page
+  restores from it on mount (validates against the live picker
+  buckets first to handle deleted-elsewhere drafts).
+- One-time migration: `playbookStore.migrateLocalDrafts(yamlStore.drafts)`
+  runs on first visit, copying browser-local drafts into the server
+  drafts table with `reason: "migrated from localStorage"`. Gated by
+  the `fsrpb.drafts.migrated_v1` flag.
+
+### Test coverage added
+
+- Backend: `web/tests/test_playbooks_routes.py` (8 tests) — list
+  combine, draft head + linear revisions, auto vs named flags, 404s,
+  cascade delete, name validation, clone-from-example + non-overwrite,
+  example serve.
+- Frontend: `playbookStore.test.ts` (12), `playbookActions.test.ts`
+  (7), `EditorToolbar.test.ts` (Jinja-only), `EditorWiring.test.ts`
+  (parent-state → MonacoYaml).
+- Totals: **171 frontend + 308 python = 479** at the end of session.
+
+### Known gaps (carried into next session)
+
+- `Mock run` variant in RunButton surfaces a placeholder status —
+  needs `step_through_playbook` SSE wiring.
+- `visualStore.dirty` and `playbookStore.dirty` track independently;
+  Design canvas stays internally "dirty" even after PlaybookHeader
+  saves. Cosmetic; doesn't affect persistence.
+- `EditWorkspace` `onJinjaTest` is still an `alert()` — the modal port
+  from `WebstormProjects/widget-jinja-editor` is still pending.
+
+---
+
+## Upcoming — step-type authoring completion
+
+Inspector surfaces vary in fidelity per step type. Next pass: bring
+every step type to first-class authoring parity so users don't have
+to drop into the Raw tab for the long tail.
+
+Status by family (as of 2026-05-08):
+
+- [x] `connector_op` — Args (schema-driven), Examples, Verify, Branches
+      n/a. Complete.
+- [x] `set_variable` — `arg_list[]` editor in Args tab. Complete.
+- [x] `decision` — Branches tab with label + target dropdowns +
+      add-branch form. Complete.
+- [~] `manual_input` — Branches tab covers `options[].next` routing,
+      but `formType` per option (string / picklist / ipv4 / lookup /
+      etc.) needs a dedicated editor. Today it's freeform JSON.
+- [~] `workflow_reference` — recognized as a family (purple node,
+      "Workflow ref"), but no Args UI. Needs:
+        - target playbook picker (cross-collection, surfaces from the
+          playbooks list),
+        - per-parameter input mapping editor (graph predecessor outputs
+          → target inputs),
+        - "open nested playbook" jump action.
+- [~] Trigger steps (`abstract_trigger` / `post_create` / `post_update` /
+      `action` / `api_call`) — render with a static "trigger"
+      placeholder. Need a per-trigger-type config editor (filter
+      conditions for post_*, manual params for action, route + method
+      for api_call). The `start` trigger has no auth/route either.
+- [~] Record CRUD (`find_record` / `create_record` / `update_record` /
+      `delete_record`) — green node visual, no Args wiring. Needs:
+        - module picker (sourced from `module_fields`),
+        - field-by-field form using the schema picklists,
+        - `__bulk` / `fieldOperation` / `__recommend` toggles where
+          applicable.
+- [ ] `code_snippet` — needs a Monaco-embedded code editor with
+      language detection (jinja-python / Python).
+- [ ] `delay` — minimal but dedicated: number + unit picker.
+- [ ] `raise_exception` / `terminate` / `assert` (terminal family) —
+      one-line editors per type.
+- [ ] Ingest Bulk Feed step type — separate from Create Record (UUIDs +
+      arg shapes differ, see `reference_create_record_vs_ingest_bulk_feed`
+      memory). Needs first-class ingestion authoring.
+
+Each step-type build-out should ship with: schema-driven Args, at
+least one fixture playbook, an Inspector tab test, and a corpus
+sanity check (params present in 100% of `playbook_steps` samples
+must appear in the editor).
 
 ---
 
@@ -593,21 +766,81 @@ on-demand `run_op` probe) into clickable jinja insertions.
 
 ---
 
-## Companion: API doc / swagger replacement
+## Companion: API explorer + Studio HTTP-step bridge (future)
 
-Tracked here because it shares the dispatcher and the verifications
-table with the visual editor.
+Deferred but in scope. Not blocking Studio — surfaces later as a
+**Studio integration point**: pick any of the 207K cataloged API
+examples, hit "Insert into playbook" and an HTTP connector step
+lands on the canvas pre-filled with method, path, parameters, sample
+body, and expected output shape. Same path for the standalone `http`
+connector and any custom connector wrapping a REST endpoint.
 
-- [ ] **A.1** Probe pass to populate `api_endpoint_params` (currently
-      0 rows) from FSR API .md docs in `Miscellaneous/fortisoar/`.
-- [ ] **A.2** Mine `playbooks_seen` for real call bodies →
-      `api_endpoint_examples`.
-- [ ] **A.3** New Svelte route `/api` grouped by service → endpoint;
-      examples ranked by `verifications` status.
-- [ ] **A.4** "Try it" panel — POSTs through `_live_client` (re-uses
-      Phase 0.1 dispatcher pattern).
-- [ ] **A.5** Per-endpoint verification badge (green/red/gray) from
-      `verification_status('api_endpoint', path)`.
+### The corpus we're sitting on
+
+`Miscellaneous/api_examples_catalog/catalog.sqlite` — **339 MB,
+207,419 entries spanning 6,927 products from 9 sources**. Per entry:
+
+```sql
+entries(
+  id, product_id, source_id, action, action_normalized, description,
+  example_type, source_url, implementation_url, example_quality,
+  has_working_example, auth_method, notes,
+  raw_inputs_json, parameters_json,
+  http_method, http_path,
+  code_snippet, code_lang
+)
+-- plus entries_fts (full-text index), products, sources,
+-- connector_lifecycle
+```
+
+This is the most valuable authoring asset in the project — orders of
+magnitude beyond what a hand-written Swagger UI could surface. Top
+products by entry count: 33,783 (#2286), 13,818 (#2567), 5,081
+(#3629). Mostly working examples (`has_working_example=1` is common,
+`example_quality` ranks them).
+
+### Why integrate with Studio
+
+- "Find a working example for product X / action Y" → "Insert into
+  playbook" closes the loop between discovery and authoring without
+  curl + copy-paste round-trips.
+- `auth_method` field tells us which connector configs the example
+  needs; we can offer to create the matching config when one isn't
+  present.
+- `parameters_json` + `raw_inputs_json` give us schema-level fidelity,
+  not just curl strings — that's what makes a useful HTTP step.
+- The FSR reference store's `verifications` table augments the
+  catalog: when an endpoint we've seen used in a real `playbook_steps`
+  row matches a catalog entry, that entry gets a "battle-tested" badge.
+
+### Phases (do not start until step-type completion lands)
+
+- [ ] **A.1** Read-only mount of `catalog.sqlite` from the FastAPI
+      backend (separate connection from `fsr_reference.db`; treat as
+      external corpus, not user data).
+- [ ] **A.2** `/api/api-catalog` endpoints — search by product +
+      action + http_method, paginated; full-text via `entries_fts`.
+- [ ] **A.3** Svelte `/api` route — product picker on the left,
+      action list grouped by `http_method`, detail pane shows
+      parameters + sample request + code snippet. Ranking: working
+      examples > example_quality > source recency.
+- [ ] **A.4** "Try it" panel — POSTs through `_live_client` (reuses
+      Phase 0.1 MCP dispatcher pattern). Saves outcomes back to
+      `verifications` so Studio benefits from the exploration.
+- [ ] **A.5** Cross-link to FSR reference store: when a catalog entry
+      matches `(connector, op)` in the FSR `playbooks_seen` corpus,
+      surface a "verified in production" badge with link-back to the
+      step example.
+- [ ] **A.6 — Studio bridge** — "Insert into playbook" action that
+      pre-fills an HTTP connector step from the catalog entry: method,
+      URL (with the configured base URL substituted), headers, body
+      template (params expanded with `{{ vars.input.… }}`-style
+      placeholders the user can wire), expected output schema. Uses
+      an existing connector config when one matches `auth_method`;
+      offers to create one otherwise.
+- [ ] **A.7** Reverse link — from a Studio HTTP step, jump straight
+      to the catalog entry for the matching endpoint so authors can
+      debug a request in the explorer without losing canvas context.
 
 ---
 

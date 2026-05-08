@@ -375,3 +375,79 @@ export async function listRecipes(): Promise<RecipeRef[]> {
   if (!r.ok) throw new Error(`recipes ${r.status}`);
   return r.json();
 }
+
+// --- Unified playbook store (Phase A backend) ---------------------------
+
+export type PlaybookKind = 'example' | 'draft';
+export type PlaybookListItem = {
+  kind: PlaybookKind;
+  name: string;
+  size: number;
+  updated_ts: string;
+};
+export type DraftRevision = {
+  id: number;
+  reason: string | null;
+  is_auto: boolean;
+  created_ts: string;
+  size: number;
+};
+
+export async function listPlaybooks(): Promise<{ count: number; items: PlaybookListItem[] }> {
+  const r = await fetch('/api/playbooks');
+  if (!r.ok) throw new Error(`playbooks ${r.status}`);
+  return r.json();
+}
+
+export async function getExample(name: string): Promise<{ kind: 'example'; name: string; yaml: string }> {
+  const r = await fetch(`/api/playbooks/example/${encodeURIComponent(name)}`);
+  if (!r.ok) throw new Error(`example ${r.status}`);
+  return r.json();
+}
+
+export async function getDraft(name: string): Promise<{ kind: 'draft'; name: string; yaml: string; created_ts: string; updated_ts: string }> {
+  const r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}`);
+  if (!r.ok) throw new Error(`draft ${r.status}`);
+  return r.json();
+}
+
+export async function putDraft(name: string, yaml: string, opts: { reason?: string; auto?: boolean } = {}): Promise<{ ok: boolean; revision_id: number; updated_ts: string }> {
+  const r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ yaml, reason: opts.reason ?? null, auto: !!opts.auto })
+  });
+  if (!r.ok) throw new Error(`draft put ${r.status}`);
+  return r.json();
+}
+
+export async function deleteDraft(name: string): Promise<void> {
+  const r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`draft delete ${r.status}`);
+}
+
+export async function listDraftRevisions(name: string): Promise<{ count: number; revisions: DraftRevision[] }> {
+  const r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}/revisions`);
+  if (!r.ok) throw new Error(`revisions ${r.status}`);
+  return r.json();
+}
+
+export async function getDraftRevision(name: string, id: number): Promise<{ id: number; yaml: string; reason: string | null; is_auto: boolean; created_ts: string }> {
+  const r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}/revisions/${id}`);
+  if (!r.ok) throw new Error(`revision ${r.status}`);
+  return r.json();
+}
+
+export async function cloneExample(example: string, draft: string): Promise<{ ok: boolean; name: string }> {
+  const r = await fetch('/api/playbooks/draft/from-example', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ example, draft })
+  });
+  if (!r.ok) {
+    let msg = `clone ${r.status}`;
+    try { const j = await r.json(); if (j.detail) msg = j.detail; } catch {}
+    throw new Error(msg);
+  }
+  return r.json();
+}

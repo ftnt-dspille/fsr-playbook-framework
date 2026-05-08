@@ -1,20 +1,22 @@
 <script lang="ts">
   /**
-   * Mini integration harness: mirrors the data flow on the Design page —
-   * ExamplesMenu calls onLoad → page sets `yaml` → MonacoYaml receives
-   * new `value` prop → Monaco's setValue is called.
+   * Mini integration harness for the prop → MonacoYaml setValue path.
    *
-   * Used by EditorWiring.test.ts. Exposes `yaml` via a getter so tests
-   * can read the current state, and renders the literal yaml in a div
-   * so jsdom queries can assert against the post-update value without
-   * caring about Monaco internals.
+   * Originally validated the ExamplesMenu → page → Monaco data flow.
+   * That menu was retired when PlaybookHeader took over playbook
+   * loading; this harness now exercises the same mechanic through a
+   * plain "Load YAML" button so the assertion (parent-state change
+   * triggers Monaco.setValue) still has coverage without depending on
+   * a deleted component.
    */
-  import ExamplesMenu from '../ExamplesMenu.svelte';
   import MonacoYaml from '../MonacoYaml.svelte';
 
   let yaml = $state('initial');
+  function loadFixture() {
+    yaml = 'collection: A\nplaybooks: []\n';
+  }
 </script>
 
 <div data-testid="yaml-mirror">{yaml}</div>
-<ExamplesMenu onLoad={(text, _name) => (yaml = text)} />
+<button type="button" onclick={loadFixture}>Load YAML</button>
 <MonacoYaml value={yaml} onInput={(v) => (yaml = v)} />

@@ -51,6 +51,7 @@ from .routes.llm_config import router as llm_config_router  # noqa: E402
 from .routes.history import router as history_router  # noqa: E402
 from .routes.mcp import router as mcp_router  # noqa: E402
 from .routes.visual import router as visual_router  # noqa: E402
+from .routes.playbooks import router as playbooks_router  # noqa: E402
 
 app.include_router(yaml_router)
 app.include_router(chat_router)
@@ -61,6 +62,7 @@ app.include_router(llm_config_router)
 app.include_router(history_router)
 app.include_router(mcp_router)
 app.include_router(visual_router)
+app.include_router(playbooks_router)
 
 app.add_middleware(
     CORSMiddleware,
