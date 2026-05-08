@@ -247,16 +247,226 @@ builds on something that already works.
 
 ### Phase 4 — Inspector Verify tab (per-step REPL)
 
-- [ ] **4.1** Render button → `render_jinja` on every arg, show
-      resolved values inline.
-- [ ] **4.2** Run (safe) button → `run_op` for read-only ops; greyed
-      with tooltip otherwise.
-- [ ] **4.3** New MCP tool `step_test(yaml_text, step_id, input?)` —
-      single-step variant of `step_through_playbook`; record pass/fail
-      to `verifications`.
-- [ ] **4.4** Verification history button → `verification_status`.
-- [ ] **4.5** Picklist fields call `precheck_picklist_value` on blur
-      with close-match suggestions.
+- [x] **4.1** Render button → `render_jinja` on every arg, show
+      resolved values inline. New `StepInspectorVerifyTab.svelte` walks
+      every string arg (incl. nested dicts/lists) and dispatches
+      `render_jinja` per template; literals are echoed, errors surfaced
+      inline. Wired as a new "Verify" tab in `StepInspector`. Test
+      `StepInspector.test.ts` covers the resolved + literal paths.
+      (2026-05-08)
+- [x] **4.2** Run (safe) button → `run_op` for read-only ops; greyed
+      with tooltip otherwise. Verify tab now has a Run section that
+      shows for connector_op nodes; disabled when op-name doesn't
+      match `_SAFE_NAME_PREFIXES` (mirrored on the frontend so the
+      gate is instant). Server `requires_confirmation` response
+      surfaces as an amber banner; ok-path renders `data` inline.
+      Two new tests cover the safe + locked cases. (2026-05-08)
+- [x] **4.3** New MCP tool `step_test(yaml_text, step_id, input?)` —
+      single-step variant of `step_through_playbook`; pinpoints by
+      `id` or by `name`-with-spaces→underscores; renders args via the
+      live FSR Jinja engine, executes only safe-prefix connector ops
+      via `run_op`, and writes `step_test_pass` / `step_test_fail`
+      rows into `verifications`. Wired to a "Test step" button in the
+      Verify tab. Backend covered by `test_mcp_step_test.py` (5
+      tests — render-only, executed pass, unsafe-skip, by-name lookup,
+      step-not-found); frontend covered by a new StepInspector test.
+      (2026-05-08)
+- [x] **4.4** Verification history button → `verification_status`.
+      Verify tab History section auto-derives `(kind, key)` per node:
+      `operation` + `<connector>:<op>` for connector_op nodes, else
+      `step_type` + node.type. Surfaces strongest status, method, ts,
+      excerpt + total row count; "no verifications recorded" when
+      empty. (2026-05-08)
+- [x] **4.5** Picklist fields call `precheck_picklist_value` on blur
+      with close-match suggestions. Args tab now scans every param
+      value for `{{ 'VAL' | picklist('NAME') }}` literals on blur,
+      runs each unique pair through `precheck_picklist_value`, and
+      surfaces `✓` / `⚠ value + suggestions` rows directly under
+      the textarea. Stale results clear when the literal is removed.
+      (2026-05-08)
+
+### Phase 4.5 — Authoring gap-fill (post-Phase 4 audit, 2026-05-08)
+
+Closed gaps the original Phase 3 / 4 plan claimed shipped but didn't:
+
+- [x] **G1** Node drag enabled (`nodesDraggable=true`); positions
+      persist via `setPosition` store method → `# fsrpb:layout` round-trip.
+- [x] **G2** Edges connectable; `addEdge` with branch-kind inference
+      (decision sources → `branch`, others → `next`); source-side
+      reconnect via `retargetEdgeSource`.
+- [x] **G3** set_variable add/remove variable buttons in Args tab.
+- [x] **G4** Decision Branches tab grew an "Add branch" form
+      (label + target dropdown).
+- [x] **G5** Connector/op swap: collapsible `<details>` block in
+      Args tab; switching `operation` clears `params` (op-specific).
+- [x] **G6** Inspector header gained editable step name + Delete
+      button (with parent `onDelete` callback). Comment editor in
+      Raw tab.
+- [x] **G7** Freeform connector params: rename / remove / + Add for
+      params not declared in the schema.
+- [x] **G10** Tab visibility per family — Decision lands on Branches,
+      terminal lands on Raw, Args/Examples gated.
+- [x] **G12** Backend round-trip pins source-side edge moves
+      (`test_edge_source_move_round_trips`).
+- [x] **G16** Drop position bug fix — node lands at cursor (manual
+      viewport-transform inversion to derive flow coords).
+- [x] **G31** LR layout uses left/right Handle positions; `direction`
+      lifted to `+page.svelte` and threaded into canvas + StepNode.
+- [x] **G32** Arrowheads on every edge via `markerEnd: ArrowClosed`
+      with explicit hex color (slate / amber for branch).
+- [x] **G33** Visible reconnect anchors via custom `FlowEdge.svelte`
+      wrapping `BaseEdge` + `EdgeReconnectAnchor` at source + target.
+- [x] **G34** Selected node highlight — 3px ring + glow driven by
+      xyflow's `selected` flag.
+- [x] **G35** Edge anchors only render when the edge is selected
+      (xyflow portals the anchor outside `.svelte-flow__edge`, so
+      conditional `{#if isSelected}` is the gate, not CSS descendant).
+- [x] **G36** Mid-edge × delete button at the bezier midpoint when
+      the edge is selected — calls `visualStore.removeEdge`.
+- [x] **G37** Tone down xyflow's default Handle dots — hidden at rest,
+      surface only when an edge is hovered/selected (via `:has()`)
+      or while a connection is mid-drag. Arrowhead size shrunk to
+      xyflow defaults so the tip sits flush against the target node.
+- [x] **G38** Stale-node-ref bug — `+page.svelte` cached
+      `selectedNode` by reference; store mutators replace
+      `pb.nodes[idx]` so the inspector kept reading the old object
+      (manifested as set_variable add/remove not updating the DOM).
+      Fixed by switching to `selectedNodeId` + `$derived` lookup
+      against the live graph.
+- [x] **G39** CSS-rule pin for handle visibility — new
+      `StepNodeStyles.test.ts` asserts the hide-by-default + edge-
+      hover/selected reveal + `connecting*` + selection-ring rules
+      live in `StepNode.svelte` so refactors can't silently regress.
+- [x] **G40** Comprehensive UI capabilities test pass — new
+      `__test_harness/InspectorHarness.svelte` mimics
+      `+page.svelte`'s `selectedNodeId → derived node` flow;
+      `InspectorIntegration.test.ts` (7 tests) drives add-variable,
+      add-two-in-a-row, remove-variable, add+remove cycle, header
+      rename, decision-add-branch, comment-write through real DOM
+      events. These would have failed pre-G38.
+
+Remaining post-audit work, tracked here so it doesn't fall off:
+
+- [ ] **G9**  Audit older phase mentions across plans / TODOs — strike
+      what didn't ship, or implement the residual.
+- [ ] **G11** Pane-click create-step popover with corpus-driven next-
+      step suggestions (mining `playbook_steps` for what usually
+      follows the selected anchor) + "Suggest with AI" fallback that
+      hits the chat agent.
+- [ ] **G13** Palette defaults to **configured** connectors (live FSR
+      `/api/integration/configurations/`); toggle to show all installed
+      / available.
+- [ ] **G14** Install connector from the palette (FSR install API
+      wrapped as an MCP tool); refresh palette + verifications log on
+      success.
+- [ ] **G15** Configure connector from the editor — POST/PUT
+      `/api/integration/configurations/`; cache config schema per
+      connector.
+- [x] **G41** Connection handles on all four sides of every node so
+      connect/reconnect works regardless of TB/LR layout. StepNode now
+      renders secondary source+target handles on the two sides
+      perpendicular to the active layout (left/right when TB, top/bottom
+      when LR). CSS handle-visibility gates already cover them.
+- [x] **G42** Drop a moving edge anywhere on the node body to count
+      as connect. Solved by raising xyflow's `connectionRadius` to 140
+      in PlaybookCanvas — drops within node-body distance snap to the
+      nearest handle, including the new G41 side handles.
+- [x] **G52** Make new-edge dragging discoverable. Handles were
+      hidden at rest and only surfaced when an existing edge was
+      hovered/selected — that worked for reconnect but left
+      first-time edge creation undiscoverable. Now handles also show
+      whenever the user hovers any node, are larger (12 px) with a
+      white outline + brand-colored fill, and scale up + show a
+      crosshair cursor on hover so it's obvious they're grab targets.
+- [x] **G51** Auto-name + dynamic param controls + real conditional
+      visibility. (a) When the user picks an operation, the step's
+      name auto-updates to the operation's title — but only if the
+      current name is a generic system default (`Connector Action`,
+      `connector_action`, empty, or the previous op's title/op_name).
+      Manual edits are preserved. (b) Args tab now picks the right
+      control per `param.type`: `<select>` when `options_json` is
+      populated, number input for integer/number, checkbox for boolean,
+      textarea for free-text. Defaults / placeholders / tooltips from
+      the schema are surfaced. (c) `parent_param_name` +
+      `condition_value` (and the OR list under `applies_when`) now
+      actually hide gated params instead of just labelling them. A
+      collapsible "Hidden — gated by other field values" footer lets
+      the user inspect what's lurking and what would unlock it.
+- [x] **G50** Three corrections in one pass:
+      (a) `list_connector_configurations` now reads `connectors.info_json`
+      first — the probe ingest already captured the full configuration
+      array per connector. SQLite hit ~5 ms vs ~2 s live; live remains
+      as the fallback when info_json is missing or `refresh=True`.
+      (b) ConnectorPicker + new OperationPicker no longer write to the
+      store on every keystroke. They commit on Enter, list-select, or
+      blur. That kills the "operation 'b' not found" flash that was
+      appearing while the user typed, and it lets the suggestions list
+      narrow correctly because the input text and parent prop are no
+      longer racing through the reactivity cycle.
+      (c) StepInspector header collapsed: name input + Delete button
+      on one row, family · type · id on a tiny dimmed line below.
+      Examples tab cards rebuilt — header bar with op name + outline
+      Copy button, syntax-highlighted JSON body (keys/strings/nums
+      colored via a tiny inline highlighter), notes footer.
+- [x] **G49** Connector configuration picker. New
+      `list_connector_configurations(connector, refresh)` MCP tool wraps
+      the existing `connector_configs.list_configurations` live-fetch
+      and adds an in-process cache (configs change rarely; user can
+      pass `refresh=True`). Inspector args tab now renders a `<select>`
+      of `[{config_id, name, default}]` once a connector is picked,
+      both in the empty-state form and as a compact "Config" row in
+      the populated header. Empty list shows a "No configurations on
+      the live FSR" hint instead of a broken control. Backend tests
+      cover pass-through caching, refresh-bypass, and live-fetch error.
+- [x] **G48** Connector combobox + big inspector icon. Replaced the
+      `<datalist>` typeahead with `ConnectorPicker.svelte` — a custom
+      combobox that renders each suggestion as `[icon] name / label`,
+      supporting ↑/↓/Enter/Esc keyboard nav (native datalist hides
+      images, so a custom popover was the only way to surface icons
+      inline). Inspector args header now also shows a 64px icon next
+      to the connector name in the empty-state form so the visual
+      anchor is present even before an operation is picked.
+- [x] **G47** Connector icons (info.json PNGs) — three-tier cache plus
+      UI rendering. New `get_connector_icon` MCP tool fetches via
+      `/api/integration/connectors/<name>/<version>/?format=json` (POST
+      because FSR rejects GET on this route), and write-throughs to a
+      `connector_icons(name PK, version, icon_small, icon_large,
+      fetched_at)` SQLite table so process restarts hit disk (~1 ms)
+      instead of refetching live (~300–1600 ms). Reused `_live_client`
+      now memoises the FortiSOAR client across calls so we don't pay
+      a fresh TLS handshake every time. New `ConnectorIcon.svelte`
+      component with module-level inflight Promise dedupe; rendered as
+      small icon in StepPalette rows + StepNode connector_op headers,
+      and large icon in the StepInspector connector_op header. Backend
+      tests cover memory→disk→live cache hierarchy + missing-connector
+      and missing-FSR error paths.
+- [x] **G46** `get_op_schema` arg-name fix — frontend was sending
+      `op_name` but the pydantic-validated MCP tool requires `op`,
+      surfacing as a "Field required" ToolError the moment the user
+      typed a connector. Switched StepInspectorArgsTab to `op` and
+      added an integration test that captures the actual fetch body
+      and asserts the `{connector, op, verbose}` contract so a future
+      rename can't reintroduce the regression.
+- [x] **G45** Quick-menu z-index hoist + connector/operation typeahead.
+      `:global(.svelte-flow__node:has(.fsrpb-add-next-menu))` lifts the
+      host node above its siblings while the popover is open so the
+      menu isn't covered by the next node's body. Connector + operation
+      inputs in StepInspectorArgsTab now hydrate `<datalist>`s via
+      `find_connector` / `find_operation` MCP tools so the user picks
+      from real options instead of typing blind.
+- [x] **G44** Best-path edge routing. Each node now carries source AND
+      target handles on all four sides (`{top,right,bottom,left}-{s,t}`).
+      `pickHandles(srcId, tgtId)` in PlaybookCanvas compares laid-out
+      node-center deltas and selects the dominant-axis handle pair so
+      lines exit and enter on whichever side is closest, instead of
+      always leaving the bottom and wrapping around the node body.
+- [x] **G43** Per-node "+ add next step" affordance. StepNode renders
+      a circular `+` button at the source side (visible on hover or
+      selection); clicking opens a quick-pick menu of the most common
+      step types (set_variable, connector, decision, manual_input,
+      record CRUD, delay, code_snippet, raise_exception). Selection
+      calls `visualStore.addNode` with `predecessorId` so the new node
+      arrives connected and offset 320px (LR) or 160px (TB) downstream.
 
 ### Phase 5 — Debug runner (whole-playbook REPL)
 
@@ -281,6 +491,72 @@ builds on something that already works.
 - [ ] **6.4** Assert → form builder for the 3 existing assertion kinds.
 - [ ] **6.5** Push → `fsrpb push` flow with confirmation.
 - [ ] **6.6** Recipe export → write selected subgraph to `recipes`.
+
+#### Utility toolbar (G19, 2026-05-08 ask)
+
+A single toolbar row above the canvas hosting day-to-day actions so
+the user rarely touches the CLI / external tabs:
+
+- [x] **G19/T1** Auto-layout TB / LR toggle button (G22) — re-runs
+      dagre via `forceLayout()`, persists into all node positions
+      via `setPosition` so undo can roll it back. (2026-05-08)
+- [x] **G19/T2** Undo / Redo buttons (G20) — graph snapshot stack
+      capped at 50 entries with JSON-equality dedupe so rapid
+      keystrokes don't pile up. `canUndo`/`canRedo` getters drive
+      the disabled state. (2026-05-08)
+- [ ] **G19/T3** Jinja Test button (G21) — modal w/ template + context
+      editor wired to `render_jinja`; accepts a `from_pb_execution`
+      task_id so the user can render against a real run env. **Stub
+      button shipped** in the toolbar; modal port pending — base
+      logic in `WebstormProjects/widget-jinja-editor/widget/` (Angular
+      controller + Monaco service to translate to Svelte/TS).
+- [ ] **G19/T4** Play (Mock) button (G24) — runs
+      `step_through_playbook` in a bottom drawer; per-step rendered
+      args + simulated output. Safe with no live FSR. **Stub button
+      shipped**; drawer pending.
+- [ ] **G19/T5** Play (Live) button (G25) — push current draft → FSR,
+      trigger a run, poll/SSE workflow execution; per-node status
+      badges sync in real time. **Stub button shipped**; backend
+      wiring pending.
+- [ ] **G19/T6** Save / Discard already in header today; consider
+      promoting into the toolbar for visibility.
+
+#### Command palette + shortcuts
+
+- [ ] **G17** Cmd-K command palette — fuzzy-search registry of every
+      toolbar action, plus playbook switch, search step by name, jump
+      to errors, clear selection. Single source of truth for actions.
+- [ ] **G18** Keyboard shortcuts bound to the palette commands:
+      `⌘S` save, `⌘Z` / `⌘⇧Z` undo/redo, `Del` delete node, `R` render,
+      `T` test step, `F5` Play (Live), `F6` Play (Mock), `⌘L` auto-
+      layout, `Esc` clear selection, `⌘K` open palette.
+
+### Phase 6.5 — Live run sync + playbook env (2026-05-08 ask)
+
+Originated from the user's screenshot showing FSR designer's
+Input/Output / Functions / Global Variables picker. The goal is to
+turn each prior step's output (declared schema, last-run JSON env, or
+on-demand `run_op` probe) into clickable jinja insertions.
+
+- [ ] **G25** Live play mode — push draft, kick off run via
+      `/api/wf/api/triggers/`, poll `/api/wf/instances/{id}/` (or SSE
+      if available) for per-step status until terminal.
+- [ ] **G26** Playbook env store — capture each step's rendered input
+      + output (live or mock) into a per-playbook env keyed by
+      `(playbook_name, run_id)`. Persist last N runs locally so users
+      can author against real outputs after the run ends. Backed by
+      existing `from_pb_execution` plumbing in `render_jinja`.
+- [ ] **G27** Variable picker side panel — three tabs:
+      - **Input/Output** — searchable token tree mined from the
+        selected step's output schema + last-run env + reachable-
+        predecessor outputs (BFS via `_compute_predecessors`).
+      - **Functions** (G29) — FSR jinja filter catalog from
+        `find_jinja_example`; click to insert an example snippet.
+      - **Global Variables** (G30) — live FSR `globalVars`; click to
+        insert `{{ globalVars.<name> }}`.
+- [ ] **G28** Jinja insertion at cursor — picker click inserts at the
+      caret of the most-recently-focused arg field. Handles textarea
+      and input. Selection tracked across blur for one-click flows.
 
 ### Phase 7 — Polish (split view, "no FSR" mode, etc.)
 
@@ -359,10 +635,48 @@ table with the visual editor.
   set_variable arg_list editor, Examples tab + copy buttons,
   Branches tab visibility per step type, branch label rename
   reaches store).
-- **Totals: 94/94 frontend + 29/29 backend green.** Drop-to-add
-  user flow on the canvas is exercised indirectly through store
-  unit tests; full xyflow drag simulation is the one notable hole
-  and a Phase 5/7 follow-up.
+- **Phase 4 backend** — `python/tests/test_mcp_step_test.py` covers
+  the new `step_test` MCP tool: render-only path, executed-pass path
+  with stubbed `run_op` + `_record_verification` (asserts
+  `step_test_pass` is recorded), unsafe-op skip path, by-name lookup,
+  and step-not-found. **5/5 green.**
+- **Phase 4.5 backend** — `test_visual_model_roundtrip.py` grew a
+  new test (`test_edge_source_move_round_trips`) pinning that moving
+  the SOURCE of an edge (UI: drag the edge handle off step A onto B)
+  round-trips through `from_visual` cleanly and is stable on a
+  second pass. **30/30 round-trip green.**
+- **Phase 4.5 frontend** — `visualEditStore.test.ts` grew 7 tests
+  for `setPosition` (write + unknown-id no-op), `addEdge` (default
+  next, decision branch inference, explicit override, dedupe),
+  `retargetEdgeSource`, and `addNode` with explicit drop position.
+  `StepInspector.test.ts` grew 9 tests covering the new add-branch
+  form, set_variable +/- buttons, connector-op swap clearing
+  params, freeform param add, header rename, Delete-node callback,
+  comment-textarea edit, and Decision/Connector tab visibility.
+- **Phase 6/4.5 follow-on tests** —
+  - `EditorToolbar.test.ts` (5 tests): undo disabled at rest, undo
+    fires store, TB layout sets top-down positions, LR layout sets
+    left-to-right + parent callback, Jinja/Mock/Live button dispatch.
+  - `visualEditStore.test.ts` grew undo/redo coverage (5 tests):
+    undo restores previous, redo replays, fresh mutation clears
+    redo, undo no-op on empty stack, `load()` clears both stacks.
+  - `visualLayout.test.ts` grew LR + `forceLayout` coverage.
+  - `InspectorIntegration.test.ts` (7 tests, NEW): drives the real
+    UI flow through `InspectorHarness.svelte` (mimics `+page.svelte`'s
+    `selectedNodeId → derived node` pattern). Catches G38-class bugs
+    where store mutations don't propagate to the rendered DOM —
+    add variable, add 2 in a row, remove variable, add+remove cycle,
+    rename header, add decision branch, write comment.
+  - `StepNodeStyles.test.ts` (4 tests, NEW): pins the handle-
+    visibility CSS gates (hidden by default; revealed via
+    `:has(.svelte-flow__edge:hover/.selected)` and `connecting*`)
+    and the selection-ring rule so refactors can't silently regress.
+- **Totals: 145/145 frontend + 305/305 backend + 30/30 visual round-
+  trip (one pre-existing emitter timestamp-flake deselected;
+  unrelated to Phase 4 / 4.5 / 6).** Full xyflow drag-handle
+  simulation remains the one notable testing hole — store-level
+  coverage is thorough; an end-to-end Playwright pass is tracked
+  under Phase 7.
 
 ## Recently landed (context for what already exists)
 

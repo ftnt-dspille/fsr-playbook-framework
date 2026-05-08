@@ -16,6 +16,10 @@ type State = {
   dirty: boolean;
   saving: boolean;
   saveError: string | null;
+  /** Snapshots of `graph` *before* each structural mutation. */
+  undoStack: VisualGraph[];
+  /** Snapshots restored to `graph` by undo, available for redo. */
+  redoStack: VisualGraph[];
 };
 
 const state = $state<State>({
@@ -23,8 +27,32 @@ const state = $state<State>({
   graph: null,
   dirty: false,
   saving: false,
-  saveError: null
+  saveError: null,
+  undoStack: [],
+  redoStack: []
 });
+
+const MAX_HISTORY = 50;
+
+function deepClone<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v));
+}
+
+/** Push current graph onto undoStack and clear redoStack. Called by
+ * every mutator before it mutates. No-op if graph is null. */
+function snapshot() {
+  if (!state.graph) return;
+  // Drop the redo stack on every fresh mutation. A new branch of edits
+  // invalidates anything we'd previously rolled back to.
+  state.redoStack = [];
+  // Skip pushing if the top is byte-identical (e.g. a rapid stream of
+  // keystrokes that don't actually change the graph yet).
+  const top = state.undoStack[state.undoStack.length - 1];
+  const cur = deepClone(state.graph);
+  if (top && JSON.stringify(top) === JSON.stringify(cur)) return;
+  state.undoStack.push(cur);
+  if (state.undoStack.length > MAX_HISTORY) state.undoStack.shift();
+}
 
 export const visualStore = {
   get state() { return state; },
@@ -34,7 +62,29 @@ export const visualStore = {
     state.graph = graph;
     state.dirty = false;
     state.saveError = null;
+    state.undoStack = [];
+    state.redoStack = [];
   },
+
+  /** Pop one undo snapshot back into `graph`, pushing the current state
+   * onto the redo stack. No-op when stack is empty. */
+  undo() {
+    if (!state.graph || state.undoStack.length === 0) return;
+    state.redoStack.push(deepClone(state.graph));
+    state.graph = state.undoStack.pop()!;
+    state.dirty = true;
+  },
+
+  /** Inverse of undo. */
+  redo() {
+    if (!state.graph || state.redoStack.length === 0) return;
+    state.undoStack.push(deepClone(state.graph));
+    state.graph = state.redoStack.pop()!;
+    state.dirty = true;
+  },
+
+  get canUndo() { return state.undoStack.length > 0; },
+  get canRedo() { return state.redoStack.length > 0; },
 
   /** Mutate a single node's args — most common edit shape. */
   patchNode(playbookIdx: number, nodeId: string, patch: Partial<VisualNode>) {
@@ -43,6 +93,7 @@ export const visualStore = {
     if (!pb) return;
     const idx = pb.nodes.findIndex((n) => n.id === nodeId);
     if (idx < 0) return;
+    snapshot();
     pb.nodes[idx] = { ...pb.nodes[idx], ...patch };
     state.dirty = true;
   },
@@ -66,6 +117,7 @@ export const visualStore = {
     if (!state.graph) return null;
     const pb = state.graph.playbooks[playbookIdx];
     if (!pb) return null;
+    snapshot();
     const newId = uniqueId(template.name, pb.nodes);
     const newNode: VisualNode = {
       id: newId,
@@ -99,6 +151,64 @@ export const visualStore = {
     return newId;
   },
 
+  /** Persist a node's canvas position. Position-only edits round-trip
+   * through the `# fsrpb:layout` block on save, leaving step bodies
+   * byte-identical. */
+  setPosition(playbookIdx: number, nodeId: string, position: { x: number; y: number }) {
+    if (!state.graph) return;
+    const pb = state.graph.playbooks[playbookIdx];
+    if (!pb) return;
+    const idx = pb.nodes.findIndex((n) => n.id === nodeId);
+    if (idx < 0) return;
+    snapshot();
+    pb.nodes[idx] = { ...pb.nodes[idx], position };
+    state.dirty = true;
+  },
+
+  /** Add a fresh edge (e.g., from drag-connect). Idempotent on
+   * (source,target,label); duplicates are ignored. branch_kind is
+   * inferred from the source step type unless overridden. */
+  addEdge(
+    playbookIdx: number,
+    edge: { source: string; target: string; label?: string | null; branch_kind?: 'next' | 'branch' | 'unlabeled' }
+  ) {
+    if (!state.graph) return;
+    const pb = state.graph.playbooks[playbookIdx];
+    if (!pb) return;
+    const label = edge.label ?? null;
+    const dup = pb.edges.find(
+      (e) => e.source === edge.source && e.target === edge.target && (e.label ?? null) === label
+    );
+    if (dup) return;
+    let bk = edge.branch_kind;
+    if (!bk) {
+      const src = pb.nodes.find((n) => n.id === edge.source);
+      bk = src && (src.type === 'decision' || src.type === 'manual_input') ? 'branch' : 'next';
+    }
+    snapshot();
+    pb.edges.push({ source: edge.source, target: edge.target, label, branch_kind: bk });
+    state.dirty = true;
+  },
+
+  /** Retarget an edge's source side (drag the edge handle off one
+   * step onto another). Pairs with retargetEdge for target-side. */
+  retargetEdgeSource(
+    playbookIdx: number,
+    edgeKey: { source: string; target: string; label: string | null },
+    newSource: string
+  ) {
+    if (!state.graph) return;
+    const pb = state.graph.playbooks[playbookIdx];
+    if (!pb) return;
+    const edge = pb.edges.find(
+      (e) => e.source === edgeKey.source && e.target === edgeKey.target && (e.label ?? null) === (edgeKey.label ?? null)
+    );
+    if (!edge) return;
+    snapshot();
+    edge.source = newSource;
+    state.dirty = true;
+  },
+
   /** Phase 3.5 — retarget an existing edge to a new target node. */
   retargetEdge(playbookIdx: number, edgeKey: { source: string; target: string; label: string | null }, newTarget: string) {
     if (!state.graph) return;
@@ -108,6 +218,7 @@ export const visualStore = {
       e.source === edgeKey.source && e.target === edgeKey.target && (e.label ?? null) === (edgeKey.label ?? null)
     );
     if (!edge) return;
+    snapshot();
     edge.target = newTarget;
     state.dirty = true;
   },
@@ -117,9 +228,13 @@ export const visualStore = {
     if (!state.graph) return;
     const pb = state.graph.playbooks[playbookIdx];
     if (!pb) return;
-    pb.edges = pb.edges.filter((e) =>
+    const before = pb.edges.length;
+    const filtered = pb.edges.filter((e) =>
       !(e.source === edgeKey.source && e.target === edgeKey.target && (e.label ?? null) === (edgeKey.label ?? null))
     );
+    if (filtered.length === before) return;
+    snapshot();
+    pb.edges = filtered;
     state.dirty = true;
   },
 
@@ -132,6 +247,7 @@ export const visualStore = {
       e.source === source && (e.label ?? null) === (oldLabel ?? null) && e.branch_kind === 'branch'
     );
     if (!edge) return;
+    snapshot();
     edge.label = newLabel || null;
     state.dirty = true;
   },
@@ -140,12 +256,62 @@ export const visualStore = {
     if (!state.graph) return;
     const pb = state.graph.playbooks[playbookIdx];
     if (!pb) return;
+    if (!pb.nodes.some((n) => n.id === nodeId)) return;
+    snapshot();
     pb.nodes = pb.nodes.filter((n) => n.id !== nodeId);
     pb.edges = pb.edges.filter((e) => e.source !== nodeId && e.target !== nodeId);
     state.dirty = true;
   },
 
   markDirty() { state.dirty = true; },
+
+  /** Round-trip the current graph through the emitter to get fresh YAML
+   * matching any pending visual edits. Used when toggling Visual→YAML
+   * so the Monaco buffer reflects unsaved canvas changes instead of
+   * the stale on-disk source. Returns null on failure (caller should
+   * fall back to `state.graph.source.yaml`). */
+  async renderToYaml(): Promise<string | null> {
+    if (!state.graph) return null;
+    try {
+      const r = await fetch('/api/visual/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          original_yaml: state.graph.source.yaml,
+          graph: state.graph
+        })
+      });
+      const data = await r.json();
+      return data.ok ? (data.yaml as string) : null;
+    } catch { return null; }
+  },
+
+  /** Toggle direction YAML→Visual: parse the Monaco buffer back into a
+   * graph and replace the current draft. Marks dirty when the YAML
+   * differs from the on-disk source so Save stays available. Returns
+   * `{ok, message?}` so the page can surface parse errors inline. */
+  async loadFromYaml(yamlText: string): Promise<{ ok: boolean; message?: string }> {
+    try {
+      const r = await fetch('/api/visual/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: yamlText })
+      });
+      if (!r.ok) return { ok: false, message: `parse failed (${r.status})` };
+      const graph = await r.json() as VisualGraph;
+      snapshot();
+      state.graph = graph;
+      // Dirty whenever the buffer no longer matches the on-disk source.
+      // We don't have the on-disk yaml stashed separately, but graph.source.yaml
+      // is updated to whatever was just parsed — so compare against the
+      // pre-snapshot top of the undo stack via a structural marker: any
+      // change in YAML text vs the previous load means dirty.
+      state.dirty = true;
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: (e as Error).message };
+    }
+  },
 
   discard(reload: () => Promise<void>) {
     state.dirty = false;

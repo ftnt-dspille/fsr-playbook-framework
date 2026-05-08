@@ -97,6 +97,34 @@ def test_decision_branch_retarget_round_trips() -> None:
     assert high["target"] == "log_low_severity"
 
 
+def test_edge_source_move_round_trips() -> None:
+    """Move an edge's SOURCE from one step to another (UI: drag the
+    edge handle off step A and drop it on step B). The YAML side must
+    reflect the new wiring after `from_visual` -> `to_visual`."""
+    text = (EXAMPLES / "decision_branch.yaml").read_text()
+    g = to_visual(text)
+    edges = g["playbooks"][0]["edges"]
+    # Target an existing linear `next` edge and re-source it.
+    e = next(e for e in edges if e["source"] == "read_severity"
+             and e["branch_kind"] == "next")
+    old_source = e["source"]
+    new_source = "start"
+    # Drop the old `start -> read_severity` edge first to avoid a
+    # collision when the moved edge takes its place.
+    edges[:] = [x for x in edges if not (x["source"] == "start"
+                                          and x["target"] == "read_severity")]
+    e["source"] = new_source
+    out = from_visual(g, text)
+    g2 = to_visual(out)
+    assert g2["errors"] == [], g2["errors"]
+    # The moved edge's old source no longer points to its old target.
+    assert not any(x["source"] == old_source and x["target"] == e["target"]
+                    for x in g2["playbooks"][0]["edges"])
+    # The new source carries the rewired edge.
+    assert any(x["source"] == new_source and x["target"] == e["target"]
+                for x in g2["playbooks"][0]["edges"])
+
+
 def test_linear_next_retarget_round_trips() -> None:
     """Change a step's `next:` to point at a different existing step."""
     text = (EXAMPLES / "decision_branch.yaml").read_text()

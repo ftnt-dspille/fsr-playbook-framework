@@ -15,9 +15,21 @@ export type PositionedNode = VisualNode & { position: { x: number; y: number } }
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 84;
 
-export function autoLayout(nodes: VisualNode[], edges: VisualEdge[]): PositionedNode[] {
+export type LayoutDirection = 'TB' | 'LR';
+
+export function autoLayout(
+  nodes: VisualNode[],
+  edges: VisualEdge[],
+  direction: LayoutDirection = 'TB'
+): PositionedNode[] {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80, marginx: 24, marginy: 24 });
+  // LR (left-to-right) wants more horizontal breathing room; TB
+  // (top-to-bottom) wants more vertical. Numbers tuned to match the
+  // visual density users see in FSR's own designer.
+  const opts = direction === 'LR'
+    ? { rankdir: 'LR', nodesep: 40, ranksep: 110, marginx: 24, marginy: 24 }
+    : { rankdir: 'TB', nodesep: 60, ranksep: 80, marginx: 24, marginy: 24 };
+  g.setGraph(opts);
   g.setDefaultEdgeLabel(() => ({}));
 
   for (const n of nodes) {
@@ -47,4 +59,19 @@ export function autoLayout(nodes: VisualNode[], edges: VisualEdge[]): Positioned
       }
     };
   });
+}
+
+/**
+ * Force-relayout: re-runs dagre and OVERRIDES every node's existing
+ * position. Used by the toolbar's auto-layout button so the user can
+ * tidy the canvas after a long authoring session, even when nodes
+ * already have hand-edited positions.
+ */
+export function forceLayout(
+  nodes: VisualNode[],
+  edges: VisualEdge[],
+  direction: LayoutDirection = 'TB'
+): PositionedNode[] {
+  const stripped = nodes.map((n) => ({ ...n, position: null }));
+  return autoLayout(stripped, edges, direction);
 }

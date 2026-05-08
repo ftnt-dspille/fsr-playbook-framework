@@ -7,28 +7,72 @@
   import StepInspectorArgsTab from './StepInspectorArgsTab.svelte';
   import StepInspectorExamplesTab from './StepInspectorExamplesTab.svelte';
   import StepInspectorBranchesTab from './StepInspectorBranchesTab.svelte';
+  import StepInspectorVerifyTab from './StepInspectorVerifyTab.svelte';
+  import { visualStore } from '../visualEditStore.svelte';
 
   type Props = {
     node: VisualNode | null;
     playbook: VisualPlaybook | null;
     playbookIdx: number;
+    onDelete?: (nodeId: string) => void;
   };
-  let { node, playbook, playbookIdx }: Props = $props();
+  let { node, playbook, playbookIdx, onDelete }: Props = $props();
 
-  type Tab = 'args' | 'examples' | 'branches' | 'raw';
+  function renameNode(e: Event) {
+    if (!node) return;
+    const v = (e.currentTarget as HTMLInputElement).value;
+    visualStore.patchNode(playbookIdx, node.id, { name: v });
+  }
+  function setComment(e: Event) {
+    if (!node) return;
+    const v = (e.currentTarget as HTMLTextAreaElement).value;
+    visualStore.patchNode(playbookIdx, node.id, { comment: v || null });
+  }
+  function deleteNode() {
+    if (!node) return;
+    if (!confirm(`Delete step '${node.name}' (${node.id})? This also drops every edge touching it.`)) return;
+    const id = node.id;
+    visualStore.removeNode(playbookIdx, id);
+    onDelete?.(id);
+  }
+
+  type Tab = 'args' | 'examples' | 'branches' | 'verify' | 'raw';
   let activeTab: Tab = $state('args');
 
-  // Reset to Args whenever the user picks a different node.
+  // Reset to the most useful default tab whenever the user picks a
+  // different node. Decision → Branches; terminal → Raw; everything
+  // else → Args.
   $effect(() => {
-    if (node) activeTab = 'args';
+    if (node) activeTab = defaultTab;
   });
 
+  // Tab visibility is driven by node family/type. Decision/terminal/etc.
+  // don't have schema-driven args or operation examples, so we hide
+  // those tabs entirely to keep the inspector focused.
+  // Args tab is irrelevant for decision (use Branches), terminal
+  // (no args), and trigger steps where the only field is the trigger
+  // record context. Keep it everywhere else.
+  let showArgs = $derived(
+    node ? node.family !== 'terminal' && node.type !== 'decision' : false
+  );
+  let showExamples = $derived(node ? node.family === 'connector_op' || node.family === 'record_crud' : false);
   let showBranches = $derived(node?.type === 'decision' || node?.type === 'manual_input');
+  let showVerify = $derived(node ? node.family !== 'terminal' : false);
+
+  // Decision and trigger nodes' "args" are tiny — fall back to Branches
+  // (decision) or Raw (trigger) as the default tab so the user lands on
+  // something useful instead of a one-line freeform JSON view.
+  let defaultTab = $derived<Tab>(
+    node?.type === 'decision' ? 'branches'
+      : node?.family === 'terminal' ? 'raw'
+      : 'args'
+  );
 
   let TABS = $derived<{ key: Tab; label: string }[]>([
-    { key: 'args', label: 'Args' },
-    { key: 'examples', label: 'Examples' },
+    ...(showArgs ? [{ key: 'args' as Tab, label: 'Args' }] : []),
+    ...(showExamples ? [{ key: 'examples' as Tab, label: 'Examples' }] : []),
     ...(showBranches ? [{ key: 'branches' as Tab, label: 'Branches' }] : []),
+    ...(showVerify ? [{ key: 'verify' as Tab, label: 'Verify' }] : []),
     { key: 'raw', label: 'Raw' }
   ]);
 </script>
@@ -39,14 +83,26 @@
       Click a node to inspect
     </div>
   {:else}
-    <header class="border-b border-[var(--border-soft)] px-4 py-3">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-        {node.family} · {node.type}
+    <header class="border-b border-[var(--border-soft)] px-4 py-2">
+      <div class="flex items-center gap-2">
+        <input
+          type="text"
+          aria-label="Step name"
+          value={node.name}
+          oninput={renameNode}
+          class="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold text-[var(--text-default)] hover:border-[var(--border-soft)] focus:border-[var(--brand)] focus:outline-none"
+        />
+        <button
+          type="button"
+          aria-label="Delete step"
+          title="Delete step"
+          class="text-[10px] font-medium text-rose-600 hover:text-rose-700"
+          onclick={deleteNode}
+        >Delete</button>
       </div>
-      <h2 class="mt-1 truncate text-base font-semibold text-[var(--text-default)]" title={node.name}>
-        {node.name}
-      </h2>
-      <div class="mt-0.5 text-xs text-[var(--text-faint)]">id: {node.id}</div>
+      <div class="text-[10px] text-[var(--text-faint)] truncate" title="{node.family} · {node.type} · {node.id}">
+        {node.family} · {node.type} · <span class="font-mono">{node.id}</span>
+      </div>
     </header>
 
     <nav class="flex border-b border-[var(--border-soft)] text-xs">
@@ -65,16 +121,23 @@
       {#if activeTab === 'args'}
         <StepInspectorArgsTab {node} {playbookIdx} />
       {:else if activeTab === 'examples'}
-        <StepInspectorExamplesTab {node} {playbook} />
+        <StepInspectorExamplesTab {node} {playbook} {playbookIdx} />
       {:else if activeTab === 'branches'}
         <StepInspectorBranchesTab {node} {playbook} {playbookIdx} />
+      {:else if activeTab === 'verify'}
+        <StepInspectorVerifyTab {node} />
       {:else}
-        {#if node.comment}
-          <section class="mb-3">
-            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Comment</div>
-            <p class="mt-1 whitespace-pre-wrap">{node.comment}</p>
-          </section>
-        {/if}
+        <section class="mb-3">
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Comment</div>
+          <textarea
+            aria-label="Step comment"
+            class="mt-1 block w-full resize-y rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-xs"
+            rows="2"
+            value={node.comment ?? ''}
+            placeholder="(no comment)"
+            oninput={setComment}
+          ></textarea>
+        </section>
         {#if node.for_each}
           <section class="mb-3">
             <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">For each</div>

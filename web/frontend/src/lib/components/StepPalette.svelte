@@ -23,6 +23,7 @@
     type OperationRef,
     type RecipeRef
   } from '../api';
+  import ConnectorIcon from './ConnectorIcon.svelte';
 
   type PaletteItem =
     | { kind: 'step_type'; type: string; label: string; detail?: string }
@@ -121,10 +122,13 @@
             <button
               type="button"
               onclick={() => expandConnector(c.name)}
-              class="flex w-full items-center justify-between rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-left text-xs hover:bg-[var(--bg-canvas)]"
+              class="flex w-full items-center justify-between gap-2 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-left text-xs hover:bg-[var(--bg-canvas)]"
             >
-              <span class="font-mono text-[11px]">{c.name}</span>
-              {#if c.category}<span class="text-[10px] text-[var(--text-faint)]">{c.category}</span>{/if}
+              <span class="flex items-center gap-2 min-w-0">
+                <ConnectorIcon name={c.name} size="sm" />
+                <span class="font-mono text-[11px] truncate">{c.name}</span>
+              </span>
+              {#if c.category}<span class="text-[10px] text-[var(--text-faint)] flex-shrink-0">{c.category}</span>{/if}
             </button>
             {#if expandedConnector === c.name}
               <ul class="mt-1 space-y-0.5 pl-3">

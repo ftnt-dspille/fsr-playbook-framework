@@ -7,13 +7,14 @@
    * event so the host page can render the right-hand inspector
    * panel (1.4). Editing comes in Phase 3.
    */
-  import { SvelteFlow, Background, Controls, MiniMap, type Node, type Edge } from '@xyflow/svelte';
+  import { SvelteFlow, Background, Controls, MiniMap, MarkerType, type Node, type Edge } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { onMount, untrack } from 'svelte';
   import type { VisualPlaybook, VisualNode } from '../api';
   import { callMcpTool } from '../api';
   import { autoLayout } from '../visualLayout';
   import StepNode from './StepNode.svelte';
+  import FlowEdge from './FlowEdge.svelte';
 
   import { visualStore } from '../visualEditStore.svelte';
 
@@ -25,11 +26,13 @@
   type Props = {
     playbook: VisualPlaybook;
     playbookIdx: number;
+    direction?: 'TB' | 'LR';
     onSelect?: (node: VisualNode | null) => void;
   };
-  let { playbook, playbookIdx, onSelect }: Props = $props();
+  let { playbook, playbookIdx, direction = 'TB', onSelect }: Props = $props();
 
   const nodeTypes = { step: StepNode };
+  const edgeTypes = { default: FlowEdge, smoothstep: FlowEdge, bezier: FlowEdge };
 
   // Verification badges keyed by node id, hydrated post-mount via the
   // generic /api/mcp dispatcher (Phase 0.1).
@@ -58,7 +61,32 @@
     verifs = Object.fromEntries(out);
   }
 
-  let positioned = $derived(autoLayout(playbook.nodes, playbook.edges));
+  let positioned = $derived(autoLayout(playbook.nodes, playbook.edges, direction));
+
+  /** G44: pick the source/target handle pair that gives the shortest
+   * connection between two laid-out nodes. Each node carries handles
+   * on all four sides; we compare node-center deltas and route via
+   * the dominant axis so edges no longer all leave from one fixed
+   * side and have to wrap around the node. */
+  function pickHandles(srcId: string, tgtId: string): { sourceHandle: string; targetHandle: string } {
+    const a = positioned.find((n) => n.id === srcId);
+    const b = positioned.find((n) => n.id === tgtId);
+    if (!a || !b) return { sourceHandle: 'bottom-s', targetHandle: 'top-t' };
+    const ax = a.position.x + NODE_WIDTH / 2;
+    const ay = a.position.y + NODE_HEIGHT / 2;
+    const bx = b.position.x + NODE_WIDTH / 2;
+    const by = b.position.y + NODE_HEIGHT / 2;
+    const dx = bx - ax;
+    const dy = by - ay;
+    if (Math.abs(dy) >= Math.abs(dx)) {
+      return dy >= 0
+        ? { sourceHandle: 'bottom-s', targetHandle: 'top-t' }
+        : { sourceHandle: 'top-s', targetHandle: 'bottom-t' };
+    }
+    return dx >= 0
+      ? { sourceHandle: 'right-s', targetHandle: 'left-t' }
+      : { sourceHandle: 'left-s', targetHandle: 'right-t' };
+  }
 
   let nodes = $derived<Node[]>(
     positioned.map((n) => ({
@@ -67,22 +95,47 @@
       position: n.position,
       data: {
         node: n,
-        verification: verifs[n.id] ?? null
+        verification: verifs[n.id] ?? null,
+        direction,
+        playbookIdx
       }
     }))
   );
 
+  // Single arrow marker for every edge so flow direction is obvious.
+  // Branch edges get the amber accent; ordinary `next` edges get the
+  // CSS-driven default stroke (resolved against the active theme).
   let edges = $derived<Edge[]>(
-    playbook.edges.map((e, idx) => ({
+    playbook.edges.map((e, idx) => {
+      const { sourceHandle, targetHandle } = pickHandles(e.source, e.target);
+      return ({
       id: `${e.source}->${e.target}#${e.label ?? ''}#${idx}`,
       source: e.source,
       target: e.target,
+      sourceHandle,
+      targetHandle,
       label: e.label ?? undefined,
       reconnectable: true,
-      data: { label: e.label, branch_kind: e.branch_kind },
+      // FlowEdge always renders a bezier, which curves cleanly between
+      // any pair of handle positions (TB or LR, post-hand-edit drift,
+      // etc). No need to switch edge types per direction.
+      type: 'default',
+      data: { label: e.label, branch_kind: e.branch_kind, direction, playbookIdx },
       animated: false,
-      style: e.branch_kind === 'branch' ? 'stroke: var(--color-accent-amber)' : undefined
-    }))
+      // Explicit hex (not CSS var) — SVG markers don't inherit
+      // `currentColor` and a missing color renders the arrowhead
+      // invisible. Match the stroke palette in FlowEdge so the
+      // arrow blends cleanly into the line.
+      // No explicit width/height — xyflow's defaults position the
+      // arrow tip flush with the target handle. Setting custom sizes
+      // pushes the line endpoint inward and creates a visible gap
+      // between the line and the node border.
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: e.branch_kind === 'branch' ? '#f59e0b' : '#94a3b8'
+      }
+    });
+    })
   );
 
   function handleEdgeContextMenu({ edge, event }: { edge: Edge; event: MouseEvent }) {
@@ -94,18 +147,37 @@
 
   function handleReconnect({ oldEdge, newConnection }: any) {
     const label = (oldEdge.data?.label as string | null) ?? null;
-    if (newConnection.source !== oldEdge.source) {
-      // Source-side reconnects aren't supported in Phase 3 — would
-      // require moving the edge between source steps. Skip silently.
-      return;
-    }
-    if (newConnection.target && newConnection.target !== oldEdge.target) {
-      visualStore.retargetEdge(
+    const targetChanged = newConnection.target && newConnection.target !== oldEdge.target;
+    const sourceChanged = newConnection.source && newConnection.source !== oldEdge.source;
+    if (!targetChanged && !sourceChanged) return;
+    if (sourceChanged) {
+      visualStore.retargetEdgeSource(
         playbookIdx,
         { source: oldEdge.source, target: oldEdge.target, label },
+        newConnection.source
+      );
+    }
+    if (targetChanged) {
+      const srcKey = sourceChanged ? newConnection.source : oldEdge.source;
+      visualStore.retargetEdge(
+        playbookIdx,
+        { source: srcKey, target: oldEdge.target, label },
         newConnection.target
       );
     }
+  }
+
+  function handleConnect({ source, target }: { source: string; target: string }) {
+    if (!source || !target || source === target) return;
+    visualStore.addEdge(playbookIdx, { source, target });
+  }
+
+  function handleNodeDragStop({ targetNode }: { targetNode: Node | null }) {
+    if (!targetNode) return;
+    visualStore.setPosition(playbookIdx, targetNode.id, {
+      x: Math.round(targetNode.position.x),
+      y: Math.round(targetNode.position.y)
+    });
   }
 
   onMount(() => {
@@ -174,18 +246,45 @@
     return best && best.d < 220 ? best.id : null;
   }
 
+  /**
+   * Convert a screen-space (clientX, clientY) drop point into xyflow's
+   * flow-coordinate space by reading the canvas wrapper rect and
+   * inverting the `.svelte-flow__viewport` CSS transform.
+   *
+   * We avoid `useSvelteFlow()` here because it requires the call site
+   * to live INSIDE the SvelteFlow provider; PlaybookCanvas hosts the
+   * provider, so the hook isn't available at this scope.
+   */
+  function dropPointToFlow(clientX: number, clientY: number): { x: number; y: number } | null {
+    if (!dropTargetEl) return null;
+    const wrapper = dropTargetEl.getBoundingClientRect();
+    const viewport = dropTargetEl.querySelector('.svelte-flow__viewport') as HTMLElement | null;
+    let tx = 0, ty = 0, scale = 1;
+    if (viewport) {
+      const m = new DOMMatrixReadOnly(window.getComputedStyle(viewport).transform);
+      tx = m.m41; ty = m.m42; scale = m.a || 1;
+    }
+    return {
+      x: Math.round((clientX - wrapper.left - tx) / scale - NODE_WIDTH / 2),
+      y: Math.round((clientY - wrapper.top - ty) / scale - NODE_HEIGHT / 2)
+    };
+  }
+
+  // Match the autoLayout constants so the cursor lands on the node's center.
+  const NODE_WIDTH = 240;
+  const NODE_HEIGHT = 84;
+
   function handleDrop(e: DragEvent) {
     e.preventDefault();
     const payload = decode(e);
     if (!payload) return;
     const tpl = templateFor(payload);
     const predecessorId = findClosestNodeId(e.clientX, e.clientY);
-    // Position the new node near the drop point in canvas coords
-    // (xyflow handles its own viewport transform — we pass a hint
-    // and let auto-layout adjust for free if no precise drop pos).
+    const position = dropPointToFlow(e.clientX, e.clientY) ?? undefined;
     const newId = visualStore.addNode(playbookIdx, tpl, {
       predecessorId: predecessorId ?? undefined,
-      splice: false
+      splice: false,
+      position
     });
     if (newId) {
       const inserted = playbook.nodes.find((n) => n.id === newId);
@@ -212,13 +311,17 @@
     {nodes}
     {edges}
     {nodeTypes}
+    {edgeTypes}
     fitView
-    nodesDraggable={false}
-    nodesConnectable={false}
+    nodesDraggable
+    nodesConnectable
+    connectionRadius={140}
     onnodeclick={handleNodeClick}
     onpaneclick={() => onSelect?.(null)}
     onedgecontextmenu={handleEdgeContextMenu}
     onreconnect={handleReconnect}
+    onconnect={handleConnect}
+    onnodedragstop={handleNodeDragStop}
   >
     <Background />
     <MiniMap />

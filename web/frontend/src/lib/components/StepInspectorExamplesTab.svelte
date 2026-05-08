@@ -16,9 +16,10 @@
    */
   import { callMcpTool } from '../api';
   import type { VisualNode, VisualPlaybook } from '../api';
+  import { visualStore } from '../visualEditStore.svelte';
 
-  type Props = { node: VisualNode; playbook: VisualPlaybook };
-  let { node, playbook }: Props = $props();
+  type Props = { node: VisualNode; playbook: VisualPlaybook; playbookIdx: number };
+  let { node, playbook, playbookIdx }: Props = $props();
 
   type OpExample = { op_name: string; snippet: string; notes?: string };
   type OpExampleResult = { matches: OpExample[]; count: number; suggestion?: string };
@@ -110,6 +111,43 @@
       .finally(() => (loading = false));
   });
 
+  /** Minimal JSON syntax highlighter: tokenises keys, strings, numbers,
+   * booleans, and null. Returns HTML with span class names — Tailwind
+   * styles them via the `.fsrpb-json-*` rules at the bottom of the
+   * file. Escapes `<` so injection isn't possible. */
+  function highlightJson(raw: string): string {
+    let pretty = raw;
+    try { pretty = JSON.stringify(JSON.parse(raw), null, 2); }
+    catch {}
+    const escaped = pretty.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return escaped.replace(
+      /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g,
+      (m, str, colon, kw) => {
+        if (str && colon) return `<span class="fsrpb-json-key">${str}</span>${colon}`;
+        if (str) return `<span class="fsrpb-json-string">${str}</span>`;
+        if (kw) return `<span class="fsrpb-json-kw">${kw}</span>`;
+        return `<span class="fsrpb-json-num">${m}</span>`;
+      }
+    );
+  }
+
+  /** Apply an operation example's `{connector, operation, params}` JSON
+   * to the current node's arguments. Replaces connector/operation/params
+   * but preserves everything else (config, comment, for_each, etc.) so
+   * the user doesn't lose unrelated edits. */
+  function useOpExample(snippet: string) {
+    let parsed: Record<string, unknown>;
+    try { parsed = JSON.parse(snippet) as Record<string, unknown>; }
+    catch { copyHint = 'snippet not parseable'; setTimeout(() => (copyHint = null), 1400); return; }
+    const args: Record<string, unknown> = JSON.parse(JSON.stringify(node.arguments ?? {}));
+    if (typeof parsed.connector === 'string') args.connector = parsed.connector;
+    if (typeof parsed.operation === 'string') args.operation = parsed.operation;
+    if (parsed.params && typeof parsed.params === 'object') args.params = parsed.params;
+    visualStore.setArgs(playbookIdx, node.id, args);
+    copyHint = 'Applied to step';
+    setTimeout(() => (copyHint = null), 1400);
+  }
+
   async function copyToClipboard(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -144,20 +182,27 @@
       {opExamples?.suggestion ?? 'No examples in store yet.'}
     </p>
   {:else}
-    <ul class="mt-1 space-y-2">
+    <ul class="mt-2 space-y-3">
       {#each opExamples.matches as ex}
-        <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
-          <div class="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-            <span class="font-mono">{ex.op_name}</span>
-            <button
-              type="button"
-              class="rounded bg-[var(--brand)] px-1.5 py-0.5 text-[10px] font-medium text-white hover:opacity-90"
-              onclick={() => copyToClipboard(ex.snippet, 'Snippet')}
-            >Copy</button>
+        <li class="fsrpb-example-card overflow-hidden rounded-lg border border-[var(--border-soft)] bg-[var(--bg-elev)] shadow-sm transition-shadow hover:shadow">
+          <div class="flex items-center justify-between gap-2 border-b border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1.5">
+            <span class="truncate font-mono text-[12px] font-semibold text-[var(--text-default)]">{ex.op_name}</span>
+            <div class="flex flex-shrink-0 gap-1">
+              <button
+                type="button"
+                class="rounded border border-[var(--border-soft)] bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white transition-colors hover:opacity-90"
+                onclick={() => useOpExample(ex.snippet)}
+              >Use</button>
+              <button
+                type="button"
+                class="rounded border border-[var(--border-soft)] bg-transparent px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-canvas)]"
+                onclick={() => copyToClipboard(ex.snippet, 'Snippet')}
+              >Copy</button>
+            </div>
           </div>
-          <pre class="mt-1 max-h-40 overflow-auto rounded bg-[var(--bg-canvas)] p-1.5 text-[11px]">{ex.snippet}</pre>
+          <pre class="fsrpb-json max-h-56 overflow-auto px-3 py-2 text-[11px] leading-relaxed">{@html highlightJson(ex.snippet)}</pre>
           {#if ex.notes}
-            <div class="mt-1 text-[10px] text-[var(--text-faint)]">{ex.notes}</div>
+            <div class="border-t border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1 text-[10px] text-[var(--text-faint)]">{ex.notes}</div>
           {/if}
         </li>
       {/each}
@@ -201,3 +246,16 @@
     </ul>
   {/if}
 </section>
+
+
+<style>
+  .fsrpb-json {
+    background: var(--bg-canvas);
+    color: var(--text-default);
+    font-family: ui-monospace, "SF Mono", "Monaco", monospace;
+  }
+  :global(.fsrpb-json-key) { color: #93c5fd; font-weight: 600; }
+  :global(.fsrpb-json-string) { color: #86efac; }
+  :global(.fsrpb-json-num) { color: #fdba74; }
+  :global(.fsrpb-json-kw) { color: #c4b5fd; font-style: italic; }
+</style>

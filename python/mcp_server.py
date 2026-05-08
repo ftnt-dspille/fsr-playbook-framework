@@ -753,6 +753,168 @@ def _op_risk(op_name: str, category: str | None) -> str:
 # different route. Until then, each connector accumulates at most one dev copy
 # (FSR returns the same dev_id on repeat calls to edit_repo_connector).
 
+# ---------------------------------------------------------------------------
+# get_connector_icon
+# ---------------------------------------------------------------------------
+# In-process cache: connector name → {icon_small, icon_large, version}.
+# Backed by the SQLite `connector_icons` sidecar table for persistence
+# across process restarts. Icons are small base64 PNGs (~2–5 KB each)
+# and never change for a given connector version.
+_ICON_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _ensure_icons_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS connector_icons (
+            name        TEXT PRIMARY KEY,
+            version     TEXT NOT NULL,
+            icon_small  TEXT,
+            icon_large  TEXT,
+            fetched_at  INTEGER NOT NULL
+        )"""
+    )
+
+
+@mcp.tool()
+def get_connector_icon(connector: str) -> dict[str, Any]:
+    """Return the connector's icon_small / icon_large as base64 PNG strings.
+
+    Cache hierarchy:
+      1. in-process dict (instant)
+      2. `connector_icons` SQLite table (persists across restarts)
+      3. live FSR `/api/integration/connectors/<name>/<version>/?format=json`
+         (cold ~300 ms after the live client warms up; first call ~1.6 s
+         due to TLS + auth handshake)
+
+    Hit (3) → write through to (2) and (1).
+    """
+    cached = _ICON_CACHE.get(connector)
+    if cached:
+        return {"ok": True, "cached": "memory", **cached}
+
+    # SQLite-backed cache lookup
+    with _db() as conn:
+        _ensure_icons_table(conn)
+        row = conn.execute(
+            "SELECT version, icon_small, icon_large FROM connector_icons WHERE name=?",
+            (connector,),
+        ).fetchone()
+        if row:
+            out = {
+                "version": row["version"],
+                "icon_small": row["icon_small"],
+                "icon_large": row["icon_large"],
+            }
+            _ICON_CACHE[connector] = out
+            return {"ok": True, "cached": "disk", **out}
+        # Not cached — need the version to address the live endpoint.
+        ver_row = conn.execute(
+            "SELECT version FROM connectors WHERE name=?", (connector,)
+        ).fetchone()
+    if not ver_row:
+        return {"ok": False, "error": f"connector {connector!r} not found in store"}
+    version = ver_row["version"]
+
+    client = _live_client()
+    if client is None:
+        return {"ok": False, "error": "FSR instance not configured"}
+
+    try:
+        # FSR rejects GET on this endpoint ("Get method for this API
+        # is forbidden, Please use POST method for same API"), so we
+        # POST with an empty body — same pattern as the rest of the
+        # connector-detail callers in this module.
+        detail = client.post(
+            f"/api/integration/connectors/{connector}/{version}/?format=json", {}
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"live fetch failed: {exc}"}
+    if not isinstance(detail, dict):
+        return {"ok": False, "error": "unexpected response shape"}
+
+    out = {
+        "version": version,
+        "icon_small": detail.get("icon_small"),
+        "icon_large": detail.get("icon_large"),
+    }
+    # Persist for next time. Use INSERT OR REPLACE so a version bump
+    # transparently overwrites the stale icon row.
+    with _db() as conn:
+        _ensure_icons_table(conn)
+        conn.execute(
+            """INSERT OR REPLACE INTO connector_icons
+               (name, version, icon_small, icon_large, fetched_at)
+               VALUES (?, ?, ?, ?, strftime('%s','now'))""",
+            (connector, version, out["icon_small"], out["icon_large"]),
+        )
+        conn.commit()
+    _ICON_CACHE[connector] = out
+    return {"ok": True, "cached": "live", **out}
+
+
+# In-process cache for connector configurations. Configs change rarely
+# but can be added/removed by the user, so we don't persist to disk —
+# a server restart re-syncs.
+_CONFIG_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+@mcp.tool()
+def list_connector_configurations(connector: str,
+                                   refresh: bool = False) -> dict[str, Any]:
+    """List the configurations the user has set up for `connector`.
+
+    Source preference:
+      1. in-process cache
+      2. local `connectors.info_json` (captured at probe time —
+         includes a full `configuration` array with config_id, name,
+         default flag, the inline config dict, and live status)
+      3. live FSR fetch via `connector_configs.list_configurations`
+
+    `refresh=True` skips (1) and (2) and forces a live re-fetch — use
+    it after the user adds a configuration in another tab.
+    """
+    if not refresh and connector in _CONFIG_CACHE:
+        return {"ok": True, "source": "memory",
+                "configurations": _CONFIG_CACHE[connector]}
+
+    if not refresh:
+        # Prefer the locally-cached info_json — instant, and we already
+        # paid the network cost during the connector probe.
+        try:
+            with _db() as conn:
+                row = conn.execute(
+                    "SELECT info_json FROM connectors WHERE name=?",
+                    (connector,),
+                ).fetchone()
+            if row and row["info_json"]:
+                blob = json.loads(row["info_json"])
+                raw = blob.get("configuration") or []
+                configs = [
+                    {"config_id": c.get("config_id"),
+                     "name": c.get("name"),
+                     "default": bool(c.get("default"))}
+                    for c in raw
+                ]
+                if configs:
+                    _CONFIG_CACHE[connector] = configs
+                    return {"ok": True, "source": "sqlite",
+                            "configurations": configs}
+        except Exception:
+            # Fall through to live fetch on any parse / DB hiccup.
+            pass
+
+    try:
+        from connector_configs import list_configurations  # type: ignore
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"connector_configs unavailable: {exc}"}
+    try:
+        configs = list_configurations(connector)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"live fetch failed: {exc}"}
+    _CONFIG_CACHE[connector] = configs
+    return {"ok": True, "source": "live", "configurations": configs}
+
+
 @mcp.tool()
 def get_connector_source(connector: str, file: str = "operations.py") -> dict[str, Any]:
     """Fetch the Python source code for a connector from the live FSR instance.
@@ -2943,15 +3105,28 @@ def list_playbook_runs(playbook: str | None = None,
 # Picklists
 # ---------------------------------------------------------------------------
 
+_LIVE_CLIENT_CACHE: dict[str, Any] = {}
+
+
 def _live_client():
-    """Return a live FSR client or None if env not configured."""
+    """Return a live FSR client or None if env not configured.
+
+    Memoised per-process so we reuse one TLS-pooled session instead of
+    paying a fresh handshake on every tool call. Saves ~1.3 s per
+    icon/picklist fetch in practice.
+    """
+    if "client" in _LIVE_CLIENT_CACHE:
+        return _LIVE_CLIENT_CACHE["client"]
     try:
         from probes._env import get_client, get_config
     except Exception:  # noqa: BLE001
         return None
     if not get_config().is_live():
         return None
-    return get_client()
+    c = get_client()
+    if c is not None:
+        _LIVE_CLIENT_CACHE["client"] = c
+    return c
 
 
 @mcp.tool()
@@ -3440,6 +3615,158 @@ def step_through_playbook(yaml_text: str,
         "first_error": first_error,
         "steps_executed": len(trace),
     }
+
+
+@mcp.tool()
+def step_test(yaml_text: str,
+              step_id: str,
+              playbook: str | None = None,
+              input: dict[str, Any] | None = None,
+              execute_safe_ops: bool = True) -> dict[str, Any]:
+    """L4 single-step probe: render one step's args + (if safe) execute it.
+
+    Targeted variant of `step_through_playbook` — pinpoints a single step
+    by `id` (or by name with spaces→underscores). Useful for the visual
+    editor's per-node Verify tab where the agent / user wants to confirm
+    one step compiles and executes cleanly without walking the full
+    playbook.
+
+    Args:
+      yaml_text: simplified-IR YAML.
+      step_id: target step's `id:` field, or its `name:` (spaces collapse
+        to underscores) — whichever matches first.
+      playbook: which playbook to look in (defaults to the first).
+      input: vars.input.params.* for jinja rendering.
+      execute_safe_ops: if False, render only — never live-execute.
+
+    Returns:
+      `{ok, step_id, type, rendered_args, output, output_top_keys,
+        status, note}` — same per-step record shape `step_through_playbook`
+      emits, plus a `verification_recorded` flag when run_op fired.
+    """
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text) or {}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"yaml parse failed: {exc}"}
+
+    pbs = doc.get("playbooks") or []
+    if not pbs:
+        return {"ok": False, "error": "no playbooks in YAML"}
+    pb = next((p for p in pbs if p.get("name") == playbook), pbs[0])
+    steps = pb.get("steps") or []
+
+    target = None
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        if s.get("id") == step_id:
+            target = s
+            break
+        nm = (s.get("name") or "").replace(" ", "_")
+        if nm == step_id:
+            target = s
+            break
+    if target is None:
+        return {"ok": False, "error": f"step {step_id!r} not found"}
+
+    sid = target.get("id", step_id)
+    stype = target.get("type", "")
+    raw_args = target.get("arguments") or target.get("args") or {}
+    vars_ctx: dict[str, Any] = {"input": {"params": dict(input or {})},
+                                 "steps": {}}
+
+    client = _live_client()
+    render_errors: list[str] = []
+
+    def _render(value: Any, path: str = "") -> Any:
+        if isinstance(value, str):
+            if "{{" not in value or client is None:
+                return value
+            try:
+                out = client.post(
+                    "/api/wf/api/jinja-editor/",
+                    data={"template": value,
+                          "values": {"vars": vars_ctx}},
+                )
+                if isinstance(out, dict):
+                    for k in ("result", "output", "rendered", "value"):
+                        if k in out:
+                            return out[k]
+                    return out
+                return out if out is not None else value
+            except Exception as exc:  # noqa: BLE001
+                render_errors.append(f"{path}: {exc}")
+                return value
+        if isinstance(value, dict):
+            return {k: _render(v, f"{path}.{k}" if path else k)
+                    for k, v in value.items()}
+        if isinstance(value, list):
+            return [_render(v, f"{path}[{i}]") for i, v in enumerate(value)]
+        return value
+
+    rendered = _render(raw_args) if isinstance(raw_args, dict) else raw_args
+
+    record: dict[str, Any] = {
+        "ok": not render_errors,
+        "step_id": sid,
+        "type": stype,
+        "rendered_args": rendered,
+        "output": None,
+        "output_top_keys": [],
+        "status": "rendered",
+        "note": "",
+        "verification_recorded": False,
+    }
+    if render_errors:
+        record["status"] = "render_failed"
+        record["note"] = "; ".join(render_errors[:3])
+        return record
+
+    if not execute_safe_ops or stype != "connector":
+        return record
+
+    cn = (rendered.get("connector") if isinstance(rendered, dict) else None) \
+        or target.get("connector")
+    opn = (rendered.get("operation") if isinstance(rendered, dict) else None) \
+        or target.get("operation")
+    if not (cn and opn):
+        record["note"] = "connector/operation missing — render-only"
+        return record
+
+    cat = _safe_op_category(cn, opn)
+    risk = _op_risk(opn, cat)
+    if risk != "safe":
+        record["status"] = "skipped"
+        record["note"] = f"non-safe op (risk={risk}); not executed"
+        return record
+
+    try:
+        op_result = run_op(connector=cn, op=opn,
+                           params=rendered if isinstance(rendered, dict) else {},
+                           confirm=False)
+    except Exception as exc:  # noqa: BLE001
+        _record_verification(cn, opn, "step_test_fail", str(exc)[:2000])
+        record["ok"] = False
+        record["status"] = "exec_failed"
+        record["note"] = str(exc)
+        record["verification_recorded"] = True
+        return record
+
+    if op_result.get("ok"):
+        record["output"] = op_result.get("data")
+        record["output_top_keys"] = op_result.get("output_top_keys") or []
+        record["status"] = "executed"
+        _record_verification(cn, opn, "step_test_pass",
+                             f"step {sid!r} executed via step_test")
+    else:
+        record["ok"] = False
+        record["status"] = "exec_failed"
+        record["note"] = op_result.get("message", "") or "run_op returned ok=false"
+        _record_verification(cn, opn, "step_test_fail",
+                             record["note"][:2000])
+    record["verification_recorded"] = True
+    return record
 
 
 # ---------------------------------------------------------------------------
