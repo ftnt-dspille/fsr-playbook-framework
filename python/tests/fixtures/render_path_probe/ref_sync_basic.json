@@ -1,0 +1,89 @@
+{
+  "scenario": "ref_sync_basic",
+  "playbook_name": "rp_ref_sync_parent",
+  "description": "sync workflow_reference, child sets var, parent reads it",
+  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_ref_sync_child\"\n    description: \"child for rp_ref_sync_parent\"\n    is_active: true\n    steps:\n      - name: \"ChildStart\"\n        type: start\n        next: \"Compute\"\n      - name: \"Compute\"\n        type: set_variable\n        vars:\n          product: 42\n          child_marker: \"ran\"\n  - name: \"rp_ref_sync_parent\"\n    description: \"parent calls child sync, reads vars.steps.<ref>\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"Call\"\n      - name: \"Call\"\n        type: workflow_reference\n        arguments:\n          target: rp_ref_sync_child\n          apply_async: false\n          pass_parent_env: false\n          pass_input_record: false\n        next: \"Capture\"\n      - name: \"Capture\"\n        type: set_variable\n        vars:\n          child_product: \"{{ vars.steps.Call.product }}\"\n          child_seen:    \"{{ vars.steps.Call }}\"\n",
+  "run_status": "finished",
+  "env": {
+    "debug": true,
+    "input": {
+      "params": {},
+      "records": []
+    },
+    "request": {
+      "uri": "https://10.99.249.205/api/triggers/1/notrigger/f9bb0ef5-6845-51c2-ad3b-3ea850b5e33e",
+      "method": "POST",
+      "baseUri": "https://10.99.249.205",
+      "headers": {
+        "host": "10.99.249.205",
+        "proxy": "",
+        "accept": "*/*",
+        "connection": "keep-alive",
+        "user-agent": "python-requests/2.33.1",
+        "content-type": "application/json",
+        "authorization": "*******",
+        "content-length": "83",
+        "x-php-ob-level": "1",
+        "accept-encoding": "gzip, deflate"
+      },
+      "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce"
+    },
+    "task_id": "c3a5039a-d271-494b-9f56-833c271b0e9f",
+    "auth_info": {
+      "auth_method": "CS HMAC"
+    },
+    "resources": {},
+    "child_seen": {
+      "debug": true,
+      "product": 42,
+      "task_id": "c3a5039a-d271-494b-9f56-833c271b0e9f",
+      "child_marker": "ran"
+    },
+    "globalMock": false,
+    "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+    "last_run_at": null,
+    "child_product": 42,
+    "useMockOutput": false,
+    "mockPlaybookId": null
+  },
+  "steps": [
+    {
+      "name": "Call",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "product": 42,
+        "task_id": "c3a5039a-d271-494b-9f56-833c271b0e9f",
+        "child_marker": "ran"
+      }
+    },
+    {
+      "name": "Capture",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "c3a5039a-d271-494b-9f56-833c271b0e9f",
+        "child_seen": {
+          "debug": true,
+          "product": 42,
+          "task_id": "c3a5039a-d271-494b-9f56-833c271b0e9f",
+          "child_marker": "ran"
+        },
+        "child_product": 42
+      }
+    },
+    {
+      "name": "Trigger",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "c3a5039a-d271-494b-9f56-833c271b0e9f",
+        "globalMock": false,
+        "useMockOutput": false
+      }
+    }
+  ]
+}

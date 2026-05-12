@@ -65,3 +65,43 @@ playbooks:
     defaults = [c for c in conds if c.get("default")]
     assert len(defaults) == 1
     assert defaults[0]["option"].startswith("Else")
+
+
+def test_debug_flag_round_trips_through_emitter(db_path):
+    """`debug:` on a playbook reaches the FSR JSON. Default is False;
+    explicit True must flow through parser → IR → emitter."""
+    yaml_text = (
+        'collection: "_test_debug"\n'
+        'description: ""\n'
+        'playbooks:\n'
+        '  - name: "with_debug"\n'
+        '    description: ""\n'
+        '    debug: true\n'
+        '    is_active: true\n'
+        '    steps:\n'
+        '      - name: start\n'
+        '        type: start\n'
+    )
+    r = compile_yaml(yaml_text, db_path)
+    assert r.ok, r.errors
+    wf = r.fsr_json["data"][0]["workflows"][0]
+    assert wf["debug"] is True
+    assert wf["isActive"] is True
+
+
+def test_debug_flag_defaults_to_false(db_path):
+    """Legacy YAML without `debug:` keeps emitting `debug: false`."""
+    yaml_text = (
+        'collection: "_test_debug_default"\n'
+        'description: ""\n'
+        'playbooks:\n'
+        '  - name: "no_debug"\n'
+        '    description: ""\n'
+        '    steps:\n'
+        '      - name: start\n'
+        '        type: start\n'
+    )
+    r = compile_yaml(yaml_text, db_path)
+    assert r.ok, r.errors
+    wf = r.fsr_json["data"][0]["workflows"][0]
+    assert wf["debug"] is False

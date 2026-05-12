@@ -110,7 +110,27 @@
   async function onNewBlank() {
     const name = prompt('New draft name:');
     if (!name) return;
-    const r = await playbookStore.createDraft(name.trim(), '');
+    // Scaffold new drafts with sensible defaults: active so trigger
+    // pushes actually fire, debug so authors see step output without
+    // flipping a knob. Both can be overridden via the inspector once
+    // the playbook is in production.
+    const trimmed = name.trim();
+    const safe = trimmed.replace(/"/g, '\\"');
+    const yaml = [
+      `collection: "${safe}"`,
+      'description: ""',
+      '',
+      'playbooks:',
+      `  - name: "${safe}"`,
+      '    description: ""',
+      '    is_active: true',
+      '    debug: true',
+      '    steps:',
+      '      - name: start',
+      '        type: start',
+      '',
+    ].join('\n');
+    const r = await playbookStore.createDraft(trimmed, yaml);
     if (!r.ok) actionError = r.message ?? 'create failed';
   }
 

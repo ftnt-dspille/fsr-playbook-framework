@@ -17,6 +17,7 @@
   import StepInspector from '$lib/components/StepInspector.svelte';
   import StepPalette from '$lib/components/StepPalette.svelte';
   import EditorToolbar from '$lib/components/EditorToolbar.svelte';
+  import PlaybookGuards from '$lib/components/PlaybookGuards.svelte';
   import { visualStore } from '$lib/visualEditStore.svelte';
 
   type Props = {
@@ -71,6 +72,19 @@
   $effect(() => {
     if (selectedNodeId) inspectorOpen = true;
   });
+
+  // Drain cross-component focus signals — e.g. the diagnostics drawer
+  // calling `visualStore.selectStepByName(step_id)` when the user
+  // clicks a render-path diagnostic row. We mirror the pending tuple
+  // into our local selection state, which auto-opens the inspector
+  // via the effect above.
+  $effect(() => {
+    const pending = visualStore.state.pendingSelection;
+    if (!pending) return;
+    activePbIdx = pending.playbookIdx;
+    selectedNodeId = pending.nodeId;
+    visualStore.consumePendingSelection();
+  });
 </script>
 
 <div class="flex h-full min-h-0 flex-1 flex-col">
@@ -101,6 +115,7 @@
         />
       {/if}
       {#if graph && graph.playbooks[activePbIdx]}
+        <PlaybookGuards playbook={graph.playbooks[activePbIdx]} />
         <PlaybookCanvas
           playbook={graph.playbooks[activePbIdx]}
           playbookIdx={activePbIdx}

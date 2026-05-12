@@ -8,6 +8,7 @@
   import StepInspectorExamplesTab from './StepInspectorExamplesTab.svelte';
   import StepInspectorBranchesTab from './StepInspectorBranchesTab.svelte';
   import StepInspectorVerifyTab from './StepInspectorVerifyTab.svelte';
+  import StepDraftModal from './StepDraftModal.svelte';
   import { visualStore } from '../visualEditStore.svelte';
 
   type Props = {
@@ -55,7 +56,23 @@
   let showArgs = $derived(
     node ? node.family !== 'terminal' && node.type !== 'decision' : false
   );
-  let showExamples = $derived(node ? node.family === 'connector_op' || node.family === 'record_crud' : false);
+  // Examples tab is shown for any step type that has corpus-mined
+  // skeletons available — connector_op + record_crud use the live
+  // operation/Jinja examples; everything else falls back to the new
+  // /api/ref/step-examples/<type> clusters with deterministic English
+  // summaries. The set below mirrors STEP_TYPE_TO_CORPUS in
+  // web/backend/step_examples.py.
+  const STEP_TYPES_WITH_EXAMPLES = new Set([
+    'decision', 'manual_input', 'set_variable', 'find_record',
+    'create_record', 'insert_record', 'update_record', 'delete_record',
+    'ingest_bulk_feed', 'delay', 'code_snippet', 'workflow_reference',
+    'start_on_create', 'start_on_update', 'start',
+    'manual_action', 'api_call'
+  ]);
+  let showExamples = $derived(node
+    ? node.family === 'connector_op' || node.family === 'record_crud'
+      || STEP_TYPES_WITH_EXAMPLES.has(node.type)
+    : false);
   let showBranches = $derived(node?.type === 'decision' || node?.type === 'manual_input');
   let showVerify = $derived(node ? node.family !== 'terminal' : false);
 
@@ -75,6 +92,45 @@
     ...(showVerify ? [{ key: 'verify' as Tab, label: 'Verify' }] : []),
     { key: 'raw', label: 'Raw' }
   ]);
+
+  // AI step drafter — same set the backend supports (mirrors STEP_INTROS
+  // in `web/backend/step_drafter.py`). Surfaces a "✨ Describe" button
+  // beside the step name when available.
+  const DRAFTABLE_TYPES = new Set([
+    'decision', 'manual_input', 'find_record',
+    'create_record', 'update_record',
+    'set_variable', 'delay', 'workflow_reference', 'code_snippet',
+    'raise_exception', 'terminate', 'assert',
+    'start_on_create', 'start_on_update', 'start',
+    'manual_action', 'api_call'
+  ]);
+  let draftOpen = $state(false);
+  let canDraft = $derived(node ? DRAFTABLE_TYPES.has(node.type) : false);
+
+  /** Pull the active module name from the node's args — only relevant
+   * for trigger / record_crud step types where the drafter wants the
+   * field schema. Returns null otherwise. */
+  function activeModule(): string | null {
+    if (!node) return null;
+    const a = (node.arguments ?? {}) as Record<string, unknown>;
+    if (node.family === 'trigger') {
+      const r = a.resource as string | undefined;
+      return r ? r.split('?', 1)[0] : null;
+    }
+    if (node.family === 'record_crud') {
+      const m = a.module as string | undefined;
+      if (m) return m.split('?', 1)[0];
+      const c = a.collection as string | undefined;
+      if (c) return c.replace(/^\/api\/(?:3|ingest-feeds)\//, '').split('?', 1)[0];
+    }
+    return null;
+  }
+
+  function applyDraft(next: Record<string, unknown>) {
+    if (!node) return;
+    visualStore.setArgs(playbookIdx, node.id, next);
+    draftOpen = false;
+  }
 </script>
 
 <aside class="flex h-full w-96 flex-col border-l border-[var(--border-soft)] bg-[var(--bg-canvas)]">
@@ -92,6 +148,15 @@
           oninput={renameNode}
           class="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold text-[var(--text-default)] hover:border-[var(--border-soft)] focus:border-[var(--brand)] focus:outline-none"
         />
+        {#if canDraft}
+          <button
+            type="button"
+            aria-label="Describe step"
+            title="Describe what you want — AI drafts the args"
+            class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-default)] hover:bg-[var(--bg-canvas)]"
+            onclick={() => (draftOpen = true)}
+          >✨ Describe</button>
+        {/if}
         <button
           type="button"
           aria-label="Delete step"
@@ -119,7 +184,7 @@
 
     <div class="flex-1 overflow-auto px-4 py-3 text-sm">
       {#if activeTab === 'args'}
-        <StepInspectorArgsTab {node} {playbookIdx} />
+        <StepInspectorArgsTab {node} {playbook} {playbookIdx} />
       {:else if activeTab === 'examples'}
         <StepInspectorExamplesTab {node} {playbook} {playbookIdx} />
       {:else if activeTab === 'branches'}
@@ -156,3 +221,12 @@
     </div>
   {/if}
 </aside>
+
+{#if draftOpen && node}
+  <StepDraftModal
+    {node}
+    module={activeModule()}
+    onApply={applyDraft}
+    onClose={() => (draftOpen = false)}
+  />
+{/if}

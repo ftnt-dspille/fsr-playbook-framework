@@ -80,7 +80,7 @@ def build_step_types_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> P
     parts.append("**Schema completeness caveat**: the `arguments` blob shown per step "
                  "type is what the API returned — it's a partial schema (often just a "
                  "`script` pointer + pre-bound args). To get canonical Python signatures "
-                 "for each step's celery handler, run `scripts/dump_step_types.py` on "
+                 "for each step's celery handler, run `scripts/internal/dump_step_types.py` on "
                  "the FSR appliance and ingest the result. Until then, the **examples** "
                  "section per step is the most reliable guide to what `arguments` should "
                  "look like.")

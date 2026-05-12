@@ -75,6 +75,11 @@ class Playbook:
     description: str = ""
     tag: str = ""
     is_active: bool = False
+    # Verbose runtime tracing. FSR's workflow engine writes one log
+    # line per step + a payload dump when this is true; keep off for
+    # production but on for new visual-editor drafts so authors see
+    # their step output without flipping a knob.
+    debug: bool = False
     trigger: str = "start"           # short-name short-cut for the trigger step type
     # Explicit trigger step id. If unset, emitter falls back to "first step
     # whose type is 'start'". Decompiled playbooks always set this — they

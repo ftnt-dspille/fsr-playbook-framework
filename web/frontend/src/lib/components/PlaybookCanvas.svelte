@@ -316,6 +316,8 @@
     nodesDraggable
     nodesConnectable
     connectionRadius={140}
+    colorMode="dark"
+    proOptions={{ hideAttribution: true }}
     onnodeclick={handleNodeClick}
     onpaneclick={() => onSelect?.(null)}
     onedgecontextmenu={handleEdgeContextMenu}
@@ -324,7 +326,14 @@
     onnodedragstop={handleNodeDragStop}
   >
     <Background />
-    <MiniMap />
+    <MiniMap
+      pannable
+      zoomable
+      maskColor="rgba(0, 0, 0, 0.6)"
+      bgColor="var(--bg-elevated, #1a1a1a)"
+      nodeColor="var(--accent, #4f46e5)"
+      nodeStrokeColor="var(--border, #333)"
+    />
     <Controls />
   </SvelteFlow>
 </div>

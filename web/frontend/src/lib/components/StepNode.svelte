@@ -9,6 +9,7 @@
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import type { VisualNode } from '../api';
   import { visualStore } from '../visualEditStore.svelte';
+  import { playbookActions } from '../playbookActions.svelte';
   import ConnectorIcon from './ConnectorIcon.svelte';
 
   let props: NodeProps = $props();
@@ -107,6 +108,32 @@
     tested_fail: '#dc2626',
     seen: '#9ca3af'
   };
+
+  /** Worst-severity render-path diagnostic for this node, if any. The
+   * analyzer emits step_ids matching either the raw `id:` or the
+   * jkey form (name with spaces→underscores), so we accept both. */
+  let diagnosticBadge = $derived.by(() => {
+    const map = playbookActions.diagnosticsByStep;
+    if (map.size === 0) return null;
+    const jkey = (node.name ?? node.id ?? '').replace(/\s+/g, '_');
+    const diags = map.get(jkey) ?? map.get(node.id) ?? [];
+    if (diags.length === 0) return null;
+    const worst = diags.reduce((acc, d) =>
+      (d.severity === 'error' ? 'error'
+       : (d.severity === 'warning' && acc !== 'error') ? 'warning'
+       : acc), 'info' as 'error' | 'warning' | 'info');
+    return {
+      severity: worst,
+      count: diags.length,
+      sample: diags[0].message,
+      kind: diags[0].kind
+    };
+  });
+  const DIAG_COLOR: Record<string, string> = {
+    error: '#dc2626',
+    warning: '#f59e0b',
+    info: '#9ca3af'
+  };
 </script>
 
 <div
@@ -129,14 +156,27 @@
   <Handle type="source" position={Position.Left}   id="left-s" />
   <div class="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide" style="color: {style.border}">
     <span>{style.label}</span>
-    {#if verification}
-      <span
-        class="inline-block h-2 w-2 rounded-full"
-        title="verification: {verification.status}"
-        style="background: {VERIF_DOT[verification.status] ?? '#9ca3af'}"
-        aria-label="verification {verification.status}"
-      ></span>
-    {/if}
+    <span class="flex items-center gap-1">
+      {#if diagnosticBadge}
+        <span
+          class="inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] font-bold text-white"
+          style="background: {DIAG_COLOR[diagnosticBadge.severity]}"
+          title={`${diagnosticBadge.count} ${diagnosticBadge.kind.replace(/_/g, ' ')} — ${diagnosticBadge.sample}`}
+          aria-label={`${diagnosticBadge.count} render-path ${diagnosticBadge.severity}`}
+        >
+          {diagnosticBadge.severity === 'error' ? '✗' : diagnosticBadge.severity === 'warning' ? '!' : '·'}
+          {#if diagnosticBadge.count > 1}<span>{diagnosticBadge.count}</span>{/if}
+        </span>
+      {/if}
+      {#if verification}
+        <span
+          class="inline-block h-2 w-2 rounded-full"
+          title="verification: {verification.status}"
+          style="background: {VERIF_DOT[verification.status] ?? '#9ca3af'}"
+          aria-label="verification {verification.status}"
+        ></span>
+      {/if}
+    </span>
   </div>
   <div class="mt-1 flex items-center gap-2">
     {#if node.family === 'connector_op' && node.arguments?.connector}

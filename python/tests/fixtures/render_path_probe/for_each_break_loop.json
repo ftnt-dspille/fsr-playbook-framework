@@ -1,0 +1,114 @@
+{
+  "scenario": "for_each_break_loop",
+  "playbook_name": "rp_for_each_brk",
+  "description": "for_each with break_loop on item==3",
+  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_for_each_brk\"\n    description: \"for_each break_loop\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"Loop\"\n      - name: \"Loop\"\n        type: set_variable\n        for_each:\n          item: \"{{ [1, 2, 3, 4, 5] }}\"\n          parallel: false\n          break_loop: \"{{ vars.item == 3 }}\"\n        vars:\n          current: \"{{ vars.item }}\"\n        next: \"Capture\"\n      - name: \"Capture\"\n        type: set_variable\n        vars:\n          loop_seen: \"{{ vars.steps.Loop }}\"\n          loop_current: \"{{ vars.steps.Loop.current }}\"\n",
+  "run_status": "finished",
+  "env": {
+    "debug": true,
+    "input": {
+      "params": {},
+      "records": []
+    },
+    "current": 3,
+    "request": {
+      "uri": "https://10.99.249.205/api/triggers/1/notrigger/62ff0bd6-270c-5dcc-9143-d3c4278bac31",
+      "method": "POST",
+      "baseUri": "https://10.99.249.205",
+      "headers": {
+        "host": "10.99.249.205",
+        "proxy": "",
+        "accept": "*/*",
+        "connection": "keep-alive",
+        "user-agent": "python-requests/2.33.1",
+        "content-type": "application/json",
+        "authorization": "*******",
+        "content-length": "83",
+        "x-php-ob-level": "1",
+        "accept-encoding": "gzip, deflate"
+      },
+      "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce"
+    },
+    "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900",
+    "auth_info": {
+      "auth_method": "CS HMAC"
+    },
+    "loop_seen": [
+      {
+        "current": 1,
+        "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+      },
+      {
+        "current": 2,
+        "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+      },
+      {
+        "current": 3,
+        "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+      }
+    ],
+    "resources": {},
+    "globalMock": false,
+    "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+    "last_run_at": null,
+    "loop_current": 3,
+    "useMockOutput": false,
+    "mockPlaybookId": null
+  },
+  "steps": [
+    {
+      "name": "Capture",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900",
+        "loop_seen": [
+          {
+            "current": 1,
+            "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+          },
+          {
+            "current": 2,
+            "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+          },
+          {
+            "current": 3,
+            "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+          }
+        ],
+        "loop_current": 3
+      }
+    },
+    {
+      "name": "Loop",
+      "type_name": null,
+      "status": "finished",
+      "result": [
+        {
+          "current": 1,
+          "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+        },
+        {
+          "current": 2,
+          "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+        },
+        {
+          "current": 3,
+          "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900"
+        }
+      ]
+    },
+    {
+      "name": "Trigger",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "fc873d20-bcf8-41a2-b076-c1f550098900",
+        "globalMock": false,
+        "useMockOutput": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "scenario": "step_condition_falsy",
+  "playbook_name": "rp_cond_false",
+  "description": "step with condition: false is skipped",
+  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_cond_false\"\n    description: \"condition falsy\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"Gated\"\n      - name: \"Gated\"\n        type: code_snippet\n        arguments:\n          condition: \"{{ false }}\"\n          code: \"return {'ran': 'yes'}\"\n        next: \"After\"\n      - name: \"After\"\n        type: set_variable\n        vars:\n          saw_gated: \"{{ vars.steps.Gated }}\"\n          saw_gated_ran: \"{{ vars.steps.Gated.ran | default('UNSET') }}\"\n",
+  "run_status": "failed",
+  "env": {
+    "debug": true,
+    "input": {
+      "params": {},
+      "records": []
+    },
+    "result": {
+      "Error message": "\n CS-INTEGRATION-5: Error occurred while executing the connector action ERROR :: 'return' outside function (code_run, line 1) Call for URL: https://localhost:9595/integration/execute/ failed with status code 400 \n"
+    },
+    "request": {
+      "uri": "https://10.99.249.205/api/triggers/1/notrigger/52581c04-5f7f-53ff-ac9f-9c536fd69ea5",
+      "data": [],
+      "method": "POST",
+      "baseUri": "https://10.99.249.205",
+      "headers": {
+        "host": "10.99.249.205",
+        "proxy": "",
+        "accept": "*/*",
+        "connection": "keep-alive",
+        "user-agent": "python-requests/2.33.1",
+        "content-type": "application/json",
+        "authorization": "*******",
+        "content-length": "83",
+        "x-php-ob-level": "1",
+        "accept-encoding": "gzip, deflate"
+      },
+      "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce"
+    },
+    "task_id": "90d9180e-afef-44e3-9756-ad78f4fb2693",
+    "auth_info": {
+      "auth_method": "CS HMAC"
+    },
+    "__schedule": {
+      "email": null
+    },
+    "audit_info": {
+      "cyops_playbook_iri": "/api/3/workflows/52581c04-5f7f-53ff-ac9f-9c536fd69ea5",
+      "cyops_playbook_name": "rp_cond_false"
+    },
+    "globalMock": false,
+    "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+    "last_run_at": null,
+    "useMockOutput": false,
+    "mockPlaybookId": null
+  },
+  "steps": [
+    {
+      "name": "After",
+      "type_name": null,
+      "status": "incipient",
+      "result": {}
+    },
+    {
+      "name": "Gated",
+      "type_name": null,
+      "status": "failed",
+      "result": {
+        "Error message": "\n CS-INTEGRATION-5: Error occurred while executing the connector action ERROR :: 'return' outside function (code_run, line 1) Call for URL: https://localhost:9595/integration/execute/ failed with status code 400 \n"
+      }
+    },
+    {
+      "name": "Trigger",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "90d9180e-afef-44e3-9756-ad78f4fb2693",
+        "globalMock": false,
+        "useMockOutput": false
+      }
+    }
+  ]
+}

@@ -28,6 +28,20 @@
     err = null;
     try {
       snapshot = await getProviders();
+      // Default `selected` to whichever provider is currently active
+      // server-side, falling back to whatever the user already chose.
+      // Without this the page mounted on a hardcoded "lmstudio" even
+      // when the user had been using Anthropic — the form looked
+      // empty/stale and any model-list fetch hit the wrong backend.
+      const active = snapshot.active_provider;
+      if (active && snapshot.providers[active]) {
+        selected = active;
+      } else if (!snapshot.providers[selected]) {
+        // The hardcoded default isn't registered (e.g. headless
+        // install). Fall back to the first provider the server knows.
+        const first = Object.keys(snapshot.providers)[0];
+        if (first) selected = first;
+      }
       hydrateForm();
     } catch (e: any) {
       err = e?.message ?? String(e);

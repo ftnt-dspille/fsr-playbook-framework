@@ -95,11 +95,11 @@ backend.
 
 ## 5. Pre-commit hook
 
-`scripts/pre-commit.fsrpb.sh` runs `validate` + `resolve` against
+`scripts/external/pre-commit.fsrpb.sh` runs `validate` + `resolve` against
 every staged playbook YAML. Install:
 
 ```bash
-ln -s ../../scripts/pre-commit.fsrpb.sh .git/hooks/pre-commit
+ln -s ../../scripts/external/pre-commit.fsrpb.sh .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 

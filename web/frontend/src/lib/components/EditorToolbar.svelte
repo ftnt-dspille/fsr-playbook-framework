@@ -117,6 +117,13 @@
   >Validate</button>
   <button
     type="button"
+    class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 hover:bg-[var(--bg-canvas)] disabled:opacity-50"
+    onclick={() => playbookActions.analyze()}
+    disabled={playbookActions.analyzeBusy}
+    title="Render-path validator — simulate offline and flag data-access bugs"
+  >{playbookActions.analyzeBusy ? 'Analyzing…' : 'Analyze'}</button>
+  <button
+    type="button"
     class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 hover:bg-[var(--bg-canvas)]"
     onclick={onCompile}
     title="Compile to FortiSOAR JSON"
@@ -140,6 +147,20 @@
       {#if playbookActions.errorCount > 0}<span class="text-red-600 dark:text-red-400">{playbookActions.errorCount} err</span>{/if}
       {#if playbookActions.errorCount > 0 && playbookActions.warningCount > 0}<span class="text-[var(--text-faint)]"> · </span>{/if}
       {#if playbookActions.warningCount > 0}<span class="text-amber-600 dark:text-amber-400">{playbookActions.warningCount} warn</span>{/if}
+    </button>
+  {/if}
+
+  {#if playbookActions.analyzeErrorCount > 0 || playbookActions.analyzeWarningCount > 0}
+    <button
+      type="button"
+      class="ml-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 text-[10px] font-medium hover:bg-[var(--bg-canvas)]"
+      onclick={() => onShowDrawer?.('diagnostics')}
+      title="Open diagnostics drawer (render path)"
+    >
+      <span class="text-[var(--text-faint)]">render</span>
+      {#if playbookActions.analyzeErrorCount > 0}<span class="ml-1 text-red-600 dark:text-red-400">{playbookActions.analyzeErrorCount} err</span>{/if}
+      {#if playbookActions.analyzeErrorCount > 0 && playbookActions.analyzeWarningCount > 0}<span class="text-[var(--text-faint)]"> · </span>{/if}
+      {#if playbookActions.analyzeWarningCount > 0}<span class="text-amber-600 dark:text-amber-400">{playbookActions.analyzeWarningCount} warn</span>{/if}
     </button>
   {/if}
 </div>

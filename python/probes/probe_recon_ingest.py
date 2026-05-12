@@ -6,7 +6,7 @@ Usage:
 Reads:
   A1_routes_full.txt           — Symfony route table
   D1_function_map_live.json    — workflow.eval.FUNCTION_MAP dump
-  scripts/workflow_urls.log    — Django workflow service url patterns (if present)
+  scripts/internal/workflow_urls.log    — Django workflow service url patterns (if present)
 
 Writes:
   api_endpoints                — one row per route discovered
@@ -123,9 +123,9 @@ def ingest(recon_dir: Path) -> dict:
             except json.JSONDecodeError:
                 pass
 
-        # Django urls (optional — comes from older scripts/dump_workflow_urls.py output)
+        # Django urls (optional — comes from older scripts/internal/dump_workflow_urls.py output)
         for p in [recon_dir / "G2_workflow_urlconfs.txt",
-                  Path("scripts/workflow_urls.log")]:
+                  Path("scripts/internal/workflow_urls.log")]:
             if p.exists():
                 for r in parse_django_urls(p.read_text()):
                     upsert_endpoint(

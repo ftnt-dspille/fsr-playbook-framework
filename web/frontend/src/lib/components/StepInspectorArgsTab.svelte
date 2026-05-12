@@ -16,9 +16,119 @@
   import ConnectorIcon from './ConnectorIcon.svelte';
   import ConnectorPicker from './ConnectorPicker.svelte';
   import OperationPicker from './OperationPicker.svelte';
+  import FilterTreeEditor from './FilterTreeEditor.svelte';
+  import RelationPicker from './RelationPicker.svelte';
+  import MonacoCode from './MonacoCode.svelte';
+  import { summarizeTrigger, summarizeFind } from '../filterSummary';
 
-  type Props = { node: VisualNode; playbookIdx: number };
-  let { node, playbookIdx }: Props = $props();
+  type Props = {
+    node: VisualNode;
+    playbookIdx: number;
+    /** Active VisualPlaybook; needed for the manual_input buttons preview
+     * (we render the outgoing branch labels at the bottom of the form
+     * builder). Optional so other call sites that don't have one yet
+     * keep working. */
+    playbook?: import('../api').VisualPlaybook | null;
+  };
+  let { node, playbookIdx, playbook = null }: Props = $props();
+
+  // Modules + per-module field catalog. Backed by the trained
+  // reference store via /api/ref/modules + /api/ref/modules/{m}/fields.
+  // Cached at module-scope on first load; the inspector typically only
+  // touches one or two modules per session.
+  type ModuleSummary = { name: string; label: string | null; plural: string | null };
+  type ModuleField = {
+    name: string;
+    title: string | null;
+    type: string;
+    required: boolean;
+    picklist_options: string | null;
+    tooltip: string | null;
+    operators: string[];
+  };
+  let allModules = $state<ModuleSummary[]>([]);
+  let modulesLoaded = $state(false);
+  let modulesLoading = $state(false);
+  let fieldsByModule = $state<Record<string, ModuleField[]>>({});
+  let fieldsLoadingFor = $state<string | null>(null);
+
+  async function ensureModulesLoaded() {
+    if (modulesLoaded || modulesLoading) return;
+    modulesLoading = true;
+    try {
+      const r = await fetch('/api/ref/modules');
+      if (r.ok) allModules = await r.json();
+      modulesLoaded = true;
+    } catch { /* trained store missing — leave list empty */ }
+    finally { modulesLoading = false; }
+  }
+
+  async function ensureFieldsLoaded(module: string) {
+    if (!module) return;
+    if (fieldsByModule[module] !== undefined) return;
+    if (fieldsLoadingFor === module) return;
+    fieldsLoadingFor = module;
+    try {
+      const r = await fetch(`/api/ref/modules/${encodeURIComponent(module)}/fields`);
+      if (r.ok) {
+        const data = await r.json();
+        fieldsByModule = { ...fieldsByModule, [module]: data.fields ?? [] };
+      } else {
+        // Cache the empty result so we don't retry on every keystroke.
+        fieldsByModule = { ...fieldsByModule, [module]: [] };
+      }
+    } catch {
+      fieldsByModule = { ...fieldsByModule, [module]: [] };
+    } finally {
+      if (fieldsLoadingFor === module) fieldsLoadingFor = null;
+    }
+  }
+
+  // Lazy-load on mount when the node is a trigger / record_crud — the
+  // dropdown wants the list ready before the user clicks.
+  $effect(() => {
+    if (node.family === 'trigger' || node.family === 'record_crud') {
+      void ensureModulesLoaded();
+    }
+  });
+
+  /** Strip the `?$limit=30` (and any other query-string) tail that
+   * FindRecords appends to its `module:` arg. The bare module name is
+   * what `/api/ref/modules/{m}/fields` expects, and what the user sees
+   * in the picker. */
+  function bareModule(s: string | undefined | null): string {
+    if (!s) return '';
+    const q = s.indexOf('?');
+    return (q < 0 ? s : s.slice(0, q)).trim();
+  }
+
+  /** Pull the active module name from the node's arguments — different
+   * step families stash it in different keys. Centralised so the
+   * field-loader effect below reacts to the same source the editor
+   * blocks read. */
+  function activeModule(): string {
+    const a = (node.arguments ?? {}) as Record<string, unknown>;
+    if (node.family === 'trigger') {
+      return bareModule(a.resource as string | undefined);
+    }
+    if (node.family === 'record_crud') {
+      const m = a.module as string | undefined;
+      if (m) return bareModule(m);
+      const c = a.collection as string | undefined;
+      if (c) return bareModule(c.replace(/^\/api\/(?:3|ingest-feeds)\//, ''));
+    }
+    return '';
+  }
+
+  // React to the module changing (either user picks a new one or a
+  // freshly-mounted node already has one set) — load its field
+  // catalog so the FilterTreeEditor's picker has data when the user
+  // clicks. Using $effect (not `{@const}` for side-effects) so the
+  // reactive graph actually fires the fetch.
+  $effect(() => {
+    const m = activeModule();
+    if (m) void ensureFieldsLoaded(m);
+  });
 
   type Param = {
     param_name: string;
@@ -376,7 +486,1358 @@
   }
 </script>
 
-{#if node.type === 'set_variable'}
+<!-- Shared module datalist — referenced by every Resource/Module input
+     in the trigger + record_crud editors below. Rendered once so we
+     don't repeat it inside the {#each} branches. -->
+{#if allModules.length > 0}
+  <datalist id="fsrpb-modules-list">
+    {#each allModules as m (m.name)}
+      <!-- modules.label often holds the FSR Jinja template for the
+           record's display name (e.g. `{{ name }}`) — not useful as a
+           UI label. Show the plural noun when distinct from the
+           machine name; that's what the analyst recognizes. -->
+      <option value={m.name}>{m.plural && m.plural !== m.name ? m.plural : ''}</option>
+    {/each}
+  </datalist>
+{/if}
+
+{#if node.type === 'manual_input'}
+  {@const a = (node.arguments ?? {}) as Record<string, unknown>}
+  {@const canonSchema = ((a.input as Record<string, unknown> | undefined)?.schema as Record<string, unknown> | undefined)}
+  {@const friendlyInputs = a.inputs as Record<string, unknown>[] | undefined}
+  {@const canonicalInputs = canonSchema?.inputVariables as Record<string, unknown>[] | undefined}
+  {@const fields = (Array.isArray(canonicalInputs) && canonicalInputs.length > 0
+    ? canonicalInputs
+    : Array.isArray(friendlyInputs) ? friendlyInputs : [])}
+  {@const title = (a.title as string | undefined) ?? (canonSchema?.title as string | undefined) ?? ''}
+  {@const description = (a.description as string | undefined) ?? (canonSchema?.description as string | undefined) ?? ''}
+
+  {@const FORM_TYPES = [
+    'text', 'textarea', 'number', 'integer', 'boolean', 'datetime',
+    'picklist', 'lookup', 'ipv4', 'ipv6', 'email', 'url', 'domain', 'json'
+  ]}
+
+  {@const writeFields = (next: Record<string, unknown>[]) => {
+    const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+    args.inputs = next;
+    // Drop the canonical block when present so we have one source of
+    // truth — the resolver re-expands `inputs:` into `input.schema.*`
+    // at compile time.
+    delete args.input;
+    visualStore.setArgs(playbookIdx, node.id, args);
+  }}
+
+  <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Form prompt</div>
+  <p class="mt-1 text-[11px] text-[var(--text-faint)]">
+    Build the form an analyst sees at runtime. Each field collects one
+    input; <em>buttons</em> at the bottom resume the playbook on the
+    matching branch.
+  </p>
+
+  <label class="mt-2 block">
+    <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Title</span>
+    <input
+      type="text"
+      value={title}
+      placeholder="What is shown in the form header"
+      oninput={(e) => {
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        const v = (e.currentTarget as HTMLInputElement).value;
+        if (v) args.title = v; else delete args.title;
+        delete args.input;
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }}
+      class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-xs"
+    />
+  </label>
+  <label class="mt-2 block">
+    <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Description (HTML allowed)</span>
+    <textarea
+      rows="3"
+      value={description}
+      placeholder="Context the analyst reads before answering — supports markdown / inline HTML."
+      oninput={(e) => {
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        const v = (e.currentTarget as HTMLTextAreaElement).value;
+        if (v) args.description = v; else delete args.description;
+        delete args.input;
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }}
+      class="mt-1 block w-full resize-y rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-xs"
+    ></textarea>
+  </label>
+
+  <div class="mt-3 flex flex-wrap gap-3 text-[11px] text-[var(--text-muted)]">
+    <label class="flex items-center gap-1">
+      <input
+        type="checkbox"
+        checked={(a.is_approval as boolean) ?? false}
+        onchange={(e) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          args.is_approval = (e.currentTarget as HTMLInputElement).checked;
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      />
+      <span title="Marks the prompt as an Approval — surfaces in the analyst's queue with approval-specific UX.">approval</span>
+    </label>
+    <label class="flex items-center gap-1">
+      <input
+        type="checkbox"
+        checked={(a.isRecordLinked as boolean) ?? false}
+        onchange={(e) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          args.isRecordLinked = (e.currentTarget as HTMLInputElement).checked;
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      />
+      <span>linked to record</span>
+    </label>
+    <label class="flex items-center gap-1">
+      <input
+        type="checkbox"
+        checked={(a.unauthenticated_input as boolean) ?? false}
+        onchange={(e) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          args.unauthenticated_input = (e.currentTarget as HTMLInputElement).checked;
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      />
+      <span title="Allow unauthenticated users to respond via tokenized link (external mode).">unauth respond</span>
+    </label>
+  </div>
+
+  <div class="mt-4">
+    <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Fields ({fields.length})</div>
+    {#if fields.length === 0}
+      <p class="text-[11px] italic text-[var(--text-faint)]">No fields. Add one below — the form will render with just the buttons.</p>
+    {:else}
+      <ul class="space-y-2">
+        {#each fields as f, idx (f.name ?? `__${idx}`)}
+          <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+            <div class="flex items-baseline gap-1">
+              <input
+                type="text"
+                aria-label="Field name"
+                value={(f.name as string) ?? ''}
+                placeholder="field_name"
+                onchange={(e) => {
+                  const v = (e.currentTarget as HTMLInputElement).value.trim();
+                  if (!v) return;
+                  const next = fields.slice();
+                  next[idx] = { ...next[idx], name: v };
+                  writeFields(next);
+                }}
+                class="w-32 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-1.5 py-0.5 font-mono text-[11px]"
+              />
+              <select
+                aria-label="Form type"
+                value={((f.formType as string | undefined) ?? (f.type as string | undefined)) ?? 'text'}
+                onchange={(e) => {
+                  const v = (e.currentTarget as HTMLSelectElement).value;
+                  const next = fields.slice();
+                  next[idx] = { ...next[idx], formType: v };
+                  writeFields(next);
+                }}
+                class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-1 py-0.5 text-[11px]"
+              >
+                {#each FORM_TYPES as ft}
+                  <option value={ft}>{ft}</option>
+                {/each}
+              </select>
+              <label class="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={(f.required as boolean) ?? false}
+                  onchange={(e) => {
+                    const next = fields.slice();
+                    next[idx] = { ...next[idx], required: (e.currentTarget as HTMLInputElement).checked };
+                    writeFields(next);
+                  }}
+                />
+                <span>required</span>
+              </label>
+              <button
+                type="button"
+                class="ml-auto text-[10px] text-rose-600 hover:text-rose-700"
+                aria-label="Remove field"
+                onclick={() => {
+                  const next = fields.slice();
+                  next.splice(idx, 1);
+                  writeFields(next);
+                }}
+              >×</button>
+            </div>
+            <input
+              type="text"
+              aria-label="Label"
+              value={(f.label as string) ?? ''}
+              placeholder="Display label (what the analyst sees)"
+              oninput={(e) => {
+                const next = fields.slice();
+                next[idx] = { ...next[idx], label: (e.currentTarget as HTMLInputElement).value };
+                writeFields(next);
+              }}
+              class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px]"
+            />
+            <input
+              type="text"
+              aria-label="Tooltip"
+              value={(f.tooltip as string) ?? ''}
+              placeholder="Tooltip / help text (optional)"
+              oninput={(e) => {
+                const next = fields.slice();
+                const v = (e.currentTarget as HTMLInputElement).value;
+                if (v) next[idx] = { ...next[idx], tooltip: v };
+                else { const c: Record<string, unknown> = { ...next[idx] }; delete c.tooltip; next[idx] = c; }
+                writeFields(next);
+              }}
+              class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] text-[var(--text-muted)]"
+            />
+            <input
+              type="text"
+              aria-label="Default value"
+              value={typeof f.defaultValue === 'string' ? f.defaultValue : (f.defaultValue == null ? '' : JSON.stringify(f.defaultValue))}
+              placeholder="Default value (optional, supports Jinja)"
+              oninput={(e) => {
+                const next = fields.slice();
+                const v = (e.currentTarget as HTMLInputElement).value;
+                if (v) next[idx] = { ...next[idx], defaultValue: v };
+                else { const c: Record<string, unknown> = { ...next[idx] }; delete c.defaultValue; next[idx] = c; }
+                writeFields(next);
+              }}
+              class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+            />
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <button
+      type="button"
+      class="mt-2 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[11px] font-medium hover:bg-[var(--bg-canvas)]"
+      onclick={() => {
+        // Pick a unique name so the {#each} key doesn't collide with
+        // an existing row.
+        let i = 1; let nm = 'newField';
+        const used = new Set(fields.map((x) => x.name as string | undefined).filter(Boolean));
+        while (used.has(nm)) { i += 1; nm = `newField_${i}`; }
+        writeFields([...fields, {
+          name: nm, label: '', formType: 'text', required: false
+        }]);
+      }}
+    >+ Add field</button>
+  </div>
+
+  {#if playbook}
+    {@const branches = playbook.edges.filter((e) => e.source === node.id && e.branch_kind === 'branch')}
+    <div class="mt-4 border-t border-[var(--border-soft)] pt-3">
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Buttons ({branches.length})
+      </div>
+      <p class="mt-1 text-[11px] text-[var(--text-faint)]">
+        Each button resumes the playbook on its branch. Use the
+        Branches tab for full editing (label / target / formType per
+        button); this is a quick preview.
+      </p>
+      {#if branches.length === 0}
+        <p class="mt-2 text-[11px] italic text-[var(--text-faint)]">
+          No buttons defined. Open the Branches tab to add one.
+        </p>
+      {:else}
+        <div class="mt-2 flex flex-wrap gap-2">
+          {#each branches as br (br.label + '|' + br.target)}
+            {@const tgt = playbook.nodes.find((n) => n.id === br.target)}
+            <span
+              class="inline-flex items-center gap-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[11px]"
+              title={`→ ${tgt?.name ?? br.target}`}
+            >
+              <span class="font-medium">{br.label ?? '(default)'}</span>
+              <span class="text-[10px] text-[var(--text-faint)]">→ {tgt?.name ?? br.target}</span>
+            </span>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+{:else if node.type === 'code_snippet'}
+  {@const a = (node.arguments ?? {}) as Record<string, unknown>}
+  {@const params = (a.params as Record<string, unknown> | undefined) ?? {}}
+  {@const code = (params.python_function as string | undefined) ?? ''}
+
+  <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Code snippet (Python / Jinja-Python)</div>
+  <p class="mt-1 text-[11px] text-[var(--text-faint)]">
+    Run inline Python against the playbook's <code class="font-mono">vars</code>
+    context. The function body is wrapped server-side; reference inputs as
+    <code class="font-mono">{`{{ vars.X }}`}</code> or via
+    <code class="font-mono">step_variables</code> bindings.
+  </p>
+  <div class="mt-2">
+    <MonacoCode
+      value={code}
+      language="python"
+      placeholder={'def main():\n    return {"result": vars.input.records[0]}'}
+      height="20rem"
+      onInput={(v) => {
+        // Skip the round-trip when Monaco fired with an unchanged
+        // value (it does on initial mount + theme swaps); otherwise
+        // we'd dirty the playbook on every node click.
+        if (v === code) return;
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        const p = { ...((args.params as Record<string, unknown>) ?? {}) };
+        p.python_function = v;
+        args.params = p;
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }}
+    />
+  </div>
+  <p class="mt-1 text-[10px] text-[var(--text-faint)]">
+    Monaco editor with Python highlighting · Jinja
+    <code class="font-mono">{'{{ vars.X }}'}</code>
+    expressions resolve at runtime · Tab indents 4 spaces.
+  </p>
+
+{:else if node.type === 'workflow_reference' || node.family === 'workflow_ref'}
+  {@const a = (node.arguments ?? {}) as Record<string, unknown>}
+  {@const target = (a.workflowReference as string | undefined) ?? ''}
+  {@const inputMap = (a.arguments as Record<string, unknown> | undefined) ?? {}}
+
+  <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Workflow reference</div>
+  <p class="mt-1 text-[11px] text-[var(--text-faint)]">
+    Invoke another playbook by IRI. Inputs flow through
+    <code class="font-mono">arguments</code>, indexed by name on the
+    target playbook's input parameters.
+  </p>
+
+  <label class="mt-2 block">
+    <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Target playbook IRI</span>
+    <input
+      type="text"
+      value={target}
+      placeholder={'/api/3/workflows/<uuid>  or  {{ globalVars.MyPlaybook_IRI }}' /* live picker is a TODO */}
+      oninput={(e) => {
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        const v = (e.currentTarget as HTMLInputElement).value;
+        if (v) args.workflowReference = v;
+        else delete args.workflowReference;
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }}
+      class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+    />
+  </label>
+
+  <div class="mt-3 flex flex-wrap gap-3 text-[11px] text-[var(--text-muted)]">
+    <label class="flex items-center gap-1">
+      <input
+        type="checkbox"
+        checked={(a.apply_async as boolean) ?? false}
+        onchange={(e) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          args.apply_async = (e.currentTarget as HTMLInputElement).checked;
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      />
+      <span title="Fire-and-forget — caller does not wait for the nested playbook to finish.">apply_async</span>
+    </label>
+    <label class="flex items-center gap-1">
+      <input
+        type="checkbox"
+        checked={(a.pass_input_record as boolean) ?? true}
+        onchange={(e) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          args.pass_input_record = (e.currentTarget as HTMLInputElement).checked;
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      />
+      <span>pass input record</span>
+    </label>
+    <label class="flex items-center gap-1">
+      <input
+        type="checkbox"
+        checked={(a.pass_parent_env as boolean) ?? false}
+        onchange={(e) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          args.pass_parent_env = (e.currentTarget as HTMLInputElement).checked;
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      />
+      <span title="Forward the caller's vars/env into the nested playbook.">pass parent env</span>
+    </label>
+  </div>
+
+  <div class="mt-3">
+    <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+      Input mapping
+    </div>
+    {#if Object.keys(inputMap).length === 0}
+      <p class="text-[11px] italic text-[var(--text-faint)]">No inputs mapped. Add one below.</p>
+    {:else}
+      <ul class="space-y-1">
+        {#each Object.entries(inputMap) as [k, v] (k)}
+          <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+            <div class="flex items-baseline gap-1">
+              <input
+                type="text"
+                aria-label={`input name ${k}`}
+                value={k}
+                onchange={(e) => {
+                  const newKey = (e.currentTarget as HTMLInputElement).value.trim();
+                  if (!newKey || newKey === k) return;
+                  const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+                  const m = { ...((args.arguments as Record<string, unknown>) ?? {}) };
+                  if (newKey in m) return;
+                  m[newKey] = m[k];
+                  delete m[k];
+                  args.arguments = m;
+                  visualStore.setArgs(playbookIdx, node.id, args);
+                }}
+                class="w-32 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-1.5 py-0.5 font-mono text-[11px]"
+              />
+              <button
+                type="button"
+                class="ml-auto text-[10px] text-rose-600 hover:text-rose-700"
+                aria-label={`Remove input ${k}`}
+                onclick={() => {
+                  const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+                  const m = { ...((args.arguments as Record<string, unknown>) ?? {}) };
+                  delete m[k];
+                  args.arguments = m;
+                  visualStore.setArgs(playbookIdx, node.id, args);
+                }}
+              >×</button>
+            </div>
+            <textarea
+              rows="2"
+              value={typeof v === 'string' ? v : JSON.stringify(v, null, 2)}
+              oninput={(e) => {
+                const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+                const m = { ...((args.arguments as Record<string, unknown>) ?? {}) };
+                m[k] = (e.currentTarget as HTMLTextAreaElement).value;
+                args.arguments = m;
+                visualStore.setArgs(playbookIdx, node.id, args);
+              }}
+              class="mt-1 block w-full resize-y rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+            ></textarea>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <button
+      type="button"
+      class="mt-2 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[11px] font-medium hover:bg-[var(--bg-canvas)]"
+      onclick={() => {
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        const m = { ...((args.arguments as Record<string, unknown>) ?? {}) };
+        let i = 1; let nm = 'newInput';
+        while (nm in m) { i += 1; nm = `newInput_${i}`; }
+        m[nm] = '';
+        args.arguments = m;
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }}
+    >+ Add input</button>
+  </div>
+
+{:else if node.family === 'trigger'}
+  {@const a = (node.arguments ?? {}) as Record<string, unknown>}
+  {@const fbt = (a.fieldbasedtrigger as Record<string, unknown> | undefined) ?? null}
+  {@const rootGroup = {
+    logic: ((fbt?.logic as 'AND' | 'OR') ?? 'AND'),
+    filters: (Array.isArray(fbt?.filters) ? (fbt!.filters as unknown[]) : []) as any[]
+  }}
+  {@const resource = (a.resource as string | undefined) ?? ''}
+
+  <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Trigger</div>
+  <p class="mt-1 text-[11px] text-[var(--text-faint)]">
+    {#if node.type === 'start_on_create'}Fires when a record is created in the chosen module.{:else if node.type === 'start_on_update'}Fires when a record is updated in the chosen module.{:else if node.type === 'manual_action'}Fires when an analyst clicks an action button on a record.{:else if node.type === 'api_call'}Fires when an external system POSTs to this playbook's endpoint.{:else}Manual trigger — runs on demand.{/if}
+  </p>
+
+  <label class="mt-2 block">
+    <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Resource (module)</span>
+    <input
+      type="text"
+      list="fsrpb-modules-list"
+      value={resource}
+      placeholder={modulesLoaded && allModules.length ? 'pick from list…' : 'alerts | incidents | indicators | tasks | …'}
+      oninput={(e) => {
+        const v = (e.currentTarget as HTMLInputElement).value;
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        if (v) {
+          args.resource = v;
+          args.resources = [v];
+        } else {
+          delete args.resource;
+          delete args.resources;
+        }
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }}
+      class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+    />
+    {#if !modulesLoaded && modulesLoading}
+      <p class="mt-0.5 text-[10px] italic text-[var(--text-faint)]">loading modules…</p>
+    {:else if modulesLoaded && allModules.length === 0}
+      <p class="mt-0.5 text-[10px] italic text-[var(--text-faint)]">
+        Module catalog empty — run <code>fsrpb train</code> against the live FSR to populate.
+      </p>
+    {/if}
+  </label>
+
+  {#if node.type === 'start_on_create' || node.type === 'start_on_update'}
+    <div class="mt-3">
+      <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Filter conditions
+      </div>
+      <!-- Live English summary of the trigger — refreshes as the user
+           edits filters so they can sanity-check intent without
+           parsing the AND/OR tree visually. -->
+      <p class="mb-2 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[11px] italic text-[var(--text-default)]">
+        {summarizeTrigger(node.type, resource, rootGroup)}
+      </p>
+      <FilterTreeEditor
+        group={rootGroup}
+        fields={fieldsByModule[resource] ?? []}
+        moduleNames={allModules.map((m) => m.name)}
+        node={node}
+        playbook={playbook ?? null}
+        getRelatedFields={(m) => {
+          // Trigger the lazy-load for the related module if we
+          // haven't fetched it yet; return whatever's cached so far
+          // (empty array on first call → the picker shows
+          // "loading…" until the fetch resolves and Svelte's $state
+          // reactivity re-renders).
+          void ensureFieldsLoaded(m);
+          return fieldsByModule[m] ?? [];
+        }}
+        allowRelatedModules={node.type !== 'start_on_create'}
+        extraOperators={node.type === 'start_on_update' ? ['changed', 'in_all'] : ['in_all']}
+        onChange={(next) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          const prev = (args.fieldbasedtrigger as Record<string, unknown> | undefined) ?? {};
+          args.fieldbasedtrigger = {
+            ...prev,
+            logic: next.logic,
+            filters: next.filters,
+            // Preserve sort/limit set by the FSR designer; default when missing.
+            limit: (prev.limit as number) ?? 30,
+            sort: (prev.sort as unknown[]) ?? []
+          };
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      />
+    </div>
+
+    <details class="mt-3 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+      <summary class="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Advanced
+      </summary>
+      <div class="mt-2 flex flex-col gap-2 text-[11px] text-[var(--text-muted)]">
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={(a.triggerOnSource as boolean) ?? true}
+            onchange={(e) => {
+              const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+              args.triggerOnSource = (e.currentTarget as HTMLInputElement).checked;
+              visualStore.setArgs(playbookIdx, node.id, args);
+            }}
+          />
+          <span>Trigger on source records (created on this FSR appliance).</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={(a.triggerOnReplicate as boolean) ?? false}
+            onchange={(e) => {
+              const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+              args.triggerOnReplicate = (e.currentTarget as HTMLInputElement).checked;
+              visualStore.setArgs(playbookIdx, node.id, args);
+            }}
+          />
+          <span>Trigger on replicated records (received from a tenant / sibling node).</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={(a.__triggerLimit as boolean) ?? false}
+            onchange={(e) => {
+              const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+              args.__triggerLimit = (e.currentTarget as HTMLInputElement).checked;
+              visualStore.setArgs(playbookIdx, node.id, args);
+            }}
+          />
+          <span title="Caps how many times this trigger can refire on the same record per minute.">Throttle (<code>__triggerLimit</code>) — rate-limit re-fires on the same record.</span>
+        </label>
+      </div>
+    </details>
+  {/if}
+
+{:else if node.family === 'record_crud'}
+  {@const a = (node.arguments ?? {}) as Record<string, unknown>}
+  {@const isFind = node.type === 'find_record'}
+  {@const isDelete = node.type === 'delete_record'}
+  {@const isWrite = node.type === 'create_record' || node.type === 'insert_record' || node.type === 'update_record'}
+  {@const isBulk = node.type === 'ingest_bulk_feed'}
+  {@const queryGroup = {
+    logic: (((a.query as Record<string, unknown>)?.logic as 'AND' | 'OR') ?? 'AND'),
+    filters: ((a.query as Record<string, unknown>)?.filters as any[]) ?? []
+  }}
+  {@const moduleVal = bareModule(
+    (a.module as string | undefined) ??
+    (a.collection as string | undefined)?.replace(/^\/api\/(?:3|ingest-feeds)\//, '')
+  )}
+  {@const resourceObj = (a.resource as Record<string, unknown> | undefined) ?? {}}
+  {@const fieldOps = (a.fieldOperation as Record<string, unknown> | undefined) ?? {}}
+
+  <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+    {isFind ? 'Find records' : isDelete ? 'Delete record' : isBulk ? 'Ingest bulk feed' : 'Write record'}
+  </div>
+
+  <label class="mt-2 block">
+    <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Module</span>
+    <input
+      type="text"
+      list="fsrpb-modules-list"
+      value={moduleVal}
+      placeholder={modulesLoaded && allModules.length ? 'pick from list…' : 'alerts | incidents | tasks | indicators | …'}
+      oninput={(e) => {
+        const v = (e.currentTarget as HTMLInputElement).value;
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        if (isFind) {
+          // FindRecords keeps `module: '<name>?$limit=30'` per corpus.
+          args.module = v ? `${v}?$limit=30` : '';
+        } else if (isBulk) {
+          args.collection = v ? `/api/ingest-feeds/${v}` : '';
+        } else {
+          args.collection = v ? `/api/3/${v}` : '';
+        }
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }}
+      class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+    />
+    {#if !modulesLoaded && modulesLoading}
+      <p class="mt-0.5 text-[10px] italic text-[var(--text-faint)]">loading modules…</p>
+    {:else if modulesLoaded && allModules.length === 0}
+      <p class="mt-0.5 text-[10px] italic text-[var(--text-faint)]">
+        Module catalog empty — run <code>fsrpb train</code> to populate.
+      </p>
+    {/if}
+  </label>
+
+  {#if isFind}
+    {@const queryObj = (a.query as Record<string, unknown> | undefined) ?? {}}
+    {@const recordLimit = (queryObj.limit as number | undefined) ?? 30}
+    {@const selectFields = (queryObj.__selectFields as string[] | undefined) ?? []}
+    {@const sortRows = (queryObj.sort as Array<Record<string, unknown>> | undefined) ?? []}
+    {@const fieldList = fieldsByModule[moduleVal] ?? []}
+    <!--
+      "Include Correlated Records" + "Maximum correlated records limit"
+      live in the `module:` URL query string, NOT as top-level args
+      (verified against the trained corpus: 61 rows with
+      `$relationships=true`, 4 with `$fsr_max_relation_count=N`).
+      Parse them back out for display.
+    -->
+    {@const moduleRaw = (a.module as string | undefined) ?? ''}
+    {@const moduleParams = (() => {
+      const q = moduleRaw.indexOf('?');
+      if (q < 0) return new URLSearchParams();
+      try { return new URLSearchParams(moduleRaw.slice(q + 1)); }
+      catch { return new URLSearchParams(); }
+    })()}
+    {@const includeCorrelated = moduleParams.get('$relationships') === 'true'}
+    {@const correlatedLimit = (() => {
+      const v = moduleParams.get('$fsr_max_relation_count');
+      const n = v ? Number(v) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : 100;
+    })()}
+    {@const writeModuleParams = (mut: (p: URLSearchParams) => void) => {
+      const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+      const cur = (args.module as string | undefined) ?? '';
+      const q = cur.indexOf('?');
+      const bare = q < 0 ? cur : cur.slice(0, q);
+      const params = new URLSearchParams(q < 0 ? '' : cur.slice(q + 1));
+      mut(params);
+      const qs = params.toString();
+      args.module = qs ? `${bare}?${qs}` : bare;
+      visualStore.setArgs(playbookIdx, node.id, args);
+    }}
+
+    <label class="mt-3 block">
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Record limit</span>
+      <input
+        type="number"
+        min="1"
+        max="5000"
+        value={recordLimit}
+        oninput={(e) => {
+          const v = Number((e.currentTarget as HTMLInputElement).value);
+          if (!Number.isFinite(v) || v <= 0) return;
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          const q = { ...((args.query as Record<string, unknown>) ?? {}) };
+          q.limit = v;
+          args.query = q;
+          // Mirror into the `module:` URL while preserving any other
+          // params the FSR designer set (`$relationships`,
+          // `$fsr_max_relation_count`, etc.).
+          const cur = (args.module as string | undefined) ?? '';
+          const idx = cur.indexOf('?');
+          const bare = idx < 0 ? cur : cur.slice(0, idx);
+          const params = new URLSearchParams(idx < 0 ? '' : cur.slice(idx + 1));
+          params.set('$limit', String(v));
+          args.module = bare ? `${bare}?${params.toString()}` : '';
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+        class="mt-1 block w-32 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+      />
+      <p class="mt-0.5 text-[10px] text-[var(--text-faint)]">Max records returned. FSR caps at 5000 per QUERY_API.md.</p>
+    </label>
+
+    <div class="mt-3 space-y-2 text-[11px] text-[var(--text-muted)]">
+      <label class="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={includeCorrelated}
+          onchange={(e) => {
+            const on = (e.currentTarget as HTMLInputElement).checked;
+            writeModuleParams((p) => {
+              if (on) p.set('$relationships', 'true');
+              else { p.delete('$relationships'); p.delete('$fsr_max_relation_count'); }
+            });
+          }}
+        />
+        <span title="Pull records linked to the matched ones (assets, comments, tasks, …) inline.">Include correlated records</span>
+      </label>
+      {#if includeCorrelated}
+        <label class="ml-6 flex items-center gap-2">
+          <span class="text-[10px] uppercase tracking-wider">Max correlated</span>
+          <input
+            type="number"
+            min="1"
+            value={correlatedLimit}
+            oninput={(e) => {
+              const v = Number((e.currentTarget as HTMLInputElement).value);
+              writeModuleParams((p) => {
+                if (Number.isFinite(v) && v > 0) p.set('$fsr_max_relation_count', String(v));
+                else p.delete('$fsr_max_relation_count');
+              });
+            }}
+            class="w-24 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-0.5 font-mono text-[11px]"
+          />
+        </label>
+      {/if}
+    </div>
+
+    <details class="mt-3 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+      <summary class="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Limit output ({selectFields.length || 'all fields'})
+      </summary>
+      <p class="mt-1 text-[10px] text-[var(--text-faint)]">
+        When set, only these fields come back. Saves payload + speeds
+        the fetch on wide modules.
+      </p>
+      {#if selectFields.length > 0}
+        <div class="mt-2 flex flex-wrap gap-1">
+          {#each selectFields as f, idx (f + '|' + idx)}
+            <span class="inline-flex items-center gap-1 rounded-full bg-[var(--brand)]/20 px-2 py-0.5 text-[11px] text-[var(--brand)]">
+              {f}
+              <button
+                type="button"
+                aria-label={`remove ${f}`}
+                class="text-[10px] hover:text-rose-600"
+                onclick={() => {
+                  const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+                  const q = { ...((args.query as Record<string, unknown>) ?? {}) };
+                  q.__selectFields = (selectFields).filter((_, i) => i !== idx);
+                  args.query = q;
+                  visualStore.setArgs(playbookIdx, node.id, args);
+                }}
+              >×</button>
+            </span>
+          {/each}
+        </div>
+      {/if}
+      <select
+        aria-label="Add output field"
+        value=""
+        onchange={(e) => {
+          const v = (e.currentTarget as HTMLSelectElement).value;
+          if (!v) return;
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          const q = { ...((args.query as Record<string, unknown>) ?? {}) };
+          const next = [...selectFields];
+          if (!next.includes(v)) next.push(v);
+          q.__selectFields = next;
+          args.query = q;
+          visualStore.setArgs(playbookIdx, node.id, args);
+          (e.currentTarget as HTMLSelectElement).value = '';
+        }}
+        class="mt-2 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+      >
+        <option value="">+ add field…</option>
+        {#each fieldList.filter((f) => !selectFields.includes(f.name)) as f (f.name)}
+          <option value={f.name}>{f.name}{f.title ? ` — ${f.title}` : ''}</option>
+        {/each}
+      </select>
+    </details>
+
+    <details class="mt-3 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+      <summary class="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Sort by ({sortRows.length})
+      </summary>
+      <ul class="mt-2 space-y-1">
+        {#each sortRows as row, idx (idx)}
+          {@const sortMeta = fieldList.find((x) => x.name === row.field)}
+          <li class="flex items-center gap-1 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-1.5 py-1">
+            <select
+              aria-label="Sort field"
+              value={(row.field as string) ?? ''}
+              onchange={(e) => {
+                const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+                const q = { ...((args.query as Record<string, unknown>) ?? {}) };
+                const next = sortRows.slice();
+                const v = (e.currentTarget as HTMLSelectElement).value;
+                const m = fieldList.find((x) => x.name === v);
+                next[idx] = {
+                  ...next[idx],
+                  field: v,
+                  _fieldName: v,
+                  _fieldTitle: m?.title ?? v
+                };
+                q.sort = next;
+                args.query = q;
+                visualStore.setArgs(playbookIdx, node.id, args);
+              }}
+              class="flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1 py-0.5 font-mono text-[11px]"
+            >
+              <option value="">— pick field —</option>
+              {#each fieldList as f (f.name)}
+                <option value={f.name}>{f.name}</option>
+              {/each}
+            </select>
+            <select
+              aria-label="Sort direction"
+              value={(row.direction as string) ?? 'ASC'}
+              onchange={(e) => {
+                const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+                const q = { ...((args.query as Record<string, unknown>) ?? {}) };
+                const next = sortRows.slice();
+                next[idx] = { ...next[idx], direction: (e.currentTarget as HTMLSelectElement).value };
+                q.sort = next;
+                args.query = q;
+                visualStore.setArgs(playbookIdx, node.id, args);
+              }}
+              class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1 py-0.5 font-mono text-[11px]"
+            >
+              <option value="ASC">ascending</option>
+              <option value="DESC">descending</option>
+            </select>
+            <button
+              type="button"
+              aria-label="Remove sort row"
+              class="text-[10px] text-rose-600 hover:text-rose-700"
+              onclick={() => {
+                const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+                const q = { ...((args.query as Record<string, unknown>) ?? {}) };
+                q.sort = sortRows.filter((_, i) => i !== idx);
+                args.query = q;
+                visualStore.setArgs(playbookIdx, node.id, args);
+              }}
+            >×</button>
+          </li>
+        {/each}
+      </ul>
+      <button
+        type="button"
+        class="mt-2 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] font-medium hover:bg-[var(--bg-elev)]"
+        onclick={() => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          const q = { ...((args.query as Record<string, unknown>) ?? {}) };
+          const next = sortRows.slice();
+          next.push({ field: '', direction: 'ASC' });
+          q.sort = next;
+          args.query = q;
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      >+ Sort row</button>
+    </details>
+
+    <div class="mt-3">
+      <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Query filter</div>
+      <p class="mb-2 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[11px] italic text-[var(--text-default)]">
+        {summarizeFind(moduleVal, queryGroup)}
+      </p>
+      <FilterTreeEditor
+        group={queryGroup}
+        fields={fieldsByModule[moduleVal] ?? []}
+        moduleNames={allModules.map((m) => m.name)}
+        node={node}
+        playbook={playbook ?? null}
+        getRelatedFields={(m) => {
+          // Trigger the lazy-load for the related module if we
+          // haven't fetched it yet; return whatever's cached so far
+          // (empty array on first call → the picker shows
+          // "loading…" until the fetch resolves and Svelte's $state
+          // reactivity re-renders).
+          void ensureFieldsLoaded(m);
+          return fieldsByModule[m] ?? [];
+        }}
+        onChange={(next) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          const prev = (args.query as Record<string, unknown> | undefined) ?? {};
+          args.query = {
+            ...prev,
+            logic: next.logic,
+            filters: next.filters,
+            limit: (prev.limit as number) ?? 30,
+            sort: (prev.sort as unknown[]) ?? []
+          };
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+      />
+    </div>
+  {/if}
+
+  {#if isBulk}
+    {@const feRaw = (a.for_each as Record<string, unknown> | undefined) ?? {}}
+    {@const feItem = (feRaw.item as string | undefined) ?? ''}
+    {@const feBatch = (feRaw.batch_size as number | undefined) ?? 100}
+    {@const feParallel = (feRaw.parallel as boolean | undefined) ?? false}
+    {@const whenExpr = (a.when as string | undefined) ?? ''}
+    {@const updateForEach = (patch: Record<string, unknown>) => {
+      const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+      const fe = { ...((args.for_each as Record<string, unknown>) ?? {}), ...patch };
+      // `__bulk: true` is the marker FSR uses to route this for_each
+      // through the Ingest Bulk Feed step engine instead of regular
+      // looped Create. Keep it asserted whenever we touch the block.
+      fe.__bulk = true;
+      if (fe.condition === undefined) fe.condition = '';
+      args.for_each = fe;
+      visualStore.setArgs(playbookIdx, node.id, args);
+    }}
+
+    <div class="mt-3 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Feed source
+      </div>
+      <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
+        Iterate over a list expression — each element becomes
+        <code class="font-mono">vars.item</code>. The bulk-feed step
+        bypasses on-create triggers (intentional: ingestion is
+        firehose-rate, triggers fire post-hoc on enrichment).
+      </p>
+
+      <label class="mt-2 block">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Item iterable</span>
+        <div class="mt-1 flex items-center gap-1">
+          <input
+            type="text"
+            value={feItem}
+            placeholder={'{{ vars.steps.Fetch_Feed.data }}'}
+            oninput={(e) => updateForEach({ item: (e.currentTarget as HTMLInputElement).value })}
+            class="flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+          />
+          <VarPathPicker
+            {node}
+            {playbook}
+            wrap={true}
+            onInsert={(snippet) => updateForEach({
+              item: feItem ? `${feItem} ${snippet}` : snippet
+            })}
+          />
+        </div>
+      </label>
+
+      <div class="mt-3 grid grid-cols-2 gap-3">
+        <label class="block">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Batch size</span>
+          <input
+            type="number"
+            min="1"
+            value={feBatch}
+            oninput={(e) => {
+              const v = Number((e.currentTarget as HTMLInputElement).value);
+              if (Number.isFinite(v) && v > 0) updateForEach({ batch_size: v });
+            }}
+            class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+          />
+        </label>
+        <label class="flex items-end gap-2 pb-1 text-[11px] text-[var(--text-muted)]">
+          <input
+            type="checkbox"
+            checked={feParallel}
+            onchange={(e) => updateForEach({ parallel: (e.currentTarget as HTMLInputElement).checked })}
+          />
+          <span title="Run batches concurrently — speeds up wide ingest at the cost of ordering guarantees.">parallel</span>
+        </label>
+      </div>
+
+      <label class="mt-3 block">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Skip-if predicate (when)</span>
+        <div class="mt-1 flex items-center gap-1">
+          <input
+            type="text"
+            value={whenExpr}
+            placeholder={'{{ vars.data | length > 0 }}'}
+            oninput={(e) => {
+              const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+              const v = (e.currentTarget as HTMLInputElement).value;
+              if (v) args.when = v; else delete args.when;
+              visualStore.setArgs(playbookIdx, node.id, args);
+            }}
+            class="flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+          />
+          <VarPathPicker
+            {node}
+            {playbook}
+            wrap={true}
+            onInsert={(snippet) => {
+              const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+              args.when = whenExpr ? `${whenExpr} ${snippet}` : snippet;
+              visualStore.setArgs(playbookIdx, node.id, args);
+            }}
+          />
+        </div>
+        <p class="mt-0.5 text-[10px] text-[var(--text-faint)]">
+          Whole step is skipped when this evaluates falsy. Common pattern: gate on
+          <code class="font-mono">{'vars.data | length > 0'}</code> so an empty feed doesn't churn.
+        </p>
+      </label>
+    </div>
+  {/if}
+
+  {#if isWrite || isBulk}
+    <div class="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-[var(--text-muted)]">
+      {#if node.type === 'update_record'}
+        <label class="flex items-center gap-1">
+          <span>operation</span>
+          <select
+            value={(a.operation as string) ?? 'Overwrite'}
+            onchange={(e) => {
+              const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+              args.operation = (e.currentTarget as HTMLSelectElement).value;
+              visualStore.setArgs(playbookIdx, node.id, args);
+            }}
+            class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-1 py-0.5 text-[11px]"
+          >
+            <option value="Overwrite">Overwrite</option>
+            <option value="Append">Append</option>
+            <option value="Replace">Replace</option>
+          </select>
+        </label>
+      {/if}
+      {#if !isBulk}
+        <label class="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={(a.__bulk as boolean) ?? false}
+            onchange={(e) => {
+              const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+              args.__bulk = (e.currentTarget as HTMLInputElement).checked;
+              visualStore.setArgs(playbookIdx, node.id, args);
+            }}
+          />
+          <span title="Batches the create — does NOT skip on-create triggers; use Ingest Bulk Feed for that.">__bulk</span>
+        </label>
+      {/if}
+    </div>
+
+    {@const writeFieldList = fieldsByModule[moduleVal] ?? []}
+    {@const writeFieldByName = Object.fromEntries(writeFieldList.map((f) => [f.name, f]))}
+    {@const setFieldNames = Object.keys(resourceObj)}
+    {@const unsetFields = writeFieldList.filter((f) => !setFieldNames.includes(f.name))}
+    {@const parsePicklistOptions = (raw: string | null | undefined): string[] => {
+      if (!raw) return [];
+      try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(String) : []; }
+      catch { return []; }
+    }}
+    {@const writeField = (name: string, value: unknown) => {
+      const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+      const r = { ...((args.resource as Record<string, unknown>) ?? {}) };
+      if (value === undefined || value === '') delete r[name]; else r[name] = value;
+      args.resource = r;
+      visualStore.setArgs(playbookIdx, node.id, args);
+    }}
+    {@const removeField = (name: string) => {
+      const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+      const r = { ...((args.resource as Record<string, unknown>) ?? {}) };
+      delete r[name];
+      args.resource = r;
+      const fo = { ...((args.fieldOperation as Record<string, unknown>) ?? {}) };
+      delete fo[name];
+      args.fieldOperation = fo;
+      visualStore.setArgs(playbookIdx, node.id, args);
+    }}
+
+    <div class="mt-3">
+      <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Fields</div>
+      {#if isBulk}
+        <p class="mb-1 text-[10px] text-[var(--text-faint)]">
+          Each batch row maps the iterable element via
+          <code class="font-mono">{'{{ vars.item.<key> }}'}</code>.
+        </p>
+      {/if}
+      {#if setFieldNames.length === 0}
+        <p class="text-[11px] italic text-[var(--text-faint)]">No fields set. Pick one below to start writing.</p>
+      {:else}
+        <ul class="space-y-1">
+          {#each setFieldNames as k (k)}
+            {@const v = resourceObj[k]}
+            {@const fieldMeta = writeFieldByName[k]}
+            {@const isPicklist = fieldMeta?.type === 'picklists'}
+            {@const isBool = fieldMeta?.type === 'checkbox' || fieldMeta?.type === 'boolean'}
+            {@const isNumber = fieldMeta?.type === 'integer' || fieldMeta?.type === 'decimal' || fieldMeta?.type === 'number'}
+            {@const isDate = fieldMeta?.type === 'datetime' || fieldMeta?.type === 'date'}
+            {@const isRel = !!fieldMeta?.type && (fieldMeta.type === 'lookup' || fieldMeta.type === 'manyToOne' || fieldMeta.type === 'manyToMany' || fieldMeta.type === 'oneToMany' || allModules.some((m) => m.name === fieldMeta.type))}
+            {@const picklistVals = isPicklist ? parsePicklistOptions(fieldMeta?.picklist_options ?? null) : []}
+            <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+              <div class="flex items-baseline gap-2">
+                <span class="font-mono text-[11px] font-semibold text-[var(--text-default)]">{k}</span>
+                {#if fieldMeta?.title}<span class="text-[10px] text-[var(--text-muted)]">{fieldMeta.title}</span>{/if}
+                <span class="text-[10px] text-[var(--text-faint)]">{fieldMeta?.type ?? 'unknown'}</span>
+                <select
+                  aria-label={`fieldOperation ${k}`}
+                  value={(fieldOps[k] as string | undefined) ?? ''}
+                  onchange={(e) => {
+                    const fv = (e.currentTarget as HTMLSelectElement).value;
+                    const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+                    const fo = { ...((args.fieldOperation as Record<string, unknown>) ?? {}) };
+                    if (fv) fo[k] = fv; else delete fo[k];
+                    args.fieldOperation = fo;
+                    visualStore.setArgs(playbookIdx, node.id, args);
+                  }}
+                  class="ml-auto rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-1 py-0.5 text-[10px] text-[var(--text-muted)]"
+                  title="Per-field write strategy (overrides top-level operation)"
+                >
+                  <option value="">(inherit)</option>
+                  <option value="Overwrite">Overwrite</option>
+                  <option value="Append">Append</option>
+                  <option value="Replace">Replace</option>
+                </select>
+                <button
+                  type="button"
+                  class="text-[10px] text-rose-600 hover:text-rose-700"
+                  aria-label={`Remove field ${k}`}
+                  onclick={() => removeField(k)}
+                >×</button>
+              </div>
+              {#if isPicklist && picklistVals.length > 0}
+                <select
+                  aria-label={`value of ${k}`}
+                  value={typeof v === 'string' ? v : ''}
+                  onchange={(e) => writeField(k, (e.currentTarget as HTMLSelectElement).value)}
+                  class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+                >
+                  <option value="">— pick value —</option>
+                  {#each picklistVals as pv}
+                    <option value={pv}>{pv}</option>
+                  {/each}
+                </select>
+                <p class="mt-0.5 text-[10px] text-[var(--text-faint)]">
+                  Stored as the friendly value; resolver maps to the picklist IRI at compile time.
+                </p>
+              {:else if isBool}
+                <label class="mt-1 flex items-center gap-2 text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={v === true || v === 'true'}
+                    onchange={(e) => writeField(k, (e.currentTarget as HTMLInputElement).checked)}
+                  />
+                  <span class="text-[var(--text-muted)]">{v === true || v === 'true' ? 'true' : 'false'}</span>
+                </label>
+              {:else if isNumber}
+                <input
+                  type="number"
+                  aria-label={`value of ${k}`}
+                  value={v == null ? '' : String(v)}
+                  oninput={(e) => writeField(k, (e.currentTarget as HTMLInputElement).value)}
+                  class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+                />
+              {:else if isDate}
+                <input
+                  type="text"
+                  aria-label={`value of ${k}`}
+                  value={typeof v === 'string' ? v : ''}
+                  placeholder={'ISO 8601 or {{ now }} / epoch ms'}
+                  oninput={(e) => writeField(k, (e.currentTarget as HTMLInputElement).value)}
+                  class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+                />
+              {:else if isRel}
+                {@const relTarget = (fieldMeta?.type && allModules.some((m) => m.name === fieldMeta!.type))
+                  ? fieldMeta!.type
+                  : ''}
+                <div class="mt-1">
+                  {#if relTarget}
+                    <RelationPicker
+                      module={relTarget}
+                      value={typeof v === 'string' ? v : JSON.stringify(v ?? '')}
+                      onChange={(next) => writeField(k, next)}
+                      placeholder={`/api/3/${relTarget}/<uuid>  or  {{ vars.steps.X[0]['@id'] }}`}
+                      ariaLabel={`pick ${relTarget} record for ${k}`}
+                    />
+                  {:else}
+                    <input
+                      type="text"
+                      aria-label={`value of ${k}`}
+                      value={typeof v === 'string' ? v : JSON.stringify(v ?? '')}
+                      placeholder={`/api/3/${fieldMeta?.type ?? '<module>'}/<uuid>  or  {{ vars.steps.X[0]['@id'] }}`}
+                      oninput={(e) => writeField(k, (e.currentTarget as HTMLInputElement).value)}
+                      class="block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+                    />
+                  {/if}
+                </div>
+                <p class="mt-0.5 text-[10px] text-[var(--text-faint)]">
+                  Relation to <code>{fieldMeta?.type}</code> — pick a record or paste an IRI / Jinja expression.
+                </p>
+              {:else}
+                <textarea
+                  rows="1"
+                  aria-label={`value of ${k}`}
+                  value={typeof v === 'string' ? v : JSON.stringify(v ?? '')}
+                  placeholder={fieldMeta?.tooltip ?? ''}
+                  oninput={(e) => writeField(k, (e.currentTarget as HTMLTextAreaElement).value)}
+                  class="mt-1 block w-full resize-y rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+                ></textarea>
+              {/if}
+              {#if fieldMeta?.tooltip && !isRel}
+                <p class="mt-0.5 text-[10px] text-[var(--text-faint)]">{fieldMeta.tooltip}</p>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if writeFieldList.length > 0}
+        <select
+          aria-label="Add field"
+          value=""
+          onchange={(e) => {
+            const v = (e.currentTarget as HTMLSelectElement).value;
+            if (!v) return;
+            const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+            const r = { ...((args.resource as Record<string, unknown>) ?? {}) };
+            if (!(v in r)) r[v] = '';
+            args.resource = r;
+            visualStore.setArgs(playbookIdx, node.id, args);
+            (e.currentTarget as HTMLSelectElement).value = '';
+          }}
+          class="mt-2 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+        >
+          <option value="">+ Add field…</option>
+          {#each unsetFields as f (f.name)}
+            <option value={f.name}>
+              {f.name}{f.title ? ` — ${f.title}` : ''} ({f.type}){f.required ? ' · required' : ''}
+            </option>
+          {/each}
+        </select>
+      {:else}
+        <!-- No catalog (module not picked yet, or trained store is
+             empty). Fall back to a plain "+ Add field" button so users
+             can still author writes via free-text keys. -->
+        <button
+          type="button"
+          class="mt-2 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[11px] font-medium hover:bg-[var(--bg-canvas)]"
+          onclick={() => {
+            const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+            const r = { ...((args.resource as Record<string, unknown>) ?? {}) };
+            let i = 1; let nm = 'newField';
+            while (nm in r) { i += 1; nm = `newField_${i}`; }
+            r[nm] = '';
+            args.resource = r;
+            visualStore.setArgs(playbookIdx, node.id, args);
+          }}
+        >+ Add field (free text)</button>
+      {/if}
+    </div>
+  {/if}
+
+  {#if isDelete}
+    <p class="mt-3 text-[11px] text-[var(--text-faint)]">
+      Delete steps use the upstream record reference — usually
+      <code class="font-mono">{`{{ vars.input.records[0]['@id'] }}`}</code>
+      or a Find step's result. Author the IRI via the Raw tab; no
+      additional config is needed here.
+    </p>
+  {/if}
+
+{:else if node.type === 'delay'}
+  {@const a = (node.arguments ?? {}) as Record<string, unknown>}
+  {@const canon = (a.delay ?? {}) as Record<string, unknown>}
+  {@const v = (k: string) => {
+    // Friendly form (top-level) wins; fall back to canonical `delay.{…}`.
+    const top = a[k];
+    if (top !== undefined && top !== null && top !== '') return String(top);
+    const c = canon[k];
+    if (c !== undefined && c !== null && c !== '') return String(c);
+    return '';
+  }}
+  <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Delay</div>
+  <p class="mt-1 text-[11px] text-[var(--text-faint)]">Pause the playbook for the configured duration. Any combination of fields is summed.</p>
+  <div class="mt-2 grid grid-cols-2 gap-2">
+    {#each ['days', 'hours', 'minutes', 'seconds'] as unit}
+      <label class="block">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">{unit}</span>
+        <input
+          type="number"
+          min="0"
+          value={v(unit)}
+          oninput={(e) => {
+            const raw = (e.currentTarget as HTMLInputElement).value;
+            const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+            // Write the friendly form; resolver expands to canonical at compile time.
+            // Drop the canonical `delay`/`type`/`rule` so we don't end up with two
+            // sources of truth in the YAML.
+            delete args.delay;
+            delete args.type;
+            delete args.rule;
+            if (raw === '' || raw === '0') delete args[unit];
+            else args[unit] = Number(raw);
+            visualStore.setArgs(playbookIdx, node.id, args);
+          }}
+          class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+        />
+      </label>
+    {/each}
+  </div>
+{:else if node.type === 'raise_exception' || node.type === 'terminate' || node.type === 'assert'}
+  {@const a = (node.arguments ?? {}) as Record<string, unknown>}
+  {@const labels: Record<string, string> = {
+    raise_exception: 'Raise an exception with a descriptive message. Halts the playbook and surfaces in the run log.',
+    terminate: 'Terminate the current playbook run. Use sparingly — most flows should end on a normal terminal step.',
+    assert: 'Fail the run when the predicate evaluates falsy. Useful for guarding preconditions.'
+  }}
+  <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+    {node.type.replace('_', ' ')}
+  </div>
+  <p class="mt-1 text-[11px] text-[var(--text-faint)]">{labels[node.type]}</p>
+  {#if node.type === 'assert'}
+    <label class="mt-2 block">
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Predicate</span>
+      <input
+        type="text"
+        value={(a.condition as string) ?? (a.expression as string) ?? ''}
+        placeholder={'{{ vars.steps.foo.status == "ok" }}' /* literal Jinja */}
+        oninput={(e) => {
+          const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+          args.condition = (e.currentTarget as HTMLInputElement).value;
+          delete args.expression;
+          visualStore.setArgs(playbookIdx, node.id, args);
+        }}
+        class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+      />
+    </label>
+  {/if}
+  <label class="mt-2 block">
+    <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Message</span>
+    <textarea
+      rows="2"
+      value={(a.message as string) ?? (a.reason as string) ?? ''}
+      placeholder="Describe why the run is failing — surfaces in logs."
+      oninput={(e) => {
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        args.message = (e.currentTarget as HTMLTextAreaElement).value;
+        delete args.reason;
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }}
+      class="mt-1 block w-full resize-y rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+    ></textarea>
+  </label>
+{:else if node.type === 'set_variable'}
   <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
     Variables
   </div>

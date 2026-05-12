@@ -100,6 +100,44 @@ def write_graph(payload: WriteIn) -> dict[str, Any]:
     return {"ok": True, "yaml": new_yaml, "graph": graph}
 
 
+class DraftStepIn(BaseModel):
+    step_type: str
+    intent: str
+    module: str | None = None
+    current_args: dict[str, Any] | None = None
+    provider: str | None = None
+
+
+@router.post("/draft-step")
+async def draft_step(payload: DraftStepIn) -> dict[str, Any]:
+    """AI-driven "describe → step args" drafter.
+
+    Posts the user's natural-language intent + the current step type
+    (and module, when relevant) to the configured LLM provider with a
+    focused system prompt: corpus patterns, schema fields, picklist
+    values. Returns proposed JSON args the inspector can preview as a
+    diff against the current step.
+
+    See ``backend/step_drafter.py`` for the prompt-building logic.
+    """
+    from backend.step_drafter import draft_step_args, STEP_INTROS
+
+    if payload.step_type not in STEP_INTROS:
+        raise HTTPException(400,
+            f"step type {payload.step_type!r} not supported by drafter; "
+            f"supported: {sorted(STEP_INTROS)}")
+    if not payload.intent.strip():
+        raise HTTPException(400, "intent must not be empty")
+
+    return await draft_step_args(
+        step_type=payload.step_type,
+        intent=payload.intent,
+        module=payload.module,
+        current_args=payload.current_args,
+        provider_name=payload.provider,
+    )
+
+
 class FileWriteIn(BaseModel):
     path: str
     graph: dict[str, Any]

@@ -329,11 +329,14 @@ describe('StepInspector', () => {
     cs.mockRestore();
   });
 
-  it('Decision node hides Args/Examples and lands on Branches by default', async () => {
+  it('Decision node hides Args and lands on Branches by default', async () => {
     const branchNode = pb().nodes.find((n) => n.id === 'branch')!;
     render(StepInspector, { props: { node: branchNode, playbook: pb(), playbookIdx: 0 } });
     expect(screen.queryByRole('button', { name: 'Args' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Examples' })).toBeNull();
+    // Examples is now wired for every step type with corpus skeletons
+    // (decision included) — the tab should be visible, but Branches
+    // remains the default.
+    expect(screen.getByRole('button', { name: 'Examples' })).toBeTruthy();
     // Default-active tab is Branches; the rename input for label "high" should be present.
     expect(screen.getByDisplayValue('high')).toBeTruthy();
   });

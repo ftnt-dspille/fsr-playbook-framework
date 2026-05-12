@@ -107,6 +107,71 @@ export type Marker = {
   suggestion: string | null;
 };
 
+/** One render-path analyzer diagnostic. Step-id-based (not line-based
+ * like Marker) — these come from `analyze_playbook` and are surfaced
+ * in the canvas + diagnostics drawer with per-node badges. */
+export type Diagnostic = {
+  kind: string;
+  severity: 'error' | 'warning' | 'info';
+  step_id: string;
+  path: string;
+  location: string;
+  message: string;
+  suggestion: string;
+  expected?: unknown;
+  actual?: unknown;
+  extra?: Record<string, unknown>;
+};
+
+export type SuggestedFix = {
+  ok: boolean;
+  kind?: string;
+  step_id?: string;
+  location?: string;
+  before?: unknown;
+  after?: unknown;
+  confidence?: 'high' | 'medium' | 'low';
+  explanation?: string;
+  reason?: string;
+};
+
+export type AnalyzeResult = {
+  ok: boolean;
+  trace?: Array<Record<string, unknown>>;
+  diagnostics: Diagnostic[];
+  error_count: number;
+  warning_count: number;
+};
+
+/** Run the render-path validator. `executeSafeOps` opts in to live
+ * FSR for picklist-drift checks (C4); leave false for pure offline. */
+export async function analyzePlaybook(
+  yamlText: string,
+  opts: { executeSafeOps?: boolean } = {}
+): Promise<AnalyzeResult> {
+  const r = await callMcpTool<AnalyzeResult>('analyze_playbook', {
+    yaml_text: yamlText,
+    execute_safe_ops: !!opts.executeSafeOps
+  });
+  if (!r.ok || !r.result) {
+    return { ok: false, diagnostics: [], error_count: 0, warning_count: 0 };
+  }
+  // Some MCP responses omit fields when empty — normalize.
+  return {
+    ok: r.result.ok ?? false,
+    trace: r.result.trace,
+    diagnostics: r.result.diagnostics ?? [],
+    error_count: r.result.error_count ?? 0,
+    warning_count: r.result.warning_count ?? 0
+  };
+}
+
+export async function suggestFixForDiagnostic(d: Diagnostic): Promise<SuggestedFix> {
+  const r = await callMcpTool<SuggestedFix>('suggest_fix_for_diagnostic', { diagnostic: d });
+  if (!r.ok || !r.result) return { ok: false, reason: r.error ?? 'mcp call failed' };
+  return r.result;
+}
+
 export type ValidateResult = { ok: boolean; markers: Marker[]; fixes?: Fix[] };
 export type CompileResult = { ok: boolean; fsr_json: unknown | null; markers: Marker[] };
 
@@ -324,6 +389,15 @@ export type VisualPlaybook = {
   parameters: string[];
   trigger: string;
   trigger_step_id: string | null;
+  /** Whether the playbook is enabled. Trigger playbooks with
+   * `is_active: false` ship to FSR but never fire — the inspector
+   * surfaces a guard banner so the user catches the silent dead-end
+   * before testing. Defaults to false (matches the IR default). */
+  is_active?: boolean;
+  /** FSR's per-workflow verbose-tracing flag. New drafts scaffold
+   * with this on so authors see step output without flipping a knob;
+   * production playbooks should turn it off. */
+  debug?: boolean;
   nodes: VisualNode[];
   edges: VisualEdge[];
 };

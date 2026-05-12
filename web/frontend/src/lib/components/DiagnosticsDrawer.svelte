@@ -9,10 +9,13 @@
    */
   import DiagnosticsList from './DiagnosticsList.svelte';
   import FixesPanel from './FixesPanel.svelte';
+  import RenderPathDiagnostics from './RenderPathDiagnostics.svelte';
   import Console from './Console.svelte';
   import DeployPanel from './DeployPanel.svelte';
   import { playbookActions } from '$lib/playbookActions.svelte';
   import { runStore } from '$lib/runStore.svelte';
+  import { visualStore } from '$lib/visualEditStore.svelte';
+  import type { SuggestedFix } from '$lib/api';
 
   type Tab = 'diagnostics' | 'fixes' | 'compile' | 'deploy';
   type Props = {
@@ -42,6 +45,33 @@
   let errCount = $derived(playbookActions.errorCount);
   let warnCount = $derived(playbookActions.warningCount);
   let canApplyFixes = $derived(!!monacoEditor && !!monacoNs);
+
+  /** Render-path "Apply" handler. The suggest_fix tool returns a
+   * `{step_id, location, before, after}` patch. For most kinds the
+   * location targets a Jinja template segment inside the step's
+   * arguments — we apply via the visual edit store's mutator so
+   * undo/redo works uniformly with manual edits. Falls back to a
+   * console warning for kinds the store can't yet rewrite. */
+  async function applyRenderPathFix(fix: SuggestedFix): Promise<void> {
+    if (!fix.ok || !fix.location || fix.before === undefined
+        || fix.after === undefined || !fix.step_id) {
+      console.warn('apply: incomplete fix', fix);
+      return;
+    }
+    const updated = await visualStore.applyTextSwap?.({
+      stepId: fix.step_id,
+      location: fix.location,
+      before: String(fix.before),
+      after: String(fix.after)
+    });
+    if (!updated) {
+      console.warn('apply: visualStore could not locate the swap target', fix);
+      return;
+    }
+    // Re-run analyze so badges + counts update against the patched
+    // YAML — same gate the prompt enforces server-side.
+    await playbookActions.analyze();
+  }
 </script>
 
 <div class="border-t border-[var(--border-soft)] bg-[var(--bg-panel)]">
@@ -101,8 +131,21 @@
   {#if open}
     <div class="fade-in" style="height: {heightPx}px">
       {#if tab === 'diagnostics'}
-        <div class="h-full overflow-auto">
-          <DiagnosticsList {markers} />
+        <div class="flex h-full flex-col overflow-hidden">
+          {#if markers.length > 0}
+            <div class="flex-1 overflow-auto border-b border-[var(--border-soft)]">
+              <DiagnosticsList {markers} />
+            </div>
+          {/if}
+          <div class={markers.length > 0 ? 'h-1/2 flex-shrink-0 overflow-hidden' : 'h-full overflow-hidden'}>
+            <div class="border-b border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Render path
+            </div>
+            <RenderPathDiagnostics
+              onFocusStep={(sid) => visualStore.selectStepByName?.(sid)}
+              onApplyFix={applyRenderPathFix}
+            />
+          </div>
         </div>
       {:else if tab === 'fixes'}
         {#if canApplyFixes}

@@ -55,6 +55,121 @@ def cmd_compile(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_analyze(args: argparse.Namespace) -> int:
+    """Render-path validator: simulate a playbook offline and report
+    diagnostics (unreachable refs, missing keys, required-empty
+    fields, …). See RENDER_PATH_VALIDATOR_PLAN.md.
+    """
+    text = Path(args.input).read_text()
+
+    # Run through the parser so simplified-IR niceties (vars: →
+    # arg_list:, name → id, top-level conditions/options hoisted into
+    # arguments) match what the simulator expects. The parser
+    # requires a `collection:` field — synthesize one if absent so
+    # users can analyze a playbooks-only file too.
+    import yaml as _yaml
+    raw = _yaml.safe_load(text) or {}
+    if "collection" not in raw:
+        raw = {"collection": "_analyze", **raw}
+    from compiler.parser import parse_yaml
+    coll, errs = parse_yaml(_yaml.safe_dump(raw, sort_keys=False))
+    if coll is None:
+        for e in errs:
+            print(f"  ✗ [parse/{e.code.value}] {e.message}", file=sys.stderr)
+        return 1
+    # Reserialize the parsed IR as YAML the simulator accepts. Each
+    # parsed step is a dataclass — convert via its .to_dict() (or
+    # asdict if it's a plain dataclass).
+    from dataclasses import asdict
+    canonical_doc = {
+        "playbooks": [
+            {
+                "name": pb.name,
+                "steps": [
+                    {k: v for k, v in asdict(s).items()
+                     if v is not None and v != {}}
+                    for s in pb.steps
+                ],
+            }
+            for pb in coll.playbooks
+        ],
+    }
+    text = _yaml.safe_dump(canonical_doc, sort_keys=False)
+
+    branch_choices = json.loads(args.branch_choices) if args.branch_choices else None
+    manual_choices = json.loads(args.manual_choices) if args.manual_choices else None
+    trigger_input = json.loads(args.trigger_input) if args.trigger_input else None
+
+    # The MCP tool is the canonical entry point; reuse it so CLI and
+    # MCP behavior never drift.
+    import mcp_server as _mcp
+    result = _mcp.analyze_playbook(
+        yaml_text=text,
+        playbook=args.playbook,
+        input=trigger_input,
+        branch_choices=branch_choices,
+        manual_choices=manual_choices,
+        execute_safe_ops=args.execute_safe_ops,
+    )
+
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+        return 0 if result.get("ok") else 1
+
+    # Human-readable summary. Group by step in declaration order so
+    # the user reads diagnostics top-down with their playbook.
+    diags = result.get("diagnostics") or []
+    if not diags:
+        print(f"✓ {result.get('playbook', '?')}: no diagnostics "
+              f"({result.get('steps_executed', 0)} steps simulated)",
+              file=sys.stderr)
+        return 0
+
+    by_step: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for d in diags:
+        sid = d.get("step_id", "")
+        if sid not in by_step:
+            order.append(sid)
+            by_step[sid] = []
+        by_step[sid].append(d)
+
+    SEV_GLYPH = {"error": "✗", "warning": "!", "info": "·"}
+    for sid in order:
+        print(f"\nstep: {sid}", file=sys.stderr)
+        for d in by_step[sid]:
+            glyph = SEV_GLYPH.get(d["severity"], "?")
+            print(f"  {glyph} [{d['severity']}/{d['kind']}] {d['message']}",
+                  file=sys.stderr)
+            if d.get("location"):
+                print(f"    at {d['location']}", file=sys.stderr)
+            if d.get("suggestion"):
+                print(f"    → {d['suggestion']}", file=sys.stderr)
+
+    print(f"\n{result['error_count']} error(s), "
+          f"{result['warning_count']} warning(s) across "
+          f"{result.get('steps_executed', 0)} step(s)", file=sys.stderr)
+    return 0 if result.get("ok") else 1
+
+
+def cmd_dump_step_params(args: argparse.Namespace) -> int:
+    """Audit known params per step type — writes one Markdown file
+    per step type combining resolver allowlists + corpus observations
+    + flagged gaps.
+    """
+    from compiler.step_param_audit import write_audit_dir
+    out_dir = Path(args.out)
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"reference DB not found: {db_path}", file=sys.stderr)
+        return 1
+    written = write_audit_dir(out_dir, db_path)
+    print(f"wrote {len(written)} step-type audits to {out_dir}/",
+          file=sys.stderr)
+    print(f"  index: {out_dir / 'INDEX.md'}", file=sys.stderr)
+    return 0
+
+
 def cmd_purge(args: argparse.Namespace) -> int:
     """Hard-delete one or more playbooks (workflows) by name or UUID.
 
@@ -3481,6 +3596,35 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-o", "--output", required=True)
     sp.set_defaults(func=cmd_compile)
 
+    sp = sub.add_parser("dump-step-params",
+        help="audit per-step-type params — writes Markdown reports")
+    sp.add_argument("--out", default="docs/step_params",
+                    help="output directory (default: docs/step_params)")
+    sp.add_argument("--db", default="store/fsr_reference.db",
+                    help="reference DB path")
+    sp.set_defaults(func=cmd_dump_step_params)
+
+    sp = sub.add_parser("analyze",
+        help="render-path validator: simulate offline + report diagnostics")
+    sp.add_argument("input", help="playbook YAML file")
+    sp.add_argument("--playbook", default=None,
+                    help="name of the workflow within the YAML "
+                         "(default: first one)")
+    sp.add_argument("--trigger-input", default=None,
+                    help="JSON for vars.input.params (e.g. '{\"alert_id\":7}')")
+    sp.add_argument("--branch-choices", default=None,
+                    help="JSON map of {step_id: branch_label} pinning "
+                         "decision routes")
+    sp.add_argument("--manual-choices", default=None,
+                    help="JSON map of {step_id: option_label} pinning "
+                         "manual_input choices")
+    sp.add_argument("--execute-safe-ops", action="store_true",
+                    help="run read-only connector ops live for real "
+                         "outputs (default: pure offline)")
+    sp.add_argument("--json", action="store_true",
+                    help="emit the full analyzer payload as JSON to stdout")
+    sp.set_defaults(func=cmd_analyze)
+
     sp = sub.add_parser("pull", help="fetch a single playbook (+ ref deps) as YAML")
     sp.add_argument("playbook", help="workflow name or UUID")
     sp.add_argument("-o", "--output", default=None)
@@ -4017,6 +4161,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="pass through to probes that support a live-FSR mode "
                          "(currently: playbook-steps)")
     sp.set_defaults(func=cmd_probe)
+
+    from recover import add_parser as _add_recover_parser
+    _add_recover_parser(sub)
 
     return p
 

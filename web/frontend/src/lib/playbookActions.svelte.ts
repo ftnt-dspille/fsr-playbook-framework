@@ -20,8 +20,10 @@ import {
   validateYaml,
   compileYaml,
   pushPlaybook,
+  analyzePlaybook,
   type Marker,
-  type Fix
+  type Fix,
+  type Diagnostic
 } from './api';
 import { playbookStore } from './playbookStore.svelte';
 import { runStore } from './runStore.svelte';
@@ -38,13 +40,17 @@ type State = {
   fixes: Fix[];
   compileJson: string | null;
   status: ActionStatus;
+  diagnostics: Diagnostic[];
+  analyzeBusy: boolean;
 };
 
 const state = $state<State>({
   markers: [],
   fixes: [],
   compileJson: null,
-  status: { kind: 'idle', msg: 'editing' }
+  status: { kind: 'idle', msg: 'editing' },
+  diagnostics: [],
+  analyzeBusy: false
 });
 
 function extractCollectionName(text: string): string | null {
@@ -65,6 +71,22 @@ export const playbookActions = {
   get status() { return state.status; },
   get errorCount() { return state.markers.filter((m) => m.severity === 'error').length; },
   get warningCount() { return state.markers.filter((m) => m.severity === 'warning').length; },
+  get diagnostics() { return state.diagnostics; },
+  get analyzeBusy() { return state.analyzeBusy; },
+  get analyzeErrorCount() { return state.diagnostics.filter((d) => d.severity === 'error').length; },
+  get analyzeWarningCount() { return state.diagnostics.filter((d) => d.severity === 'warning').length; },
+  /** Worst-severity diagnostic per step jkey, for canvas badges.
+   * Step `name` with spaces→underscores is the canonical jkey. */
+  get diagnosticsByStep(): Map<string, Diagnostic[]> {
+    const m = new Map<string, Diagnostic[]>();
+    for (const d of state.diagnostics) {
+      const key = (d.step_id || '').replace(/\s+/g, '_');
+      const arr = m.get(key) ?? [];
+      arr.push(d);
+      m.set(key, arr);
+    }
+    return m;
+  },
 
   /** Validate the current playbook buffer. Cheap and idempotent;
    * called on a debounce in the page-level effect so the diagnostics
@@ -88,6 +110,35 @@ export const playbookActions = {
         : { kind: 'err', msg: `${errs} error${errs !== 1 ? 's' : ''}` };
     } catch (e: any) {
       state.status = { kind: 'err', msg: e?.message ?? String(e) };
+    }
+  },
+
+  /** Render-path validator — simulates the playbook offline and
+   * surfaces data-access bugs (`vars.steps.X.Y` typos, missing keys,
+   * required-empty fields) that `validate_yaml` can't see. Pass
+   * `executeSafeOps: true` to also run C4 picklist drift against
+   * the live FSR. */
+  async analyze(opts: { executeSafeOps?: boolean } = {}): Promise<void> {
+    const yaml = playbookStore.yaml;
+    if (!yaml) {
+      state.diagnostics = [];
+      return;
+    }
+    state.analyzeBusy = true;
+    try {
+      const r = await analyzePlaybook(yaml, opts);
+      state.diagnostics = r.diagnostics;
+      const errs = r.error_count;
+      const warns = r.warning_count;
+      state.status = errs === 0
+        ? { kind: 'ok', msg: warns
+            ? `analyzed · ${warns} render warning${warns > 1 ? 's' : ''}`
+            : 'analyzed · no issues' }
+        : { kind: 'err', msg: `analyzed · ${errs} render error${errs !== 1 ? 's' : ''}` };
+    } catch (e: any) {
+      state.status = { kind: 'err', msg: e?.message ?? String(e) };
+    } finally {
+      state.analyzeBusy = false;
     }
   },
 

@@ -1,6 +1,6 @@
 # fsrpb CLI reference
 
-_Auto-generated from `cli.build_parser()` — re-run `python3 scripts/dump_cli_docs.py` after touching the CLI.
+_Auto-generated from `cli.build_parser()` — re-run `python3 scripts/external/dump_cli_docs.py` after touching the CLI.
 
 ## Commands
 

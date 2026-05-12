@@ -2,7 +2,7 @@
 # Pre-commit hook: run fsrpb checks on every staged playbook YAML.
 #
 # Install:
-#   ln -s ../../scripts/pre-commit.fsrpb.sh .git/hooks/pre-commit
+#   ln -s ../../scripts/external/pre-commit.fsrpb.sh .git/hooks/pre-commit
 #   chmod +x .git/hooks/pre-commit
 #
 # What it runs (per staged YAML under examples/ or matching *.yaml in

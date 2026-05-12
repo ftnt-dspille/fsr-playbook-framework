@@ -1,7 +1,7 @@
 """probe_jinja_backend — ingest the introspection dump from FSR's workflow env.
 
 Source: `store/incoming/filters.json`, produced by running
-`scripts/dump_jinja_filters.py` on the FSR appliance and scp'ing back.
+`scripts/internal/dump_jinja_filters.py` on the FSR appliance and scp'ing back.
 
 This is the canonical truth — `inspect.signature()` on the actual Python
 callables registered with `sealab`'s Jinja Environment. It supersedes the
@@ -161,7 +161,7 @@ def _ingest_tests(conn: sqlite3.Connection, tests: dict) -> int:
 def main() -> int:
     if not INCOMING.exists():
         print(f"[{PROBE_NAME}] missing {INCOMING}; "
-              f"run scripts/dump_jinja_filters.py on the FSR box and scp the "
+              f"run scripts/internal/dump_jinja_filters.py on the FSR box and scp the "
               f"result here first.")
         return 2
 

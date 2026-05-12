@@ -50,7 +50,7 @@ describe('StepPalette', () => {
   it('switches to connectors tab and lists connectors', async () => {
     render(StepPalette);
     await waitFor(() => screen.getByText('set_variable'));
-    await fireEvent.click(screen.getByRole('button', { name: 'connectors' }));
+    await fireEvent.click(screen.getByRole('tab', { name: /^connectors$/i }));
     await waitFor(() => screen.getByText('jira'));
     expect(screen.getByText('jira')).toBeTruthy();
     expect(screen.getByText('crowd-strike-falcon')).toBeTruthy();
@@ -59,9 +59,9 @@ describe('StepPalette', () => {
   it('filters connectors by query', async () => {
     render(StepPalette);
     await waitFor(() => screen.getByText('set_variable'));
-    await fireEvent.click(screen.getByRole('button', { name: 'connectors' }));
+    await fireEvent.click(screen.getByRole('tab', { name: /^connectors$/i }));
     await waitFor(() => screen.getByText('jira'));
-    const filter = screen.getByPlaceholderText('filter connectors…') as HTMLInputElement;
+    const filter = screen.getByPlaceholderText(/connectors/i) as HTMLInputElement;
     await fireEvent.input(filter, { target: { value: 'jira' } });
     expect(screen.queryByText('crowd-strike-falcon')).toBeNull();
     expect(screen.getByText('jira')).toBeTruthy();
@@ -70,7 +70,7 @@ describe('StepPalette', () => {
   it('expands a connector to reveal its operations', async () => {
     render(StepPalette);
     await waitFor(() => screen.getByText('set_variable'));
-    await fireEvent.click(screen.getByRole('button', { name: 'connectors' }));
+    await fireEvent.click(screen.getByRole('tab', { name: /^connectors$/i }));
     const jira = await waitFor(() => screen.getByText('jira'));
     await fireEvent.click(jira);
     await waitFor(() => screen.getByText('get_ticket_details'));
@@ -80,7 +80,7 @@ describe('StepPalette', () => {
   it('switches to recipes tab and renders recipe rows', async () => {
     render(StepPalette);
     await waitFor(() => screen.getByText('set_variable'));
-    await fireEvent.click(screen.getByRole('button', { name: 'recipes' }));
+    await fireEvent.click(screen.getByRole('tab', { name: /^recipes$/i }));
     await waitFor(() => screen.getByText('trigger:cybersponse.action'));
     expect(screen.getByText('trigger:cybersponse.action')).toBeTruthy();
     expect(screen.getByText('trigger_pattern')).toBeTruthy();

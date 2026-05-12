@@ -120,6 +120,71 @@
     | { kind: 'needs_confirm'; risk: string; category: string; message: string }
     | { kind: 'error'; message: string };
 
+  // ── Find-record live query preview ──────────────────────────────
+  // Posts the current `arguments.query` body to the configured FSR's
+  // /api/query/<module> via the `test_find_record` MCP tool. Returns
+  // total + first 5 records so the user gets immediate "did my filter
+  // match anything" feedback without leaving the inspector.
+  type FindResult =
+    | { kind: 'ok'; total: number; returned: number; records: unknown[]; url: string }
+    | { kind: 'error'; code: string; message: string; url?: string };
+  let findBusy = $state(false);
+  let findResult: FindResult | null = $state(null);
+
+  function bareModuleName(s: string | undefined | null): string {
+    if (!s) return '';
+    const q = s.indexOf('?');
+    return (q < 0 ? s : s.slice(0, q)).trim();
+  }
+
+  let findModule = $derived(
+    node.type === 'find_record'
+      ? bareModuleName(node.arguments?.module as string | undefined)
+      : ''
+  );
+
+  async function runFindRecord() {
+    if (!findModule) {
+      findResult = { kind: 'error', code: 'no_module', message: 'pick a module first' };
+      return;
+    }
+    findBusy = true;
+    findResult = null;
+    try {
+      // Pass the query body as-is — `test_find_record` validates and
+      // strips the module name's query-string suffix on the backend.
+      const query = (node.arguments?.query as Record<string, unknown> | undefined) ?? {
+        logic: 'AND', filters: []
+      };
+      const res = await callMcpTool<Record<string, unknown>>('test_find_record', {
+        module: findModule,
+        query,
+        limit: 5
+      });
+      const r = res.result ?? {};
+      if (!res.ok || r['ok'] === false) {
+        findResult = {
+          kind: 'error',
+          code: String(r['code'] ?? 'mcp_error'),
+          message: String(r['message'] ?? res.error ?? 'test_find_record failed'),
+          url: typeof r['url'] === 'string' ? (r['url'] as string) : undefined
+        };
+      } else {
+        findResult = {
+          kind: 'ok',
+          total: Number(r['total'] ?? 0),
+          returned: Number(r['returned'] ?? 0),
+          records: (r['records'] as unknown[]) ?? [],
+          url: String(r['url'] ?? '')
+        };
+      }
+    } catch (e: any) {
+      findResult = { kind: 'error', code: 'transport', message: String(e?.message ?? e) };
+    } finally {
+      findBusy = false;
+    }
+  }
+
   let runBusy = $state(false);
   let runResult: RunResult | null = $state(null);
 
@@ -317,6 +382,60 @@
       {/if}
     {/if}
   </section>
+
+  {#if node.type === 'find_record'}
+    <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Test query</div>
+          <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
+            {#if !findModule}
+              Pick a module first — the test posts the current filter
+              body to <code class="font-mono">/api/query/&lt;module&gt;</code>.
+            {:else}
+              Posts to <code class="font-mono">/api/query/{findModule}</code> with the current filter and returns the first 5 matches.
+            {/if}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-elev)] disabled:cursor-not-allowed disabled:opacity-40"
+          onclick={runFindRecord}
+          disabled={!findModule || findBusy}
+          title={findModule ? 'Run query against the configured FSR (read-only)' : 'Module is empty'}
+        >{findBusy ? 'Querying…' : 'Test query'}</button>
+      </div>
+      {#if findResult}
+        {#if findResult.kind === 'ok'}
+          <div class="mt-2 flex items-center gap-2 text-[10px] uppercase tracking-wider">
+            <span class={findResult.total === 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}>
+              {findResult.total === 0 ? 'no matches' : 'ok'}
+            </span>
+            <span class="text-[var(--text-faint)]">total {findResult.total}</span>
+            <span class="text-[var(--text-faint)]">· showing {findResult.returned}</span>
+          </div>
+          {#if findResult.url}
+            <p class="mt-1 truncate font-mono text-[10px] text-[var(--text-faint)]" title={findResult.url}>{findResult.url}</p>
+          {/if}
+          {#if findResult.records.length === 0}
+            <p class="mt-2 text-xs italic text-[var(--text-faint)]">
+              The query ran but matched no records. Tweak the filters and rerun.
+            </p>
+          {:else}
+            <pre class="mt-1 max-h-60 overflow-auto rounded bg-[var(--bg-canvas)] p-2 text-xs">{fmt(findResult.records)}</pre>
+          {/if}
+        {:else}
+          <div class="mt-2 text-[10px] uppercase tracking-wider text-rose-600 dark:text-rose-400">
+            error · {findResult.code}
+          </div>
+          <pre class="mt-1 whitespace-pre-wrap text-xs text-rose-600 dark:text-rose-400">{findResult.message}</pre>
+          {#if findResult.url}
+            <p class="mt-1 truncate font-mono text-[10px] text-[var(--text-faint)]" title={findResult.url}>{findResult.url}</p>
+          {/if}
+        {/if}
+      {/if}
+    </section>
+  {/if}
 
   {#if node.family === 'connector_op'}
     <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">

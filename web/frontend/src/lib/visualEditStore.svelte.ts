@@ -20,6 +20,11 @@ type State = {
   undoStack: VisualGraph[];
   /** Snapshots restored to `graph` by undo, available for redo. */
   redoStack: VisualGraph[];
+  /** Cross-component "focus this node" signal — set by, e.g., the
+   * diagnostics drawer when the user clicks a step_id and read by
+   * the canvas-owning component (EditWorkspace) which reflects it
+   * into its own selection state. Cleared after consumption. */
+  pendingSelection: { playbookIdx: number; nodeId: string } | null;
 };
 
 const state = $state<State>({
@@ -29,7 +34,8 @@ const state = $state<State>({
   saving: false,
   saveError: null,
   undoStack: [],
-  redoStack: []
+  redoStack: [],
+  pendingSelection: null
 });
 
 const MAX_HISTORY = 50;
@@ -345,6 +351,86 @@ export const visualStore = {
     } finally {
       state.saving = false;
     }
+  },
+
+  /** Find a node across all playbooks by step_id OR jkey (name with
+   * spaces→underscores). The render-path analyzer surfaces step_ids
+   * in either form depending on how the YAML was authored. */
+  findNodeByStepId(stepId: string): { playbookIdx: number; node: any } | null {
+    if (!state.graph || !stepId) return null;
+    const want = stepId;
+    const wantJkey = stepId.replace(/\s+/g, '_');
+    for (let pi = 0; pi < state.graph.playbooks.length; pi++) {
+      const pb = state.graph.playbooks[pi];
+      const node = pb.nodes.find((n) =>
+        n.id === want || n.name === want
+        || n.id === wantJkey || (n.name ?? '').replace(/\s+/g, '_') === wantJkey
+      );
+      if (node) return { playbookIdx: pi, node };
+    }
+    return null;
+  },
+
+  /** Select a node by step_id so the canvas focuses + the inspector
+   * opens it. Used by the diagnostics drawer to "jump to step". */
+  selectStepByName(stepId: string): void {
+    const hit = this.findNodeByStepId(stepId);
+    if (!hit) return;
+    state.pendingSelection = { playbookIdx: hit.playbookIdx, nodeId: hit.node.id };
+  },
+
+  /** Drain the pending selection signal — owners of the canvas
+   * call this from a $effect, mirror the values into their own
+   * selection state, then clear here. */
+  consumePendingSelection(): { playbookIdx: number; nodeId: string } | null {
+    const v = state.pendingSelection;
+    state.pendingSelection = null;
+    return v;
+  },
+
+  /** Apply a text-swap fix — locate the offending value at the dotted
+   * `location` path inside the named step's arguments, replace
+   * `before` with `after`, push to undo stack. Returns true on hit.
+   *
+   * The diagnostic's `location` looks like
+   * `arguments.arg_list[0].value` or `arguments.params.url` —
+   * standard JS dot/bracket notation. We walk to the leaf, then
+   * substring-replace within the leaf string (so a Jinja segment
+   * inside a longer template gets swapped without rewriting the
+   * whole template). */
+  applyTextSwap(args: { stepId: string; location: string; before: string; after: string }): boolean {
+    const hit = this.findNodeByStepId(args.stepId);
+    if (!hit) return false;
+    // Strip the leading `arguments.` if present — we operate on the
+    // node.arguments tree directly.
+    const path = args.location.replace(/^arguments\.?/, '');
+    const segments = path.match(/[^.[\]]+/g) ?? [];
+    if (segments.length === 0) return false;
+
+    snapshot();
+    const root = hit.node.arguments ?? {};
+    let cursor: any = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const seg = segments[i];
+      const idx = /^\d+$/.test(seg) ? parseInt(seg, 10) : seg;
+      if (cursor[idx] === undefined) {
+        // Path doesn't resolve — bail without a partial swap.
+        return false;
+      }
+      cursor = cursor[idx];
+    }
+    const leaf = segments[segments.length - 1];
+    const leafIdx = /^\d+$/.test(leaf) ? parseInt(leaf, 10) : leaf;
+    const cur = cursor[leafIdx];
+    if (typeof cur !== 'string' || !cur.includes(args.before)) {
+      // Best-effort substring swap; if `before` isn't a substring of
+      // the leaf, the diagnostic and the YAML have drifted apart.
+      return false;
+    }
+    cursor[leafIdx] = cur.replace(args.before, args.after);
+    hit.node.arguments = root;
+    state.dirty = true;
+    return true;
   }
 };
 

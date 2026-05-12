@@ -41,6 +41,30 @@
   let loading = $state(false);
   let loadError: string | null = $state(null);
 
+  // Corpus-mined skeletons + summaries for non-connector step types
+  // (everything routed through `/api/ref/step-examples/<type>`).
+  // Loaded in parallel with the connector_op fetches above.
+  type CorpusExample = {
+    frequency: number;
+    playbook_count: number;
+    summary: string;
+    arguments: Record<string, unknown>;
+    corpus_type: string;
+  };
+  let corpusExamples = $state<CorpusExample[]>([]);
+  let corpusLoadError: string | null = $state(null);
+
+  // Step types that have a corpus-mined Examples view (mirrors
+  // STEP_TYPES_WITH_EXAMPLES in StepInspector.svelte; kept local so
+  // the load decision is self-contained).
+  const CORPUS_TYPES = new Set([
+    'decision', 'manual_input', 'set_variable', 'find_record',
+    'create_record', 'insert_record', 'update_record', 'delete_record',
+    'ingest_bulk_feed', 'delay', 'code_snippet', 'workflow_reference',
+    'start_on_create', 'start_on_update', 'start',
+    'manual_action', 'api_call'
+  ]);
+
   let connector = $derived(node.arguments?.connector as string | undefined);
   let opName = $derived(
     (node.arguments?.operation as string | undefined) ??
@@ -80,8 +104,25 @@
     loadError = null;
     opExamples = null;
     jinjaExamples = null;
+    corpusExamples = [];
+    corpusLoadError = null;
 
     const tasks: Promise<unknown>[] = [];
+
+    if (CORPUS_TYPES.has(node.type)) {
+      tasks.push(
+        fetch(`/api/ref/step-examples/${encodeURIComponent(node.type)}?limit=8`)
+          .then(async (r) => {
+            if (!r.ok) {
+              corpusLoadError = `HTTP ${r.status}`;
+              return;
+            }
+            const data = await r.json();
+            corpusExamples = (data.examples ?? []) as CorpusExample[];
+          })
+          .catch((e) => { corpusLoadError = String(e?.message ?? e); })
+      );
+    }
 
     if (connector) {
       tasks.push(
@@ -246,6 +287,67 @@
     </ul>
   {/if}
 </section>
+
+{#if CORPUS_TYPES.has(node.type)}
+  <section class="mt-4">
+    <header class="mb-2">
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Patterns from production
+      </div>
+      <p class="text-[11px] text-[var(--text-faint)]">
+        Real <code class="font-mono">{node.type}</code> shapes mined
+        from playbooks on disk + the live FSR, ranked by frequency.
+        Click a row to inspect the full args.
+      </p>
+    </header>
+    {#if loading}
+      <p class="italic text-[var(--text-faint)] text-[11px]">loading…</p>
+    {:else if corpusLoadError}
+      <p class="text-[11px] text-rose-600 dark:text-rose-400">{corpusLoadError}</p>
+    {:else if corpusExamples.length === 0}
+      <p class="text-[11px] italic text-[var(--text-faint)]">
+        No examples in the trained store for this step type yet.
+        Run <code class="font-mono">fsrpb train</code> against a live
+        FSR to populate.
+      </p>
+    {:else}
+      <ul class="space-y-2">
+        {#each corpusExamples as ex, idx (idx)}
+          <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+            <details>
+              <summary class="cursor-pointer">
+                <div class="flex items-baseline justify-between gap-2">
+                  <p class="text-[12px] text-[var(--text-default)]">{ex.summary}</p>
+                  <span class="flex-shrink-0 text-[10px] text-[var(--text-faint)]">
+                    {ex.frequency}× · {ex.playbook_count} {ex.playbook_count === 1 ? 'pb' : 'pbs'}
+                  </span>
+                </div>
+              </summary>
+              <pre class="fsrpb-json mt-2 max-h-60 overflow-auto rounded p-2 text-[11px]">{@html highlightJson(JSON.stringify(ex.arguments))}</pre>
+              <div class="mt-1 flex items-center justify-end gap-2 text-[10px]">
+                <span class="text-[var(--text-faint)]">corpus type: <code class="font-mono">{ex.corpus_type}</code></span>
+                <button
+                  type="button"
+                  class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-0.5 hover:bg-[var(--bg-elev)]"
+                  onclick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(JSON.stringify(ex.arguments, null, 2));
+                      copyHint = 'copied!';
+                      setTimeout(() => (copyHint = null), 1200);
+                    } catch {
+                      copyHint = 'copy failed';
+                      setTimeout(() => (copyHint = null), 1200);
+                    }
+                  }}
+                >Copy args</button>
+              </div>
+            </details>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+{/if}
 
 
 <style>

@@ -601,6 +601,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             description=pb_raw.get("description", "") or "",
             tag=pb_raw.get("tag", "") or "",
             is_active=bool(pb_raw.get("is_active", False)),
+            debug=bool(pb_raw.get("debug", False)),
             trigger=str(pb_raw.get("trigger", "start") or "start"),
             parameters=list(params_raw),
             steps=steps,

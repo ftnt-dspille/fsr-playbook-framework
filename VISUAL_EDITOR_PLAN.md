@@ -695,6 +695,27 @@ behind unsaved canvas edits.
 
 ---
 
+## AI step drafter (landed 2026-05-08)
+
+Inspector header on every supported step type (17 types) now shows a
+**✨ Describe** button. Click → modal with a single textarea; the
+user types intent in plain English, the backend composes a
+deterministic system prompt per step type (intro + live module
+schema + top 3 corpus skeletons from E1's summariser), and the
+configured LLM provider returns a JSON `arguments:` body. The modal
+renders a side-by-side diff (current vs proposed); one click applies
+through `setArgs`. ⌘/Ctrl-Enter submits, Esc closes.
+
+Backend lives at `web/backend/step_drafter.py` (13 unit tests) +
+`POST /api/visual/draft-step`. Every call tags the UsageEvent with
+`{feature: 'step_drafter', step_type: <type>}` so cost attribution
+is wired for the dashboard read-side later.
+
+Open follow-ups: tool-using variant (model can call
+`list_picklists` / `find_step_examples` mid-turn instead of relying
+on the pre-loaded prompt), inline validator pass before the diff is
+shown.
+
 ## Upcoming — step-type authoring completion
 
 Inspector surfaces vary in fidelity per step type. Next pass: bring
@@ -706,37 +727,99 @@ Status by family (as of 2026-05-08):
 - [x] `connector_op` — Args (schema-driven), Examples, Verify, Branches
       n/a. Complete.
 - [x] `set_variable` — `arg_list[]` editor in Args tab. Complete.
-- [x] `decision` — Branches tab with label + target dropdowns +
-      add-branch form. Complete.
-- [~] `manual_input` — Branches tab covers `options[].next` routing,
-      but `formType` per option (string / picklist / ipv4 / lookup /
-      etc.) needs a dedicated editor. Today it's freeform JSON.
-- [~] `workflow_reference` — recognized as a family (purple node,
-      "Workflow ref"), but no Args UI. Needs:
-        - target playbook picker (cross-collection, surfaces from the
-          playbooks list),
-        - per-parameter input mapping editor (graph predecessor outputs
-          → target inputs),
-        - "open nested playbook" jump action.
-- [~] Trigger steps (`abstract_trigger` / `post_create` / `post_update` /
-      `action` / `api_call`) — render with a static "trigger"
-      placeholder. Need a per-trigger-type config editor (filter
-      conditions for post_*, manual params for action, route + method
-      for api_call). The `start` trigger has no auth/route either.
+- [x] `decision` — Branches tab now exposes per-row condition predicate
+      + default (else) flag in addition to label + target. Renames /
+      retargets / add / delete keep `arguments.conditions[]` in lockstep
+      with the edges so emitted YAML is coherent. Complete.
+- [x] `manual_input` — Args tab is now a visual form builder:
+      title + description + per-field rows (name, label, formType,
+      required, defaultValue, tooltip) reading either friendly
+      `arguments.inputs[]` or canonical `arguments.input.schema.
+      inputVariables[]`. Writes friendly form and clears the canonical
+      block so there's one source of truth (resolver expands at compile
+      time). A "Buttons" preview at the bottom of the Args tab shows
+      the outgoing branch labels + targets so the analyst-facing form
+      shape is visible at a glance. Branches tab still covers full
+      label / target / formType editing per option.
+- [x] `delay` — friendly days/hours/minutes/seconds grid in Args tab;
+      writes friendly form, lets resolver expand to canonical TimeBased
+      rule at compile time. Complete.
+- [x] `raise_exception` / `terminate` / `assert` — dedicated mini
+      editor (message + predicate for assert). Complete.
+- [~] `workflow_reference` — Args tab now wires:
+        - target IRI input (free text or Jinja — live picker still
+          queued),
+        - apply_async / pass_input_record / pass_parent_env toggles,
+        - input mapping editor (key/value list under
+          `arguments.arguments`).
+      Still open: live cross-collection playbook picker (today user
+      types/pastes the IRI) and "open nested playbook" jump action.
+- [x] Trigger steps (`start_on_create` / `start_on_update` /
+      `manual_action` / `api_call` / `start`) — Args tab now exposes
+      resource (module) input, triggerOnSource / triggerOnReplicate /
+      __triggerLimit toggles, and a recursive AND/OR `FilterTreeEditor`
+      backing `arguments.fieldbasedtrigger.{logic, filters[]}`. Filter
+      tree supports nested groups + the 13 leaf operators from
+      `store/QUERY_API.md` §2.1 (eq/neq/lt/lte/gt/gte/in/nin/like/
+      contains/exists/isnull) and the three value types
+      (primitive / object / datetime). Sort + limit pass through
+      untouched on every edit. Resource input is backed by a live
+      module dropdown (sourced from the trained `modules` table via
+      `GET /api/ref/modules`); FilterTreeEditor pulls per-field
+      operator catalogs from `GET /api/ref/modules/<m>/fields` so
+      operators are scoped to the field's FSR type (no more `like`
+      on a boolean, no `gt` on a picklist).
 - [~] Record CRUD (`find_record` / `create_record` / `update_record` /
-      `delete_record`) — green node visual, no Args wiring. Needs:
-        - module picker (sourced from `module_fields`),
-        - field-by-field form using the schema picklists,
-        - `__bulk` / `fieldOperation` / `__recommend` toggles where
-          applicable.
-- [ ] `code_snippet` — needs a Monaco-embedded code editor with
-      language detection (jinja-python / Python).
+      `delete_record` / `ingest_bulk_feed`) — Args tab now wired:
+        - Module input (writes `module: '<name>?$limit=30'` for find,
+          `collection: '/api/3/<name>'` for write, `/api/ingest-feeds/`
+          for bulk).
+        - find_record reuses `FilterTreeEditor` against
+          `arguments.query.{logic, filters[]}` (full nested AND/OR).
+        - Write steps render `resource` as a key/value field list with
+          per-field `fieldOperation` (Overwrite / Append / Replace) and
+          a top-level `operation` selector for update_record. `__bulk`
+          checkbox surfaced with a tooltip clarifying it does NOT skip
+          on-create triggers (per `feedback_bulk_vs_ingest_bulk_feed`).
+        - delete_record: usage hint pointing at the upstream record IRI
+          pattern.
+      Write fields are now schema-driven: each entry under
+      `arguments.resource` reads its FSR type from the
+      `/api/ref/modules/<m>/fields` catalog and renders the matching
+      editor — picklist dropdown (sourced from
+      `module_fields.picklist_options`), boolean checkbox, number
+      input, datetime input, or relation IRI input with a hint. The
+      "+ Add field" affordance is now a dropdown over every
+      not-yet-set field on the module. Free-text fallback survives
+      when the catalog is empty.
+      Verify tab wires a "Test query" action on `find_record`: posts
+      the current `arguments.query` body via the new
+      `test_find_record` MCP tool to `POST /api/query/<module>` and
+      renders total + first 5 records (or a structured error) inline.
+      Relation fields render a live `RelationPicker` dropdown
+      (`search_module_records` MCP → `GET /api/3/<rel>?$search=…`)
+      with a 200ms debounce + out-of-order request guard; users can
+      pick a record by name without ever typing an IRI, but the
+      input still accepts free-text Jinja for templated relations.
+      Still open: dedicated Ingest Bulk Feed authoring.
+- [x] `code_snippet` — Monaco-embedded editor (Python language mode,
+      tab-indents 4 spaces, line numbers, word-wrap) bound to
+      `params.python_function`. The wrapper (`MonacoCode.svelte`) is
+      language-agnostic and reusable for future fields that need
+      proper code editing. Open follow-up: register a tokenized
+      Jinja-Python dialect so templated expressions visually
+      distinguish from Python identifiers.
 - [ ] `delay` — minimal but dedicated: number + unit picker.
 - [ ] `raise_exception` / `terminate` / `assert` (terminal family) —
       one-line editors per type.
-- [ ] Ingest Bulk Feed step type — separate from Create Record (UUIDs +
-      arg shapes differ, see `reference_create_record_vs_ingest_bulk_feed`
-      memory). Needs first-class ingestion authoring.
+- [x] Ingest Bulk Feed step type — distinct "Feed source" block
+      (item iterable + batch size + parallel + when-predicate; always
+      asserts `for_each.__bulk: true`) above the schema-driven field
+      editor. Field editor surfaces a `vars.item.<key>` hint so users
+      see the binding pattern. Bypasses on-create triggers per
+      `feedback_bulk_vs_ingest_bulk_feed`. Open follow-up: source
+      schema preview (read the iterable's first element to suggest
+      field bindings) — small AI-builder extension.
 
 Each step-type build-out should ship with: schema-driven Args, at
 least one fixture playbook, an Inspector tab test, and a corpus

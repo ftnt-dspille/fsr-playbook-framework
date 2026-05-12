@@ -1,6 +1,282 @@
 # FSRPlaybookYaml — TODO / resume state
 
-**Last touched**: 2026-05-07. Live FSR target: `https://10.99.249.205` (label `dev`).
+**Last touched**: 2026-05-08. Live FSR target: `https://10.99.249.205` (label `dev`).
+
+## Live-FSR round-trip probe (added 2026-05-08)
+
+`python/probes/probe_round_trip.py` — synthesises a YAML playbook
+per scenario, compiles + pushes via the real resolver/runner pipeline,
+pulls back the canonical JSON, and asserts the structural claims
+survived FSR's normalisation. 6 scenarios green on first run:
+
+- `two_triggers` (negative) — compiler rejects multi-trigger.
+- `on_create_nested_filter` — AND/OR nesting, picklist eq, like.
+- `on_update_changed` — `operator: changed` with no value side.
+- `find_record_correlated` — `?$relationships=true&$fsr_max_relation_count=5` URL params.
+- `decision_three_way` — 3 conditions + exactly 1 default flag.
+- **`on_create_fires_and_completes` (live-fire)** — pushes a playbook,
+  POSTs an alert that matches the trigger filter, polls
+  `/api/wf/api/workflows/?template_iri=<wf>` until terminal, asserts
+  the run hit `finished`. Confirms the WHOLE chain works:
+  resolver → push → FSR subscriber → trigger eval → step engine.
+  Run with `--no-fire` to skip the live-fire scenarios for a faster
+  structural-only sweep.
+
+Gotchas captured for future scenario authors:
+
+- Each scenario MUST use a unique collection name. FSR retains
+  deleted UUIDs in a recycle layer that doesn't expose a clear
+  hard-purge endpoint on this version (7.6.x); reusing a collection
+  name across scenarios produces 409 UniqueConstraintViolation on
+  the second push because the resolver mints deterministic uuid5
+  from the collection name. Probe uses `_fsrpb_rt_<scenario>`
+  prefix and purges per-scenario at start + end.
+- ✅ **Compiler-rule guards in the canvas — DONE 2026-05-08.** New
+  `PlaybookGuards.svelte` (7 tests) renders read-only diagnostic
+  banners above the canvas when the active playbook has compile-time
+  or runtime gotchas. Two guards today, both stemming from real
+  failures the round-trip probe surfaced:
+    - **Multi-trigger** (red alert) — flags every offending trigger
+      step name; user sees the rule the moment they drop the second
+      trigger, not at compile time.
+    - **Inactive trigger playbook** (amber status) — fires only when
+      the playbook has at least one trigger AND `is_active === false`
+      explicitly (legacy graphs without the flag don't generate noise).
+  Backend now surfaces `is_active` from `to_visual` so the frontend
+  has the data to check. Outstanding: an in-line **toggle** to
+  flip `is_active` from the inspector (today the user has to edit
+  YAML directly); requires extending `from_visual`'s diff path to
+  cover playbook-level keys.
+
+Open follow-up scenarios (each round-trippable, just pattern-fill
+the harness):
+  - manual_input with multiple form fields + buttons
+  - workflow_reference with input mapping
+  - ingest_bulk_feed with for_each
+  - update_record with picklist value + fieldOperation: Append
+  - find_record with $sort + __selectFields
+
+## Pending — quick UX polish (added 2026-05-08)
+
+- ✅ **Settings: pre-select the active AI provider — DONE 2026-05-08.**
+  The settings page now reads `snapshot.active_provider` after the
+  initial fetch and switches `selected` to it before hydrating the
+  form. Falls back to the first registered provider when the saved
+  active is unknown (headless/fresh-install case).
+
+## Pending — step-type authoring polish (added 2026-05-08)
+
+Now that decision/manual_input/delay/terminal/trigger/record_crud have
+first-class inspector editors (see VISUAL_EDITOR_PLAN.md §"Upcoming —
+step-type authoring completion"), the long-tail polish:
+
+- **Picklist friendly-token round-trip.** Today we store the friendly
+  picklist token (e.g. `"High"`) under `arguments.resource.<field>`
+  and rely on the resolver to map it to the IRI at compile time.
+  Verify on a live FSR push that the designer accepts the friendly
+  form (it should, per `set_variable` precedent). If not, swap to
+  storing the IRI directly and resolve the friendly label for
+  display.
+- **`workflow_reference` Args UI.** Target playbook picker
+  (cross-collection, surface from the playbook list); per-parameter
+  input mapping editor (graph predecessor outputs → target inputs);
+  "open nested playbook" jump button.
+- ✅ **`code_snippet` Monaco editor — DONE 2026-05-08.** New
+  `MonacoCode.svelte` is a slim language-agnostic Monaco wrapper
+  (default `language="python"`, configurable). Embedded into the
+  code_snippet Args tab against `params.python_function`. Outstanding
+  polish: registering a tokenized Jinja-Python dialect so
+  `{{ vars.X }}` highlights distinctly from Python (Monaco's stock
+  Python lexer treats it as plain identifiers — works fine, just
+  not visually distinct). Reusable elsewhere now (assert predicates,
+  decision conditions long-form) when authoring exceeds a few lines.
+- ✅ **Dedicated Ingest Bulk Feed authoring — DONE 2026-05-08.**
+  `ingest_bulk_feed` now renders a distinct "Feed source" block above
+  the field editor: Item iterable input (with `{x}` Jinja path
+  picker), batch size, parallel toggle, optional skip-if predicate
+  (`when`). The block always asserts `for_each.__bulk: true` so the
+  YAML compiles to the bulk-ingest path that bypasses on-create
+  triggers. Field editor reuses the schema-driven typed inputs from
+  the regular write path with a hint reminding the user that each
+  batch row binds via `{{ vars.item.<key> }}`. Outstanding: source
+  schema preview (parse the iterable's first element to suggest
+  field bindings) — a small AI-builder follow-up where the model
+  reads `vars.steps.<predecessor>.data[0]` and proposes mappings.
+- **Filter-leaf value editors by type.** Picklist values should
+  auto-resolve to IRIs when `type: object` is selected (precheck via
+  `precheck_picklist_value` MCP, same flow used in connector_op
+  params). Datetime should accept either ISO or epoch ms with a
+  picker.
+- ✅ **Decision condition Jinja path picker — DONE 2026-05-08.**
+  Reusable `VarPathPicker` component (7 unit tests) renders a `{x}`
+  button next to inputs that pops a list of `vars.input.records[0].*`,
+  `vars.input.params['<name>']`, `globalVars.*`, and per-ancestor
+  `vars.steps.<Name>.*` paths (step-type-aware: connector_op suggests
+  `.data`, find_record suggests `[0]['@id']`, manual_input suggests
+  `.input`, etc.). Walks the playbook graph for transitive ancestors,
+  not just direct predecessors. Wired into:
+    - decision condition inputs (existing rows + the "Add branch"
+      form),
+    - `FilterTreeEditor` leaf value input (so trigger filters and
+      find_record queries get path suggestions too).
+  Outstanding: full Monaco-style inline autocomplete that triggers
+  on `{{` and consults the same suggestions; Jinja filter
+  autocomplete inside the braces (`| upper`, `| ternary(…)`).
+- ✅ **Find Record correlated-records wire shape — VERIFIED 2026-05-08.**
+  The actual wire form lives in the `module:` URL query string:
+  `?$relationships=true` for the toggle (61 corpus rows) and
+  `?$fsr_max_relation_count=N` for the max (multiple corpus rows;
+  e.g. `netshot_domains?$limit=1&$relationships=true&$fsr_max_relation_count=1000`).
+  Inspector now parses these out of the URL on render and writes
+  them back via a `URLSearchParams`-aware mutator that preserves
+  every other param (including `$limit`). The legacy
+  `checkboxFields: bool` arg is independent (different designer
+  toggle, not correlated-records) and now passes through untouched.
+  Top-level `correlatedRecordsLimit` was wrong — removed.
+- ✅ **Related-module sub-query auto-scoping — DONE 2026-05-08.**
+  When every leaf in a group shares a `<rel>.` prefix and `<rel>` is
+  a known module, the FilterTreeEditor auto-detects the scope and
+  renders a "on `<rel>`" chip in the group header. Adding a new
+  condition (`+ condition`) pre-seeds the relation prefix so the
+  user only picks the sub-field. The redundant primary picker is
+  hidden for in-scope leaves. Wire shape stays identical to FSR's
+  (flat dotted leaves like `assets.hostname`) — confirmed against
+  the corpus (41 rows with dotted-path filters: `workspaces.uuid`,
+  `netshotOutputGroups.id.uuid`, etc.).
+- ✅ **`changed` + `in_all` operators — LIVE-VERIFIED 2026-05-08.**
+  Corpus showed the actual operator tokens are `changed` (not
+  `is_changed`) and `in_all`. Both are trigger-only — the live FSR's
+  `/api/query/<module>` endpoint rejects them with 500, but a
+  one-step `start_on_update` playbook with either operator pushes
+  cleanly through the compiler pipeline. Probe at
+  `python/probes/probe_visual_editor_wire.py` synthesises a tiny
+  YAML, pushes via `e2e.runner._push`, confirms 200, and cleans up.
+  4/4 wire shapes (changed, in_all, $relationships, $fsr_max_relation_count)
+  green against `https://10.99.249.205`. Inspector now exposes
+  `in_all` as an extra operator on every trigger type (alongside
+  `changed` for On-Update).
+
+## Pending — step-type Examples + AI builder (added 2026-05-08)
+
+Cuts authoring time on every step type. The two ideas reinforce each
+other: a corpus-mined Examples tab teaches the user the patterns that
+actually exist in production, and the AI builder uses the same corpus
++ MCP introspection to draft a step from a natural-language prompt.
+
+E1. ✅ **Corpus-mined Examples tab — DONE 2026-05-08.** Backend
+    summariser at `web/backend/step_examples.py` with 15 unit tests;
+    `GET /api/ref/step-examples/<step_type>` returns top-N clustered
+    skeletons with deterministic English summaries
+    (decision / manual_input / set_variable / find_record / write
+    family / workflow_reference / delay / triggers). Examples tab on
+    every supported step type renders summary + frequency + playbook
+    count, with click-to-expand JSON and Copy-args. Outstanding:
+    `code_snippet` summariser is wired but the corpus has only ~20
+    rows so clustering is thin — fine, just under-sampled.
+
+E2. ✅ **AI step builder — DONE 2026-05-08.** Backend at
+    `web/backend/step_drafter.py` with 13 unit tests. New endpoint
+    `POST /api/visual/draft-step` accepts `{step_type, intent,
+    module?, current_args?, provider?}` and returns `{ok,
+    proposed_args, raw_text, prompt_chars}`. The system prompt is
+    composed deterministically per step type from: a per-type intro,
+    the live module's field catalog (including picklist enumerations,
+    capped at 60 fields), and the top 3 corpus skeletons reused from
+    E1's summariser. Frontend launcher is the **✨ Describe** button
+    in the inspector header (visible on all 17 supported step types);
+    opens a modal with a textarea, ⌘/Ctrl-Enter to submit, Esc to
+    close. Successful draft renders side-by-side current/proposed
+    JSON; user clicks Apply to commit via `setArgs`. Outstanding
+    follow-ups: (a) tool-using variant where the model can call
+    `list_picklists` / `find_step_examples` mid-turn instead of
+    relying on the pre-loaded prompt, (b) ✅ inline validator pass —
+    DONE 2026-05-08, every proposal goes through the resolver +
+    validator and the modal shows compiler diagnostics inline (errors
+    in red, warnings in amber, ✓ green when clean), (c) usage
+    telemetry — every call already tags
+    `{feature: 'step_drafter', step_type: <type>}` on the UsageEvent
+    so cost attribution is wired; the dashboard read-side is queued
+    separately.
+
+(original E1 spec preserved below for reference.)
+
+E1. **Corpus-mined Examples tab on every step type.** `connector_op`
+    already has Examples (operation-keyed). Extend the same pattern to
+    decision / manual_input / trigger / record_crud / set_variable /
+    workflow_reference / code_snippet / delay / raise_exception /
+    terminate / assert.
+
+    For each step type:
+    - Source: the `playbook_steps` table (sqlite, ~7,400 rows from disk
+      + live FSR), partitioned by `step_type_name`.
+    - Rank/dedupe: cluster by `arguments_json` shape (canonicalize
+      keys, drop ad-hoc text values like Jinja vars and free-text
+      messages, hash the skeleton). Show top-N distinct skeletons
+      annotated with frequency ("seen in 47 playbooks").
+    - **Auto-summary line per example.** Don't just dump JSON — render
+      a one-liner derived mechanically from the args. Examples:
+        - decision: "if `vars.score > 50` → Set Critical; else → Set Low"
+          (read from `arguments.conditions[]`, build "if X → Y" per row).
+        - trigger: "fires on indicators where typeofindicator ∈
+          {Domain, FileHash-MD5, …} AND indicatorStatus ≠ Excluded".
+          Built by walking the `fieldbasedtrigger` AND/OR tree and
+          formatting each leaf as `field op value` (look up picklist
+          display labels via `_value.itemValue`).
+        - manual_input: "asks for orgName, contentRepositoryName +
+          [Setup] button" (extract from `inputVariables[]` +
+          `response_mapping.options[]`).
+        - find_record: "finds tasks where name == vars.input.records[0].uuid".
+        - update_record: "sets content = '<jinja>', tasks = '<iri>'
+          on /api/3/comments (Overwrite)".
+        - workflow_reference: "calls CloneRepository with
+          {org_name, repo_name, branch_name}".
+        - delay: "waits 5 minutes".
+      The summary is deterministic — same code path that powers the
+      AI builder's understanding of an existing step.
+    - Wire-up: extend `find_step_examples` MCP tool (already exists —
+      see `python/mcp_server.py:2057`) to return clusters + summaries
+      instead of raw rows; surface in the inspector's Examples tab via
+      `/api/ref/step-examples/{step_type}`.
+
+E2. **AI step builder ("describe → step").** From the inspector the
+    user clicks "✨ Describe what you want" on any step type and types
+    a prompt. The agent generates the step args using:
+    - **MCP introspection.** The agent already has tools that know the
+      step type's schema (`get_step_type`), the live FSR's modules
+      (`/api/ref/modules`), per-module fields and operators
+      (`/api/ref/modules/{m}/fields`), picklists (`list_picklists`),
+      connector ops (`get_op_schema`), and corpus examples (E1's
+      `find_step_examples`). The system prompt directs it to read
+      these before drafting.
+    - **Type-narrow prompts per step type.** Different system prompts
+      per step type so the model isn't told the universe — e.g. for
+      triggers: "given the user's intent, choose a module, build a
+      `fieldbasedtrigger` filter tree, set the trigger flags. You may
+      call get_module_fields, list_picklists, find_step_examples."
+    - **Diff preview before commit.** The result is shown in a diff
+      view (proposed args vs. current args) — user clicks Apply to
+      land the change via `setArgs`. Round-trips through the same
+      validator the manual editor uses, so a bad draft surfaces with
+      red squiggles instead of silently breaking the playbook.
+    - Examples of intents to support per step type:
+        - trigger: "fire on new high-severity phishing alerts that
+          aren't already escalated"
+        - decision: "branch on whether the indicator's reputation is
+          malicious or unknown"
+        - manual_input: "ask the analyst for org name, repo name, and
+          a branch — required, with sensible defaults"
+        - find_record: "find tasks linked to the current incident
+          assigned to me"
+        - update_record: "mark this task as completed, attach the run
+          summary as a comment"
+    - Reuses existing chat plumbing (`web/backend/llm/`, agentic
+      provider, history.db) — same model + cost ceiling as today's
+      free-form chat, just scoped to a single-step authoring flow.
+
+These two stack: E1 ships first because it's deterministic + cheap and
+makes the corpus visible; E2 builds on top by using the same
+summarizer to tell the model "here are 5 production trigger filters
+on this module — pick the closest pattern and tweak it".
 
 ## Pending — distributability & user personalization (added 2026-05-07)
 

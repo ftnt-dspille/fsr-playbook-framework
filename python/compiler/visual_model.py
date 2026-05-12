@@ -246,6 +246,16 @@ def to_visual(yaml_text: str) -> dict[str, Any]:
             "parameters": list(pb.parameters or []),
             "trigger": pb.trigger,
             "trigger_step_id": pb.trigger_step_id,
+            # Surfaced for the frontend's "inactive playbook" guard.
+            # Default in the IR is False; trigger playbooks need this
+            # set to True (or a post-push PUT-activate) to actually
+            # fire — confirmed by the round-trip live-fire probe.
+            "is_active": bool(getattr(pb, "is_active", False)),
+            # Verbose runtime tracing. New visual-editor drafts ship
+            # with this set so authors see step-by-step output the
+            # first time they run; production playbooks should flip
+            # it off via the inspector header.
+            "debug": bool(getattr(pb, "debug", False)),
             "nodes": nodes,
             "edges": edges,
         })

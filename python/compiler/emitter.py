@@ -382,7 +382,7 @@ def emit(collection: Collection) -> dict[str, Any]:
             "tag": pb.tag or "",
             "description": pb.description or "",
             "isActive": pb.is_active,
-            "debug": False,
+            "debug": pb.debug,
             "singleRecordExecution": False,
             "remoteExecutableFlag": 0,
             "parameters": list(pb.parameters),

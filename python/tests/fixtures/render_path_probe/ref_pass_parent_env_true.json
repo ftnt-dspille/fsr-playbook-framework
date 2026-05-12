@@ -1,0 +1,100 @@
+{
+  "scenario": "ref_pass_parent_env_true",
+  "playbook_name": "rp_ref_envT_parent",
+  "description": "ref with pass_parent_env=true; check var inheritance",
+  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_ref_envT_child\"\n    description: \"child for rp_ref_envT_parent\"\n    is_active: true\n    steps:\n      - name: \"ChildStart\"\n        type: start\n        next: \"Echo\"\n      - name: \"Echo\"\n        type: set_variable\n        vars:\n          child_marker:    \"from_child\"\n          saw_parent:      \"{{ vars.parent_marker | default('NONE') }}\"\n  - name: \"rp_ref_envT_parent\"\n    description: \"parent sets var, child reads + writes, parent reads back\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"SetParentVar\"\n      - name: \"SetParentVar\"\n        type: set_variable\n        vars:\n          parent_marker: \"from_parent\"\n        next: \"Call\"\n      - name: \"Call\"\n        type: workflow_reference\n        arguments:\n          target: rp_ref_envT_child\n          apply_async: false\n          pass_parent_env: true\n          pass_input_record: false\n        next: \"Capture\"\n      - name: \"Capture\"\n        type: set_variable\n        vars:\n          saw_child_write: \"{{ vars.child_marker | default('UNSET') }}\"\n          child_step_view: \"{{ vars.steps.Call }}\"\n",
+  "run_status": "finished",
+  "env": {
+    "debug": true,
+    "input": {
+      "params": {},
+      "records": []
+    },
+    "request": {
+      "uri": "https://10.99.249.205/api/triggers/1/notrigger/163edddf-7a15-58c9-8913-5fb2ba4d53dd",
+      "method": "POST",
+      "baseUri": "https://10.99.249.205",
+      "headers": {
+        "host": "10.99.249.205",
+        "proxy": "",
+        "accept": "*/*",
+        "connection": "keep-alive",
+        "user-agent": "python-requests/2.33.1",
+        "content-type": "application/json",
+        "authorization": "*******",
+        "content-length": "83",
+        "x-php-ob-level": "1",
+        "accept-encoding": "gzip, deflate"
+      },
+      "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce"
+    },
+    "task_id": "b3b8e390-c9bb-4db5-b77a-25e6da4515a3",
+    "auth_info": {
+      "auth_method": "CS HMAC"
+    },
+    "resources": {},
+    "globalMock": false,
+    "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+    "last_run_at": null,
+    "parent_marker": "from_parent",
+    "useMockOutput": false,
+    "mockPlaybookId": null,
+    "child_step_view": {
+      "debug": true,
+      "task_id": "b3b8e390-c9bb-4db5-b77a-25e6da4515a3",
+      "saw_parent": "from_parent",
+      "child_marker": "from_child"
+    },
+    "saw_child_write": "UNSET"
+  },
+  "steps": [
+    {
+      "name": "Call",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "b3b8e390-c9bb-4db5-b77a-25e6da4515a3",
+        "saw_parent": "from_parent",
+        "child_marker": "from_child"
+      }
+    },
+    {
+      "name": "Capture",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "b3b8e390-c9bb-4db5-b77a-25e6da4515a3",
+        "child_step_view": {
+          "debug": true,
+          "task_id": "b3b8e390-c9bb-4db5-b77a-25e6da4515a3",
+          "saw_parent": "from_parent",
+          "child_marker": "from_child"
+        },
+        "saw_child_write": "UNSET"
+      }
+    },
+    {
+      "name": "SetParentVar",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "b3b8e390-c9bb-4db5-b77a-25e6da4515a3",
+        "parent_marker": "from_parent"
+      }
+    },
+    {
+      "name": "Trigger",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "b3b8e390-c9bb-4db5-b77a-25e6da4515a3",
+        "globalMock": false,
+        "useMockOutput": false
+      }
+    }
+  ]
+}

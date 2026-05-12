@@ -8,7 +8,7 @@ actually accepts.
 
 Run manually:
 
-    python3 scripts/dump_cli_docs.py
+    python3 scripts/external/dump_cli_docs.py
 
 Or from a pre-commit hook so a stale CLI.md fails CI.
 """
@@ -115,7 +115,7 @@ def main() -> int:
     out.append("")
     out.append(
         "_Auto-generated from `cli.build_parser()` — re-run "
-        "`python3 scripts/dump_cli_docs.py` after touching the CLI."
+        "`python3 scripts/external/dump_cli_docs.py` after touching the CLI."
     )
     out.append("")
     if parser.description:

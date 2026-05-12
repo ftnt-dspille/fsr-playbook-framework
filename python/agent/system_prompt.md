@@ -159,6 +159,73 @@ Every authoring or editing turn:
 5. If `validate_yaml` runs three rounds without the error count
    dropping, call `get_step_type` on the offending step type to
    re-anchor on the canonical shape.
+6. **Mandatory analyze gate**: once `validate_yaml` is clean, call
+   `analyze_playbook` on the same YAML. This runs the render-path
+   validator — it catches data-access bugs (`vars.steps.X.Y` typos,
+   unreachable refs, type mismatches) that `validate_yaml` can't
+   see. Do NOT declare a playbook done until `analyze_playbook`
+   returns `error_count: 0`.
+   - For `unreachable_var_path`: the diagnostic's `extra.missing_step`
+     names the bad reference; check the playbook for typo'd step
+     names. The close-key suggestion in `suggestion` is usually right.
+   - For `missing_key`: the producer step exists but the key being
+     read isn't in its output. The `expected` field shows known keys
+     and `suggestion` proposes the closest match.
+   - For `required_arg_empty`: a required arg rendered to empty after
+     Jinja substitution. Either set a literal or fix the template.
+   - For `picklist_drift` (only fires with `execute_safe_ops=true`):
+     value isn't on the live picklist; `expected` lists close matches.
+     Swap to `suggestion`'s value, don't invent.
+7. If any step uses `{{ 'PL' | picklist('value') }}`, run
+   `analyze_playbook(execute_safe_ops=true)` so C4 picklist drift
+   fires. Without that flag the check is skipped (offline mode).
+
+# Troubleshooting an existing playbook
+
+When the user asks "why is this playbook broken" or "fix this for me":
+
+1. If they pasted YAML, work with it directly. If they named a
+   playbook, call `pull` first to fetch the current YAML.
+2. **Always start with `analyze_playbook`** — never read the YAML
+   and guess the issue. The diagnostics are grouped by step + kind
+   with severity, location, and suggestions. Read them top-down by
+   severity (errors first), then by step order.
+3. Fix one diagnostic at a time, then re-run `analyze_playbook`.
+   Same rule as authoring: do not batch-fix.
+4. If a diagnostic mentions a step type's args you're unsure about,
+   prefer `docs/step_params/<TYPE>.md` in the repo over your
+   training intuition — those allowlists are kept in sync with the
+   resolver and the live corpus.
+5. Use `suggest_fix_for_diagnostic(diagnostic)` for a structured
+   patch proposal when the heuristic suggestion in the diagnostic
+   isn't enough; it returns a `{step_id, location, before, after,
+   confidence}` patch the user can apply.
+6. Before pushing a fix, run `fsrpb diff` so the user sees exactly
+   what changed.
+
+# FSR runtime semantics (live-verified — do not invent)
+
+These are non-obvious shapes the simulator + analyzer rely on. Don't
+guess — they're captured from real FSR via `python/probes/probe_render_path.py`.
+
+- `vars.steps.<for_each_step>` is a **list of per-iteration dicts**,
+  NOT the last value. Each dict carries the body's set_var /
+  mock_result keys plus a `task_id`. Sequential `.<key>` access falls
+  through to the last iteration's value via env; in **parallel**
+  mode the same access returns `None` (race) — don't author
+  `vars.steps.<parallel_loop>.<key>`.
+- `for_each.break_loop` is a do-while: the iteration where it
+  becomes truthy IS in the result list, not excluded.
+- `vars.steps.<workflow_reference_step>` is the **child playbook's
+  full env dict** (every set_var key the child wrote, post-execution).
+  `pass_parent_env` controls READS only — child writes never
+  propagate to parent's top-level vars regardless of the flag. The
+  only way for a parent to read child output is
+  `vars.steps.<ref>.<key>`.
+- `arguments.arguments` on a `workflow_reference` becomes the
+  child's `vars.input.params`. The child must declare matching
+  `parameters: [name1, name2]` at the playbook level — resolver
+  rejects undeclared keys.
 
 # Tool conventions
 

@@ -215,6 +215,105 @@ def list_jinja_filters(q: str = "", limit: int = 200) -> list[dict[str, Any]]:
         return [dict(r) for r in c.execute(sql, args)]
 
 
+@router.get("/modules")
+def list_modules() -> list[dict[str, Any]]:
+    """Module names + labels from the trained `modules` table.
+
+    Powers the Resource (module) dropdown on trigger and record_crud
+    inspector blocks. Empty list when the trained DB hasn't been
+    populated yet (fresh install / pre-`fsrpb train`).
+    """
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT name, label, plural FROM modules ORDER BY name"
+        ).fetchall()
+    return [{"name": r["name"], "label": r["label"], "plural": r["plural"]}
+            for r in rows]
+
+
+# Operator catalog per leaf-value type — trimmed from
+# `store/QUERY_API.md` §2.1 to surface only the ops that make
+# semantic sense for the field type. Keeps the UI from offering
+# `like` on a boolean or `gt` on a picklist.
+_OPERATORS_BY_TYPE: dict[str, list[str]] = {
+    "default":    ["eq", "neq", "in", "nin", "like", "isnull"],
+    "integer":    ["eq", "neq", "lt", "lte", "gt", "gte", "in", "nin", "isnull"],
+    "decimal":    ["eq", "neq", "lt", "lte", "gt", "gte", "in", "nin", "isnull"],
+    "number":     ["eq", "neq", "lt", "lte", "gt", "gte", "in", "nin", "isnull"],
+    "checkbox":   ["eq", "neq", "isnull"],
+    "boolean":    ["eq", "neq", "isnull"],
+    "datetime":   ["eq", "neq", "lt", "lte", "gt", "gte", "isnull"],
+    "date":       ["eq", "neq", "lt", "lte", "gt", "gte", "isnull"],
+    "picklists":  ["eq", "neq", "in", "nin", "isnull"],
+    "lookup":     ["eq", "neq", "in", "nin", "isnull"],
+    "manyToMany": ["eq", "neq", "in", "nin", "isnull"],
+    "manyToOne":  ["eq", "neq", "in", "nin", "isnull"],
+    "oneToMany":  ["eq", "neq", "in", "nin", "isnull"],
+    "json":       ["eq", "neq", "like", "contains", "exists", "isnull"],
+    "object":     ["eq", "neq", "like", "contains", "exists", "isnull"],
+}
+
+
+@router.get("/modules/{module}/fields")
+def get_module_fields(module: str) -> dict[str, Any]:
+    """Field catalog for a single module.
+
+    Each field carries its FSR type, required flag, picklist name (when
+    applicable), tooltip, and the per-type operator catalog so the
+    FilterTreeEditor can scope the operator dropdown by field type.
+    """
+    with _conn() as c:
+        m = c.execute(
+            "SELECT name, label, plural FROM modules WHERE name = ?",
+            (module,),
+        ).fetchone()
+        if m is None:
+            raise HTTPException(404,
+                                f"module {module!r} not found in trained store")
+        rows = c.execute(
+            "SELECT field_name, title, type, required, picklist_options, tooltip "
+            "FROM module_fields WHERE module_name = ? ORDER BY field_name",
+            (module,),
+        ).fetchall()
+    fields = []
+    for r in rows:
+        ftype = r["type"] or "default"
+        ops = _OPERATORS_BY_TYPE.get(ftype, _OPERATORS_BY_TYPE["default"])
+        fields.append({
+            "name": r["field_name"],
+            "title": r["title"],
+            "type": ftype,
+            "required": bool(r["required"]),
+            "picklist_options": r["picklist_options"],
+            "tooltip": r["tooltip"],
+            "operators": ops,
+        })
+    return {
+        "module": m["name"],
+        "label": m["label"],
+        "plural": m["plural"],
+        "fields": fields,
+    }
+
+
+@router.get("/step-examples/{step_type}")
+def step_examples(step_type: str, limit: int = 10) -> dict[str, Any]:
+    """Top-N corpus-mined skeletons for a step type, with summaries.
+
+    Powers the Examples tab on every step type. See
+    ``web/backend/step_examples.py`` for clustering + summariser.
+    """
+    from step_examples import cluster_examples, STEP_TYPE_TO_CORPUS
+    if step_type not in STEP_TYPE_TO_CORPUS:
+        raise HTTPException(404,
+            f"step type {step_type!r} has no corpus mapping; "
+            f"supported: {sorted(STEP_TYPE_TO_CORPUS)}")
+    n = max(1, min(int(limit), 25))
+    with _conn() as c:
+        clusters = cluster_examples(c, step_type, limit=n)
+    return {"step_type": step_type, "examples": clusters}
+
+
 @router.get("/example-prompts")
 def list_example_prompts() -> list[dict[str, Any]]:
     """Sample chat prompts for testing the agent.

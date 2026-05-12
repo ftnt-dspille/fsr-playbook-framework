@@ -759,7 +759,7 @@ class Resolver:
         fieldbasedtrigger.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"module", "modules", "when", "mock_result"}
+        _FRIENDLY = {"module", "modules", "when", "mock_result", "condition"}
         _CANONICAL = {
             "resource", "resources", "step_variables", "triggerOnSource",
             "triggerOnReplicate", "__triggerLimit", "fieldbasedtrigger",
@@ -881,7 +881,7 @@ class Resolver:
         Already-set canonical keys win — never clobber an explicit value.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"module", "mock_result"}
+        _FRIENDLY = {"module", "mock_result", "condition"}
         _CANONICAL = {
             "collection", "collectionType", "resource", "operation",
             "fieldOperation", "__recommend", "_showJson", "step_variables",
@@ -1469,7 +1469,7 @@ class Resolver:
         if a.get("connector") and a.get("operation") and a.get("params"):
             step.arguments = a
             return
-        _FRIENDLY = {"code", "python", "config", "mock_result"}
+        _FRIENDLY = {"code", "python", "config", "mock_result", "condition"}
         _CANONICAL = {
             "connector", "operation", "operationTitle", "version",
             "params", "step_variables", "pickFromTenant",
@@ -1511,7 +1511,8 @@ class Resolver:
         if "rule" in a and "delay" in a:
             step.arguments = a
             return
-        _FRIENDLY = {"seconds", "minutes", "hours", "days", "mock_result"}
+        _FRIENDLY = {"seconds", "minutes", "hours", "days", "mock_result",
+                     "condition"}
         _CANONICAL = {"type", "delay", "rule", "step_variables"}
         if self._check_unknown_keys(
             a, "delay", _FRIENDLY, _CANONICAL, path, errors,
@@ -1894,6 +1895,10 @@ class Resolver:
             "connector", "operation", "operationTitle", "version", "config",
             "params", "step_variables", "pickFromTenant", "name",
             "mock_result", "useMockOutput",
+            # Generic step-level skip gate. FSR evaluates it at runtime;
+            # falsy → step is bypassed. Whitelisted here so the resolver
+            # doesn't auto-lift it into params or flag it as unknown.
+            "condition",
         }
         if valid_params:
             lifted: list[str] = []

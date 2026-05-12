@@ -1,7 +1,7 @@
 """probe_step_handlers — ingest workflow.eval.FUNCTION_MAP signatures.
 
 Source: `store/incoming/function_map.json`, produced by running
-`scripts/dump_function_map.py` on the FSR appliance.
+`scripts/internal/dump_function_map.py` on the FSR appliance.
 
 The 43 step types exposed by `/api/3/workflow_step_types/` carry an
 `args_schema_json.script` field of the form `/wf/workflow/tasks/<name>`,
@@ -67,7 +67,7 @@ def _ingest(conn: sqlite3.Connection, function_map: dict) -> int:
 def main() -> int:
     if not INCOMING.exists():
         raise SystemExit(
-            f"missing {INCOMING}. Run scripts/dump_function_map.py on FSR "
+            f"missing {INCOMING}. Run scripts/internal/dump_function_map.py on FSR "
             f"and scp /tmp/function_map.json to {INCOMING}"
         )
     payload = json.loads(INCOMING.read_text())
