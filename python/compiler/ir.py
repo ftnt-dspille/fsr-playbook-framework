@@ -99,3 +99,12 @@ class Collection:
     description: str = ""
     visible: bool = True
     playbooks: list[Playbook] = field(default_factory=list)
+    # Push mode — toggled by which top-level YAML key was used:
+    #   "wrap"        — YAML used `collection: <name>`. The push replaces
+    #                   the whole collection (cascade-removes foreigns
+    #                   unless --allow-foreign-loss is set). Default.
+    #   "per_playbook"— YAML used `into_collection: <name>` (or omitted
+    #                   both and inherited the default target). The push
+    #                   touches ONLY the listed playbooks inside the
+    #                   target collection; siblings are preserved.
+    target_mode: str = "wrap"

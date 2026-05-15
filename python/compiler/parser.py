@@ -100,12 +100,38 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
         ))
         return None, errors
 
-    name = doc.get("collection")
+    # Push-mode detection: `collection:` = wrap (replace whole collection,
+    # default for backward compat), `into_collection:` = per_playbook
+    # (only touches listed playbooks within a shared target). Default
+    # collection for empty per-playbook YAMLs: the studio's own bucket.
+    DEFAULT_TARGET = "00 - FSR Studio"
+    has_collection = "collection" in doc
+    has_into = "into_collection" in doc
+    if has_collection and has_into:
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message="set EITHER `collection:` (wrap mode) OR "
+                    "`into_collection:` (per-playbook mode), not both",
+            path="collection",
+        ))
+        return None, errors
+    if has_into:
+        name = doc.get("into_collection")
+        target_mode = "per_playbook"
+        name_path = "into_collection"
+    elif has_collection:
+        name = doc.get("collection")
+        target_mode = "wrap"
+        name_path = "collection"
+    else:
+        name = DEFAULT_TARGET
+        target_mode = "per_playbook"
+        name_path = "into_collection"
     if not isinstance(name, str) or not name:
         errors.append(CompileError(
             code=ErrorCode.MISSING_FIELD,
-            message="collection name is required",
-            path="collection",
+            message=f"{name_path} must be a non-empty string",
+            path=name_path,
         ))
 
     pbs_raw = doc.get("playbooks")
@@ -616,4 +642,5 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
         description=doc.get("description", "") or "",
         visible=bool(doc.get("visible", True)),
         playbooks=playbooks,
+        target_mode=target_mode,
     ), errors

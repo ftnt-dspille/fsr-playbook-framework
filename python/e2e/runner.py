@@ -397,7 +397,26 @@ def _push(client, coll_entity: dict, log_dir: Path) -> None:
 
 
 def _hard_purge(client, coll_uuid: str, coll_entity: dict) -> None:
-    """Hard-delete the collection and its workflows. Idempotent; failures swallowed."""
+    """Hard-delete the collection and its (locally-known) workflows.
+
+    Scope is strictly limited to UUIDs that came from the local just-
+    compiled YAML — no server-side discovery, no name matching. Idempotent;
+    individual failures swallowed (the followup POST will surface any
+    remaining collision).
+
+    Gated by FSR_ALLOW_HARD_DELETE or FSR_ALLOW_E2E so a misbehaving
+    automation can't run this path silently.
+    """
+    import os
+    _truthy = ("1", "true", "yes")
+    if (
+        os.environ.get("FSR_ALLOW_HARD_DELETE", "").lower() not in _truthy
+        and os.environ.get("FSR_ALLOW_E2E", "").lower() not in _truthy
+    ):
+        raise _PushError(
+            "hard-purge refused: set FSR_ALLOW_HARD_DELETE=true "
+            "(or FSR_ALLOW_E2E=true) to enable"
+        )
     try:
         client.session.delete(
             client.base_url + "/api/3/delete/workflow_collections?$hardDelete=true",

@@ -18,10 +18,40 @@ def test_yaml_syntax_error():
     assert any(e.code is ErrorCode.PARSE_ERROR for e in errs)
 
 
-def test_missing_collection_name():
+def test_missing_collection_name_defaults_to_studio_target():
+    """Omitting both `collection:` and `into_collection:` now defaults
+    to per-playbook mode with the studio bucket as the target. This is
+    intentional — see preflight/per-playbook push docs."""
     coll, errs = parse_yaml("playbooks:\n  - name: P\n    steps:\n      - name: s\n        type: start\n")
+    assert coll is not None
+    assert coll.name == "00 - FSR Studio"
+    assert coll.target_mode == "per_playbook"
+    assert not any(e.severity != "warning" for e in errs)
+
+
+def test_both_collection_keys_rejected():
+    """Setting BOTH `collection:` (wrap mode) and `into_collection:`
+    (per-playbook mode) is an authoring error — the modes are mutually
+    exclusive."""
+    text = (
+        "collection: A\n"
+        "into_collection: B\n"
+        "playbooks:\n  - name: P\n    steps:\n      - name: s\n        type: start\n"
+    )
+    coll, errs = parse_yaml(text)
     assert coll is None
-    assert any(e.code is ErrorCode.MISSING_FIELD and e.path == "collection" for e in errs)
+    assert any(e.code is ErrorCode.BAD_VALUE for e in errs)
+
+
+def test_into_collection_sets_per_playbook_mode():
+    text = (
+        "into_collection: My Shared Bucket\n"
+        "playbooks:\n  - name: P\n    steps:\n      - name: s\n        type: start\n"
+    )
+    coll, errs = parse_yaml(text)
+    assert coll is not None
+    assert coll.name == "My Shared Bucket"
+    assert coll.target_mode == "per_playbook"
 
 
 def test_missing_playbooks():

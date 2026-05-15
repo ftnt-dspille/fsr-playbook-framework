@@ -381,17 +381,14 @@ def test_mcp_validate_yaml_returns_next_fix():
     import sys
     sys.path.insert(0, "python")
     from mcp_server import validate_yaml as mcp_validate
-    yaml = """
-playbooks:
-  - name: P
-    steps:
-      - name: s
-        type: start
-"""
+    # A bare `collection:` with no playbooks is a missing_field on the
+    # `playbooks` path — canonical first error to test the next_fix
+    # prioritization. (Omitting the collection key entirely no longer
+    # errors; it defaults to per-playbook mode with the studio target.)
+    yaml = "collection: A\n"
     r = mcp_validate(yaml)
     assert not r.get("ok"), r
     nf = r.get("next_fix")
     assert nf is not None
     assert nf["code"] == "missing_field"
-    # Highest priority is missing_field — collection is the canonical first error.
-    assert "collection" in nf["path"] or "collection" in (nf["message"] or "")
+    assert "playbooks" in nf["path"] or "playbooks" in (nf["message"] or "")

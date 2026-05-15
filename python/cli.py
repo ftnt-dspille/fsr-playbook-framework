@@ -240,6 +240,162 @@ def cmd_purge(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_or_create_collection(client, name: str) -> tuple[str | None, str]:
+    """Find the target collection by name; create a minimal one if missing.
+
+    Returns (uuid, status) where status is "found" | "created" | "ambiguous"
+    | "error:<msg>". The status is for the caller's reporting; uuid is None
+    on any non-resolved case.
+
+    Used by per-playbook push to anchor each workflow to its target
+    collection's actual server uuid. Auto-create is the only way the
+    studio's default bucket ("00 - FSR Studio") can come into existence
+    on a fresh FSR; refusing to create here would force users to
+    pre-provision the collection via the FSR UI.
+    """
+    try:
+        r = client.session.get(
+            f"{client.base_url}/api/3/workflow_collections",
+            params={"name": name, "$limit": 5},
+            verify=client.verify_ssl, timeout=20,
+        )
+    except Exception as e:  # noqa: BLE001
+        return None, f"error:GET raised {e!r}"
+    if r.status_code != 200:
+        return None, f"error:GET HTTP {r.status_code} {r.text[:200]}"
+    members = (r.json() or {}).get("hydra:member", []) or []
+    # Filter for exact name match (API Platform's ?name= is a substring
+    # search on some configs).
+    exact = [m for m in members if m.get("name") == name]
+    if len(exact) > 1:
+        return None, f"ambiguous:{len(exact)} collections named {name!r}"
+    if len(exact) == 1:
+        return exact[0].get("uuid"), "found"
+    # Not found — create. Minimal body; FSR fills in the rest.
+    try:
+        cr = client.session.post(
+            f"{client.base_url}/api/3/workflow_collections",
+            json={"name": name, "description": f"Auto-created by fsrpb"},
+            verify=client.verify_ssl, timeout=30,
+        )
+    except Exception as e:  # noqa: BLE001
+        return None, f"error:POST raised {e!r}"
+    if cr.status_code not in (200, 201):
+        return None, f"error:POST HTTP {cr.status_code} {cr.text[:200]}"
+    return (cr.json() or {}).get("uuid"), "created"
+
+
+def _cmd_push_per_playbook(args, coll_entity: dict, client) -> int:
+    """Per-playbook push: each YAML playbook becomes an individual
+    workflow upsert against a named target collection. Siblings under
+    that collection are NEVER touched.
+
+    Algorithm per workflow:
+      1. Resolve target collection by name (auto-create if absent).
+      2. Rewrite the workflow's parent `collection` IRI to point at the
+         resolved target.
+      3. Pre-check the deterministic uuid against the recycle bin via
+         GET ?$showDeleted=true. If found (live or recycled), single-uuid
+         hard-delete via DELETE /api/3/workflows/{uuid}?$hardDelete=true.
+         Scope is one uuid by URL — impossible to leak.
+      4. POST /api/3/workflows with the fresh body.
+
+    Each workflow is independent; one failure doesn't abort the rest.
+    Returns 0 if every workflow succeeded; 4 otherwise.
+    """
+    target_name = coll_entity.get("name") or ""
+    if not target_name:
+        print("per-playbook push: target collection name is empty", file=sys.stderr)
+        return 2
+    target_uuid, status = _resolve_or_create_collection(client, target_name)
+    if target_uuid is None:
+        print(f"per-playbook push: {status}", file=sys.stderr)
+        return 2
+    print(
+        f"target collection {target_name!r} ({status}): {target_uuid}",
+        file=sys.stderr,
+    )
+    target_iri = f"/api/3/workflow_collections/{target_uuid}"
+
+    workflows = coll_entity.get("workflows") or []
+    successes: list[tuple[str, str]] = []
+    failures: list[tuple[str, str]] = []
+    for wf in workflows:
+        wf_uuid = wf.get("uuid")
+        wf_name = wf.get("name") or "<unnamed>"
+        if not wf_uuid:
+            failures.append((wf_name, "no uuid on emitted workflow"))
+            continue
+        # Re-anchor to the resolved target collection.
+        wf["collection"] = target_iri
+        # Strip @id (FSR rejects on POST/PUT) — emitter sets it for some shapes.
+        wf_body = {k: v for k, v in wf.items() if not k.startswith("@")}
+
+        # Pre-check via plain GET with $showDeleted=true — one HTTP per
+        # workflow, scope is the single uuid in the URL.
+        try:
+            pr = client.session.get(
+                f"{client.base_url}/api/3/workflows/{wf_uuid}?$showDeleted=true",
+                verify=client.verify_ssl, timeout=20,
+            )
+        except Exception as e:  # noqa: BLE001
+            failures.append((wf_name, f"precheck raised {e!r}"))
+            continue
+        existed = pr.status_code == 200
+
+        if existed:
+            # Per-uuid hard-delete via CRUD endpoint (URL-scoped). Cascade
+            # removes child steps/routes that belong to this workflow.
+            # Foreign workflows in the same collection are untouched
+            # because we never operate at the collection level here.
+            try:
+                dr = client.session.delete(
+                    f"{client.base_url}/api/3/workflows/{wf_uuid}?$hardDelete=true",
+                    verify=client.verify_ssl, timeout=30,
+                )
+            except Exception as e:  # noqa: BLE001
+                failures.append((wf_name, f"hardDelete raised {e!r}"))
+                continue
+            if dr.status_code not in (200, 204):
+                failures.append((
+                    wf_name,
+                    f"hardDelete HTTP {dr.status_code} {dr.text[:200]}",
+                ))
+                continue
+
+        # POST the workflow.
+        try:
+            cr = client.session.post(
+                f"{client.base_url}/api/3/workflows",
+                json=wf_body, verify=client.verify_ssl, timeout=60,
+            )
+        except Exception as e:  # noqa: BLE001
+            failures.append((wf_name, f"POST raised {e!r}"))
+            continue
+        if cr.status_code not in (200, 201):
+            failures.append((
+                wf_name,
+                f"POST HTTP {cr.status_code} {cr.text[:300]}",
+            ))
+            continue
+        successes.append((wf_name, wf_uuid))
+
+    # Report.
+    for name, uuid in successes:
+        print(
+            f"  ✓ {name}: {client.base_url}/playbooks/{uuid}",
+            file=sys.stderr,
+        )
+    for name, err in failures:
+        print(f"  ✗ {name}: {err}", file=sys.stderr)
+    print(
+        f"per-playbook push: {len(successes)} ok, {len(failures)} failed "
+        f"(target={target_name!r})",
+        file=sys.stderr,
+    )
+    return 0 if not failures else 4
+
+
 def cmd_push(args: argparse.Namespace) -> int:
     """Compile YAML and POST/PUT the unwrapped collection to /api/3/workflow_collections.
 
@@ -250,9 +406,15 @@ def cmd_push(args: argparse.Namespace) -> int:
     `workflows[]` and their steps/routes.
 
     Mode semantics:
-      replace (default) — try PUT first; on 404 POST; on 409 (UUID owned
-                          by a soft-deleted record) hard-purge and POST.
-                          Idempotent across recycle-bin state.
+      safe (default)    — preflight: classify every uuid the YAML would
+                          write as fresh/live/recycled, restore any
+                          recycled rows via PUT deletedAt:null, then
+                          POST /api/3/bulkupsert/workflow_collections
+                          with the YAML body (list-wrapped). Bulkupsert
+                          recursively upserts children, sidestepping
+                          Doctrine cascade-persist 409s. No hard-delete.
+                          Foreign workflows under the collection are
+                          preserved. See ``python/preflight.py``.
       create            — POST only. Fails with 409 if UUID/name collides
                           (live or soft-deleted).
       update            — PUT only. Fails with 404 if no record.
@@ -262,6 +424,13 @@ def cmd_push(args: argparse.Namespace) -> int:
                           `array_key_exists` and array-index access used
                           on stdClass). Works only for fresh creates with
                           no existing match. Kept as opt-in for testing.
+      replace           — clean-slate hard-purge then POST. ``safe``
+                          mode handles all the recycle-bin cases that
+                          historically required ``replace``; use this
+                          only when you genuinely want a fresh-uuid
+                          re-create (e.g. recovering from corrupted
+                          orphan child rows). Gated on
+                          FSR_ALLOW_HARD_DELETE.
     """
     from compiler import compile_yaml
     from probes import _env  # type: ignore
@@ -282,6 +451,14 @@ def cmd_push(args: argparse.Namespace) -> int:
     coll_name = coll_entity["name"]
 
     client = _env.get_client()
+
+    # Dispatch to per-playbook mode if the YAML used `into_collection:`
+    # (or inherited the studio default). This path NEVER hard-deletes
+    # the collection — it only touches the listed workflows inside the
+    # named target, leaving siblings untouched.
+    target_mode = getattr(result.ir, "target_mode", "wrap")
+    if target_mode == "per_playbook":
+        return _cmd_push_per_playbook(args, coll_entity, client)
 
     def _put() -> tuple[bool, object]:
         try:
@@ -311,87 +488,247 @@ def cmd_push(args: argparse.Namespace) -> int:
         except Exception as e:  # noqa: BLE001
             return False, e
 
-    def _purge_soft_deleted() -> bool:
-        """Hard-purge by UUID via the canonical UI endpoint.
-        `DELETE /api/3/delete/<entity>?$hardDelete=true` body `{ids:[<uuid>]}`
-        — what the FSR web UI uses for "permanently delete". Idempotent.
+    def _purge_soft_deleted(scope: dict[str, list[str]] | None = None) -> bool:
+        """Hard-purge by UUID, scope-locked to the YAML's own uuids.
 
-        Sweeps four entity tables because cascade is unreliable:
-        collection → workflow → step → route. Compiler emits deterministic
-        UUIDv5 for every entity (emitter.py), so re-pushing the same YAML
-        re-uses the same IDs; any orphan row left from a prior failed/
-        partial purge collides on POST with HTTP 409 and silently breaks
-        canvas rendering on PUT (orphan routes survive Doctrine cascade
-        and reference vanished steps).
+        Returns True on success; False on ABORT — caller MUST NOT proceed
+        to POST. Aborts on:
+          - ``FSR_ALLOW_HARD_DELETE`` / ``FSR_ALLOW_E2E`` not set
+          - scope exceeds ``MAX_*`` without ``--force-large-purge``
+          - any per-batch delete HTTP/exception failure (no degraded purge)
+
+        Scope is *strictly* the deterministic uuid5 set the compiler
+        emitted for THIS YAML — collection, workflows, steps, routes.
+        Per ``emitter.py:132`` every child uuid is uuid5(collection_name,
+        playbook_name, …); we don't need to discover anything from the
+        server, which closes the historical scope-leak vector (an earlier
+        version did a nested-route GET and name-matched candidates, which
+        once contributed to a mass-deletion incident).
+
+        Prefer the ``safe`` push mode for routine re-pushes; this path
+        is only correct when you intentionally want a hard-delete +
+        fresh-create with the same uuids.
         """
-        wf_uuids = [w.get("uuid") for w in coll_entity.get("workflows", []) if w.get("uuid")]
-        step_uuids: list[str] = []
-        route_uuids: list[str] = []
-        for w in coll_entity.get("workflows", []):
-            for s in w.get("steps", []):
-                if s.get("uuid"):
-                    step_uuids.append(s["uuid"])
-            for r in w.get("routes", []):
-                if r.get("uuid"):
-                    route_uuids.append(r["uuid"])
-
-        # Workflow UUIDs are randomized per compile (emitter.py) so we can't
-        # derive prior-push UUIDs from the YAML — discover them by listing
-        # workflows attached to the (deterministic) collection UUID and
-        # matching by name. Also pull each prior workflow's child step + route
-        # rows so we hard-delete the full subtree, not just the workflow row.
-        try:
-            r = client.session.get(
-                client.base_url
-                + f"/api/3/workflow_collections/{coll_uuid}/workflows",
-                verify=client.verify_ssl, timeout=10,
-            )
-            if r.status_code == 200:
-                wanted = {w.get("name") for w in coll_entity.get("workflows", [])}
-                live = (r.json() or {}).get("hydra:member", []) or []
-                for w in live:
-                    if w.get("name") not in wanted:
-                        continue
-                    u = w.get("uuid")
-                    if u and u not in wf_uuids:
-                        wf_uuids.append(u)
-                    for sub, bucket in (("steps", step_uuids), ("routes", route_uuids)):
-                        try:
-                            sr = client.session.get(
-                                client.base_url
-                                + f"/api/3/workflows/{u}/{sub}",
-                                verify=client.verify_ssl, timeout=10,
-                            )
-                            if sr.status_code == 200:
-                                for m in (sr.json() or {}).get("hydra:member", []) or []:
-                                    mu = m.get("uuid")
-                                    if mu and mu not in bucket:
-                                        bucket.append(mu)
-                        except Exception:  # noqa: BLE001
-                            pass
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Order: routes → steps → workflows → collection. Child-first so
-        # FK references on the parent side disappear before we hit it.
-        for entity, ids in (
-            ("workflow_routes", route_uuids),
-            ("workflow_steps", step_uuids),
-            ("workflows", wf_uuids),
-            ("workflow_collections", [coll_uuid]),
+        # Killswitch — required for any hard-delete path. Either
+        # FSR_ALLOW_HARD_DELETE (purpose-specific) or FSR_ALLOW_E2E
+        # (existing destructive-ops opt-in) satisfies the gate.
+        _truthy = ("1", "true", "yes")
+        if (
+            os.environ.get("FSR_ALLOW_HARD_DELETE", "").lower() not in _truthy
+            and os.environ.get("FSR_ALLOW_E2E", "").lower() not in _truthy
         ):
+            print(
+                "refusing hard-purge: set FSR_ALLOW_HARD_DELETE=true "
+                "(or FSR_ALLOW_E2E=true) to enable",
+                file=sys.stderr,
+            )
+            return False
+
+        # If caller passed a scope (typically from preflight classification),
+        # only delete those uuids — avoids 500s from trying to delete uuids
+        # the server doesn't have. Otherwise fall back to the full YAML
+        # uuid set (safe by construction: deterministic uuid5 from THIS
+        # compile's YAML; cannot reference any other collection).
+        if scope is not None:
+            wf_uuids = list(scope.get("workflows") or [])
+            step_uuids = list(scope.get("workflow_steps") or [])
+            route_uuids = list(scope.get("workflow_routes") or [])
+        else:
+            wf_uuids = [
+                w["uuid"] for w in coll_entity.get("workflows", []) if w.get("uuid")
+            ]
+            step_uuids = []
+            route_uuids = []
+            for w in coll_entity.get("workflows", []):
+                for s in w.get("steps", []):
+                    if s.get("uuid"):
+                        step_uuids.append(s["uuid"])
+                for r in w.get("routes", []):
+                    if r.get("uuid"):
+                        route_uuids.append(r["uuid"])
+        # Batch cap — refuse runaway scopes.
+        MAX_WF, MAX_STEPS = 50, 500
+        force_large = bool(getattr(args, "force_large_purge", False))
+        if not force_large and (
+            len(wf_uuids) > MAX_WF or len(step_uuids) > MAX_STEPS
+        ):
+            print(
+                f"purge aborted: scope too large "
+                f"(wf={len(wf_uuids)}>{MAX_WF} or steps={len(step_uuids)}>{MAX_STEPS}). "
+                f"Re-run with --force-large-purge if intentional.",
+                file=sys.stderr,
+            )
+            return False
+
+        # Bulk-delete just the collection — FSR cascades through
+        # workflows → steps → routes via Doctrine's onDelete=CASCADE
+        # on the FK columns. Empirically verified on 7.6.x: a single
+        # ``DELETE /api/3/delete/workflow_collections?$hardDelete=true``
+        # with ``{ids:[coll_uuid]}`` removes the entire subtree, not
+        # just the collection row. The earlier four-table sweep was
+        # working around a stale assumption that cascade was unreliable.
+        #
+        # Child-table deletes are skipped entirely; targeting children
+        # directly hits FK violations because the workflow's triggerStep
+        # column FK-references one of the steps.
+        coll_ids = (
+            list(scope.get("workflow_collections") or [])
+            if scope is not None else [coll_uuid]
+        )
+        # Drop child entity sweeps; keep them in the loop only when no
+        # collection delete is happening (defensive; should be rare).
+        if coll_ids:
+            sweep_iter: tuple = (("workflow_collections", coll_ids),)
+        else:
+            sweep_iter = (
+                ("workflow_routes", route_uuids),
+                ("workflow_steps", step_uuids),
+                ("workflows", wf_uuids),
+            )
+        for entity, ids in sweep_iter:
             if not ids:
                 continue
             try:
-                client.session.delete(
+                dr = client.session.delete(
                     client.base_url
                     + f"/api/3/delete/{entity}?$hardDelete=true",
                     json={"ids": ids},
                     verify=client.verify_ssl,
                 )
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001
+                print(
+                    f"purge aborted mid-delete on {entity}: {e}",
+                    file=sys.stderr,
+                )
+                return False
+            if dr.status_code >= 400:
+                print(
+                    f"purge aborted mid-delete on {entity}: "
+                    f"HTTP {dr.status_code} {dr.text[:800]}",
+                    file=sys.stderr,
+                )
+                return False
         return True
+
+    def _safe() -> tuple[bool, object, str]:
+        """Preflight + recycle-bin restore + bulkupsert. No hard-delete.
+
+        Returns (ok, payload_or_err, action).
+
+        Flow:
+          1. Preflight: classify every uuid the YAML would write as
+             fresh / live / recycled. Print a summary.
+          2. Restore any recycled rows via PUT ``deletedAt: null``.
+             Required because ``bulkupsert`` has a PHP-8 stdClass bug
+             on the recycle-bin resurrect path (UpsertController.php
+             line 89) — it only works for fresh + live records.
+          3. Foreign-workflow check: if the target collection contains
+             playbooks not in this YAML (e.g. added via the FSR UI
+             after our last push), refuse. Empirically verified on
+             7.6.x: bulkupsert REPLACES the collection's workflows[]
+             with the list we send, Doctrine cascade-removes the rest.
+             Override with ``--allow-foreign-loss``.
+          4. ``POST /api/3/bulkupsert/workflow_collections`` with body
+             ``[coll_entity]`` (the bulkupsert endpoint requires a list
+             — bare-object payloads hit UpsertController.php line 258:
+             "Cannot access offset of type string on string"). The
+             controller recursively upserts children, sidestepping the
+             Doctrine cascade-persist 409 we hit with plain PUT.
+
+        Hard-delete remains available only via ``--mode replace`` for
+        corruption recovery / explicit clean-slate re-create.
+        """
+        import preflight as _pre
+        inv = _pre.inventory_from_collection(coll_entity)
+        try:
+            cls = _pre.classify(client, inv)
+        except Exception as e:  # noqa: BLE001
+            return False, e, "PREFLIGHT_FAIL"
+        print(_pre.summarize(inv, cls), file=sys.stderr)
+
+        # Restore any recycled rows BEFORE bulkupsert. The PHP-8 bug at
+        # UpsertController.php line 89 makes bulkupsert fail on any row
+        # whose deletedAt is non-null. Restoring is one PUT per row,
+        # scope-limited to uuids in THIS YAML's deterministic uuid5 set.
+        recycled = _pre.recycled_uuids(cls)
+        total_recycled = sum(len(v) for v in recycled.values())
+        if total_recycled:
+            restored, errs = _pre.restore_recycled(client, recycled)
+            print(
+                f"preflight: restored {restored}/{total_recycled} row(s) "
+                f"from recycle bin",
+                file=sys.stderr,
+            )
+            for err in errs:
+                print(f"  restore error: {err}", file=sys.stderr)
+            if errs:
+                return False, RuntimeError(
+                    f"restore failed for {len(errs)} row(s); aborting push"
+                ), "RESTORE_FAIL"
+
+        # Foreign-workflow check — BLOCKING by default. Empirically:
+        # bulkupsert replaces the collection's workflows[] with what we
+        # send and Doctrine cascade-removes the rest (verified live on
+        # 7.6.x — a UI-injected foreign workflow returned 404 after
+        # bulkupsert). Override with --allow-foreign-loss.
+        coll_row = cls.get("workflow_collections", {}).get(coll_uuid)
+        if coll_row and coll_row.status in ("live", "recycled"):
+            known_wfs = inv.by_entity.get("workflows") or []
+            try:
+                foreign = _pre.find_foreign_workflows(
+                    client, coll_uuid, known_wfs,
+                )
+            except Exception as e:  # noqa: BLE001
+                return False, e, "FOREIGN_CHECK_FAIL"
+            if foreign and not getattr(args, "allow_foreign_loss", False):
+                print(
+                    f"\nsafe push aborted: collection contains "
+                    f"{len(foreign)} workflow(s) not in this YAML:",
+                    file=sys.stderr,
+                )
+                for w in foreign:
+                    state = "recycled" if w.get("deletedAt") else "live"
+                    print(
+                        f"  FOREIGN ({state})  {w['uuid']}  {w.get('name')!r}",
+                        file=sys.stderr,
+                    )
+                print(
+                    "\nBulkupsert will cascade-remove them. Resolve by:\n"
+                    "  - moving these playbooks to a different collection "
+                    "via the FSR UI, or\n"
+                    "  - adding them to this YAML so they're preserved, or\n"
+                    "  - re-running with --allow-foreign-loss if you "
+                    "intentionally want to drop them.",
+                    file=sys.stderr,
+                )
+                return False, RuntimeError(
+                    f"refused: {len(foreign)} foreign workflow(s) under "
+                    f"collection {coll_uuid}"
+                ), "FOREIGN_PRESENT"
+
+        # Bulkupsert. List-wrapped — bare object hits line 258.
+        try:
+            r = client.session.post(
+                f"{client.base_url}/api/3/bulkupsert/workflow_collections",
+                json=[coll_entity],
+                verify=client.verify_ssl, timeout=60,
+            )
+        except Exception as e:  # noqa: BLE001
+            return False, e, "BULKUPSERT_RAISE"
+        if r.status_code >= 400:
+            # Wrap the response in a HTTPError so downstream error handler
+            # (which inspects .response.status_code / .response.text) works.
+            import requests
+            err = requests.HTTPError(
+                f"HTTP {r.status_code} bulkupsert failed",
+                response=r,
+            )
+            return False, err, "BULKUPSERT_HTTP_ERR"
+        try:
+            payload = r.json()
+        except Exception:  # noqa: BLE001
+            payload = r.text
+        return True, payload, "SAFE_BULKUPSERT"
 
     if args.mode == "create":
         ok, payload_or_err = _post()
@@ -402,17 +739,22 @@ def cmd_push(args: argparse.Namespace) -> int:
     elif args.mode == "upsert":
         ok, payload_or_err = _upsert()
         action = "BULKUPSERT"
-    else:  # replace — clean-slate: hard-purge unconditionally, then POST.
-        # Compiler emits deterministic UUIDv5 (emitter.py), so step/route
-        # rows from prior pushes can outlive their parent collection and
-        # collide on POST (409) or — worse — survive a PUT and render
-        # broken edges in the canvas (orphan routes referencing vanished
-        # steps). GET on the collection is unreliable as a "needs purge"
-        # signal: it returns 404 even when child step rows are still live.
-        # So always sweep before POST.
-        _purge_soft_deleted()
+    elif args.mode == "replace":
+        # Explicit clean-slate hard-purge. Use only when `safe` won't do
+        # — typically recovery from corrupted orphan rows. Children are
+        # deterministic uuid5 so this only deletes uuids THIS YAML emits.
+        if not _purge_soft_deleted():
+            print(
+                "push aborted: hard-purge refused; not POSTing. "
+                "Re-run with --mode safe (default) for normal pushes, or "
+                "--mode update / --mode create if a purge is not desired.",
+                file=sys.stderr,
+            )
+            return 3
         ok, payload_or_err = _post()
         action = "PURGE+POST"
+    else:  # safe (default)
+        ok, payload_or_err, action = _safe()
     # Best-effort import of the history store. The CLI must keep
     # working even if the web/backend tree isn't available (e.g. the
     # core compile/push path is sometimes invoked from a stripped
@@ -3747,11 +4089,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("push", help="compile + POST to /api/3/import_jobs (upsert)")
     sp.add_argument("input")
-    sp.add_argument("--mode", choices=["replace", "create", "update", "upsert"], default="replace",
-                    help="replace (default): DELETE+POST clean-slate update. "
+    sp.add_argument("--mode",
+                    choices=["safe", "replace", "create", "update", "upsert"],
+                    default="safe",
+                    help="safe (default): preflight + restore recycled rows, "
+                         "then PUT or POST. No hard-delete on this path. "
                          "create: POST only (409 on UUID/name collision). "
-                         "update: PUT in-place (preserves unmodeled fields).")
+                         "update: PUT in-place (preserves unmodeled fields). "
+                         "replace: hard-purge then POST — gated on "
+                         "FSR_ALLOW_HARD_DELETE; use only for recovery.")
     sp.add_argument("--json", action="store_true", help="print response JSON to stdout")
+    sp.add_argument("--force-large-purge", action="store_true",
+                    help="replace mode: bypass the >50-workflow / >500-step "
+                         "safety cap. Required only when an intentional purge "
+                         "exceeds the cap.")
+    sp.add_argument("--allow-foreign-loss", action="store_true",
+                    help="safe mode: proceed even if the target collection "
+                         "contains workflows not in this YAML. Bulkupsert "
+                         "will cascade-remove them. Use only when you "
+                         "intentionally want to drop them.")
     sp.set_defaults(func=cmd_push)
 
     sp = sub.add_parser("validate", help="validate YAML against the store")
