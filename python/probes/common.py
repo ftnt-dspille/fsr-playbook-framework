@@ -95,7 +95,7 @@ def probe_session(probe_name: str, source_paths: Iterable[Path], version: str = 
 PROBE_TABLES: dict[str, tuple[str, ...]] = {
     "probe_step_types": ("step_types", "step_examples"),
     "probe_connectors": ("connectors", "operations", "operation_params", "operation_examples"),
-    "probe_modules": ("modules", "module_fields"),
+    "probe_modules": ("modules", "module_fields", "picklists"),
     "probe_jinja": ("jinja_macros", "jinja_context_vars"),
     # 'probe_jinja' is the live name; alias retained for any old refs.
     "probe_playbook_patterns": ("recipes", "playbooks_seen"),

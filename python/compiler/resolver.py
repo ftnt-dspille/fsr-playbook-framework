@@ -11,7 +11,7 @@ import difflib
 import json
 import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Step
@@ -892,15 +892,134 @@ class Resolver:
         ):
             return
         module = a.pop("module", None)
-        if not module or not isinstance(module, str):
-            step.arguments = a
-            return
-        iri = f"/api/3/{module}" if not module.startswith("/api/") else module
-        if step.type in ("create_record", "insert_record"):
-            a.setdefault("collection", iri)
-        elif step.type == "update_record":
-            a.setdefault("collectionType", iri)
+        if module and isinstance(module, str):
+            iri = f"/api/3/{module}" if not module.startswith("/api/") else module
+            if step.type in ("create_record", "insert_record"):
+                a.setdefault("collection", iri)
+            elif step.type == "update_record":
+                a.setdefault("collectionType", iri)
         step.arguments = a
+
+        # Friendly picklist tokens → IRIs. If the resource payload sets a
+        # picklist-backed field to a bare string label (e.g. status:
+        # "Closed"), rewrite to the canonical /api/3/picklists/<uuid>
+        # IRI so callers don't have to spell out the `| picklist(...)`
+        # filter in every write. Jinja expressions and existing IRIs
+        # pass through untouched.
+        self._resolve_picklist_friendly_tokens(step, path, errors)
+
+    def _resolve_picklist_friendly_tokens(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Rewrite bare picklist-field string values in `arguments.resource`
+        to the canonical `/api/3/picklists/<uuid>` IRI.
+
+        Module is derived from `collection` (create/insert) or
+        `collectionType` (update). A field is a candidate iff
+        `module_fields.picklist_name IS NOT NULL`. A value is rewritten iff
+        it's a non-empty string that:
+          - is not already an IRI (`/api/...`),
+          - contains no Jinja template markers (`{{`, `{%`),
+          - matches a row in `picklists` for that listName.
+        Unknown labels emit a BAD_VALUE with a "did you mean" suggestion.
+
+        List values are walked element-wise (covers multiselectpicklist).
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        resource = a.get("resource")
+        if not isinstance(resource, dict):
+            return
+
+        # Module IRI source per step type. `collection` on create/insert is
+        # the module IRI; on update it's the record IRI — use collectionType
+        # there. Bail if we can't pin down the module — without it we can't
+        # look up which fields are picklist-backed.
+        if step.type in ("create_record", "insert_record"):
+            mod_iri = a.get("collection")
+        else:
+            mod_iri = a.get("collectionType")
+        if not isinstance(mod_iri, str) or not mod_iri.startswith("/api/3/"):
+            return
+        module = mod_iri.split("/api/3/", 1)[1].split("?", 1)[0].rstrip("/")
+        if not module:
+            return
+
+        picklist_fields = {
+            row[0]: row[1] for row in self.conn.execute(
+                "SELECT field_name, picklist_name FROM module_fields "
+                "WHERE module_name=? AND picklist_name IS NOT NULL",
+                (module,),
+            ).fetchall()
+        }
+        if not picklist_fields:
+            return
+
+        rpath = f"{path}.arguments.resource"
+        for fname, fvalue in list(resource.items()):
+            list_name = picklist_fields.get(fname)
+            if not list_name:
+                continue
+            if isinstance(fvalue, list):
+                new_list = []
+                changed = False
+                for i, item in enumerate(fvalue):
+                    out = self._rewrite_one_picklist_token(
+                        item, list_name, f"{rpath}.{fname}[{i}]", errors,
+                    )
+                    if out is not item:
+                        changed = True
+                    new_list.append(out)
+                if changed:
+                    resource[fname] = new_list
+            else:
+                out = self._rewrite_one_picklist_token(
+                    fvalue, list_name, f"{rpath}.{fname}", errors,
+                )
+                if out is not fvalue:
+                    resource[fname] = out
+
+    def _rewrite_one_picklist_token(
+        self, value: Any, list_name: str, vpath: str,
+        errors: list[CompileError],
+    ) -> Any:
+        """Return the IRI for a friendly token, or the original value if
+        it's already an IRI / Jinja expression / non-string. Appends a
+        BAD_VALUE error to `errors` when the label doesn't match.
+        """
+        if not isinstance(value, str) or not value:
+            return value
+        # Pass-through: already canonical, or a Jinja expression that
+        # resolves at runtime.
+        if value.startswith("/api/") or "{{" in value or "{%" in value:
+            return value
+        row = self.conn.execute(
+            "SELECT item_iri FROM picklists WHERE list_name=? AND item_value=?",
+            (list_name, value),
+        ).fetchone()
+        if row:
+            return row[0]
+        # Build a "did you mean" suggestion from the same picklist.
+        candidates = [r[0] for r in self.conn.execute(
+            "SELECT item_value FROM picklists WHERE list_name=?",
+            (list_name,),
+        ).fetchall()]
+        sug = difflib.get_close_matches(value, candidates, n=1, cutoff=0.6)
+        # Recipe-template placeholders are intentional — flag as a
+        # warning so the template compiles cleanly until the author
+        # fills it in.
+        is_placeholder = value.startswith("TODO") or value.startswith("<TODO")
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(f"picklist value {value!r} is not in picklist "
+                     f"{list_name!r} (valid: "
+                     f"{', '.join(sorted(candidates)[:8])}"
+                     f"{'…' if len(candidates) > 8 else ''})"),
+            path=vpath,
+            near=sug[0] if sug else None,
+            suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+            severity="warning" if is_placeholder else "error",
+        ))
+        return value
 
     # Friendly `kind:` → canonical (formType, dataType, type, templateUrl)
     # for the inputVariables section of a manual_input step. Each row was

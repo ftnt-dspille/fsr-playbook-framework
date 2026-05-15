@@ -65,19 +65,27 @@ def _resolve_default(raw: Any, picklist_items: dict[str, str]) -> Any:
     return raw
 
 
-def _picklist_options_for(attr: dict, picklist_lists: dict[str, list[str]]) -> list[str] | None:
-    """Extract picklist option strings if the attribute references one."""
+def _picklist_list_name(attr: dict) -> str | None:
+    """Return the listName the attribute binds to (e.g. 'AlertStatus'),
+    or None if it isn't picklist-backed."""
     ds = attr.get("dataSource") or {}
     if not isinstance(ds, dict):
         return None
-    # The data source filter contains: filters: [{field:'listName__name', value:'AlertStatus'}]
     query = ds.get("query") or {}
     for f in query.get("filters", []) or []:
         if isinstance(f, dict) and f.get("field") == "listName__name":
-            list_name = f.get("value")
-            if isinstance(list_name, str):
-                return picklist_lists.get(list_name)
+            v = f.get("value")
+            if isinstance(v, str):
+                return v
     return None
+
+
+def _picklist_options_for(attr: dict, picklist_lists: dict[str, list[str]]) -> list[str] | None:
+    """Extract picklist option strings if the attribute references one."""
+    list_name = _picklist_list_name(attr)
+    if list_name is None:
+        return None
+    return picklist_lists.get(list_name)
 
 
 def _insert_module(conn: sqlite3.Connection, m: dict) -> str | None:
@@ -109,11 +117,13 @@ def _insert_field(
     if not name:
         return
     options = _picklist_options_for(attr, picklist_lists)
+    list_name = _picklist_list_name(attr)
     default = _resolve_default(attr.get("defaultValue"), picklist_items)
     conn.execute(
         """INSERT OR REPLACE INTO module_fields
-           (module_name, field_name, title, type, required, picklist_options, tooltip)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           (module_name, field_name, title, type, required,
+            picklist_options, tooltip, picklist_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             module,
             name,
@@ -122,18 +132,25 @@ def _insert_field(
             _bool(_is_required(attr.get("validation"))),
             json.dumps(options) if options else None,
             _scalarize(attr.get("tooltip")),
+            list_name,
         ),
     )
 
 
 # ----------------------- live -----------------------
 
-def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]], int]:
-    """Returns (item_id_to_value, list_name_to_options, totalItems)."""
+def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]],
+                                      list[tuple[str, str, str]], int]:
+    """Returns (item_id_to_value, list_name_to_options, items_rows, totalItems).
+
+    `items_rows` is a list of (list_name, item_value, item_iri) tuples,
+    ready for bulk-insertion into the `picklists` table.
+    """
     r = client.get(PICKLISTS_URL)
     members = r.get("hydra:member", [])
     item_id_to_value: dict[str, str] = {}
     list_name_to_options: dict[str, list[str]] = {}
+    items_rows: list[tuple[str, str, str]] = []
     for pl_name in members:
         name = pl_name.get("name")
         items = pl_name.get("picklists") or []
@@ -145,9 +162,11 @@ def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]], int]:
                 item_id_to_value[iid] = iv
             if iv is not None:
                 opts.append(iv)
+            if name and isinstance(iv, str) and isinstance(iid, str):
+                items_rows.append((name, iv, iid))
         if name:
             list_name_to_options[name] = opts
-    return item_id_to_value, list_name_to_options, len(members)
+    return item_id_to_value, list_name_to_options, items_rows, len(members)
 
 
 def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
@@ -157,14 +176,23 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     errors: list[str] = []
 
     try:
-        picklist_items, picklist_lists, n_pl = _load_picklists(client)
+        picklist_items, picklist_lists, items_rows, n_pl = _load_picklists(client)
     except Exception as e:  # noqa: BLE001
         return 0, 0, [f"picklists: {e!r}"]
+    # Persist (list_name, item_value, item_iri) so the resolver can map
+    # friendly picklist tokens in record-write payloads to IRIs without
+    # an online lookup.
+    conn.execute("DELETE FROM picklists")
+    conn.executemany(
+        "INSERT OR REPLACE INTO picklists (list_name, item_value, item_iri) "
+        "VALUES (?, ?, ?)",
+        items_rows,
+    )
     record_verification(
         conn, kind="api_endpoint",
         key="GET /api/3/picklist_names",
         method="live_api_get", status="tested_pass",
-        notes=f"picklists={n_pl}",
+        notes=f"picklists={n_pl}, items={len(items_rows)}",
     )
 
     try:
@@ -260,6 +288,24 @@ def main() -> int:
         sources.append(Path(cfg.base_url + METADATA_URL))
 
     with probe_session(PROBE_NAME, sources) as conn:
+        # Idempotent migration for already-built DBs that predate the
+        # picklists table / module_fields.picklist_name column.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS picklists ("
+            "  list_name TEXT NOT NULL,"
+            "  item_value TEXT NOT NULL,"
+            "  item_iri TEXT NOT NULL,"
+            "  PRIMARY KEY (list_name, item_value))"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_picklists_list ON picklists(list_name)"
+        )
+        cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(module_fields)").fetchall()}
+        if "picklist_name" not in cols:
+            conn.execute(
+                "ALTER TABLE module_fields ADD COLUMN picklist_name TEXT"
+            )
         wipe_probe_tables(conn, PROBE_NAME)
         conn.execute(
             "DELETE FROM verifications WHERE kind IN ('module','module_field') "

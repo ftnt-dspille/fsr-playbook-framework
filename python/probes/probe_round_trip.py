@@ -574,6 +574,493 @@ def _fire_and_check(client, coll_name: str, marker: str,
                 pass
 
 
+def _yaml_manual_input(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "round-trip probe — manual_input with multiple form fields + buttons"
+        playbooks:
+          - name: "rt_manual_input"
+            description: "approve/reject prompt + two free-text fields"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Triage"
+
+              - name: "Triage"
+                type: manual_input
+                options:
+                  - display: approve
+                    primary: true
+                    next: "Stamp Approved"
+                  - display: reject
+                    next: "Stamp Rejected"
+                arguments:
+                  title: "Triage this alert?"
+                  description: "Capture analyst notes before deciding."
+
+              - name: "Stamp Approved"
+                type: set_variable
+                vars:
+                  verdict: "approved"
+
+              - name: "Stamp Rejected"
+                type: set_variable
+                vars:
+                  verdict: "rejected"
+        """)
+
+
+def _check_manual_input(coll: dict) -> bool | str:
+    wf = workflow_by_name(coll, "rt_manual_input")
+    if wf is None:
+        return "workflow not found"
+    mi = None
+    for st in wf.get("steps", []):
+        a = st.get("arguments") or {}
+        if isinstance(a, dict) and "response_mapping" in a:
+            mi = st
+            break
+    if mi is None:
+        return "no manual_input step (no response_mapping in args)"
+    rmap = mi["arguments"]["response_mapping"]
+    opts = rmap.get("options") or []
+    if len(opts) != 2:
+        return f"expected 2 options, got {len(opts)}"
+    labels = {o.get("option") for o in opts if isinstance(o, dict)}
+    if labels != {"approve", "reject"}:
+        return f"option labels {labels} != {{approve, reject}}"
+    primaries = [o for o in opts if isinstance(o, dict) and o.get("primary")]
+    if len(primaries) != 1:
+        return f"expected exactly 1 primary, got {len(primaries)}"
+    return True
+
+
+def _yaml_workflow_reference(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "round-trip probe — workflow_reference with input mapping"
+        playbooks:
+          - name: "rt_wfref_child"
+            description: "child: multiply input.base by 10"
+            parameters: [base]
+            steps:
+              - name: "Start"
+                type: start
+                next: "Multiply"
+              - name: "Multiply"
+                type: set_variable
+                vars:
+                  product: "{{{{ (vars.input.params.base | int) * 10 }}}}"
+          - name: "rt_wfref_parent"
+            description: "parent: calls child with base=7"
+            parameters: [base]
+            steps:
+              - name: "Start"
+                type: start
+                next: "Call Child"
+              - name: "Call Child"
+                type: workflow_reference
+                next: "Stamp"
+                arguments:
+                  target: "rt_wfref_child"
+                  arguments:
+                    base: "{{{{ vars.input.params.base }}}}"
+                  apply_async: false
+                  pass_parent_env: false
+                  pass_input_record: false
+                  step_variables: []
+              - name: "Stamp"
+                type: set_variable
+                vars:
+                  final_product: "{{{{ vars.steps.Call_Child.product }}}}"
+        """)
+
+
+def _check_workflow_reference(coll: dict) -> bool | str:
+    parent = workflow_by_name(coll, "rt_wfref_parent")
+    child = workflow_by_name(coll, "rt_wfref_child")
+    if parent is None or child is None:
+        return "missing parent or child workflow"
+    # Emitter rewrites `target: <name>` → `workflowReference: <IRI>`.
+    ref = None
+    for st in parent.get("steps", []):
+        a = st.get("arguments") or {}
+        if isinstance(a, dict) and "workflowReference" in a:
+            ref = st
+            break
+    if ref is None:
+        return "no workflow_reference step (no workflowReference arg)"
+    iri = ref["arguments"]["workflowReference"]
+    if not isinstance(iri, str) or not iri.startswith("/api/3/workflows/"):
+        return (f"workflowReference={iri!r} not a /api/3/workflows/ IRI; "
+                "emitter should have rewritten friendly name → IRI")
+    # Confirm input mapping survived.
+    mapped = ref["arguments"].get("arguments")
+    if not isinstance(mapped, dict) or "base" not in mapped:
+        return f"input-mapping arguments missing or wrong shape: {mapped!r}"
+    return True
+
+
+def _yaml_ingest_bulk_feed(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "round-trip probe — ingest_bulk_feed with batch_size + __bulk"
+        playbooks:
+          - name: "rt_ingest_bulk"
+            description: "fake feed → IngestBulkFeed; __bulk:true must survive"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Build Feed"
+              - name: "Build Feed"
+                type: set_variable
+                next: "Ingest"
+                vars:
+                  feed:
+                    - {{value: "1.1.1.1", id: "a"}}
+                    - {{value: "2.2.2.2", id: "b"}}
+              - name: "Ingest"
+                type: ingest_bulk_feed
+                for_each:
+                  item: "{{{{ vars.feed }}}}"
+                  parallel: false
+                  condition: ""
+                  __bulk: true
+                  batch_size: 100
+                arguments:
+                  collection: "/api/ingest-feeds/threat_intel_feeds"
+                  resource:
+                    __replace: ""
+                    value: "{{{{ vars.item.value }}}}"
+                    sourceId: "{{{{ vars.item.id }}}}"
+                  __recommend: []
+                  step_variables: []
+                  mock_result: |
+                    {{"status": "ok", "ingested": 0, "mock": true}}
+        """)
+
+
+def _check_ingest_bulk_feed(coll: dict) -> bool | str:
+    wf = workflow_by_name(coll, "rt_ingest_bulk")
+    if wf is None:
+        return "workflow not found"
+    ing = None
+    for st in wf.get("steps", []):
+        a = st.get("arguments") or {}
+        if (isinstance(a, dict)
+                and isinstance(a.get("collection"), str)
+                and "ingest-feeds" in a["collection"]):
+            ing = st
+            break
+    if ing is None:
+        return "no ingest_bulk_feed step found"
+    # for_each lives at step top-level on the FSR side too.
+    fe = ing.get("for_each") or (ing.get("arguments") or {}).get("for_each")
+    if not isinstance(fe, dict):
+        return f"for_each missing or not a dict: {fe!r}"
+    if fe.get("__bulk") is not True:
+        return f"__bulk={fe.get('__bulk')!r} (expected True)"
+    if fe.get("batch_size") not in (100, "100"):
+        return f"batch_size={fe.get('batch_size')!r} (expected 100)"
+    return True
+
+
+def _yaml_update_record_picklist(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "round-trip probe — update_record with friendly picklist + Append"
+        playbooks:
+          - name: "rt_update_picklist"
+            description: "find alert by name, set status via friendly picklist token, Append tag"
+            parameters: [target_name]
+            steps:
+              - name: "Start"
+                type: start
+                next: "Find"
+              - name: "Find"
+                type: find_record
+                next: "Update"
+                arguments:
+                  module: alerts
+                  query:
+                    logic: AND
+                    filters:
+                      - type: primitive
+                        field: name
+                        value: "{{{{ vars.input.params.target_name }}}}"
+                        operator: eq
+                        _operator: eq
+                    __selectFields: [uuid, name, status]
+                  step_variables: []
+              - name: "Update"
+                type: update_record
+                arguments:
+                  collection: "{{{{ vars.steps.Find[0]['@id'] }}}}"
+                  collectionType: /api/3/alerts
+                  resource:
+                    # Friendly token — the resolver rewrites to the
+                    # canonical /api/3/picklists/<uuid> IRI.
+                    status: "Closed"
+                    recordTags: ["fsrpb-rt"]
+                  fieldOperation:
+                    recordTags: "Append"
+                  operation: Append
+                  step_variables: []
+        """)
+
+
+def _check_update_record_picklist(coll: dict) -> bool | str:
+    wf = workflow_by_name(coll, "rt_update_picklist")
+    if wf is None:
+        return "workflow not found"
+    upd = None
+    for st in wf.get("steps", []):
+        a = st.get("arguments") or {}
+        if (isinstance(a, dict)
+                and a.get("collectionType") == "/api/3/alerts"
+                and "resource" in a):
+            upd = st
+            break
+    if upd is None:
+        return "no update_record step"
+    args = upd["arguments"]
+    res = args.get("resource") or {}
+    status_val = res.get("status")
+    # Friendly-token NFR: the resolver should have rewritten "Closed"
+    # to the canonical /api/3/picklists/<uuid> IRI before the push.
+    if not isinstance(status_val, str):
+        return f"status type {type(status_val).__name__} (expected str)"
+    if not status_val.startswith("/api/3/picklists/"):
+        return (f"status={status_val!r} was not resolved to a picklist IRI; "
+                "friendly-token rewrite failed")
+    fop = args.get("fieldOperation") or {}
+    if fop.get("recordTags") != "Append":
+        return f"fieldOperation.recordTags={fop.get('recordTags')!r} (expected 'Append')"
+    if args.get("operation") != "Append":
+        return f"operation={args.get('operation')!r} (expected 'Append')"
+    return True
+
+
+def _yaml_find_record_sort(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "round-trip probe — find_record with $sort + __selectFields"
+        playbooks:
+          - name: "rt_find_sort"
+            description: "sorted projection survives FSR canonicalisation"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Find"
+              - name: "Find"
+                type: find_record
+                arguments:
+                  module: "alerts?$limit=5&$sort=-modifyDate"
+                  query:
+                    logic: AND
+                    filters:
+                      - type: primitive
+                        field: severity
+                        value: high
+                        operator: eq
+                        _operator: eq
+                    __selectFields: [uuid, name, severity, modifyDate]
+                  step_variables: []
+        """)
+
+
+def _check_find_record_sort(coll: dict) -> bool | str:
+    wf = workflow_by_name(coll, "rt_find_sort")
+    if wf is None:
+        return "workflow not found"
+    fr = None
+    for st in wf.get("steps", []):
+        a = st.get("arguments") or {}
+        if (isinstance(a, dict)
+                and isinstance(a.get("module"), str)
+                and a["module"].startswith("alerts")):
+            fr = st
+            break
+    if fr is None:
+        return "no find_record step with module=alerts*"
+    mod = fr["arguments"]["module"]
+    if "$sort=-modifyDate" not in mod:
+        return f"$sort=-modifyDate missing from module URL: {mod!r}"
+    if "$limit=5" not in mod:
+        return f"$limit=5 missing from module URL: {mod!r}"
+    sel = (fr["arguments"].get("query") or {}).get("__selectFields") or []
+    if "modifyDate" not in sel:
+        return f"__selectFields missing modifyDate: {sel!r}"
+    return True
+
+
+# ── Negative / compile-failure scenarios ─────────────────────────────
+# Each is (name, yaml_fn, expected_error_code_substring). The harness
+# asserts the compiler rejects the YAML AND that at least one error
+# contains the expected code/substring — so it isn't enough to fail
+# for the wrong reason.
+
+
+def _yaml_neg_unreachable_step(coll: str) -> str:
+    # 'Orphan' is not referenced by any step's `next:`.
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "negative — unreachable step"
+        playbooks:
+          - name: "rt_neg_unreachable"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Live"
+              - name: "Live"
+                type: set_variable
+                vars: {{x: "1"}}
+              - name: "Orphan"
+                type: set_variable
+                vars: {{y: "2"}}
+        """)
+
+
+def _yaml_neg_duplicate_step_name(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "negative — duplicate step names"
+        playbooks:
+          - name: "rt_neg_dup_name"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Dup"
+              - name: "Dup"
+                type: set_variable
+                vars: {{x: "1"}}
+              - name: "Dup"
+                type: set_variable
+                vars: {{x: "2"}}
+        """)
+
+
+def _yaml_neg_dangling_next(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "negative — next points at non-existent step"
+        playbooks:
+          - name: "rt_neg_dangling"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Nowhere"
+              - name: "Live"
+                type: set_variable
+                vars: {{x: "1"}}
+        """)
+
+
+def _yaml_neg_no_trigger(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "negative — no start/trigger step"
+        playbooks:
+          - name: "rt_neg_no_trigger"
+            steps:
+              - name: "Only"
+                type: set_variable
+                vars: {{x: "1"}}
+        """)
+
+
+def _yaml_neg_decision_two_defaults(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "negative — decision with two default branches"
+        playbooks:
+          - name: "rt_neg_two_defaults"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Branch"
+              - name: "Branch"
+                type: decision
+                conditions:
+                  - display: A
+                    default: true
+                    next: "X"
+                  - display: B
+                    default: true
+                    next: "X"
+              - name: "X"
+                type: set_variable
+                vars: {{x: "1"}}
+        """)
+
+
+def _yaml_neg_norway_branch(coll: str) -> str:
+    # Bare YAML `yes`/`no` in decision branch display gets coerced to
+    # Python booleans; the linter should flag it.
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "negative — Norway problem in decision display"
+        playbooks:
+          - name: "rt_neg_norway"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Branch"
+              - name: "Branch"
+                type: decision
+                conditions:
+                  - display: yes
+                    when: "{{{{ true }}}}"
+                    next: "X"
+                  - display: Else
+                    default: true
+                    next: "X"
+              - name: "X"
+                type: set_variable
+                vars: {{x: "1"}}
+        """)
+
+
+def _yaml_neg_unknown_step_type(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "negative — unknown step type"
+        playbooks:
+          - name: "rt_neg_unknown_type"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Bogus"
+              - name: "Bogus"
+                type: definitely_not_a_real_step_type
+        """)
+
+
+def _yaml_neg_unknown_picklist(coll: str) -> str:
+    return textwrap.dedent(f"""\
+        collection: "{coll}"
+        description: "negative — unknown picklist label in update_record.resource"
+        playbooks:
+          - name: "rt_neg_unknown_picklist"
+            steps:
+              - name: "Start"
+                type: start
+                next: "Update"
+              - name: "Update"
+                type: update_record
+                arguments:
+                  collection: "/api/3/alerts/00000000-0000-0000-0000-000000000000"
+                  collectionType: /api/3/alerts
+                  resource:
+                    status: "Klosed"
+        """)
+
+
+def _yaml_neg_decision_three_way(coll: str) -> str:
+    # Kept for parity with the positive scenario; sanity.
+    return _yaml_decision_branches(coll)
+
+
 def _check_decision_branches(coll: dict) -> bool | str:
     wf = workflow_by_name(coll, "rt_decision_three_way")
     if wf is None:
@@ -608,6 +1095,30 @@ SCENARIOS = [
      _check_find_correlated, False),
     ("decision_three_way", _yaml_decision_branches,
      _check_decision_branches, False),
+    ("manual_input", _yaml_manual_input, _check_manual_input, False),
+    ("workflow_reference", _yaml_workflow_reference,
+     _check_workflow_reference, False),
+    ("ingest_bulk_feed", _yaml_ingest_bulk_feed,
+     _check_ingest_bulk_feed, False),
+    ("update_record_picklist", _yaml_update_record_picklist,
+     _check_update_record_picklist, False),
+    ("find_record_sort", _yaml_find_record_sort,
+     _check_find_record_sort, False),
+]
+
+# Negative / lint scenarios: (name, yaml_fn, expected_error_substr).
+# Pass when the compiler returns at least one error whose code OR
+# message contains `expected_error_substr`. Catches both "compiler
+# missed the foot-gun" AND "compiler rejected for the wrong reason".
+NEGATIVE_SCENARIOS = [
+    ("neg_unreachable", _yaml_neg_unreachable_step, "unreachable"),
+    ("neg_dup_name", _yaml_neg_duplicate_step_name, "duplicate_step_id"),
+    ("neg_dangling_next", _yaml_neg_dangling_next, "unknown_next_step"),
+    ("neg_no_trigger", _yaml_neg_no_trigger, "no_trigger"),
+    ("neg_two_defaults", _yaml_neg_decision_two_defaults, "default"),
+    ("neg_norway_branch", _yaml_neg_norway_branch, "YAML 1.1 boolean"),
+    ("neg_unknown_type", _yaml_neg_unknown_step_type, "unknown_step_type"),
+    ("neg_unknown_picklist", _yaml_neg_unknown_picklist, "not in picklist"),
 ]
 
 # Live-fire scenarios: push + actually trigger + verify the run hit
@@ -655,6 +1166,44 @@ def run_one(client, name: str,
     return {"name": name, "ok": False, "stage": "check", "detail": str(verdict)}
 
 
+def run_negative(name: str,
+                 yaml_fn: Callable[[str], str],
+                 expected_substr: str) -> dict:
+    """Compile-only — assert the compiler rejects with the expected
+    error code/message substring. Never pushes to FSR.
+    """
+    try:
+        from compiler import compile_yaml as _compile
+    except Exception as exc:  # noqa: BLE001
+        return {"name": name, "ok": False, "stage": "import",
+                "detail": f"{exc!r}"}
+    coll_name = f"{PROBE_COLLECTION_PREFIX}{name}"
+    yaml_text = yaml_fn(coll_name)
+    result = _compile(yaml_text, DB)
+    blocking = [e for e in result.errors if e.severity != "warning"]
+    # Linter rules surface as warnings by default; for "linter must
+    # catch this" tests we accept any error OR warning that mentions
+    # the expected substring.
+    haystack = " ; ".join(f"{e.code.value}: {e.message}" for e in result.errors)
+    needle = expected_substr.lower()
+    if needle in haystack.lower():
+        if result.ok and not blocking:
+            # The lint warning was emitted but didn't block compile.
+            # That's acceptable for warning-level rules (e.g. Norway,
+            # unreachable). Note it in the detail.
+            return {"name": name, "ok": True, "stage": "compile-warn",
+                    "detail": f"lint warning caught ({expected_substr!r})"}
+        return {"name": name, "ok": True, "stage": "compile-fail",
+                "detail": f"compiler caught {expected_substr!r}"}
+    if result.ok:
+        return {"name": name, "ok": False, "stage": "compile",
+                "detail": (f"expected error/warning matching "
+                           f"{expected_substr!r}, got clean compile")}
+    return {"name": name, "ok": False, "stage": "compile",
+            "detail": (f"compiler rejected, but no error matched "
+                       f"{expected_substr!r}; errors: {haystack[:300]}")}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", action="store_true",
@@ -684,6 +1233,12 @@ def main() -> int:
         if args.only and name not in args.only:
             continue
         results.append(run_one(client, name, yaml_fn, check_fn, expect_fail))
+
+    # Negative scenarios — compile-only, no FSR round-trip.
+    for name, yaml_fn, expected in NEGATIVE_SCENARIOS:
+        if args.only and name not in args.only:
+            continue
+        results.append(run_negative(name, yaml_fn, expected))
 
     if not args.no_fire:
         import secrets

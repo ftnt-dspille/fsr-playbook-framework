@@ -161,8 +161,20 @@ CREATE TABLE IF NOT EXISTS module_fields (
     required         INTEGER DEFAULT 0,
     picklist_options TEXT,
     tooltip          TEXT,
+    picklist_name    TEXT,                -- listName of the bound picklist (e.g. 'AlertStatus'); NULL for non-picklist fields
     PRIMARY KEY (module_name, field_name)
 );
+
+-- Picklist items keyed by (listName, itemValue). Lets the resolver
+-- map a friendly token in a record-write payload to the canonical
+-- `/api/3/picklists/<uuid>` IRI without a live API call.
+CREATE TABLE IF NOT EXISTS picklists (
+    list_name   TEXT NOT NULL,            -- 'AlertStatus'
+    item_value  TEXT NOT NULL,            -- 'Closed'
+    item_iri    TEXT NOT NULL,            -- '/api/3/picklists/<uuid>'
+    PRIMARY KEY (list_name, item_value)
+);
+CREATE INDEX IF NOT EXISTS idx_picklists_list ON picklists(list_name);
 
 -- ---------- Jinja ----------
 -- Filter type discipline matters when piping: a filter that returns a
