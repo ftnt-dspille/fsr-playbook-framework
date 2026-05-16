@@ -44,8 +44,12 @@ def cmd_refresh(_args: argparse.Namespace) -> int:
 
 def cmd_compile(args: argparse.Namespace) -> int:
     from compiler import compile_yaml
+    from compiler.errors import ErrorCode
     text = Path(args.input).read_text()
-    result = compile_yaml(text, Path(args.db))
+    lax_codes = None
+    if getattr(args, "lax", False):
+        lax_codes = {ErrorCode.UNKNOWN_PARAM, ErrorCode.UNKNOWN_CONNECTOR}
+    result = compile_yaml(text, Path(args.db), lax_codes=lax_codes)
     if not result.ok:
         _print_errors(result.errors)
         return 1
@@ -3936,6 +3940,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("compile", help="YAML -> FSR JSON")
     sp.add_argument("input")
     sp.add_argument("-o", "--output", required=True)
+    sp.add_argument("--lax", action="store_true",
+                    help="demote unknown_param/unknown_connector to warnings "
+                         "(use for round-trip Path B on decompiled playbooks)")
     sp.set_defaults(func=cmd_compile)
 
     sp = sub.add_parser("dump-step-params",

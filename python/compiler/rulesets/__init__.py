@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterable
 # Step type UUIDs (canonical, from store/STEP_TYPES.md and live FSR)
 STEP_CREATE_RECORD = "2597053c-e718-44b4-8394-4d40fe26d357"
 STEP_INGEST_BULK_FEED = "7b221880-716b-4726-a2ca-5e568d330b3e"
+STEP_CONNECTOR = "0bfed618-0316-11e7-93ae-92361f002671"
 
 
 @dataclass

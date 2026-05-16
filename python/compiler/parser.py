@@ -362,6 +362,33 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                             path=f"{sp}.conditions",
                         ))
                     _norway_warnings.clear()
+                # Step-level `default: <step_id>` sugar — synthesizes an
+                # Else default-condition row that targets that step. Pairs
+                # with the non-default conditions[] entries; surfaces in
+                # `step.branches` via the resolver's normalizer.
+                top_default = s_raw.get("default")
+                if isinstance(top_default, str) and top_default.strip():
+                    existing = args.setdefault("conditions", [])
+                    has_default = any(
+                        isinstance(c, dict) and c.get("default") is True
+                        for c in existing
+                    )
+                    if has_default:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                "decision step has both a step-level "
+                                "`default:` and a default-flagged entry in "
+                                "`conditions:` — keep only one"
+                            ),
+                            path=f"{sp}.default",
+                        ))
+                    else:
+                        existing.append({
+                            "option": "Else",
+                            "default": True,
+                            "next": top_default.strip(),
+                        })
             if stype == "manual_input":
                 top_opts = s_raw.get("options")
                 if isinstance(top_opts, list):

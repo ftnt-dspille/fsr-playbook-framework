@@ -42,6 +42,7 @@ PICKLISTS_URL = (
     "/api/3/picklist_names"
     "?$export=false&$limit=2147483647&$orderby=name&$relationships=true"
 )
+TAGS_URL = "/api/3/tags?$limit=2147483647&$orderby=name"
 
 
 def _scalarize(v: Any) -> Any:
@@ -195,6 +196,33 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         notes=f"picklists={n_pl}, items={len(items_rows)}",
     )
 
+    # Tags catalog — drives compile-time validation of
+    # set_variable.message.tags so the agent can't ship a playbook that
+    # silently creates a typo tag at runtime.
+    try:
+        rt = client.get(TAGS_URL)
+        tag_rows: list[tuple[str, str]] = []
+        for m in rt.get("hydra:member") or []:
+            if not isinstance(m, dict):
+                continue
+            name = m.get("itemValue") or m.get("name")
+            iri = m.get("@id")
+            if name and iri:
+                tag_rows.append((str(name), str(iri)))
+        conn.execute("DELETE FROM tags")
+        conn.executemany(
+            "INSERT OR REPLACE INTO tags (name, iri) VALUES (?, ?)",
+            tag_rows,
+        )
+        record_verification(
+            conn, kind="api_endpoint",
+            key="GET /api/3/tags",
+            method="live_api_get", status="tested_pass",
+            notes=f"tags={len(tag_rows)}",
+        )
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"tags: {e!r}")
+
     try:
         r = client.get(METADATA_URL)
     except Exception as e:  # noqa: BLE001
@@ -299,6 +327,11 @@ def main() -> int:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_picklists_list ON picklists(list_name)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tags ("
+            "  name TEXT PRIMARY KEY,"
+            "  iri  TEXT NOT NULL)"
         )
         cols = {r[1] for r in conn.execute(
             "PRAGMA table_info(module_fields)").fetchall()}

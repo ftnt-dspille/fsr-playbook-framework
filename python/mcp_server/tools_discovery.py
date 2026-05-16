@@ -338,6 +338,39 @@ def _build_param_groups_by_select(
     return groups
 
 
+def _build_visibility_block(
+    rules: list[tuple[str, str | None, str | None]],
+) -> dict[str, Any]:
+    """Flat-view sibling of `param_groups_by_select`.
+
+    Returns `{always: [...], when: {"<select>=<option>": [...], ...}}`.
+    `always` lists params that have no gating rule. `when` keys are
+    human-readable "<gating_param>=<option_value>" strings so the agent
+    can scan once and pick the right branch.
+
+    Returns `{}` when no params have visibility rules — most ops.
+    """
+    always: list[str] = []
+    when: dict[str, list[str]] = {}
+    any_gated = False
+    seen_always: set[str] = set()
+    for name, parent, cond in rules:
+        if parent is None:
+            if name not in seen_always:
+                always.append(name)
+                seen_always.add(name)
+        else:
+            any_gated = True
+            key = f"{parent}={cond}" if cond is not None else f"{parent}=*"
+            when.setdefault(key, []).append(name)
+    if not any_gated:
+        return {}
+    out: dict[str, Any] = {"always": always}
+    if when:
+        out["when"] = when
+    return out
+
+
 def _parse_options(blob: Any) -> list[str]:
     if not blob:
         return []
@@ -465,6 +498,7 @@ def get_op_schema(connector: str, op: str,
         param_groups = _build_param_groups_by_select(
             rules_for_groups, param_types, param_options, param_defaults,
         )
+        visibility = _build_visibility_block(rules_for_groups)
 
         if verbose:
             result = dict(op_row[0])
@@ -517,6 +551,15 @@ def get_op_schema(connector: str, op: str,
                 "key in `param_groups_by_select` and use ONLY the params "
                 "listed under that option (plus any nested_selects). Mixing "
                 "params across groups produces hidden-field errors at runtime."
+            )
+        if visibility:
+            result["visibility"] = visibility
+            result["visibility_hint"] = (
+                "Flat view: `always` lists params with no gating rule; "
+                "`when` keys (`<select>=<option>`) list params that appear "
+                "only when the gating select takes that value. Pick the "
+                "branch first, then use only the params from `always` plus "
+                "the matching `when` entry."
             )
 
         if not op_row[0].get("output_schema_json") and \
@@ -941,12 +984,63 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "triggered record's collaboration panel; `record:` is only "
             "needed when the playbook has no triggered record."
         ),
+        "message_block": {
+            "shape": (
+                "Optional sibling of `vars:` at the step level. Posts a "
+                "comment / Action Log entry to a record. If the playbook "
+                "was triggered on a record, FSR auto-attaches the message "
+                "and `record(s):` may be omitted. Otherwise supply "
+                "`record:` (single IRI / Jinja) or `records:` (list)."
+            ),
+            "accepted_keys": [
+                "content", "tags", "type", "thread", "record", "records",
+            ],
+            "keys": {
+                "content": (
+                    "required string; plain text auto-wraps in <p>…</p>, "
+                    "or pass an HTML fragment for rich formatting."
+                ),
+                "tags": (
+                    "optional list of tag names or `/api/3/tags/<slug>` "
+                    "IRIs; friendly names are resolved at import."
+                ),
+                "type": (
+                    "optional — 'comment' (default) or 'actionlog', or a "
+                    "full `/api/3/picklists/<uuid>` IRI from the "
+                    "'Comment Type' picklist."
+                ),
+                "thread": (
+                    "optional bool; true keeps the comment threaded "
+                    "with prior automated messages on the record."
+                ),
+                "record": (
+                    "single record IRI or Jinja string. Use when the "
+                    "playbook has no triggered-record context."
+                ),
+                "records": (
+                    "list of record IRIs (or a Jinja list expression). "
+                    "Use to post the same message to multiple records."
+                ),
+            },
+            "example": {
+                "message": {
+                    "content": "<p>Verdict: {{ vars.verdict }}</p>",
+                    "tags": ["automation", "verdict"],
+                    "type": "comment",
+                    "thread": True,
+                },
+            },
+        },
         "example": {
             "type": "set_variable",
             "name": "Stash Inputs",
             "vars": {
                 "source_ip": "{{ vars.input.records[0].sourceIp }}",
                 "verdict": "pending",
+            },
+            "message": {
+                "content": "Triaging {{ vars.input.records[0].sourceIp }}",
+                "tags": ["automation"],
             },
         },
         "do_not_use": [
@@ -955,6 +1049,8 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "putting variables under `arguments:` — use step-level `vars:`",
             "arg_list: [{name, value}, ...] at step level — legacy wire "
             "form, the parser writes it for you",
+            "putting message:{} keys under arguments: — `message:` is a "
+            "step-level sibling of `vars:`",
         ],
     },
     "decision": {

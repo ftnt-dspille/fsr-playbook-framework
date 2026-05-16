@@ -207,8 +207,18 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)[:400]}
 
+    # FSR sometimes returns the body as a JSON-encoded string (when the
+    # response Content-Type is text/plain but the payload is `{"result":
+    # 5}`). Unwrap so callers see the native scalar, not a quoted blob.
     if isinstance(r, str):
-        return {"output": r}
+        s = r.strip()
+        if s and s[0] in "{[":
+            try:
+                r = json.loads(s)
+            except Exception:
+                return {"output": r}
+        else:
+            return {"output": r}
     if isinstance(r, dict):
         for k in ("result", "output", "rendered", "value"):
             if k in r:

@@ -225,19 +225,22 @@ D3. **Wire `api_examples_catalog/catalog.sqlite` into fsrpb as a
 
 Open:
 
-1. **`get_op_schema` MCP — group fields by visibility predicate**.
-   Emit `{always: [...], when: {"method=Policy Based": [...], …}}`
-   so the agent picks the right branch on first draft.
-2. **`get_step_type(set_variable) / friendly_form`** must surface the
-   `message:` block + keys (content, tags, record, type, thread).
-3. **Live picklist resolution for `message.type`** — probe live FSR's
-   message-type picklist by name; today defaults to a hardcoded IRI.
-4. **`message.tags` resolution** — verify tag exists on live FSR;
-   warn or auto-create when missing.
-5. **Eval re-baseline** — re-run agentic_anthropic + agentic_lmstudio
+1. **Eval re-baseline** — re-run agentic_anthropic + agentic_lmstudio
    on the "Confirm Before Block" task; compare to c44c6e36 transcript.
-6. **Linter parity for `validate-ingestion`** — mirror the conditional
-   visibility check into the ingestion ruleset.
+
+Shipped 2026-05-16:
+- ✅ `get_op_schema` flat `visibility: {always, when}` block alongside
+  `param_groups_by_select` — `tools_discovery.py:_build_visibility_block`.
+- ✅ `get_step_type(set_variable)/friendly_form` surfaces `message_block`
+  with per-key docs (content/tags/type/thread/record/records).
+- ✅ Live picklist resolution for `message.type` — resolver queries
+  `picklists` table for `'Comment Type'` first; falls back to hardcoded
+  IRI map. Warning lists live options.
+- ✅ `message.tags` live verification — new `tags(name, iri)` table
+  hydrated by `probe_modules` from `/api/3/tags`; resolver warns when
+  a friendly tag isn't found *and* the table is populated.
+- ✅ Linter parity: `rule_connector_param_visibility` in
+  `rulesets/_shared.py`, registered on both data-ingest and feed-ingest.
 
 ## Pending — agentic eval re-baseline (2026-05-07)
 
@@ -301,6 +304,9 @@ trivia — query the DB instead.
 | I35 Bias fix (placeholder YAML not sent) + draft revisions | ✅ 2026-05-06 | `routes/chat.py:_is_meaningful_yaml`, `yamlStore.svelte.ts` |
 | I36 Chat-review tool — 8 pattern detectors | ✅ 2026-05-06 | `python/chat_review.py`, `fsrpb chat-review` |
 | I37 Detect "agent didn't add the playbook to the UI" failure | ✅ 2026-05-06 | chat_review detectors `no_editor_update`, `yaml_in_wrong_fence` |
+| I16 Per-option `next:` on manual_input | ✅ shipped | resolver `_normalize_manual_input_args` lifts into `step.branches` |
+| I18 Did-you-mean on unknown `kind:` | ✅ 2026-05-16 | alias map + difflib in `_expand_input_variables` |
+| I25 Friendly `default: <step_id>` on decision | ✅ 2026-05-16 | parser synthesizes Else default-condition row |
 
 I24 (MI form-builder round-trip) **deprioritized** — UI-cosmetic keys
 confirmed.
@@ -315,15 +321,9 @@ confirmed.
   hardcoded map at `resolver._INPUT_FIELD_KINDS` with a generator
   reading `SELECT DISTINCT formType, dataType, type, templateUrl FROM
   playbook_steps WHERE step_type_name='ManualInput'`.
-- **I16 Friendly `next:` per-option in manual_input.** Lift `next:`
-  off each option (currently silently stripped at resolver.py:701).
-- **I18 "Did you mean" on unknown `kind:`.** Fuzzy-match against the
-  catalog (e.g. `hostname` → `domain`, `ip` → `ipv4`).
 - **I19 `why_did_playbook_fail(playbook_or_id)` MCP convenience tool.**
   Chains `list_recent_failed_runs` → `get_run_env` →
   `diagnose_yaml_against_pb_execution`.
-- **I25 Friendly `default: <step_id>` on decision steps**, parallel to
-  `branches:`. Compiles to a `default: true` entry.
 - **I33 Richer "did you mean" mining for empty searches.** Partly
   covered by I32's difflib pass; revisit when more thumbs-down rows
   arrive.
@@ -406,11 +406,11 @@ Shipped:
 - ✅ I4 `generate_recipe` MCP wrapper.
 - ✅ I7 recipe gold-standard test fixtures (`test_recipe_gold.py`).
 - ✅ I10 stepper skeleton (`step_through_playbook` MCP).
+- ✅ I5 `compile --lax` flag — 2026-05-16; `compile_yaml(lax_codes=…)`
+  + CLI `--lax` demotes `unknown_param`/`unknown_connector` to warnings.
 
 Open:
 
-- **I5 `compile --lax` flag** — demote `unknown_param`/`unknown_connector`
-  to warnings for round-trip Path B. ~20 min.
 - **I6 Extract + index RPM-bundled playbooks.** `store/rpm_cache/` holds
   RPMs; each contains a `playbooks/playbooks.json`. We ingest connector
   metadata but not the playbooks. New `python/probes/probe_rpm_playbooks.py`.
@@ -431,16 +431,7 @@ Open:
 Each item is grounded in something a recent session exposed; estimates
 assume the patterns established in 2026-05-03/04 are followed.
 
-1. **Apply the strict-whitelist pattern to the other resolver normalizers.**
-   `manual_input` hard-errors on unknown keys and on bad `type:` values
-   (silent-drop trap fixed). The same trap still exists for `delay`,
-   `code_snippet`, `start_on_create` / `start_on_update`, and the record
-   CRUD trio (`create_record`, `update_record`, `find_record`). Add a
-   per-handler accepted-keys check + fail-on-unknown the way
-   `_normalize_manual_input_args` does. Template: `compiler/resolver.py`,
-   the `_FRIENDLY` / `_CANONICAL` whitelists pattern. ~30 min.
-
-2. **Slim the other big tools the way `get_step_type` was slimmed.**
+1. **Slim the other big tools the way `get_step_type` was slimmed.**
    Token analyzer + history db are built (`fsrpb chat-stats`,
    `web/backend/usage.jsonl`, `history.cost_by_playbook()`). Run a real
    chat session and trim whatever sits at the top of the tool-cost
@@ -456,10 +447,8 @@ assume the patterns established in 2026-05-03/04 are followed.
    and document why. Reproduce with `fsrpb push --mode upsert <yaml>`.
    ~1 hr.
 
-4. **Roundtrip test against the friendly-form examples.** Decompile →
-   recompile may regress YAMLs from friendly form to canonical wire form
-   after the friendly-form work. Run `fsrpb roundtrip` on the 11 demo
-   examples and confirm nothing diverges semantically. ~15 min smoke.
+4. ~~Roundtrip test against the friendly-form examples.~~ ✅ 2026-05-16
+   22/22 examples green (compile → decompile → recompile).
 
 5. **Smoke test for the 9 examples without `.test.yaml` sidecars**
    (`decision_branch`, `find_and_update`, `hello_connector`,
@@ -569,9 +558,9 @@ idempotent; `python/probes/_env.py` loads `.env`.
 
 ### Open follow-ups carried forward
 
-- **`render_jinja` non-string scalar bug** — returns
-  `{"output": '{"result": 5}'}` instead of `{"output": "5"}`. Cheap
-  fix in `python/mcp_server.py` render handler.
+- ✅ `render_jinja` non-string scalar bug — 2026-05-16,
+  `python/mcp_server/tools_jinja.py` now JSON-decodes string-wrapped
+  bodies before unwrapping `result`/`output`/…
 - **`fsrpb pull "<name>"`** filter — `?name=` exact-match returned 0
   hits historically (URL-encoding workaround documented in GAPS.md
   §4). Verify the fix landed in `python/cli.py:cmd_pull` or apply.

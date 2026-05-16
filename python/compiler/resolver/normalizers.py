@@ -60,6 +60,9 @@ class NormalizerMixin:
         if step.type in ("create_record", "insert_record", "update_record"):
             self._normalize_record_crud_args(step, path, errors)
 
+        if step.type == "find_record":
+            self._normalize_find_record_args(step, path, errors)
+
         if step.type == "delay":
             self._normalize_delay_args(step, path, errors)
 
@@ -345,6 +348,25 @@ class NormalizerMixin:
         # pass through untouched.
         self._resolve_picklist_friendly_tokens(step, path, errors)
 
+    def _normalize_find_record_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Strict-whitelist guard for find_record.
+
+        Handler signature is `find_data(module, query, partial=True, **kw)`.
+        Unknown keys silently disappear at runtime, so reject misspellings
+        (e.g. `filter:` instead of `query:`) at compile time.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        _FRIENDLY: set[str] = set()
+        _CANONICAL = {
+            "module", "query", "partial", "mock_result", "condition",
+            "step_variables",
+        }
+        self._check_unknown_keys(
+            a, step.type, _FRIENDLY, _CANONICAL, path, errors,
+        )
+
     def _expand_input_variables(
         self, raw: Any, path: str, errors: list[CompileError],
     ) -> list[dict[str, Any]]:
@@ -401,14 +423,42 @@ class NormalizerMixin:
                 ))
                 continue
             if not kind or kind not in self._INPUT_FIELD_KINDS:
+                # Common aliases the agent reaches for first; mapped to
+                # the canonical kind. Catches the most frequent typos
+                # before falling through to difflib.
+                _ALIASES = {
+                    "hostname": "domain", "host": "domain", "fqdn": "domain",
+                    "ip": "ipv4", "ipaddress": "ipv4", "ipv": "ipv4",
+                    "hash": "filehash", "sha256": "filehash",
+                    "sha1": "filehash", "md5": "filehash",
+                    "string": "text", "str": "text", "phone": "phonenumber",
+                    "tel": "phonenumber", "bool": "checkbox",
+                    "boolean": "checkbox", "int": "integer", "num": "integer",
+                    "number": "integer", "dropdown": "select",
+                    "list": "select", "datetime-local": "datetime",
+                    "date": "datetime", "time": "datetime",
+                }
+                import difflib as _difflib
+                guess = _ALIASES.get(str(kind or "").lower())
+                if not guess:
+                    matches = _difflib.get_close_matches(
+                        str(kind or ""),
+                        sorted(self._INPUT_FIELD_KINDS),
+                        n=1, cutoff=0.6,
+                    )
+                    guess = matches[0] if matches else None
+                msg = (
+                    f"`inputs[].kind` must be one of "
+                    f"{', '.join(sorted(self._INPUT_FIELD_KINDS))}; "
+                    f"got {kind!r}"
+                )
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message=(
-                        f"`inputs[].kind` must be one of "
-                        f"{', '.join(sorted(self._INPUT_FIELD_KINDS))}; "
-                        f"got {kind!r}"
-                    ),
+                    message=msg,
                     path=f"{ipath}.kind",
+                    suggestion=(f"did you mean {guess!r}?"
+                                if guess else None),
+                    near=guess,
                 ))
                 continue
             # Hint: warn when a text-typed field's name/label clearly maps
@@ -997,29 +1047,84 @@ class NormalizerMixin:
                 path=f"{mpath}.tags",
             ))
             return
+        # Live tag verification — if the reference store has been
+        # populated via `fsrpb probe modules` (which now also hydrates
+        # the tags table), warn on names that don't exist on the FSR
+        # instance. Skip the check when the table is empty or missing
+        # so the resolver degrades gracefully on a fresh install.
+        known_tags: dict[str, str] = {}
+        try:
+            known_tags = {
+                row["name"].lower(): row["iri"]
+                for row in self.conn.execute(
+                    "SELECT name, iri FROM tags"
+                ).fetchall()
+            }
+        except sqlite3.Error:
+            pass
         tag_iris: list[str] = []
         for t in raw_tags:
             if not isinstance(t, str):
                 continue
-            tag_iris.append(t if t.startswith("/api/") else f"/api/3/tags/{t}")
+            if t.startswith("/api/"):
+                tag_iris.append(t)
+                continue
+            lookup = known_tags.get(t.lower())
+            if lookup:
+                tag_iris.append(lookup)
+            else:
+                if known_tags:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"set_variable.message.tags: tag {t!r} not "
+                            "found on the FSR instance; it will be "
+                            "auto-created on first use — confirm the "
+                            "spelling or pre-create the tag in the UI"
+                        ),
+                        path=f"{mpath}.tags",
+                        severity="warning",
+                    ))
+                tag_iris.append(f"/api/3/tags/{t}")
         msg_type_raw = msg.get("type")
+        # Live picklist lookup first — probe_modules hydrates the
+        # picklists table per-deployment, so deployments that customized
+        # the Comment Type picklist resolve correctly here. The
+        # _MESSAGE_TYPE_IRIS map is a fallback when the reference store
+        # has not been populated.
+        live_map: dict[str, str] = {}
+        live_options: list[str] = []
+        try:
+            rows = self.conn.execute(
+                "SELECT item_value, item_iri FROM picklists "
+                "WHERE list_name = 'Comment Type'",
+            ).fetchall()
+            for row in rows:
+                val = row["item_value"]
+                live_options.append(val)
+                live_map[val.strip().lower().replace(" ", "")] = row["item_iri"]
+        except sqlite3.Error:
+            pass
+        default_iri = live_map.get("comment") or self._DEFAULT_MESSAGE_TYPE_IRI
         if msg_type_raw is None:
-            msg_type = self._DEFAULT_MESSAGE_TYPE_IRI
+            msg_type = default_iri
         elif str(msg_type_raw).startswith("/api/"):
             msg_type = msg_type_raw
         else:
-            # Friendly name (e.g. "Comment", "ActionLog") — case-insensitive
-            # lookup against the stock Comment Type picklist.
             key = str(msg_type_raw).strip().lower().replace(" ", "")
-            if key in self._MESSAGE_TYPE_IRIS:
+            if key in live_map:
+                msg_type = live_map[key]
+            elif key in self._MESSAGE_TYPE_IRIS:
                 msg_type = self._MESSAGE_TYPE_IRIS[key]
             else:
-                msg_type = self._DEFAULT_MESSAGE_TYPE_IRI
+                msg_type = default_iri
+                known = ", ".join(live_options) if live_options else \
+                    "Comment, ActionLog"
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
                     message=(f"set_variable.message.type {msg_type_raw!r} is "
-                             "not a known Comment Type value (Comment, "
-                             "ActionLog) or an IRI; defaulting to Comment"),
+                             f"not a known Comment Type value ({known}) "
+                             "or an IRI; defaulting to Comment"),
                     path=f"{mpath}.type",
                     severity="warning",
                 ))

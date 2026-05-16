@@ -35,8 +35,28 @@ class CompileResult:
         return [e for e in self.errors if e.severity == "warning"]
 
 
-def compile_yaml(text: str, db_path: Path) -> CompileResult:
+def compile_yaml(
+    text: str, db_path: Path,
+    lax_codes: Optional[set[str]] = None,
+) -> CompileResult:
+    """Compile YAML to FSR JSON.
+
+    lax_codes: iterable of ErrorCode values (or their str) to demote from
+    error → warning before blocking checks fire. Use for round-trip Path B
+    where unknown_param / unknown_connector should not block emission.
+    """
+    lax_set: set[str] = {str(c) for c in (lax_codes or set())}
+
+    def _demote(errs: list[CompileError]) -> list[CompileError]:
+        if not lax_set:
+            return errs
+        for e in errs:
+            if str(e.code) in lax_set and e.severity == "error":
+                e.severity = "warning"
+        return errs
+
     coll, errs = parse_yaml(text)
+    errs = _demote(errs)
     parse_blocking = [e for e in errs if e.severity != "warning"]
     if parse_blocking or coll is None:
         # Even on parse failure we attempt the raw-text linter so the
@@ -46,12 +66,13 @@ def compile_yaml(text: str, db_path: Path) -> CompileResult:
         return CompileResult(errors=errs + lint_errs, ir=coll)
 
     all_warnings: list[CompileError] = [e for e in errs if e.severity == "warning"]
-    lint_errs = lint(text, coll)
+    lint_errs = _demote(lint(text, coll))
     if any(e.severity != "warning" for e in lint_errs):
         return CompileResult(errors=lint_errs, ir=coll)
     all_warnings.extend(lint_errs)
 
     def _has_blocking(errs: list[CompileError]) -> bool:
+        _demote(errs)
         blocking = [e for e in errs if e.severity != "warning"]
         all_warnings.extend(e for e in errs if e.severity == "warning")
         return bool(blocking)
@@ -69,7 +90,7 @@ def compile_yaml(text: str, db_path: Path) -> CompileResult:
     if _has_blocking(errs):
         return CompileResult(errors=errs, ir=coll)
 
-    errs = validate(coll)
+    errs = _demote(validate(coll))
     if _has_blocking(errs):
         return CompileResult(errors=errs, ir=coll)
 

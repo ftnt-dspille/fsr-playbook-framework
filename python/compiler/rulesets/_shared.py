@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import os
+import sqlite3
+from pathlib import Path
+
 from . import (
+    STEP_CONNECTOR,
     STEP_CREATE_RECORD,
     STEP_INGEST_BULK_FEED,
     Issue,
@@ -280,6 +285,108 @@ def rule_collection_or_workflow_has_slug(doc: dict) -> Iterable[Issue]:
                 path=f"data[{ci}]({coll.get('name')!r})",
             )
         break
+
+
+def _open_ref_db() -> sqlite3.Connection | None:
+    """Open the reference store read-only. Honors FSRPB_DB; falls back to
+    the in-tree store/fsr_reference.db. Returns None when nothing usable
+    is available so the rule degrades quietly on a fresh install.
+    """
+    candidates: list[Path] = []
+    env = os.environ.get("FSRPB_DB")
+    if env:
+        candidates.append(Path(env))
+    here = Path(__file__).resolve().parents[3]
+    candidates.append(here / "store" / "fsr_reference.db")
+    for p in candidates:
+        if p.exists():
+            try:
+                conn = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+                conn.row_factory = sqlite3.Row
+                return conn
+            except sqlite3.Error:
+                return None
+    return None
+
+
+def rule_connector_param_visibility(doc: dict) -> Iterable[Issue]:
+    """Connector steps inside an ingestion playbook must satisfy the same
+    operation_params visibility rules the resolver checks at compile time.
+
+    Mirrors `NormalizerMixin._check_param_visibility` against raw FSR
+    JSON: when a connector op's params row carries `parent_param_name`,
+    the provided params must include the parent with a matching
+    `condition_value`. Otherwise FSR hides the field at runtime and the
+    op typically rejects the call — the same silent-failure mode that
+    bit chat-review session c44c6e36.
+
+    No-ops when the reference store isn't available locally.
+    """
+    conn = _open_ref_db()
+    if conn is None:
+        return
+    try:
+        for ci, _coll, wi, wf in _all_workflows(doc):
+            for si, step in _all_steps(wf):
+                if _step_type_uuid(step) != STEP_CONNECTOR:
+                    continue
+                args = step.get("arguments") or {}
+                connector = args.get("connector") or ""
+                operation = args.get("operation") or ""
+                params = args.get("params") or {}
+                if not connector or not operation or not isinstance(params, dict):
+                    continue
+                rules = conn.execute(
+                    "SELECT param_name, parent_param_name, condition_value "
+                    "FROM operation_params "
+                    "WHERE connector_name=? AND op_name=?",
+                    (connector, operation),
+                ).fetchall()
+                if not rules:
+                    continue
+                by_name: dict[str, list[tuple[str | None, str | None]]] = {}
+                for r in rules:
+                    by_name.setdefault(r["param_name"], []).append(
+                        (r["parent_param_name"], r["condition_value"]),
+                    )
+                path = (
+                    f"data[{ci}].workflows[{wi}].steps[{si}]"
+                    f"({step.get('name')!r})"
+                )
+                for p_name, p_value in params.items():
+                    entries = by_name.get(p_name)
+                    if not entries:
+                        continue
+                    if any(parent is None for parent, _ in entries):
+                        continue
+                    satisfied = False
+                    for parent, cond in entries:
+                        if (parent in params
+                                and str(params[parent]) == str(cond)):
+                            satisfied = True
+                            break
+                    if satisfied:
+                        continue
+                    conds = ", ".join(
+                        f"{parent}={cond!r}" for parent, cond in entries
+                    )
+                    yield Issue(
+                        rule_id="shared.param_visibility_mismatch",
+                        severity="warn",
+                        message=(
+                            f"param {p_name!r} on {connector}.{operation} "
+                            f"is only valid when {conds}; FSR will hide "
+                            f"the field at runtime and likely reject the "
+                            f"call"
+                        ),
+                        path=f"{path}.arguments.params.{p_name}",
+                        suggestion=(
+                            f"set the parent param to match, or remove "
+                            f"{p_name!r}"
+                        ),
+                    )
+    finally:
+        conn.close()
 
 
 def rule_three_workflow_split_or_env_setup(doc: dict) -> Iterable[Issue]:
