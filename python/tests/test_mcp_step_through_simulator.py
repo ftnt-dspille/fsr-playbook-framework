@@ -16,13 +16,14 @@ pytest.importorskip(
 )
 
 import mcp_server  # noqa: E402
+import mcp_server._shared  # noqa: E402, F401
 
 
 @pytest.fixture(autouse=True)
 def _no_live_fsr(monkeypatch):
     """Force the stepper offline so jinja-render is a no-op and we
     exercise the deterministic simulation paths only."""
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
 
 
 # ---- helpers ----------------------------------------------------------

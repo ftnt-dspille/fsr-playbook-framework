@@ -14,12 +14,13 @@ pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
 import mcp_server  # noqa: E402
+import mcp_server._shared  # noqa: E402, F401
 from compiler.render_analyzer import analyze, diagnostics_dict  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _no_live_fsr(monkeypatch):
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
 
 
 def _trace(yaml_text, **kwargs):

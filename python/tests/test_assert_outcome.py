@@ -12,6 +12,7 @@ pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
 import mcp_server  # noqa: E402
+import mcp_server._shared  # noqa: E402, F401
 
 
 class _FakeResp:
@@ -49,7 +50,7 @@ def patch_live(monkeypatch):
     def setup(payload, status=200):
         c = _FakeClient(payload, status)
         holder["c"] = c
-        monkeypatch.setattr(mcp_server, "_live_client", lambda: c)
+        monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: c)
         return c
 
     return setup
@@ -163,7 +164,7 @@ def test_pre_shaped_filter_body_passes_through(patch_live):
 
 
 def test_no_live_fsr(monkeypatch):
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
     out = mcp_server.assert_playbook_outcome([
         {"kind": "record_exists", "module": "alerts", "filters": {"x": 1}},
     ])

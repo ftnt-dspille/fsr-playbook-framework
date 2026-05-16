@@ -16,6 +16,7 @@ pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
 import mcp_server  # noqa: E402
+import mcp_server._shared  # noqa: E402, F401
 
 # Minimum fields the generator inspects: name, version, label, operations.
 _FAKE_INFO = {
@@ -89,7 +90,7 @@ def isolated_recipes_db(tmp_path, monkeypatch):
             )
         """)
         conn.commit()
-    monkeypatch.setattr(mcp_server, "DB_PATH", db)
+    monkeypatch.setattr(mcp_server._shared, "DB_PATH", db)
     return db
 
 

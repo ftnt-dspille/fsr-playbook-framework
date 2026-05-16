@@ -24,6 +24,7 @@ pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
 import mcp_server  # noqa: E402
+import mcp_server._shared  # noqa: E402, F401
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO / "python" / "tests" / "fixtures" / "render_path_probe"
@@ -48,7 +49,7 @@ if not FIXTURES:
 @pytest.fixture(autouse=True)
 def _no_live_fsr(monkeypatch):
     """Pin the simulator offline for these comparison tests."""
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
 
 
 @pytest.mark.parametrize("fixture_path", FIXTURES,

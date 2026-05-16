@@ -14,6 +14,7 @@ pytest.importorskip(
 )
 
 import mcp_server  # noqa: E402
+import mcp_server._shared  # noqa: E402, F401
 
 
 class _FakeClient:
@@ -35,7 +36,7 @@ def stub_live(monkeypatch):
         "icon_small": "data:image/png;base64,SMALL_FIXTURE",
         "icon_large": "data:image/png;base64,LARGE_FIXTURE",
     })
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: fake)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: fake)
     # Pretend the connector is in the local store at version 1.0.0.
     # `get_connector_icon` only reads `version` from the connectors row,
     # so a tiny stand-in is enough.
@@ -94,7 +95,7 @@ def test_unknown_connector_returns_error():
 def test_no_live_client_after_disk_miss(monkeypatch, stub_live):
     # Kill the live client AFTER the disk row was wiped. We should get
     # an error pointing at the missing FSR config, not a stack trace.
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
     mcp_server._ICON_CACHE.pop("icon_test", None)
     import sqlite3
     with sqlite3.connect(mcp_server.DB_PATH) as conn:

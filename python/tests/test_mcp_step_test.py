@@ -16,6 +16,8 @@ pytest.importorskip(
 )
 
 import mcp_server  # noqa: E402
+import mcp_server.tools_execution  # noqa: E402, F401
+import mcp_server._shared  # noqa: E402, F401
 
 
 YAML = textwrap.dedent(
@@ -51,7 +53,7 @@ def test_step_not_found():
 
 def test_render_only_when_execute_disabled(monkeypatch):
     # Force the live-client out of the picture so render is a no-op.
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
     r = mcp_server.step_test(YAML, step_id="fetch", execute_safe_ops=False)
     assert r["ok"] is True
     assert r["status"] == "rendered"
@@ -60,19 +62,19 @@ def test_render_only_when_execute_disabled(monkeypatch):
 
 
 def test_executes_safe_op_and_records_verification(monkeypatch):
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
     monkeypatch.setattr(
-        mcp_server, "_safe_op_category",
+        mcp_server._shared, "_safe_op_category",
         lambda c, o: "investigation",
     )
     calls: list[tuple] = []
     monkeypatch.setattr(
-        mcp_server, "run_op",
+        mcp_server.tools_execution, "run_op",
         lambda **kw: {"ok": True, "data": {"key": "JIR-1"},
                       "output_top_keys": ["key"]},
     )
     monkeypatch.setattr(
-        mcp_server, "_record_verification",
+        mcp_server.tools_execution, "_record_verification",
         lambda c, o, s, n: calls.append((c, o, s)),
     )
 
@@ -86,12 +88,12 @@ def test_executes_safe_op_and_records_verification(monkeypatch):
 def test_unsafe_op_is_skipped_not_executed(monkeypatch):
     """Op name without a safe prefix => `skipped`, no run_op call."""
     bad_yaml = YAML.replace("get_ticket_details", "delete_ticket")
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
-    monkeypatch.setattr(mcp_server, "_safe_op_category", lambda c, o: "remediation")
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_safe_op_category", lambda c, o: "remediation")
 
     def _boom(**kw):
         raise AssertionError("run_op must not be called for unsafe ops")
-    monkeypatch.setattr(mcp_server, "run_op", _boom)
+    monkeypatch.setattr(mcp_server.tools_execution, "run_op", _boom)
 
     r = mcp_server.step_test(bad_yaml, step_id="fetch")
     assert r["status"] == "skipped"
@@ -99,7 +101,7 @@ def test_unsafe_op_is_skipped_not_executed(monkeypatch):
 
 
 def test_step_lookup_by_name_with_underscores(monkeypatch):
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
     r = mcp_server.step_test(YAML, step_id="Fetch_Ticket", execute_safe_ops=False)
     assert r["ok"] is True
     assert r["step_id"] == "fetch"

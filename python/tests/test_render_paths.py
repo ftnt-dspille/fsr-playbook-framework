@@ -176,10 +176,11 @@ pytest.importorskip(
     reason="mcp package not installed",
 )
 import mcp_server  # noqa: E402
+import mcp_server._shared  # noqa: E402, F401
 
 
 def test_consumed_paths_attached_to_trace(monkeypatch):
-    monkeypatch.setattr(mcp_server, "_live_client", lambda: None)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
     yaml = textwrap.dedent("""\
         playbooks:
           - name: P

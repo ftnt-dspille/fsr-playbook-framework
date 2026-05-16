@@ -12,6 +12,8 @@ pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
 import mcp_server  # noqa: E402
+import mcp_server.tools_jinja  # noqa: E402, F401
+import mcp_server.tools_triage  # noqa: E402, F401
 
 
 YAML_REFERENCING_STEP = """
@@ -64,8 +66,8 @@ def patched(monkeypatch):
             return {"output": "literal abc"}
         return {"output": template}
 
-    monkeypatch.setattr(mcp_server, "get_run_env", fake_get_run_env)
-    monkeypatch.setattr(mcp_server, "render_jinja", fake_render_jinja)
+    monkeypatch.setattr(mcp_server.tools_triage, "get_run_env", fake_get_run_env)
+    monkeypatch.setattr(mcp_server.tools_jinja, "render_jinja", fake_render_jinja)
 
 
 def test_diagnose_collects_template_rows(patched):
@@ -101,7 +103,7 @@ def test_diagnose_marks_empty_render_as_failure(patched):
 
 def test_diagnose_run_env_unavailable_envelope(monkeypatch):
     monkeypatch.setattr(
-        mcp_server, "get_run_env",
+        mcp_server.tools_triage, "get_run_env",
         lambda pk: {"error": "no such workflow"},
     )
     out = mcp_server.diagnose_yaml_against_pb_execution(
@@ -114,7 +116,7 @@ def test_diagnose_run_env_unavailable_envelope(monkeypatch):
 
 def test_diagnose_yaml_parse_error(monkeypatch):
     monkeypatch.setattr(
-        mcp_server, "get_run_env",
+        mcp_server.tools_triage, "get_run_env",
         lambda pk: {"status": "finished", "vars": {"steps": {}}},
     )
     out = mcp_server.diagnose_yaml_against_pb_execution(
