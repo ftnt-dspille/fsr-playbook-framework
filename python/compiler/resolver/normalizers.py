@@ -204,6 +204,8 @@ class NormalizerMixin:
             "resource", "resources", "step_variables", "triggerOnSource",
             "triggerOnReplicate", "__triggerLimit", "fieldbasedtrigger",
             "useMockOutput",
+            # Trigger schema version (post-update only in corpus, e.g. "2.0.2").
+            "version",
         }
         if self._check_unknown_keys(
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
@@ -326,6 +328,13 @@ class NormalizerMixin:
             "collection", "collectionType", "resource", "operation",
             "fieldOperation", "__recommend", "_showJson", "step_variables",
             "__bulk", "for_each",
+            # Tag merge semantics on record writes; observed enum value:
+            # "OverwriteTags" (other values exist in the FSR UI).
+            "tagsOperation",
+            # Upsert mode flag (InsertData with is_upsert=true).
+            "is_upsert",
+            # Connector-mode insert/update: config UUID + version string.
+            "config", "version",
         }
         if self._check_unknown_keys(
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
@@ -361,7 +370,7 @@ class NormalizerMixin:
         _FRIENDLY: set[str] = set()
         _CANONICAL = {
             "module", "query", "partial", "mock_result", "condition",
-            "step_variables",
+            "step_variables", "checkboxFields",
         }
         self._check_unknown_keys(
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
@@ -920,7 +929,9 @@ class NormalizerMixin:
             return
         _FRIENDLY = {"seconds", "minutes", "hours", "days", "mock_result",
                      "condition"}
-        _CANONICAL = {"type", "delay", "rule", "step_variables"}
+        # `timeout`: branch-resume variant {days, hours, minutes, step_iri};
+        # used when a Delay anchors an "after timeout, resume at step X" path.
+        _CANONICAL = {"type", "delay", "rule", "step_variables", "timeout"}
         if self._check_unknown_keys(
             a, "delay", _FRIENDLY, _CANONICAL, path, errors,
         ):

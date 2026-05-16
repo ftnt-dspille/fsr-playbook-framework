@@ -52,30 +52,34 @@ EXPECTED_KEYS: dict[str, dict[str, set[str]]] = {
         "friendly":  {"module", "modules", "when", "mock_result", "condition"},
         "canonical": {"resource", "resources", "step_variables",
                       "triggerOnSource", "triggerOnReplicate",
-                      "__triggerLimit", "fieldbasedtrigger", "useMockOutput"},
+                      "__triggerLimit", "fieldbasedtrigger", "useMockOutput",
+                      "version"},
     },
     "cybersponse.post_update": {
         "friendly":  {"module", "modules", "when", "mock_result", "condition"},
         "canonical": {"resource", "resources", "step_variables",
                       "triggerOnSource", "triggerOnReplicate",
-                      "__triggerLimit", "fieldbasedtrigger", "useMockOutput"},
+                      "__triggerLimit", "fieldbasedtrigger", "useMockOutput",
+                      "version"},
     },
     "InsertData": {
         "friendly":  {"module", "mock_result", "condition"},
         "canonical": {"collection", "collectionType", "resource", "operation",
                       "fieldOperation", "__recommend", "_showJson",
-                      "step_variables", "__bulk", "for_each"},
+                      "step_variables", "__bulk", "for_each",
+                      "tagsOperation", "is_upsert", "config", "version"},
     },
     "UpdateRecord": {
         "friendly":  {"module", "mock_result", "condition"},
         "canonical": {"collection", "collectionType", "resource", "operation",
                       "fieldOperation", "__recommend", "_showJson",
-                      "step_variables", "__bulk", "for_each"},
+                      "step_variables", "__bulk", "for_each",
+                      "tagsOperation", "is_upsert", "config", "version"},
     },
     "FindRecords": {
         "friendly":  set(),
         "canonical": {"module", "query", "partial", "mock_result",
-                      "condition", "step_variables"},
+                      "condition", "step_variables", "checkboxFields"},
     },
     "ManualInput": {
         "friendly":  {"title", "description", "options", "inputs",
@@ -101,7 +105,7 @@ EXPECTED_KEYS: dict[str, dict[str, set[str]]] = {
     "Delay": {
         "friendly":  {"seconds", "minutes", "hours", "days", "mock_result",
                       "condition"},
-        "canonical": {"type", "delay", "rule", "step_variables"},
+        "canonical": {"type", "delay", "rule", "step_variables", "timeout"},
     },
 }
 

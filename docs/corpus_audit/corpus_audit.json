@@ -5,43 +5,7 @@
       "distinct_keys": 19,
       "top_keys": [
         [
-          "is_approval",
-          3
-        ],
-        [
-          "resources",
-          3
-        ],
-        [
-          "inline_channel_list",
-          3
-        ],
-        [
-          "internal_email_subject",
-          3
-        ],
-        [
-          "external_channel_list",
-          3
-        ],
-        [
-          "agent_id",
-          3
-        ],
-        [
-          "record",
-          3
-        ],
-        [
-          "external_email_attachments",
-          3
-        ],
-        [
-          "type",
-          3
-        ],
-        [
-          "custom_email_body_external",
+          "step_variables",
           3
         ],
         [
@@ -49,7 +13,7 @@
           3
         ],
         [
-          "response_mapping",
+          "record",
           3
         ],
         [
@@ -57,11 +21,47 @@
           3
         ],
         [
-          "unauthenticated_input",
+          "isRecordLinked",
+          3
+        ],
+        [
+          "external_email_attachments",
+          3
+        ],
+        [
+          "inline_channel_list",
+          3
+        ],
+        [
+          "custom_email_body_external",
+          3
+        ],
+        [
+          "customEmailExternal",
+          3
+        ],
+        [
+          "is_approval",
+          3
+        ],
+        [
+          "external_channel_list",
+          3
+        ],
+        [
+          "resources",
+          3
+        ],
+        [
+          "email_notification",
           3
         ],
         [
           "external_email_subject",
+          3
+        ],
+        [
+          "internal_email_subject",
           3
         ]
       ],
@@ -72,19 +72,7 @@
       "distinct_keys": 8,
       "top_keys": [
         [
-          "params",
-          28
-        ],
-        [
-          "connector",
-          28
-        ],
-        [
-          "version",
-          28
-        ],
-        [
-          "config",
+          "operationTitle",
           28
         ],
         [
@@ -92,11 +80,23 @@
           28
         ],
         [
-          "operationTitle",
+          "step_variables",
           28
         ],
         [
-          "step_variables",
+          "config",
+          28
+        ],
+        [
+          "connector",
+          28
+        ],
+        [
+          "params",
+          28
+        ],
+        [
+          "version",
           28
         ],
         [
@@ -141,15 +141,15 @@
       "distinct_keys": 35,
       "top_keys": [
         [
+          "operation",
+          1332
+        ],
+        [
           "connector",
           1332
         ],
         [
           "version",
-          1332
-        ],
-        [
-          "operation",
           1332
         ],
         [
@@ -208,15 +208,7 @@
       "distinct_keys": 14,
       "top_keys": [
         [
-          "params",
-          525
-        ],
-        [
-          "connector",
-          525
-        ],
-        [
-          "version",
+          "operationTitle",
           525
         ],
         [
@@ -224,11 +216,19 @@
           525
         ],
         [
-          "operationTitle",
+          "step_variables",
           525
         ],
         [
-          "step_variables",
+          "connector",
+          525
+        ],
+        [
+          "params",
+          525
+        ],
+        [
+          "version",
           525
         ],
         [
@@ -331,13 +331,12 @@
         "rule",
         "seconds",
         "step_variables",
+        "timeout",
         "type",
         "useMockOutput",
         "when"
       ],
-      "unexpected_keys": [
-        "timeout"
-      ],
+      "unexpected_keys": [],
       "never_observed": []
     },
     "FindRecords": {
@@ -382,6 +381,7 @@
         "agent",
         "agentId",
         "apply_async",
+        "checkboxFields",
         "condition",
         "do_until",
         "for_each",
@@ -398,9 +398,7 @@
         "useMockOutput",
         "when"
       ],
-      "unexpected_keys": [
-        "checkboxFields"
-      ],
+      "unexpected_keys": [],
       "never_observed": [
         "condition",
         "mock_result",
@@ -412,15 +410,15 @@
       "distinct_keys": 8,
       "top_keys": [
         [
-          "collection",
-          18
-        ],
-        [
           "resource",
           18
         ],
         [
           "step_variables",
+          18
+        ],
+        [
+          "collection",
           18
         ],
         [
@@ -455,11 +453,11 @@
           300
         ],
         [
-          "collection",
+          "step_variables",
           300
         ],
         [
-          "step_variables",
+          "collection",
           300
         ],
         [
@@ -495,11 +493,11 @@
           2
         ],
         [
-          "version",
+          "config",
           2
         ],
         [
-          "config",
+          "version",
           2
         ],
         [
@@ -518,10 +516,12 @@
         "collection",
         "collectionType",
         "condition",
+        "config",
         "do_until",
         "fieldOperation",
         "for_each",
         "ignore_errors",
+        "is_upsert",
         "message",
         "mock_result",
         "module",
@@ -531,15 +531,12 @@
         "pass_parent_env",
         "resource",
         "step_variables",
+        "tagsOperation",
         "useMockOutput",
+        "version",
         "when"
       ],
-      "unexpected_keys": [
-        "config",
-        "is_upsert",
-        "tagsOperation",
-        "version"
-      ],
+      "unexpected_keys": [],
       "never_observed": [
         "__bulk",
         "collectionType"
@@ -550,11 +547,7 @@
       "distinct_keys": 27,
       "top_keys": [
         [
-          "record",
-          190
-        ],
-        [
-          "type",
+          "step_variables",
           190
         ],
         [
@@ -562,7 +555,7 @@
           190
         ],
         [
-          "response_mapping",
+          "record",
           190
         ],
         [
@@ -570,7 +563,11 @@
           190
         ],
         [
-          "step_variables",
+          "response_mapping",
+          190
+        ],
+        [
+          "type",
           190
         ],
         [
@@ -606,7 +603,7 @@
           116
         ],
         [
-          "internal_email_subject",
+          "external_email_subject",
           93
         ]
       ],
@@ -668,15 +665,15 @@
       "distinct_keys": 4,
       "top_keys": [
         [
-          "collection",
-          6
-        ],
-        [
           "resource",
           6
         ],
         [
           "step_variables",
+          6
+        ],
+        [
+          "collection",
           6
         ],
         [
@@ -710,6 +707,10 @@
       "distinct_keys": 16,
       "top_keys": [
         [
+          "config",
+          23
+        ],
+        [
           "connector",
           23
         ],
@@ -718,8 +719,12 @@
           23
         ],
         [
-          "config",
-          23
+          "operation",
+          22
+        ],
+        [
+          "step_variables",
+          22
         ],
         [
           "from_str",
@@ -727,14 +732,6 @@
         ],
         [
           "params",
-          22
-        ],
-        [
-          "operation",
-          22
-        ],
-        [
-          "step_variables",
           22
         ],
         [
@@ -746,15 +743,11 @@
           6
         ],
         [
-          "mock_result",
-          1
-        ],
-        [
           "for_each",
           1
         ],
         [
-          "ignore_errors",
+          "mock_result",
           1
         ],
         [
@@ -762,11 +755,15 @@
           1
         ],
         [
-          "agent",
+          "ignore_errors",
           1
         ],
         [
-          "pickFromTenant",
+          "name",
+          1
+        ],
+        [
+          "agent",
           1
         ]
       ],
@@ -777,11 +774,11 @@
       "distinct_keys": 2,
       "top_keys": [
         [
-          "public_key",
+          "private_key",
           2
         ],
         [
-          "private_key",
+          "public_key",
           2
         ]
       ],
@@ -922,10 +919,12 @@
         "collection",
         "collectionType",
         "condition",
+        "config",
         "do_until",
         "fieldOperation",
         "for_each",
         "ignore_errors",
+        "is_upsert",
         "message",
         "mock_result",
         "module",
@@ -935,14 +934,17 @@
         "pass_parent_env",
         "resource",
         "step_variables",
+        "tagsOperation",
         "useMockOutput",
+        "version",
         "when"
       ],
-      "unexpected_keys": [
-        "tagsOperation"
-      ],
+      "unexpected_keys": [],
       "never_observed": [
-        "__bulk"
+        "__bulk",
+        "config",
+        "is_upsert",
+        "version"
       ]
     },
     "WorkflowReference": {
@@ -950,15 +952,15 @@
       "distinct_keys": 13,
       "top_keys": [
         [
-          "workflowReference",
-          624
-        ],
-        [
           "step_variables",
           624
         ],
         [
           "arguments",
+          624
+        ],
+        [
+          "workflowReference",
           624
         ],
         [
@@ -1013,10 +1015,6 @@
           762
         ],
         [
-          "__triggerLimit",
-          194
-        ],
-        [
           "triggerOnReplicate",
           194
         ],
@@ -1025,35 +1023,15 @@
           194
         ],
         [
+          "__triggerLimit",
+          194
+        ],
+        [
           "message",
           1
         ],
         [
-          "description",
-          1
-        ],
-        [
-          "@type",
-          1
-        ],
-        [
-          "createUser_id",
-          1
-        ],
-        [
-          "connector_action_inputs",
-          1
-        ],
-        [
-          "connector_action",
-          1
-        ],
-        [
-          "exit_if_running",
-          1
-        ],
-        [
-          "installed_by",
+          "connector_icon",
           1
         ],
         [
@@ -1061,11 +1039,35 @@
           1
         ],
         [
-          "event_id",
+          "description",
           1
         ],
         [
-          "agentId",
+          "exit_if_running",
+          1
+        ],
+        [
+          "@id",
+          1
+        ],
+        [
+          "sample_data",
+          1
+        ],
+        [
+          "@type",
+          1
+        ],
+        [
+          "connector_action",
+          1
+        ],
+        [
+          "schedule",
+          1
+        ],
+        [
+          "connector_name",
           1
         ]
       ],
@@ -1124,15 +1126,15 @@
           130
         ],
         [
-          "__triggerLimit",
-          129
-        ],
-        [
           "triggerOnSource",
           129
         ],
         [
-          "operationTitle",
+          "__triggerLimit",
+          129
+        ],
+        [
+          "name",
           1
         ]
       ],
@@ -1143,11 +1145,11 @@
       "distinct_keys": 6,
       "top_keys": [
         [
-          "route",
+          "authentication_methods",
           18
         ],
         [
-          "authentication_methods",
+          "route",
           18
         ],
         [
@@ -1174,11 +1176,11 @@
       "distinct_keys": 7,
       "top_keys": [
         [
-          "resource",
+          "fieldbasedtrigger",
           37
         ],
         [
-          "fieldbasedtrigger",
+          "resource",
           37
         ],
         [
@@ -1190,15 +1192,15 @@
           35
         ],
         [
-          "__triggerLimit",
-          17
-        ],
-        [
           "triggerOnReplicate",
           17
         ],
         [
           "triggerOnSource",
+          17
+        ],
+        [
+          "__triggerLimit",
           17
         ]
       ],
@@ -1226,11 +1228,13 @@
         "triggerOnReplicate",
         "triggerOnSource",
         "useMockOutput",
+        "version",
         "when"
       ],
       "unexpected_keys": [],
       "never_observed": [
-        "useMockOutput"
+        "useMockOutput",
+        "version"
       ]
     },
     "cybersponse.post_delete": {
@@ -1238,19 +1242,15 @@
       "distinct_keys": 7,
       "top_keys": [
         [
-          "resource",
-          1
-        ],
-        [
           "fieldbasedtrigger",
           1
         ],
         [
-          "__triggerLimit",
+          "resource",
           1
         ],
         [
-          "resources",
+          "step_variables",
           1
         ],
         [
@@ -1262,7 +1262,11 @@
           1
         ],
         [
-          "step_variables",
+          "resources",
+          1
+        ],
+        [
+          "__triggerLimit",
           1
         ]
       ],
@@ -1273,11 +1277,11 @@
       "distinct_keys": 8,
       "top_keys": [
         [
-          "resource",
+          "fieldbasedtrigger",
           59
         ],
         [
-          "fieldbasedtrigger",
+          "resource",
           59
         ],
         [
@@ -1289,15 +1293,15 @@
           54
         ],
         [
-          "__triggerLimit",
-          21
-        ],
-        [
           "triggerOnReplicate",
           21
         ],
         [
           "triggerOnSource",
+          21
+        ],
+        [
+          "__triggerLimit",
           21
         ],
         [
@@ -1329,11 +1333,10 @@
         "triggerOnReplicate",
         "triggerOnSource",
         "useMockOutput",
+        "version",
         "when"
       ],
-      "unexpected_keys": [
-        "version"
-      ],
+      "unexpected_keys": [],
       "never_observed": [
         "useMockOutput"
       ]
