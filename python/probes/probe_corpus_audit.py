@@ -222,11 +222,27 @@ def audit_input_field_kinds(conn: sqlite3.Connection) -> dict[str, Any]:
     projected = {v for v in _FIELD_KIND_TUPLES.values()}
 
     def covered(t: tuple) -> str | None:
-        for kind, spec in _FIELD_KIND_TUPLES.items():
-            if spec[0] == t[0] and spec[1] == t[1] and spec[3] == t[3]:
-                if spec[2] == "*lookup*" or spec[2] == t[2]:
-                    return kind
-        return None
+        """Match a corpus tuple to a friendly kind.
+
+        templateUrl is treated as advisory: live FSR is inconsistent
+        about it (UI strips/leaves stale values when authors switch
+        field types). Match strictly on (formType, dataType, type) and
+        only check templateUrl as a tiebreaker when multiple kinds
+        share the same triple.
+        """
+        triple_hits = [
+            (k, s) for k, s in _FIELD_KIND_TUPLES.items()
+            if s[0] == t[0] and s[1] == t[1]
+            and (s[2] == "*lookup*" or s[2] == t[2])
+        ]
+        if not triple_hits:
+            return None
+        if len(triple_hits) == 1:
+            return triple_hits[0][0]
+        for k, s in triple_hits:
+            if s[3] == t[3]:
+                return k
+        return triple_hits[0][0]
 
     drift = []
     for tup, n in tuples.most_common():
@@ -239,7 +255,7 @@ def audit_input_field_kinds(conn: sqlite3.Connection) -> dict[str, Any]:
     uncovered = [d for d in drift if d["covered_by_kind"] is None]
     unused_kinds = sorted({
         kind for kind, spec in _FIELD_KIND_TUPLES.items()
-        if not any(spec[0] == t[0] and spec[1] == t[1] and spec[3] == t[3]
+        if not any(spec[0] == t[0] and spec[1] == t[1]
                    and (spec[2] == "*lookup*" or spec[2] == t[2])
                    for t in tuples)
     })

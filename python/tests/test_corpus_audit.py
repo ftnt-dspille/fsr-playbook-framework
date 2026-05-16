@@ -82,6 +82,24 @@ def test_run_writes_report(tmp_path: Path, db_path: Path):
     assert payload["step_keys"], "step_keys report is empty"
 
 
+def test_template_url_is_advisory(db_path: Path):
+    """Live FSR is inconsistent about templateUrl on inputVariables
+    (the UI strips it or leaves stale values when authors switch
+    field types). Covered() must match on (formType, dataType, type)
+    even when templateUrl is None or non-canonical."""
+    conn = sqlite3.connect(str(db_path))
+    report = audit.audit_input_field_kinds(conn)
+    conn.close()
+    # The dominant variant — bare text with templateUrl absent —
+    # is a real corpus pattern; assert it's now covered.
+    text_none = [
+        d for d in report["all"]
+        if d["tuple"] == ["text", "text", "string", None]
+    ]
+    if text_none:
+        assert text_none[0]["covered_by_kind"] == "text", text_none[0]
+
+
 def test_lookup_kind_treats_target_module_as_wildcard(db_path: Path):
     """lookup inputs carry their target module in `type` (people /
     indicators / etc.). The audit's `*lookup*` sentinel must absorb
