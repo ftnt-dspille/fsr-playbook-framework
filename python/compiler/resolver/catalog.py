@@ -15,6 +15,16 @@ class CatalogLookupMixin:
 
     conn: sqlite3.Connection
 
+    # Universal step-level wrapper keys observed across every step type
+    # in the corpus (probe_corpus_audit, 2026-05-16): control-flow and
+    # UI metadata that FSR layers over the step-type-specific arguments.
+    # Allowed unconditionally so per-type normalizers don't reject them.
+    _UNIVERSAL_STEP_KEYS: set[str] = {
+        "when", "for_each", "do_until", "ignore_errors", "message", "name",
+        "agent", "agentId", "apply_async", "pass_input_record",
+        "pass_parent_env", "mock_result", "useMockOutput", "condition",
+    }
+
     @staticmethod
     def _check_unknown_keys(
         a: dict,
@@ -32,7 +42,10 @@ class CatalogLookupMixin:
         a misspelled friendly key (e.g. `mins:` instead of `minutes:`)
         compiles green but produces the wrong wire shape.
         """
-        unknown = sorted(set(a) - friendly - canonical)
+        unknown = sorted(
+            set(a) - friendly - canonical
+            - CatalogLookupMixin._UNIVERSAL_STEP_KEYS
+        )
         if not unknown:
             return False
         errors.append(CompileError(

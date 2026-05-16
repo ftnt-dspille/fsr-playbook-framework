@@ -653,7 +653,8 @@ class NormalizerMixin:
             "external_email_attachments", "internal_email_attachments",
             "message", "label",
         }
-        unknown = sorted(set(a) - _FRIENDLY - _CANONICAL)
+        unknown = sorted(set(a) - _FRIENDLY - _CANONICAL
+                         - self._UNIVERSAL_STEP_KEYS)
         if unknown:
             errors.append(CompileError(
                 code=ErrorCode.UNKNOWN_PARAM,

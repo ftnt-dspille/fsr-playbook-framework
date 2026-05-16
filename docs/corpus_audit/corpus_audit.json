@@ -1,11 +1,564 @@
 {
   "step_keys": {
+    "ApprovalManualInput": {
+      "row_count": 3,
+      "distinct_keys": 19,
+      "top_keys": [
+        [
+          "is_approval",
+          3
+        ],
+        [
+          "resources",
+          3
+        ],
+        [
+          "inline_channel_list",
+          3
+        ],
+        [
+          "internal_email_subject",
+          3
+        ],
+        [
+          "external_channel_list",
+          3
+        ],
+        [
+          "agent_id",
+          3
+        ],
+        [
+          "record",
+          3
+        ],
+        [
+          "external_email_attachments",
+          3
+        ],
+        [
+          "type",
+          3
+        ],
+        [
+          "custom_email_body_external",
+          3
+        ],
+        [
+          "input",
+          3
+        ],
+        [
+          "response_mapping",
+          3
+        ],
+        [
+          "owner_detail",
+          3
+        ],
+        [
+          "unauthenticated_input",
+          3
+        ],
+        [
+          "external_email_subject",
+          3
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "CodeSnippet": {
+      "row_count": 28,
+      "distinct_keys": 8,
+      "top_keys": [
+        [
+          "params",
+          28
+        ],
+        [
+          "connector",
+          28
+        ],
+        [
+          "version",
+          28
+        ],
+        [
+          "config",
+          28
+        ],
+        [
+          "operation",
+          28
+        ],
+        [
+          "operationTitle",
+          28
+        ],
+        [
+          "step_variables",
+          28
+        ],
+        [
+          "when",
+          2
+        ]
+      ],
+      "status": "classified",
+      "expected_keys": [
+        "agent",
+        "agentId",
+        "apply_async",
+        "code",
+        "condition",
+        "config",
+        "connector",
+        "do_until",
+        "for_each",
+        "ignore_errors",
+        "message",
+        "mock_result",
+        "name",
+        "operation",
+        "operationTitle",
+        "params",
+        "pass_input_record",
+        "pass_parent_env",
+        "pickFromTenant",
+        "python",
+        "step_variables",
+        "useMockOutput",
+        "version",
+        "when"
+      ],
+      "unexpected_keys": [],
+      "never_observed": [
+        "pickFromTenant"
+      ]
+    },
+    "Connectors": {
+      "row_count": 1332,
+      "distinct_keys": 35,
+      "top_keys": [
+        [
+          "connector",
+          1332
+        ],
+        [
+          "version",
+          1332
+        ],
+        [
+          "operation",
+          1332
+        ],
+        [
+          "params",
+          1331
+        ],
+        [
+          "name",
+          1330
+        ],
+        [
+          "operationTitle",
+          1328
+        ],
+        [
+          "config",
+          1273
+        ],
+        [
+          "step_variables",
+          1073
+        ],
+        [
+          "pickFromTenant",
+          498
+        ],
+        [
+          "mock_result",
+          115
+        ],
+        [
+          "operationOutput",
+          53
+        ],
+        [
+          "ignore_errors",
+          46
+        ],
+        [
+          "when",
+          38
+        ],
+        [
+          "for_each",
+          30
+        ],
+        [
+          "message",
+          18
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "CyopsUtilites": {
+      "row_count": 525,
+      "distinct_keys": 14,
+      "top_keys": [
+        [
+          "params",
+          525
+        ],
+        [
+          "connector",
+          525
+        ],
+        [
+          "version",
+          525
+        ],
+        [
+          "operation",
+          525
+        ],
+        [
+          "operationTitle",
+          525
+        ],
+        [
+          "step_variables",
+          525
+        ],
+        [
+          "when",
+          50
+        ],
+        [
+          "for_each",
+          30
+        ],
+        [
+          "ignore_errors",
+          22
+        ],
+        [
+          "message",
+          10
+        ],
+        [
+          "config",
+          7
+        ],
+        [
+          "do_until",
+          2
+        ],
+        [
+          "mock_result",
+          2
+        ],
+        [
+          "name",
+          1
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "Decision": {
+      "row_count": 380,
+      "distinct_keys": 2,
+      "top_keys": [
+        [
+          "conditions",
+          380
+        ],
+        [
+          "step_variables",
+          190
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "Delay": {
+      "row_count": 32,
+      "distinct_keys": 6,
+      "top_keys": [
+        [
+          "delay",
+          32
+        ],
+        [
+          "type",
+          29
+        ],
+        [
+          "rule",
+          29
+        ],
+        [
+          "step_variables",
+          8
+        ],
+        [
+          "timeout",
+          7
+        ],
+        [
+          "for_each",
+          5
+        ]
+      ],
+      "status": "classified",
+      "expected_keys": [
+        "agent",
+        "agentId",
+        "apply_async",
+        "condition",
+        "days",
+        "delay",
+        "do_until",
+        "for_each",
+        "hours",
+        "ignore_errors",
+        "message",
+        "minutes",
+        "mock_result",
+        "name",
+        "pass_input_record",
+        "pass_parent_env",
+        "rule",
+        "seconds",
+        "step_variables",
+        "type",
+        "useMockOutput",
+        "when"
+      ],
+      "unexpected_keys": [
+        "timeout"
+      ],
+      "never_observed": []
+    },
+    "FindRecords": {
+      "row_count": 305,
+      "distinct_keys": 8,
+      "top_keys": [
+        [
+          "query",
+          305
+        ],
+        [
+          "module",
+          305
+        ],
+        [
+          "step_variables",
+          305
+        ],
+        [
+          "checkboxFields",
+          245
+        ],
+        [
+          "when",
+          7
+        ],
+        [
+          "message",
+          6
+        ],
+        [
+          "do_until",
+          3
+        ],
+        [
+          "for_each",
+          3
+        ]
+      ],
+      "status": "classified",
+      "expected_keys": [
+        "agent",
+        "agentId",
+        "apply_async",
+        "condition",
+        "do_until",
+        "for_each",
+        "ignore_errors",
+        "message",
+        "mock_result",
+        "module",
+        "name",
+        "partial",
+        "pass_input_record",
+        "pass_parent_env",
+        "query",
+        "step_variables",
+        "useMockOutput",
+        "when"
+      ],
+      "unexpected_keys": [
+        "checkboxFields"
+      ],
+      "never_observed": [
+        "condition",
+        "mock_result",
+        "partial"
+      ]
+    },
+    "IngestBulkFeed": {
+      "row_count": 18,
+      "distinct_keys": 8,
+      "top_keys": [
+        [
+          "collection",
+          18
+        ],
+        [
+          "resource",
+          18
+        ],
+        [
+          "step_variables",
+          18
+        ],
+        [
+          "for_each",
+          16
+        ],
+        [
+          "__recommend",
+          14
+        ],
+        [
+          "_showJson",
+          8
+        ],
+        [
+          "when",
+          5
+        ],
+        [
+          "mock_result",
+          2
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "InsertData": {
+      "row_count": 300,
+      "distinct_keys": 14,
+      "top_keys": [
+        [
+          "resource",
+          300
+        ],
+        [
+          "collection",
+          300
+        ],
+        [
+          "step_variables",
+          300
+        ],
+        [
+          "operation",
+          274
+        ],
+        [
+          "fieldOperation",
+          273
+        ],
+        [
+          "__recommend",
+          210
+        ],
+        [
+          "_showJson",
+          193
+        ],
+        [
+          "for_each",
+          56
+        ],
+        [
+          "when",
+          23
+        ],
+        [
+          "message",
+          18
+        ],
+        [
+          "is_upsert",
+          2
+        ],
+        [
+          "version",
+          2
+        ],
+        [
+          "config",
+          2
+        ],
+        [
+          "tagsOperation",
+          1
+        ]
+      ],
+      "status": "classified",
+      "expected_keys": [
+        "__bulk",
+        "__recommend",
+        "_showJson",
+        "agent",
+        "agentId",
+        "apply_async",
+        "collection",
+        "collectionType",
+        "condition",
+        "do_until",
+        "fieldOperation",
+        "for_each",
+        "ignore_errors",
+        "message",
+        "mock_result",
+        "module",
+        "name",
+        "operation",
+        "pass_input_record",
+        "pass_parent_env",
+        "resource",
+        "step_variables",
+        "useMockOutput",
+        "when"
+      ],
+      "unexpected_keys": [
+        "config",
+        "is_upsert",
+        "tagsOperation",
+        "version"
+      ],
+      "never_observed": [
+        "__bulk",
+        "collectionType"
+      ]
+    },
     "ManualInput": {
       "row_count": 190,
       "distinct_keys": 27,
       "top_keys": [
         [
+          "record",
+          190
+        ],
+        [
           "type",
+          190
+        ],
+        [
+          "input",
           190
         ],
         [
@@ -14,14 +567,6 @@
         ],
         [
           "owner_detail",
-          190
-        ],
-        [
-          "record",
-          190
-        ],
-        [
-          "input",
           190
         ],
         [
@@ -41,11 +586,11 @@
           160
         ],
         [
-          "unauthenticated_input",
+          "external_channel_list",
           160
         ],
         [
-          "external_channel_list",
+          "unauthenticated_input",
           160
         ],
         [
@@ -61,24 +606,31 @@
           116
         ],
         [
-          "external_email_subject",
+          "internal_email_subject",
           93
         ]
       ],
       "status": "classified",
       "expected_keys": [
+        "agent",
+        "agentId",
         "agent_id",
+        "apply_async",
         "assignee",
         "audience",
+        "condition",
         "customEmailExternal",
         "customEmailInternal",
         "custom_email_body_external",
         "custom_email_body_internal",
         "description",
+        "do_until",
         "email_notification",
         "external_channel_list",
         "external_email_attachments",
         "external_email_subject",
+        "for_each",
+        "ignore_errors",
         "inline_channel_list",
         "input",
         "inputExternalUser",
@@ -90,9 +642,13 @@
         "is_approval",
         "label",
         "message",
+        "mock_result",
         "mode",
+        "name",
         "options",
         "owner_detail",
+        "pass_input_record",
+        "pass_parent_env",
         "record",
         "resources",
         "response_mapping",
@@ -100,10 +656,687 @@
         "timeout",
         "title",
         "type",
-        "unauthenticated_input"
+        "unauthenticated_input",
+        "useMockOutput",
+        "when"
       ],
       "unexpected_keys": [],
       "never_observed": []
+    },
+    "ManualTask": {
+      "row_count": 6,
+      "distinct_keys": 4,
+      "top_keys": [
+        [
+          "collection",
+          6
+        ],
+        [
+          "resource",
+          6
+        ],
+        [
+          "step_variables",
+          6
+        ],
+        [
+          "message",
+          3
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "RunScript": {
+      "row_count": 4,
+      "distinct_keys": 3,
+      "top_keys": [
+        [
+          "script",
+          4
+        ],
+        [
+          "arguments",
+          4
+        ],
+        [
+          "step_variables",
+          3
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "SendMail": {
+      "row_count": 23,
+      "distinct_keys": 16,
+      "top_keys": [
+        [
+          "connector",
+          23
+        ],
+        [
+          "version",
+          23
+        ],
+        [
+          "config",
+          23
+        ],
+        [
+          "from_str",
+          22
+        ],
+        [
+          "params",
+          22
+        ],
+        [
+          "operation",
+          22
+        ],
+        [
+          "step_variables",
+          22
+        ],
+        [
+          "operationTitle",
+          21
+        ],
+        [
+          "when",
+          6
+        ],
+        [
+          "mock_result",
+          1
+        ],
+        [
+          "for_each",
+          1
+        ],
+        [
+          "ignore_errors",
+          1
+        ],
+        [
+          "message",
+          1
+        ],
+        [
+          "agent",
+          1
+        ],
+        [
+          "pickFromTenant",
+          1
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "SetAPIKeys": {
+      "row_count": 2,
+      "distinct_keys": 2,
+      "top_keys": [
+        [
+          "public_key",
+          2
+        ],
+        [
+          "private_key",
+          2
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "SetVariable": {
+      "row_count": 1564,
+      "distinct_keys": 1331,
+      "top_keys": [
+        [
+          "output",
+          143
+        ],
+        [
+          "data",
+          44
+        ],
+        [
+          "payload",
+          35
+        ],
+        [
+          "useMockOutput",
+          32
+        ],
+        [
+          "indicatorIRI",
+          29
+        ],
+        [
+          "indicatorValue",
+          29
+        ],
+        [
+          "target_record_id",
+          27
+        ],
+        [
+          "actionReason",
+          26
+        ],
+        [
+          "loggedInUserName",
+          26
+        ],
+        [
+          "context",
+          24
+        ],
+        [
+          "indicator_value",
+          21
+        ],
+        [
+          "enrichment_summary",
+          20
+        ],
+        [
+          "params",
+          20
+        ],
+        [
+          "source_data",
+          19
+        ],
+        [
+          "cti_name",
+          17
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "UpdateRecord": {
+      "row_count": 385,
+      "distinct_keys": 13,
+      "top_keys": [
+        [
+          "resource",
+          385
+        ],
+        [
+          "collection",
+          385
+        ],
+        [
+          "collectionType",
+          383
+        ],
+        [
+          "step_variables",
+          383
+        ],
+        [
+          "operation",
+          377
+        ],
+        [
+          "fieldOperation",
+          367
+        ],
+        [
+          "__recommend",
+          280
+        ],
+        [
+          "_showJson",
+          244
+        ],
+        [
+          "message",
+          137
+        ],
+        [
+          "when",
+          59
+        ],
+        [
+          "for_each",
+          52
+        ],
+        [
+          "tagsOperation",
+          35
+        ],
+        [
+          "ignore_errors",
+          5
+        ]
+      ],
+      "status": "classified",
+      "expected_keys": [
+        "__bulk",
+        "__recommend",
+        "_showJson",
+        "agent",
+        "agentId",
+        "apply_async",
+        "collection",
+        "collectionType",
+        "condition",
+        "do_until",
+        "fieldOperation",
+        "for_each",
+        "ignore_errors",
+        "message",
+        "mock_result",
+        "module",
+        "name",
+        "operation",
+        "pass_input_record",
+        "pass_parent_env",
+        "resource",
+        "step_variables",
+        "useMockOutput",
+        "when"
+      ],
+      "unexpected_keys": [
+        "tagsOperation"
+      ],
+      "never_observed": [
+        "__bulk"
+      ]
+    },
+    "WorkflowReference": {
+      "row_count": 624,
+      "distinct_keys": 13,
+      "top_keys": [
+        [
+          "workflowReference",
+          624
+        ],
+        [
+          "step_variables",
+          624
+        ],
+        [
+          "arguments",
+          624
+        ],
+        [
+          "apply_async",
+          618
+        ],
+        [
+          "pass_input_record",
+          570
+        ],
+        [
+          "pass_parent_env",
+          532
+        ],
+        [
+          "for_each",
+          164
+        ],
+        [
+          "when",
+          52
+        ],
+        [
+          "ignore_errors",
+          28
+        ],
+        [
+          "message",
+          9
+        ],
+        [
+          "do_until",
+          8
+        ],
+        [
+          "mock_result",
+          2
+        ],
+        [
+          "params",
+          1
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "cybersponse.abstract_trigger": {
+      "row_count": 766,
+      "distinct_keys": 32,
+      "top_keys": [
+        [
+          "step_variables",
+          762
+        ],
+        [
+          "__triggerLimit",
+          194
+        ],
+        [
+          "triggerOnReplicate",
+          194
+        ],
+        [
+          "triggerOnSource",
+          194
+        ],
+        [
+          "message",
+          1
+        ],
+        [
+          "description",
+          1
+        ],
+        [
+          "@type",
+          1
+        ],
+        [
+          "createUser_id",
+          1
+        ],
+        [
+          "connector_action_inputs",
+          1
+        ],
+        [
+          "connector_action",
+          1
+        ],
+        [
+          "exit_if_running",
+          1
+        ],
+        [
+          "installed_by",
+          1
+        ],
+        [
+          "poll",
+          1
+        ],
+        [
+          "event_id",
+          1
+        ],
+        [
+          "agentId",
+          1
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "cybersponse.action": {
+      "row_count": 840,
+      "distinct_keys": 21,
+      "top_keys": [
+        [
+          "inputVariables",
+          840
+        ],
+        [
+          "resources",
+          840
+        ],
+        [
+          "route",
+          839
+        ],
+        [
+          "step_variables",
+          838
+        ],
+        [
+          "singleRecordExecution",
+          823
+        ],
+        [
+          "noRecordExecution",
+          819
+        ],
+        [
+          "title",
+          783
+        ],
+        [
+          "executeButtonText",
+          706
+        ],
+        [
+          "displayConditions",
+          353
+        ],
+        [
+          "_promptexpanded",
+          135
+        ],
+        [
+          "showToasterMessage",
+          133
+        ],
+        [
+          "triggerOnReplicate",
+          130
+        ],
+        [
+          "__triggerLimit",
+          129
+        ],
+        [
+          "triggerOnSource",
+          129
+        ],
+        [
+          "operationTitle",
+          1
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "cybersponse.api_call": {
+      "row_count": 18,
+      "distinct_keys": 6,
+      "top_keys": [
+        [
+          "route",
+          18
+        ],
+        [
+          "authentication_methods",
+          18
+        ],
+        [
+          "step_variables",
+          17
+        ],
+        [
+          "triggerOnReplicate",
+          9
+        ],
+        [
+          "triggerOnSource",
+          9
+        ],
+        [
+          "__triggerLimit",
+          8
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "cybersponse.post_create": {
+      "row_count": 37,
+      "distinct_keys": 7,
+      "top_keys": [
+        [
+          "resource",
+          37
+        ],
+        [
+          "fieldbasedtrigger",
+          37
+        ],
+        [
+          "step_variables",
+          37
+        ],
+        [
+          "resources",
+          35
+        ],
+        [
+          "__triggerLimit",
+          17
+        ],
+        [
+          "triggerOnReplicate",
+          17
+        ],
+        [
+          "triggerOnSource",
+          17
+        ]
+      ],
+      "status": "classified",
+      "expected_keys": [
+        "__triggerLimit",
+        "agent",
+        "agentId",
+        "apply_async",
+        "condition",
+        "do_until",
+        "fieldbasedtrigger",
+        "for_each",
+        "ignore_errors",
+        "message",
+        "mock_result",
+        "module",
+        "modules",
+        "name",
+        "pass_input_record",
+        "pass_parent_env",
+        "resource",
+        "resources",
+        "step_variables",
+        "triggerOnReplicate",
+        "triggerOnSource",
+        "useMockOutput",
+        "when"
+      ],
+      "unexpected_keys": [],
+      "never_observed": [
+        "useMockOutput"
+      ]
+    },
+    "cybersponse.post_delete": {
+      "row_count": 1,
+      "distinct_keys": 7,
+      "top_keys": [
+        [
+          "resource",
+          1
+        ],
+        [
+          "fieldbasedtrigger",
+          1
+        ],
+        [
+          "__triggerLimit",
+          1
+        ],
+        [
+          "resources",
+          1
+        ],
+        [
+          "triggerOnReplicate",
+          1
+        ],
+        [
+          "triggerOnSource",
+          1
+        ],
+        [
+          "step_variables",
+          1
+        ]
+      ],
+      "status": "unclassified"
+    },
+    "cybersponse.post_update": {
+      "row_count": 59,
+      "distinct_keys": 8,
+      "top_keys": [
+        [
+          "resource",
+          59
+        ],
+        [
+          "fieldbasedtrigger",
+          59
+        ],
+        [
+          "step_variables",
+          59
+        ],
+        [
+          "resources",
+          54
+        ],
+        [
+          "__triggerLimit",
+          21
+        ],
+        [
+          "triggerOnReplicate",
+          21
+        ],
+        [
+          "triggerOnSource",
+          21
+        ],
+        [
+          "version",
+          1
+        ]
+      ],
+      "status": "classified",
+      "expected_keys": [
+        "__triggerLimit",
+        "agent",
+        "agentId",
+        "apply_async",
+        "condition",
+        "do_until",
+        "fieldbasedtrigger",
+        "for_each",
+        "ignore_errors",
+        "message",
+        "mock_result",
+        "module",
+        "modules",
+        "name",
+        "pass_input_record",
+        "pass_parent_env",
+        "resource",
+        "resources",
+        "step_variables",
+        "triggerOnReplicate",
+        "triggerOnSource",
+        "useMockOutput",
+        "when"
+      ],
+      "unexpected_keys": [
+        "version"
+      ],
+      "never_observed": [
+        "useMockOutput"
+      ]
     }
   },
   "input_field_kinds": {

@@ -31,6 +31,14 @@ from .common import REPO_ROOT
 
 PROBE_NAME = "probe_corpus_audit"
 
+# Universal step-level wrappers allowed across every step type.
+# Mirrors python/compiler/resolver/catalog.py:_UNIVERSAL_STEP_KEYS.
+UNIVERSAL_STEP_KEYS: set[str] = {
+    "when", "for_each", "do_until", "ignore_errors", "message", "name",
+    "agent", "agentId", "apply_async", "pass_input_record",
+    "pass_parent_env", "mock_result", "useMockOutput", "condition",
+}
+
 # Canonical-keys snapshot, mined from python/compiler/resolver/normalizers.py.
 # Keyed by FSR's internal step_type_name (the column value in
 # playbook_steps.step_type_name). Update this map when the corresponding
@@ -178,7 +186,7 @@ def audit_step_keys(conn: sqlite3.Connection) -> dict[str, Any]:
         if spec is None:
             entry["status"] = "unclassified"
         else:
-            expected = spec["friendly"] | spec["canonical"]
+            expected = spec["friendly"] | spec["canonical"] | UNIVERSAL_STEP_KEYS
             entry["status"] = "classified"
             entry["expected_keys"] = sorted(expected)
             entry["unexpected_keys"] = sorted(observed - expected)

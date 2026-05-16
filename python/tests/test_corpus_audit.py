@@ -27,6 +27,7 @@ def test_audit_step_keys_classifies_known_types(db_path: Path):
         assert report[tname]["status"] == "classified", tname
         assert set(report[tname]["expected_keys"]) == (
             spec["friendly"] | spec["canonical"]
+            | audit.UNIVERSAL_STEP_KEYS
         )
 
 
