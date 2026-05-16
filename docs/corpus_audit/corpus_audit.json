@@ -1,0 +1,389 @@
+{
+  "step_keys": {
+    "ManualInput": {
+      "row_count": 190,
+      "distinct_keys": 27,
+      "top_keys": [
+        [
+          "type",
+          190
+        ],
+        [
+          "response_mapping",
+          190
+        ],
+        [
+          "owner_detail",
+          190
+        ],
+        [
+          "record",
+          190
+        ],
+        [
+          "input",
+          190
+        ],
+        [
+          "step_variables",
+          190
+        ],
+        [
+          "email_notification",
+          164
+        ],
+        [
+          "isRecordLinked",
+          161
+        ],
+        [
+          "inline_channel_list",
+          160
+        ],
+        [
+          "unauthenticated_input",
+          160
+        ],
+        [
+          "external_channel_list",
+          160
+        ],
+        [
+          "resources",
+          148
+        ],
+        [
+          "agent_id",
+          133
+        ],
+        [
+          "is_approval",
+          116
+        ],
+        [
+          "external_email_subject",
+          93
+        ]
+      ],
+      "status": "classified",
+      "expected_keys": [
+        "agent_id",
+        "assignee",
+        "audience",
+        "customEmailExternal",
+        "customEmailInternal",
+        "custom_email_body_external",
+        "custom_email_body_internal",
+        "description",
+        "email_notification",
+        "external_channel_list",
+        "external_email_attachments",
+        "external_email_subject",
+        "inline_channel_list",
+        "input",
+        "inputExternalUser",
+        "inputInternalUsers",
+        "inputs",
+        "internal_email_attachments",
+        "internal_email_subject",
+        "isRecordLinked",
+        "is_approval",
+        "label",
+        "message",
+        "mode",
+        "options",
+        "owner_detail",
+        "record",
+        "resources",
+        "response_mapping",
+        "step_variables",
+        "timeout",
+        "title",
+        "type",
+        "unauthenticated_input"
+      ],
+      "unexpected_keys": [],
+      "never_observed": []
+    }
+  },
+  "input_field_kinds": {
+    "distinct_tuples": 20,
+    "uncovered_tuples": [
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          null
+        ],
+        "count": 48,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "textarea",
+          "text",
+          "string",
+          "app/components/form/fields/json.html"
+        ],
+        "count": 11,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          "app/components/form/fields/integer.html"
+        ],
+        "count": 2,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "textarea",
+          "text",
+          "string",
+          "app/components/form/fields/input.html"
+        ],
+        "count": 1,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          "app/components/form/fields/checkbox.html"
+        ],
+        "count": 1,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          "app/components/form/fields/json.html"
+        ],
+        "count": 1,
+        "covered_by_kind": null
+      }
+    ],
+    "kinds_never_observed": [
+      "date",
+      "datetime",
+      "decimal",
+      "email",
+      "filehash",
+      "image",
+      "integer",
+      "multiselect",
+      "multiselectpicklist",
+      "phone",
+      "url"
+    ],
+    "all": [
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          null
+        ],
+        "count": 48,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "dynamicList",
+          "dynamicList",
+          "array",
+          "app/components/form/fields/dynamicList.html"
+        ],
+        "count": 39,
+        "covered_by_kind": "select"
+      },
+      {
+        "tuple": [
+          "checkbox",
+          "checkbox",
+          "boolean",
+          "app/components/form/fields/checkbox.html"
+        ],
+        "count": 12,
+        "covered_by_kind": "checkbox"
+      },
+      {
+        "tuple": [
+          "picklist",
+          "picklist",
+          "picklists",
+          "app/components/form/fields/typeahead.html"
+        ],
+        "count": 12,
+        "covered_by_kind": "picklist"
+      },
+      {
+        "tuple": [
+          "textarea",
+          "text",
+          "string",
+          "app/components/form/fields/json.html"
+        ],
+        "count": 11,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "lookup",
+          "lookup",
+          "people",
+          "app/components/form/fields/typeahead.html"
+        ],
+        "count": 5,
+        "covered_by_kind": "lookup"
+      },
+      {
+        "tuple": [
+          "richtext",
+          "text",
+          "string",
+          "app/components/form/fields/markdownEditor.html"
+        ],
+        "count": 5,
+        "covered_by_kind": "richtext"
+      },
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          "app/components/form/fields/input.html"
+        ],
+        "count": 4,
+        "covered_by_kind": "text"
+      },
+      {
+        "tuple": [
+          "ipv4",
+          "text",
+          "string",
+          "app/components/form/fields/webAddress.html"
+        ],
+        "count": 4,
+        "covered_by_kind": "ipv4"
+      },
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          "app/components/form/fields/integer.html"
+        ],
+        "count": 2,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "password",
+          "text",
+          "string",
+          "app/components/form/fields/password.html"
+        ],
+        "count": 2,
+        "covered_by_kind": "password"
+      },
+      {
+        "tuple": [
+          "textarea",
+          "text",
+          "string",
+          "app/components/form/fields/textarea.html"
+        ],
+        "count": 2,
+        "covered_by_kind": "textarea"
+      },
+      {
+        "tuple": [
+          "html",
+          "text",
+          "string",
+          "app/components/form/fields/htmlEditor.html"
+        ],
+        "count": 1,
+        "covered_by_kind": "html"
+      },
+      {
+        "tuple": [
+          "domain",
+          "text",
+          "string",
+          "app/components/form/fields/webAddress.html"
+        ],
+        "count": 1,
+        "covered_by_kind": "domain"
+      },
+      {
+        "tuple": [
+          "ipv6",
+          "text",
+          "string",
+          "app/components/form/fields/webAddress.html"
+        ],
+        "count": 1,
+        "covered_by_kind": "ipv6"
+      },
+      {
+        "tuple": [
+          "textarea",
+          "text",
+          "string",
+          "app/components/form/fields/input.html"
+        ],
+        "count": 1,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "file",
+          "file",
+          "string",
+          "app/components/form/fields/file.html"
+        ],
+        "count": 1,
+        "covered_by_kind": "file"
+      },
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          "app/components/form/fields/checkbox.html"
+        ],
+        "count": 1,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "text",
+          "text",
+          "string",
+          "app/components/form/fields/json.html"
+        ],
+        "count": 1,
+        "covered_by_kind": null
+      },
+      {
+        "tuple": [
+          "object",
+          "object",
+          "object",
+          "app/components/form/fields/json.html"
+        ],
+        "count": 1,
+        "covered_by_kind": "json"
+      }
+    ]
+  }
+}

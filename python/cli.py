@@ -174,6 +174,29 @@ def cmd_dump_step_params(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit_shapes(args: argparse.Namespace) -> int:
+    """Diff resolver whitelists against the live playbook_steps corpus
+    and audit ManualInput inputVariables tuples against
+    _INPUT_FIELD_KINDS. Writes corpus_audit.md/.json under --out.
+    """
+    from probes.probe_corpus_audit import run
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"reference DB not found: {db_path}", file=sys.stderr)
+        return 1
+    result = run(db_path, Path(args.out), only_type=args.type)
+    sr = result["step_report"]
+    fr = result["field_report"]
+    drift = sum(1 for e in sr.values() if e.get("unexpected_keys"))
+    uncovered = len(fr["uncovered_tuples"])
+    print(f"audit-shapes: {len(sr)} step types · "
+          f"{drift} with unexpected keys · "
+          f"{uncovered} uncovered MI field tuples",
+          file=sys.stderr)
+    print(f"report: {result['out_dir']}/corpus_audit.md", file=sys.stderr)
+    return 0
+
+
 def cmd_purge(args: argparse.Namespace) -> int:
     """Hard-delete one or more playbooks (workflows) by name or UUID.
 
@@ -3952,6 +3975,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--db", default="store/fsr_reference.db",
                     help="reference DB path")
     sp.set_defaults(func=cmd_dump_step_params)
+
+    sp = sub.add_parser("audit-shapes",
+        help="diff resolver whitelists vs playbook_steps corpus")
+    sp.add_argument("--out", default="docs/corpus_audit")
+    sp.add_argument("--db", default="store/fsr_reference.db")
+    sp.add_argument("--type", default=None,
+                    help="filter to one step_type_name (e.g. ManualInput)")
+    sp.set_defaults(func=cmd_audit_shapes)
 
     sp = sub.add_parser("analyze",
         help="render-path validator: simulate offline + report diagnostics")

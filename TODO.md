@@ -313,14 +313,17 @@ confirmed.
 
 ### Open
 
-- **I13 Random-playbook coverage audit.** Pick 20 random rows per step
-  type, diff `arguments_json` keys against resolver whitelists; emit a
-  "missed shape" report. `python/probes/probe_corpus_audit.py` +
-  `fsrpb audit-shapes`. Run quarterly.
-- **I14 Auto-derive `_INPUT_FIELD_KINDS` from corpus.** Replace the
-  hardcoded map at `resolver._INPUT_FIELD_KINDS` with a generator
-  reading `SELECT DISTINCT formType, dataType, type, templateUrl FROM
-  playbook_steps WHERE step_type_name='ManualInput'`.
+- ✅ I13 Corpus shape audit — 2026-05-16; `probe_corpus_audit.py` +
+  `fsrpb audit-shapes`. Initial run surfaced cross-step universal keys
+  (`when`, `for_each`, `do_until`, `ignore_errors`, `message`, `name`)
+  that resolver normalizers reject when they shouldn't; follow-up to
+  promote these to step-level fields (see "Refine the YAML grammar"
+  backlog item).
+- ✅ I14 `_INPUT_FIELD_KINDS` drift audit — 2026-05-16; reframed from
+  "auto-derive" to drift check, since friendly kind names have no
+  in-corpus signal. Audit flags corpus tuples no kind projects to. Open:
+  add a `text` variant with `templateUrl=None` (48 MI rows use it) and a
+  `textarea_json` kind (`textarea/text/string/.../json.html`, 11 rows).
 - **I19 `why_did_playbook_fail(playbook_or_id)` MCP convenience tool.**
   Chains `list_recent_failed_runs` → `get_run_env` →
   `diagnose_yaml_against_pb_execution`.
