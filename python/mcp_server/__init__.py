@@ -132,6 +132,7 @@ from .tools_recipe import (
     diagnose_yaml_against_pb_execution,
     find_recipe,
     generate_recipe,
+    why_did_playbook_fail,
 )
 
 # =========================================================================
@@ -212,4 +213,5 @@ __all__ = [
     "find_recipe",
     "generate_recipe",
     "diagnose_yaml_against_pb_execution",
+    "why_did_playbook_fail",
 ]

@@ -397,6 +397,122 @@ def diagnose_yaml_against_pb_execution(
     }
 
 
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+                      r"[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _looks_like_run_id(s: str) -> bool:
+    """Workflow PK (all digits) or task_id (UUID)."""
+    return s.isdigit() or bool(_UUID_RE.match(s))
+
+
+@mcp.tool()
+def why_did_playbook_fail(
+    playbook_or_id: str, yaml_text: str | None = None,
+) -> dict[str, Any]:
+    """One-shot triage: given a playbook name OR a run id, fetch the most
+    recent failed run's env, pull the live YAML if not provided, and
+    render every Jinja block in the YAML against the run's vars to
+    surface the failure cause.
+
+    Chains three existing tools (`list_recent_failed_runs` →
+    `get_run_env` → `diagnose_yaml_against_pb_execution`) plus a
+    decompile pass when the caller doesn't ship YAML.
+
+    Args:
+        playbook_or_id: a playbook display name ("Block Indicator"),
+            workflow PK (e.g. "676747"), or task_id UUID.
+        yaml_text: optional. If omitted, the tool pulls the playbook
+            from the live FSR and decompiles it. Provide explicitly to
+            diagnose an in-progress edit against a past run.
+
+    Returns:
+        {ok, pb_execution, run_status, playbook_name, error_message,
+         summary{total_templates, render_failures, referenced_step_keys},
+         step_diagnostics[], hints[]} — or {ok: False, code, message}
+        on resolution failure.
+    """
+    # Step 1 — resolve playbook_or_id to a concrete run.
+    run_match: dict[str, Any] | None = None
+    error_message: str | None = None
+    if _looks_like_run_id(playbook_or_id):
+        pb_execution = playbook_or_id
+    else:
+        runs = tools_triage.list_recent_failed_runs(
+            limit=1, playbook=playbook_or_id,
+        )
+        if not runs or runs[0].get("error"):
+            msg = (runs[0].get("error") if runs else
+                   "no recent failed runs matched")
+            return _err(
+                "no_failed_runs",
+                f"no recent failed run found for {playbook_or_id!r}: {msg}",
+                suggestions=[
+                    "Confirm the playbook name (substring match, case-insensitive)",
+                    "Try `list_recent_failed_runs(playbook=...)` directly",
+                    "Pass a workflow PK or task_id UUID instead of a name",
+                ],
+                playbook_or_id=playbook_or_id,
+            )
+        run_match = runs[0]
+        pb_execution = run_match.get("task_id") or str(run_match.get("pk") or "")
+        error_message = run_match.get("error_message")
+        if not pb_execution:
+            return _err("missing_run_id",
+                        "matched run has no task_id/pk",
+                        run=run_match)
+
+    # Step 2 — if YAML wasn't supplied, pull the live playbook + decompile.
+    if not yaml_text:
+        try:
+            sys.path.insert(0, str(REPO_ROOT / "python"))
+            from cli import (  # type: ignore
+                _fetch_workflow_with_refs, _decompile_to_yaml,
+            )
+            from probes import _env as _env_mod  # type: ignore
+        except Exception as exc:  # noqa: BLE001
+            return _err("decompile_import_failed", repr(exc))
+        cfg = _env_mod.get_config()
+        if not cfg.is_live():
+            return _err("fsr_not_configured",
+                        "live FSR not configured; pass yaml_text= explicitly")
+        client = _env_mod.get_client()
+        # We have a run; get the playbook name to pull the live YAML.
+        env_peek = tools_triage.get_run_env(pb_execution)
+        pb_name = env_peek.get("name") if isinstance(env_peek, dict) else None
+        if not pb_name:
+            return _err(
+                "run_name_unknown",
+                "could not resolve playbook name from run env",
+                pb_execution=pb_execution,
+                env_error=env_peek.get("error") if isinstance(env_peek, dict) else None,
+            )
+        coll = _fetch_workflow_with_refs(client, pb_name)
+        if coll is None:
+            return _err(
+                "playbook_not_found",
+                f"could not pull playbook {pb_name!r} from FSR",
+                suggestions=["Pass yaml_text= explicitly"],
+            )
+        try:
+            yaml_text = _decompile_to_yaml(coll, DB_PATH)
+        except Exception as exc:  # noqa: BLE001
+            return _err("decompile_failed", repr(exc), playbook=pb_name)
+
+    # Step 3 — diagnose.
+    result = diagnose_yaml_against_pb_execution(yaml_text, pb_execution)
+    if isinstance(result, dict) and error_message and "error_message" not in result:
+        result["error_message"] = error_message
+    if isinstance(result, dict) and run_match:
+        result["matched_run"] = {
+            "task_id": run_match.get("task_id"),
+            "name": run_match.get("name"),
+            "status": run_match.get("status"),
+            "modified": run_match.get("modified"),
+        }
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

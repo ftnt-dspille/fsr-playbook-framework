@@ -324,9 +324,10 @@ confirmed.
   in-corpus signal. Audit flags corpus tuples no kind projects to. Open:
   add a `text` variant with `templateUrl=None` (48 MI rows use it) and a
   `textarea_json` kind (`textarea/text/string/.../json.html`, 11 rows).
-- **I19 `why_did_playbook_fail(playbook_or_id)` MCP convenience tool.**
-  Chains `list_recent_failed_runs` → `get_run_env` →
-  `diagnose_yaml_against_pb_execution`.
+- ✅ I19 `why_did_playbook_fail` MCP tool — 2026-05-16;
+  `tools_recipe.why_did_playbook_fail`. Accepts a playbook name OR
+  workflow PK / task_id UUID; when no yaml_text is supplied it
+  pulls the live playbook + decompiles via the CLI helpers.
 - **I33 Richer "did you mean" mining for empty searches.** Partly
   covered by I32's difflib pass; revisit when more thumbs-down rows
   arrive.
