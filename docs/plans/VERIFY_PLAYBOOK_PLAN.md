@@ -282,8 +282,8 @@ original text):
 | 2 — Typed-walker library | ✅ done | `python/compiler/typed_walker.py`, 13 hermetic tests. Offline-pure; live-probe + module-fields + op-safety injected via callbacks. |
 | 3 — `verify_playbook` MCP + CLI | ✅ done | `tools_verify.py`, `fsrpb verify`, system-prompt rule. Live-probe orchestration shipped (degrades to warning when no live FSR). Stub-value Jinja render landed via Phase 5 §"Render-Jinja preview" rather than this phase. |
 | 4 — Eval scoring | ✅ done | Confidence-tier rename shipped (`draft` / `verified` / `live_tested` / `matches_example`). 3 new agent-behavior gates (`verify_called_before_submit`, `verify_iterations_until_ready`, `final_verify_ready_to_push`). New task `manual_input_block_ip`. **Not yet done:** actual agentic re-baseline run against live models. |
-| 5 — Editor wiring | 🟡 in progress | 4/6 tickets shipped: per-step verify badges, step debugger panel, connector op picker, render-Jinja preview. 2 left: "Why did this fail?" history panel, failed-runs list. |
-| — System-prompt wire-ups | ⏳ not started | Phase 3's wire-up list (26 latent MCP tools getting a one-line cue in `system_prompt.md`) is the cheapest test of whether `verify_playbook` actually changes agent behavior. |
+| 5 — Editor wiring | ✅ done | All 6 tickets shipped: per-step verify badges, step debugger panel, connector op picker, render-Jinja preview, "Why did this fail?" history panel + failed-runs list (combined in `FailedRunsPanel.svelte`, added as a "Failed runs" tab on the History page). |
+| — System-prompt wire-ups | ✅ done | 22 latent MCP tools surfaced via a new "Latent capabilities" section in `system_prompt.md` grouping them by trigger (pre-flight / picklist / HTTP / discovery / post-mortem / self-review). |
 
 ### Phase 0 — Surface-area audit
 
