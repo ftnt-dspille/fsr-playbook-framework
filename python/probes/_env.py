@@ -101,4 +101,9 @@ def get_client():
     kwargs = dict(base_url=cfg.base_url, auth=cfg.auth(), verify_ssl=cfg.verify_ssl)
     if cfg.port is not None:
         kwargs["port"] = cfg.port
-    return FortiSOAR(**kwargs)
+    client = FortiSOAR(**kwargs)
+    # pyfsr unconditionally prepends https://; restore the original scheme
+    # when the caller pointed at a plain-HTTP host (used by the E2E stub).
+    if cfg.base_url.startswith("http://"):
+        client.base_url = cfg.base_url.rstrip("/")
+    return client

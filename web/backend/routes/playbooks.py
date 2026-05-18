@@ -17,6 +17,7 @@ browse in the Revisions drawer.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,7 +30,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES_DIR = REPO_ROOT / "examples"
 # Separate DB so user-data (drafts) lives apart from the curated
 # `fsr_reference.db` reference store. Easier to back up / wipe / sync.
-DRAFTS_DB = REPO_ROOT / "store" / "drafts.db"
+# DRAFTS_DB_PATH override lets the e2e fixture point at a tempdir so
+# CI runs don't share state with a developer's live drafts.db.
+DRAFTS_DB = Path(os.environ.get("DRAFTS_DB_PATH") or REPO_ROOT / "store" / "drafts.db")
 
 router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
 

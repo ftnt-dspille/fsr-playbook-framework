@@ -52,6 +52,35 @@
     }
   });
 
+  // Debounced auto-save: visual canvas edits (or any other source that
+  // flips a `dirty` flag) get flushed → playbookStore → backend after
+  // ~1 s of quiet. Without this, refreshing the page loses every edit
+  // since visualStore.save() was never wired to a UI button. We don't
+  // touch read-only example docs; they must be cloned first.
+  let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let autosaveInFlight = false;
+  $effect(() => {
+    // Track all the dirty sources so any of them rearms the timer.
+    const dirty = visualStore.state.dirty || playbookStore.dirty;
+    const active = playbookStore.state.active;
+    if (!dirty || !active || active.kind === 'example') return;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(async () => {
+      if (autosaveInFlight) return;
+      autosaveInFlight = true;
+      try {
+        const latest = await getActiveYaml();
+        if (typeof latest === 'string') playbookStore.setYaml(latest);
+        await playbookStore.save({ reason: 'autosave', auto: true });
+      } catch {
+        // Surface via the normal error channels; manual save still
+        // available if the user wants to retry.
+      } finally {
+        autosaveInFlight = false;
+      }
+    }, 1000);
+  });
+
   /** Flush hook for PlaybookHeader.save(): grab the freshest YAML from
    * whichever mode is active so the buffer doesn't lag behind the UI. */
   async function getActiveYaml(): Promise<string> {
@@ -187,6 +216,20 @@
     setTimeout(async () => {
       if (playbookStore.state.active) return;
 
+      // PlaybookHeader's bucket refresh is async; on cold-boot it may not
+      // have populated state.drafts/examples by 50ms. Poll up to ~3s so
+      // the auto-open below sees real lists instead of empty fallbacks
+      // (otherwise a returning user lands on the welcome empty state).
+      const deadline = Date.now() + 3000;
+      while (
+        Date.now() < deadline &&
+        playbookStore.state.drafts.length === 0 &&
+        playbookStore.state.examples.length === 0
+      ) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (playbookStore.state.active) return;
+
       const last = playbookStore.readLastOpened();
       if (last) {
         // The pointer can dangle (draft was deleted on another browser /
@@ -262,7 +305,7 @@
   // so Design and CLI share one source of truth (the BuildBar fires
   // actions, the DiagnosticsDrawer reads results). Markers also feed
   // the Monaco gutter when the user is on CLI.
-  let drawerTab = $state<'diagnostics' | 'fixes' | 'compile' | 'deploy'>('diagnostics');
+  let drawerTab = $state<'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug'>('diagnostics');
   // Monaco editor + namespace handles, populated via MonacoYaml's onEditor.
   // FixesPanel uses these to apply text edits with executeEdits so each
   // fix lands in the editor's own undo stack (Cmd-Z reverts cleanly).
@@ -321,7 +364,7 @@
     debounceId = setTimeout(() => playbookActions.validate(), 400);
   });
 
-  function showDrawer(tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy') {
+  function showDrawer(tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug') {
     drawerTab = tab;
     drawerOpen = true;
   }
