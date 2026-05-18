@@ -154,19 +154,40 @@ def _agentic_anthropic_provider() -> Callable:
     client = anthropic.Anthropic()
     model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
     anthropic_tools, _, dispatch = _import_studio_tools()
-    tools = anthropic_tools()
+    raw_tools = anthropic_tools()
+    # Cache the (static) tool list — mark the last entry so the cache
+    # breakpoint includes every preceding tool def.
+    tools = [dict(t) for t in raw_tools]
+    if tools:
+        tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
 
     def _call(system: str, prompt: str) -> dict:
+        # Anthropic accepts `system` as either a string or a list of
+        # content blocks; the block form is required to attach
+        # cache_control. Static across the whole eval run.
+        system_blocks = [{
+            "type": "text", "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }]
         history: list[dict] = [{"role": "user", "content": prompt}]
         trace: list[dict] = []
         text_chunks: list[str] = []
+        usage_log: list[dict] = []
         turns = 0
         for _ in range(_AGENTIC_MAX_TURNS):
             turns += 1
             resp = client.messages.create(
-                model=model, max_tokens=4096, system=system,
+                model=model, max_tokens=4096, system=system_blocks,
                 messages=history, tools=tools,
             )
+            u = getattr(resp, "usage", None)
+            if u is not None:
+                usage_log.append({
+                    "input_tokens": getattr(u, "input_tokens", 0),
+                    "output_tokens": getattr(u, "output_tokens", 0),
+                    "cache_creation_input_tokens": getattr(u, "cache_creation_input_tokens", 0),
+                    "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0),
+                })
             assistant_blocks: list[dict] = []
             tool_uses: list[tuple[str, str, dict]] = []
             for b in resp.content:
@@ -208,7 +229,8 @@ def _agentic_anthropic_provider() -> Callable:
                     "content": content,
                 })
             history.append({"role": "user", "content": tool_results})
-        return {"text": "\n".join(text_chunks), "trace": trace, "turns": turns}
+        return {"text": "\n".join(text_chunks), "trace": trace,
+                "turns": turns, "usage": usage_log}
     return _call
 
 

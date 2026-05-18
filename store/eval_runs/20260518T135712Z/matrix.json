@@ -1,0 +1,121 @@
+{
+  "live": false,
+  "tasks": [
+    "manual_input_block_ip"
+  ],
+  "models": [
+    "agentic_anthropic"
+  ],
+  "rows": [
+    {
+      "model": "agentic_anthropic",
+      "task": "manual_input_block_ip",
+      "yaml": "collection: SOC Playbooks\nplaybooks:\n  - name: FortiGate Block or Allow IP\n    description: >\n      Analyst enters an IP address and selects Block or Allow.\n      On Block the IP is quarantine-blocked on FortiGate.\n      On Allow a note is logged and the playbook ends.\n    is_active: true\n    steps:\n\n      # \u2500\u2500 Trigger \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: start\n        name: Start\n        next: Analyst IP Decision\n\n      # \u2500\u2500 Prompt analyst for IP + action \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: manual_input\n        name: Analyst IP Decision\n        arguments:\n          title: \"Block or Allow IP Address\"\n          description: >\n            Enter the IP address you want to act on and choose an action.\n            Selecting 'Block' will quarantine-block the IP on FortiGate.\n            Selecting 'Allow' will log the decision and take no blocking action.\n          inputs:\n            - name: target_ip\n              kind: ipv4                   # typed IPv4 field \u2014 validates format in UI\n              label: \"IP Address to Act On\"\n              required: true\n            - name: action\n              kind: select\n              label: \"Action\"\n              required: true\n              options:\n                - block\n                - allow\n        options:                           # step-level, NOT under arguments\n          - display: Block\n            primary: true\n            next: Check Action\n          - display: Allow\n            next: Check Action\n\n      # \u2500\u2500 Route on analyst's input value \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      # NOTE: Both buttons converge here so the decision inspects the\n      # *field* value, not just which button was clicked.\n      - type: decision\n        name: Check Action\n        conditions:\n          - display: Block\n            when: \"{{ vars.steps.Analyst_IP_Decision.input.action == 'block' }}\"\n            next: Block IP on FortiGate\n          - display: Allow\n            default: true\n            next: Log Allow Decision\n\n      # \u2500\u2500 Block path: Quarantine Based (no policy name required) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: connector\n        name: Block IP on FortiGate\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip             # canonical op name confirmed from connector store\n          config: ''                      # uses default connector configuration\n          params:\n            method: Quarantine Based      # gating select \u2014 drives which params are active\n            ip_addresses: \"{{ vars.steps.Analyst_IP_Decision.input.target_ip }}\"\n            time_to_live: \"12 Hour\"       # options: 1 Hour, 6 Hour, 12 Hour, 1 Day,\n                                          #          6 Months, 1 Year, Never, Custom Time\n        next: End Block\n\n      # \u2500\u2500 Allow path: just log a workflow variable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: set_variable\n        name: Log Allow Decision\n        vars:\n          allow_note: >-\n            Analyst chose ALLOW for IP {{ vars.steps.Analyst_IP_Decision.input.target_ip }}.\n            No blocking action taken.\n        next: End Allow\n\n      # \u2500\u2500 Terminators \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: end\n        name: End Block\n\n      - type: end\n        name: End Allow",
+      "elapsed_ms": 122503,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 1,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": false,
+          "skipped": false,
+          "detail": "agent never called verify_playbook"
+        },
+        "verify_iterations_until_ready": {
+          "passed": false,
+          "skipped": false,
+          "iterations": 0,
+          "detail": "no verify calls",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": false,
+          "skipped": false,
+          "detail": "last verify did NOT return ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 6,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 1,
+          "tool": "find_connector",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        }
+      },
+      "score": 5,
+      "max": 7,
+      "fraction": 0.7142857142857143,
+      "turns": 6,
+      "tool_calls": 6,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 18,
+          "result_chars": 248
+        },
+        {
+          "name": "get_step_type",
+          "args_chars": 24,
+          "result_chars": 2594
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 77,
+          "result_chars": 279
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 70,
+          "result_chars": 8801
+        },
+        {
+          "name": "validate_yaml",
+          "args_chars": 2366,
+          "result_chars": 12
+        },
+        {
+          "name": "compile_yaml",
+          "args_chars": 2383,
+          "result_chars": 14722
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "agentic_anthropic": {
+      "score": 5,
+      "max": 7,
+      "fraction": 0.7142857142857143
+    }
+  },
+  "run_id": "20260518T135712Z",
+  "ts": "2026-05-18T13:57:12.639339+00:00"
+}

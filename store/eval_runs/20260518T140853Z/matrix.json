@@ -1,0 +1,195 @@
+{
+  "live": false,
+  "tasks": [
+    "manual_input_block_ip"
+  ],
+  "models": [
+    "agentic_anthropic"
+  ],
+  "rows": [
+    {
+      "model": "agentic_anthropic",
+      "task": "manual_input_block_ip",
+      "yaml": "collection: FortiSOAR\nplaybooks:\n  - name: IP Block or Allow Decision\n    description: Prompt analyst to enter an IP and choose to block or allow it\n    steps:\n      - type: manual_input\n        name: Analyst Input\n        arguments:\n          title: IP Block or Allow Decision\n          description: Enter an IP address and choose whether to block or allow it\n          inputs:\n            - name: ip_address\n              kind: ipv4\n              label: IP Address\n              required: true\n            - name: action\n              kind: select\n              label: Action\n              options:\n                - block\n                - allow\n              required: true\n        options:\n          - display: Submit\n            primary: true\n            next: Check Action\n      - type: decision\n        name: Check Action\n        conditions:\n          - display: Block\n            when: \"{{ vars.steps.Analyst_Input.input.action == 'block' }}\"\n            next: Block IP on FortiGate\n          - display: Allow\n            default: true\n            next: Log Allow Decision\n      - type: connector\n        name: Block IP on FortiGate\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip_new\n          config: ''\n          params:\n            method: Quarantine Based\n            ip_addresses: \"{{ vars.steps.Analyst_Input.input.ip_address }}\"\n            time_to_live: 1 Hour\n            vdom: ''\n        next: Log Block Decision\n      - type: set_variable\n        name: Log Block Decision\n        vars:\n          action_result: \"IP {{ vars.steps.Analyst_Input.input.ip_address }} blocked on FortiGate\"\n        message:\n          content: \"Blocking action completed for IP {{ vars.steps.Analyst_Input.input.ip_address }}\"\n          tags:\n            - ip_block\n      - type: set_variable\n        name: Log Allow Decision\n        vars:\n          action_result: \"IP {{ vars.steps.Analyst_Input.input.ip_address }} allow decision noted, no block applied\"\n        message:\n          content: \"Allow decision noted for IP {{ vars.steps.Analyst_Input.input.ip_address }}, no firewall action taken\"\n          tags:\n            - ip_allow\n      - type: end\n        name: End",
+      "elapsed_ms": 33941,
+      "levels": {
+        "draft": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed",
+          "errors": [
+            {
+              "code": "no_trigger",
+              "path": "playbooks[0]",
+              "message": "playbook 'IP Block or Allow Decision' has no 'start' step",
+              "suggestion": "add `- id: start\\n  type: start` as the first step",
+              "suggestions": [
+                "add `- id: start\\n  type: start` as the first step"
+              ]
+            }
+          ]
+        },
+        "verified": {
+          "passed": false,
+          "skipped": false,
+          "required_fix_count": 1,
+          "warning_count": 0,
+          "detail": "1 required fix(es)"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "2 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 2,
+          "detail": "2 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 8,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 2,
+          "tool": "find_operation",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        }
+      },
+      "score": 5,
+      "max": 7,
+      "fraction": 0.7142857142857143,
+      "turns": 7,
+      "tool_calls": 8,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 18,
+          "result_chars": 248
+        },
+        {
+          "name": "list_configured_connectors",
+          "args_chars": 2,
+          "result_chars": 2501
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 57,
+          "result_chars": 284
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 49,
+          "result_chars": 1608
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 57,
+          "result_chars": 5264
+        },
+        {
+          "name": "get_step_type",
+          "args_chars": 24,
+          "result_chars": 2594
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 2303,
+          "result_chars": 705,
+          "verify": {
+            "ready_to_push": false,
+            "required_fix_count": 1,
+            "warning_count": 0
+          }
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 2372,
+          "result_chars": 658,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 1
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 436,
+          "output_tokens": 106,
+          "cache_creation_input_tokens": 10682,
+          "cache_read_input_tokens": 0
+        },
+        {
+          "input_tokens": 1114,
+          "output_tokens": 96,
+          "cache_creation_input_tokens": 434,
+          "cache_read_input_tokens": 10682
+        },
+        {
+          "input_tokens": 1308,
+          "output_tokens": 85,
+          "cache_creation_input_tokens": 434,
+          "cache_read_input_tokens": 10682
+        },
+        {
+          "input_tokens": 913,
+          "output_tokens": 144,
+          "cache_creation_input_tokens": 1030,
+          "cache_read_input_tokens": 11194
+        },
+        {
+          "input_tokens": 3316,
+          "output_tokens": 1195,
+          "cache_creation_input_tokens": 102,
+          "cache_read_input_tokens": 12318
+        },
+        {
+          "input_tokens": 4038,
+          "output_tokens": 641,
+          "cache_creation_input_tokens": 631,
+          "cache_read_input_tokens": 12502
+        },
+        {
+          "input_tokens": 2309,
+          "output_tokens": 713,
+          "cache_creation_input_tokens": 2497,
+          "cache_read_input_tokens": 13234
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "agentic_anthropic": {
+      "score": 5,
+      "max": 7,
+      "fraction": 0.7142857142857143
+    }
+  },
+  "run_id": "20260518T140853Z",
+  "ts": "2026-05-18T14:08:53.165455+00:00"
+}

@@ -1,0 +1,159 @@
+{
+  "live": false,
+  "tasks": [
+    "manual_input_block_ip"
+  ],
+  "models": [
+    "gold",
+    "agentic_anthropic"
+  ],
+  "rows": [
+    {
+      "model": "gold",
+      "task": "manual_input_block_ip",
+      "yaml": "",
+      "elapsed_ms": 464,
+      "levels": {
+        "draft": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed",
+          "errors": [
+            {
+              "code": "parse_error",
+              "path": "",
+              "message": "top level must be a mapping (collection: ..., playbooks: [...])",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "verified": {
+          "passed": false,
+          "skipped": false,
+          "required_fix_count": 1,
+          "warning_count": 0,
+          "detail": "1 required fix(es)"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "tool_budget": {
+          "passed": false,
+          "skipped": true
+        },
+        "no_spiral": {
+          "passed": false,
+          "skipped": true
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_iterations_until_ready": {
+          "passed": false,
+          "skipped": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": false,
+          "skipped": true
+        }
+      },
+      "score": 0,
+      "max": 2,
+      "fraction": 0.0
+    },
+    {
+      "model": "agentic_anthropic",
+      "task": "manual_input_block_ip",
+      "yaml": "collection: SOC Playbooks\nplaybooks:\n  - name: FortiGate Block or Allow IP\n    description: >\n      Prompts an analyst to enter an IP address and choose Block or Allow.\n      On Block, calls FortiGate block_ip (Quarantine Based).\n      On Allow, logs a set_variable note and exits.\n    is_active: true\n    steps:\n      # \u2500\u2500 Trigger \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: start\n        name: Start\n        next: Analyst IP Decision\n\n      # \u2500\u2500 Manual Input \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      # kind: ipv4  \u2192  strict IPv4 field (not free-text)\n      # kind: select \u2192  drop-down; values are lower-case strings compared\n      #                 in the decision step below\n      # Both options converge on the same decision step so the branch label\n      # on the manual_input route doesn't affect routing logic.\n      - type: manual_input\n        name: Analyst IP Decision\n        arguments:\n          title: \"Block or Allow an IP Address\"\n          description: >\n            Enter the IP address you want to act on, then choose whether\n            to Block it on FortiGate or Allow (no action) it.\n          inputs:\n            - name: target_ip\n              kind: ipv4\n              label: IP Address\n              tooltip: \"Enter the IPv4 address to block or allow.\"\n              required: true\n            - name: action\n              kind: select\n              label: Action\n              tooltip: \"Choose Block to quarantine on FortiGate, or Allow to skip.\"\n              required: true\n              options:\n                - block\n                - allow\n        options:\n          - display: Block\n            primary: true\n            next: Route on Action\n          - display: Allow\n            next: Route on Action\n\n      # \u2500\u2500 Decision \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      # vars.steps.Analyst_IP_Decision.input.<field_name>  \u2190 canonical path\n      # for manual_input fields (spaces \u2192 underscores in step-name slug).\n      - type: decision\n        name: Route on Action\n        conditions:\n          - display: Block\n            when: \"{{ vars.steps.Analyst_IP_Decision.input.action == 'block' }}\"\n            next: Block IP on FortiGate\n          - display: Else\n            default: true\n            next: Log Allow Decision\n\n      # \u2500\u2500 Block branch \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      # Canonical op: block_ip  (confirmed from fortigate-firewall connector)\n      # Method: Quarantine Based  \u2192  params: ip_addresses, time_to_live, vdom(opt)\n      # Mixing Policy Based params here would cause hidden-field errors.\n      - type: connector\n        name: Block IP on FortiGate\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip\n          config: ''\n          params:\n            method: \"Quarantine Based\"\n            ip_addresses: \"{{ vars.steps.Analyst_IP_Decision.input.target_ip }}\"\n            time_to_live: \"12 Hour\"\n        next: Log Block Result\n\n      - type: set_variable\n        name: Log Block Result\n        vars:\n          block_status: \"Blocked\"\n          actioned_ip: \"{{ vars.steps.Analyst_IP_Decision.input.target_ip }}\"\n          fortigate_response: \"{{ vars.steps.Block_IP_on_FortiGate }}\"\n        message:\n          content: >\n            FortiGate Block executed for IP\n            {{ vars.steps.Analyst_IP_Decision.input.target_ip }}.\n            Newly blocked: {{ vars.steps.Block_IP_on_FortiGate.newly_blocked }}.\n          tags:\n            - fortigate\n            - block\n            - automation\n        next: End Block\n\n      # \u2500\u2500 Allow branch \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: set_variable\n        name: Log Allow Decision\n        vars:\n          block_status: \"Allowed\"\n          actioned_ip: \"{{ vars.steps.Analyst_IP_Decision.input.target_ip }}\"\n          note: \"Analyst chose Allow \u2014 no FortiGate action taken.\"\n        message:\n          content: >\n            IP {{ vars.steps.Analyst_IP_Decision.input.target_ip }} was reviewed\n            and marked Allowed. No FortiGate block was applied.\n          tags:\n            - fortigate\n            - allow\n            - analyst_decision\n        next: End Allow\n\n      # \u2500\u2500 Terminators \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: end\n        name: End Block\n\n      - type: end\n        name: End Allow",
+      "elapsed_ms": 129914,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 1,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": false,
+          "skipped": false,
+          "detail": "agent never called verify_playbook"
+        },
+        "verify_iterations_until_ready": {
+          "passed": false,
+          "skipped": false,
+          "iterations": 0,
+          "detail": "no verify calls",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": false,
+          "skipped": false,
+          "detail": "last verify did NOT return ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 6,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 1,
+          "tool": "find_connector",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        }
+      },
+      "score": 5,
+      "max": 7,
+      "fraction": 0.7142857142857143,
+      "turns": 6,
+      "tool_calls": 6
+    }
+  ],
+  "summary": {
+    "gold": {
+      "score": 0,
+      "max": 2,
+      "fraction": 0.0
+    },
+    "agentic_anthropic": {
+      "score": 5,
+      "max": 7,
+      "fraction": 0.7142857142857143
+    }
+  },
+  "run_id": "20260518T135227Z",
+  "ts": "2026-05-18T13:52:27.652366+00:00"
+}

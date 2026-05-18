@@ -1,0 +1,184 @@
+{
+  "live": false,
+  "tasks": [
+    "soc_phish_block_with_approval"
+  ],
+  "models": [
+    "agentic_anthropic"
+  ],
+  "rows": [
+    {
+      "model": "agentic_anthropic",
+      "task": "soc_phish_block_with_approval",
+      "yaml": "collection: Default\nplaybooks:\n  - name: Phishing Alert IP Reputation and Block\n    description: For phishing alerts, check sender IPs against VirusTotal, prompt analyst to block high-risk IPs via FortiGate.\n    is_active: true\n    parameters: []\n    steps:\n      - type: start_on_create\n        name: Phishing Alert Created\n        arguments:\n          module: alerts\n          when:\n            logic: AND\n            filters:\n              - field: tags\n                op: like\n                value: phishing\n\n      - type: set_variable\n        name: Initialize Collections\n        vars:\n          sender_ips: \"{{ vars.input.records[0].sender_ips | default([]) }}\"\n          high_score_ips: []\n          ip_scores: {}\n        next: Check IPs Present\n\n      - type: decision\n        name: Check IPs Present\n        conditions:\n          - display: IPs Found\n            when: \"{{ vars.sender_ips | length > 0 }}\"\n            next: Query VirusTotal for Each IP\n          - display: No IPs\n            default: true\n            next: Post Summary No IPs\n\n      - type: connector\n        name: Query VirusTotal for Each IP\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: ''\n          params:\n            ip: \"{{ item }}\"\n        for_each:\n          item: \"{{ vars.sender_ips }}\"\n        next: Process Reputation Results\n\n      - type: code_snippet\n        name: Process Reputation Results\n        arguments:\n          code: |\n            high_score_ips = []\n            ip_scores = {}\n            # vars.steps.Query_VirusTotal_for_Each_IP is a list of results, one per iteration\n            for i, ip in enumerate(vars['sender_ips']):\n              result = vars['steps']['Query_VirusTotal_for_Each_IP'][i]\n              score = result.get('reputation', 0)\n              ip_scores[ip] = score\n              if score > 50:\n                high_score_ips.append(ip)\n            # Store in workflow vars for downstream access\n            vars['high_score_ips'] = high_score_ips\n            vars['ip_scores'] = ip_scores\n        next: Check High Scores\n\n      - type: decision\n        name: Check High Scores\n        conditions:\n          - display: High Risk IPs Found\n            when: \"{{ vars.high_score_ips | length > 0 }}\"\n            next: Ask Analyst to Block\n          - display: All IPs Clean\n            default: true\n            next: Post Summary All Clean\n\n      - type: manual_input\n        name: Ask Analyst to Block\n        arguments:\n          title: High-Risk Sender IPs Detected\n          description: \"The following sender IPs have VirusTotal reputation scores > 50 and are flagged as potentially malicious: {{ vars.high_score_ips | join(', ') }}. Do you want to block them on FortiGate?\"\n        options:\n          - display: Block\n            primary: true\n            next: Block IPs on FortiGate\n          - display: Skip\n            next: Post Summary Skipped\n\n      - type: connector\n        name: Block IPs on FortiGate\n        arguments:\n          connector: fortigate-firewall\n          operation: create_address\n          config: ''\n          params:\n            address_category: IPv4 Address\n            name: \"Phishing_Alert_{{ vars.input.records[0].id }}_{{ item | replace('.', '_') }}\"\n            type: Subnet\n            subnet: \"{{ item }}/32\"\n            comment: \"Blocked phishing sender IP from alert {{ vars.input.records[0].name }}\"\n        for_each:\n          item: \"{{ vars.high_score_ips }}\"\n        next: Post Summary Blocked\n\n      - type: set_variable\n        name: Post Summary Blocked\n        vars:\n          summary: \"Alert processed. High-risk IPs blocked on FortiGate: {{ vars.high_score_ips | join(', ') }}\"\n        message:\n          content: \"Phishing Alert Processed\\n\\n**Action Taken**: Blocked {{ vars.high_score_ips | length }} high-risk sender IP(s) on FortiGate.\\n\\n**IP Scores**:\\n{% for ip, score in vars.ip_scores.items() %}\\n- {{ ip }}: {{ score }}\\n{% endfor %}\"\n          tags:\n            - phishing_automated_block\n        next: End\n\n      - type: set_variable\n        name: Post Summary Skipped\n        vars:\n          summary: \"Alert processed. High-risk IPs identified but not blocked: {{ vars.high_score_ips | join(', ') }}\"\n        message:\n          content: \"Phishing Alert Processed\\n\\n**Action Taken**: Identified but skipped blocking {{ vars.high_score_ips | length }} high-risk sender IP(s).\\n\\n**IP Scores**:\\n{% for ip, score in vars.ip_scores.items() %}\\n- {{ ip }}: {{ score }}\\n{% endfor %}\"\n          tags:\n            - phishing_analyst_skip\n        next: End\n\n      - type: set_variable\n        name: Post Summary All Clean\n        vars:\n          summary: \"Alert processed. All sender IPs have safe reputation scores.\"\n        message:\n          content: \"Phishing Alert Processed\\n\\n**Action Taken**: No high-risk sender IPs detected. All IPs have VirusTotal reputation scores \u2264 50.\\n\\n**IP Scores**:\\n{% for ip, score in vars.ip_scores.items() %}\\n- {{ ip }}: {{ score }}\\n{% endfor %}\"\n          tags:\n            - phishing_all_clean\n        next: End\n\n      - type: set_variable\n        name: Post Summary No IPs\n        vars:\n          summary: \"Alert processed. No sender IPs found in alert.\"\n        message:\n          content: \"Phishing Alert Processed\\n\\nNo sender IPs found in alert to evaluate.\"\n          tags:\n            - phishing_no_ips\n        next: End\n\n      - type: end\n        name: End",
+      "elapsed_ms": 50895,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 1,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "2 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 2,
+          "detail": "2 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 9,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 2,
+          "tool": "find_connector",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        }
+      },
+      "score": 7,
+      "max": 7,
+      "fraction": 1.0,
+      "turns": 6,
+      "tool_calls": 9,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 19,
+          "result_chars": 798
+        },
+        {
+          "name": "find_connector",
+          "args_chars": 18,
+          "result_chars": 248
+        },
+        {
+          "name": "list_configured_connectors",
+          "args_chars": 2,
+          "result_chars": 2501
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 49,
+          "result_chars": 355
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 57,
+          "result_chars": 284
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 45,
+          "result_chars": 977
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 59,
+          "result_chars": 6955
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 5779,
+          "result_chars": 1440,
+          "verify": {
+            "ready_to_push": false,
+            "required_fix_count": 2,
+            "warning_count": 0
+          }
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 5676,
+          "result_chars": 651,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 1
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 476,
+          "output_tokens": 150,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 10682
+        },
+        {
+          "input_tokens": 1486,
+          "output_tokens": 149,
+          "cache_creation_input_tokens": 474,
+          "cache_read_input_tokens": 10682
+        },
+        {
+          "input_tokens": 1917,
+          "output_tokens": 165,
+          "cache_creation_input_tokens": 474,
+          "cache_read_input_tokens": 10682
+        },
+        {
+          "input_tokens": 3016,
+          "output_tokens": 1759,
+          "cache_creation_input_tokens": 1397,
+          "cache_read_input_tokens": 11239
+        },
+        {
+          "input_tokens": 4855,
+          "output_tokens": 1652,
+          "cache_creation_input_tokens": 343,
+          "cache_read_input_tokens": 12724
+        },
+        {
+          "input_tokens": 4152,
+          "output_tokens": 1703,
+          "cache_creation_input_tokens": 2478,
+          "cache_read_input_tokens": 13168
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "agentic_anthropic": {
+      "score": 7,
+      "max": 7,
+      "fraction": 1.0
+    }
+  },
+  "run_id": "20260518T141227Z",
+  "ts": "2026-05-18T14:12:27.153926+00:00"
+}

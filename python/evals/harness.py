@@ -96,10 +96,12 @@ def run_matrix(
                 final_text = raw.get("text", "")
                 trace = raw.get("trace")
                 turns = raw.get("turns")
+                usage = raw.get("usage")
             else:
                 final_text = raw or ""
                 trace = None
                 turns = None
+                usage = None
             yaml_text = extract_yaml(final_text)
             scored = score(
                 yaml_text,
@@ -118,6 +120,9 @@ def run_matrix(
             if turns is not None:
                 row["turns"] = turns
                 row["tool_calls"] = len(trace or [])
+                row["trace"] = trace or []
+                if usage is not None:
+                    row["usage"] = usage
             rows.append(row)
 
     summary: dict[str, dict[str, float]] = {}
