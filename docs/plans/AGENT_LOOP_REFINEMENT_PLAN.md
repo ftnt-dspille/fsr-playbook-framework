@@ -50,10 +50,10 @@ or live-state stays in MCP.
 
 | Phase | Status | Notes |
 |---|---|---|
-| A1 — Generator script | ⏳ not started | `scripts/build_static_prompt.py` emits the cacheable block from the reference store. |
-| A2 — Wire into providers | ⏳ not started | Anthropic + LM Studio providers send the block as a cached system message. |
-| A3 — Trim MCP outputs | ⏳ not started | Slim `get_step_type` to the per-tenant delta only. |
-| A4 — Re-run agent-stats | ⏳ not started | Confirm `get_step_type` call count drops, total prompt+tool tokens drops. |
+| A1 — Generator script | ✅ done | `scripts/build_static_prompt.py` reads `_FRIENDLY_FORMS` + `fsr_reference.db`; emits `python/agent/static_grammar_block.md` (14.9 KB). Idempotent. |
+| A2 — Wire into providers | ✅ done | `python/agent/__init__.py:load_system_prompt()` prepends the static block. The Anthropic provider already wraps the whole system string in a single cached block, so the static prefix is cached automatically. LM Studio gets the same string (unchached) for parity. |
+| A3 — Trim MCP outputs | 🟡 partial | `system_prompt.md` now references the static block as authoritative for shapes and tells the agent NOT to call `get_step_type` / `find_jinja_filter` to re-derive that content. Slimming `get_step_type`'s default response is deferred until A4 confirms call-count drop in real sessions. |
+| A4 — Re-run agent-stats | ⏳ not started | Confirm `get_step_type` call count drops, total prompt+tool tokens drops. Needs ≥5 fresh chat sessions to measure. |
 
 ### A1 — Generator
 
