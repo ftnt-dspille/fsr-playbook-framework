@@ -33,6 +33,7 @@ from . import (
     tools_picklists,
     tools_recipe,
     tools_triage,
+    tools_verify,
 )
 
 # Import shared infrastructure for external use
@@ -135,6 +136,9 @@ from .tools_recipe import (
     why_did_playbook_fail,
 )
 
+# Verify
+from .tools_verify import verify_playbook
+
 # =========================================================================
 # Entry point
 # =========================================================================
@@ -214,4 +218,6 @@ __all__ = [
     "generate_recipe",
     "diagnose_yaml_against_pb_execution",
     "why_did_playbook_fail",
+    # Verify
+    "verify_playbook",
 ]

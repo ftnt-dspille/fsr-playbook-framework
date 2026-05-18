@@ -1,16 +1,32 @@
-"""Score a candidate playbook YAML against the success-ladder gates.
+"""Score a candidate playbook YAML on three confidence tiers + an
+example-match check + agent-behavior gates.
 
-Each level is a hard pass/fail with the structured tool result kept
-inline so the eval matrix can show *why* a model failed without
-re-running anything.
+Confidence tiers (what a human means by "is this playbook good?"):
 
-Levels:
-  L1 — compiles clean (validate_yaml ok)
-  L2 — live prechecks pass (resolve_yaml ok); skipped when no live FSR
-  L3 — variable references reachable (subset of L1 — broken out so
-       agent-driven authoring shows up specifically here)
-  L4 — dry-run executes on the live FSR; skipped offline
-  gold — optional byte-equal compile output match against a fixture
+  draft        — YAML parses + compiles to FSR JSON. "It would import
+                 without an error." Says nothing about whether it works.
+  verified     — Statically sound: references resolve, branches
+                 reachable, connectors/ops exist, picklists valid.
+                 Equivalent to `verify_playbook.ready_to_push=True`.
+                 "I would ship this without testing it manually."
+  live_tested  — Actually executes on a real FSR (dry-run passes).
+                 Strongest signal short of pushing. Skipped offline.
+
+Orthogonal:
+
+  matches_example — byte-equal compile output to the hand-curated
+                    reference YAML in /examples/. Only meaningful for
+                    tasks that have a reference; says nothing about
+                    novel playbooks.
+
+Agent-behavior gates (apply only when a tool-use `trace` is supplied):
+
+  verify_called_before_submit
+  verify_iterations_until_ready   (record only — not pass/fail)
+  final_verify_ready_to_push
+  tool_budget
+  no_spiral
+  adherence                       (final text included a YAML block)
 """
 from __future__ import annotations
 
@@ -22,29 +38,9 @@ from typing import Any
 _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n", re.IGNORECASE)
 
 
-def _validate(yaml_text: str) -> dict[str, Any]:
-    from mcp_server import validate_yaml
-    return validate_yaml(yaml_text)
-
-
-def _compile_warnings(yaml_text: str) -> list[dict[str, Any]]:
-    """Return the compiler's `warnings` list (UNKNOWN_PARAM, corpus
-    drift, lint hints). validate_yaml swallows these because
-    CompileResult.ok already excludes them — we re-run via the
-    library to surface them for the L1.5 gate."""
-    from pathlib import Path as _P
-    from compiler import compile_yaml as _compile
-    db_path = _P(__file__).resolve().parents[2] / "store" / "fsr_reference.db"
-    result = _compile(yaml_text, db_path)
-    return [
-        {"code": w.code.value, "path": w.path, "message": w.message}
-        for w in result.warnings
-    ]
-
-
-def _resolve(yaml_text: str) -> dict[str, Any]:
-    from mcp_server import resolve_yaml
-    return resolve_yaml(yaml_text)
+def _verify(yaml_text: str, *, live: bool) -> dict[str, Any]:
+    from mcp_server import verify_playbook
+    return verify_playbook(yaml_text=yaml_text, live_probe=live)
 
 
 def _compile_obj(yaml_text: str) -> dict[str, Any]:
@@ -56,27 +52,12 @@ _VOLATILE_KEYS = frozenset({"lastModifyDate"})
 
 
 def _strip_volatile(obj: Any) -> Any:
-    """Recursively drop fields that are time-stamped (wf-engine
-    bookkeeping) so byte-equality comparisons aren't second-bound."""
     if isinstance(obj, dict):
-        return {
-            k: _strip_volatile(v)
-            for k, v in obj.items() if k not in _VOLATILE_KEYS
-        }
+        return {k: _strip_volatile(v) for k, v in obj.items()
+                if k not in _VOLATILE_KEYS}
     if isinstance(obj, list):
         return [_strip_volatile(x) for x in obj]
     return obj
-
-
-def _has_var_reachability_error(validate_out: dict[str, Any]) -> bool:
-    """The validator emits BAD_VALUE with a message phrase for both
-    Jinja-step-not-found and not-reachable cases. Match on phrase so
-    we can keep L3 as its own gate without a new error code."""
-    for e in validate_out.get("errors") or []:
-        msg = (e.get("message") or "").lower()
-        if "no step with jinja-key" in msg or "cannot run before" in msg:
-            return True
-    return False
 
 
 # Agentic gate thresholds. Sourced from docs/AGENT_TOOL_USAGE.md p95s —
@@ -86,20 +67,46 @@ NO_SPIRAL_MAX_CONSECUTIVE = int(
     os.environ.get("EVAL_NO_SPIRAL_MAX_CONSECUTIVE", "4"))
 
 
-def _score_agentic(
-    *, trace: list[dict[str, Any]], text: str,
-) -> dict[str, dict[str, Any]]:
-    """Three gates over the agentic provider's trace.
+def _verify_metrics(trace: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Three metrics about the agent's use of `verify_playbook` from
+    the call trace. Distinct from the `verified` confidence tier —
+    these measure agent *behavior*, not playbook quality. The agent
+    can technically ship a YAML it never ran through verify; this gate
+    catches that."""
+    verifies = [t for t in trace if t.get("name") == "verify_playbook"]
+    called = len(verifies) >= 1
+    last_ready = bool(verifies[-1].get("verify", {}).get("ready_to_push")) if verifies else False
+    iters = len(verifies)
+    for i, v in enumerate(verifies, start=1):
+        if v.get("verify", {}).get("ready_to_push"):
+            iters = i
+            break
+    return {
+        "verify_called_before_submit": {
+            "passed": called, "skipped": False,
+            "detail": (f"{len(verifies)} verify_playbook call(s)" if called
+                       else "agent never called verify_playbook"),
+        },
+        "verify_iterations_until_ready": {
+            "passed": called, "skipped": False,
+            "iterations": iters if called else 0,
+            "detail": (f"{iters} verify cycle(s) until ready"
+                       if called and last_ready
+                       else "never reached ready_to_push=True"
+                       if called else "no verify calls"),
+        },
+        "final_verify_ready_to_push": {
+            "passed": last_ready, "skipped": False,
+            "detail": ("last verify returned ready_to_push=True" if last_ready
+                       else "last verify did NOT return ready_to_push=True"),
+        },
+    }
 
-    - tool_budget: total tool calls <= TOOL_BUDGET_MAX (default 20).
-    - no_spiral: no tool called > NO_SPIRAL_MAX_CONSECUTIVE times in a
-      row (caught the validate→validate×23 spiral in session
-      60743f70). Default 4.
-    - adherence: final assistant text contains a fenced ```yaml block —
-      proxies "agent ended with a deliverable, not just chatter".
-    """
+
+def _score_agentic(*, trace: list[dict[str, Any]],
+                   text: str) -> dict[str, dict[str, Any]]:
+    """tool_budget / no_spiral / adherence + verify-behavior metrics."""
     n = len(trace)
-    # consecutive run length
     longest = 0
     cur_name = None
     cur_run = 0
@@ -117,6 +124,7 @@ def _score_agentic(
 
     has_yaml = bool(_YAML_BLOCK_RE.search(text or ""))
     return {
+        **_verify_metrics(trace),
         "tool_budget": {
             "passed": n <= TOOL_BUDGET_MAX, "skipped": False,
             "calls": n, "limit": TOOL_BUDGET_MAX,
@@ -143,122 +151,100 @@ def score(
     trace: list[dict[str, Any]] | None = None,
     final_text: str | None = None,
 ) -> dict[str, Any]:
-    """Run all available scoring gates and return a result row.
-
-    Returns a dict with per-level `{passed: bool, skipped: bool,
-    detail: ...}` plus a flat `score` (passed gates / non-skipped
-    gates) and `passed_levels` (highest contiguous level passed).
-    """
+    """Score a candidate YAML across confidence tiers + agent gates."""
     out: dict[str, Any] = {"levels": {}}
 
-    # L1 — validate
-    val = _validate(yaml_text)
-    out["levels"]["L1"] = {
-        "passed": bool(val.get("ok")),
+    # ----------------- confidence tier 1: draft (compile clean) ------------
+    comp = _compile_obj(yaml_text)
+    draft_ok = bool(comp.get("ok"))
+    out["levels"]["draft"] = {
+        "passed": draft_ok,
         "skipped": False,
-        "code": val.get("code"),
-        "errors": val.get("errors", []),
+        "detail": ("compiles" if draft_ok else "compile failed"),
+        "errors": comp.get("errors", []) if not draft_ok else [],
     }
 
-    # L1.5 — strict-whitelist (no UNKNOWN_PARAM / corpus-drift warnings)
-    if val.get("ok"):
-        warnings = _compile_warnings(yaml_text)
-        out["levels"]["L1.5"] = {
-            "passed": not warnings,
-            "skipped": False,
-            "warnings": warnings,
-        }
-    else:
-        # Don't double-penalize: if L1 fails, the warning gate is meaningless.
-        out["levels"]["L1.5"] = {"passed": False, "skipped": True}
-
-    # L3 — variable reachability (computable even when L1 fails)
-    has_var_err = _has_var_reachability_error(val)
-    out["levels"]["L3"] = {
-        "passed": (not has_var_err) and bool(val.get("ok")),
+    # ----------------- confidence tier 2: verified -------------------------
+    # Runs the same fan-out the agent is supposed to call: compile +
+    # typed walk + per-step schema checks. live_probe follows the eval
+    # mode so offline runs stay deterministic.
+    verify = _verify(yaml_text, live=live)
+    verified_ok = bool(verify.get("ready_to_push"))
+    out["levels"]["verified"] = {
+        "passed": verified_ok,
         "skipped": False,
-        "detail": ("var-reachability error present" if has_var_err
-                   else "ok"),
+        "required_fix_count": len(verify.get("required_fixes") or []),
+        "warning_count": len(verify.get("warnings") or []),
+        "detail": ("verify_playbook ready_to_push=True" if verified_ok
+                   else f"{len(verify.get('required_fixes') or [])} required fix(es)"),
     }
 
-    # L2 — live resolve (connector + picklist prechecks)
-    if live:
-        res = _resolve(yaml_text)
-        # resolve_yaml returns {ok, structural, prechecks, summary}
-        out["levels"]["L2"] = {
-            "passed": bool(res.get("ok")),
-            "skipped": False,
-            "summary": res.get("summary"),
-        }
-    else:
-        out["levels"]["L2"] = {"passed": False, "skipped": True}
-
-    # L4 — dry-run
+    # ----------------- confidence tier 3: live_tested ----------------------
     if live:
         try:
             from mcp_server import dry_run_playbook  # noqa: PLC0415
             kw = dict(dry_run_kwargs or {})
             dr = dry_run_playbook(yaml_text, **kw) if kw else None
-            # dry_run_playbook requires a `playbook` arg; if the caller
-            # didn't supply one, fall back to "first playbook" by name.
             if dr is None:
                 dr = {"ok": False, "code": "no_dry_run_target",
                       "message": "dry_run_kwargs missing `playbook` name"}
-            out["levels"]["L4"] = {
+            out["levels"]["live_tested"] = {
                 "passed": bool(dr.get("ok")),
                 "skipped": False,
                 "code": dr.get("code"),
                 "summary": dr.get("status") or dr.get("message"),
             }
         except Exception as exc:  # noqa: BLE001
-            out["levels"]["L4"] = {
+            out["levels"]["live_tested"] = {
                 "passed": False, "skipped": False,
                 "detail": f"dry-run raised: {exc!r}",
             }
     else:
-        out["levels"]["L4"] = {"passed": False, "skipped": True}
+        out["levels"]["live_tested"] = {"passed": False, "skipped": True}
 
-    # gold-fixture byte-equality (against the compiled FSR JSON)
+    # ----------------- example check (orthogonal) --------------------------
     if gold_json is not None:
-        comp = _compile_obj(yaml_text)
         if comp.get("ok"):
             try:
                 got = json.loads(comp["json"])
             except Exception:  # noqa: BLE001
                 got = {}
-            # `lastModifyDate` is `int(datetime.now().timestamp())` written
-            # by emitter.py — it ticks per second so two compiles spanning
-            # a second boundary produce different output. Strip it on both
-            # sides of the gold comparison; the field is wf-engine
-            # bookkeeping, not part of the playbook semantics.
             a = _strip_volatile(got)
             b = _strip_volatile(gold_json)
-            out["levels"]["gold"] = {
-                "passed": a == b,
-                "skipped": False,
+            out["levels"]["matches_example"] = {
+                "passed": a == b, "skipped": False,
                 "detail": ("match" if a == b
-                           else "compiled JSON differs from gold"),
+                           else "compiled JSON differs from the reference example"),
             }
         else:
-            out["levels"]["gold"] = {
+            out["levels"]["matches_example"] = {
                 "passed": False, "skipped": False,
-                "detail": "compile failed — see L1 errors",
+                "detail": "compile failed — see draft errors",
             }
     else:
-        out["levels"]["gold"] = {"passed": False, "skipped": True}
+        out["levels"]["matches_example"] = {"passed": False, "skipped": True}
 
-    # Agentic gates — only when the provider returned a tool-use trace.
-    # Skipped (not failing) for non-agentic providers so their score
-    # max stays comparable to historical runs.
+    # ----------------- agent-behavior gates --------------------------------
     if trace is not None:
-        out["levels"].update(_score_agentic(
-            trace=trace, text=final_text or ""))
+        out["levels"].update(_score_agentic(trace=trace, text=final_text or ""))
     else:
-        for k in ("tool_budget", "no_spiral", "adherence"):
+        for k in ("tool_budget", "no_spiral", "adherence",
+                  "verify_called_before_submit",
+                  "verify_iterations_until_ready",
+                  "final_verify_ready_to_push"):
             out["levels"][k] = {"passed": False, "skipped": True}
 
-    # Aggregate: passed-non-skipped / total-non-skipped
-    counted = [v for v in out["levels"].values() if not v["skipped"]]
+    # `verify_iterations_until_ready` is informational, not a gate —
+    # exclude from the pass/fail aggregate. Same logic as the old
+    # `skipped` flag, but here we mark it `passed=True` if it ran at
+    # all so it doesn't drag the fraction.
+    iters_lv = out["levels"].get("verify_iterations_until_ready", {})
+    if not iters_lv.get("skipped"):
+        # not counted toward fraction
+        iters_lv["informational"] = True
+
+    counted = [v for k, v in out["levels"].items()
+               if not v.get("skipped") and not v.get("informational")]
     out["score"] = sum(1 for v in counted if v["passed"])
     out["max"] = len(counted)
     out["fraction"] = (out["score"] / out["max"]) if out["max"] else 0.0

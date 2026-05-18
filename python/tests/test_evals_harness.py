@@ -43,13 +43,13 @@ def test_load_tasks_corpus():
             assert t.gold_yaml_text(), f"missing gold for {t.name}"
 
 
-def test_score_invalid_yaml_fails_l1_l3_gold():
-    out = score("collection: bad\nplaybooks: []\n", live=False)
-    # Empty playbooks compiles fine actually; use a real failure.
+def test_score_invalid_yaml_fails_draft_and_verified():
     bad = "collection: x\nplaybooks:\n  - name: pb\n    steps: [{type: connector}]"
     out = score(bad, live=False)
-    assert out["levels"]["L1"]["passed"] is False
-    assert out["max"] >= 2  # L1 + L3 always counted (+ gold if passed in)
+    assert out["levels"]["draft"]["passed"] is False
+    assert out["levels"]["verified"]["passed"] is False
+    # draft + verified + matches_example(skipped) + live(skipped) → max ≥ 2
+    assert out["max"] >= 2
 
 
 def test_score_gold_match():
@@ -58,12 +58,10 @@ def test_score_gold_match():
     from mcp_server import compile_yaml
     gold_json = __import__("json").loads(compile_yaml(gold_yaml, verbose=True)["json"])
     out = score(gold_yaml, gold_json=gold_json, live=False)
-    assert out["levels"]["L1"]["passed"] is True
-    assert out["levels"]["L3"]["passed"] is True
-    assert out["levels"]["gold"]["passed"] is True
-    # L2/L4 skipped offline.
-    assert out["levels"]["L2"]["skipped"] is True
-    assert out["levels"]["L4"]["skipped"] is True
+    assert out["levels"]["draft"]["passed"] is True
+    assert out["levels"]["matches_example"]["passed"] is True
+    # live_tested skipped offline.
+    assert out["levels"]["live_tested"]["skipped"] is True
 
 
 def test_run_matrix_gold_beats_echo():
