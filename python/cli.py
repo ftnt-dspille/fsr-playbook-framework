@@ -2914,6 +2914,40 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Mirror of the verify_playbook MCP tool. Returns 0 iff
+    ready_to_push=True; 1 otherwise. Prints a human-readable punch list
+    by default, or `--json` for the raw envelope."""
+    from mcp_server import verify_playbook
+    text = Path(args.input).read_text()
+    result = verify_playbook(
+        yaml_text=text,
+        playbook=args.playbook,
+        live_probe=args.live_probe,
+        verbose=args.verbose,
+    )
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("ready_to_push") else 1
+    print(f"ready_to_push: {result.get('ready_to_push')}", file=sys.stderr)
+    for c in result.get("checks_run", []):
+        mark = "ok" if c.get("ok") else "FAIL"
+        print(f"  [{mark}] {c.get('name')}: {c.get('summary', '')}",
+              file=sys.stderr)
+    for f in result.get("required_fixes", []):
+        line = f"  ✗ [{f.get('code')}] {f.get('message')}"
+        if f.get("step"):
+            line += f" (step: {f['step']})"
+        if f.get("branch"):
+            line += f" (branch: {f['branch']})"
+        print(line, file=sys.stderr)
+    for w in result.get("warnings", []):
+        print(f"  ! [{w.get('code')}] {w.get('message')}", file=sys.stderr)
+    for a in result.get("next_actions", []):
+        print(f"  -> {a}", file=sys.stderr)
+    return 0 if result.get("ready_to_push") else 1
+
+
 def cmd_generate_recipe(args: argparse.Namespace) -> int:
     from recipes import generate_threat_feed_recipe, generate_data_ingest_recipe
     from recipes.prechecks import run_recipe_prechecks
@@ -3718,6 +3752,7 @@ _PROBES: dict[str, tuple[str, str]] = {
     "cleanup":       ("probes.probe_cleanup",           "remove fsrpb test artifacts from FSR"),
     "jinja-corpus":  ("probes.probe_jinja_corpus",       "mine all Jinja blocks (expr/set/for/if/macro) + filter usage from live workflows"),
     "playbook-steps":("probes.probe_playbook_steps",     "index every step from every FSR playbook JSON export on disk"),
+    "op-safety":     ("probes.probe_op_safety",          "classify each op safe/unsafe/unknown for verify_playbook"),
 }
 
 
@@ -3911,8 +3946,9 @@ def cmd_probe(args: argparse.Namespace) -> int:
     if args.all:
         # Deterministic order: connectors first (others may depend on it),
         # then modules, playbooks, jinja, jinja-backend, api-endpoints, rest.
+        # op-safety must run after connectors (it reads operations rows).
         ordered = ["connectors", "modules", "playbooks", "jinja", "jinja-backend",
-                   "api-endpoints", "step-handlers", "constraints"]
+                   "api-endpoints", "step-handlers", "constraints", "op-safety"]
         targets = ordered + [k for k in _PROBES if k not in ordered]
 
     if not targets:
@@ -4152,6 +4188,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("input")
     sp.add_argument("--json", action="store_true", help="emit errors as JSON on stdout")
     sp.set_defaults(func=cmd_validate)
+
+    sp = sub.add_parser(
+        "verify",
+        help="forcing-function pre-submit gate: compile + typed walk + "
+             "schema checks (+ optional live probe)",
+    )
+    sp.add_argument("input")
+    sp.add_argument("--playbook", default=None,
+                    help="which playbook to verify (default: first in collection)")
+    sp.add_argument("--live-probe", action="store_true",
+                    help="probe safe ops via run_op for true output shapes")
+    sp.add_argument("--verbose", action="store_true",
+                    help="include full typed_walk + per-step shapes in evidence")
+    sp.add_argument("--json", action="store_true",
+                    help="emit raw result as JSON on stdout")
+    sp.set_defaults(func=cmd_verify)
 
     sp = sub.add_parser(
         "resolve",

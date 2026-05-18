@@ -5,8 +5,10 @@
    * add Run (safe), Test step, Verification history, picklist precheck.
    */
   import type { VisualNode } from '../api';
-  import { callMcpTool } from '../api';
+  import { callMcpTool, verifyPlaybook } from '../api';
   import { visualStore } from '../visualEditStore.svelte';
+  import { playbookStore } from '../playbookStore.svelte';
+  import { buildJinjaContext, type Shape } from '../shapeStubs';
 
   type Props = { node: VisualNode };
   let { node }: Props = $props();
@@ -248,11 +250,30 @@
     }
   }
 
+  /** Build a Jinja context from the typed_walker's per-step shapes so
+   * cross-step refs like `vars.steps.Get_Org.records[0].id` resolve
+   * against deterministic stubs instead of erroring as undefined. */
+  async function buildContext(): Promise<Record<string, unknown>> {
+    const yaml = playbookStore.yaml;
+    if (!yaml) return {};
+    try {
+      const res = await verifyPlaybook(yaml, { verbose: true });
+      const shapes = (res.evidence?.per_step_jinja_shapes ?? {}) as Record<string, Shape>;
+      return buildJinjaContext(shapes);
+    } catch {
+      return {};
+    }
+  }
+
   async function runRender() {
     busy = true;
     const next: Record<string, Resolved> = {};
     const args = node.arguments ?? {};
     const tasks: Promise<void>[] = [];
+    // One verify call up front; reused for every template render in
+    // this step. Cheap (no live probe) and ensures every template sees
+    // the same env snapshot.
+    const context = await buildContext();
     for (const { path, value } of walkStrings(args, '')) {
       if (!isTemplateString(value)) {
         next[path] = { kind: 'literal', value };
@@ -260,7 +281,9 @@
       }
       next[path] = { kind: 'pending' };
       tasks.push(
-        callMcpTool<{ output?: unknown; error?: string }>('render_jinja', { template: value })
+        callMcpTool<{ output?: unknown; error?: string }>(
+          'render_jinja', { template: value, context }
+        )
           .then((res) => {
             if (!res.ok || res.result?.error) {
               next[path] = { kind: 'error', message: res.error ?? res.result?.error ?? 'render failed' };
@@ -293,11 +316,13 @@
 </script>
 
 <section class="space-y-3">
-  <header class="flex items-center justify-between">
+  <header class="flex items-center justify-between gap-3">
     <div>
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Verify</div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Render args</div>
       <p class="mt-0.5 text-xs text-[var(--text-faint)]">
-        Resolve every arg through the live FSR Jinja engine.
+        Replace every <code class="font-mono">{`{{ … }}`}</code> in this
+        step with what it will actually become at runtime. Output appears
+        in <strong>Rendered args</strong> below.
       </p>
     </div>
     <button
@@ -315,9 +340,13 @@
   <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
     <div class="flex items-center justify-between gap-2">
       <div>
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">History</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Past test runs</div>
         <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
-          <code class="font-mono">{historyKind}</code> · <code class="font-mono">{historyKey || '(none)'}</code>
+          {#if node.family === 'connector_op'}
+            Verifications for <code class="font-mono">{historyKey || 'this operation'}</code>.
+          {:else}
+            Verifications for any <code class="font-mono">{node.type}</code> step.
+          {/if}
         </p>
       </div>
       <button
@@ -325,7 +354,7 @@
         class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-elev)] disabled:opacity-50"
         onclick={loadHistory}
         disabled={historyBusy}
-      >{historyBusy ? 'Loading…' : 'History'}</button>
+      >{historyBusy ? 'Loading…' : 'Load'}</button>
     </div>
     {#if historyResult}
       {#if historyResult.kind === 'found'}
@@ -357,7 +386,17 @@
       <div>
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Test step</div>
         <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
-          Render this step and (if read-only) execute it; records pass/fail to the verifications log.
+          {#if node.family === 'trigger'}
+            Triggers fire on FSR events — they can't be "tested" in isolation.
+            Clicking renders the step's args only; status will say
+            <em>rendered</em> with no execution attempted.
+          {:else if node.family === 'connector_op'}
+            Render this step's args, then execute the connector op if it's
+            marked read-only. Pass/fail is logged to <em>Past test runs</em> above.
+          {:else}
+            Render this step's args and mark the result pass/fail in the
+            verifications log. No record changes for non-connector steps.
+          {/if}
         </p>
       </div>
       <button
@@ -369,12 +408,24 @@
     </div>
     {#if stepTestResult}
       {#if stepTestResult.kind === 'ok'}
-        <div class="mt-2 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">{stepTestResult.status}</div>
+        <div class="mt-2 flex items-center gap-2">
+          <span class="rounded bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">{stepTestResult.status}</span>
+          <span class="text-[10px] text-[var(--text-faint)]">
+            {#if stepTestResult.status === 'rendered'}
+              args resolved cleanly — no live call was made
+            {:else if stepTestResult.status === 'executed'}
+              connector op ran successfully against the live FSR
+            {/if}
+          </span>
+        </div>
         {#if stepTestResult.note}
           <p class="mt-1 text-xs text-[var(--text-muted)]">{stepTestResult.note}</p>
         {/if}
         {#if stepTestResult.output !== null && stepTestResult.output !== undefined}
-          <pre class="mt-1 max-h-40 overflow-auto rounded bg-[var(--bg-canvas)] p-2 text-xs">{fmt(stepTestResult.output)}</pre>
+          <details class="mt-1">
+            <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-default)]">Show output</summary>
+            <pre class="mt-1 max-h-40 overflow-auto rounded bg-[var(--bg-canvas)] p-2 text-xs">{fmt(stepTestResult.output)}</pre>
+          </details>
         {/if}
       {:else}
         <div class="mt-2 text-[10px] uppercase tracking-wider text-rose-600 dark:text-rose-400">error</div>
@@ -478,24 +529,37 @@
   {/if}
 
   {#if entries.length === 0}
-    <p class="italic text-[var(--text-faint)]">Click <strong>Render</strong> to resolve args.</p>
+    <p class="italic text-[var(--text-faint)]">
+      Click <strong>Render</strong> above to resolve this step's args.
+      Output will appear here.
+    </p>
   {:else}
-    <ul class="space-y-2">
-      {#each entries as [path, r] (path)}
-        <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
-          <div class="font-mono text-[11px] text-[var(--text-muted)]">{path || '(root)'}</div>
-          {#if r.kind === 'pending'}
-            <div class="mt-1 text-xs italic text-[var(--text-faint)]">resolving…</div>
-          {:else if r.kind === 'literal'}
-            <pre class="mt-1 whitespace-pre-wrap text-xs text-[var(--text-default)]">{fmt(r.value)}</pre>
-          {:else if r.kind === 'rendered'}
-            <pre class="mt-1 whitespace-pre-wrap text-xs text-[var(--text-default)]">{fmt(r.value)}</pre>
-            <div class="mt-0.5 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">rendered</div>
-          {:else if r.kind === 'error'}
-            <pre class="mt-1 whitespace-pre-wrap text-xs text-rose-600 dark:text-rose-400">{r.message}</pre>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+    <div>
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Rendered args
+      </div>
+      <p class="mt-0.5 mb-2 text-[11px] text-[var(--text-faint)]">
+        One row per arg path. Green tag = a <code class="font-mono">{`{{ … }}`}</code>
+        expression that resolved against the current playbook context;
+        no tag = the value was already a literal.
+      </p>
+      <ul class="space-y-2">
+        {#each entries as [path, r] (path)}
+          <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+            <div class="font-mono text-[11px] text-[var(--text-muted)]">{path || '(root)'}</div>
+            {#if r.kind === 'pending'}
+              <div class="mt-1 text-xs italic text-[var(--text-faint)]">resolving…</div>
+            {:else if r.kind === 'literal'}
+              <pre class="mt-1 whitespace-pre-wrap text-xs text-[var(--text-default)]">{fmt(r.value)}</pre>
+            {:else if r.kind === 'rendered'}
+              <pre class="mt-1 whitespace-pre-wrap text-xs text-[var(--text-default)]">{fmt(r.value)}</pre>
+              <div class="mt-0.5 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">rendered</div>
+            {:else if r.kind === 'error'}
+              <pre class="mt-1 whitespace-pre-wrap text-xs text-rose-600 dark:text-rose-400">{r.message}</pre>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    </div>
   {/if}
 </section>

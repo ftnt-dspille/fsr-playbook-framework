@@ -21,10 +21,15 @@ import {
   compileYaml,
   pushPlaybook,
   analyzePlaybook,
+  verifyPlaybook,
   type Marker,
   type Fix,
-  type Diagnostic
+  type Diagnostic,
+  type VerifyFix,
+  type VerifyResult
 } from './api';
+import { jinjaShapesStore } from './jinjaShapesStore.svelte';
+import type { Shape } from './shapeStubs';
 import { playbookStore } from './playbookStore.svelte';
 import { runStore } from './runStore.svelte';
 import { postSse } from './sse';
@@ -42,6 +47,8 @@ type State = {
   status: ActionStatus;
   diagnostics: Diagnostic[];
   analyzeBusy: boolean;
+  verify: VerifyResult | null;
+  verifyBusy: boolean;
 };
 
 const state = $state<State>({
@@ -50,7 +57,9 @@ const state = $state<State>({
   compileJson: null,
   status: { kind: 'idle', msg: 'editing' },
   diagnostics: [],
-  analyzeBusy: false
+  analyzeBusy: false,
+  verify: null,
+  verifyBusy: false
 });
 
 function extractCollectionName(text: string): string | null {
@@ -155,6 +164,63 @@ export const playbookActions = {
         : { kind: 'err', msg: 'compile failed' };
     } catch (e: any) {
       state.status = { kind: 'err', msg: e?.message ?? String(e) };
+    }
+  },
+
+  get verify() { return state.verify; },
+  get verifyBusy() { return state.verifyBusy; },
+  get verifyReady() { return !!state.verify?.ready_to_push; },
+  get verifyFixCount() { return state.verify?.required_fixes.length ?? 0; },
+  /** Worst severity per step jkey from the latest verify run.
+   * Returns 'error' | 'warning' | null per step name (with spaces→underscores
+   * because that's how the typed walker emits step ids — matches the
+   * canvas's jkey scheme). */
+  get verifyByStep(): Map<string, 'error' | 'warning'> {
+    const m = new Map<string, 'error' | 'warning'>();
+    const tag = (s: string, sev: 'error' | 'warning') => {
+      const cur = m.get(s);
+      if (cur === 'error') return;
+      m.set(s, sev);
+    };
+    if (!state.verify) return m;
+    for (const f of state.verify.required_fixes) {
+      if (f.step) tag(f.step.replace(/\s+/g, '_'), 'error');
+    }
+    for (const w of state.verify.warnings) {
+      if (w.step) tag(w.step.replace(/\s+/g, '_'), 'warning');
+    }
+    return m;
+  },
+  /** Run verify_playbook on the current buffer. Idempotent. Updates
+   * `verify` state which the canvas reads to color step badges. */
+  async runVerify(opts: { livePrope?: boolean } = {}): Promise<void> {
+    const yaml = playbookStore.yaml;
+    if (!yaml) {
+      state.verify = null;
+      jinjaShapesStore.setShapes({});
+      state.status = { kind: 'idle', msg: 'no playbook loaded' };
+      return;
+    }
+    state.verifyBusy = true;
+    state.status = { kind: 'busy', msg: 'verifying…' };
+    try {
+      // verbose:true so evidence.per_step_jinja_shapes comes back —
+      // VarPathPicker + future Monaco completions consume this for
+      // type-aware var-path suggestions. The marginal cost over a
+      // non-verbose verify is negligible (just extra payload bytes).
+      const r = await verifyPlaybook(yaml, { ...opts, verbose: true });
+      state.verify = r;
+      const shapes = (r.evidence?.per_step_jinja_shapes ?? {}) as Record<string, Shape>;
+      jinjaShapesStore.setShapes(shapes);
+      const n = r.required_fixes.length;
+      const w = r.warnings.length;
+      state.status = r.ready_to_push
+        ? { kind: 'ok', msg: w ? `verified · ${w} warning${w === 1 ? '' : 's'}` : 'verified' }
+        : { kind: 'err', msg: `${n} required fix${n === 1 ? '' : 'es'}` };
+    } catch (e: any) {
+      state.status = { kind: 'err', msg: e?.message ?? String(e) };
+    } finally {
+      state.verifyBusy = false;
     }
   },
 

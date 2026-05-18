@@ -77,7 +77,7 @@ describe('FilterTreeEditor — related-module drill-in', () => {
     });
     // Initial render plus button render both consult the resolver.
     expect(getRelated).toHaveBeenCalled();
-    expect(getRelated.mock.calls.some((args) => args[0] === 'assets')).toBe(true);
+    expect(getRelated.mock.calls.some((args: unknown[]) => args[0] === 'assets')).toBe(true);
   });
 
   it('writes "<relation>.<subfield>" + narrows the operator catalog when the user drills in', async () => {

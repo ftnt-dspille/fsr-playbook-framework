@@ -18,7 +18,7 @@
     direction?: LayoutDirection;
     onDirectionChange?: (dir: LayoutDirection) => void;
     onJinjaTest?: () => void;
-    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy') => void;
+    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug') => void;
   };
   let {
     playbookIdx,

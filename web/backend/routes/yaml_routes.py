@@ -144,18 +144,6 @@ def validate(body: YamlIn) -> dict[str, Any]:
     return {"ok": ok, "markers": [m.model_dump() for m in markers], "fixes": fixes}
 
 
-@router.post("/fixes")
-def fixes(body: YamlIn) -> dict[str, Any]:
-    """Source-level auto-fixes for the editor's "Fix warnings" UI.
-
-    Returns one entry per known foot-gun (em-dash step name, bare `yes`
-    in `display:`, `vars.input.<param>` missing the `.params.` segment,
-    `type: stop`). Each entry carries a Monaco-shaped range so the
-    editor can apply the patch as a normal edit (undoable via Cmd-Z).
-    """
-    return {"fixes": [f.to_dict() for f in _collect_fixes(body.text)]}
-
-
 @router.post("/compile")
 def compile_(body: YamlIn) -> dict[str, Any]:
     res = _compile_yaml(body.text, DEFAULT_DB)
@@ -164,4 +152,86 @@ def compile_(body: YamlIn) -> dict[str, Any]:
         "ok": res.ok,
         "fsr_json": res.fsr_json,
         "markers": markers,
+    }
+
+
+@router.post("/shapes")
+def shapes(body: YamlIn) -> dict[str, Any]:
+    """Fast typed-walker pass over the buffer — used by the variable
+    picker / Monaco completions to surface real step output shapes
+    without forcing the user to run the full verify_playbook gate.
+
+    No live probe, no diagnostics — just `per_step_jinja_shapes` and a
+    flag per step indicating *why* its shape is unknown so the picker
+    can prompt the user to verify (or otherwise enrich) it.
+    """
+    from compiler.typed_walker import walk_playbook
+    from compiler.parser import parse_yaml
+    try:
+        coll, errs = parse_yaml(body.text)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "shapes": {}}
+    if coll is None:
+        return {
+            "ok": False,
+            "error": "; ".join(str(e) for e in errs) or "parse failed",
+            "shapes": {},
+        }
+    try:
+        walk = walk_playbook(coll)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "shapes": {}}
+
+    shapes_by_jkey: dict[str, dict[str, Any]] = {}
+    # Top-level vars created by `set_variable` steps. FSR exposes these
+    # as `vars.<name>` (NOT `vars.steps.<step>.<name>` — the corpus
+    # makes this clear: `{{vars.cicd_env}}`, `{{vars.source_control_base_url}}`).
+    top_level_vars: dict[str, dict[str, Any]] = {}
+    needs_verify: list[dict[str, str]] = []
+
+    def _collect_top_level(step):
+        """Pull set_variable arg_list / vars: keys and record their shape
+        under the top-level `vars.<name>` namespace (real FSR runtime)."""
+        if step.type != "set_variable":
+            return
+        a = step.arguments or {}
+        arg_list = a.get("arg_list") or a.get("vars") or []
+        entries: list[tuple[str, Any]] = []
+        if isinstance(arg_list, list):
+            for entry in arg_list:
+                if isinstance(entry, dict):
+                    k = entry.get("key") or entry.get("name")
+                    if isinstance(k, str) and k:
+                        entries.append((k, entry.get("value")))
+        elif isinstance(arg_list, dict):
+            for k, v in arg_list.items():
+                if isinstance(k, str) and k:
+                    entries.append((k, v))
+        for k, _v in entries:
+            # We don't (yet) infer the value's type from the literal —
+            # set_variable values are often Jinja templates whose type
+            # depends on the rendered output. Mark as `any`.
+            top_level_vars[k] = {"kind": "scalar", "type": "any"}
+
+    for pb in coll.playbooks:
+        for s in pb.steps:
+            _collect_top_level(s)
+            jkey = (s.name or s.id or "").strip().replace(" ", "_")
+            if not jkey:
+                continue
+            sh = walk.per_step_shapes.get(s.id)
+            if sh is None:
+                continue
+            shapes_by_jkey[jkey] = sh
+            if sh.get("kind") == "unknown":
+                needs_verify.append({
+                    "step": jkey,
+                    "step_id": s.id,
+                    "reason": str(sh.get("reason") or "shape not inferable"),
+                })
+    return {
+        "ok": True,
+        "shapes": shapes_by_jkey,
+        "top_level_vars": top_level_vars,
+        "needs_verify": needs_verify,
     }

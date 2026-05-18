@@ -26,7 +26,9 @@
   // Internal input text — kept separate from the parent prop so that
   // refreshing the dropdown can't fight a stale prop value. Synced
   // FROM the prop only when it changes externally (e.g. node switch).
+  // svelte-ignore state_referenced_locally
   let inputText = $state(value ?? '');
+  // svelte-ignore state_referenced_locally
   let lastValueProp = $state(value);
   $effect(() => {
     if (value !== lastValueProp) {

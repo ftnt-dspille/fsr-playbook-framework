@@ -146,13 +146,24 @@ def render_text(matrix: dict[str, Any]) -> str:
                  f"{len(matrix['tasks'])} tasks x "
                  f"{len(matrix['models'])} models)")
     lines.append("")
-    header = f"{'model':<14} {'task':<28} L1 L1.5 L2 L3 L4 gold  score  ms"
+    # Columns:
+    #   draft  verified  live   example | vCalled vReady  score  ms
+    # `draft` / `verified` / `live` are the three confidence tiers;
+    # `example` is the orthogonal byte-equal check (matches the
+    # hand-curated reference YAML in /examples/); the verify-behavior
+    # columns measure agent discipline (did it call verify, did the
+    # final call return ready) — distinct from `verified`.
+    header = (f"{'model':<14} {'task':<28} "
+              f"draft verified live example  vCalled vReady  score  ms")
     lines.append(header)
     lines.append("-" * len(header))
     for r in matrix["rows"]:
         if "error" in r:
-            lines.append(f"{r['model']:<14} {r['task']:<28} -- ---- -- -- -- ----  "
-                         f"ERR    {r.get('elapsed_ms', '-')}  ({r['error']})")
+            lines.append(
+                f"{r['model']:<14} {r['task']:<28} "
+                f"---  ---      ---  ----    --       --      "
+                f"ERR    {r.get('elapsed_ms', '-')}  ({r['error']})"
+            )
             continue
         lv = r["levels"]
 
@@ -165,9 +176,11 @@ def render_text(matrix: dict[str, Any]) -> str:
         score_str = f"{r['score']}/{r['max']}"
         lines.append(
             f"{r['model']:<14} {r['task']:<28} "
-            f"{cell('L1')} {cell('L1.5'):<4} "
-            f"{cell('L2')} {cell('L3')} {cell('L4')} "
-            f"{cell('gold'):<4}  {score_str:<5}  {r['elapsed_ms']}"
+            f"{cell('draft'):<5} {cell('verified'):<8} "
+            f"{cell('live_tested'):<4} {cell('matches_example'):<7} "
+            f"{cell('verify_called_before_submit'):<8} "
+            f"{cell('final_verify_ready_to_push'):<7} "
+            f"{score_str:<5}  {r['elapsed_ms']}"
         )
     lines.append("")
     lines.append("Per-model totals:")
@@ -304,13 +317,14 @@ def _render_md(matrix: dict[str, Any]) -> str:
              "",
              "## Per-cell results",
              "",
-             "| model | task | L1 | L1.5 | L2 | L3 | L4 | gold | score | ms |",
-             "|---|---|---|---|---|---|---|---|---:|---:|"]
+             "| model | task | draft | verified | live | example | "
+             "vCalled | vIters | vReady | score | ms |",
+             "|---|---|---|---|---|---|---|---:|---|---:|---:|"]
     for r in matrix.get("rows", []):
         if "error" in r:
             lines.append(
-                f"| `{r['model']}` | `{r['task']}` | ERR | – | – | – | – | – | "
-                f"– | {r.get('elapsed_ms','-')} |"
+                f"| `{r['model']}` | `{r['task']}` | ERR | – | – | – | "
+                f"– | – | – | – | {r.get('elapsed_ms','-')} |"
             )
             continue
         lv = r.get("levels", {})
@@ -321,10 +335,16 @@ def _render_md(matrix: dict[str, Any]) -> str:
                 return "–"
             return "✓" if v.get("passed") else "✗"
 
+        iters = lv.get("verify_iterations_until_ready", {}).get("iterations")
+        iters_str = "–" if lv.get(
+            "verify_iterations_until_ready", {}).get("skipped") else str(iters or 0)
         lines.append(
-            f"| `{r['model']}` | `{r['task']}` | {cell('L1')} | "
-            f"{cell('L1.5')} | {cell('L2')} | {cell('L3')} | "
-            f"{cell('L4')} | {cell('gold')} | "
+            f"| `{r['model']}` | `{r['task']}` | {cell('draft')} | "
+            f"{cell('verified')} | {cell('live_tested')} | "
+            f"{cell('matches_example')} | "
+            f"{cell('verify_called_before_submit')} | "
+            f"{iters_str} | "
+            f"{cell('final_verify_ready_to_push')} | "
             f"{r['score']}/{r['max']} | {r['elapsed_ms']} |"
         )
     lines += ["", "## Per-model totals", ""]

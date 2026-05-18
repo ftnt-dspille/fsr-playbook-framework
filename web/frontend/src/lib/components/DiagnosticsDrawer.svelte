@@ -12,12 +12,13 @@
   import RenderPathDiagnostics from './RenderPathDiagnostics.svelte';
   import Console from './Console.svelte';
   import DeployPanel from './DeployPanel.svelte';
+  import StepDebuggerPanel from './StepDebuggerPanel.svelte';
   import { playbookActions } from '$lib/playbookActions.svelte';
   import { runStore } from '$lib/runStore.svelte';
   import { visualStore } from '$lib/visualEditStore.svelte';
   import type { SuggestedFix } from '$lib/api';
 
-  type Tab = 'diagnostics' | 'fixes' | 'compile' | 'deploy';
+  type Tab = 'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug';
   type Props = {
     open: boolean;
     tab: Tab;
@@ -91,7 +92,8 @@
       { id: 'diagnostics' as Tab, label: 'Diagnostics' },
       { id: 'fixes' as Tab, label: 'Fixes' },
       { id: 'compile' as Tab, label: 'Compile' },
-      { id: 'deploy' as Tab, label: 'Deploy' }
+      { id: 'deploy' as Tab, label: 'Deploy' },
+      { id: 'debug' as Tab, label: 'Step Debugger' }
     ] as t}
       {@const active = tab === t.id && open}
       <button
@@ -166,6 +168,8 @@
         />
       {:else if tab === 'deploy'}
         <DeployPanel />
+      {:else if tab === 'debug'}
+        <StepDebuggerPanel />
       {/if}
     </div>
   {/if}

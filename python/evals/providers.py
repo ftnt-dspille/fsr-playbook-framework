@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 ProviderFn = Callable[[str, str], str]
 
@@ -187,11 +187,21 @@ def _agentic_anthropic_provider() -> Callable:
                 result = dispatch(name, args)
                 content = result if isinstance(result, str) else _json.dumps(
                     result, default=str)
-                trace.append({
+                entry: dict[str, Any] = {
                     "name": name,
                     "args_chars": len(_json.dumps(args, default=str)),
                     "result_chars": len(content),
-                })
+                }
+                # Capture the verify_playbook envelope (small, structured)
+                # so the scorer can compute verify-related metrics without
+                # re-running the tool.
+                if name == "verify_playbook" and isinstance(result, dict):
+                    entry["verify"] = {
+                        "ready_to_push": bool(result.get("ready_to_push")),
+                        "required_fix_count": len(result.get("required_fixes") or []),
+                        "warning_count": len(result.get("warnings") or []),
+                    }
+                trace.append(entry)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": call_id,
@@ -247,11 +257,18 @@ def _agentic_lmstudio_provider() -> Callable:
                 result = dispatch(name, args)
                 content = result if isinstance(result, str) else _json.dumps(
                     result, default=str)
-                trace.append({
+                entry: dict[str, Any] = {
                     "name": name,
                     "args_chars": len(_json.dumps(args, default=str)),
                     "result_chars": len(content),
-                })
+                }
+                if name == "verify_playbook" and isinstance(result, dict):
+                    entry["verify"] = {
+                        "ready_to_push": bool(result.get("ready_to_push")),
+                        "required_fix_count": len(result.get("required_fixes") or []),
+                        "warning_count": len(result.get("warnings") or []),
+                    }
+                trace.append(entry)
                 history.append({
                     "role": "tool", "tool_call_id": tc.get("id", ""),
                     "content": content,

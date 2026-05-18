@@ -1,13 +1,26 @@
 <script lang="ts">
   /**
-   * Operation combobox for connector_op steps. Sibling to
-   * ConnectorPicker — only commits on selection / Enter / blur so
-   * `get_op_schema` doesn't fire mid-keystroke and surface
-   * "operation 'b' not found" errors while the user is still typing.
+   * Operation combobox for connector_op steps.
+   *
+   * Asks the server for `verbose` results so it can render the
+   * one-line op description and a verification dot (green/red/gray)
+   * alongside `op_name`. Re-ranks the server's list by a local
+   * recently-picked store (opPickerPrefs) so the user's habitual ops
+   * float to the top without a backend dependency.
+   *
+   * Only commits on selection / Enter / blur so `get_op_schema` doesn't
+   * fire mid-keystroke and surface "operation 'b' not found".
    */
   import { callMcpTool } from '../api';
+  import { recordPick, scoreFor } from '../opPickerPrefs';
 
-  type Suggestion = { op_name: string; title?: string };
+  type Verification = { status: string; method?: string; ts?: string };
+  type Suggestion = {
+    op_name: string;
+    title?: string;
+    description?: string;
+    verification?: Verification | null;
+  };
   type Props = {
     connector: string;
     value: string;
@@ -16,7 +29,9 @@
   };
   let { connector, value, placeholder = 'e.g. get_ticket_details', onCommit }: Props = $props();
 
+  // svelte-ignore state_referenced_locally
   let inputText = $state(value ?? '');
+  // svelte-ignore state_referenced_locally
   let lastValueProp = $state(value);
   $effect(() => {
     if (value !== lastValueProp) {
@@ -30,15 +45,34 @@
   let activeIdx = $state(-1);
   let queryAt = 0;
 
+  // Verification dot colors: green = tested_pass, red = tested_fail,
+  // gray = merely seen / unknown. Mirrors the canvas store-verification
+  // pattern in StepNode.
+  const VERIF_COLOR: Record<string, string> = {
+    tested_pass: '#16a34a',
+    tested_fail: '#dc2626',
+    seen: '#9ca3af'
+  };
+
   async function refresh(q: string) {
     if (!connector) { suggestions = []; return; }
     const stamp = ++queryAt;
     try {
       const r = await callMcpTool<{ matches: Suggestion[] }>(
-        'find_operation', { connector, q: q ?? '', limit: 25 }
+        'find_operation', { connector, q: q ?? '', limit: 25, verbose: true }
       );
       if (stamp !== queryAt) return;
-      if (r.ok) suggestions = r.result?.matches ?? [];
+      if (!r.ok) { suggestions = []; return; }
+      const matches = r.result?.matches ?? [];
+      // Re-rank by local user-pref score. Stable sort preserves the
+      // server's own order (verification status, then alpha) inside a
+      // score tier — the server has signal we lack (e.g. tested_fail
+      // demotion), and we only want to *boost* familiar ops.
+      const score = scoreFor(connector);
+      suggestions = matches
+        .map((m, i) => ({ m, s: score(m.op_name), i }))
+        .sort((a, b) => (b.s - a.s) || (a.i - b.i))
+        .map((x) => x.m);
     } catch {
       if (stamp === queryAt) suggestions = [];
     }
@@ -54,6 +88,7 @@
     inputText = s.op_name;
     open = false;
     activeIdx = -1;
+    recordPick(connector, s.op_name);
     commit(s.op_name);
   }
 
@@ -109,9 +144,20 @@
           onmousedown={(e) => { e.preventDefault(); pick(s); }}
           onmouseenter={() => (activeIdx = i)}
         >
-          <span class="flex flex-col min-w-0">
-            <span class="font-mono text-[11px] truncate">{s.op_name}</span>
+          <span class="flex min-w-0 flex-1 flex-col">
+            <span class="flex items-center gap-1.5">
+              <span class="font-mono text-[11px] truncate">{s.op_name}</span>
+              {#if s.verification}
+                <span
+                  class="inline-block h-1.5 w-1.5 rounded-full"
+                  style="background: {VERIF_COLOR[s.verification.status] ?? '#d1d5db'}"
+                  title={`verification: ${s.verification.status}${s.verification.method ? ` (${s.verification.method})` : ''}`}
+                  aria-label={`verification ${s.verification.status}`}
+                ></span>
+              {/if}
+            </span>
             {#if s.title}<span class="text-[10px] text-[var(--text-faint)] truncate">{s.title}</span>{/if}
+            {#if s.description}<span class="text-[10px] text-[var(--text-muted)] line-clamp-2">{s.description}</span>{/if}
           </span>
         </li>
       {/each}
@@ -126,7 +172,7 @@
     top: calc(100% + 2px);
     left: 0;
     right: 0;
-    max-height: 320px;
+    max-height: 360px;
     overflow-y: auto;
     background: var(--bg-canvas, white);
     border: 1px solid var(--border-soft, #e5e7eb);
@@ -138,11 +184,18 @@
     list-style: none;
   }
   .fsrpb-operation-picker-row {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: flex-start; gap: 8px;
     padding: 6px 10px; cursor: pointer;
   }
   .fsrpb-operation-picker-row--active,
   .fsrpb-operation-picker-row:hover {
     background: var(--bg-elev, #f3f4f6);
+  }
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 </style>

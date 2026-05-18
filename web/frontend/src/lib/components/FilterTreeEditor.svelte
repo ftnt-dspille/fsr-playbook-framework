@@ -43,6 +43,8 @@
   };
 
   import VarPathPicker from './VarPathPicker.svelte';
+  import { attachVarPaneFocus } from '../varPaneFocus';
+  import { jinjaShapesStore } from '../jinjaShapesStore.svelte';
   import type { VisualNode, VisualPlaybook } from '../api';
 
   type Props = {
@@ -453,6 +455,7 @@
                         aria-label="Field picker"
                         class="absolute left-0 z-20 mt-1 max-h-64 w-72 overflow-auto rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] shadow-lg"
                       >
+                        <!-- svelte-ignore a11y_autofocus -->
                         <input
                           type="text"
                           autofocus
@@ -620,17 +623,27 @@
                        post_update steps use this exact operator). -->
                   <span class="text-[11px] italic text-[var(--text-faint)]">(any change to this field)</span>
                 {:else}
+                  {@const filterValFocus = node ? attachVarPaneFocus({
+                    label: `${node.name || 'filter'} · ${f.field || 'value'}`,
+                    insert: (snippet) => {
+                      const cur = valueToText(f.value);
+                      patchAt(i, { value: cur ? `${cur} ${snippet}` : snippet });
+                    }
+                  }) : null}
                   <input
                     type="text"
                     placeholder="value"
                     value={valueToText(f.value)}
                     oninput={(e) => patchAt(i, { value: (e.currentTarget as HTMLInputElement).value })}
+                    onfocus={filterValFocus?.onfocus}
+                    onblur={filterValFocus?.onblur}
                     class="min-w-[8rem] flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1.5 py-0.5 font-mono text-[11px]"
                   />
                   {#if node}
                     <VarPathPicker
                       {node}
                       {playbook}
+                      shapes={jinjaShapesStore.shapes}
                       wrap={true}
                       onInsert={(snippet) => {
                         const cur = valueToText(f.value);

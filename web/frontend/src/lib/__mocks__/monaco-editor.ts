@@ -5,13 +5,22 @@
 export const MarkerSeverity = { Error: 8, Warning: 4, Info: 2 };
 
 export const languages = {
+  register: () => {},
+  setMonarchTokensProvider: () => {},
+  setLanguageConfiguration: () => ({ dispose: () => {} }),
   registerCompletionItemProvider: () => ({ dispose: () => {} }),
   registerHoverProvider: () => ({ dispose: () => {} }),
+  registerSignatureHelpProvider: () => ({ dispose: () => {} }),
+  registerCodeActionProvider: () => ({ dispose: () => {} }),
+  registerDocumentFormattingEditProvider: () => ({ dispose: () => {} }),
+  onLanguage: () => ({ dispose: () => {} }),
+  getLanguages: () => [],
   CompletionItemKind: {
     Snippet: 27,
     Module: 8,
     Function: 1,
-    EnumMember: 16
+    EnumMember: 16,
+    Field: 4
   },
   CompletionItemInsertTextRule: { InsertAsSnippet: 4 }
 };
@@ -30,11 +39,34 @@ export const editor = {
         handlers.push(cb);
         return { dispose: () => {} };
       },
-      getModel: () => ({}),
+      // Editor lifecycle / interaction listeners — enhanceJinjaEditor
+      // wires onDidType + onKeyDown + onDidDispose. The mock just hands
+      // back a disposable so the wrapper doesn't crash; tests that
+      // exercise the actual typing behavior live in the browser project.
+      onDidType: () => ({ dispose: () => {} }),
+      onKeyDown: () => ({ dispose: () => {} }),
+      onDidDispose: () => ({ dispose: () => {} }),
+      onDidFocusEditorText: () => ({ dispose: () => {} }),
+      onDidBlurEditorText: () => ({ dispose: () => {} }),
+      getModel: () => ({ getLanguageId: () => 'yaml', getLineContent: () => '', getValueInRange: () => '' }),
+      getPosition: () => ({ lineNumber: 1, column: 1 }),
+      getSelection: () => ({ isEmpty: () => true }),
+      getContribution: () => null,
+      executeEdits: () => true,
+      setPosition: () => {},
+      focus: () => {},
       dispose: () => {}
     };
   },
-  setModelMarkers: () => {}
+  setModelMarkers: () => {},
+  defineTheme: () => {},
+  setTheme: () => {}
 };
 
-export default { editor, languages, MarkerSeverity };
+export const KeyCode = { Backspace: 1, Enter: 3, Tab: 2, Escape: 9 };
+export class Range {
+  constructor(public startLineNumber: number, public startColumn: number,
+              public endLineNumber: number, public endColumn: number) {}
+}
+
+export default { editor, languages, MarkerSeverity, KeyCode, Range };

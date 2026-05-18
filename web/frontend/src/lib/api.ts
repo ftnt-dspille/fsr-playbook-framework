@@ -166,6 +166,113 @@ export async function analyzePlaybook(
   };
 }
 
+/** Forcing-function pre-submit gate. Wraps the `verify_playbook` MCP
+ * tool. Returns the same envelope the agent sees: ready_to_push +
+ * required_fixes + warnings + next_actions. Each fix/warning carries a
+ * `step` field (the producing step id) so the canvas can map
+ * diagnostics back to nodes. */
+export type VerifyFix = {
+  code: string;
+  message: string;
+  step?: string;
+  branch?: string;
+  path?: string;
+  suggestion?: string | null;
+  severity?: 'error' | 'warning' | string;
+};
+export type VerifyResult = {
+  ok: boolean;
+  ready_to_push: boolean;
+  required_fixes: VerifyFix[];
+  warnings: VerifyFix[];
+  checks_run: Array<{ name: string; ok: boolean; summary?: string }>;
+  next_actions: string[];
+  /** Populated only when verbose=true. Maps jinja-key (step name with
+   * spaces→underscores) to the typed_walker Shape. Consumers use this
+   * + shapeStubs.buildJinjaContext to build a `context` for render_jinja. */
+  evidence?: {
+    per_step_jinja_shapes?: Record<string, unknown>;
+    [k: string]: unknown;
+  };
+};
+
+export async function verifyPlaybook(
+  yamlText: string,
+  opts: { playbook?: string; livePrope?: boolean; verbose?: boolean } = {}
+): Promise<VerifyResult> {
+  const r = await callMcpTool<VerifyResult>('verify_playbook', {
+    yaml_text: yamlText,
+    playbook: opts.playbook,
+    live_probe: !!opts.livePrope,
+    verbose: !!opts.verbose
+  });
+  if (!r.ok || !r.result) {
+    return {
+      ok: false,
+      ready_to_push: false,
+      required_fixes: [],
+      warnings: [],
+      checks_run: [],
+      next_actions: r.error ? [r.error] : []
+    };
+  }
+  return {
+    ok: r.result.ok ?? false,
+    ready_to_push: r.result.ready_to_push ?? false,
+    required_fixes: r.result.required_fixes ?? [],
+    warnings: r.result.warnings ?? [],
+    checks_run: r.result.checks_run ?? [],
+    next_actions: r.result.next_actions ?? [],
+    evidence: r.result.evidence
+  };
+}
+
+/** Step-through driver. Wraps `step_through_playbook` — simulates a
+ * playbook offline (or with safe-op live reads) and returns one
+ * trace row per step so the debugger panel can show rendered args +
+ * outputs at each stage. */
+export type StepTraceRow = {
+  step_id: string;
+  type?: string;
+  rendered_args?: Record<string, unknown>;
+  output?: unknown;
+  output_top_keys?: string[];
+  status?: string;
+  note?: string;
+};
+export type StepThroughResult = {
+  ok: boolean;
+  playbook?: string;
+  trace: StepTraceRow[];
+  first_error?: { step_id: string; message: string } | null;
+  steps_executed?: number;
+  error?: string;
+};
+
+export async function stepThroughPlaybook(
+  yamlText: string,
+  opts: {
+    playbook?: string;
+    input?: Record<string, unknown>;
+    branchChoices?: Record<string, string>;
+    manualChoices?: Record<string, string>;
+    executeSafeOps?: boolean;
+  } = {}
+): Promise<StepThroughResult> {
+  const r = await callMcpTool<StepThroughResult>('step_through_playbook', {
+    yaml_text: yamlText,
+    playbook: opts.playbook,
+    input: opts.input,
+    branch_choices: opts.branchChoices,
+    manual_choices: opts.manualChoices,
+    execute_safe_ops: opts.executeSafeOps ?? false
+  });
+  if (!r.ok || !r.result) {
+    return { ok: false, trace: [], error: r.error ?? 'mcp call failed' };
+  }
+  return { ...r.result, ok: r.result.ok ?? false, trace: r.result.trace ?? [] };
+}
+
 export async function suggestFixForDiagnostic(d: Diagnostic): Promise<SuggestedFix> {
   const r = await callMcpTool<SuggestedFix>('suggest_fix_for_diagnostic', { diagnostic: d });
   if (!r.ok || !r.result) return { ok: false, reason: r.error ?? 'mcp call failed' };
@@ -318,9 +425,149 @@ export async function listJinjaFilters(q = '', limit = 200): Promise<JinjaFilter
   return r.json();
 }
 
+export type ShapesResponse = {
+  ok: boolean;
+  error?: string;
+  shapes: Record<string, unknown>;
+  /** Top-level vars created by set_variable steps; FSR exposes these
+   *  as `vars.<name>`, NOT `vars.steps.<step>.<name>` (confirmed by
+   *  scanning the production corpus). */
+  top_level_vars?: Record<string, unknown>;
+  needs_verify?: Array<{ step: string; step_id: string; reason: string }>;
+};
+
+/** Fast typed-walker pass — returns per-step Jinja shapes WITHOUT
+ *  running the full verify_playbook gate. Used by the variable picker
+ *  + Monaco completions so the user sees real step output shapes on
+ *  every YAML edit, not just after clicking Verify. */
+export async function fetchShapes(text: string): Promise<ShapesResponse> {
+  try {
+    const r = await fetch('/api/yaml/shapes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!r.ok) return { ok: false, shapes: {} };
+    return (await r.json()) as ShapesResponse;
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e), shapes: {} };
+  }
+}
+
+export type GlobalVarRef = {
+  name: string;
+  value: string | null;
+  default_value: string | null;
+};
+
+export type SampleRecordResponse = {
+  ok: boolean;
+  module?: string;
+  records: Array<Record<string, unknown>>;
+  error?: string;
+};
+
+/** Pull live sample records from FSR for `<module>` — used by the
+ *  start-step UI / variable picker so the user can SEE what
+ *  `vars.input.records[0]` will actually look like at runtime. */
+export async function fetchSampleRecords(module: string, limit = 5): Promise<SampleRecordResponse> {
+  if (!module) return { ok: false, records: [] };
+  try {
+    const r = await fetch(`/api/ref/sample-record/${encodeURIComponent(module)}?limit=${limit}`);
+    if (!r.ok) return { ok: false, records: [], error: `HTTP ${r.status}` };
+    return (await r.json()) as SampleRecordResponse;
+  } catch (e: any) {
+    return { ok: false, records: [], error: e?.message ?? String(e) };
+  }
+}
+
+export type RecentRun = {
+  id: number | null;
+  status: string | null;
+  created: string | null;
+  name: string;
+  records: string[];
+};
+
+/** Recent FSR playbook executions. Returns each run with its
+ *  record-IRI list — the trigger sample picker uses one of those
+ *  IRIs to fetch the actual record that was running. */
+export async function fetchRecentRuns(
+  playbookIri?: string, limit = 5
+): Promise<RecentRun[]> {
+  try {
+    const qs = new URLSearchParams();
+    if (playbookIri) qs.set('playbook_iri', playbookIri);
+    qs.set('limit', String(limit));
+    const r = await fetch(`/api/ref/recent-runs?${qs}`);
+    if (!r.ok) return [];
+    const data = await r.json();
+    return (data?.runs ?? []) as RecentRun[];
+  } catch {
+    return [];
+  }
+}
+
+export type RunDetail = {
+  ok: boolean;
+  error?: string;
+  id?: number | null;
+  status?: string | null;
+  created?: string | null;
+  modified?: string | null;
+  name?: string;
+  records?: string[];
+  wf_step_logs?: unknown;
+  step_logs?: unknown;
+  stepInstances?: unknown;
+  input_parameters?: unknown;
+};
+
+/** Pull the full FSR workflow execution detail for a single run.
+ *  Lets the editor seed sample input + (eventually) per-step variables
+ *  from real production data so authors can iterate against the exact
+ *  context the playbook had. */
+export async function fetchRunDetail(runId: number | string): Promise<RunDetail> {
+  try {
+    const r = await fetch(`/api/ref/run-detail/${encodeURIComponent(String(runId))}`);
+    if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+    return (await r.json()) as RunDetail;
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+/** Fetch a single record by its IRI (`/api/3/alerts/<uuid>`). Used
+ *  by the sample picker after the user picks a recent run + IRI. */
+export async function fetchRecordByIri(
+  iri: string
+): Promise<Record<string, unknown> | null> {
+  if (!iri) return null;
+  try {
+    const r = await fetch(`/api/ref/record-by-iri?iri=${encodeURIComponent(iri)}`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.record ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetches FSR dynamic-variables. Returns [] when FSR is offline so
+ *  callers can fall back to a YAML-buffer scrape. */
+export async function listGlobalVars(): Promise<GlobalVarRef[]> {
+  try {
+    const r = await fetch('/api/ref/global-vars');
+    if (!r.ok) return [];
+    return await r.json();
+  } catch {
+    return [];
+  }
+}
+
 export type PushResult = { ok: boolean; stdout: string; stderr: string; exit_code: number };
 
-export async function pushPlaybook(text: string, mode = 'replace'): Promise<PushResult> {
+export async function pushPlaybook(text: string, mode = 'safe'): Promise<PushResult> {
   const r = await fetch('/api/playbook/push', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -440,6 +687,64 @@ export async function callMcpTool<T = unknown>(name: string, args: Record<string
   });
   if (!r.ok) throw new Error(`mcp/${name} ${r.status}`);
   return r.json();
+}
+
+// --- Phase 5 failed-runs surface (VERIFY_PLAYBOOK_PLAN) -----------------
+
+export type FailedRun = {
+  task_id: string;
+  pk: number | null;
+  name: string | null;
+  status: string;
+  error_message: string | null;
+  modified: string | null;
+  uuid: string | null;
+  source: 'live' | 'historical' | string;
+  error?: string;
+};
+
+export async function listRecentFailedRuns(
+  args: { limit?: number; playbook?: string; include_finished?: boolean } = {},
+): Promise<FailedRun[]> {
+  const r = await callMcpTool<FailedRun[]>('list_recent_failed_runs', args);
+  if (!r.ok) throw new Error(r.error || 'list_recent_failed_runs failed');
+  return r.result ?? [];
+}
+
+export type WhyDidPlaybookFail = {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  pb_execution?: string;
+  run_status?: string;
+  playbook_name?: string;
+  error_message?: string | null;
+  summary?: {
+    total_templates: number;
+    render_failures: number;
+    referenced_step_keys: string[];
+  };
+  step_diagnostics?: Array<{
+    step: string;
+    location: string;
+    severity: string;
+    code: string;
+    message: string;
+    template?: string;
+    suggestion?: string;
+  }>;
+  hints?: string[];
+};
+
+export async function whyDidPlaybookFail(
+  playbook_or_id: string,
+  yaml_text?: string,
+): Promise<WhyDidPlaybookFail> {
+  const args: Record<string, unknown> = { playbook_or_id };
+  if (yaml_text) args.yaml_text = yaml_text;
+  const r = await callMcpTool<WhyDidPlaybookFail>('why_did_playbook_fail', args);
+  if (!r.ok) throw new Error(r.error || 'why_did_playbook_fail failed');
+  return r.result ?? { ok: false };
 }
 
 export type RecipeRef = { name: string; kind: string; when_to_use: string | null };

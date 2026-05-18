@@ -20,6 +20,8 @@
   import type { VisualNode, VisualPlaybook } from '../api';
   import { visualStore } from '../visualEditStore.svelte';
   import VarPathPicker from './VarPathPicker.svelte';
+  import { attachVarPaneFocus } from '../varPaneFocus';
+  import { jinjaShapesStore } from '../jinjaShapesStore.svelte';
 
   type Props = { node: VisualNode; playbook: VisualPlaybook; playbookIdx: number };
   let { node, playbook, playbookIdx }: Props = $props();
@@ -293,6 +295,7 @@
                 <VarPathPicker
                   {node}
                   {playbook}
+                  shapes={jinjaShapesStore.shapes}
                   wrap={true}
                   onInsert={(snippet) => {
                     // Append the picked path to the existing condition
@@ -319,12 +322,26 @@
               </label>
             </div>
           </div>
+          {@const condFocus = attachVarPaneFocus({
+            label: `${node.name || 'decision'} · ${br.label}`,
+            insert: (snippet) => {
+              const cur = (cond?.condition as string | undefined) ?? '';
+              const next = cur ? `${cur} ${snippet}` : snippet;
+              const conds = getConditions().slice();
+              const m = findEntry(conds, br.label);
+              if (m) conds[m.index] = { ...m.entry, condition: next };
+              else conds.push({ option: br.label, condition: next });
+              writeArgs({ conditions: conds });
+            }
+          })}
           <input
             type="text"
             value={(cond?.condition as string | undefined) ?? ''}
             placeholder={cond?.default ? '(default branch — predicate ignored)' : '{{ vars.score > 50 }}' /* literal Jinja */}
             disabled={!!cond?.default}
             oninput={(e) => setCondition(br.label, e)}
+            onfocus={cond?.default ? undefined : condFocus.onfocus}
+            onblur={cond?.default ? undefined : condFocus.onblur}
             class="block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px] disabled:opacity-50"
           />
         {/if}
@@ -373,18 +390,25 @@
   </select>
 
   {#if isDecision}
+    {@const newCondFocus = attachVarPaneFocus({
+      label: `${node.name || 'decision'} · new branch`,
+      insert: (snippet) => { newCondition = newCondition ? `${newCondition} ${snippet}` : snippet; }
+    })}
     <div class="mt-1 flex items-center gap-1">
       <input
         type="text"
         placeholder={'condition (e.g. {{ vars.score > 50 }})'}
         bind:value={newCondition}
         disabled={newDefault}
+        onfocus={newDefault ? undefined : newCondFocus.onfocus}
+        onblur={newDefault ? undefined : newCondFocus.onblur}
         class="flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px] disabled:opacity-50"
       />
       {#if !newDefault}
         <VarPathPicker
           {node}
           {playbook}
+          shapes={jinjaShapesStore.shapes}
           wrap={true}
           onInsert={(snippet) => {
             newCondition = newCondition ? `${newCondition} ${snippet}` : snippet;

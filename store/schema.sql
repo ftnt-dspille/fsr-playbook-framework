@@ -45,6 +45,24 @@ CREATE TABLE IF NOT EXISTS operations (
 
 CREATE INDEX IF NOT EXISTS idx_ops_op ON operations(op_name);
 
+-- Per-op safety classification. Populated by probes.probe_op_safety
+-- using a layered classifier (HTTP method, name prefix, category bias).
+-- `verify_playbook` reads this to decide which connector_ops are safe
+-- to live-probe with `run_op` for output-shape synthesis.
+CREATE TABLE IF NOT EXISTS op_safety (
+    connector_name      TEXT NOT NULL,
+    op_name             TEXT NOT NULL,
+    safety              TEXT NOT NULL CHECK (safety IN ('safe','unsafe','unknown')),
+    reason              TEXT,             -- one-line human explanation
+    evidence            TEXT,             -- JSON: {method, matched_pattern, source}
+    classifier_version  INTEGER NOT NULL DEFAULT 1,
+    updated_at          TEXT NOT NULL,
+    PRIMARY KEY (connector_name, op_name),
+    FOREIGN KEY (connector_name, op_name)
+        REFERENCES operations(connector_name, op_name) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_op_safety_safety ON op_safety(safety);
+
 -- A param row models either a top-level param (parent_param_name IS NULL,
 -- condition_value IS NULL) or a conditional sub-param that appears only when
 -- its parent's value matches `condition_value` (per the connector's onchange

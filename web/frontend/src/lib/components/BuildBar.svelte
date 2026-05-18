@@ -13,7 +13,7 @@
   import RunButton from './RunButton.svelte';
 
   type Props = {
-    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy') => void;
+    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug') => void;
   };
   let { onShowDrawer }: Props = $props();
 
@@ -29,6 +29,13 @@
     onShowDrawer?.('compile');
     await playbookActions.compile();
   }
+
+  async function onVerify() {
+    await playbookActions.runVerify();
+    // If verify blocked, pop the diagnostics drawer so the user sees
+    // the per-step badges' explanations alongside markers.
+    if (!playbookActions.verifyReady) onShowDrawer?.('diagnostics');
+  }
 </script>
 
 <div class="flex items-center gap-1 border-b border-[var(--border-soft)] bg-[var(--bg-canvas)] px-4 py-1 text-xs">
@@ -42,6 +49,16 @@
     class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 hover:bg-[var(--bg-canvas)]"
     onclick={onCompile}
   >Compile</button>
+  <!-- Verify: forcing-function pre-submit gate (compile + typed walk
+       + per-step schema checks). Runs `verify_playbook`; per-step
+       results render as red/amber badges on the canvas. -->
+  <button
+    type="button"
+    class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 hover:bg-[var(--bg-canvas)]"
+    onclick={onVerify}
+    disabled={playbookActions.verifyBusy}
+    title="Run verify_playbook — single forcing-function gate before push"
+  >Verify</button>
 
   <RunButton />
 
@@ -49,6 +66,18 @@
     <span class="h-2 w-2 rounded-full {dot}"></span>
     <span class="text-[var(--text-muted)]">{status.msg}</span>
   </span>
+
+  {#if playbookActions.verify}
+    <span
+      class="ml-2 rounded px-2 py-0.5 text-[10px] font-medium"
+      style="background: {playbookActions.verifyReady ? '#dcfce7' : '#fee2e2'}; color: {playbookActions.verifyReady ? '#166534' : '#991b1b'}"
+      title={playbookActions.verifyReady
+        ? 'verify: ready to push'
+        : `${playbookActions.verifyFixCount} required fix(es)`}
+    >
+      {playbookActions.verifyReady ? 'verify ✓' : `verify ✗ ${playbookActions.verifyFixCount}`}
+    </span>
+  {/if}
 
   {#if playbookActions.errorCount > 0 || playbookActions.warningCount > 0}
     <button

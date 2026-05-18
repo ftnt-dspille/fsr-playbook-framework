@@ -17,6 +17,7 @@
   import FlowEdge from './FlowEdge.svelte';
 
   import { visualStore } from '../visualEditStore.svelte';
+  import { playbookActions } from '../playbookActions.svelte';
 
   type DropPayload =
     | { kind: 'step_type'; type: string; label: string; detail?: string }
@@ -96,6 +97,14 @@
       data: {
         node: n,
         verification: verifs[n.id] ?? null,
+        // Per-step verify_playbook status. Map keys are jinja-keys
+        // (step name with spaces→underscores) — match against either
+        // the node id or jkey since the typed walker uses step ids
+        // and the validator uses jkeys.
+        verifyStatus:
+          playbookActions.verifyByStep.get(n.id)
+          ?? playbookActions.verifyByStep.get((n.name ?? n.id).replace(/\s+/g, '_'))
+          ?? null,
         direction,
         playbookIdx
       }

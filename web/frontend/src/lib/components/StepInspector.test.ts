@@ -159,16 +159,22 @@ describe('StepInspector', () => {
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Copy' }).length).toBeGreaterThan(0));
   });
 
-  it('shows the Branches tab only for decision/manual_input', async () => {
-    // Connector op: no Branches tab.
+  it('shows the inline Branches section only for decision/manual_input', async () => {
+    // Connector op: no Branches section in Args.
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
-    const view1 = render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
-    expect(view1.queryByRole('button', { name: 'Branches' })).toBeNull();
+    render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
+    // Branches is no longer a tab — it's folded into Args. The
+    // "Branches" heading is absent for connector_op nodes.
+    expect(
+      Array.from(document.querySelectorAll('.uppercase'))
+        .map((e) => e.textContent?.trim())
+    ).not.toContain('Branches');
     cleanup();
-    // Decision: Branches tab visible.
+    // Decision: Branches heading appears inline under Args.
     const branchNode = pb().nodes.find((n) => n.id === 'branch')!;
     render(StepInspector, { props: { node: branchNode, playbook: pb(), playbookIdx: 0 } });
-    expect(screen.getByRole('button', { name: 'Branches' })).toBeTruthy();
+    const headings = Array.from(document.querySelectorAll('.uppercase')).map((e) => e.textContent?.trim());
+    expect(headings).toContain('Branches');
   });
 
   it('renders the Verify tab and resolves args via render_jinja', async () => {
@@ -196,11 +202,13 @@ describe('StepInspector', () => {
     expect(screen.getByText(/Open, Closed/)).toBeTruthy();
   });
 
-  it('Verify tab History button shows verification_status results', async () => {
+  it('Verify tab "Past test runs" Load button shows verification_status results', async () => {
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'History' }));
+    // History button was renamed to "Load" so the action verb matches
+    // what the user is doing (loading past runs).
+    await fireEvent.click(screen.getByRole('button', { name: 'Load' }));
     await waitFor(() => screen.getByText('tested_pass'));
     expect(screen.getByText(/live_op_exec/)).toBeTruthy();
     expect(screen.getByText(/ran clean/)).toBeTruthy();
@@ -234,10 +242,10 @@ describe('StepInspector', () => {
     expect(screen.queryByRole('button', { name: 'Run' })).toBeNull();
   });
 
-  it('renames a branch label via the Branches tab', async () => {
+  it('renames a branch label via the inline Branches section', async () => {
     const branchNode = pb().nodes.find((n) => n.id === 'branch')!;
     render(StepInspector, { props: { node: branchNode, playbook: pb(), playbookIdx: 0 } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Branches' }));
+    // Branches now renders inline beneath Args — no tab click needed.
     const labelInput = screen.getByDisplayValue('high');
     await fireEvent.input(labelInput, { target: { value: 'critical' } });
     const after = visualStore.state.graph!.playbooks[0].edges.find(
@@ -246,11 +254,9 @@ describe('StepInspector', () => {
     expect(after?.label).toBe('critical');
   });
 
-  it('Branches tab can add a new branch with a label + target', async () => {
+  it('inline Branches section can add a new branch with a label + target', async () => {
     const branchNode = pb().nodes.find((n) => n.id === 'branch')!;
-    // Need at least one selectable target other than the branch itself.
     render(StepInspector, { props: { node: branchNode, playbook: pb(), playbookIdx: 0 } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Branches' }));
     const labelInput = screen.getByPlaceholderText('label (e.g. matched)') as HTMLInputElement;
     await fireEvent.input(labelInput, { target: { value: 'extra' } });
     const targetSelect = screen.getByLabelText('New branch target') as HTMLSelectElement;
@@ -329,15 +335,13 @@ describe('StepInspector', () => {
     cs.mockRestore();
   });
 
-  it('Decision node hides Args and lands on Branches by default', async () => {
+  it('Decision node shows Args (with inline Branches) as the default tab', async () => {
     const branchNode = pb().nodes.find((n) => n.id === 'branch')!;
     render(StepInspector, { props: { node: branchNode, playbook: pb(), playbookIdx: 0 } });
-    expect(screen.queryByRole('button', { name: 'Args' })).toBeNull();
-    // Examples is now wired for every step type with corpus skeletons
-    // (decision included) — the tab should be visible, but Branches
-    // remains the default.
+    // Args is back for decision — it owns the inline Branches editor.
+    expect(screen.getByRole('button', { name: 'Args' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Examples' })).toBeTruthy();
-    // Default-active tab is Branches; the rename input for label "high" should be present.
+    // Default-active tab is Args; the rename input for label "high" comes from the inline branches editor.
     expect(screen.getByDisplayValue('high')).toBeTruthy();
   });
 

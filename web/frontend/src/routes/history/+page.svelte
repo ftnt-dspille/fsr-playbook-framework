@@ -1,5 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import FailedRunsPanel from '$lib/components/FailedRunsPanel.svelte';
+
+  type Tab = 'sessions' | 'runs';
+  let tab = $state<Tab>('sessions');
 
   type Session = {
     id: string;
@@ -229,6 +233,37 @@
      and header subtract their own space via the flex-column layout
      wrapper, so a hard `100vh - 3rem` calc here would overlap the
      footer. -->
+<div class="flex h-full min-h-0 flex-col">
+  <nav
+    class="flex items-center gap-1 border-b border-[var(--border-soft)] bg-[var(--bg-canvas)] px-4 py-1.5 text-sm"
+  >
+    <button
+      onclick={() => (tab = 'sessions')}
+      class={[
+        'px-3 py-1 rounded',
+        tab === 'sessions'
+          ? 'bg-[var(--bg-panel)] text-[var(--text-default)]'
+          : 'text-[var(--text-muted)] hover:text-[var(--text-default)]',
+      ].join(' ')}
+    >
+      Chat sessions
+    </button>
+    <button
+      onclick={() => (tab = 'runs')}
+      class={[
+        'px-3 py-1 rounded',
+        tab === 'runs'
+          ? 'bg-[var(--bg-panel)] text-[var(--text-default)]'
+          : 'text-[var(--text-muted)] hover:text-[var(--text-default)]',
+      ].join(' ')}
+    >
+      Failed runs
+    </button>
+  </nav>
+
+{#if tab === 'runs'}
+  <FailedRunsPanel />
+{:else}
 <div class="flex h-full min-h-0">
   <aside class="w-96 shrink-0 border-r border-[var(--border-soft)] overflow-y-auto">
     <div class="sticky top-0 bg-[var(--bg-canvas)] border-b border-[var(--border-soft)] px-4 py-3 flex items-center justify-between">
@@ -554,4 +589,6 @@
       {/if}
     {/if}
   </main>
+</div>
+{/if}
 </div>

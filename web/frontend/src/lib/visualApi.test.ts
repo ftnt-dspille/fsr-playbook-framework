@@ -10,7 +10,6 @@ let fetchMock: any;
 
 beforeEach(() => {
   fetchMock = vi.fn();
-  // @ts-expect-error stubbing global
   globalThis.fetch = fetchMock;
 });
 

@@ -303,7 +303,7 @@ def step_examples(step_type: str, limit: int = 10) -> dict[str, Any]:
     Powers the Examples tab on every step type. See
     ``web/backend/step_examples.py`` for clustering + summariser.
     """
-    from step_examples import cluster_examples, STEP_TYPE_TO_CORPUS
+    from ..step_examples import cluster_examples, STEP_TYPE_TO_CORPUS
     if step_type not in STEP_TYPE_TO_CORPUS:
         raise HTTPException(404,
             f"step type {step_type!r} has no corpus mapping; "
@@ -312,6 +312,248 @@ def step_examples(step_type: str, limit: int = 10) -> dict[str, Any]:
     with _conn() as c:
         clusters = cluster_examples(c, step_type, limit=n)
     return {"step_type": step_type, "examples": clusters}
+
+
+_GLOBAL_VARS_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
+_GLOBAL_VARS_TTL = 60.0  # seconds; global vars change rarely
+
+
+@router.get("/global-vars")
+def list_global_vars() -> list[dict[str, Any]]:
+    """FSR global ("dynamic") variables — `globalVars.<name>` autocomplete.
+
+    Hits the live FSR at `/api/wf/api/dynamic-variable/`. Cached for
+    60s so the editor doesn't pummel the appliance. Returns [] when
+    the env is offline or the request fails — callers fall back to a
+    buffer-scrape of names already referenced in the YAML.
+    """
+    import time as _time
+    now = _time.monotonic()
+    cached = _GLOBAL_VARS_CACHE["data"]
+    if cached is not None and (now - float(_GLOBAL_VARS_CACHE["ts"])) < _GLOBAL_VARS_TTL:
+        return cached  # type: ignore[no-any-return]
+    try:
+        from probes import _env  # type: ignore
+        cfg = _env.get_config()
+        if not cfg.is_live():
+            return []
+        client = _env.get_client()
+        r = client.session.get(
+            client.base_url + "/api/wf/api/dynamic-variable/?offset=0&limit=2147483647",
+            verify=client.verify_ssl,
+            timeout=4,
+        )
+        if r.status_code != 200:
+            return []
+        members = r.json().get("hydra:member", [])
+        out = [
+            {
+                "name": m.get("name", ""),
+                "value": m.get("value"),
+                "default_value": m.get("default_value"),
+            }
+            for m in members
+            if isinstance(m, dict) and m.get("name")
+        ]
+    except Exception:
+        out = []
+    _GLOBAL_VARS_CACHE["data"] = out
+    _GLOBAL_VARS_CACHE["ts"] = now
+    return out
+
+
+@router.get("/recent-runs")
+def recent_runs(
+    playbook_iri: str | None = None,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Last N playbook executions from FSR, optionally filtered to a
+    single playbook. Used by the trigger-step sample picker so authors
+    can pin "the record from the last run" without us needing to
+    persist anything ourselves — FSR's workflow execution history is
+    already the source of truth.
+
+    Returns each run with its record IRIs (when present). The picker
+    can then fetch the record body via /api/ref/record-by-iri.
+    """
+    try:
+        from probes import _env  # type: ignore
+        cfg = _env.get_config()
+        if not cfg.is_live():
+            return {"ok": False, "error": "FSR offline", "runs": []}
+        client = _env.get_client()
+        n = max(1, min(int(limit), 20))
+        params = "?format=json&ordering=-created&limit=" + str(n)
+        if playbook_iri:
+            from urllib.parse import quote
+            params += "&template_iri=" + quote(playbook_iri, safe="")
+        r = client.session.get(
+            client.base_url + "/api/wf/api/workflows/" + params,
+            verify=client.verify_ssl,
+            timeout=5,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}", "runs": []}
+        data = r.json() or {}
+        items = data.get("hydra:member") or data.get("results") or []
+        out = []
+        for it in items[:n]:
+            if not isinstance(it, dict):
+                continue
+            recs = it.get("records") or []
+            if not isinstance(recs, list):
+                recs = []
+            out.append({
+                "id": it.get("id"),
+                "status": it.get("status"),
+                "created": it.get("created"),
+                "name": it.get("playbookName") or it.get("name") or "",
+                "records": [str(x) for x in recs if isinstance(x, str)],
+            })
+        return {"ok": True, "runs": out}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "runs": []}
+
+
+@router.get("/run-detail/{run_id}")
+def run_detail(run_id: str) -> dict[str, Any]:
+    """Full FSR workflow execution detail — used to seed the editor
+    with the EXACT context a past run had (input records, step
+    variables, step outputs). Lets authors iterate on a playbook
+    against real production data without re-running anything.
+
+    Returns the raw FSR response trimmed to a reasonable size; the
+    frontend cherry-picks input records / step traces from it.
+    """
+    if not run_id or not run_id.isdigit():
+        return {"ok": False, "error": "run_id must be a positive integer"}
+    try:
+        from probes import _env  # type: ignore
+        cfg = _env.get_config()
+        if not cfg.is_live():
+            return {"ok": False, "error": "FSR offline"}
+        client = _env.get_client()
+        r = client.session.get(
+            client.base_url + f"/api/wf/api/workflows/{run_id}/?format=json",
+            verify=client.verify_ssl,
+            timeout=8,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        data = r.json() or {}
+        # Pull common fields we care about; pass through unknown ones
+        # so future FSR versions adding fields still work.
+        return {
+            "ok": True,
+            "id": data.get("id"),
+            "status": data.get("status"),
+            "created": data.get("created"),
+            "modified": data.get("modified"),
+            "name": data.get("playbookName") or data.get("name") or "",
+            "records": data.get("records") or [],
+            # Step traces; field names vary by FSR version — we include
+            # whichever the appliance returns so the frontend can probe.
+            "wf_step_logs": data.get("wf_step_logs"),
+            "step_logs": data.get("step_logs"),
+            "stepInstances": data.get("stepInstances"),
+            "input_parameters": data.get("input_parameters") or data.get("inputs"),
+        }
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+@router.get("/record-by-iri")
+def record_by_iri(iri: str) -> dict[str, Any]:
+    """Fetch a single record by its IRI (e.g. `/api/3/alerts/<uuid>`).
+    Wraps the appliance fetch so the browser doesn't need to talk to
+    FSR directly (avoids mixed-content / cert issues). Returns the
+    record body with the same noisy-key trimming as /sample-record."""
+    if not iri or not iri.startswith("/api/"):
+        return {"ok": False, "error": "iri must start with /api/", "record": None}
+    try:
+        from probes import _env  # type: ignore
+        cfg = _env.get_config()
+        if not cfg.is_live():
+            return {"ok": False, "error": "FSR offline", "record": None}
+        client = _env.get_client()
+        r = client.session.get(
+            client.base_url + iri,
+            verify=client.verify_ssl,
+            timeout=5,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}", "record": None}
+        rec = r.json() or {}
+        if not isinstance(rec, dict):
+            return {"ok": False, "error": "non-object response", "record": None}
+        out = {}
+        for k, v in rec.items():
+            if isinstance(v, list) and len(v) > 3:
+                out[k] = f"<list[{len(v)}]>"
+            elif isinstance(v, dict) and "itemValue" in v:
+                out[k] = v  # picklist — keep so itemValue stays accessible
+            elif isinstance(v, dict) and len(v) > 8:
+                out[k] = "<object>"
+            else:
+                out[k] = v
+        return {"ok": True, "record": out}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "record": None}
+
+
+@router.get("/sample-record/{module}")
+def sample_record(module: str, limit: int = 5) -> dict[str, Any]:
+    """Pull the N most recent records of `<module>` from the live FSR.
+
+    Used by the variable picker / start-step UI to show *real* field
+    values the user can use as a sample for `vars.input.records[0]`.
+    The picker can offer one row as the "what `vars.input.records[0]`
+    will look like at runtime" preview, so authors can validate that
+    `.severity` (or whatever they're about to reference) actually
+    exists on the trigger's records.
+
+    Returns [] when offline. We strip noisy meta-keys to keep the JSON
+    shape readable in the picker.
+    """
+    try:
+        from probes import _env  # type: ignore
+        cfg = _env.get_config()
+        if not cfg.is_live():
+            return {"ok": False, "error": "FSR offline", "records": []}
+        client = _env.get_client()
+        n = max(1, min(int(limit), 25))
+        bare = module.split("?", 1)[0]
+        r = client.session.get(
+            client.base_url + f"/api/3/{bare}?$limit={n}&$orderby=-id",
+            verify=client.verify_ssl,
+            timeout=5,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}", "records": []}
+        data = r.json() or {}
+        items = data.get("hydra:member") or data.get("data") or []
+        # Drop large/noisy collections that overwhelm the picker. Keep
+        # scalars + small dicts; preserve `@id` / `id` which authors use.
+        # Picklist-shaped objects (have `itemValue`) are ALWAYS preserved
+        # — they're how FSR stores severity / status / type etc., and
+        # the frontend renders their `itemValue` as the display value.
+        def _clean(rec):
+            if not isinstance(rec, dict):
+                return rec
+            out = {}
+            for k, v in rec.items():
+                if isinstance(v, list) and len(v) > 3:
+                    out[k] = f"<list[{len(v)}]>"
+                elif isinstance(v, dict) and "itemValue" in v:
+                    out[k] = v  # picklist — keep as-is
+                elif isinstance(v, dict) and len(v) > 8:
+                    out[k] = "<object>"
+                else:
+                    out[k] = v
+            return out
+        return {"ok": True, "module": bare, "records": [_clean(x) for x in items[:n]]}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "records": []}
 
 
 @router.get("/example-prompts")

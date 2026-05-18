@@ -16,7 +16,10 @@
   import PlaybookCanvas from '$lib/components/PlaybookCanvas.svelte';
   import StepInspector from '$lib/components/StepInspector.svelte';
   import StepPalette from '$lib/components/StepPalette.svelte';
+  import VarTreePane from '$lib/components/VarTreePane.svelte';
+  import { varPaneStore } from '$lib/varPaneStore.svelte';
   import EditorToolbar from '$lib/components/EditorToolbar.svelte';
+  import JinjaTestModal from '$lib/components/JinjaTestModal.svelte';
   import PlaybookGuards from '$lib/components/PlaybookGuards.svelte';
   import { visualStore } from '$lib/visualEditStore.svelte';
 
@@ -24,7 +27,7 @@
     /** Pop the bottom diagnostics drawer to a specific tab. Forwarded
      * down so the Compile button on EditorToolbar can lift the drawer
      * without EditWorkspace duplicating drawer state. */
-    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy') => void;
+    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug') => void;
   };
   let { onShowDrawer }: Props = $props();
 
@@ -51,6 +54,7 @@
   // persistence: a fresh canvas should never come up with an empty
   // inspector hogging the right edge.
   let inspectorOpen: boolean = $state(false);
+  let jinjaTestOpen: boolean = $state(false);
 
   let graph = $derived(visualStore.state.graph);
   let selectedNode: VisualNode | null = $derived(
@@ -71,6 +75,16 @@
   // have to chase a hidden panel after every selection.
   $effect(() => {
     if (selectedNodeId) inspectorOpen = true;
+  });
+
+  // Keep the var pane's scope in sync with the selected node so
+  // ancestor step shapes reflect what's actually in scope when the
+  // user opens the pane from a field. Also auto-close the pane when
+  // the user navigates to a different step — the previous target's
+  // insert closure is no longer relevant.
+  $effect(() => {
+    varPaneStore.node = selectedNode;
+    if (!selectedNode) varPaneStore.close();
   });
 
   // Drain cross-component focus signals — e.g. the diagnostics drawer
@@ -110,7 +124,7 @@
           playbookIdx={activePbIdx}
           direction={layoutDir}
           onDirectionChange={(d) => (layoutDir = d)}
-          onJinjaTest={() => alert('Jinja test modal — coming next pass')}
+          onJinjaTest={() => (jinjaTestOpen = true)}
           {onShowDrawer}
         />
       {/if}
@@ -184,6 +198,25 @@
         </button>
       {/if}
 
+      {#if inspectorOpen && varPaneStore.open && selectedNode}
+        <!-- Variable tree pane — flies in to the immediate left of
+             the inspector when a Jinja-accepting field is focused or
+             its {x} button is clicked. Width matches the inspector
+             so the two panes feel like a single inspector cluster. -->
+        <div
+          class="absolute inset-y-0 z-30 flex w-80 flex-col border-l border-[var(--border-soft)] bg-[var(--bg-canvas)] shadow-xl"
+          style:right="24rem"
+          role="dialog"
+          aria-label="Variable tree pane"
+        >
+          <VarTreePane
+            node={selectedNode}
+            playbook={graph?.playbooks[activePbIdx] ?? null}
+            onClose={() => varPaneStore.close()}
+          />
+        </div>
+      {/if}
+
       {#if inspectorOpen}
         <div
           class="absolute inset-y-0 right-0 z-30 flex w-96 flex-col border-l border-[var(--border-soft)] bg-[var(--bg-canvas)] shadow-xl"
@@ -213,3 +246,7 @@
     </main>
   </div>
 </div>
+
+{#if jinjaTestOpen}
+  <JinjaTestModal onClose={() => (jinjaTestOpen = false)} />
+{/if}

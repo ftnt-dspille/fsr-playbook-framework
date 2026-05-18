@@ -1,5 +1,8 @@
 <script lang="ts">
   import '../app.css';
+  // Configure MonacoEnvironment BEFORE any component imports
+  // monaco-editor, so the editor worker is registered up front.
+  import '$lib/monacoEnvironment';
   import StatusBar from '$lib/components/StatusBar.svelte';
   import { theme } from '$lib/theme.svelte';
   import { onMount } from 'svelte';

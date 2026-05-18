@@ -37,7 +37,7 @@
     onDelete?.(id);
   }
 
-  type Tab = 'args' | 'examples' | 'branches' | 'verify' | 'raw';
+  type Tab = 'args' | 'examples' | 'verify' | 'raw';
   let activeTab: Tab = $state('args');
 
   // Reset to the most useful default tab whenever the user picks a
@@ -50,12 +50,10 @@
   // Tab visibility is driven by node family/type. Decision/terminal/etc.
   // don't have schema-driven args or operation examples, so we hide
   // those tabs entirely to keep the inspector focused.
-  // Args tab is irrelevant for decision (use Branches), terminal
-  // (no args), and trigger steps where the only field is the trigger
-  // record context. Keep it everywhere else.
-  let showArgs = $derived(
-    node ? node.family !== 'terminal' && node.type !== 'decision' : false
-  );
+  // Args tab is hidden only for terminal nodes (no args at all).
+  // Decision + manual_input now show Args because their Branches
+  // editor lives inside it.
+  let showArgs = $derived(node ? node.family !== 'terminal' : false);
   // Examples tab is shown for any step type that has corpus-mined
   // skeletons available — connector_op + record_crud use the live
   // operation/Jinja examples; everything else falls back to the new
@@ -76,19 +74,14 @@
   let showBranches = $derived(node?.type === 'decision' || node?.type === 'manual_input');
   let showVerify = $derived(node ? node.family !== 'terminal' : false);
 
-  // Decision and trigger nodes' "args" are tiny — fall back to Branches
-  // (decision) or Raw (trigger) as the default tab so the user lands on
-  // something useful instead of a one-line freeform JSON view.
-  let defaultTab = $derived<Tab>(
-    node?.type === 'decision' ? 'branches'
-      : node?.family === 'terminal' ? 'raw'
-      : 'args'
-  );
+  // Trigger nodes' "args" are tiny — fall back to Raw so the user
+  // lands on something useful. Decision / manual_input now keep
+  // branches inside the Args tab, so Args is always a sensible default.
+  let defaultTab = $derived<Tab>(node?.family === 'terminal' ? 'raw' : 'args');
 
   let TABS = $derived<{ key: Tab; label: string }[]>([
     ...(showArgs ? [{ key: 'args' as Tab, label: 'Args' }] : []),
     ...(showExamples ? [{ key: 'examples' as Tab, label: 'Examples' }] : []),
-    ...(showBranches ? [{ key: 'branches' as Tab, label: 'Branches' }] : []),
     ...(showVerify ? [{ key: 'verify' as Tab, label: 'Verify' }] : []),
     { key: 'raw', label: 'Raw' }
   ]);
@@ -185,10 +178,19 @@
     <div class="flex-1 overflow-auto px-4 py-3 text-sm">
       {#if activeTab === 'args'}
         <StepInspectorArgsTab {node} {playbook} {playbookIdx} />
+        {#if showBranches}
+          <!-- Branches were previously a separate tab; folded in here
+               so the user sees options and their routing together (esp.
+               for manual_input, where each button is one branch). -->
+          <section class="mt-6 border-t border-[var(--border-soft)] pt-4">
+            <div class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              Branches
+            </div>
+            <StepInspectorBranchesTab {node} {playbook} {playbookIdx} />
+          </section>
+        {/if}
       {:else if activeTab === 'examples'}
         <StepInspectorExamplesTab {node} {playbook} {playbookIdx} />
-      {:else if activeTab === 'branches'}
-        <StepInspectorBranchesTab {node} {playbook} {playbookIdx} />
       {:else if activeTab === 'verify'}
         <StepInspectorVerifyTab {node} />
       {:else}

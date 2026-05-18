@@ -15,6 +15,10 @@
   let props: NodeProps = $props();
   let node = $derived(props.data.node as VisualNode);
   let verification = $derived(props.data.verification as { status: string } | null);
+  // Per-step verify_playbook status: 'error' (blocks push), 'warning'
+  // (unknown-shape, live-probe-skipped), or null (no diagnostics for
+  // this step on the latest verify run).
+  let verifyStatus = $derived(props.data.verifyStatus as 'error' | 'warning' | null);
   let direction = $derived((props.data.direction as 'TB' | 'LR' | undefined) ?? 'TB');
   let playbookIdx = $derived((props.data.playbookIdx as number | undefined) ?? 0);
 
@@ -175,6 +179,20 @@
           style="background: {VERIF_DOT[verification.status] ?? '#9ca3af'}"
           aria-label="verification {verification.status}"
         ></span>
+      {/if}
+      {#if verifyStatus}
+        <!-- verify_playbook per-step status. Distinct from the
+             store-verification dot above (which tracks whether the
+             connector/op has ever been used) — this one reflects the
+             latest pre-submit verify run. -->
+        <span
+          class="inline-flex items-center rounded-full px-1.5 py-px text-[9px] font-bold text-white"
+          style="background: {verifyStatus === 'error' ? DIAG_COLOR.error : DIAG_COLOR.warning}"
+          title={verifyStatus === 'error'
+            ? 'verify: required fix on this step'
+            : 'verify: warning on this step'}
+          aria-label={`verify ${verifyStatus}`}
+        >{verifyStatus === 'error' ? '✗' : '!'}</span>
       {/if}
     </span>
   </div>

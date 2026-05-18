@@ -130,29 +130,3 @@ def delete_session(session_id: str) -> dict[str, Any]:
     return {"deleted": True}
 
 
-@router.get("/feedback")
-def list_feedback(rating: str | None = None,
-                  limit: int = 100) -> list[dict[str, Any]]:
-    """All sessions that have user feedback. Useful when a future
-    session wants to mine 'what went wrong' across the corpus."""
-    return history_db.list_feedback(rating=rating, limit=limit)
-
-
-@router.get("/pushes")
-def list_pushes(limit: int = 100,
-                coll_uuid: str | None = None) -> list[dict[str, Any]]:
-    return history_db.list_pushes(limit=limit, coll_uuid=coll_uuid)
-
-
-@router.get("/pushes/{push_id}")
-def get_push(push_id: int) -> dict[str, Any]:
-    p = history_db.get_push(push_id)
-    if p is None:
-        raise HTTPException(404, f"no push {push_id}")
-    return p
-
-
-@router.get("/timeline")
-def timeline(limit: int = 50) -> list[dict[str, Any]]:
-    """Combined chat-session + push timeline."""
-    return history_db.timeline(limit=limit)

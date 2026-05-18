@@ -74,7 +74,10 @@ def _scrub(text: str) -> str:
 
 class PushIn(BaseModel):
     text: str
-    mode: str = "replace"
+    # Default mirrors `python -m cli push` — `safe` runs preflight + bulk-
+    # upsert and never hard-purges. `replace` is opt-in and requires
+    # FSR_ALLOW_HARD_DELETE on the backend.
+    mode: str = "safe"
 
 
 class PushOut(BaseModel):
@@ -86,8 +89,8 @@ class PushOut(BaseModel):
 
 @router.post("/playbook/push", response_model=PushOut)
 def push(body: PushIn) -> PushOut:
-    if body.mode not in ("replace", "create", "update", "upsert"):
-        raise HTTPException(400, "mode must be replace|create|update|upsert")
+    if body.mode not in ("safe", "replace", "create", "update", "upsert"):
+        raise HTTPException(400, "mode must be safe|replace|create|update|upsert")
     # Fail fast when FSR isn't configured — without this the user
     # waits for the 120 s subprocess timeout before getting feedback.
     try:

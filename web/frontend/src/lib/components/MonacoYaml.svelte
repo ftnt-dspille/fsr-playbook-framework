@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import type { Marker } from '$lib/api';
-  import { registerYamlCompletions } from '$lib/yamlCompletions';
-  import { registerYamlHover } from '$lib/yamlHover';
+  import { ensureYamlSupport } from '$lib/monacoYamlSupport';
+  import { enhanceJinjaEditor } from '$lib/jinja/enhanceJinjaEditor';
+  import JinjaVarPicker from './JinjaVarPicker.svelte';
+  import JinjaToolbar from './JinjaToolbar.svelte';
 
   let {
     value = '',
@@ -29,8 +31,6 @@
   let editor = $state<any>(null);
   let monacoRef = $state<any>(null);
   let modelRef = $state<any>(null);
-  let completionDisposer: { dispose: () => void } | null = null;
-  let hoverDisposer: { dispose: () => void } | null = null;
   let internalUpdate = false;
 
   onMount(async () => {
@@ -45,11 +45,12 @@
       fontSize: 15,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      tabSize: 2
+      tabSize: 2,
+      fixedOverflowWidgets: true
     });
     modelRef = editor.getModel();
-    completionDisposer = registerYamlCompletions(monaco);
-    hoverDisposer = registerYamlHover(monaco);
+    ensureYamlSupport(monaco);
+    enhanceJinjaEditor(editor, monaco);
     editor.onDidChangeModelContent(() => {
       if (internalUpdate) return;
       onInput(editor.getValue());
@@ -59,8 +60,6 @@
   });
 
   onDestroy(() => {
-    completionDisposer?.dispose();
-    hoverDisposer?.dispose();
     editor?.dispose();
   });
 
@@ -101,4 +100,16 @@
   }
 </script>
 
-<div bind:this={host} class="h-full w-full"></div>
+<div class="relative h-full w-full">
+  <div bind:this={host} class="h-full w-full"></div>
+  {#if editor && monacoRef && !readOnly}
+    <div class="pointer-events-none absolute right-2 top-2 z-10 flex gap-2">
+      <div class="pointer-events-auto">
+        <JinjaVarPicker {editor} monaco={monacoRef} />
+      </div>
+      <div class="pointer-events-auto">
+        <JinjaToolbar {editor} monaco={monacoRef} />
+      </div>
+    </div>
+  {/if}
+</div>

@@ -24,10 +24,10 @@ describe('buildSnippet — pad-independent output (no double-indentation)', () =
     it(`${name}: output is identical for all pad values`, () => {
       const baseline = buildSnippet(name, '');
       for (const pad of PADS) {
-        expect(buildSnippet(name, pad)).toBe(
-          baseline,
+        expect(
+          buildSnippet(name, pad),
           `snippet "${name}" differs when pad="${pad}" — it embeds the pad (double-indent bug)`
-        );
+        ).toBe(baseline);
       }
     });
   }

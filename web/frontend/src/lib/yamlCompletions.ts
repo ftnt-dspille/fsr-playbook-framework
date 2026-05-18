@@ -9,6 +9,14 @@ import {
   listOperations,
   searchConnectors
 } from './api';
+import { suggestForJinjaPath } from './jinjaPathCompletions';
+import { jinjaShapesStore } from './jinjaShapesStore.svelte';
+import {
+  extractTriggerModule,
+  triggerModuleFieldsStore,
+  extractGlobalVarNames,
+  globalVarsStore
+} from './triggerModuleFields.svelte';
 
 let stepTypeCache: { name: string; detail: string }[] | null = null;
 let connectorCache: { name: string; label: string | null }[] | null = null;
@@ -98,7 +106,7 @@ export function buildSnippet(name: string, pad: string): string {
 
 export function registerYamlCompletions(monaco: any): { dispose: () => void } {
   return monaco.languages.registerCompletionItemProvider('yaml', {
-    triggerCharacters: [':', ' ', '|'],
+    triggerCharacters: [':', ' ', '|', '.', '['],
     async provideCompletionItems(model: any, position: any) {
       const line = model.getLineContent(position.lineNumber);
       const before = line.slice(0, position.column - 1);
@@ -151,6 +159,66 @@ export function registerYamlCompletions(monaco: any): { dispose: () => void } {
             range
           }))
         };
+      }
+
+      // typed value-path inside `{{ ... }}` — fires when the most
+      // recent `{{` is unclosed AND the partial expression starts
+      // with `vars.steps.`. Suggestions come from the typed_walker
+      // shapes published by the most recent verify run.
+      const lastOpen = before.lastIndexOf('{{');
+      if (lastOpen !== -1 && !before.slice(lastOpen).includes('}}')) {
+        const expr = before.slice(lastOpen);
+        // Don't shadow the filter branch — once a `|` appears in the
+        // expression, the filter completion owns the suggestion list.
+        if (!/\|/.test(expr)) {
+          // Module-aware input.records: when the expression targets
+          // `vars.input.records[N]`, swap in the trigger module's
+          // actual fields. Falls through to DEFAULT_RECORD_FIELDS when
+          // the YAML lacks a trigger or the fetch is empty.
+          let inputRecordFields: string[] | undefined;
+          let globalVarNames: string[] | undefined;
+          if (/vars\.input\.records\[\d+\]\./.test(expr)) {
+            const yamlText = model.getValue?.() ?? '';
+            const mod = extractTriggerModule(yamlText);
+            if (mod) {
+              const fields = await triggerModuleFieldsStore.fieldsFor(mod);
+              if (fields.length) inputRecordFields = fields;
+            }
+          }
+          if (/globalVars\./.test(expr)) {
+            // Live FSR catalog first; buffer-scrape if offline.
+            const live = await globalVarsStore.list();
+            if (live.length) {
+              globalVarNames = live.map((g) => g.name).sort();
+            } else {
+              const yamlText = model.getValue?.() ?? '';
+              globalVarNames = extractGlobalVarNames(yamlText);
+            }
+          }
+          // Refresh shapes lazily on the first vars.* keystroke so
+          // typed_walker results are current (no need for the user to
+          // click Verify before getting set_variable completions).
+          if (/\{\{\s*vars\./.test(expr)) {
+            const yamlText = model.getValue?.() ?? '';
+            if (yamlText) await jinjaShapesStore.refresh(yamlText);
+          }
+          const pathSugs = suggestForJinjaPath(expr, {
+            inputRecordFields,
+            globalVarNames,
+            topLevelVars: jinjaShapesStore.topLevelVars
+          });
+          if (pathSugs && pathSugs.length) {
+            return {
+              suggestions: pathSugs.map((p) => ({
+                label: p.label,
+                kind: monaco.languages.CompletionItemKind.Field,
+                insertText: p.insertText,
+                detail: p.detail,
+                range
+              }))
+            };
+          }
+        }
       }
 
       // jinja filter — fires when the cursor is inside `{{ ... | }}`
