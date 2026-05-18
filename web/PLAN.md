@@ -3,7 +3,7 @@
 **Status**: Phase 5 in progress (LLM-modular + history backend done; UI routes pending)
 **Owner**: Dylan
 **Last updated**: 2026-05-04
-**Supersedes**: UI + shipping sections of `../CHAT_APP_PLAN.md` (Streamlit). Inherits everything else from that doc — LLM context strategy, hard rules, tool dispatcher design, offline/live data buckets, risks. Read `CHAT_APP_PLAN.md` first; this doc only covers the deltas for the SvelteKit + FastAPI stack.
+**Supersedes**: UI + shipping sections of `../docs/archive/CHAT_APP_PLAN.md` (Streamlit). Inherits everything else from that doc — LLM context strategy, hard rules, tool dispatcher design, offline/live data buckets, risks. Read the archived plan first; this doc only covers the deltas for the SvelteKit + FastAPI stack.
 
 ---
 

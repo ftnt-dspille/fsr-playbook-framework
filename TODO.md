@@ -1,6 +1,38 @@
 # FSRPlaybookYaml — TODO / resume state
 
-**Last touched**: 2026-05-15. Live FSR target: `https://10.99.249.205` (label `dev`).
+**Last touched**: 2026-05-18. Live FSR target: `https://10.99.249.205` (label `dev`).
+
+This file is the master backlog + resume state. Deep multi-phase plans
+live under `docs/plans/`; frozen research/audit snapshots under
+`docs/research/`; superseded plans under `docs/archive/`.
+
+## Plan index
+
+**Active plans** (`docs/plans/`) — open these for phase-level detail; this file links to them rather than restating their content.
+
+| Plan | Scope | Status |
+|---|---|---|
+| [`VERIFY_PLAYBOOK_PLAN.md`](docs/plans/VERIFY_PLAYBOOK_PLAN.md) | Single `verify_playbook` forcing-function tool that gates "done" for the agent loop. Trust audit + tool consolidation. | In progress; `verify_playbook` MCP tool + confidence-tier scoring shipped (commit b14ca1c) |
+| [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector wired to every MCP tool; debug runner. | Phase 1–4 shipped; inspector polish + debug runner ongoing |
+| [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 shipped (`render_paths.py`, `render_analyzer.py`); heuristic catalog ongoing |
+| [`AGENT_QUALITY_PLAN.md`](docs/plans/AGENT_QUALITY_PLAN.md) | Evidence base for agent tuning: what the agent actually looks up, data-store gaps, prompt-adherence baseline. | Phase 1A/B/C shipped (`fsrpb agent-stats`); Phase 2/3 pending |
+
+**Frozen research / audits** (`docs/research/`) — snapshots, not updated:
+
+- [`GAPS.md`](docs/research/GAPS.md) — live-instance information gaps (endpoints we still need to confirm).
+- [`SURFACE_AUDIT.md`](docs/research/SURFACE_AUDIT.md) — Phase 0 feeder for `VERIFY_PLAYBOOK_PLAN`: every MCP tool / route / prompt directive / CLI verb tagged keep|wire|delete.
+- [`MI_DECISION_VALIDATION_AUDIT.md`](docs/research/MI_DECISION_VALIDATION_AUDIT.md) — 2026-05-06 audit of ManualInput + Decision rules against the corpus.
+- [`RECIPE_EXPANSION_RESEARCH.md`](docs/research/RECIPE_EXPANSION_RESEARCH.md) — 2026-05-06 archetype assessment beyond threat-feed / data-ingest recipes.
+
+**Archived / superseded** (`docs/archive/`):
+
+- [`CHAT_APP_PLAN.md`](docs/archive/CHAT_APP_PLAN.md) — Phase 2 LLM-agnostic chat shim. UI/shipping superseded by `web/PLAN.md` (SvelteKit + FastAPI); LLM-context strategy still inherited from this doc.
+
+**Cross-project**:
+
+- [`Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`](../Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md) — original cross-project plan; referenced from global `~/.claude/CLAUDE.md`.
+
+---
 
 ## Live-FSR round-trip probe
 
@@ -262,7 +294,7 @@ them per-cell.
 ## Success ladder + LLM-agnostic groundwork
 
 All 11 items shipped 2026-05-06. Strategy in
-`CHAT_APP_PLAN.md` "Success ladder + LLM-agnostic strategy".
+`docs/archive/CHAT_APP_PLAN.md` "Success ladder + LLM-agnostic strategy".
 
 | # | Item | Code |
 |---|---|---|
@@ -566,7 +598,7 @@ idempotent; `python/probes/_env.py` loads `.env`.
   `python/mcp_server/tools_jinja.py` now JSON-decodes string-wrapped
   bodies before unwrapping `result`/`output`/…
 - **`fsrpb pull "<name>"`** filter — `?name=` exact-match returned 0
-  hits historically (URL-encoding workaround documented in GAPS.md
+  hits historically (URL-encoding workaround documented in docs/research/GAPS.md
   §4). Verify the fix landed in `python/cli.py:cmd_pull` or apply.
 - **`--mode upsert` HTTP 400** — `POST /api/3/bulkupsert/workflow_collections`
   500s with PHP-side bugs in `UpsertController.php`. Either remove
@@ -606,7 +638,7 @@ Should still update:
 ## Key files / paths
 
 - Live plan: `Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`
-- Open gaps: `FSRPlaybookYaml/GAPS.md`
+- Open gaps: `docs/research/GAPS.md`
 - API truth: `soar-reporting-dashboard-cl/docs/FORTISOAR_API.md`
 - Schema: `store/schema.sql`
 - Probes: `python/probes/probe_*.py`

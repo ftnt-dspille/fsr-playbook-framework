@@ -2,7 +2,7 @@
 
 Browser app for live LLM-driven FortiSOAR playbook authoring.
 
-See `PLAN.md` for the design. See `../CHAT_APP_PLAN.md` for inherited LLM-context strategy.
+See `PLAN.md` for the design. See `../docs/archive/CHAT_APP_PLAN.md` for inherited LLM-context strategy.
 
 ## Layout
 
