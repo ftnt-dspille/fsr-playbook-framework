@@ -1,0 +1,5 @@
+{
+  "name": "soc_http_fallback_no_native_op",
+  "prompt": "We use Akamai but the FortiSOAR Akamai connector doesn't have a 'block_url' operation. I need to block a URL via their Network Lists API anyway. Build me a playbook with a manual_input step that takes a URL from the analyst, then makes the call using FortiSOAR's generic 'http' connector to POST against the Network Lists endpoint. The Authorization header should reference a workflow input parameter for the bearer token (the analyst will wire that via connector config or vars). Comment back on the triggering record with the API response status. Output complete YAML.",
+  "notes": "Phase 0.5 forcing-function task from CONNECTOR_INTEGRATION_PLAN.md. Tests the agent's decision tree when a native op is absent: it should not refuse, but reach for propose_http_fallback or directly emit an http connector step grounded in a real fixture. The walker should accept arguments.params.url + arguments.params.method on the http connector step. Adversarial probe: a naive agent will hallucinate `connector: akamai` with op `block_url` and only the verify_playbook check will catch it."
+}
