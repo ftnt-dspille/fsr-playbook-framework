@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS chat_turns (
     history_chars INTEGER,
     playbook_collection TEXT,
     yaml_sha TEXT,
+    model TEXT,
     PRIMARY KEY (session_id, turn),
     FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 );
@@ -166,6 +167,15 @@ def _connect() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    # Best-effort column adds for DBs created before a column existed.
+    # SQLite raises if the column already exists; that's fine.
+    for stmt in (
+        "ALTER TABLE chat_turns ADD COLUMN model TEXT",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 
@@ -230,8 +240,8 @@ def record_chat_turn(record: dict[str, Any]) -> None:
             """INSERT OR REPLACE INTO chat_turns
                (session_id, turn, ts, input_tokens, output_tokens,
                 cache_read, cache_write, stop_reason, history_chars,
-                playbook_collection, yaml_sha)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                playbook_collection, yaml_sha, model)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (sid, record["turn"], ts,
              record.get("input_tokens", 0),
              record.get("output_tokens", 0),
@@ -240,7 +250,8 @@ def record_chat_turn(record: dict[str, Any]) -> None:
              record.get("stop_reason"),
              record.get("history_chars", 0),
              tags.get("playbook_collection"),
-             tags.get("yaml_sha")),
+             tags.get("yaml_sha"),
+             record.get("model")),
         )
         for seq, t in enumerate(record.get("tool_calls") or []):
             conn.execute(
@@ -631,26 +642,38 @@ def cost_by_playbook(limit: int = 50) -> list[dict[str, Any]]:
     out = []
     for r in rows:
         d = dict(r)
-        # Resolve a representative model for the collection — pick the
-        # most recent session that touched it. SQLite forbids
-        # correlated subqueries referencing aggregates, so do it as a
-        # follow-up query.
-        model_row = conn.execute(
-            """SELECT s.model FROM chat_sessions s
-               JOIN chat_turns ct ON ct.session_id = s.id
-               WHERE ct.playbook_collection = ?
-               ORDER BY ct.ts DESC LIMIT 1""",
+        # Sum cost across each turn at the turn's actual model — this
+        # is accurate even when a user switched providers mid-chat.
+        # Older turns where `chat_turns.model` is NULL fall back to the
+        # session's representative model (best effort).
+        turn_rows = conn.execute(
+            """SELECT t.model AS turn_model, s.model AS session_model,
+                      t.input_tokens, t.output_tokens,
+                      t.cache_read, t.cache_write
+               FROM chat_turns t
+               JOIN chat_sessions s ON s.id = t.session_id
+               WHERE t.playbook_collection = ?""",
             (d["collection"],),
-        ).fetchone()
-        model = model_row["model"] if model_row else ""
-        d["model"] = model
-        d["est_cost_usd"] = _estimate_cost(
-            model or "",
-            d.get("total_input", 0) or 0,
-            d.get("total_output", 0) or 0,
-            d.get("total_cache_read", 0) or 0,
-            d.get("total_cache_write", 0) or 0,
-        )
+        ).fetchall()
+        any_priced = False
+        cost_sum = 0.0
+        models_seen: list[str] = []
+        for tr in turn_rows:
+            m = tr["turn_model"] or tr["session_model"] or ""
+            if m and m not in models_seen:
+                models_seen.append(m)
+            c = _estimate_cost(
+                m,
+                tr["input_tokens"] or 0,
+                tr["output_tokens"] or 0,
+                tr["cache_read"] or 0,
+                tr["cache_write"] or 0,
+            )
+            if c is not None:
+                any_priced = True
+                cost_sum += c
+        d["model"] = ", ".join(models_seen) if models_seen else ""
+        d["est_cost_usd"] = round(cost_sum, 5) if any_priced else None
         out.append(d)
     conn.close()
     return out
