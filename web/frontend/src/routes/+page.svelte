@@ -72,6 +72,13 @@
         const latest = await getActiveYaml();
         if (typeof latest === 'string') playbookStore.setYaml(latest);
         await playbookStore.save({ reason: 'autosave', auto: true });
+        // Clear visualStore's dirty flag once persisted — otherwise a
+        // second mutation right after a save doesn't re-arm this effect
+        // (dirty was already true → no state change → no re-run), so
+        // the second change would sit unsaved until the next dirty
+        // toggle. visualStore doesn't clear it itself because edit ops
+        // only ever set true.
+        visualStore.state.dirty = false;
       } catch {
         // Surface via the normal error channels; manual save still
         // available if the user wants to retry.

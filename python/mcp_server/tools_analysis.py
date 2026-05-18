@@ -320,16 +320,34 @@ def step_through_playbook(yaml_text: str,
                     f"non-safe op (risk={risk}); simulated to keep "
                     "stepper read-only")
         elif stype == "set_variable":
-            # The handler writes each arg_list item into vars.steps.<sid>.<name>.
-            sim_output = {}
+            # The handler writes each variable into vars.steps.<sid>.<name>.
+            # Two source shapes are accepted: the post-parser form
+            # `arguments.arg_list: [{name, value}, …]`, and the
+            # human-source form `vars: {name: value, …}` at step level
+            # (what the emitter writes out and what step-through sees
+            # when fed raw draft YAML). Render the source-form values
+            # too so chained refs resolve.
+            sim_output: dict[str, Any] = {}
             arg_list = rendered.get("arg_list") or []
-            if isinstance(arg_list, list):
+            if isinstance(arg_list, list) and arg_list:
                 for item in arg_list:
                     if isinstance(item, dict) and "name" in item:
                         sim_output[item["name"]] = item.get("value")
             else:
-                sim_output = {k: v for k, v in rendered.items()
-                              if k != "step_variables"}
+                top_vars = cur.get("vars")
+                if isinstance(top_vars, dict):
+                    for k, v in top_vars.items():
+                        sim_output[k] = (_render_walk(v, f"vars.{k}")
+                                         if isinstance(v, str) else v)
+                else:
+                    sim_output = {k: v for k, v in rendered.items()
+                                  if k != "step_variables"}
+            # FSR runtime contract: set_variable also surfaces vars at
+            # the TOP LEVEL — `{{ vars.<name> }}` — so downstream Jinja
+            # rendering resolves chained refs without going through
+            # `vars.steps.<step>.<name>`. Mirror that here.
+            for k, v in sim_output.items():
+                vars_ctx[k] = v
             step_record["status"] = "simulated"
             step_record["simulated_from"] = "computed"
         elif stype == "decision":

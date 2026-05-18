@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import jinja2
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -186,6 +187,75 @@ def get_record(module: str, record_id: str) -> dict[str, Any]:
         if iri.endswith(f"/{record_id}"):
             return rec
     return {"error": "not found"}
+
+
+# --------------------------------------------------------------- step-through
+
+# Templates the step debugger / tools_analysis.py hits to render Jinja
+# args (`/api/wf/api/jinja-editor/`) and execute connector ops live
+# (`/api/integration/execute/`). Stubbed so e2e specs that drive the
+# Step Debugger don't need a real FSR — Jinja resolves real values
+# from the supplied `vars`, and a small registry of canned connector
+# ops returns plausible enrichment payloads.
+
+_jinja_env = jinja2.Environment(
+    undefined=jinja2.ChainableUndefined,
+    autoescape=False,
+)
+
+
+@app.post("/api/wf/api/jinja-editor/")
+async def jinja_render(request: Request) -> dict[str, Any]:
+    """Render a Jinja template against the supplied `values` context.
+    Body shape mirrors what `tools_analysis._render_walk` sends:
+        {"template": "<jinja str>", "values": {"vars": {...}}}
+    Returns `{result: <rendered>}` so the caller's `for k in
+    ('result', 'output', 'rendered', 'value')` extractor finds it."""
+    body = await request.json()
+    template = body.get("template") or ""
+    values = body.get("values") or {}
+    try:
+        rendered = _jinja_env.from_string(template).render(**values)
+    except Exception as exc:  # noqa: BLE001
+        # Mirror FSR's "errored render returns the template" behaviour
+        # so step traces show the raw expression rather than blowing up.
+        return {"result": template, "error": str(exc)}
+    return {"result": rendered}
+
+
+# Canned connector ops. Keyed by (connector, operation); the value is
+# the JSON the live FSR would return inside `{"data": ...}` from
+# /api/integration/execute/. Add entries here when a new e2e spec
+# needs to "test" a connector action.
+_CONNECTOR_OPS: dict[tuple[str, str], dict[str, Any]] = {
+    # virustotal/query_ip — `query_` prefix routes to risk=safe per
+    # tools_discovery._op_risk so step_through (execute_safe_ops=True)
+    # actually hits this stub. Keys picked so connector_op.spec.ts can
+    # assert output_top_keys + verify the rendered IP arrived in the
+    # request body.
+    ("virustotal", "query_ip"): {
+        "ip": "10.0.0.42",
+        "country": "US",
+        "detections": 0,
+        "is_malicious": False,
+        "reputation": "clean",
+    },
+}
+
+
+@app.post("/api/integration/execute/")
+async def integration_execute(request: Request) -> dict[str, Any]:
+    """Run a connector operation. The Step Debugger ('Run with safe
+    ops on') sends `{connector, operation, version, config, params}`
+    and expects `{status: 'Success', data: ...}` back. Unknown ops
+    return a 200 with an empty payload so step-through doesn't crash —
+    the trace will show `output_top_keys: []` which is what the real
+    FSR would emit for a configless connector."""
+    body = await request.json()
+    cn = (body.get("connector") or "").lower()
+    op = (body.get("operation") or "").lower()
+    data = _CONNECTOR_OPS.get((cn, op), {})
+    return {"status": "Success", "data": data}
 
 
 if __name__ == "__main__":

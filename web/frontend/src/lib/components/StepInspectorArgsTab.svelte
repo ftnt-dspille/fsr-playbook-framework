@@ -19,6 +19,12 @@
   import FilterTreeEditor from './FilterTreeEditor.svelte';
   import RelationPicker from './RelationPicker.svelte';
   import MonacoCode from './MonacoCode.svelte';
+  import VarPathPicker from './VarPathPicker.svelte';
+  import { attachVarPaneFocus } from '../varPaneFocus';
+  import { jinjaShapesStore } from '../jinjaShapesStore.svelte';
+  import { sampleRecordsStore } from '../triggerModuleFields.svelte';
+  import SampleRecordPicker from './SampleRecordPicker.svelte';
+  import JinjaInlinePreview from './JinjaInlinePreview.svelte';
   import { summarizeTrigger, summarizeFind } from '../filterSummary';
 
   type Props = {
@@ -160,7 +166,7 @@
     suggestions?: string[];
   };
 
-  let schema: Schema | null = $state(null);
+  let schema = $state<Schema | null>(null);
   let loading = $state(false);
   let loadError: string | null = $state(null);
 
@@ -727,37 +733,10 @@
     >+ Add field</button>
   </div>
 
-  {#if playbook}
-    {@const branches = playbook.edges.filter((e) => e.source === node.id && e.branch_kind === 'branch')}
-    <div class="mt-4 border-t border-[var(--border-soft)] pt-3">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-        Buttons ({branches.length})
-      </div>
-      <p class="mt-1 text-[11px] text-[var(--text-faint)]">
-        Each button resumes the playbook on its branch. Use the
-        Branches tab for full editing (label / target / formType per
-        button); this is a quick preview.
-      </p>
-      {#if branches.length === 0}
-        <p class="mt-2 text-[11px] italic text-[var(--text-faint)]">
-          No buttons defined. Open the Branches tab to add one.
-        </p>
-      {:else}
-        <div class="mt-2 flex flex-wrap gap-2">
-          {#each branches as br (br.label + '|' + br.target)}
-            {@const tgt = playbook.nodes.find((n) => n.id === br.target)}
-            <span
-              class="inline-flex items-center gap-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[11px]"
-              title={`→ ${tgt?.name ?? br.target}`}
-            >
-              <span class="font-medium">{br.label ?? '(default)'}</span>
-              <span class="text-[10px] text-[var(--text-faint)]">→ {tgt?.name ?? br.target}</span>
-            </span>
-          {/each}
-        </div>
-      {/if}
-    </div>
-  {/if}
+  <!-- Buttons (one branch per option) are now rendered+editable by
+       the Branches section that StepInspector folds in beneath this
+       block. Keeping a separate preview here would double-render the
+       same data and drift out of sync on edits. -->
 
 {:else if node.type === 'code_snippet'}
   {@const a = (node.arguments ?? {}) as Record<string, unknown>}
@@ -979,6 +958,16 @@
       </p>
     {/if}
   </label>
+
+  <!-- Sample record from the live FSR. Picking one tells the variable
+       picker + Verify tab "this is what vars.input.records[0] will look
+       like at runtime" so authors can validate fields exist + see real
+       values inline. Lives at module level (not per-step) so it stays
+       valid even after the user navigates away and back. -->
+  {#if resource}
+    {@const bareRes = bareModule(resource)}
+    <SampleRecordPicker module={bareRes} />
+  {/if}
 
   {#if node.type === 'start_on_create' || node.type === 'start_on_update'}
     <div class="mt-3">
@@ -1411,6 +1400,18 @@
       args.for_each = fe;
       visualStore.setArgs(playbookIdx, node.id, args);
     }}
+    {@const feItemFocus = attachVarPaneFocus({
+      label: `${node.name || 'step'} · for_each.item`,
+      insert: (snippet) => updateForEach({ item: feItem ? `${feItem} ${snippet}` : snippet })
+    })}
+    {@const whenFocus = attachVarPaneFocus({
+      label: `${node.name || 'step'} · when`,
+      insert: (snippet) => {
+        const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
+        args.when = whenExpr ? `${whenExpr} ${snippet}` : snippet;
+        visualStore.setArgs(playbookIdx, node.id, args);
+      }
+    })}
 
     <div class="mt-3 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
@@ -1431,11 +1432,14 @@
             value={feItem}
             placeholder={'{{ vars.steps.Fetch_Feed.data }}'}
             oninput={(e) => updateForEach({ item: (e.currentTarget as HTMLInputElement).value })}
+            onfocus={feItemFocus.onfocus}
+            onblur={feItemFocus.onblur}
             class="flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
           />
           <VarPathPicker
             {node}
             {playbook}
+            shapes={jinjaShapesStore.shapes}
             wrap={true}
             onInsert={(snippet) => updateForEach({
               item: feItem ? `${feItem} ${snippet}` : snippet
@@ -1481,11 +1485,14 @@
               if (v) args.when = v; else delete args.when;
               visualStore.setArgs(playbookIdx, node.id, args);
             }}
+            onfocus={whenFocus.onfocus}
+            onblur={whenFocus.onblur}
             class="flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
           />
           <VarPathPicker
             {node}
             {playbook}
+            shapes={jinjaShapesStore.shapes}
             wrap={true}
             onInsert={(snippet) => {
               const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
@@ -1846,22 +1853,57 @@
   {:else}
     <ul class="mt-1 space-y-2">
       {#each varList as v (v.name)}
+        {@const setVarFocus = attachVarPaneFocus({
+          label: `${node.name || 'set_variable'} · ${v.name}`,
+          insert: (snippet) => {
+            const cur = typeof v.value === 'string' ? v.value : JSON.stringify(v.value);
+            setVar(v.name, cur ? `${cur} ${snippet}` : snippet);
+          }
+        })}
         <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
           <div class="flex items-baseline justify-between text-xs">
             <span class="font-mono font-semibold text-[var(--text-default)]">{v.name}</span>
-            <button
-              type="button"
-              aria-label={`Remove variable ${v.name}`}
-              class="text-[10px] text-rose-600 hover:text-rose-700"
-              onclick={() => removeVar(v.name)}
-            >×</button>
+            <div class="flex items-center gap-1">
+              <VarPathPicker
+                {node}
+                {playbook}
+                shapes={jinjaShapesStore.shapes}
+                wrap={true}
+                onInsert={(snippet) => {
+                  const cur = typeof v.value === 'string'
+                    ? v.value
+                    : JSON.stringify(v.value);
+                  setVar(v.name, cur ? `${cur} ${snippet}` : snippet);
+                }}
+              />
+              <button
+                type="button"
+                aria-label={`Remove variable ${v.name}`}
+                class="text-[10px] text-rose-600 hover:text-rose-700"
+                onclick={() => removeVar(v.name)}
+              >×</button>
+            </div>
           </div>
-          <textarea
-            class="mt-1 block w-full resize-y rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
-            rows="2"
-            value={typeof v.value === 'string' ? v.value : JSON.stringify(v.value)}
-            oninput={(e) => setVar(v.name, (e.currentTarget as HTMLTextAreaElement).value)}
-          ></textarea>
+          <!-- Monaco-backed value editor: syntax highlighting + the same
+               {{ vars.* }} autocomplete + hover the main YAML editor has
+               (Jinja path completion is registered globally on first
+               YAML editor mount via ensureYamlSupport). -->
+          <div class="mt-1">
+            <MonacoCode
+              value={typeof v.value === 'string' ? v.value : JSON.stringify(v.value)}
+              language="jinja"
+              compact={true}
+              height="2.25rem"
+              placeholder={'{{ vars.input.records[0].severity }}'}
+              onInput={(s) => setVar(v.name, s)}
+              onFocus={setVarFocus.onfocus}
+              onBlur={setVarFocus.onblur}
+            />
+          </div>
+          <!-- Live render: see what `{{ … }}` becomes against the current
+               context (pinned sample, upstream set_variable outputs, etc.)
+               while you type — no need to switch to the Verify tab. -->
+          <JinjaInlinePreview value={typeof v.value === 'string' ? v.value : ''} />
         </li>
       {/each}
     </ul>
@@ -1882,12 +1924,22 @@
     >+ Add variable</button>
   </div>
 {:else if node.family !== 'connector_op'}
-  <div class="text-sm text-[var(--text-faint)]">
-    Schema-driven editing is wired for connector ops + set_variable in Phase 3.
-    For <code class="rounded bg-[var(--bg-elev)] px-1">{node.type}</code> steps,
-    see the raw arguments below.
-  </div>
-  <pre class="mt-2 max-h-96 overflow-auto rounded bg-[var(--bg-elev)] p-2 text-xs">{JSON.stringify(node.arguments, null, 2)}</pre>
+  {#if node.type === 'decision' || node.type === 'manual_input'}
+    <!-- Decision / manual_input args ARE the branches — and the
+         Branches editor is folded in beneath this slot by
+         StepInspector. Skip the raw JSON dump so the user sees the
+         actual editor, not the raw blob it produces. -->
+    <div class="text-[11px] italic text-[var(--text-faint)]">
+      Edit branches below.
+    </div>
+  {:else}
+    <div class="text-sm text-[var(--text-faint)]">
+      Schema-driven editing is wired for connector ops + set_variable in Phase 3.
+      For <code class="rounded bg-[var(--bg-elev)] px-1">{node.type}</code> steps,
+      see the raw arguments below.
+    </div>
+    <pre class="mt-2 max-h-96 overflow-auto rounded bg-[var(--bg-elev)] p-2 text-xs">{JSON.stringify(node.arguments, null, 2)}</pre>
+  {/if}
 {:else if !connector || !opName}
   <section class="mb-3 space-y-2">
     {#if connector}
@@ -2054,14 +2106,36 @@
           oninput={(e) => setParam(p.param_name, (e.currentTarget as HTMLInputElement).value)}
         />
       {:else}
-        <textarea
-          class="mt-1 block w-full resize-y rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
-          rows={typeof val === 'string' && val.length > 60 ? 3 : 1}
-          placeholder={p.placeholder ?? (val === undefined ? '<not set>' : '')}
-          value={val === undefined ? '' : preview(val)}
-          oninput={(e) => setParam(p.param_name, (e.currentTarget as HTMLTextAreaElement).value)}
-          onblur={(e) => precheckPicklist(p.param_name, (e.currentTarget as HTMLTextAreaElement).value)}
-        ></textarea>
+        {@const paramFocus = attachVarPaneFocus({
+          label: `${node.name || 'connector'} · params.${p.param_name}`,
+          insert: (snippet) => {
+            const cur = typeof val === 'string' ? val : (val === undefined ? '' : String(val));
+            setParam(p.param_name, cur ? `${cur} ${snippet}` : snippet);
+          }
+        })}
+        <div class="mt-1 flex items-start gap-1">
+          <textarea
+            class="block w-full resize-y rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
+            rows={typeof val === 'string' && val.length > 60 ? 3 : 1}
+            placeholder={p.placeholder ?? (val === undefined ? '<not set>' : '')}
+            value={val === undefined ? '' : preview(val)}
+            oninput={(e) => setParam(p.param_name, (e.currentTarget as HTMLTextAreaElement).value)}
+            onfocus={paramFocus.onfocus}
+            onblur={(e) => {
+              paramFocus.onblur();
+              precheckPicklist(p.param_name, (e.currentTarget as HTMLTextAreaElement).value);
+            }}
+          ></textarea>
+          <VarPathPicker
+            {node}
+            {playbook}
+            wrap={true}
+            onInsert={(snippet) => {
+              const cur = typeof val === 'string' ? val : (val === undefined ? '' : String(val));
+              setParam(p.param_name, cur ? `${cur} ${snippet}` : snippet);
+            }}
+          />
+        </div>
       {/if}
       {#if picklistResults[p.param_name]?.length}
         <ul class="mt-1 space-y-1 text-[11px]">
