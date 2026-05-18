@@ -103,8 +103,8 @@ landed.
 
 | Phase | Status | Notes |
 |---|---|---|
-| 0 — Catalog read-path | ⏳ not started | ATTACH + 3 MCP tools. No new code in `Miscellaneous/`. |
-| **0.5 — Per-op HTTP fallback** | ⏳ not started | `propose_http_fallback(connector, intent)` MCP + system-prompt rule. Highest user-visible value of this plan. |
+| 0 — Catalog read-path | ✅ done | `python/mcp_server/tools_catalog.py` ships `find_api_product`, `find_api_example` (FTS5 over `entries_fts`), `find_api_fixture` (with `response_schema_json` + `parameters_schema_json` decoded). Graceful degrade via `{ok: false, code: "catalog_unavailable"}` when the catalog isn't attached. 13 tests pass. |
+| **0.5 — Per-op HTTP fallback** | ✅ done | `propose_http_fallback(vendor, intent, prefer_native=True)` decides native_op → api_call → http_fixture → no_grounded_shape and emits a ready-to-paste `http` connector step (`http_get`/`http_post`/etc.) with auth-wiring warnings. Confirmed end-to-end: `akamai` + "block url" → `http_fixture` decision with fixture #2147 and 3 auth warnings. |
 | 1 — Adopt rung-1 validator | ⏳ not started | `python/connector_validator/`, `fsrpb verify-connector` CLI, MCP tool. |
 | 2 — Rung-2 mock-replay | ⏳ not started | Behind `--mock-replay` flag; depends on Phase 0 catalog ATTACH. |
 | 3 — `verify_connector` forcing-function rule | ⏳ not started | System-prompt rule; mirrors `verify_playbook`. |

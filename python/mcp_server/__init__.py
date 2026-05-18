@@ -25,6 +25,7 @@ from __future__ import annotations
 # Import and register all tools
 from . import (
     tools_analysis,
+    tools_catalog,
     tools_compile,
     tools_corpus,
     tools_discovery,
@@ -139,6 +140,14 @@ from .tools_recipe import (
 # Verify
 from .tools_verify import verify_playbook
 
+# Catalog (Phase 0 + 0.5 of CONNECTOR_INTEGRATION_PLAN)
+from .tools_catalog import (
+    find_api_example,
+    find_api_fixture,
+    find_api_product,
+    propose_http_fallback,
+)
+
 # =========================================================================
 # Entry point
 # =========================================================================
@@ -220,4 +229,9 @@ __all__ = [
     "why_did_playbook_fail",
     # Verify
     "verify_playbook",
+    # Catalog (Phase 0 + 0.5)
+    "find_api_example",
+    "find_api_fixture",
+    "find_api_product",
+    "propose_http_fallback",
 ]
