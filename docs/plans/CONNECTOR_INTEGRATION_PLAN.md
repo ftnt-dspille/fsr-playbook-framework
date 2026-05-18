@@ -16,7 +16,19 @@ agent can both **find** real API examples for HTTP-shaped authoring
 
 This is the **other half** of the authoring story. Today fsrpb helps
 you author playbooks against existing connectors. After this plan it
-also helps you author the connectors themselves.
+also helps you:
+
+- **Fall back to FSR's generic `http` connector per-operation** when a
+  native connector exists but doesn't expose the operation the user
+  wants, and the connector has no `api_call` escape hatch. The
+  catalog has the URL / method / body / response schema for that
+  vendor+intent — the playbook just fires the HTTP step directly.
+  This is the lowest-friction unlock: no new connector to author, no
+  waiting on a vendor SP, the playbook is shippable today.
+- Author **brand-new connectors** end-to-end when an HTTP fallback
+  isn't enough (e.g. the user wants the operation reusable across
+  playbooks, or it needs auth refresh, pagination, or chunked
+  uploads).
 
 ---
 
@@ -91,11 +103,12 @@ landed.
 
 | Phase | Status | Notes |
 |---|---|---|
-| 0 — Catalog read-path | ⏳ not started | ATTACH + 2 MCP tools. No new code in `Miscellaneous/`. |
+| 0 — Catalog read-path | ⏳ not started | ATTACH + 3 MCP tools. No new code in `Miscellaneous/`. |
+| **0.5 — Per-op HTTP fallback** | ⏳ not started | `propose_http_fallback(connector, intent)` MCP + system-prompt rule. Highest user-visible value of this plan. |
 | 1 — Adopt rung-1 validator | ⏳ not started | `python/connector_validator/`, `fsrpb verify-connector` CLI, MCP tool. |
 | 2 — Rung-2 mock-replay | ⏳ not started | Behind `--mock-replay` flag; depends on Phase 0 catalog ATTACH. |
 | 3 — `verify_connector` forcing-function rule | ⏳ not started | System-prompt rule; mirrors `verify_playbook`. |
-| 4 — Editor surface | ⏳ not started | Connector authoring workspace + verify badges. |
+| 4 — Editor surface | ⏳ not started | Connector authoring workspace + verify badges. Includes "use http fallback" affordance per step. |
 | 5 — Connector-lifecycle mining | ⏳ not started | `find_connector_implementation` MCP tool over `connector_lifecycle.body`. |
 
 ---
@@ -146,6 +159,133 @@ landed.
 unaffected.
 
 **Estimated effort**: 1–2 days.
+
+---
+
+### Phase 0.5 — Per-operation HTTP fallback
+
+**Why this is the highest-leverage phase.** Most "I want to do X with
+vendor Y" requests today fail at one of three gates:
+
+1. Vendor Y has no FSR connector at all → today: blocked.
+2. Vendor Y has a connector but no `op_x` operation → today: blocked
+   unless the connector ships `api_call` (most don't, or it's gated
+   to admins).
+3. Vendor Y has both → fsrpb already handles this.
+
+The catalog has the URL/method/body for case 1 *and* case 2, and the
+FSR `http` connector ships with every appliance. So for both cases,
+the agent can compose a working playbook today by emitting a single
+`connector` step against `http` instead of waiting for an upstream fix.
+
+This phase doesn't add new infra — it composes Phase 0's lookups with
+fsrpb's existing connector inventory to make the decision automatic.
+
+**Decision logic** (deterministic, the LLM doesn't pick):
+
+```
+given (vendor, intent):
+  1. find_operation(vendor, intent)
+     → ≥1 hit with reasonable score? use the native op. STOP.
+  2. find_operation(vendor, "api_call")  or  "generic_api_call"
+     → if present, use it (the connector knows auth + base URL).
+        Emit step with method+path+body from catalog. STOP.
+  3. find_api_fixture(product=vendor, ...) on the catalog
+     → if hit, emit an `http` connector step with the fixture's
+        URL/method/body/headers; auth is the user's problem (next
+        bullet). STOP.
+  4. No catalog fixture → return a structured "no_grounded_shape"
+     error with suggestions (try a related vendor, or author a custom
+     connector via Phases 1–4).
+```
+
+**Auth gap acknowledgement.** Step 3 is the riskiest: the catalog has
+the request shape but not the user's vendor credentials. The fallback
+step emits with `Authorization: Bearer {{ vars.input.params.token }}`
+(or the catalog's `auth_method` hint) and a comment explaining the
+user must wire the token via a `set_variable` from connector configs
+or vault. This is honest — we're saying "here's the shape; you bring
+the secret" — and it matches what users already do for one-off
+connectors today.
+
+**Work**:
+
+1. New MCP tool `propose_http_fallback(vendor, intent, *,
+   prefer_native=True)` in `python/mcp_server/tools_catalog.py`:
+   ```python
+   propose_http_fallback(vendor, intent) -> {
+       ok: bool,
+       decision: "native_op" | "api_call" | "http_fixture" | "no_grounded_shape",
+       step: dict | None,        # ready-to-paste step args
+       reason: str,              # short prose for the user/agent
+       native: {connector, op_name, score} | None,
+       fixture: {fixture_id, method, url_template, auth_method,
+                 confidence, source_url} | None,
+       warnings: [str],          # e.g. "auth_method=bearer — set vars.token"
+   }
+   ```
+2. When `decision == "http_fixture"`, emit a step shape:
+   ```yaml
+   - type: connector
+     name: <Inferred Step Name>
+     connector: http
+     op: invoke_api      # or whatever the http connector calls it
+     arguments:
+       method: <method>
+       url: "{{ vars.input.params.base_url }}/<rendered_path>"
+       headers:
+         Authorization: "Bearer {{ vars.input.params.token }}"
+         Content-Type: application/json
+       body: |
+         <rendered body skeleton from request_body_json>
+   ```
+   - Substitute `{path_param}` style placeholders with
+     `{{ vars.steps.<predecessor>.<plausible_key> }}` *as a
+     placeholder*, with `warnings:` flagging "fill these in."
+3. System-prompt addition under "Tool conventions" (replaces the
+   bare "use HTTP virtual-connector when no native connector"
+   guidance):
+   > **Vendor without a native operation?** Before saying "FSR can't
+   > do this," call `propose_http_fallback(vendor, intent)`. The tool
+   > picks the right path:
+   >  - native op if one exists,
+   >  - the connector's generic `api_call` if shipped,
+   >  - else an `http` connector step grounded in a catalog fixture.
+   >
+   > Only return "FSR can't do this" if `decision ==
+   > "no_grounded_shape"`. The HTTP fallback step is a real, runnable
+   > step — paste it in; users routinely wire generic HTTP calls into
+   > playbooks today.
+4. Tests under `python/tests/test_propose_http_fallback.py`:
+   - Vendor with native op (`virustotal` + `get_ip_reputation`)
+     → `decision == "native_op"`.
+   - Vendor with `api_call` (`servicenow` + `create_change_request`,
+     if that's how the connector ships) → `decision == "api_call"`.
+   - Vendor with no native op but catalog fixture (synthetic vendor +
+     intent) → `decision == "http_fixture"`, step shape parseable.
+   - Made-up vendor with no catalog hit → `decision ==
+     "no_grounded_shape"`, structured suggestion.
+5. Eval task `block_via_http_fallback` — prompt: "block this IP on
+   Akamai." Akamai's connector may lack `block_ip`. Assert the agent
+   calls `propose_http_fallback` and ends with a runnable playbook
+   whose `verify_playbook` returns `ready_to_push=True`.
+
+**Risks**:
+
+- **Auth doesn't transfer.** The `http` connector doesn't inherit the
+  vendor connector's auth. We flag this in `warnings:` and offload the
+  secret to `vars.input.params.token`. Out of scope: building a
+  per-vendor secret bridge.
+- **The catalog's fixture might be from a different API version than
+  what the user's tenant runs.** `http_fixtures.confidence` carries
+  this signal — surface it in the response and bias toward `confidence
+  == "high"` rows.
+- **Decision can be wrong.** If the agent disagrees (e.g. the
+  "native" match scored low for a reason), `prefer_native=False`
+  forces the fallback path. Document this lever in the system prompt.
+
+**Estimated effort**: 2 days (the lookup pieces are Phase 0; this is
+mostly the composer + system-prompt rule).
 
 ---
 
@@ -364,6 +504,11 @@ threat-intel category" instead of guessing.
 - Phase 0: agent calls `find_api_example` / `find_api_fixture` at
   least once per HTTP-authoring chat session in the agent-stats
   census.
+- **Phase 0.5: zero "FSR can't do this" dead-ends** for vendors that
+  appear in the catalog. Every chat where the user requests an action
+  against a catalog-known vendor ends with either a native-op
+  playbook, an `api_call` playbook, or an `http`-fallback playbook —
+  none with "I'm sorry, no such operation."
 - Phase 1–2: every connector under
   `Miscellaneous/connector_building/{jira,http,recorded-future-feed,…}`
   gets a `verify-connector` run with zero new false-positive errors
