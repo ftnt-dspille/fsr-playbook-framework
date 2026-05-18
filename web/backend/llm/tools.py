@@ -11,10 +11,17 @@ beyond what we cover, add the case here rather than papering over it.
 """
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
+import os
+import re
+import sqlite3
 import sys
+import time
 import typing
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, get_args, get_origin
 
@@ -43,7 +50,226 @@ SAFE_TOOLS: list[str] = [
     "list_picklists",
     "picklist_for_field",
     "resolve_picklist_value",
+    # Tier 1+ — gated by the dispatch wrapper below. See `TOOL_TIERS`.
+    "run_op",
+    "step_through_playbook",
+    "dry_run_playbook",
+    "diagnose_yaml_against_pb_execution",
 ]
+
+
+# --- Tier model (see docs/plans/HITL_GUARDRAILS_PLAN.md) -------------------
+#
+# Static per-tool defaults. `run_op` is overridden at call time by
+# `_resolve_tier` because its tier depends on the (connector, op) being
+# called.
+
+TOOL_TIERS: dict[str, int] = {
+    # Tier 0 — pure local compute.
+    "find_connector": 0,
+    "find_operation": 0,
+    "get_op_schema": 0,
+    "get_step_type": 0,
+    "find_jinja_filter": 0,
+    "find_jinja_pattern": 0,
+    "get_filter_examples": 0,
+    "search_playbooks": 0,
+    "list_picklists": 0,
+    "picklist_for_field": 0,
+    "resolve_picklist_value": 0,
+    # Tier 1 — read-only FSR API.
+    "verify_playbook": 1,
+    "list_configured_connectors": 1,
+    "diagnose_yaml_against_pb_execution": 1,
+    # Tier-dynamic. Resolved per call.
+    "run_op": -1,
+    "step_through_playbook": -1,
+    "dry_run_playbook": -1,
+}
+
+# Op-name / category classifiers used as fallback when op_safety has no
+# row for a given (connector, op). Mirrors the heuristics from
+# `probe_op_safety` so the wrapper degrades gracefully on fresh DBs.
+_REMEDIATION_CATEGORIES = {"remediation", "containment"}
+_MANAGEMENT_CATEGORIES = {"management"}
+_SAFE_CATEGORIES = {"investigation", "query", "utilities", "enrichment", "verification"}
+
+_SENSITIVE_KEY_RE = re.compile(r"(?i)(password|token|api[_-]?key|secret|authorization|bearer)")
+
+
+_DB_PATH = Path(__file__).resolve().parents[3] / "store" / "fsr_reference.db"
+
+
+def _lookup_op_metadata(connector: str, op: str) -> tuple[str | None, str | None]:
+    """Return (safety, category) for a given op, or (None, None) if unknown.
+
+    Safety is from `op_safety.safety` ('safe' | 'unsafe' | 'unknown') when
+    present, else None. Category is from `operations.category`.
+    """
+    if not connector or not op or not _DB_PATH.exists():
+        return None, None
+    try:
+        con = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        try:
+            cur = con.cursor()
+            safety: str | None = None
+            try:
+                row = cur.execute(
+                    "SELECT safety FROM op_safety WHERE connector_name=? AND op_name=?",
+                    (connector, op),
+                ).fetchone()
+                if row:
+                    safety = (row[0] or "").strip().lower() or None
+            except sqlite3.OperationalError:
+                pass  # op_safety not probed yet
+            row = cur.execute(
+                "SELECT category FROM operations WHERE connector_name=? AND op_name=?",
+                (connector, op),
+            ).fetchone()
+            category = (row[0] or "").strip().lower() if row and row[0] else None
+            return safety, category
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None, None
+
+
+def _tier_for_run_op(args: dict[str, Any]) -> int:
+    """Resolve effective tier for a `run_op` call from op_safety + category.
+
+    Tier 4 — third-party side effect (remediation / containment).
+    Tier 3 — FSR data mutation (management).
+    Tier 2 — read-only external (third-party query: safe + non-FSR connector).
+    Tier 1 — read-only FSR or safely-classified op.
+    Unknowns escalate: default to tier 3 (always prompt).
+    """
+    connector = (args or {}).get("connector") or ""
+    op = (args or {}).get("op") or ""
+    safety, category = _lookup_op_metadata(connector, op)
+    if category in _REMEDIATION_CATEGORIES:
+        return 4
+    if category in _MANAGEMENT_CATEGORIES:
+        return 3
+    if safety == "safe" or category in _SAFE_CATEGORIES:
+        # Third-party query → tier 2; FSR-internal query → tier 1.
+        # We don't have a reliable "is FSR-internal" flag; treat all
+        # external reads as tier 2 (auto-allow + log).
+        return 2
+    if safety == "unsafe":
+        return 4  # unknown category but classifier flagged destructive
+    return 3  # unknown / unclassified → require approval
+
+
+def _tier_for_simulator(args: dict[str, Any]) -> int:
+    """`step_through_playbook` / `dry_run_playbook` inherit tier from
+    whether they're authorized to execute unsafe ops. With the default
+    `execute_unsafe_ops=False` they're tier 1; flipping it to True
+    escalates to tier 3 (per-step approval handled in Phase 5)."""
+    if args and args.get("execute_unsafe_ops"):
+        return 3
+    return 1
+
+
+def _resolve_tier(name: str, args: dict[str, Any]) -> int:
+    static = TOOL_TIERS.get(name, 0)
+    if static >= 0:
+        return static
+    if name == "run_op":
+        return _tier_for_run_op(args or {})
+    if name in ("step_through_playbook", "dry_run_playbook"):
+        return _tier_for_simulator(args or {})
+    return 0
+
+
+def _mask_value(v: Any) -> Any:
+    if isinstance(v, dict):
+        return {k: ("***" if _SENSITIVE_KEY_RE.search(k) else _mask_value(val)) for k, val in v.items()}
+    if isinstance(v, list):
+        return [_mask_value(x) for x in v]
+    return v
+
+
+def _build_preview(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    masked = _mask_value(args or {})
+    return {"tool": name, "args": masked}
+
+
+def _args_hash(name: str, args: dict[str, Any]) -> str:
+    payload = json.dumps({"tool": name, "args": args or {}}, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+# Per-process audit log. The chat backend (Phase 1) will replace this
+# with a per-conversation store keyed off the session id.
+AUDIT_LOG: list[dict[str, Any]] = []
+
+
+def _record_audit(name: str, args: dict[str, Any], tier: int, decision: str, *, result_preview: Any = None) -> None:
+    AUDIT_LOG.append({
+        "ts": time.time(),
+        "tool": name,
+        "tier": tier,
+        "args_hash": _args_hash(name, args),
+        "decision": decision,  # "auto_allow" | "approved" | "denied" | "pending"
+        "result_preview": result_preview,
+    })
+
+
+def clear_audit_log() -> None:
+    """Test/eval harness helper. Per-task resets so the
+    `appropriate_approval_requests` gate scores only the calls made
+    during the task it's measuring."""
+    AUDIT_LOG.clear()
+
+
+def snapshot_audit_log() -> list[dict[str, Any]]:
+    """Return a defensive copy of the audit log for scoring."""
+    return [dict(r) for r in AUDIT_LOG]
+
+
+# --- Eval-mode approval policy (Phase 3) ----------------------------------
+#
+# Under the chat / agent loop the gate suspends and waits for a human.
+# Under the eval harness there's no human in the loop — the policy
+# decides for us. Set via env (`EVAL_APPROVAL_POLICY`) or the per-task
+# `approval_policy` field, which the harness sets per task before
+# calling dispatch. Recognized values:
+#   "suspend"          — production behavior (default). Return pending_approval.
+#   "approve-all"      — auto-approve every gated call.
+#   "deny-tier-3+"     — synthesize `{ok:false, code:user_denied, ...}`.
+#   "auto-approve-tier:N" — approve iff tier ≤ N, else deny.
+# Anything unrecognized falls back to "suspend".
+
+_EVAL_POLICY_OVERRIDE: str | None = None  # set by the harness per task
+
+
+def set_eval_policy(policy: str | None) -> None:
+    global _EVAL_POLICY_OVERRIDE
+    _EVAL_POLICY_OVERRIDE = policy or None
+
+
+def _active_eval_policy() -> str | None:
+    if _EVAL_POLICY_OVERRIDE:
+        return _EVAL_POLICY_OVERRIDE
+    return os.environ.get("EVAL_APPROVAL_POLICY") or None
+
+
+def _apply_eval_policy(policy: str, tier: int) -> str:
+    """Return 'approve' | 'deny' for a given policy + tier. Anything
+    unknown returns 'suspend' so production behavior is the safe
+    default."""
+    p = policy.strip().lower()
+    if p in ("approve-all", "approve"):
+        return "approve"
+    if p in ("deny-tier-3+", "deny"):
+        return "deny"
+    if p.startswith("auto-approve-tier:"):
+        try:
+            cap = int(p.split(":", 1)[1].split(",")[-1].strip())
+            return "approve" if tier <= cap else "deny"
+        except (ValueError, IndexError):
+            return "suspend"
+    return "suspend"
 
 
 @dataclass(frozen=True)
@@ -52,6 +278,8 @@ class ToolSpec:
     description: str
     input_schema: dict[str, Any]
     fn: Callable[..., Any]
+    tier: int = 0
+    confirm_mode: str = "auto"  # auto | log | approve | step_up
 
 
 def _py_type_to_json(tp: Any) -> dict[str, Any]:
@@ -115,11 +343,17 @@ def build_registry() -> dict[str, ToolSpec]:
         desc = inspect.getdoc(fn) or f"{name} (no docstring)"
         # First-paragraph only; Anthropic limits description length implicitly.
         short = desc.strip().split("\n\n", 1)[0]
+        static_tier = TOOL_TIERS.get(name, 0)
+        confirm_mode = "auto" if static_tier in (0, 1) else ("approve" if static_tier in (2, 3) else "step_up")
+        if static_tier < 0:
+            confirm_mode = "dynamic"
         out[name] = ToolSpec(
             name=name,
             description=short,
             input_schema=_build_schema(fn),
             fn=fn,
+            tier=static_tier,
+            confirm_mode=confirm_mode,
         )
     return out
 
@@ -152,12 +386,71 @@ def openai_tools() -> list[dict[str, Any]]:
 
 
 def dispatch(name: str, arguments: dict[str, Any]) -> Any:
+    """Tier-aware dispatch (HITL_GUARDRAILS_PLAN Phase 0).
+
+    Tier 0–2: execute immediately, append an audit row.
+    Tier 3+:  if `arguments` lacks a valid `_approval_token`, return a
+              `{pending_approval: true, …}` envelope without calling the
+              underlying tool. The chat-app loop (Phase 1) suspends on
+              this envelope and renders the approval card; on approve,
+              the loop re-dispatches with `_approval_token` set.
+    """
     spec = REGISTRY.get(name)
     if spec is None:
         return {"error": f"unknown tool: {name}"}
+
+    raw_args = dict(arguments or {})
+    # `_approved` sentinel is set by the chat backend when it has
+    # already validated the human approval against its session-auth
+    # surface. We don't mint HMAC tokens — auth is the existing app
+    # auth; this flag is internal-only and the chat layer guarantees
+    # it can't originate from the LLM (tool-use args pass through a
+    # whitelist enforced one frame up).
+    approved = bool(raw_args.pop("_approved", False))
+    summary = raw_args.pop("_summary", None)
+    tier = _resolve_tier(name, raw_args)
+
+    if tier >= 3 and not approved:
+        # Phase 3: eval-mode policy short-circuit. Production callers
+        # (the chat loop) leave the policy unset, fall through to the
+        # pending_approval envelope, and the chat layer suspends.
+        policy = _active_eval_policy()
+        policy_decision = _apply_eval_policy(policy, tier) if policy else "suspend"
+        if policy_decision == "approve":
+            try:
+                result = spec.fn(**raw_args)
+            except TypeError as e:
+                return {"error": f"bad arguments for {name}: {e}"}
+            except Exception as e:
+                return {"error": f"{type(e).__name__}: {e}"}
+            _record_audit(name, raw_args, tier, "approved")
+            return result
+        if policy_decision == "deny":
+            _record_audit(name, raw_args, tier, "denied")
+            return {"ok": False, "code": "user_denied",
+                    "reason": f"Eval policy '{policy}' denied tier-{tier} action."}
+
+        approval_id = uuid.uuid4().hex
+        envelope = {
+            "pending_approval": True,
+            "approval_id": approval_id,
+            "tier": tier,
+            "tool": name,
+            "preview": _build_preview(name, raw_args),
+            "args_hash": _args_hash(name, raw_args),
+            "summary": summary,
+            "requires_step_up": tier >= 4,
+        }
+        _record_audit(name, raw_args, tier, "pending", result_preview=envelope)
+        return envelope
+
     try:
-        return spec.fn(**(arguments or {}))
+        result = spec.fn(**raw_args)
     except TypeError as e:
         return {"error": f"bad arguments for {name}: {e}"}
     except Exception as e:  # surface to LLM as a tool result, not a 500
         return {"error": f"{type(e).__name__}: {e}"}
+
+    decision = "approved" if approved else ("auto_allow" if tier <= 2 else "approved")
+    _record_audit(name, raw_args, tier, decision)
+    return result

@@ -17,6 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 from backend import settings as _settings
 from backend.llm.factory import get_provider
 from backend.llm.provider import (
+    ApprovalRequestEvent,
     DoneEvent,
     ErrorEvent,
     Event,
@@ -27,6 +28,7 @@ from backend.llm.provider import (
     ToolUseEvent,
     UsageEvent,
 )
+from backend.llm import approvals as _approval_store
 from backend.llm import ladder as _ladder
 from backend.system_prompt import SYSTEM_PROMPT
 from backend import history as history_db
@@ -55,9 +57,12 @@ def _serialize(event: Event) -> dict[str, Any]:
     if isinstance(event, ToolUseEvent):
         return {
             "event": "tool_use",
-            "data": json.dumps(
-                {"name": event.name, "arguments": event.arguments, "call_id": event.call_id}
-            ),
+            "data": json.dumps({
+                "name": event.name,
+                "arguments": event.arguments,
+                "call_id": event.call_id,
+                "tier": event.tier,
+            }),
         }
     if isinstance(event, ToolResultEvent):
         # Truncate big results so the UI doesn't get flooded.
@@ -109,6 +114,20 @@ def _serialize(event: Event) -> dict[str, Any]:
                 "error_count": event.error_count,
                 "warning_count": event.warning_count,
                 "achieved": event.achieved,
+            }),
+        }
+    if isinstance(event, ApprovalRequestEvent):
+        return {
+            "event": "approval_request",
+            "data": json.dumps({
+                "approval_id": event.approval_id,
+                "tool_use_id": event.tool_use_id,
+                "tool": event.tool,
+                "tier": event.tier,
+                "preview": event.preview,
+                "args_hash": event.args_hash,
+                "summary": event.summary,
+                "requires_step_up": event.requires_step_up,
             }),
         }
     if isinstance(event, DoneEvent):
@@ -392,5 +411,152 @@ async def chat(body: ChatIn) -> EventSourceResponse:
         finally:
             if active_session_written:
                 history_db.write_active_session(None)
+
+    return EventSourceResponse(gen())
+
+
+# --- HITL approval resume endpoint -----------------------------------------
+#
+# When the provider hits a tier-3+ tool call it stashes a SuspendedSession
+# keyed by approval_id and emits an `approval_request` SSE event. The
+# frontend renders an approval card and posts the user's decision here;
+# we re-enter the provider loop with the decision baked in. Auth is the
+# existing app session — no separate HMAC token. The approval_id itself
+# is single-use (popped on resolution), so a replay attempt 404s.
+
+class ApprovalDecisionIn(BaseModel):
+    decision: str  # "approve" | "deny"
+    # For tier-4 step-up: the user-typed target. Backend asserts this
+    # equals the canonical target extracted from the suspended args
+    # before flipping decision to approve. Frontend already enforces
+    # the same check, but the frontend is bypassable — a curl with
+    # `{"decision":"approve"}` and no confirmed_target must still 400.
+    confirmed_target: str | None = None
+
+
+def _extract_target(args: dict[str, Any]) -> str | None:
+    """Pull the canonical target identifier out of the suspended args.
+
+    Mirrors the frontend's `targetHint` derivation so both ends agree on
+    what string the user must re-type. Order matters — first hit wins."""
+    if not isinstance(args, dict):
+        return None
+    params = args.get("params")
+    if isinstance(params, dict):
+        for k in ("ip", "host", "target"):
+            v = params.get(k)
+            if isinstance(v, str) and v:
+                return v
+    v = args.get("target")
+    if isinstance(v, str) and v:
+        return v
+    return None
+
+
+@router.post("/approvals/{approval_id}")
+async def resolve_approval(
+    approval_id: str, body: ApprovalDecisionIn
+) -> EventSourceResponse:
+    if body.decision not in ("approve", "deny"):
+        async def gen_bad() -> AsyncIterator[dict[str, Any]]:
+            yield {"event": "error",
+                   "data": json.dumps({"message": "decision must be approve or deny"})}
+            yield {"event": "done", "data": json.dumps({"stop_reason": "bad_request"})}
+        return EventSourceResponse(gen_bad())
+
+    # Peek first so we can validate step-up before consuming the
+    # session. A failed step-up must leave the session intact so the
+    # user can retype the target.
+    suspended = _approval_store.peek(approval_id)
+    if suspended is None:
+        async def gen_missing() -> AsyncIterator[dict[str, Any]]:
+            yield {"event": "error",
+                   "data": json.dumps({"message": "approval not found or expired"})}
+            yield {"event": "done", "data": json.dumps({"stop_reason": "not_found"})}
+        return EventSourceResponse(gen_missing())
+
+    # Tier-4 step-up: backend re-derives the canonical target from the
+    # suspended args and requires confirmed_target == target. Only
+    # enforced on approve — deny is always allowed regardless of typing.
+    if body.decision == "approve" and suspended.tier >= 4:
+        target = _extract_target(suspended.args)
+        if target and body.confirmed_target != target:
+            async def gen_stepup() -> AsyncIterator[dict[str, Any]]:
+                yield {"event": "error",
+                       "data": json.dumps({
+                           "message": f"Type the target ({target}) to confirm "
+                                      f"this tier-{suspended.tier} action."
+                       })}
+                yield {"event": "done", "data": json.dumps({"stop_reason": "step_up_required"})}
+            return EventSourceResponse(gen_stepup())
+
+    # Validated — consume the session.
+    suspended = _approval_store.pop(approval_id)
+    if suspended is None:
+        # Lost the race against TTL gc between peek and pop.
+        async def gen_race() -> AsyncIterator[dict[str, Any]]:
+            yield {"event": "error",
+                   "data": json.dumps({"message": "approval not found or expired"})}
+            yield {"event": "done", "data": json.dumps({"stop_reason": "not_found"})}
+        return EventSourceResponse(gen_race())
+
+    chosen = _settings.get_active_provider_name()
+    provider = get_provider(chosen)
+
+    async def gen() -> AsyncIterator[dict[str, Any]]:
+        # Mirrors /api/chat: persist text / tool_use / tool_result rows
+        # into the existing session's transcript. We don't re-run the
+        # ladder eval here — resume is about whether a tool fired, not
+        # about fresh YAML emission.
+        session_id = suspended.session_id
+        seq_in_turn = 0
+        assistant_buf: list[str] = []
+
+        def _flush() -> None:
+            nonlocal assistant_buf
+            if not assistant_buf:
+                return
+            history_db.record_chat_message(
+                session_id, 0, seq_in_turn,
+                kind="assistant_text", content="".join(assistant_buf),
+            )
+            assistant_buf = []
+
+        try:
+            resume_fn = getattr(provider, "resume", None)
+            if resume_fn is None:
+                yield {"event": "error",
+                       "data": json.dumps({"message": "provider does not support approval resume"})}
+                yield {"event": "done", "data": json.dumps({"stop_reason": "config_error"})}
+                return
+            async for ev in resume_fn(suspended=suspended, decision=body.decision):
+                if isinstance(ev, UsageEvent):
+                    _flush()
+                    _persist_usage(ev)
+                elif isinstance(ev, TextEvent):
+                    assistant_buf.append(ev.text)
+                elif isinstance(ev, ToolUseEvent):
+                    _flush()
+                    history_db.record_chat_message(
+                        session_id, 0, seq_in_turn,
+                        kind="tool_use", name=ev.name,
+                        content=json.dumps(ev.arguments, default=str),
+                    )
+                    seq_in_turn += 1
+                elif isinstance(ev, ToolResultEvent):
+                    _flush()
+                    payload = ev.result if isinstance(ev.result, str) \
+                        else json.dumps(ev.result, default=str)
+                    history_db.record_chat_message(
+                        session_id, 0, seq_in_turn,
+                        kind="tool_result", name=ev.call_id, content=payload,
+                    )
+                    seq_in_turn += 1
+                yield _serialize(ev)
+            _flush()
+        except Exception as exc:  # noqa: BLE001
+            yield {"event": "error",
+                   "data": json.dumps({"message": f"resume failed: {exc}"})}
+            yield {"event": "done", "data": json.dumps({"stop_reason": "resume_error"})}
 
     return EventSourceResponse(gen())

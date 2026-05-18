@@ -1,5 +1,10 @@
 # Human-in-the-loop guardrails — design plan
 
+**Status: ✅ Complete (2026-05-18).** All five phases shipped. The
+backlog below remains as authored — see `TODO.md` Plan index entry for
+the post-landing summary. Future changes should move to a successor
+plan rather than reopening this doc.
+
 **Goal**: every agent action that touches a live FortiSOAR with non-query side
 effects (or any third-party state) is gated by an explicit human approval,
 with rendered preview + masked secrets + scoped single-use tokens. The

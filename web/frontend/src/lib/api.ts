@@ -325,7 +325,16 @@ export type LadderRung = {
 
 export type ChatEvent =
   | { kind: 'text'; text: string }
-  | { kind: 'tool_use'; name: string; arguments: Record<string, unknown>; call_id: string }
+  | {
+      kind: 'tool_use';
+      name: string;
+      arguments: Record<string, unknown>;
+      call_id: string;
+      /** HITL Phase 2: server-resolved tier (0–4). 0/1/2 auto-allow;
+       *  3+ went through an approval card. Used by the audit pane to
+       *  flag tier-3+ rows. Default 0 when older backends don't send it. */
+      tier?: number;
+    }
   | { kind: 'tool_result'; call_id: string; result_preview: string }
   | {
       kind: 'usage';
@@ -346,6 +355,17 @@ export type ChatEvent =
       warning_count: number;
       achieved: number;
     }
+  | {
+      kind: 'approval_request';
+      approval_id: string;
+      tool_use_id: string;
+      tool: string;
+      tier: number;
+      preview: { tool: string; args: Record<string, unknown> };
+      args_hash: string;
+      summary: string | null;
+      requires_step_up: boolean;
+    }
   | { kind: 'done'; stop_reason: string }
   | { kind: 'error'; message: string };
 
@@ -363,6 +383,8 @@ export function parseChatEvent(event: string, data: string): ChatEvent | null {
         return { kind: 'usage', ...obj };
       case 'ladder':
         return { kind: 'ladder', ...obj };
+      case 'approval_request':
+        return { kind: 'approval_request', ...obj };
       case 'done':
         return { kind: 'done', ...obj };
       case 'error':

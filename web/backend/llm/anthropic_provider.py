@@ -16,6 +16,7 @@ from typing import Any, AsyncIterator
 from anthropic import AsyncAnthropic
 
 from .provider import (
+    ApprovalRequestEvent,
     DoneEvent,
     ErrorEvent,
     Event,
@@ -26,6 +27,7 @@ from .provider import (
     ToolUseEvent,
     UsageEvent,
 )
+from . import approvals as _approvals
 from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
@@ -33,7 +35,7 @@ from ._loop_helpers import (
     extract_yaml_block as _extract_yaml_block,
     shrink_history as _shrink_history,
 )
-from .tools import anthropic_tools, dispatch
+from .tools import anthropic_tools, dispatch, _resolve_tier as _tier_for
 
 
 DEFAULT_MODEL = os.environ.get("STUDIO_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
@@ -71,6 +73,79 @@ class AnthropicProvider:
         else:
             # Falls back to ANTHROPIC_API_KEY env var via SDK default.
             self._client = AsyncAnthropic(max_retries=5)
+
+    async def resume(
+        self,
+        *,
+        suspended: "_approvals.SuspendedSession",
+        decision: str,  # "approve" | "deny"
+    ) -> AsyncIterator[Event]:
+        """Resume a turn that was suspended on a pending_approval.
+
+        Rebuilds the user-side tool_result message covering every
+        tool_use the model emitted in the suspended assistant turn:
+        - prior_tool_result_blocks for calls that completed pre-pending
+        - one block for the pending call (re-dispatched on approve, or
+          synthesized `{ok: false, code: "user_denied"}` on deny)
+        - placeholders for remaining_tool_calls (Anthropic requires a
+          tool_result for every tool_use; without these the next
+          messages call 400s).
+
+        Then re-enters `stream()` with the rebuilt history. The full
+        provider loop (text deltas, further tool calls, UsageEvent,
+        DoneEvent) flows as usual.
+        """
+        if decision == "approve":
+            # Bypass the gate this one time — see tools.dispatch.
+            resolved = dispatch(
+                suspended.tool,
+                {**suspended.args, "_approved": True},
+            )
+            decision_event_result: Any = resolved
+        else:
+            resolved = {"ok": False, "code": "user_denied",
+                        "reason": "User denied the action."}
+            decision_event_result = resolved
+
+        # Emit the resolved tool_result so the UI can render it inline
+        # with the approval card it was waiting on.
+        yield ToolResultEvent(
+            call_id=suspended.tool_use_id,
+            result=decision_event_result,
+        )
+
+        resumed_blocks: list[dict[str, Any]] = list(
+            suspended.prior_tool_result_blocks
+        )
+        resumed_blocks.append({
+            "type": "tool_result",
+            "tool_use_id": suspended.tool_use_id,
+            "content": _stringify(resolved),
+        })
+        for pid, _pn, _pa in suspended.remaining_tool_calls:
+            resumed_blocks.append({
+                "type": "tool_result",
+                "tool_use_id": pid,
+                "content": "{\"ok\": false, \"code\": "
+                            "\"superseded_by_approval\"}",
+            })
+
+        # Rehydrate Messages from the wire-form snapshot + the rebuilt
+        # tool_result user turn. The provider's `stream()` will run
+        # _to_anthropic_messages over this again, which is a no-op for
+        # already-shaped block lists.
+        rehydrated: list[Message] = []
+        for m in suspended.history_snapshot:
+            rehydrated.append(Message(role=m["role"], content=m["content"]))
+        rehydrated.append(Message(role="user", content=resumed_blocks))
+
+        async for ev in self.stream(
+            system=suspended.system,
+            messages=rehydrated,
+            tools=[],
+            tags=suspended.tags,
+        ):
+            yield ev
 
     async def stream(
         self,
@@ -262,10 +337,53 @@ class AnthropicProvider:
                 return
 
             # Execute tools, emit events, append tool_result message.
+            # If any call returns a pending_approval envelope, we
+            # stash the suspension state and bail out for this turn.
+            # The chat layer resumes once the user decides.
             tool_result_blocks: list[dict[str, Any]] = []
-            for call_id, name, args in tool_calls:
-                yield ToolUseEvent(name=name, arguments=args, call_id=call_id)
+            pending: ApprovalRequestEvent | None = None
+            pending_remaining: list[tuple[str, str, dict[str, Any]]] = []
+            for i, (call_id, name, args) in enumerate(tool_calls):
+                yield ToolUseEvent(
+                    name=name, arguments=args, call_id=call_id,
+                    tier=_tier_for(name, args),
+                )
                 result = dispatch(name, args)
+                if isinstance(result, dict) and result.get("pending_approval"):
+                    # The assistant turn (with this tool_use) is already
+                    # appended to history above. Stash everything resume
+                    # needs, including any earlier tool_result_blocks for
+                    # calls that resolved in this same turn, plus the
+                    # tool_use_ids for calls we DIDN'T get to so resume
+                    # can fill them with placeholder denials.
+                    pending_remaining = list(tool_calls[i + 1:])
+                    approval_id = result["approval_id"]
+                    _approvals.stash(_approvals.SuspendedSession(
+                        approval_id=approval_id,
+                        session_id=session_id,
+                        tool=name,
+                        tool_use_id=call_id,
+                        args=args,
+                        tier=int(result.get("tier", 3)),
+                        history_snapshot=_to_anthropic_messages(history),
+                        prior_tool_result_blocks=list(tool_result_blocks),
+                        remaining_tool_calls=list(pending_remaining),
+                        system=system,
+                        tags=dict(tags),
+                        summary=result.get("summary"),
+                    ))
+                    pending = ApprovalRequestEvent(
+                        approval_id=approval_id,
+                        tool_use_id=call_id,
+                        tool=name,
+                        tier=int(result.get("tier", 3)),
+                        preview=result.get("preview") or {},
+                        args_hash=result.get("args_hash", ""),
+                        summary=result.get("summary"),
+                        requires_step_up=bool(result.get("requires_step_up")),
+                    )
+                    break
+
                 yield ToolResultEvent(call_id=call_id, result=result)
                 content_str = _stringify(result)
                 tool_result_blocks.append({
@@ -281,6 +399,25 @@ class AnthropicProvider:
                     name=name, args_chars=args_chars,
                     result_chars=len(content_str),
                 ))
+
+            if pending is not None:
+                # Suspend: emit the approval request + usage for the
+                # round-trip we already paid for, then a DoneEvent with
+                # a sentinel stop_reason so the chat layer knows this
+                # isn't a normal end-of-turn.
+                yield pending
+                yield UsageEvent(
+                    session_id=session_id, turn=turn_idx, model=self.model,
+                    input_tokens=input_tok, output_tokens=output_tok,
+                    cache_read=cache_hit, cache_write=cache_write,
+                    history_chars=history_chars,
+                    stop_reason="pending_approval",
+                    self_repair_turn=self_repair_turns,
+                    tool_calls=tool_call_usage, tags=tags,
+                )
+                yield DoneEvent(stop_reason="pending_approval")
+                return
+
             history.append(Message(role="user", content=tool_result_blocks))
             yield UsageEvent(
                 session_id=session_id, turn=turn_idx, model=self.model,

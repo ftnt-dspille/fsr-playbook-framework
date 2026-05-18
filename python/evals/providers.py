@@ -135,15 +135,21 @@ _AGENTIC_MAX_TURNS = 8
 
 def _import_studio_tools():
     """Pull the same SAFE_TOOLS registry the chat backend uses, so agentic
-    evals exercise the exact tool surface end users hit."""
+    evals exercise the exact tool surface end users hit. Also returns
+    the HITL audit-log helpers so the agentic providers can snapshot
+    per-task escalation behavior."""
     import sys
     from pathlib import Path
     repo = Path(__file__).resolve().parents[2]
     backend = repo / "web" / "backend"
     if str(backend) not in sys.path:
         sys.path.insert(0, str(backend))
-    from llm.tools import anthropic_tools, openai_tools, dispatch  # type: ignore
-    return anthropic_tools, openai_tools, dispatch
+    from llm.tools import (  # type: ignore
+        anthropic_tools, openai_tools, dispatch,
+        clear_audit_log, snapshot_audit_log, set_eval_policy,
+    )
+    return (anthropic_tools, openai_tools, dispatch,
+            clear_audit_log, snapshot_audit_log, set_eval_policy)
 
 
 def _agentic_anthropic_provider() -> Callable:
@@ -153,7 +159,7 @@ def _agentic_anthropic_provider() -> Callable:
     import json as _json
     client = anthropic.Anthropic()
     model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
-    anthropic_tools, _, dispatch = _import_studio_tools()
+    anthropic_tools, _, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
     raw_tools = anthropic_tools()
     # Cache the (static) tool list — mark the last entry so the cache
     # breakpoint includes every preceding tool def.
@@ -230,7 +236,8 @@ def _agentic_anthropic_provider() -> Callable:
                 })
             history.append({"role": "user", "content": tool_results})
         return {"text": "\n".join(text_chunks), "trace": trace,
-                "turns": turns, "usage": usage_log}
+                "turns": turns, "usage": usage_log,
+                "audit": _snap()}
     return _call
 
 
@@ -242,7 +249,7 @@ def _agentic_lmstudio_provider() -> Callable:
     model = os.environ.get("LMSTUDIO_MODEL", "local-model")
     import json as _json
     import requests  # type: ignore[import-untyped]
-    _, openai_tools, dispatch = _import_studio_tools()
+    _, openai_tools, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
     tools = openai_tools()
 
     def _call(system: str, prompt: str) -> dict:
@@ -295,7 +302,8 @@ def _agentic_lmstudio_provider() -> Callable:
                     "role": "tool", "tool_call_id": tc.get("id", ""),
                     "content": content,
                 })
-        return {"text": "\n".join(text_chunks), "trace": trace, "turns": turns}
+        return {"text": "\n".join(text_chunks), "trace": trace,
+                "turns": turns, "audit": _snap()}
     return _call
 
 

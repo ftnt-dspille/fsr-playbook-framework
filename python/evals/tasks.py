@@ -16,9 +16,9 @@ in scoring.gold. When absent, the gold gate is skipped.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TASKS_DIR = Path(__file__).resolve().parent / "tasks"
@@ -30,6 +30,13 @@ class Task:
     prompt: str
     gold_yaml_path: Optional[str] = None  # repo-relative
     notes: str = ""
+    # Phase 3 HITL: per-task eval policy. None = use $EVAL_APPROVAL_POLICY
+    # (or "suspend" if unset, but suspend in an eval is treated as a
+    # tier-3+ call returning `pending_approval`).
+    approval_policy: Optional[str] = None
+    # Shape for the `appropriate_approval_requests` gate. None = default
+    # ("exactly_zero" tier-3+ calls).
+    expected_approvals: Optional[dict[str, Any]] = None
 
     def gold_yaml_text(self) -> Optional[str]:
         if not self.gold_yaml_path:
@@ -50,6 +57,8 @@ def load_tasks(filter_names: list[str] | None = None) -> list[Task]:
             prompt=data["prompt"],
             gold_yaml_path=data.get("gold_yaml_path"),
             notes=data.get("notes", ""),
+            approval_policy=data.get("approval_policy"),
+            expected_approvals=data.get("expected_approvals"),
         ))
     if filter_names:
         wanted = set(filter_names)

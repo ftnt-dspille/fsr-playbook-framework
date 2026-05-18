@@ -38,6 +38,7 @@ def step_through_playbook(yaml_text: str,
                           branch_choices: dict[str, str] | None = None,
                           manual_choices: dict[str, str] | None = None,
                           execute_safe_ops: bool = True,
+                          execute_unsafe_ops: bool = False,
                           max_steps: int = 30) -> dict[str, Any]:
     """L3 gate: walk a playbook step-by-step *without* pushing to FSR.
 
@@ -60,6 +61,14 @@ def step_through_playbook(yaml_text: str,
       input: vars.input.params.* values.
       branch_choices: {step_id: branch_label} pinning decision-step paths.
       execute_safe_ops: if False, every step is simulated (purely offline).
+      execute_unsafe_ops: opt-in flag (HITL Phase 5). Default False keeps
+        the simulator strictly read-only — unsafe steps return
+        `{output: {_simulated: True, would_have_run: {connector, op,
+        params}}}` so downstream Jinja keeps resolving. When True, the
+        dispatch wrapper escalates the *call* to tier-3 (one approval
+        card guards entry into the unsafe simulator); to commit any
+        specific destructive step the agent then calls `run_op` per
+        step, each of which carries its own per-call approval gate.
       max_steps: hard cap to prevent runaway loops.
 
     Response shape:
@@ -315,10 +324,33 @@ def step_through_playbook(yaml_text: str,
                     if first_error is None:
                         first_error = {"step_id": sid, "message": str(exc)}
             else:
+                # HITL Phase 5: emit a synthetic placeholder with the
+                # canonical `_simulated: True` + `would_have_run`
+                # payload so downstream Jinja keeps resolving and the
+                # agent sees exactly what would have fired. The
+                # `execute_unsafe_ops` flag is read by the dispatch
+                # gate to escalate the *call* to tier-3 (one approval
+                # card to enter the unsafe simulator); per-step
+                # commits happen via separate `run_op` calls, each of
+                # which carries its own gate.
+                sim_output = {
+                    "_simulated": True,
+                    "would_have_run": {
+                        "connector": cn or "",
+                        "op": opn or "",
+                        "params": {k: v for k, v in rendered.items()
+                                   if k not in {"connector", "operation",
+                                                "mock_result"}},
+                    },
+                }
                 step_record["status"] = "simulated"
+                step_record["simulated_from"] = "unsafe_placeholder"
                 step_record["note"] = (
                     f"non-safe op (risk={risk}); simulated to keep "
-                    "stepper read-only")
+                    "stepper read-only. "
+                    + ("Re-run with execute_unsafe_ops=True + per-step run_op "
+                       "(each gated) to commit." if not execute_unsafe_ops
+                       else "execute_unsafe_ops=True; commit via run_op."))
         elif stype == "set_variable":
             # The handler writes each variable into vars.steps.<sid>.<name>.
             # Two source shapes are accepted: the post-parser form

@@ -20,6 +20,11 @@
     name: string;
     arguments: Record<string, unknown>;
     result_preview?: string;
+    /** Server-resolved tier (HITL Phase 2). Drives the audit pane row
+     *  badge — tier 3+ rows are highlighted because they went through
+     *  an approval card. */
+    tier?: number;
+    ts?: number;
   };
 
   type PushOffer = { yaml: string; hasWarnings: boolean };
@@ -31,9 +36,29 @@
     result: PushResult | null;
   };
 
+  type ApprovalCard = {
+    approval_id: string;
+    tool_use_id: string;
+    tool: string;
+    tier: number;
+    preview: { tool: string; args: Record<string, unknown> };
+    summary: string | null;
+    requires_step_up: boolean;
+    /** 'pending' until the user clicks; 'approving'/'denying' while the
+     *  resume SSE request is in flight; 'approved'/'denied' once the
+     *  server has finished streaming the resume. */
+    state: 'pending' | 'approving' | 'denying' | 'approved' | 'denied';
+    /** For tier-4 step-up: the user types the rendered target back. */
+    confirmedTarget?: string;
+    /** Best-effort target identifier extracted from `preview.args` for
+     *  the step-up prompt — typically the IP/host/record id. */
+    targetHint?: string;
+  };
+
   type TurnSegment =
     | { kind: 'text'; text: string }
-    | { kind: 'tool'; tool: ToolCall };
+    | { kind: 'tool'; tool: ToolCall }
+    | { kind: 'approval'; card: ApprovalCard };
 
   type Turn = {
     role: 'user' | 'assistant';
@@ -327,7 +352,9 @@
         const tool: ToolCall = {
           call_id: ev.call_id,
           name: ev.name,
-          arguments: ev.arguments
+          arguments: ev.arguments,
+          tier: ev.tier ?? 0,
+          ts: Date.now()
         };
         a.tools = [...(a.tools ?? []), tool];
         if (!a.segments) a.segments = [];
@@ -388,9 +415,91 @@
         ladderWarnings = ev.warning_count;
         ladderHistory = [...ladderHistory.slice(-5), ev.error_count];
         break;
+      case 'approval_request': {
+        // The provider has suspended on a tier-3+ tool call. Render an
+        // approval card immediately after the tool segment so the user
+        // can decide before any FSR / third-party side effect runs.
+        if (!a.segments) a.segments = [];
+        const argsRecord =
+          (ev.preview?.args as Record<string, unknown> | undefined) ?? {};
+        const params =
+          (argsRecord.params as Record<string, unknown> | undefined) ?? {};
+        const targetHint =
+          (params.ip as string | undefined) ??
+          (params.host as string | undefined) ??
+          (params.target as string | undefined) ??
+          (argsRecord.target as string | undefined) ??
+          undefined;
+        a.segments.push({
+          kind: 'approval',
+          card: {
+            approval_id: ev.approval_id,
+            tool_use_id: ev.tool_use_id,
+            tool: ev.tool,
+            tier: ev.tier,
+            preview: ev.preview,
+            summary: ev.summary,
+            requires_step_up: ev.requires_step_up,
+            state: 'pending',
+            targetHint
+          }
+        });
+        break;
+      }
       case 'error':
         err = ev.message;
         break;
+    }
+  }
+
+  async function resolveApproval(
+    turnIdx: number,
+    card: ApprovalCard,
+    decision: 'approve' | 'deny'
+  ) {
+    if (card.state !== 'pending') return;
+    if (
+      decision === 'approve' &&
+      card.requires_step_up &&
+      (card.targetHint ?? '') !== '' &&
+      (card.confirmedTarget ?? '') !== card.targetHint
+    ) {
+      err = `Type the target (${card.targetHint}) to confirm.`;
+      return;
+    }
+    card.state = decision === 'approve' ? 'approving' : 'denying';
+    err = null;
+    busy = true;
+    let stepUpFailed = false;
+    try {
+      for await (const frame of postSse(
+        `/api/approvals/${card.approval_id}`,
+        {
+          decision,
+          confirmed_target: card.confirmedTarget ?? null
+        }
+      )) {
+        const ev = parseChatEvent(frame.event, frame.data);
+        if (!ev) continue;
+        // Server-side step-up rejection — the suspended session is
+        // preserved; bounce the card back to pending so the user can
+        // retype the target instead of having to retry the whole turn.
+        if (ev.kind === 'done' && ev.stop_reason === 'step_up_required') {
+          stepUpFailed = true;
+          continue;
+        }
+        applyEvent(turnIdx, ev);
+      }
+      if (stepUpFailed) {
+        card.state = 'pending';
+      } else {
+        card.state = decision === 'approve' ? 'approved' : 'denied';
+      }
+    } catch (e: any) {
+      err = e?.message ?? String(e);
+      card.state = 'pending';
+    } finally {
+      busy = false;
     }
   }
 
@@ -613,6 +722,84 @@
               </details>
             {/snippet}
 
+            {#snippet approvalCard(turnIdx: number, card: ApprovalCard)}
+              <div
+                class="rounded-md border bg-[var(--bg-panel)]/40 px-3 py-2.5 {card.tier >= 4
+                  ? 'border-red-700/60'
+                  : 'border-amber-700/60'}"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="text-{card.tier >= 4 ? 'red' : 'amber'}-400">
+                    {card.tier >= 4 ? '⚠' : '◐'}
+                  </span>
+                  <span class="text-xs font-semibold uppercase tracking-wider text-{card.tier >= 4 ? 'red' : 'amber'}-200">
+                    Tier {card.tier} approval required
+                  </span>
+                  <span class="ml-auto text-[10px] text-[var(--text-faint)]">
+                    {card.state === 'pending'
+                      ? 'awaiting your decision'
+                      : card.state === 'approving'
+                        ? 'approving…'
+                        : card.state === 'denying'
+                          ? 'denying…'
+                          : card.state}
+                  </span>
+                </div>
+                {#if card.summary}
+                  <div class="mt-2 text-[14px] text-[var(--text-default)]">{card.summary}</div>
+                {/if}
+                <div class="mt-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
+                  {card.tool}
+                </div>
+                <pre class="mt-1 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--bg-canvas)]/60 p-2 font-mono text-[11px] text-[var(--text-muted)]">{JSON.stringify(
+                    card.preview.args,
+                    null,
+                    2
+                  )}</pre>
+                {#if card.state === 'pending' && card.requires_step_up && card.targetHint}
+                  <div class="mt-2 flex items-center gap-2 text-[11px] text-red-200">
+                    <span>Type</span>
+                    <code class="rounded bg-red-950/60 px-1.5 py-0.5 font-mono text-red-200">{card.targetHint}</code>
+                    <span>to confirm:</span>
+                    <input
+                      type="text"
+                      class="flex-1 rounded border border-red-800/60 bg-[var(--bg-canvas)] px-2 py-0.5 text-[11px] font-mono text-[var(--text-default)] focus:border-red-500 focus:outline-none"
+                      bind:value={card.confirmedTarget}
+                    />
+                  </div>
+                {/if}
+                {#if card.state === 'pending'}
+                  <div class="mt-2.5 flex items-center justify-end gap-2">
+                    <button
+                      class="rounded-md border border-[var(--border-soft)] bg-[var(--bg-elevated)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:border-[var(--border)] hover:text-[var(--text-default)] disabled:cursor-not-allowed disabled:opacity-50"
+                      onclick={() => resolveApproval(turnIdx, card, 'deny')}
+                      disabled={busy}
+                    >
+                      Deny
+                    </button>
+                    <button
+                      class="rounded-md px-3 py-1 text-[11px] font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 {card.tier >=
+                      4
+                        ? 'bg-red-700 hover:bg-red-600'
+                        : 'bg-amber-700 hover:bg-amber-600'}"
+                      onclick={() => resolveApproval(turnIdx, card, 'approve')}
+                      disabled={busy}
+                    >
+                      Approve
+                    </button>
+                  </div>
+                {:else if card.state === 'approved'}
+                  <div class="mt-2 text-[11px] text-emerald-300">
+                    ✓ Approved — action executed
+                  </div>
+                {:else if card.state === 'denied'}
+                  <div class="mt-2 text-[11px] text-[var(--text-muted)]">
+                    ✕ Denied — action skipped
+                  </div>
+                {/if}
+              </div>
+            {/snippet}
+
             {#if t.role === 'assistant'}
               {#if t.segments && t.segments.length}
                 <!-- Chronological interleave: each text chunk emitted
@@ -627,6 +814,8 @@
                           {@html renderMarkdown(seg.text)}
                         </div>
                       {/if}
+                    {:else if seg.kind === 'approval'}
+                      {@render approvalCard(i, seg.card)}
                     {:else}
                       {@render toolCard(seg.tool)}
                     {/if}
@@ -725,6 +914,60 @@
         <div class="rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-xs text-red-300">
           {err}
         </div>
+      {/if}
+
+      {#if turns.some((t) => (t.tools?.length ?? 0) > 0)}
+        <!-- HITL Phase 2: tool-activity audit pane. Collapsed by
+             default — the conversation IS the audit trail, but this
+             surfaces the chronology + tier badges without scrolling
+             back through every turn. -->
+        <details class="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40">
+          <summary
+            class="flex cursor-pointer items-center gap-2 px-3 py-2 text-[11px] text-[var(--text-muted)]"
+          >
+            <span>Tool activity</span>
+            <span class="text-[var(--text-faint)]">
+              · {turns.reduce((n, t) => n + (t.tools?.length ?? 0), 0)} call(s)
+            </span>
+            {#if turns.some((t) => (t.tools ?? []).some((c) => (c.tier ?? 0) >= 3))}
+              <span class="rounded bg-amber-950/60 px-1.5 py-0.5 text-[10px] text-amber-300">
+                🔓 approved by you
+              </span>
+            {/if}
+          </summary>
+          <div class="border-t border-[var(--border-soft)] px-3 py-2">
+            <div class="space-y-1">
+              {#each turns as t}
+                {#each t.tools ?? [] as c}
+                  <div class="flex items-center gap-2 text-[11px]">
+                    {#if (c.tier ?? 0) >= 4}
+                      <span class="rounded bg-red-950/60 px-1.5 py-0.5 font-mono text-[10px] text-red-300">T4</span>
+                    {:else if (c.tier ?? 0) === 3}
+                      <span class="rounded bg-amber-950/60 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">T3</span>
+                    {:else if (c.tier ?? 0) === 2}
+                      <span class="rounded bg-sky-950/60 px-1.5 py-0.5 font-mono text-[10px] text-sky-300">T2</span>
+                    {:else if (c.tier ?? 0) === 1}
+                      <span class="rounded bg-emerald-950/60 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300">T1</span>
+                    {:else}
+                      <span class="rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-faint)]">T0</span>
+                    {/if}
+                    <span class="font-mono text-blue-300">{c.name}</span>
+                    <span class="text-[var(--text-faint)]">
+                      ·
+                      {Object.keys(c.arguments).length}
+                      {Object.keys(c.arguments).length === 1 ? 'arg' : 'args'}
+                    </span>
+                    {#if c.ts}
+                      <span class="ml-auto font-mono text-[10px] text-[var(--text-faint)]">
+                        {new Date(c.ts).toLocaleTimeString()}
+                      </span>
+                    {/if}
+                  </div>
+                {/each}
+              {/each}
+            </div>
+          </div>
+        </details>
       {/if}
     </div>
   </div>

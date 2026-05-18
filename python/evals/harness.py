@@ -79,6 +79,18 @@ def run_matrix(
             continue
         for t in tasks:
             t0 = time.time()
+            # HITL Phase 3: pin per-task approval policy + reset the
+            # dispatch wrapper's audit log so the gate scores only this
+            # task's escalation behavior. No-op when the studio tools
+            # module isn't on sys.path (classic providers).
+            try:
+                from llm.tools import (  # type: ignore
+                    clear_audit_log as _clr, set_eval_policy as _set_pol,
+                )
+                _set_pol(t.approval_policy)
+                _clr()
+            except Exception:
+                pass
             try:
                 raw = provider(system_prompt, t.prompt)
             except Exception as e:  # noqa: BLE001
@@ -97,11 +109,13 @@ def run_matrix(
                 trace = raw.get("trace")
                 turns = raw.get("turns")
                 usage = raw.get("usage")
+                audit = raw.get("audit")
             else:
                 final_text = raw or ""
                 trace = None
                 turns = None
                 usage = None
+                audit = None
             yaml_text = extract_yaml(final_text)
             scored = score(
                 yaml_text,
@@ -109,6 +123,8 @@ def run_matrix(
                 live=live,
                 trace=trace,
                 final_text=final_text,
+                audit=audit,
+                expected_approvals=t.expected_approvals,
             )
             row = {
                 "model": model_name,

@@ -23,6 +23,10 @@ class ToolUseEvent:
     name: str
     arguments: dict[str, Any]
     call_id: str
+    # HITL Phase 2: server-resolved tier so the audit pane can colour
+    # tier-3+ calls without re-resolving on the client. 0 = tier
+    # unknown (e.g. provider didn't stamp it; defaults to "safe" badge).
+    tier: int = 0
     kind: Literal["tool_use"] = "tool_use"
 
 
@@ -31,6 +35,26 @@ class ToolResultEvent:
     call_id: str
     result: Any
     kind: Literal["tool_result"] = "tool_result"
+
+
+@dataclass
+class ApprovalRequestEvent:
+    """Emitted when a tier-3+ tool call needs human approval before the
+    provider can continue. The loop is suspended on the server until
+    `POST /api/approvals/{approval_id}` arrives with the decision.
+
+    `tool_use_id` is the Anthropic tool_use block id that triggered the
+    request — frontend matches it back onto the assistant turn so the
+    approval card renders inline with the call it gates."""
+    approval_id: str
+    tool_use_id: str
+    tool: str
+    tier: int
+    preview: dict[str, Any]
+    args_hash: str
+    summary: str | None = None
+    requires_step_up: bool = False
+    kind: Literal["approval_request"] = "approval_request"
 
 
 @dataclass
@@ -112,6 +136,7 @@ class LadderEvent:
 Event = (
     TextEvent | ToolUseEvent | ToolResultEvent
     | DoneEvent | ErrorEvent | UsageEvent | LadderEvent
+    | ApprovalRequestEvent
 )
 
 

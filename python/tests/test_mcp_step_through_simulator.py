@@ -519,3 +519,48 @@ def test_coerce_literal_list_handles_inline_jinja_literal():
 ])
 def test_truthy(v, expected):
     assert mcp_server._truthy(v) is expected
+
+
+# ---- HITL Phase 5: unsafe-op placeholder shape ------------------------
+
+def test_unsafe_connector_op_returns_simulated_placeholder():
+    """An unsafe connector op (here: fortigate block_address) should
+    NOT execute under the offline simulator. Trace must surface the
+    `_simulated: True` + `would_have_run` payload so the agent can see
+    exactly what would have fired without running it."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            start: s
+            steps:
+              - id: s
+                type: start
+                name: Start
+                next: blk
+              - id: blk
+                type: connector
+                name: Block
+                connector: fortigate
+                operation: block_address
+                arguments:
+                  ip: 8.8.8.8
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    r = mcp_server.step_through_playbook(yaml)
+    by = _trace_by_id(r)
+    assert by["blk"]["status"] == "simulated"
+    out = by["blk"].get("output")
+    assert isinstance(out, dict)
+    assert out.get("_simulated") is True
+    whr = out.get("would_have_run")
+    assert isinstance(whr, dict)
+    assert whr.get("connector") == "fortigate"
+    assert whr.get("op") == "block_address"
+    # `would_have_run.params` carries the rendered args sans the
+    # connector/operation/mock_result keys (those are step metadata).
+    assert "connector" not in whr["params"]
+    assert "operation" not in whr["params"]
+    assert by["blk"].get("simulated_from") == "unsafe_placeholder"
