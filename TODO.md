@@ -16,8 +16,8 @@ live under `docs/plans/`; frozen research/audit snapshots under
 | [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector wired to every MCP tool; debug runner. | Phase 1–4 shipped; inspector polish + debug runner ongoing |
 | [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 shipped (`render_paths.py`, `render_analyzer.py`); heuristic catalog ongoing |
 | [`AGENT_QUALITY_PLAN.md`](docs/plans/AGENT_QUALITY_PLAN.md) | Evidence base for agent tuning: what the agent actually looks up, data-store gaps, prompt-adherence baseline. | Phase 1A/B/C shipped (`fsrpb agent-stats`); Phase 2/3 pending |
-| [`CONNECTOR_INTEGRATION_PLAN.md`](docs/plans/CONNECTOR_INTEGRATION_PLAN.md) | Adopt the sibling `connector_building/` validator + `api_examples_catalog/catalog.sqlite` (36k HTTP fixtures, 6.9k products) so the agent can both find real API examples and verify a custom-authored connector. Supersedes TODO D3 + HTTP-virtual-connector items. | Drafted 2026-05-18; not started |
-| [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Three orthogonal refinements: (A) static reference data into the prompt cache, (B) constrained generation for hot shapes via `emit_*` tools, (C) separate "enhance" path from "build" path with `verify_enhancement` + intent-tagged metrics. | Drafted 2026-05-18; not started |
+| [`CONNECTOR_INTEGRATION_PLAN.md`](docs/plans/CONNECTOR_INTEGRATION_PLAN.md) | Adopt the sibling `connector_building/` validator + `api_examples_catalog/catalog.sqlite` (36k HTTP fixtures, 6.9k products) so the agent can both find real API examples and verify a custom-authored connector. Supersedes TODO D3 + HTTP-virtual-connector items. | **Phases 0 + 0.5 done** (catalog MCP tools + `propose_http_fallback`, commit `b4ad73d`). Phases 1–5 pending. |
+| [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Three orthogonal refinements: (A) static reference data into the prompt cache, (B) constrained generation for hot shapes via `emit_*` tools, (C) separate "enhance" path from "build" path with `verify_enhancement` + intent-tagged metrics. | **Refinement A done** (commit `18adb53` — 14.9 KB cached prefix). B + C pending. |
 
 **Frozen research / audits** (`docs/research/`) — snapshots, not updated:
 
@@ -33,6 +33,21 @@ live under `docs/plans/`; frozen research/audit snapshots under
 **Cross-project**:
 
 - [`Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`](../Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md) — original cross-project plan; referenced from global `~/.claude/CLAUDE.md`.
+
+**Working-tree carry-overs** (changes not yet committed because the
+files had pre-existing WIP from other sessions):
+
+- `python/agent/system_prompt.md` — gains:
+  - top-of-file pointer to the cached static grammar block (Refinement A).
+  - "Latent capabilities" section listing 22 wire-up tools.
+  - `propose_http_fallback` rule under "Latent capabilities"
+    (CONNECTOR_INTEGRATION_PLAN Phase 0.5).
+- `web/frontend/src/lib/api.ts` — `listRecentFailedRuns`,
+  `whyDidPlaybookFail` helpers for `FailedRunsPanel`.
+- `web/frontend/src/routes/history/+page.svelte` — tab nav into the
+  failed-runs panel.
+
+Pull these into whichever next commit touches those files.
 
 ---
 
@@ -218,39 +233,19 @@ D2. **User context preferences that influence every chat session**.
       with/without a preference and asserts the right connector got
       selected.
 
-D3. **Wire `api_examples_catalog/catalog.sqlite` into fsrpb as a
-    first-class lookup**. Today the catalog (6,927 products /
-    207,419 API command entries with FTS, in
-    `~/PycharmProjects/Miscellaneous/api_examples_catalog/`) is a
-    standalone artifact with its own `query.py`. The agent never
-    sees it. With HTTP virtual-connector authoring on the roadmap,
-    this is the highest-leverage external corpus we have for
-    grounding 3rd-party API calls in real examples. Plan:
-    - Adopt the file: move or symlink the catalog under
-      `store/api_catalog.db` (or attach via `ATTACH DATABASE` like
-      we do for the playbook-steps catalog) so fsrpb can read it
-      without absolute paths.
-    - New MCP tool `find_api_example(product, intent, limit=5)`:
-      maps product (Splunk, ServiceNow, CrowdStrike, …) +
-      natural-language intent → top entries with action,
-      http_method, http_path, code_snippet, source_url. Use the
-      existing `entries_fts` virtual table for relevance ranking.
-    - New MCP tool `find_api_product(name)`: fuzzy-search the 6,927
-      products since users will misspell vendor names.
-    - System-prompt addition: when authoring an HTTP virtual
-      connector or a `connector` step against a connector that
-      isn't in the FSR catalog (or where the FSR op is missing
-      params we need), call `find_api_example` to ground the
-      request shape in a real example.
-    - Tie-in with D2 user prefs: if the user has "block on endpoint
-      → CrowdStrike", auto-call `find_api_example("crowdstrike",
-      "quarantine endpoint")` when block-on-endpoint intent matches.
-    - Tie-in with D1 distribution: see the catalog notes in D1 —
-      decide ship-slim vs optional-sidecar before exposing the tool
-      to non-dev users.
-    - Tests: assert top-1 hit for a few canned queries (e.g.
-      "splunk run search", "servicenow create incident") so corpus
-      drift is caught.
+D3. ~~**Wire `api_examples_catalog/catalog.sqlite` into fsrpb as a
+    first-class lookup**.~~ ✅ Superseded by
+    [`CONNECTOR_INTEGRATION_PLAN.md`](docs/plans/CONNECTOR_INTEGRATION_PLAN.md)
+    Phases 0 + 0.5 (commit `b4ad73d`). The catalog is now ATTACHed and
+    surfaced via `find_api_product`, `find_api_example` (FTS5), and
+    `find_api_fixture` (with response/parameters schemas). The bigger
+    `propose_http_fallback` story — native op → connector `api_call`
+    escape hatch → http fixture → `no_grounded_shape` — also landed.
+    Still open from the original D3 plan, deferred to D1 sidecar
+    decision:
+    - Distribution of the 437 MB catalog (slim vs full sidecar).
+    - D2 user-pref tie-in (auto-call when "block on endpoint → CrowdStrike"
+      preference matches).
 
 ## Chat-review landings follow-ups (session c44c6e36)
 
@@ -292,6 +287,23 @@ Compare cells to see whether the Track-B slimming + Track-C auto-fixes
 moved the agentic providers' p95 tool count / spiral counts. Archive
 under `store/eval_runs/`; if regressions appear, the gates will surface
 them per-cell.
+
+**Since 2026-05-07** several refinements have landed that should also
+show up in the re-baseline delta:
+
+- Refinement A (cached static grammar block, commit `18adb53`) —
+  expect `get_step_type` / `find_jinja_filter` call counts to drop.
+- 22 latent MCP tools surfaced in `system_prompt.md` (commit `9ca5a36`
+  era, in working tree) — expect non-zero call counts on
+  `propose_http_fallback`, `why_did_playbook_fail`, picklist discovery.
+- Connector Phase 0 + 0.5 (commit `b4ad73d`) — eval task #21
+  (`soc_http_fallback_no_native_op`) is the dedicated probe for
+  whether the agent reaches for `propose_http_fallback` vs dead-ending.
+- 5 new SOC/NOC/ITOps/DevOps eval tasks (17–21) added.
+
+The pre-2026-05-07 baseline (`20260507T132623Z`) is therefore stale
+as a single comparison; consider running fresh with **all** current
+gates and using *that* run as the baseline going forward.
 
 ## Success ladder + LLM-agnostic groundwork
 
@@ -414,23 +426,32 @@ Open follow-ups:
 
 ### HTTP virtual-connector + `api_examples_catalog`
 
-`Miscellaneous/api_examples_catalog/catalog.sqlite` (~6 GB, 207k entries,
-6,927 products) is ATTACHed read-only but no queries reference it.
-Combined with FSR's HTTP connector, lets the assistant author playbooks
-for vendors without dedicated connectors.
+Mostly subsumed by
+[`CONNECTOR_INTEGRATION_PLAN.md`](docs/plans/CONNECTOR_INTEGRATION_PLAN.md).
+Status:
 
-- **HTTP v2.0.0 not in DB** — re-run `probe_connectors` against
+- ✅ Catalog ATTACHed + queryable (`find_api_product`,
+  `find_api_example` FTS5 join, `find_api_fixture` with schemas).
+- ✅ `propose_http_fallback` decision tree (native op → connector
+  `api_call` → http fixture → `no_grounded_shape`) emits a
+  ready-to-paste `http` connector step with auth-wiring warnings.
+- ✅ `synthesize_http_step` MCP (entry → step) — already shipped
+  earlier; pair it with `find_api_fixture` for OpenAPI-grounded
+  shapes.
+- ⏳ **HTTP v2.0.0 not in DB** — re-run `probe_connectors` against
   `Miscellaneous/connector_building/http` (adds `http_paginate`,
   `fetch_records`).
-- **`search_api_examples(product, query, limit)` MCP** — FTS over
-  `catalog.entries_fts` joined to entries + products.
-- **`synthesize_http_step(entry_id)` MCP** — deterministic catalog
-  entry → `http_request` step-args mapping.
-- **`http-virtual-connector` recipe kind** — when no native connector,
-  emit HTTP-connector playbook seeded from catalog request shape.
-- **`connector_catalog_map(connector_name, catalog_product_id,
-  confidence)`** cross-link table — populated once via fuzzy match.
-- **Pagination + auth taxonomy mapping** to HTTP connector enums.
+- ⏳ **`http-virtual-connector` recipe kind** — when no native
+  connector, emit a *whole* playbook seeded from catalog request
+  shape (not just one step). Different surface than
+  `propose_http_fallback`; multi-step pattern.
+- ⏳ **`connector_catalog_map(connector_name, catalog_product_id,
+  confidence)`** cross-link — would let the agent skip the fuzzy
+  match for vendors with stable mappings. Low priority; the runtime
+  match works.
+- ⏳ **Pagination + auth taxonomy mapping to HTTP connector enums** —
+  today `propose_http_fallback` emits header hints; an authoritative
+  mapping per FSR HTTP-connector auth enum would tighten it up.
 
 ## Ingestion recipe + validator follow-ups
 
