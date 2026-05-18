@@ -17,6 +17,7 @@ live under `docs/plans/`; frozen research/audit snapshots under
 | [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 shipped (`render_paths.py`, `render_analyzer.py`); heuristic catalog ongoing |
 | [`AGENT_QUALITY_PLAN.md`](docs/plans/AGENT_QUALITY_PLAN.md) | Evidence base for agent tuning: what the agent actually looks up, data-store gaps, prompt-adherence baseline. | Phase 1A/B/C shipped (`fsrpb agent-stats`); Phase 2/3 pending |
 | [`CONNECTOR_INTEGRATION_PLAN.md`](docs/plans/CONNECTOR_INTEGRATION_PLAN.md) | Adopt the sibling `connector_building/` validator + `api_examples_catalog/catalog.sqlite` (36k HTTP fixtures, 6.9k products) so the agent can both find real API examples and verify a custom-authored connector. Supersedes TODO D3 + HTTP-virtual-connector items. | Drafted 2026-05-18; not started |
+| [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Three orthogonal refinements: (A) static reference data into the prompt cache, (B) constrained generation for hot shapes via `emit_*` tools, (C) separate "enhance" path from "build" path with `verify_enhancement` + intent-tagged metrics. | Drafted 2026-05-18; not started |
 
 **Frozen research / audits** (`docs/research/`) — snapshots, not updated:
 
