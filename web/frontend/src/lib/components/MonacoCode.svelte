@@ -23,6 +23,8 @@
     placeholder = '',
     height = '14rem',
     compact = false,
+    autoGrow = false,
+    autoGrowMaxPx = 320,
     showJinjaToolbar = false,
     onEditor,
     onFocus,
@@ -43,6 +45,13 @@
      * editors (set_variable rows, condition fields) where Monaco's
      * default gutter dominates a 1-line field. */
     compact?: boolean;
+    /** Grow the host height with the editor's content (clamped between
+     * `height` as a minimum and `autoGrowMaxPx` as a ceiling). The
+     * default fixed-height behavior stays when this is false. */
+    autoGrow?: boolean;
+    /** Maximum height (px) the auto-grow can reach before the editor
+     * starts scrolling internally. Ignored when autoGrow=false. */
+    autoGrowMaxPx?: number;
     /** Show the Jinja toolbar (filter palette + snippets + templates)
      * overlaid on this editor. Only relevant for yaml/jinja languages.
      * Default off so the toolbar doesn't clutter Python / JSON cells. */
@@ -63,6 +72,10 @@
   let editor = $state<any>(null);
   let monacoRef = $state<any>(null);
   let internalUpdate = false;
+  // Live host height when autoGrow is on. Starts undefined so the
+  // declared `height` prop wins on first render; the contentSizeChange
+  // handler takes over once Monaco mounts.
+  let liveHeight = $state<string | null>(null);
 
   onMount(async () => {
     const monaco = await import('monaco-editor');
@@ -73,7 +86,11 @@
       theme: 'vs-dark',
       automaticLayout: true,
       readOnly,
-      fontSize: 13,
+      // Compact inline editors (set_variable rows, condition fields)
+      // get a smaller font so a typical `{{ vars.input.records[0].<field> }}`
+      // fits on one line in a sidebar-width inspector. Standard editors
+      // keep the larger size for code-snippet / Jinja-modal use.
+      fontSize: compact ? 11 : 13,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       tabSize: 4,
@@ -88,6 +105,16 @@
       glyphMargin: false,
       folding: false,
       wordWrap: 'on',
+      // Compact inline editors live in a sidebar that's too narrow to
+      // host Monaco's parameter-hints / suggest-details flyout — it
+      // covers the very input the user is typing into. The full Jinja
+      // test modal still shows them (compact=false). Hover tooltips on
+      // identifiers stay on because they appear on demand, not on
+      // every keystroke.
+      parameterHints: { enabled: !compact },
+      suggest: compact
+        ? { showStatusBar: false, preview: false, showInlineDetails: false }
+        : undefined,
       // Render hover popovers (error tooltips, signature help, etc.)
       // at the document root so they aren't clipped by parent
       // `overflow: hidden` containers — e.g. the JinjaTestModal's
@@ -113,6 +140,26 @@
     // gains/loses focus inside the editor.
     if (onFocus) editor.onDidFocusEditorText?.(() => onFocus());
     if (onBlur) editor.onDidBlurEditorText?.(() => onBlur());
+
+    // Auto-grow: track Monaco's content height, clamp to [min, max], and
+    // resize the host. Without this the editor either stays at its
+    // declared height (clipping wrapped lines) or paints a tiny scrollbar
+    // for one extra line of Jinja. Min is derived from the declared
+    // `height` prop — convert rem to px via the host's computed font
+    // size so 2.25rem doesn't hardcode 36 px.
+    if (autoGrow) {
+      const minPx = host.getBoundingClientRect().height || 36;
+      const applyHeight = () => {
+        const ch = editor.getContentHeight?.() ?? 0;
+        const next = Math.min(autoGrowMaxPx, Math.max(minPx, ch));
+        liveHeight = `${next}px`;
+        // Width comes from the host; only height needs an explicit
+        // layout nudge after we resize the wrapper.
+        requestAnimationFrame(() => editor.layout?.());
+      };
+      editor.onDidContentSizeChange?.(applyHeight);
+      applyHeight();
+    }
   });
 
   onDestroy(() => { editor?.dispose(); });
@@ -132,7 +179,7 @@
   });
 </script>
 
-<div class="relative" style:height>
+<div class="relative" style:height={liveHeight ?? height}>
   <div bind:this={host} class="h-full w-full rounded border border-[var(--border-soft)]"></div>
   {#if placeholder && !value}
     <div class="pointer-events-none absolute {compact ? 'left-3' : 'left-12'} top-2 font-mono text-[12px] italic text-[var(--text-faint)]">

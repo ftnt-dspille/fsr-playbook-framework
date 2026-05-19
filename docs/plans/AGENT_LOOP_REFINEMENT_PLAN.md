@@ -180,7 +180,7 @@ it cannot produce invalid shapes." Free-author is the fallback.
 
 | Phase | Status | Notes |
 |---|---|---|
-| B1 — `emit_decision_step` | ⏳ not started | Smallest schema; biggest win because decision malformations are most common. |
+| B1 — `emit_decision_step` | ✅ done | `python/mcp_server/tools_emit.py`. Strict input schema (nested `additionalProperties:false`, `minItems:1`, name regex) wired via new `TOOL_SCHEMA_OVERRIDES` map in `web/backend/llm/tools.py` — Anthropic enforces on the wire. Hand-rolled YAML render matches canonical shape; runtime check covers non-LLM callers. System prompt §3 nudges the model to prefer the tool over hand-writing. Tier 0 / auto-confirm. |
 | B2 — `emit_manual_input_step` | ⏳ not started | Mode-aware: schema depends on `mode` discriminator (Context/Behavior/InputType). |
 | B3 — `emit_connector_step` | ⏳ not started | Per-op schemas generated from `operations.parameters_json`; cached. |
 | B4 — `emit_set_variable_step` | ⏳ not started | Trivial schema; catches a recurring nesting bug. |
@@ -309,11 +309,11 @@ The build path's verify gate doesn't catch these because they're not
 
 | Phase | Status | Notes |
 |---|---|---|
-| C1 — Detect intent | ⏳ not started | Heuristic at chat-start: yaml provided + change-language → enhance mode. Tag the session. |
-| C2 — Enhance-mode system prompt | ⏳ not started | Different rules: minimal-diff principle, preserve annotations, ask before refactoring. |
-| C3 — Diff-aware verify | ⏳ not started | `verify_enhancement(before_yaml, after_yaml)` MCP — checks shape *and* regression. |
+| C1 — Detect intent | ✅ done | `_detect_intent` in `web/backend/routes/chat.py` stamps `tags["intent"] = "build" \| "enhance"` at chat-start. Defaults to `enhance` when YAML is present and verbs are ambiguous (over-rewrite is the failure mode). Flows through `tags` → chat_turns + usage.jsonl. |
+| C2 — Enhance-mode system prompt | ✅ done | `python/agent/enhance_addendum.md` (~2.1 KB) appended after the main prompt when `intent == "enhance"`. Cache prefix unchanged between modes (static block + main prompt are identical) so prompt-cache hits survive intent flips. `load_system_prompt(intent)` / `build_system_prompt(intent)` are the entry points. |
+| C3 — Diff-aware verify | ✅ done | `python/mcp_server/tools_enhancement.py::verify_enhancement(before_yaml, after_yaml, user_message=None, live_probe=False)`. Delegates shape check to `verify_playbook`, IR-diffs both Collections via `_step_projection` + `_annotation_projection`, fires `playbook_dropped` / `step_dropped` / `step_renamed_silently` (error) and `annotation_stripped` / `annotation_modified` / `ui_metadata_lost` / `behavior_changed_outside_diff` (warning). Wired into MCP registry + web SAFE_TOOLS (tier 1). Enhance addendum now mandates this gate instead of `verify_playbook`. |
 | C4 — Separate eval bucket | ⏳ not started | New eval task set under `tasks/enhance/`; agent-stats segments by intent tag. |
-| C5 — Per-intent metrics | ⏳ not started | agent-stats reports wins/calls ratio separately for build vs enhance. |
+| C5 — Per-intent metrics | ⏳ not started | agent-stats reports wins/calls ratio separately for build vs enhance. Tag already lands in `tags` JSON via C1, so C5 has retroactive data from any session run after C1's commit. |
 
 ### C1 — Intent detection
 

@@ -1893,7 +1893,9 @@
               value={typeof v.value === 'string' ? v.value : JSON.stringify(v.value)}
               language="jinja"
               compact={true}
-              height="2.25rem"
+              autoGrow={true}
+              height="2.5rem"
+              autoGrowMaxPx={280}
               placeholder={'{{ vars.input.records[0].severity }}'}
               onInput={(s) => setVar(v.name, s)}
               onFocus={setVarFocus.onfocus}

@@ -265,10 +265,14 @@ def _suggest_close_key(needle: str, haystack: list[str]) -> str:
 # Per-step-type required-arg lists. Keep narrow on purpose — only
 # fields the FSR runtime will reject if blank. Schema-driven discovery
 # (`get_op_schema`) comes in Phase 5; this is the deterministic baseline.
-_REQUIRED_FIELDS: dict[str, list[str]] = {
+# Required-field entries can be either a single key (string) or a tuple
+# of keys, where the tuple means "any of these satisfies the requirement"
+# (e.g. update_record accepts either `module:` for the bulk-update path
+# or `collection:` for the targeted-record path — see system_prompt §9).
+_REQUIRED_FIELDS: dict[str, list] = {
     "connector": ["connector", "operation"],
     "create_record": ["module"],
-    "update_record": ["module"],
+    "update_record": [("module", "collection")],
     "find_records": ["module"],
     "delete_record": ["module"],
     "decision": ["conditions"],
@@ -276,6 +280,23 @@ _REQUIRED_FIELDS: dict[str, list[str]] = {
     "set_variable": ["arg_list"],
     "code_snippet": ["code"],
     "utils_delay": [],  # delay accepts seconds OR minutes OR hours OR days
+}
+
+
+# Step types whose canonical "required" fields live at the *step* level
+# in friendly YAML (not under `arguments:`). The trace's `rendered_args`
+# only captures `arguments.*` after Jinja substitution, so it's always
+# empty for these fields and would false-positive every set_variable /
+# decision / manual_input in the corpus. For these types we additionally
+# check the step dict for the step-level alias.
+#
+# Map: type → list of (rendered_args_key, step_level_aliases_to_check).
+# `vars` and `arg_list` are both accepted for set_variable (typed_walker
+# already treats them as interchangeable at line 205).
+_STEP_LEVEL_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "set_variable": {"arg_list": ("vars", "arg_list")},
+    "decision":     {"conditions": ("conditions",)},
+    "manual_input": {"options": ("options",)},
 }
 
 
@@ -289,15 +310,69 @@ def _is_empty(v: Any) -> bool:
 def _c3_required_empty(trace: list[dict[str, Any]],
                        playbook: dict[str, Any] | None) -> list[Diagnostic]:
     out: list[Diagnostic] = []
+    # Index step dicts by id and by name so step-level alias lookups work
+    # regardless of whether the trace's step_id is the parser's local
+    # refname or the display name.
+    steps_by_key: dict[str, dict[str, Any]] = {}
+    for s in (playbook or {}).get("steps") or []:
+        for k in (s.get("name"), s.get("id")):
+            if k:
+                steps_by_key[k] = s
+
     for rec in trace:
         stype = rec.get("type", "")
         required = _REQUIRED_FIELDS.get(stype, [])
         if not required:
             continue
         rendered = rec.get("rendered_args") or {}
-        for field_name in required:
-            v = rendered.get(field_name)
-            if _is_empty(v):
+        aliases = _STEP_LEVEL_ALIASES.get(stype, {})
+        step_node = steps_by_key.get(rec.get("step_id", "")) \
+            or steps_by_key.get(rec.get("name", ""))
+
+        # Mode-aware skip: manual_input has two modes (default Behavior
+        # vs InputBased). `options:` is required for Behavior; InputBased
+        # uses `arguments.input.schema` and a separate per-step check
+        # (tools_verify.py) covers the InputBased shape. Don't double-
+        # flag here.
+        if stype == "manual_input":
+            mi_type = (rendered.get("type")
+                       or (step_node or {}).get("arguments", {}).get("type")
+                       or "").lower()
+            if mi_type == "inputbased":
+                continue
+
+        for field_spec in required:
+            # Tuple = any-of: requirement satisfied when ANY listed key
+            # has a non-empty value in either rendered_args or (for
+            # step-level types) the step dict.
+            field_keys = (field_spec,) if isinstance(field_spec, str) else field_spec
+            satisfied = False
+            for field_name in field_keys:
+                v = rendered.get(field_name)
+                if _is_empty(v) and step_node is not None:
+                    for alias in aliases.get(field_name, ()):
+                        av = step_node.get(alias)
+                        if not _is_empty(av):
+                            v = av
+                            break
+                # Also accept the bare key on the step dict for any-of
+                # alternatives (update_record's `collection:` is sometimes
+                # at the step level, sometimes nested under arguments —
+                # be liberal here).
+                if _is_empty(v) and step_node is not None:
+                    av = (step_node.get("arguments") or {}).get(field_name)
+                    if not _is_empty(av):
+                        v = av
+                if not _is_empty(v):
+                    satisfied = True
+                    break
+            if satisfied:
+                continue
+            # All any-of alternatives empty — emit diagnostic against
+            # the first listed key for stable location.
+            field_name = field_keys[0]
+            v = None
+            if True:
                 out.append(Diagnostic(
                     kind="required_arg_empty",
                     severity="error",

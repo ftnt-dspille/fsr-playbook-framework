@@ -46,6 +46,8 @@ SAFE_TOOLS: list[str] = [
     "get_filter_examples",
     "search_playbooks",
     "verify_playbook",
+    "verify_enhancement",
+    "emit_decision_step",
     "list_configured_connectors",
     "list_picklists",
     "picklist_for_field",
@@ -79,6 +81,9 @@ TOOL_TIERS: dict[str, int] = {
     "resolve_picklist_value": 0,
     # Tier 1 — read-only FSR API.
     "verify_playbook": 1,
+    "verify_enhancement": 1,
+    # Tier 0 — pure local YAML render from a structured payload.
+    "emit_decision_step": 0,
     "list_configured_connectors": 1,
     "diagnose_yaml_against_pb_execution": 1,
     # Tier-dynamic. Resolved per call.
@@ -315,6 +320,68 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
     return {}
 
 
+# Hand-written input_schema overrides for tools whose shape is too nested
+# for the auto-from-signature builder. Anthropic enforces these on the
+# wire, so e.g. emit_decision_step physically cannot receive a condition
+# missing `when:` or a default_branch without `next:`. Keep these in
+# sync with the runtime checks inside the tool itself — the override is
+# the wire contract; the runtime check covers non-LLM callers.
+TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
+    "emit_decision_step": {
+        "type": "object",
+        "required": ["name", "conditions", "default_branch"],
+        "additionalProperties": False,
+        "properties": {
+            "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9 _]+$",
+                "description": ("Step display name. Title Case; letters, "
+                                "digits, spaces, and underscores only."),
+            },
+            "conditions": {
+                "type": "array",
+                "minItems": 1,
+                "description": ("Ordered non-default branches. Evaluated "
+                                "top-down; the default_branch is the else."),
+                "items": {
+                    "type": "object",
+                    "required": ["display", "when", "next"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "display": {"type": "string"},
+                        "when": {
+                            "type": "string",
+                            "description": ("Jinja expression returning "
+                                            "truthy/falsy. Do not wrap "
+                                            "in {{ }} — the tool does that."),
+                        },
+                        "next": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9 _]+$",
+                            "description": "Target step name (verbatim).",
+                        },
+                    },
+                },
+            },
+            "default_branch": {
+                "type": "object",
+                "required": ["display", "next"],
+                "additionalProperties": False,
+                "description": ("The else branch. `default: true` is "
+                                "added by the tool; do NOT pass it here."),
+                "properties": {
+                    "display": {"type": "string"},
+                    "next": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9 _]+$",
+                    },
+                },
+            },
+        },
+    },
+}
+
+
 def _build_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     sig = inspect.signature(fn)
     props: dict[str, Any] = {}
@@ -350,7 +417,7 @@ def build_registry() -> dict[str, ToolSpec]:
         out[name] = ToolSpec(
             name=name,
             description=short,
-            input_schema=_build_schema(fn),
+            input_schema=TOOL_SCHEMA_OVERRIDES.get(name) or _build_schema(fn),
             fn=fn,
             tier=static_tier,
             confirm_mode=confirm_mode,

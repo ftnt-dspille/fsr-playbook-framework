@@ -79,6 +79,14 @@
         // toggle. visualStore doesn't clear it itself because edit ops
         // only ever set true.
         visualStore.state.dirty = false;
+        // Refresh render-path diagnostics so badges, the drawer, and
+        // the toolbar pill reflect the just-saved buffer. Fire-and-
+        // forget — the UI surfaces it reactively when it lands. Skip
+        // when already running so a rapid second autosave doesn't
+        // pile up overlapping analyze calls.
+        if (!playbookActions.analyzeBusy) {
+          void playbookActions.analyze();
+        }
       } catch {
         // Surface via the normal error channels; manual save still
         // available if the user wants to retry.

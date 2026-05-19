@@ -63,7 +63,14 @@ showing the YAML to the user.
    (e.g. `vars.steps.Greater_Than_10.foo`); same slug rule applies to
    child-playbook output references.
 
-3. Decision steps — exactly this shape:
+3. Decision steps — **prefer `emit_decision_step(name, conditions,
+   default_branch)`** over hand-writing the YAML. The tool's input
+   schema is enforced on the wire — invalid shapes (missing `when:`,
+   no `default: true` branch, malformed targets) cannot be produced.
+   The tool returns `{ok: true, yaml: "<fragment>"}`; splice the
+   fragment into your draft. Hand-write decision YAML only when the
+   tool's runtime check rejects your input and you need to debug. The
+   canonical shape it produces:
        - type: decision
          name: Check Value
          conditions:

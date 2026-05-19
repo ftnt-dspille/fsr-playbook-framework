@@ -35,6 +35,8 @@ from . import (
     tools_recipe,
     tools_triage,
     tools_verify,
+    tools_enhancement,
+    tools_emit,
 )
 
 # Import shared infrastructure for external use
@@ -139,6 +141,8 @@ from .tools_recipe import (
 
 # Verify
 from .tools_verify import verify_playbook
+from .tools_enhancement import verify_enhancement
+from .tools_emit import emit_decision_step
 
 # Catalog (Phase 0 + 0.5 of CONNECTOR_INTEGRATION_PLAN)
 from .tools_catalog import (

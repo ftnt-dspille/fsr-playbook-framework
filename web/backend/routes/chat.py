@@ -30,7 +30,7 @@ from backend.llm.provider import (
 )
 from backend.llm import approvals as _approval_store
 from backend.llm import ladder as _ladder
-from backend.system_prompt import SYSTEM_PROMPT
+from backend.system_prompt import build_system_prompt
 from backend import history as history_db
 from backend.llm.usage_log import est_tokens, log_turn
 
@@ -222,6 +222,63 @@ def _is_meaningful_yaml(text: str | None) -> bool:
     return len(body) >= 40
 
 
+# Verbs that signal a surgical change to an existing playbook. Kept
+# tight on purpose — false-positives (build flagged as enhance) waste
+# a clarifying question; false-negatives (enhance flagged as build)
+# trigger silent rewrites, which is the failure mode C2 exists to
+# prevent. When in doubt with meaningful YAML present, default to
+# enhance.
+_ENHANCE_VERBS = (
+    "fix", "fixes", "fixing", "update", "updates", "updating",
+    "change", "changes", "changing", "edit", "edits", "editing",
+    "add a", "add an", "add the", "add another",
+    "remove", "removes", "removing", "delete", "deletes", "deleting",
+    "make it also", "make it not", "also ", "instead",
+    "tweak", "adjust", "patch",
+    "why doesn't", "why does", "why is", "why isn't",
+    "what's wrong", "whats wrong", "broken", "not working",
+)
+
+# Verbs that explicitly want a rewrite even when YAML is present.
+# These should go to build mode (with the understanding the existing
+# YAML may be discarded).
+_REWRITE_VERBS = (
+    "rewrite", "refactor", "start over", "from scratch",
+    "build me", "build a", "build the", "create a", "create the",
+    "make me a", "make me an",
+)
+
+
+def _detect_intent(current_yaml: str | None, last_user_msg: str) -> str:
+    """Return "build" or "enhance" for the session's tags + prompt
+    selection. Heuristic, not perfect — see C2 in AGENT_LOOP_REFINEMENT_PLAN.
+
+    Rule of thumb (plan §C1):
+    - No meaningful YAML in editor → build.
+    - Meaningful YAML + explicit rewrite verb → build.
+    - Meaningful YAML + enhance verb → enhance.
+    - Meaningful YAML + ambiguous → enhance (safer; over-rewriting
+      is the failure mode we're trying to avoid).
+    """
+    if not _is_meaningful_yaml(current_yaml):
+        return "build"
+    msg = (last_user_msg or "").lower()
+    for v in _REWRITE_VERBS:
+        if v in msg:
+            return "build"
+    for v in _ENHANCE_VERBS:
+        if v in msg:
+            return "enhance"
+    return "enhance"
+
+
+def _last_user_message(body: ChatIn) -> str:
+    for m in reversed(body.messages):
+        if m.role == "user":
+            return m.content or ""
+    return ""
+
+
 def _build_messages(body: ChatIn) -> list[Message]:
     out: list[Message] = []
     if _is_meaningful_yaml(body.current_yaml):
@@ -256,6 +313,9 @@ async def chat(body: ChatIn) -> EventSourceResponse:
     provider = get_provider(chosen)
     messages = _build_messages(body)
     tags = _yaml_tags(body.current_yaml)
+    intent = _detect_intent(body.current_yaml, _last_user_message(body))
+    tags["intent"] = intent
+    system_prompt = build_system_prompt(intent)
 
     async def gen() -> AsyncIterator[dict[str, Any]]:
         active_session_written = False
@@ -296,7 +356,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
             # tools=[] → provider self-fills with the right schema shape
             # (Anthropic input_schema vs OpenAI function-calling).
             async for ev in provider.stream(
-                system=SYSTEM_PROMPT, messages=messages,
+                system=system_prompt, messages=messages,
                 tools=[], tags=tags,
             ):
                 if isinstance(ev, UsageEvent):

@@ -59,6 +59,16 @@ class VarPaneStore {
     }, BLUR_GRACE_MS);
   }
 
+  /** Cancel a pending blur close. Call this from any interaction
+   *  inside the pane (filter input focus, scroll, etc.) so focus
+   *  moving from the target field into the pane doesn't shut it. */
+  cancelBlur() {
+    if (this.#blurTimer) {
+      clearTimeout(this.#blurTimer);
+      this.#blurTimer = null;
+    }
+  }
+
   /** {x} button click: if this field is already the active target,
    *  toggle the pane closed; otherwise claim focus + open. */
   toggle(t: VarPaneTarget) {
