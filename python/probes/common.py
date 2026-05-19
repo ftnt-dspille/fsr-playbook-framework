@@ -17,15 +17,22 @@ STORE_DIR = REPO_ROOT / "store"
 DB_PATH = STORE_DIR / "fsr_reference.db"
 SCHEMA_PATH = STORE_DIR / "schema.sql"
 
+import os
+
 # External DB we ATTACH read-only for enrichment (cross-vendor API examples
-# + extracted FortiSOAR connector method bodies).
-CATALOG_DB_PATH = (
+# + extracted FortiSOAR connector method bodies). Env override
+# `FSRPB_API_CATALOG` lets a deploy point at a different file without
+# editing code. Default tracks the current location under
+# `Miscellaneous/fortisoar/corpus_builder/` (moved 2026-05 from
+# `Miscellaneous/api_examples_catalog/`).
+CATALOG_DB_PATH = Path(os.environ.get("FSRPB_API_CATALOG") or (
     Path.home()
     / "PycharmProjects"
     / "Miscellaneous"
-    / "api_examples_catalog"
+    / "fortisoar"
+    / "corpus_builder"
     / "catalog.sqlite"
-)
+))
 
 # Canonical source roots for the probes. Kept here so a single edit moves all
 # probes if a directory is renamed.
@@ -33,7 +40,8 @@ RPM_EXTRACTED_DIR = (
     Path.home()
     / "PycharmProjects"
     / "Miscellaneous"
-    / "api_examples_catalog"
+    / "fortisoar"
+    / "corpus_builder"
     / "repos"
     / "fortisoar-rpm-extracted"
 )

@@ -32,6 +32,90 @@ _BASE_URL_HINT = "{{ vars.input.params.<vendor>_base_url }}"
 _TOKEN_HINT = "{{ vars.input.params.<vendor>_token }}"
 
 
+# Auth-prelude endpoints that appear in test fixtures for almost every
+# vendor (because tests run an auth call before the real one). They
+# poison "give me a fixture for vendor X" because they're high-
+# confidence and low-id. We demote them so the intent-relevant fixture
+# wins. Not deleted: when intent IS auth (e.g. "get token"), we still
+# need them.
+_AUTH_PRELUDE_RE = re.compile(
+    r"/(?:oauth2?/token|oauth2?/authorize|auth/login|authenticate|sessions?/login|"
+    r"login/sessions|token/get|access_token|refresh_token|api/login|service_token|"
+    r"oauth/access_token|connect/token|identity/connect|api/v\d/login)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_auth_prelude(url_template: str) -> bool:
+    return bool(_AUTH_PRELUDE_RE.search(url_template or ""))
+
+
+_INTENT_STOPWORDS = frozenset({
+    "a", "an", "the", "of", "for", "with", "on", "in", "to", "from",
+    "and", "or", "by", "at", "is", "are", "be", "this", "that",
+    "endpoint", "api", "via",  # too generic for catalog ranking
+})
+
+
+def _intent_tokens(intent: str) -> list[str]:
+    """Stem-ish tokens from a free-form intent string for url-template
+    matching. Singular/plural collapse, stopwords filtered. Bag-of-words
+    overlap is good enough — the catalog isn't deep enough for
+    semantic embeddings to pay off."""
+    raw = re.findall(r"[A-Za-z][A-Za-z0-9_]+", (intent or "").lower())
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for t in raw:
+        if t in _INTENT_STOPWORDS or len(t) < 3:
+            continue
+        # Trim trailing 's' so "incidents" matches "/incident".
+        stem = t[:-1] if t.endswith("s") and len(t) > 4 else t
+        if stem in seen:
+            continue
+        seen.add(stem)
+        tokens.append(stem)
+    return tokens
+
+
+def _intent_overlap_score(url_template: str, tokens: list[str]) -> int:
+    """How many intent tokens appear in the url path. Higher is better.
+    Trivial bag-of-words; effective in practice because path tokens
+    line up with intent verbs+nouns (`/incident`, `/comment`, `/quarantine`)."""
+    if not tokens:
+        return 0
+    lower = (url_template or "").lower()
+    return sum(1 for t in tokens if t in lower)
+
+
+# Map intent verbs to expected HTTP methods. Used as a soft tie-breaker
+# when the catalog has multiple fixtures whose paths overlap the
+# intent equally — a "create" intent that comes back as GET is almost
+# always the wrong fixture (the GET being a setup/list call from the
+# test).
+_VERB_METHOD: dict[str, str] = {
+    "create": "POST", "add": "POST", "post": "POST", "submit": "POST",
+    "send": "POST", "publish": "POST", "open": "POST",
+    "update": "PUT", "modify": "PUT", "edit": "PUT", "patch": "PATCH",
+    "set": "PUT", "change": "PUT", "replace": "PUT",
+    "delete": "DELETE", "remove": "DELETE", "close": "DELETE",
+    "destroy": "DELETE",
+    "get": "GET", "fetch": "GET", "list": "GET", "find": "GET",
+    "search": "GET", "lookup": "GET", "show": "GET", "read": "GET",
+    "query": "GET", "describe": "GET",
+}
+
+
+def _expected_method_for_intent(tokens: list[str]) -> str | None:
+    """First intent token that maps to a method; None if no verb hit.
+    Earlier tokens win because users typically lead with the verb
+    ('create incident', 'block ip')."""
+    for t in tokens:
+        m = _VERB_METHOD.get(t)
+        if m:
+            return m
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Catalog availability — single source of truth
 # ---------------------------------------------------------------------------
@@ -57,7 +141,7 @@ def _no_catalog_err() -> dict[str, Any]:
         "FSRPB_API_CATALOG to its path or download via `fsrpb train "
         "--with-api-catalog` (planned).",
         suggestions=[
-            "Confirm $HOME/PycharmProjects/Miscellaneous/api_examples_catalog/catalog.sqlite exists",
+            "Confirm $HOME/PycharmProjects/Miscellaneous/fortisoar/corpus_builder/catalog.sqlite exists (moved 2026-05 from api_examples_catalog/)",
             "Run `python -c \"from probes.common import CATALOG_DB_PATH; print(CATALOG_DB_PATH, CATALOG_DB_PATH.exists())\"`",
         ],
     )
@@ -512,11 +596,45 @@ def propose_http_fallback(vendor: str, intent: str, *,
         }
 
     # ---- 3. catalog http fixture ----
-    fix_result = find_api_fixture(vendor, limit=3)
+    # Pull a wider candidate set than we'll keep so we can re-rank by
+    # intent-token overlap and demote auth-prelude rows. find_api_fixture
+    # alone orders by confidence + id only, which surfaces /oauth/token
+    # for nearly every vendor (it's the most common high-confidence
+    # fixture because tests always run an auth call first).
+    fix_result = find_api_fixture(vendor, limit=25)
     if fix_result.get("ok") is False:
         return fix_result  # catalog_unavailable, propagated
     fixtures = fix_result.get("matches") or []
+    intent_tokens = _intent_tokens(intent)
+    expected_method = _expected_method_for_intent(intent_tokens)
+
+    def _rank(f: dict[str, Any]) -> tuple[int, int, int, int, int]:
+        url = f.get("url_template") or ""
+        conf = f.get("confidence") or "low"
+        # Sort key (Python ascending). Smaller = better.
+        # 1. demote auth-prelude (unless the intent IS auth)
+        is_auth = _is_auth_prelude(url)
+        intent_is_auth = any(t in {"token", "auth", "login", "authent"}
+                             for t in intent_tokens)
+        auth_penalty = 1 if (is_auth and not intent_is_auth) else 0
+        # 2. higher intent-token overlap = better (negate so smaller wins).
+        # This DOMINATES the method tie-break: an agent can flip GET→POST
+        # by hand, but cannot guess the correct path. Pinning the path
+        # is the high-value signal — the catalog often has the path
+        # for one method but not the other.
+        overlap = -_intent_overlap_score(url, intent_tokens)
+        # 3. method matches the intent verb (create→POST etc.)
+        method = (f.get("method") or "").upper()
+        method_penalty = (0 if expected_method is None
+                          or method == expected_method else 1)
+        # 4. confidence tier
+        conf_rank = {"high": 0, "medium": 1}.get(conf, 2)
+        # 5. fallback to fixture_id for deterministic tie-break
+        return (auth_penalty, overlap, method_penalty, conf_rank,
+                f.get("fixture_id") or 0)
+
     if fixtures:
+        fixtures = sorted(fixtures, key=_rank)
         chosen = fixtures[0]
         step, fixture_warnings = _render_fallback_step(
             chosen, step_name=_intent_step_name(intent),

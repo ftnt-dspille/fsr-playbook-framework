@@ -287,19 +287,39 @@ them gratuitously; call when the trigger matches:
 - **Op schema is incomplete** — fall back to `get_connector_source` to
   read the raw `operations.py` from the live connector. Last-resort
   truth when `get_op_schema` returns sparse data.
-- **HTTP / custom-API authoring** — `find_api_example(product, q)` for
-  real API command examples; `find_api_fixture(product, method,
-  path_substring)` for an exact-shape OpenAPI-grounded fixture with
-  response schema; `find_api_product(name)` for vendor fuzzy-match.
-  `synthesize_http_step(entry_id)` converts a catalog entry into a
-  ready-to-paste `http_request` step.
-- **Vendor exists but has no operation for the user's intent?** Call
-  `propose_http_fallback(vendor, intent)` BEFORE saying "FSR can't do
-  this." It runs a deterministic decision tree (native op → connector
-  `api_call` escape hatch → catalog-grounded `http` connector step →
-  `no_grounded_shape`). The fallback step is real and runnable; the
-  `warnings:` array tells the user exactly which `vars.input.params.*`
-  to wire for auth. Only refuse if `decision == "no_grounded_shape"`.
+- **HTTP / custom-API authoring** — when the user wants action X against
+  vendor Y, **prefer `propose_http_fallback(vendor, intent)`** — it runs
+  the full decision tree (native op → connector `api_call` escape hatch
+  → catalog-grounded `http` connector step → `no_grounded_shape`) and
+  emits a ready-to-paste step. Only refuse if
+  `decision == "no_grounded_shape"`. The fallback step is real and
+  runnable; the `warnings:` array tells the user exactly which
+  `vars.input.params.*` to wire for auth.
+  - Companion tools when you need to inspect or refine the catalog
+    answer: `find_api_example(product, q)` for code snippets,
+    `find_api_fixture(product, method, path_substring)` for the
+    exact-shape OpenAPI-grounded fixture (with `response_schema_json` +
+    `parameters_schema_json`), `find_api_product(name)` for fuzzy
+    vendor lookup, `synthesize_http_step(entry_id)` to turn an
+    `entries` row into a step.
+  - **Sanity-check the returned fixture before emitting.** The catalog
+    ranking demotes auth-prelude fixtures (`/oauth/token`,
+    `/service_token`, `/sessions/login`) and prefers paths whose
+    tokens overlap the intent, but corpus depth varies wildly:
+    - If `fixture.url_template` doesn't reference the entity the user
+      named (e.g. user said "incident" but URL is `/alm_asset`),
+      that's a corpus gap — tell the user and offer to use the
+      connector's `api_call` escape hatch with the intended URL.
+    - If `fixture.method` doesn't match the intent verb (e.g. user
+      said "create" but you got back GET), the catalog only stored
+      the *list/get* shape for that path. Flip method to POST in
+      the emitted step and tell the user why.
+    - VirusTotal, Recorded Future, Carbon Black, and other
+      common-but-corpus-thin vendors will return `no_grounded_shape`
+      even though they're real products — the catalog doesn't yet
+      have request fixtures for them. In that case, fall back to a
+      generic `api_call` step shape and reference the vendor's
+      public docs in the warnings.
 - **Step shape discovery** — `find_step_examples(step_type)` for
   clustered real-world skeletons. Use when `get_step_type`'s
   `friendly_form` is sparse or you need a multi-step pattern.

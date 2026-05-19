@@ -193,3 +193,73 @@ def test_propose_http_fallback_returns_http_step_when_no_native():
             assert isinstance(out.get("warnings"), list)
             # auth must be flagged somehow
             assert out["warnings"], "fallback must emit at least one warning"
+
+
+# ---------------------------------------------------------------------------
+# Intent-aware fixture ranking (audit-driven regression set, 2026-05)
+# ---------------------------------------------------------------------------
+
+
+def _fixture_url(out):
+    return ((out.get("fixture") or {}).get("url_template") or "").lower()
+
+
+@catalog_required
+def test_propose_http_fallback_skips_oauth_prelude_when_intent_isnt_auth():
+    """Pre-fix behavior: nearly every vendor returned its OAuth token
+    fixture as the top hit because tests run an auth call first and
+    those fixtures land at high confidence + low id. Anti-regression:
+    for a non-auth intent, the chosen fixture must not be /oauth/token
+    style."""
+    out = propose_http_fallback("CrowdStrike", "quarantine endpoint")
+    if out.get("ok") and out.get("decision") == "http_fixture":
+        url = _fixture_url(out)
+        assert "/oauth" not in url and "/token" not in url, url
+
+
+@catalog_required
+def test_propose_http_fallback_prefers_intent_path_token_overlap():
+    """Slack 'post message' must land on chat.postMessage, not on the
+    slack-poll auth fixture that previously won by confidence alone."""
+    out = propose_http_fallback("Slack", "post message to channel")
+    if out.get("ok") and out.get("decision") == "http_fixture":
+        url = _fixture_url(out)
+        assert "chat.postmessage" in url or "/chat." in url, url
+
+
+@catalog_required
+def test_propose_http_fallback_prefers_intent_path_over_unrelated_high_conf():
+    """ServiceNow 'create incident' must hit a /incident URL, not the
+    /table/alm_asset POST that previously won purely on confidence."""
+    out = propose_http_fallback("ServiceNow", "create incident")
+    if out.get("ok") and out.get("decision") == "http_fixture":
+        url = _fixture_url(out)
+        assert "alm_asset" not in url, url
+
+
+def test_intent_tokens_strips_stopwords_and_short_words():
+    from mcp_server.tools_catalog import _intent_tokens
+    assert _intent_tokens("create a new incident") == ["create", "new", "incident"]
+    assert _intent_tokens("on the endpoint") == []  # all stopwords/short
+    # Plural stemming
+    assert "incident" in _intent_tokens("list incidents")
+
+
+def test_is_auth_prelude_catches_known_endpoints():
+    from mcp_server.tools_catalog import _is_auth_prelude
+    assert _is_auth_prelude("https://api.example.com/oauth2/token")
+    assert _is_auth_prelude("https://api.example.com/oauth/access_token")
+    assert _is_auth_prelude("https://api.example.com/service_token")
+    assert _is_auth_prelude("https://api.example.com/sessions/login")
+    assert not _is_auth_prelude("https://api.example.com/api/users")
+
+
+def test_expected_method_for_intent():
+    from mcp_server.tools_catalog import (
+        _intent_tokens, _expected_method_for_intent,
+    )
+    assert _expected_method_for_intent(_intent_tokens("create incident")) == "POST"
+    assert _expected_method_for_intent(_intent_tokens("delete user")) == "DELETE"
+    assert _expected_method_for_intent(_intent_tokens("fetch indicators")) == "GET"
+    # Verb-less intent → no method preference
+    assert _expected_method_for_intent(_intent_tokens("incident")) is None

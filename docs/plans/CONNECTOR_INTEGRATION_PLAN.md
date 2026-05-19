@@ -1,18 +1,26 @@
 # Connector-builder integration plan
 
 **Started**: 2026-05-18. Owner: dcspille.
+**Scope revised 2026-05-18.** Original plan called for adopting the
+sibling validator+replay into fsrpb. Rescoped: the catalog is the
+primary value to fsrpb (already attached + consumed); the validator
+and replay tools are **for a different audience** (connector authors),
+not playbook authors, and stay where they live. See "Scope revision"
+section below.
 
-Pull two sibling projects under
-`/Users/dylanspille/PycharmProjects/Miscellaneous/` into fsrpb so the
-agent can both **find** real API examples for HTTP-shaped authoring
-*and* **verify** that a custom-authored connector will actually run.
+**Source artifacts** (moved 2026-05; the plan's earlier paths are
+stale):
 
-- `api_examples_catalog/catalog.sqlite` — 437 MB, 6,927 products,
-  207k entries, 36k HTTP fixtures with response/parameter schemas,
-  6,272 real connector implementations.
-- `connector_building/validator/` — rung-1 static AST validator and
-  rung-2 mock-replay validator (1.5k LOC together). Pairs with the
-  catalog via `connector_op_matcher.py`.
+- `~/PycharmProjects/Miscellaneous/fortisoar/corpus_builder/catalog.sqlite`
+  (formerly `Miscellaneous/api_examples_catalog/catalog.sqlite`) —
+  458 MB, 6,927 products, 207k entries, 36k HTTP fixtures with
+  response/parameter schemas, 6,272 connector lifecycle rows. Override
+  path with `FSRPB_API_CATALOG=<file>`.
+- `~/PycharmProjects/Miscellaneous/fortisoar/fsr_connector_toolkit/`
+  (formerly `Miscellaneous/connector_building/`) — extraction
+  pipeline + rung-1 AST validator (`lint/runner.py` + `lint/checks.py`)
+  + rung-2 mock-replay (`lint/replay.py`, was `rung2.py`) +
+  `connector_op_matcher.py` + its own MCP server (`mcp/server.py`).
 
 This is the **other half** of the authoring story. Today fsrpb helps
 you author playbooks against existing connectors. After this plan it
@@ -103,13 +111,47 @@ landed.
 
 | Phase | Status | Notes |
 |---|---|---|
-| 0 — Catalog read-path | ✅ done | `python/mcp_server/tools_catalog.py` ships `find_api_product`, `find_api_example` (FTS5 over `entries_fts`), `find_api_fixture` (with `response_schema_json` + `parameters_schema_json` decoded). Graceful degrade via `{ok: false, code: "catalog_unavailable"}` when the catalog isn't attached. 13 tests pass. |
-| **0.5 — Per-op HTTP fallback** | ✅ done | `propose_http_fallback(vendor, intent, prefer_native=True)` decides native_op → api_call → http_fixture → no_grounded_shape and emits a ready-to-paste `http` connector step (`http_get`/`http_post`/etc.) with auth-wiring warnings. Confirmed end-to-end: `akamai` + "block url" → `http_fixture` decision with fixture #2147 and 3 auth warnings. |
-| 1 — Adopt rung-1 validator | ⏳ not started | `python/connector_validator/`, `fsrpb verify-connector` CLI, MCP tool. |
-| 2 — Rung-2 mock-replay | ⏳ not started | Behind `--mock-replay` flag; depends on Phase 0 catalog ATTACH. |
-| 3 — `verify_connector` forcing-function rule | ⏳ not started | System-prompt rule; mirrors `verify_playbook`. |
-| 4 — Editor surface | ⏳ not started | Connector authoring workspace + verify badges. Includes "use http fallback" affordance per step. |
-| 5 — Connector-lifecycle mining | ⏳ not started | `find_connector_implementation` MCP tool over `connector_lifecycle.body`. |
+| 0 — Catalog read-path | ✅ done | `python/mcp_server/tools_catalog.py` ships `find_api_product`, `find_api_example` (FTS5 over `entries_fts`), `find_api_fixture` (with `response_schema_json` + `parameters_schema_json` decoded). Graceful degrade via `{ok: false, code: "catalog_unavailable"}` when the catalog isn't attached. 13 tests pass. Path fix landed 2026-05-18: defaults now point at `fortisoar/corpus_builder/catalog.sqlite`; `FSRPB_API_CATALOG` env override added. |
+| **0.5 — Per-op HTTP fallback** | ✅ done | `propose_http_fallback(vendor, intent, prefer_native=True)` decides native_op → api_call → http_fixture → no_grounded_shape and emits a ready-to-paste `http` connector step (`http_get`/`http_post`/etc.) with auth-wiring warnings. |
+| **0.6 — Intent-aware fixture ranking** | ✅ done 2026-05-18 | Audit-driven follow-up after the path fix relit the tools. Pre-fix: 0/7 realistic vendor+intent queries returned the right fixture — they all hit the OAuth-prelude endpoint because tests always run an auth call first (high confidence + low id). Fix: rank-`_AUTH_PRELUDE_RE` demotion + intent-token path overlap + intent-verb→method tie-break. Post-fix: 4/7 fully correct, 1/7 partial, 2/7 corpus-thin (no fixture exists). 6 new regression tests in `test_catalog_tools.py`. |
+| 1 — Adopt rung-1 validator | ❌ **descoped 2026-05-18** | See "Scope revision" below. Validator/replay are connector-author tools; fsrpb's audience is playbook authors. The toolkit stays where it lives. |
+| 2 — Rung-2 mock-replay | ❌ **descoped 2026-05-18** | Same. |
+| 3 — `verify_connector` forcing-function rule | ❌ **descoped 2026-05-18** | Same. |
+| 4 — Editor surface | 🔜 reframed | The "use http fallback" affordance per step is still valuable. Decoupled from connector-authoring UI. Will revive as a smaller follow-up once we know which surfaces want it. |
+| 5 — Connector-lifecycle mining | 🟡 still viable | `find_connector_implementation` MCP tool over `connector_lifecycle.body` (6,272 real connector implementations). Lets the agent show "here's how five other vendors solved this auth flow". No validator dependency. |
+
+---
+
+## Scope revision (2026-05-18)
+
+Original plan assumed fsrpb should pull in the toolkit's static
+validator (rung-1) and mock-replay (rung-2) so the chat agent could
+`verify_connector`. After landing the path fix and re-reading the
+toolkit's interfaces, three things became clear:
+
+1. **The toolkit's MCP server already exists** at
+   `fortisoar/fsr_connector_toolkit/mcp/server.py`, but it does NOT
+   expose `validate` or `replay` — only lookup/discovery tools
+   (`list_connectors`, `list_operations`, `lookup`, `search_corpus`,
+   `audit_schemas`, etc).
+2. **Six of those seven toolkit MCP tools duplicate fsrpb's existing
+   surface** — fsrpb's `find_connector`/`find_operation`/`get_op_schema`/
+   `find_api_example`/`find_api_fixture` cover the same ground, just
+   reading from the reference DB instead of a filesystem connector
+   dir. No need to add a parallel set.
+3. **The validator/replay audience is wrong.** Those tools are for
+   *connector authors* (people writing `operations.py` + `info.json`),
+   not for *playbook authors* (fsrpb's chat users). Different
+   workflow, different surface. Bundling them into fsrpb's editor
+   would surface the wrong affordances to playbook authors.
+
+What fsrpb actually needs from the toolkit's universe is the **output**
+— `catalog.sqlite`. Phase 0/0.5/0.6 already consume it. The path fix
+lit the tools back up; the ranking fix made them useful.
+
+If we later build a *connector-authoring* surface in fsrpb (separate
+audience), that will be its own plan and can shell out to
+`fsr-toolkit validate --json` / `fsr-toolkit replay --json` then.
 
 ---
 
