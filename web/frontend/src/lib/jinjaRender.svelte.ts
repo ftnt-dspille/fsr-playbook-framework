@@ -30,7 +30,7 @@ let cachedFor = '';
  *  with the user's pinned sample record so previews show real values.
  *  Refresh() the shapes store first if you want the freshest snapshot. */
 export async function getJinjaContext(force = false): Promise<Record<string, unknown>> {
-  const yaml = playbookStore.yaml ?? '';
+  const yaml = playbookStore.currentYaml ?? '';
   if (!force && cachedContext && cachedFor === yaml) return cachedContext;
   try {
     // Use the lighter /api/yaml/shapes path the store already has loaded

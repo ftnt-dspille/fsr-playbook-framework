@@ -6,7 +6,6 @@
    */
   import type { VisualNode } from '../api';
   import { callMcpTool, verifyPlaybook } from '../api';
-  import { visualStore } from '../visualEditStore.svelte';
   import { playbookStore } from '../playbookStore.svelte';
   import { buildJinjaContext, type Shape } from '../shapeStubs';
 
@@ -64,7 +63,7 @@
   let stepTestResult: StepTestResult | null = $state(null);
 
   async function testStep() {
-    const yaml = visualStore.state.graph?.source?.yaml;
+    const yaml = playbookStore.currentYaml;
     if (!yaml) {
       stepTestResult = { kind: 'error', message: 'no source YAML available' };
       return;
@@ -254,7 +253,7 @@
    * cross-step refs like `vars.steps.Get_Org.records[0].id` resolve
    * against deterministic stubs instead of erroring as undefined. */
   async function buildContext(): Promise<Record<string, unknown>> {
-    const yaml = playbookStore.yaml;
+    const yaml = playbookStore.currentYaml;
     if (!yaml) return {};
     try {
       const res = await verifyPlaybook(yaml, { verbose: true });

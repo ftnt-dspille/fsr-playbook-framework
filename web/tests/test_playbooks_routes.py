@@ -177,6 +177,149 @@ def test_clone_example_refuses_to_overwrite_existing_draft(client):
     assert head["yaml"] == "x: 1\n"
 
 
+def _backdate_revision(db_path, rev_id: int, seconds_ago: int) -> None:
+    """Rewrite a revision's created_ts to N seconds ago. The prune logic
+    keys off `created_ts`, so backdating lets a synchronous test cover
+    week/month tiers without sleeping."""
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE draft_revisions SET created_ts = "
+        "datetime('now', ? || ' seconds') WHERE id = ?",
+        (f"-{seconds_ago}", rev_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _count_auto_revisions(db_path, draft_name: str) -> int:
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    n = conn.execute(
+        "SELECT COUNT(*) FROM draft_revisions "
+        "WHERE draft_name=? AND is_auto=1",
+        (draft_name,),
+    ).fetchone()[0]
+    conn.close()
+    return n
+
+
+def test_pruning_keeps_manual_saves_forever(client):
+    """Manual saves are the user's explicit checkpoints — they survive
+    every tier of the auto-pruner even when older than a month."""
+    name = "manual_survives"
+    # One manual save, then backdate it to 60 days ago.
+    r = client.put(
+        f"/api/playbooks/draft/{name}",
+        json={"yaml": "v: 1\n", "reason": "manual checkpoint", "auto": False},
+    )
+    rev_id = r.json()["revision_id"]
+    _backdate_revision(pb_routes.DRAFTS_DB, rev_id, 60 * 24 * 60 * 60)
+
+    # Trigger a fresh save → invokes the prune in-band.
+    client.put(
+        f"/api/playbooks/draft/{name}",
+        json={"yaml": "v: 2\n", "reason": "later edit", "auto": True},
+    )
+
+    # Manual revision is still present despite being 60 days old.
+    import sqlite3
+    conn = sqlite3.connect(pb_routes.DRAFTS_DB)
+    row = conn.execute(
+        "SELECT id FROM draft_revisions WHERE id=?", (rev_id,)
+    ).fetchone()
+    conn.close()
+    assert row is not None
+
+
+def test_pruning_collapses_old_auto_revisions_into_buckets(client):
+    """Insert many auto-revisions spread across the day-old tier (10min
+    buckets) and assert the pruner collapses them down to one per
+    bucket. Per the policy, a 60-minute window of auto-saves should
+    survive as ~6 rows."""
+    name = "auto_bucketed"
+    # Seed one manual save to anchor the draft row.
+    client.put(
+        f"/api/playbooks/draft/{name}",
+        json={"yaml": "anchor\n", "reason": "anchor", "auto": False},
+    )
+
+    # Insert 12 auto-revisions spread across a 60-minute window inside
+    # the day-tier (so they're old enough to be bucketed at 10min
+    # granularity, young enough not to hit the 1-week tier).
+    import sqlite3
+    base_offset = 6 * 60 * 60  # 6 hours ago — squarely in the day tier
+    conn = sqlite3.connect(pb_routes.DRAFTS_DB)
+    inserted_ids = []
+    for i in range(12):
+        cur = conn.execute(
+            "INSERT INTO draft_revisions"
+            "(draft_name, yaml, reason, is_auto, created_ts) "
+            "VALUES (?,?,?,?,datetime('now', ? || ' seconds'))",
+            (name, f"step {i}\n", "auto", 1, f"-{base_offset + i * 300}"),
+        )
+        inserted_ids.append(cur.lastrowid)
+    conn.commit()
+    conn.close()
+
+    # Trigger the prune.
+    client.put(
+        f"/api/playbooks/draft/{name}",
+        json={"yaml": "trigger\n", "reason": "trigger", "auto": True},
+    )
+
+    # 12 revisions spanning 60 minutes, bucketed at 10min → 6 buckets
+    # survive (plus the just-inserted "trigger" revision which is in
+    # the youngest tier still <1min old, so it's exempt). The total
+    # count of backdated auto-revisions still present should be <= 6.
+    import sqlite3
+    conn = sqlite3.connect(pb_routes.DRAFTS_DB)
+    surviving = conn.execute(
+        "SELECT COUNT(*) FROM draft_revisions WHERE id IN ("
+        + ",".join("?" for _ in inserted_ids)
+        + ")",
+        inserted_ids,
+    ).fetchone()[0]
+    conn.close()
+    assert surviving <= 6, f"expected <=6 buckets in the day tier, got {surviving}"
+    # And we must have kept at least one (the whole window shouldn't vanish).
+    assert surviving >= 1
+
+
+def test_pruning_drops_auto_revisions_older_than_one_month(client):
+    """Auto-revisions past the longest tier (>30 days) are dropped
+    entirely. Without this, an active draft would accumulate forever."""
+    name = "old_auto"
+    client.put(
+        f"/api/playbooks/draft/{name}",
+        json={"yaml": "anchor\n", "reason": "anchor", "auto": False},
+    )
+
+    import sqlite3
+    conn = sqlite3.connect(pb_routes.DRAFTS_DB)
+    cur = conn.execute(
+        "INSERT INTO draft_revisions"
+        "(draft_name, yaml, reason, is_auto, created_ts) "
+        "VALUES (?,?,?,?,datetime('now','-45 days'))",
+        (name, "ancient\n", "auto", 1),
+    )
+    ancient_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    client.put(
+        f"/api/playbooks/draft/{name}",
+        json={"yaml": "trigger\n", "reason": "trigger", "auto": True},
+    )
+
+    conn = sqlite3.connect(pb_routes.DRAFTS_DB)
+    row = conn.execute(
+        "SELECT id FROM draft_revisions WHERE id=?", (ancient_id,)
+    ).fetchone()
+    conn.close()
+    assert row is None, "auto-revision older than 30d should have been pruned"
+
+
 def test_get_example_serves_disk_yaml(client):
     listing = client.get("/api/playbooks").json()
     examples = [it for it in listing["items"] if it["kind"] == "example"]

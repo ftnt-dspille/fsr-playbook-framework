@@ -1,12 +1,8 @@
 <script lang="ts">
   /**
-   * Unified Design-mode toolbar. Hosts the editor utilities (undo/redo,
-   * layout direction, Jinja test) AND the build/deploy actions
-   * (Validate, Compile, Run split-button + status pill) in a single
-   * row so Design has just ONE chrome bar above the canvas.
-   *
-   * CLI mode still mounts BuildBar separately (it has no editor toolbar
-   * to merge into).
+   * Unified Design-mode toolbar: editor utilities (undo/redo, layout,
+   * Jinja test) + actions (Verify, Run + status). Validate / Analyze
+   * run automatically; their escape valve lives in the ⋯ overflow.
    */
   import { visualStore } from '../visualEditStore.svelte';
   import { forceLayout, type LayoutDirection } from '../visualLayout';
@@ -18,7 +14,7 @@
     direction?: LayoutDirection;
     onDirectionChange?: (dir: LayoutDirection) => void;
     onJinjaTest?: () => void;
-    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug') => void;
+    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'deploy') => void;
   };
   let {
     playbookIdx,
@@ -50,10 +46,25 @@
     }
   }
 
-  async function onCompile() {
-    onShowDrawer?.('compile');
-    await playbookActions.compile();
+  // Combined error/warning counts across validate + analyze, so the
+  // toolbar shows one chip instead of two.
+  let totalErr = $derived(playbookActions.errorCount + playbookActions.analyzeErrorCount);
+  let totalWarn = $derived(playbookActions.warningCount + playbookActions.analyzeWarningCount);
+
+  // ⋯ overflow menu, position:fixed to escape overflow-hidden parents.
+  let menuOpen = $state(false);
+  let menuBtn = $state<HTMLButtonElement | null>(null);
+  let menuTop = $state(0);
+  let menuRight = $state(0);
+  function toggleMenu() {
+    if (!menuOpen && menuBtn) {
+      const r = menuBtn.getBoundingClientRect();
+      menuTop = r.bottom + 4;
+      menuRight = window.innerWidth - r.right;
+    }
+    menuOpen = !menuOpen;
   }
+  function closeMenu() { menuOpen = false; }
 </script>
 
 <div
@@ -109,58 +120,71 @@
   <span class="mx-1.5 h-4 w-px bg-[var(--border-soft)]" aria-hidden="true"></span>
 
   <!-- Build/deploy group -->
-  <button
-    type="button"
-    class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 hover:bg-[var(--bg-canvas)]"
-    onclick={() => playbookActions.validate()}
-    title="Validate the current YAML"
-  >Validate</button>
-  <button
-    type="button"
-    class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 hover:bg-[var(--bg-canvas)] disabled:opacity-50"
-    onclick={() => playbookActions.analyze()}
-    disabled={playbookActions.analyzeBusy}
-    title="Render-path validator — simulate offline and flag data-access bugs"
-  >{playbookActions.analyzeBusy ? 'Analyzing…' : 'Analyze'}</button>
-  <button
-    type="button"
-    class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 hover:bg-[var(--bg-canvas)]"
-    onclick={onCompile}
-    title="Compile to FortiSOAR JSON"
-  >Compile</button>
-
   <RunButton />
 
-  <!-- Status + diagnostics access -->
-  <span class="ml-2 flex items-center gap-1.5">
+  <!-- Status + issues access. Dot color = latest auto-run outcome
+       (validate / analyze / verify). -->
+  <span class="ml-2 flex items-center gap-1.5" title={status.msg}>
     <span class="h-2 w-2 rounded-full {dot}"></span>
     <span class="text-[var(--text-muted)]">{status.msg}</span>
   </span>
 
-  {#if playbookActions.errorCount > 0 || playbookActions.warningCount > 0}
+  {#if totalErr > 0 || totalWarn > 0}
     <button
       type="button"
       class="ml-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 text-[10px] font-medium hover:bg-[var(--bg-canvas)]"
       onclick={() => onShowDrawer?.('diagnostics')}
-      title="Open diagnostics drawer"
+      title="Open issues drawer"
     >
-      {#if playbookActions.errorCount > 0}<span class="text-red-600 dark:text-red-400">{playbookActions.errorCount} err</span>{/if}
-      {#if playbookActions.errorCount > 0 && playbookActions.warningCount > 0}<span class="text-[var(--text-faint)]"> · </span>{/if}
-      {#if playbookActions.warningCount > 0}<span class="text-amber-600 dark:text-amber-400">{playbookActions.warningCount} warn</span>{/if}
+      {#if totalErr > 0}<span class="text-red-600 dark:text-red-400">{totalErr} err</span>{/if}
+      {#if totalErr > 0 && totalWarn > 0}<span class="text-[var(--text-faint)]"> · </span>{/if}
+      {#if totalWarn > 0}<span class="text-amber-600 dark:text-amber-400">{totalWarn} warn</span>{/if}
     </button>
   {/if}
 
-  {#if playbookActions.analyzeErrorCount > 0 || playbookActions.analyzeWarningCount > 0}
+  <button
+    type="button"
+    bind:this={menuBtn}
+    class="ml-auto rounded px-2 py-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-elev)]"
+    title="More actions"
+    aria-label="More actions"
+    aria-haspopup="menu"
+    aria-expanded={menuOpen}
+    onclick={toggleMenu}
+  >⋯</button>
+</div>
+
+{#if menuOpen}
+  <button
+    type="button"
+    aria-label="Close menu"
+    class="fixed inset-0 z-40 cursor-default bg-transparent"
+    onclick={closeMenu}
+  ></button>
+  <div
+    role="menu"
+    class="fixed z-50 flex w-48 flex-col rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] py-1 text-xs shadow-lg"
+    style="top: {menuTop}px; right: {menuRight}px"
+  >
     <button
       type="button"
-      class="ml-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 text-[10px] font-medium hover:bg-[var(--bg-canvas)]"
-      onclick={() => onShowDrawer?.('diagnostics')}
-      title="Open diagnostics drawer (render path)"
-    >
-      <span class="text-[var(--text-faint)]">render</span>
-      {#if playbookActions.analyzeErrorCount > 0}<span class="ml-1 text-red-600 dark:text-red-400">{playbookActions.analyzeErrorCount} err</span>{/if}
-      {#if playbookActions.analyzeErrorCount > 0 && playbookActions.analyzeWarningCount > 0}<span class="text-[var(--text-faint)]"> · </span>{/if}
-      {#if playbookActions.analyzeWarningCount > 0}<span class="text-amber-600 dark:text-amber-400">{playbookActions.analyzeWarningCount} warn</span>{/if}
-    </button>
-  {/if}
-</div>
+      role="menuitem"
+      class="px-3 py-1 text-left hover:bg-[var(--bg-canvas)] disabled:opacity-50"
+      onclick={() => { closeMenu(); void playbookActions.validate(); }}
+    >Re-validate</button>
+    <button
+      type="button"
+      role="menuitem"
+      class="px-3 py-1 text-left hover:bg-[var(--bg-canvas)] disabled:opacity-50"
+      onclick={() => { closeMenu(); void playbookActions.analyze(); }}
+      disabled={playbookActions.analyzeBusy}
+    >{playbookActions.analyzeBusy ? 'Analyzing…' : 'Re-analyze render path'}</button>
+    <button
+      type="button"
+      role="menuitem"
+      class="px-3 py-1 text-left hover:bg-[var(--bg-canvas)] disabled:opacity-50"
+      onclick={() => { closeMenu(); void playbookActions.runVerify(); }}
+      disabled={playbookActions.verifyBusy}
+    >{playbookActions.verifyBusy ? 'Verifying…' : 'Re-verify'}</button>
+  </div>
+{/if}

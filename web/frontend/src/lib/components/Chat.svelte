@@ -89,9 +89,8 @@
 
   // "Empty" YAML buffers we should NOT send as agent context — sending
   // them causes the agent to extend the scaffold instead of authoring
-  // fresh. Heuristic: blank, comment-only, or the welcome placeholder
-  // (detected by the marker comment that yamlStore.PLACEHOLDER opens
-  // with). Authors with a real playbook in the editor pass the check.
+  // fresh. Heuristic: blank, comment-only, or only-comments + "Welcome"
+  // marker. Authors with a real playbook in the editor pass the check.
   function isMeaningfulYaml(text: string): boolean {
     const stripped = text
       .split('\n')

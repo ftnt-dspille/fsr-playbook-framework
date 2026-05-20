@@ -8,104 +8,35 @@
   import { visualStore } from '$lib/visualEditStore.svelte';
   import { playbookStore } from '$lib/playbookStore.svelte';
   import { playbookActions } from '$lib/playbookActions.svelte';
-  import { yamlStore } from '$lib/yamlStore.svelte';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { messagesToTurns, type ReplayTurn } from '$lib/sessionReplay';
 
-  // Two-way bind: editor edits the store directly via the effect below.
-  // Wholesale replacements (load example, load draft, reset) MUST call
-  // yamlStore.setText() so an auto-snapshot fires and the user can undo
-  // a misclick.
-  let yaml = $state(yamlStore.text);
-  $effect(() => {
-    yamlStore.text = yaml;
-  });
-  // When the store is mutated externally (loadDraft, reset, restoreSnapshot,
-  // setText from another tab via storage event), pull the new value into
-  // the local `yaml` so the editor re-renders.
-  $effect(() => {
-    if (yamlStore.text !== yaml) yaml = yamlStore.text;
-  });
-
-  // playbookStore is the unified active-document source. When the user
-  // picks a playbook in the PlaybookHeader, mirror the YAML into the
-  // legacy yamlStore (which Chat / DiagnosticsList / DeployPanel read)
-  // so existing wiring keeps working without a wholesale refactor.
-  // Tracks `playbookStore.state.active?.name` as the change key so we
-  // only sync on document change, not on every keystroke (which would
-  // fight the user-edit effect above).
-  let lastSyncedKey: string | null = $state(null);
-  $effect(() => {
-    const a = playbookStore.state.active;
-    const key = a ? `${a.kind}:${a.name}` : null;
-    if (key === lastSyncedKey) return;
-    lastSyncedKey = key;
-    if (a) {
-      yamlStore.setText(a.yaml, `loaded ${a.kind}: ${a.name}`);
-      yaml = a.yaml;
-      // Push into visualStore too so flipping to Design shows the
-      // newly-picked playbook on the canvas instead of whatever was
-      // loaded last. Fire-and-forget — parse errors are surfaced by
-      // the canvas itself.
-      void visualStore.loadFromYaml(a.yaml).catch(() => {});
+  // Active-doc sync + debounced autosave + auto-verify all live on
+  // `playbookStore`. Registering them here scopes the effects to this
+  // component's lifecycle. The test harness calls the same hook so the
+  // effect graph stays single-sourced.
+  playbookStore.bindAutosave({
+    getLatestYaml: getActiveYaml,
+    onActiveLoaded: (yaml) => {
+      // Push freshly-loaded drafts into visualStore so flipping to
+      // Design shows the right canvas. Fire-and-forget — parse errors
+      // are surfaced by the canvas itself.
+      void visualStore.loadFromYaml(yaml).catch(() => {});
     }
   });
 
-  // Debounced auto-save: visual canvas edits (or any other source that
-  // flips a `dirty` flag) get flushed → playbookStore → backend after
-  // ~1 s of quiet. Without this, refreshing the page loses every edit
-  // since visualStore.save() was never wired to a UI button. We don't
-  // touch read-only example docs; they must be cloned first.
-  let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
-  let autosaveInFlight = false;
-  $effect(() => {
-    // Track all the dirty sources so any of them rearms the timer.
-    const dirty = visualStore.state.dirty || playbookStore.dirty;
-    const active = playbookStore.state.active;
-    if (!dirty || !active || active.kind === 'example') return;
-    if (autosaveTimer) clearTimeout(autosaveTimer);
-    autosaveTimer = setTimeout(async () => {
-      if (autosaveInFlight) return;
-      autosaveInFlight = true;
-      try {
-        const latest = await getActiveYaml();
-        if (typeof latest === 'string') playbookStore.setYaml(latest);
-        await playbookStore.save({ reason: 'autosave', auto: true });
-        // Clear visualStore's dirty flag once persisted — otherwise a
-        // second mutation right after a save doesn't re-arm this effect
-        // (dirty was already true → no state change → no re-run), so
-        // the second change would sit unsaved until the next dirty
-        // toggle. visualStore doesn't clear it itself because edit ops
-        // only ever set true.
-        visualStore.state.dirty = false;
-        // Refresh render-path diagnostics so badges, the drawer, and
-        // the toolbar pill reflect the just-saved buffer. Fire-and-
-        // forget — the UI surfaces it reactively when it lands. Skip
-        // when already running so a rapid second autosave doesn't
-        // pile up overlapping analyze calls.
-        if (!playbookActions.analyzeBusy) {
-          void playbookActions.analyze();
-        }
-      } catch {
-        // Surface via the normal error channels; manual save still
-        // available if the user wants to retry.
-      } finally {
-        autosaveInFlight = false;
-      }
-    }, 1000);
-  });
+  function onYamlInput(v: string) { playbookStore.replaceYaml(v, 'monaco'); }
 
   /** Flush hook for PlaybookHeader.save(): grab the freshest YAML from
-   * whichever mode is active so the buffer doesn't lag behind the UI. */
+   *  whichever mode is active. In Design, flushing dirty canvas edits
+   *  pushes the rendered YAML into `playbookStore` via `renderToYaml`,
+   *  so the canonical read is always `playbookStore.currentYaml`. */
   async function getActiveYaml(): Promise<string> {
-    if (mode === 'design' && visualStore.state.graph) {
-      const rendered = visualStore.state.dirty
-        ? await visualStore.renderToYaml()
-        : null;
-      return rendered ?? visualStore.state.graph.source.yaml;
+    if (mode === 'design' && visualStore.state.graph && visualStore.state.dirty) {
+      await visualStore.renderToYaml();
     }
-    return yamlStore.text;
+    return playbookStore.currentYaml;
   }
 
   // Replay mode: when the URL carries `?session=<id>`, hydrate the
@@ -148,36 +79,26 @@
   let modeError: string | null = $state(null);
   let switching = $state(false);
 
-  /** Sync the active YAML across the two stores when toggling mode so
-   * the same playbook follows the user. Without this, Design loads
-   * from `/api/visual/list` and CLI reads `yamlStore.text` — two
-   * disconnected buckets. */
+  /** Sync the active YAML across stores when toggling mode so the
+   *  same playbook follows the user between Design (canvas) and CLI
+   *  (Monaco). The canonical buffer is `playbookStore.currentYaml`; on
+   *  Design→CLI we flush any unsaved canvas edits into it. */
   async function setMode(target: 'design' | 'cli') {
     if (target === mode || switching) return;
     modeError = null;
     switching = true;
     try {
       if (target === 'cli') {
-        // Design → CLI: pull current visual graph YAML into yamlStore
-        // (rendering through the emitter when there are unsaved canvas
-        // edits so CLI sees the latest).
-        if (visualStore.state.graph) {
-          const rendered = visualStore.state.dirty
-            ? await visualStore.renderToYaml()
-            : null;
-          const next = rendered ?? visualStore.state.graph.source.yaml;
-          if (next && next !== yamlStore.text) {
-            yamlStore.setText(next, 'switch from Design');
-            yaml = next;
-          }
+        // Design → CLI: render any unsaved canvas edits — renderToYaml
+        // writes straight into the canonical buffer.
+        if (visualStore.state.graph && visualStore.state.dirty) {
+          await visualStore.renderToYaml();
         }
       } else {
-        // CLI → Design: push the CLI buffer through the parser into
-        // visualStore so the canvas reflects it. Fall back gracefully
-        // when the buffer is empty/placeholder.
-        const text = yamlStore.text;
-        const current = visualStore.state.graph?.source.yaml;
-        if (text && text !== current) {
+        // CLI → Design: push the canonical buffer through the parser
+        // into visualStore so the canvas reflects it.
+        const text = playbookStore.currentYaml;
+        if (text) {
           const r = await visualStore.loadFromYaml(text);
           if (!r.ok) { modeError = r.message ?? 'parse failed'; return; }
         }
@@ -292,12 +213,12 @@
   // so Design and CLI share one source of truth (the BuildBar fires
   // actions, the DiagnosticsDrawer reads results). Markers also feed
   // the Monaco gutter when the user is on CLI.
-  let drawerTab = $state<'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug'>('diagnostics');
+  let drawerTab = $state<'diagnostics' | 'fixes' | 'deploy'>('diagnostics');
   // Monaco editor + namespace handles, populated via MonacoYaml's onEditor.
-  // FixesPanel uses these to apply text edits with executeEdits so each
-  // fix lands in the editor's own undo stack (Cmd-Z reverts cleanly).
+  // DiagnosticsList uses these to apply per-row fixes via executeEdits so
+  // each fix lands in the editor's undo stack (Cmd-Z reverts cleanly).
   // Only the CLI-mounted Monaco populates these; in Design mode they
-  // stay null and DiagnosticsDrawer disables the Fixes apply button.
+  // stay null and the per-row Apply buttons self-disable.
   let monacoEditor = $state<any>(null);
   let monacoNs = $state<any>(null);
   // Drawer starts collapsed so the canvas/Monaco gets the full viewport
@@ -346,12 +267,12 @@
    // surface for both Monaco's gutter and the diagnostics drawer.
   let debounceId: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
-    void yaml;
+    void playbookStore.currentYaml;
     if (debounceId) clearTimeout(debounceId);
     debounceId = setTimeout(() => playbookActions.validate(), 400);
   });
 
-  function showDrawer(tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug') {
+  function showDrawer(tab: 'diagnostics' | 'fixes' | 'deploy') {
     drawerTab = tab;
     drawerOpen = true;
   }
@@ -382,8 +303,8 @@
       <div class="flex min-h-0 flex-col border-r border-[var(--border-soft)]">
         <div class="min-h-0 flex-1">
           <MonacoYaml
-            value={yaml}
-            onInput={(v) => (yaml = v)}
+            value={playbookStore.currentYaml}
+            onInput={onYamlInput}
             markers={playbookActions.markers}
             onEditor={(ed, mn) => {
               monacoEditor = ed;
@@ -407,8 +328,8 @@
           </div>
         {/if}
         <Chat
-          currentYaml={yaml}
-          onYamlReplace={(y) => (yaml = y)}
+          currentYaml={playbookStore.currentYaml}
+          onYamlReplace={onYamlInput}
           initialTurns={chatInitialTurns}
         />
       </aside>
@@ -424,7 +345,7 @@
     onResize={startDrawerDrag}
     monacoEditor={mode === 'cli' ? monacoEditor : null}
     monacoNs={mode === 'cli' ? monacoNs : null}
-    onYamlReplace={(v) => (yaml = v)}
+    onYamlReplace={onYamlInput}
   />
 </div>
 </div>

@@ -10,8 +10,10 @@
  */
 import { request, type Page } from '@playwright/test';
 
-export const API = 'http://localhost:47821';
-export const APP = 'http://localhost:47822';
+// E2E uses dedicated ports (4792X) so it never collides with a dev
+// session running on 4782X. Keep in sync with e2e/playwright.config.ts.
+export const API = 'http://localhost:47921';
+export const APP = 'http://localhost:47922';
 
 /** Create-or-replace a draft via the backend's PUT route. */
 export async function seedDraft(name: string, yaml: string): Promise<void> {

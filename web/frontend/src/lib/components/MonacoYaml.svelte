@@ -32,9 +32,13 @@
   let monacoRef = $state<any>(null);
   let modelRef = $state<any>(null);
   let internalUpdate = false;
+  // onMount awaits the monaco-editor dynamic import; guard against the
+  // component being destroyed (e.g. test cleanup) during that await.
+  let destroyed = false;
 
   onMount(async () => {
     const monaco = await import('monaco-editor');
+    if (destroyed || !host) return;
     monacoRef = monaco;
     editor = monaco.editor.create(host, {
       value,
@@ -46,7 +50,12 @@
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       tabSize: 2,
-      fixedOverflowWidgets: true
+      // false: render hover/suggest widgets inside the editor DOM so
+      // they anchor to the cursor line in document flow. `true` uses
+      // position:fixed, which lands in the wrong place when an ancestor
+      // creates a containing block (transform / filter / backdrop-filter)
+      // — which our `.glass` header does globally.
+      fixedOverflowWidgets: false
     });
     modelRef = editor.getModel();
     ensureYamlSupport(monaco);
@@ -60,6 +69,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     editor?.dispose();
   });
 

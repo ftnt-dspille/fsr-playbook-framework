@@ -19,7 +19,7 @@ Shape choices match the comments in the real backend:
     field-name candidates the runVarsStore probes), so the Real-run
     pane spec can assert the observed-value rendering.
 
-Run standalone for poking:  uvicorn fsr_stub:app --port 47820
+Run standalone for poking:  uvicorn fsr_stub:app --port 47920
 """
 from __future__ import annotations
 
@@ -260,5 +260,5 @@ async def integration_execute(request: Request) -> dict[str, Any]:
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("FSR_STUB_PORT", "47820"))
+    port = int(os.environ.get("FSR_STUB_PORT", "47920"))
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

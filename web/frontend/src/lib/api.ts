@@ -227,52 +227,6 @@ export async function verifyPlaybook(
   };
 }
 
-/** Step-through driver. Wraps `step_through_playbook` — simulates a
- * playbook offline (or with safe-op live reads) and returns one
- * trace row per step so the debugger panel can show rendered args +
- * outputs at each stage. */
-export type StepTraceRow = {
-  step_id: string;
-  type?: string;
-  rendered_args?: Record<string, unknown>;
-  output?: unknown;
-  output_top_keys?: string[];
-  status?: string;
-  note?: string;
-};
-export type StepThroughResult = {
-  ok: boolean;
-  playbook?: string;
-  trace: StepTraceRow[];
-  first_error?: { step_id: string; message: string } | null;
-  steps_executed?: number;
-  error?: string;
-};
-
-export async function stepThroughPlaybook(
-  yamlText: string,
-  opts: {
-    playbook?: string;
-    input?: Record<string, unknown>;
-    branchChoices?: Record<string, string>;
-    manualChoices?: Record<string, string>;
-    executeSafeOps?: boolean;
-  } = {}
-): Promise<StepThroughResult> {
-  const r = await callMcpTool<StepThroughResult>('step_through_playbook', {
-    yaml_text: yamlText,
-    playbook: opts.playbook,
-    input: opts.input,
-    branch_choices: opts.branchChoices,
-    manual_choices: opts.manualChoices,
-    execute_safe_ops: opts.executeSafeOps ?? false
-  });
-  if (!r.ok || !r.result) {
-    return { ok: false, trace: [], error: r.error ?? 'mcp call failed' };
-  }
-  return { ...r.result, ok: r.result.ok ?? false, trace: r.result.trace ?? [] };
-}
-
 export async function suggestFixForDiagnostic(d: Diagnostic): Promise<SuggestedFix> {
   const r = await callMcpTool<SuggestedFix>('suggest_fix_for_diagnostic', { diagnostic: d });
   if (!r.ok || !r.result) return { ok: false, reason: r.error ?? 'mcp call failed' };

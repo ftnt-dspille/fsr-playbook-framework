@@ -27,7 +27,7 @@
     /** Pop the bottom diagnostics drawer to a specific tab. Forwarded
      * down so the Compile button on EditorToolbar can lift the drawer
      * without EditWorkspace duplicating drawer state. */
-    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'compile' | 'deploy' | 'debug') => void;
+    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'deploy') => void;
   };
   let { onShowDrawer }: Props = $props();
 

@@ -15,7 +15,7 @@
      * latest in-flight YAML before save. In Design mode this renders
      * the visualStore graph to YAML; in CLI mode it returns the
      * Monaco buffer. When omitted, Save uses whatever is in
-     * `playbookStore.yaml` already. */
+     * `playbookStore.currentYaml` already. */
     getActiveYaml?: () => Promise<string> | string;
     /** Studio mode toggle — promoted into this header to reclaim the
      * vertical row it used to occupy on its own. Optional so the
@@ -65,7 +65,7 @@
     if (getActiveYaml) {
       try {
         const latest = await getActiveYaml();
-        if (typeof latest === 'string') playbookStore.setYaml(latest);
+        if (typeof latest === 'string') playbookStore.replaceYaml(latest);
       } catch (e) {
         actionError = `flush failed: ${(e as Error).message}`;
         return;
@@ -78,7 +78,7 @@
   async function onSaveAs() {
     const name = saveAsName.trim();
     if (!name) return;
-    const r = await playbookStore.createDraft(name, playbookStore.yaml);
+    const r = await playbookStore.createDraft(name, playbookStore.currentYaml);
     if (!r.ok) { actionError = r.message ?? 'create failed'; return; }
     savingAs = false;
     saveAsName = '';
@@ -242,7 +242,7 @@
               <li>
                 <button
                   type="button"
-                  class="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-xs hover:bg-[var(--bg-elev)] {active?.kind === 'draft' && active?.name === d.name ? 'bg-[var(--brand)]/10 font-semibold' : ''}"
+                  class="flex w-full cursor-pointer items-baseline justify-between gap-3 px-3 py-1.5 text-left text-xs hover:bg-[var(--brand)]/15 hover:text-[var(--text-default)] {active?.kind === 'draft' && active?.name === d.name ? 'bg-[var(--brand)]/10 font-semibold' : ''}"
                   onclick={() => pick('draft', d.name)}
                 >
                   <span class="truncate font-mono">{d.name}</span>
@@ -266,7 +266,7 @@
               <li>
                 <button
                   type="button"
-                  class="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-xs hover:bg-[var(--bg-elev)] {active?.kind === 'example' && active?.name === e.name ? 'bg-[var(--brand)]/10 font-semibold' : ''}"
+                  class="flex w-full cursor-pointer items-baseline justify-between gap-3 px-3 py-1.5 text-left text-xs hover:bg-[var(--brand)]/15 hover:text-[var(--text-default)] {active?.kind === 'example' && active?.name === e.name ? 'bg-[var(--brand)]/10 font-semibold' : ''}"
                   onclick={() => pick('example', e.name)}
                 >
                   <span class="truncate font-mono">{e.name}</span>

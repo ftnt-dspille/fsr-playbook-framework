@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/svelte';
 import StepInspector from './StepInspector.svelte';
 import { visualStore } from '../visualEditStore.svelte';
+import { playbookStore } from '../playbookStore.svelte';
 import type { VisualGraph } from '../api';
 
 function makeGraph(): VisualGraph {
@@ -106,10 +107,19 @@ beforeEach(() => {
   }) as any;
 
   visualStore.load('demo.yaml', makeGraph());
+  // testStep reads YAML from playbookStore.currentYaml (the canonical
+  // buffer); seed it so step_test invocations have source to work with.
+  playbookStore.state.active = {
+    kind: 'draft',
+    name: 'demo',
+    savedYaml: 'playbooks: []',
+    yaml: 'playbooks: []'
+  };
 });
 afterEach(() => {
   cleanup();
   globalThis.fetch = originalFetch;
+  playbookStore.reset();
 });
 
 describe('StepInspector', () => {

@@ -26,6 +26,8 @@ import {
   type PlaybookListItem,
   type DraftRevision
 } from './api';
+import { visualStore } from './visualEditStore.svelte';
+import { playbookActions } from './playbookActions.svelte';
 
 type ActiveDoc = {
   kind: PlaybookKind;
@@ -72,7 +74,10 @@ function bucket(items: PlaybookListItem[]) {
 
 export const playbookStore = {
   get state() { return state; },
-  get yaml() { return state.active?.yaml ?? ''; },
+  /** The single authoritative read of the active YAML buffer. Returns
+   *  `''` when no document is loaded so callers don't need to guard
+   *  `state.active` themselves. */
+  get currentYaml() { return state.active?.yaml ?? ''; },
   get dirty() {
     return !!state.active && state.active.yaml !== state.active.savedYaml;
   },
@@ -141,8 +146,10 @@ export const playbookStore = {
   },
 
   /** Update the live buffer. Cheap; called on every keystroke or graph
-   * mutation. Does NOT persist. */
-  setYaml(next: string): void {
+   * mutation. Does NOT persist. `source` is a free-form tag (e.g.
+   * "monaco", "visual-render", "revision-restore") that exists for
+   * future telemetry / debugging — it does not affect behavior. */
+  replaceYaml(next: string, _source?: string): void {
     if (!state.active) return;
     if (state.active.yaml === next) return;
     state.active.yaml = next;
@@ -247,6 +254,65 @@ export const playbookStore = {
     } catch (e) {
       return { ok: false, message: (e as Error).message };
     }
+  },
+
+  /** Register the page-level reactivity that turns user edits into
+   *  persisted state: a debounced autosave + an active-doc-loaded
+   *  hook for the page to wire downstream stores (e.g. visualStore).
+   *
+   *  Must be called from a Svelte component `<script>` so the inner
+   *  `$effect` calls attach to that component's lifecycle.
+   *
+   *  @param opts.getLatestYaml Returns the freshest YAML across all
+   *    editor surfaces — the page passes a mode-aware getter that
+   *    renders the Design canvas when active. Defaults to
+   *    `currentYaml`.
+   *  @param opts.onActiveLoaded Fires when the active doc identity
+   *    changes, so callers can mirror the buffer into peer stores. */
+  bindAutosave(opts: {
+    getLatestYaml?: () => Promise<string>;
+    onActiveLoaded?: (yaml: string) => void;
+  } = {}): void {
+    // Active-doc-identity tracker: fire onActiveLoaded only when
+    // `kind:name` changes, not on every keystroke.
+    let lastSyncedKey: string | null = null;
+    $effect(() => {
+      const a = state.active;
+      const key = a ? `${a.kind}:${a.name}` : null;
+      if (key === lastSyncedKey) return;
+      lastSyncedKey = key;
+      if (a) opts.onActiveLoaded?.(a.yaml);
+    });
+
+    // Debounced autosave. Any source of dirtiness (CLI keystroke,
+    // visual edit) re-arms a 1s timer; on fire we persist and re-run
+    // analyze + verify so badges/status reflect the saved buffer.
+    let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+    let autosaveInFlight = false;
+    $effect(() => {
+      const dirty = visualStore.state.dirty || this.dirty;
+      const active = state.active;
+      if (!dirty || !active || active.kind === 'example') return;
+      if (autosaveTimer) clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(async () => {
+        if (autosaveInFlight) return;
+        autosaveInFlight = true;
+        try {
+          const latest = opts.getLatestYaml
+            ? await opts.getLatestYaml()
+            : this.currentYaml;
+          if (typeof latest === 'string') this.replaceYaml(latest, 'autosave-flush');
+          await this.save({ reason: 'autosave', auto: true });
+          visualStore.state.dirty = false;
+          if (!playbookActions.analyzeBusy) void playbookActions.analyze();
+          if (!playbookActions.verifyBusy) void playbookActions.runVerify();
+        } catch {
+          // Manual save still available; errors surface via normal channels.
+        } finally {
+          autosaveInFlight = false;
+        }
+      }, 1000);
+    });
   },
 
   /** Clear the active doc (used by replay flows / explicit "new"). */

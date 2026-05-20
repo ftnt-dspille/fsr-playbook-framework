@@ -72,6 +72,8 @@ def _path_to_line(text: str, path: str) -> int:
             step_n = int(m.group(1))
             in_steps = False
             seen = -1
+            step_start_line = None
+            step_start_indent = -1
             for i, ln in enumerate(lines, start=1):
                 stripped = ln.lstrip()
                 if stripped.startswith("steps:"):
@@ -80,7 +82,31 @@ def _path_to_line(text: str, path: str) -> int:
                 if in_steps and stripped.startswith("- "):
                     seen += 1
                     if seen == step_n:
-                        return i
+                        step_start_line = i
+                        step_start_indent = len(ln) - len(stripped)
+                    elif seen > step_n:
+                        break
+            if step_start_line is not None:
+                # If the path ends in `.<key>` (e.g. ".type", ".arguments"),
+                # find that key inside this step block so the squiggle
+                # lands on the offending line, not the step header.
+                key_match = re.search(r"\.([a-zA-Z_][a-zA-Z0-9_]*)$", path)
+                if key_match:
+                    key = key_match.group(1)
+                    for j in range(step_start_line, len(lines) + 1):
+                        ln = lines[j - 1]
+                        stripped_j = ln.lstrip()
+                        indent_j = len(ln) - len(stripped_j)
+                        # Bail out when we leave this step's indentation
+                        # (next step or a dedent past the step block).
+                        if j > step_start_line and (
+                            stripped_j.startswith("- ")
+                            and indent_j <= step_start_indent
+                        ):
+                            break
+                        if stripped_j.startswith(key + ":"):
+                            return j
+                return step_start_line
     if path == "collection":
         for i, ln in enumerate(lines, start=1):
             if ln.lstrip().startswith("collection:"):

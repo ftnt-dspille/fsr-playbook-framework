@@ -41,5 +41,10 @@ def _isolate_secrets_and_settings(tmp_path, monkeypatch):
     secrets_store.reset_for_tests(fake)
     monkeypatch.setattr(_settings, "DATA_DIR", tmp_path)
     monkeypatch.setattr(_settings, "SETTINGS_PATH", tmp_path / "settings.json")
+    # `load_provider("anthropic")` auto-migrates ANTHROPIC_API_KEY from
+    # env into the keyring when none is stored. A developer `.env` with a
+    # real key would silently repopulate the in-memory backend mid-test
+    # and defeat any "no key configured" assertion. Pin it absent.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     yield
     secrets_store.reset_for_tests(None)

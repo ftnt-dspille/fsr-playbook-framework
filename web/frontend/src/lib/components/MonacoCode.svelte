@@ -72,6 +72,10 @@
   let editor = $state<any>(null);
   let monacoRef = $state<any>(null);
   let internalUpdate = false;
+  // onMount is async (awaits monaco-editor import); if the component
+  // is destroyed during that await, the post-await body must abort or
+  // it dereferences a null host. Set by onDestroy.
+  let destroyed = false;
   // Live host height when autoGrow is on. Starts undefined so the
   // declared `height` prop wins on first render; the contentSizeChange
   // handler takes over once Monaco mounts.
@@ -79,6 +83,7 @@
 
   onMount(async () => {
     const monaco = await import('monaco-editor');
+    if (destroyed || !host) return;
     monacoRef = monaco;
     editor = monaco.editor.create(host, {
       value,
@@ -171,7 +176,7 @@
     }
   });
 
-  onDestroy(() => { editor?.dispose(); });
+  onDestroy(() => { destroyed = true; editor?.dispose(); });
 
   // Parent-driven value sync. Reads `value` unconditionally so it
   // remains a tracked dep even when the early-returns trigger.

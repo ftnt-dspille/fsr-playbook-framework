@@ -137,7 +137,7 @@
 
   $effect(() => {
     if (!node || !playbook) return;
-    const yaml = playbookStore.yaml;
+    const yaml = playbookStore.currentYaml;
     if (yaml) jinjaShapesStore.refresh(yaml);
     const trig = playbook.nodes.find((n) => n.family === 'trigger');
     const mod = (trig?.arguments as any)?.module ?? (trig?.arguments as any)?.resource;

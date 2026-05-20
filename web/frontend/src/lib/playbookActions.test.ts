@@ -166,7 +166,7 @@ describe('playbookActions', () => {
     expect(pushCall.body).toEqual({ text: fresh, mode: 'safe' });
 
     // And the store's buffer was updated to match what was pushed.
-    expect(playbookStore.yaml).toBe(fresh);
+    expect(playbookStore.currentYaml).toBe(fresh);
 
     // Reset for any later tests.
     visualStore.state.graph = null as any;

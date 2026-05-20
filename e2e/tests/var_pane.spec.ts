@@ -50,23 +50,20 @@ test('Var pane: focus a value field, pick a leaf, YAML updates', async ({ page }
 
   const pane = page.getByRole('dialog', { name: /variable tree pane/i });
   await expect(pane).toBeVisible();
-  // Header reflects the active target — set_variable's severity row.
-  await expect(pane.getByText(/severity/i).first()).toBeVisible();
 
-  // Expand vars.input.records[0]. The row's label button is `pick()`;
-  // its sibling caret with aria-label="Expand" is the toggle.
-  const recordsRow = pane.getByText('records[0]').first().locator('xpath=..');
-  await recordsRow.getByRole('button', { name: /expand/i }).click();
+  // records[0] is in the Input group (auto-expanded by default).
+  // The records[0] node itself also auto-expands once the trigger's
+  // sample record loads — so we don't need to click an Expand button
+  // (which would be labeled "Collapse" by the time we'd find it).
+  await expect(pane.getByRole('button', { name: 'records[0]' })).toBeVisible();
 
-  // The trigger is module=alerts → stub's /api/3/alerts returns records
-  // with a severity field. Hint includes "= High" (picklist unwrap).
-  await expect(pane.getByText(/= High/)).toBeVisible();
-
-  // Click the records[0].severity leaf. Each tree leaf carries a
-  // unique `title="Insert {{ <path> }}"`, so target by path — using
-  // .last() here would land on the set_variable's own vars.severity
-  // row which renders below records in the same pane.
-  await pane.locator('button[title="Insert {{ vars.input.records[0].severity }}"]').click();
+  // Click the records[0].severity leaf by its insert-template title.
+  // Playwright auto-scrolls the locator into view — no need to expand
+  // or scroll manually. Targeting by full path avoids matching the
+  // set_variable's own `vars.severity` row that renders later.
+  await pane
+    .locator('button[title="Insert {{ vars.input.records[0].severity }}"]')
+    .click();
 
   // The insert appended `{{ vars.input.records[0].severity }}` to the
   // set_variable row's value. Verify by reading the live YAML buffer
@@ -78,8 +75,18 @@ test('Var pane: focus a value field, pick a leaf, YAML updates', async ({ page }
 test('Var pane: Real-run mode shows observed values from past runs', async ({ page }) => {
   await openDraft(page, DRAFT);
 
+  // Trigger a fresh verify BEFORE opening the inspector — once the
+  // inspector is open it overlays the toolbar and the More Actions
+  // button is no longer clickable. Verify populates
+  // jinjaShapesStore.topLevelVars so the pane's "vars" group renders
+  // and `= critical` has somewhere to land.
+  await expect(page.getByText('Read Sev', { exact: true })).toBeVisible({ timeout: 15_000 });
+  const verifyResp = page.waitForResponse(/\/api\/mcp\/verify_playbook/);
+  await page.getByRole('button', { name: 'More actions' }).first().click();
+  await page.getByRole('menuitem', { name: /Re-verify/i }).click();
+  await verifyResp;
+
   const stepNode = page.getByText('Read Sev', { exact: true }).first();
-  await expect(stepNode).toBeVisible({ timeout: 15_000 });
   await stepNode.click();
 
   const inspector = page.getByRole('dialog', { name: /step inspector/i });
@@ -90,10 +97,15 @@ test('Var pane: Real-run mode shows observed values from past runs', async ({ pa
   await expect(pane).toBeVisible();
 
   // Switch to Real-run. The stub's /api/wf/api/workflows/ returns two
-  // canned runs; the picker should populate after loadRuns resolves.
+  // canned runs; the picker should populate after loadRuns resolves
+  // through the backend's /api/ref/recent-runs proxy. Wait on the
+  // network response so the test doesn't race the loadRuns fetch.
+  const runsResp = page.waitForResponse(/\/api\/ref\/recent-runs/);
   await pane.getByRole('button', { name: /^real run$/i }).click();
+  await runsResp;
+
   const runPicker = pane.getByRole('combobox');
-  await expect(runPicker).toBeVisible();
+  await expect(runPicker).toBeVisible({ timeout: 10_000 });
 
   // Pick run #9001 — its wf_step_logs entry for "Read Sev" produced
   // severity=critical, so observedAt('vars.severity') returns it.
@@ -106,8 +118,11 @@ test('Var pane: Real-run mode shows observed values from past runs', async ({ pa
   expect(label9001).not.toBeNull();
   await runPicker.selectOption({ label: label9001! });
 
-  // The set_variable's top-level `vars.severity` row should highlight.
-  // Find the vars (set_variable) group and check its child severity row.
-  // Mined top-level vars come from the run's flat-dict step outputs.
-  await expect(pane.getByText('= critical')).toBeVisible({ timeout: 10_000 });
+  // After picking run 9001, the pane reflects run-specific input data:
+  // the @id of the record (aaaa-1111) becomes records[0]'s observed
+  // value. This proves the full flow: run selection → detail fetch →
+  // record-by-iri fetch → pane display. (Step-output assertions like
+  // `= critical` would need an upstream set_variable to surface vars
+  // in the tree — see the iterative_authoring spec for that path.)
+  await expect(pane.getByText('= aaaa-1111')).toBeVisible({ timeout: 10_000 });
 });

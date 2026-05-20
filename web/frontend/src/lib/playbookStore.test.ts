@@ -68,7 +68,7 @@ describe('playbookStore', () => {
     await playbookStore.open('draft', 'wip');
     expect(playbookStore.state.active?.kind).toBe('draft');
     expect(playbookStore.state.active?.name).toBe('wip');
-    expect(playbookStore.yaml).toBe('a: 1\n');
+    expect(playbookStore.currentYaml).toBe('a: 1\n');
     expect(playbookStore.state.revisions).toHaveLength(2);
     expect(playbookStore.dirty).toBe(false);
   });
@@ -110,7 +110,7 @@ describe('playbookStore', () => {
 
     await playbookStore.open('draft', 'wip');
     expect(playbookStore.dirty).toBe(false);
-    playbookStore.setYaml('a: 99\n');
+    playbookStore.replaceYaml('a: 99\n');
     expect(playbookStore.dirty).toBe(true);
 
     const r = await playbookStore.save({ reason: 'test save' });
@@ -137,7 +137,7 @@ describe('playbookStore', () => {
     });
 
     await playbookStore.open('draft', 'wip');
-    playbookStore.setYaml('a: 99\n');
+    playbookStore.replaceYaml('a: 99\n');
     const r1 = await playbookStore.save({ reason: 'first' });
     expect(r1.ok).toBe(true);
     const putsAfterFirst = calls.filter((c) => c.method === 'PUT').length;
@@ -154,7 +154,7 @@ describe('playbookStore', () => {
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
 
     // After a real edit, Save resumes persisting.
-    playbookStore.setYaml('a: 100\n');
+    playbookStore.replaceYaml('a: 100\n');
     await playbookStore.save({ reason: 'fourth' });
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2);
   });
@@ -194,7 +194,7 @@ describe('playbookStore', () => {
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
 
     // Dirty → PUT with auto:true.
-    playbookStore.setYaml('a: 2\n');
+    playbookStore.replaceYaml('a: 2\n');
     await playbookStore.autoSnapshot('mode-switch');
     const put = calls.find((c) => c.method === 'PUT');
     expect((put?.body as any).auto).toBe(true);
@@ -242,7 +242,7 @@ describe('playbookStore', () => {
     await playbookStore.open('draft', 'wip');
     const r = await playbookStore.loadRevision(42);
     expect(r.ok).toBe(true);
-    expect(playbookStore.yaml).toBe('old: revision\n');
+    expect(playbookStore.currentYaml).toBe('old: revision\n');
     expect(playbookStore.dirty).toBe(true); // differs from saved head
   });
 

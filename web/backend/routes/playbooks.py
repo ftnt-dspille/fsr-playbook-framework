@@ -68,8 +68,80 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_revisions_draft
           ON draft_revisions(draft_name, id DESC);
+        -- Pruning predicate scans (draft, is_auto, age); this index
+        -- keeps the per-save prune cheap as a draft's auto-history grows.
+        CREATE INDEX IF NOT EXISTS idx_revisions_prune
+          ON draft_revisions(draft_name, is_auto, created_ts);
         """
     )
+
+
+# Tiered retention for AUTO revisions. Manual saves (is_auto=0) are
+# never pruned — those are checkpoints the user explicitly committed
+# to. Same shape Google Docs uses ("aggregate older changes").
+#
+# Each tier covers an age range and keeps the newest auto-revision per
+# bucket within that range. Bucket sizes are in seconds.
+#
+# Tier 5 (older than the last tier's upper bound) drops everything,
+# encoded as `bucket_seconds = None`.
+_PRUNE_TIERS: tuple[tuple[int, int, int | None], ...] = (
+    # (age_low_seconds, age_high_seconds, bucket_seconds)
+    (60,           60 * 60,             60),          # 1min–1hr: 1min buckets
+    (60 * 60,      24 * 60 * 60,        10 * 60),     # 1hr–1d:  10min buckets
+    (24 * 60 * 60, 7 * 24 * 60 * 60,    60 * 60),     # 1d–1w:   1hr buckets
+    (7 * 24 * 60 * 60,  30 * 24 * 60 * 60, 24 * 60 * 60),  # 1w–1mo: 1day buckets
+    (30 * 24 * 60 * 60, 10 ** 12,       None),        # older: drop
+)
+
+
+def _prune_auto_revisions(conn: sqlite3.Connection, draft_name: str) -> int:
+    """Apply tiered retention to this draft's auto-revisions. Called
+    inside the same transaction as the INSERT so prune+insert are
+    atomic — a crash between them can't leave the table mid-pruned.
+
+    Returns the number of rows deleted (useful for tests + telemetry).
+
+    Uses `strftime('%s', created_ts)` to convert the ISO timestamp into
+    Unix-epoch seconds; integer-divide by `bucket_seconds` to get the
+    bucket id. Keeping `MAX(id)` per bucket means the most recent edit
+    within that minute/hour/day wins.
+    """
+    deleted = 0
+    for age_low, age_high, bucket in _PRUNE_TIERS:
+        if bucket is None:
+            cur = conn.execute(
+                """
+                DELETE FROM draft_revisions
+                WHERE draft_name = ?
+                  AND is_auto = 1
+                  AND (strftime('%s','now') - strftime('%s', created_ts)) >= ?
+                """,
+                (draft_name, age_low),
+            )
+            deleted += cur.rowcount or 0
+            continue
+        cur = conn.execute(
+            """
+            DELETE FROM draft_revisions
+            WHERE draft_name = ?
+              AND is_auto = 1
+              AND (strftime('%s','now') - strftime('%s', created_ts)) >= ?
+              AND (strftime('%s','now') - strftime('%s', created_ts)) <  ?
+              AND id NOT IN (
+                SELECT MAX(id) FROM draft_revisions
+                WHERE draft_name = ?
+                  AND is_auto = 1
+                  AND (strftime('%s','now') - strftime('%s', created_ts)) >= ?
+                  AND (strftime('%s','now') - strftime('%s', created_ts)) <  ?
+                GROUP BY CAST(strftime('%s', created_ts) AS INTEGER) / ?
+              )
+            """,
+            (draft_name, age_low, age_high,
+             draft_name, age_low, age_high, bucket),
+        )
+        deleted += cur.rowcount or 0
+    return deleted
 
 
 def _now() -> str:
@@ -260,6 +332,10 @@ def put_draft(name: str, payload: DraftSave) -> dict[str, Any]:
             (name, payload.yaml, payload.reason, 1 if payload.auto else 0, now),
         )
         rev_id = cursor.lastrowid
+        # Prune older auto-revisions in the same txn — keeps the table
+        # bounded without a background job, and a crash mid-save can't
+        # leave it half-pruned. Manual saves are never touched.
+        _prune_auto_revisions(conn, name)
         conn.commit()
     return {
         "ok": True,

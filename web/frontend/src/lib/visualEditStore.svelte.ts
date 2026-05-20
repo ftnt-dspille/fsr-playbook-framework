@@ -9,6 +9,7 @@
  * Save button surfaces and ⌘S works (Phase 7.4).
  */
 import type { VisualGraph, VisualNode, VisualPlaybook } from './api';
+import { playbookStore } from './playbookStore.svelte';
 
 type State = {
   filePath: string | null;
@@ -271,11 +272,10 @@ export const visualStore = {
 
   markDirty() { state.dirty = true; },
 
-  /** Round-trip the current graph through the emitter to get fresh YAML
-   * matching any pending visual edits. Used when toggling Visual→YAML
-   * so the Monaco buffer reflects unsaved canvas changes instead of
-   * the stale on-disk source. Returns null on failure (caller should
-   * fall back to `state.graph.source.yaml`). */
+  /** Round-trip the current graph through the emitter to get fresh
+   * YAML matching any pending visual edits, and push it into the
+   * canonical buffer (`playbookStore`). Returns the rendered YAML on
+   * success, or null on failure. */
   async renderToYaml(): Promise<string | null> {
     if (!state.graph) return null;
     try {
@@ -283,21 +283,15 @@ export const visualStore = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          original_yaml: state.graph.source.yaml,
+          original_yaml: playbookStore.currentYaml,
           graph: state.graph
         })
       });
       const data = await r.json();
       if (!data.ok) return null;
-      // Keep `state.graph.source.yaml` in sync with what we just rendered.
-      // Otherwise autosave clears `state.dirty` but source.yaml still holds
-      // the pre-edit text — and the next Design→CLI toggle short-circuits
-      // renderToYaml (dirty=false), falls back to the stale source.yaml,
-      // and overwrites the up-to-date Monaco buffer.
-      if (state.graph) {
-        state.graph.source = { ...state.graph.source, yaml: data.yaml as string };
-      }
-      return data.yaml as string;
+      const next = data.yaml as string;
+      playbookStore.replaceYaml(next, 'visual-render');
+      return next;
     } catch { return null; }
   },
 
@@ -316,11 +310,6 @@ export const visualStore = {
       const graph = await r.json() as VisualGraph;
       snapshot();
       state.graph = graph;
-      // Dirty whenever the buffer no longer matches the on-disk source.
-      // We don't have the on-disk yaml stashed separately, but graph.source.yaml
-      // is updated to whatever was just parsed — so compare against the
-      // pre-snapshot top of the undo stack via a structural marker: any
-      // change in YAML text vs the previous load means dirty.
       state.dirty = true;
       return { ok: true };
     } catch (e) {

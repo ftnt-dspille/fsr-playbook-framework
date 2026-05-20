@@ -52,7 +52,7 @@
 <div class="flex h-full flex-col overflow-hidden text-sm">
   {#if diagnostics.length === 0}
     <div class="flex h-full items-center justify-center px-6 text-center text-xs text-[var(--text-faint)]">
-      No render-path diagnostics. Click <span class="mx-1 font-mono">Analyze</span> in the toolbar to run the validator.
+      No data-flow issues. Re-runs automatically on save.
     </div>
   {:else}
     <ul class="flex-1 overflow-auto divide-y divide-[var(--border-soft)]">
