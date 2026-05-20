@@ -2,11 +2,118 @@
 from __future__ import annotations
 
 import difflib
+import ipaddress
+import json as _json
+import re
 import sqlite3
+from datetime import datetime
 from typing import Optional
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Step
+
+
+# Observed-type validators (Tier 2.3). Each returns True iff the value
+# is acceptable under that type. All accept native Python types straight
+# through and fall back to coercion attempts on strings. None of them
+# allocate beyond what Python's stdlib already costs — they run per
+# param at compile time, so they need to stay cheap.
+
+_URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s]+$")
+# Pragmatic email regex — RFC 5322 is too permissive to be useful as a
+# *typo* check, which is the goal here. The pattern matches the
+# overwhelming-majority "local@host.tld" shape; anything weirder is
+# unlikely to be intentional in a connector param.
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _is_ipv4(v) -> bool:
+    if not isinstance(v, str):
+        return False
+    try:
+        ipaddress.IPv4Address(v.strip())
+        return True
+    except (ipaddress.AddressValueError, ValueError):
+        return False
+
+
+def _is_url(v) -> bool:
+    return isinstance(v, str) and bool(_URL_RE.match(v.strip()))
+
+
+def _is_email(v) -> bool:
+    return isinstance(v, str) and bool(_EMAIL_RE.match(v.strip()))
+
+
+def _is_iso8601(v) -> bool:
+    """True if v parses as ISO 8601 (with or without time).
+
+    `fromisoformat` covers the standard variants that FSR connectors
+    accept. Native datetime/date objects pass through. Epoch numbers
+    are *not* accepted here — those have their own observed_type
+    (`epoch_seconds` / `epoch_millis`); mixing them would dilute the
+    diagnostic value.
+    """
+    if isinstance(v, datetime):
+        return True
+    if not isinstance(v, str):
+        return False
+    s = v.strip()
+    if not s:
+        return False
+    try:
+        datetime.fromisoformat(s)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_json_object(v) -> bool:
+    """True if v is a dict (or a string that parses to a dict).
+
+    Connector params widget-typed `json` accept either form on the wire —
+    the FSR runtime json.loads strings before passing through. List-of-
+    items is handled separately via the `json_array` observed_type.
+    """
+    if isinstance(v, dict):
+        return True
+    if not isinstance(v, str):
+        return False
+    try:
+        return isinstance(_json.loads(v), dict)
+    except (_json.JSONDecodeError, TypeError):
+        return False
+
+
+def _is_json_array(v) -> bool:
+    if isinstance(v, list):
+        return True
+    if not isinstance(v, str):
+        return False
+    try:
+        return isinstance(_json.loads(v), list)
+    except (_json.JSONDecodeError, TypeError):
+        return False
+
+
+# Map observed_type → (display_name, validator, suggestion-tail). The
+# Tier 1 widget pass already covers `int` / `float` / `bool` / `picklist`
+# / `str` (str is permissive). We only register here the *additional*
+# types Tier 2 unlocks.
+_OBSERVED_VALIDATORS: dict[str, tuple[str, "callable", str]] = {
+    "ipv4": ("IPv4 address", _is_ipv4,
+             "pass a dotted-quad address like '10.0.0.1'"),
+    "url":  ("URL", _is_url,
+             "pass a full URL including scheme, e.g. 'https://example.com/path'"),
+    "email": ("email address", _is_email,
+              "pass an address like 'user@example.com'"),
+    "iso8601": ("ISO 8601 timestamp", _is_iso8601,
+                "pass a timestamp like '2026-05-20T12:34:00Z' or '2026-05-20'"),
+    "json_object": ("JSON object", _is_json_object,
+                    "pass a YAML mapping or a JSON-encoded string"),
+    "json_array": ("JSON array", _is_json_array,
+                   "pass a YAML list or a JSON-encoded array string"),
+}
 
 
 def _coerces_to_int(v) -> bool:
@@ -313,6 +420,28 @@ class ConnectorArgsMixin:
                                 f"not coerce to a number"),
                             path=f"{path}.arguments.params.{p_name}",
                             suggestion="pass a number or numeric string",
+                        ))
+                # Tier 2.3: observed_type validators for types Tier 1's
+                # widget pass doesn't cover (ipv4 / url / email /
+                # iso8601 / json_object / json_array). Only fires on
+                # `text`-widget params that the type probe lifted —
+                # numeric/bool/picklist widgets are already handled
+                # above.
+                elif ptype_low in {"text", "textarea", "richtext"}:
+                    obs, _coerces = self.operation_param_observed_type(
+                        connector, operation, p_name)
+                    spec = _OBSERVED_VALIDATORS.get(obs or "")
+                    if spec is not None and not spec[1](p_val):
+                        display, _, sug_tail = spec
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"param {p_name!r} on "
+                                f"{connector}.{operation} expects an "
+                                f"{display} but got {p_val!r} "
+                                f"({type(p_val).__name__})"),
+                            path=f"{path}.arguments.params.{p_name}",
+                            suggestion=sug_tail,
                         ))
                 # Boolean: checkbox / boolean.
                 elif ptype_low in {"checkbox", "boolean"}:

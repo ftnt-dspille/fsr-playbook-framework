@@ -31,6 +31,7 @@ import {
 import { jinjaShapesStore } from './jinjaShapesStore.svelte';
 import type { Shape } from './shapeStubs';
 import { playbookStore } from './playbookStore.svelte';
+import { visualStore } from './visualEditStore.svelte';
 import { runStore } from './runStore.svelte';
 import { postSse } from './sse';
 
@@ -101,6 +102,7 @@ export const playbookActions = {
    * called on a debounce in the page-level effect so the diagnostics
    * panel stays current without manual triggers. */
   async validate(): Promise<void> {
+    await this.flushVisual();
     const yaml = playbookStore.yaml;
     if (!yaml) {
       state.markers = [];
@@ -128,6 +130,7 @@ export const playbookActions = {
    * `executeSafeOps: true` to also run C4 picklist drift against
    * the live FSR. */
   async analyze(opts: { executeSafeOps?: boolean } = {}): Promise<void> {
+    await this.flushVisual();
     const yaml = playbookStore.yaml;
     if (!yaml) {
       state.diagnostics = [];
@@ -153,6 +156,7 @@ export const playbookActions = {
 
   /** Compile to FSR JSON. Updates markers + the compile-JSON pane. */
   async compile(): Promise<void> {
+    await this.flushVisual();
     const yaml = playbookStore.yaml;
     state.status = { kind: 'busy', msg: 'compiling…' };
     try {
@@ -194,6 +198,7 @@ export const playbookActions = {
   /** Run verify_playbook on the current buffer. Idempotent. Updates
    * `verify` state which the canvas reads to color step badges. */
   async runVerify(opts: { livePrope?: boolean } = {}): Promise<void> {
+    await this.flushVisual();
     const yaml = playbookStore.yaml;
     if (!yaml) {
       state.verify = null;
@@ -224,9 +229,22 @@ export const playbookActions = {
     }
   },
 
+  /** Flush any in-flight visual-canvas edits back into `playbookStore.yaml`
+   * before an action reads it. Without this, Push / Push & Run / Validate
+   * etc. operate on the last-loaded YAML even when the canvas has newer
+   * edits (e.g. an AI-generated draft sitting on the canvas dirty but not
+   * yet round-tripped through the emitter). No-op when the canvas is
+   * clean or absent. */
+  async flushVisual(): Promise<void> {
+    if (!visualStore.state.graph || !visualStore.state.dirty) return;
+    const rendered = await visualStore.renderToYaml();
+    if (typeof rendered === 'string') playbookStore.setYaml(rendered);
+  },
+
   /** Push the current YAML to the configured FSR. Returns true on
    * success so callers chaining (push → run) can short-circuit. */
   async push(): Promise<boolean> {
+    await this.flushVisual();
     const yaml = playbookStore.yaml;
     runStore.reset();
     runStore.status = 'pushing';
@@ -258,6 +276,7 @@ export const playbookActions = {
   async pushAndRun(): Promise<void> {
     const ok = await this.push();
     if (!ok) return;
+    // `push()` already flushed; re-read the buffer it persisted.
     const yaml = playbookStore.yaml;
     const coll = extractCollectionName(yaml);
     const pb = firstPlaybookName(yaml);

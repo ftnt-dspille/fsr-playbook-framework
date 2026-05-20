@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { playbookActions } from './playbookActions.svelte';
 import { playbookStore } from './playbookStore.svelte';
 import { runStore } from './runStore.svelte';
+import { visualStore } from './visualEditStore.svelte';
 
 let originalFetch: typeof fetch;
 let calls: { url: string; method: string; body: any }[];
@@ -124,6 +125,69 @@ describe('playbookActions', () => {
     expect(runStore.status).toBe('error');
     expect(runStore.pushOutput).toBe('boom');
     expect(playbookActions.state.status.kind).toBe('err');
+  });
+
+  it('push() flushes pending visual-canvas edits before sending (no stale buffer)', async () => {
+    // Stage: the YAML buffer holds the OLD playbook (what the AI replaced),
+    // but the visual canvas is dirty with a NEW playbook the user is looking
+    // at. Push must send the new one, not the stale buffer.
+    const stale = 'collection: OLD\nplaybooks:\n  - name: Old\n';
+    const fresh = 'collection: NEW\nplaybooks:\n  - name: New\n';
+    seedYaml(stale);
+    visualStore.state.graph = {
+      // Minimal shape — flushVisual only reads .dirty + .graph truthiness
+      // and calls renderToYaml, which we stub via fetch below.
+      source: { path: null, yaml: stale },
+      playbooks: []
+    } as any;
+    visualStore.state.dirty = true;
+
+    mockFetch((url, init) => {
+      if (url === '/api/visual/write' && init?.method === 'POST') {
+        return { ok: true, yaml: fresh, graph: { source: { yaml: fresh }, playbooks: [] } };
+      }
+      if (url === '/api/playbook/push' && init?.method === 'POST') {
+        return { ok: true, exit_code: 0, stdout: 'ok', stderr: '' };
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+
+    const ok = await playbookActions.push();
+    expect(ok).toBe(true);
+
+    // /api/visual/write was called BEFORE /api/playbook/push.
+    const writeIdx = calls.findIndex((c) => c.url === '/api/visual/write');
+    const pushIdx = calls.findIndex((c) => c.url === '/api/playbook/push');
+    expect(writeIdx).toBeGreaterThanOrEqual(0);
+    expect(pushIdx).toBeGreaterThan(writeIdx);
+
+    // The push payload carries the FRESH yaml, not the stale buffer.
+    const pushCall = calls[pushIdx];
+    expect(pushCall.body).toEqual({ text: fresh, mode: 'safe' });
+
+    // And the store's buffer was updated to match what was pushed.
+    expect(playbookStore.yaml).toBe(fresh);
+
+    // Reset for any later tests.
+    visualStore.state.graph = null as any;
+    visualStore.state.dirty = false;
+  });
+
+  it('push() with a clean visual canvas does NOT call /api/visual/write', async () => {
+    seedYaml('collection: X\nplaybooks:\n  - name: P\n');
+    visualStore.state.graph = { source: { path: null, yaml: '' }, playbooks: [] } as any;
+    visualStore.state.dirty = false;
+
+    mockFetch((url) => {
+      if (url === '/api/visual/write') throw new Error('renderToYaml must NOT run when clean');
+      if (url === '/api/playbook/push') return { ok: true, exit_code: 0, stdout: '', stderr: '' };
+      throw new Error(`unexpected ${url}`);
+    });
+
+    await playbookActions.push();
+    expect(calls.find((c) => c.url === '/api/visual/write')).toBeUndefined();
+
+    visualStore.state.graph = null as any;
   });
 
   it('pushAndRun() short-circuits when push fails', async () => {

@@ -400,6 +400,155 @@ def _strip_default(raw: Any) -> str | None:
 # get_op_schema
 # ---------------------------------------------------------------------------
 
+def _short_desc(p: dict) -> str:
+    """First sentence (or 120-char clip) of description, falling back
+    to tooltip when description is missing. Keeps the slim response
+    self-explanatory without hauling vendor doc paragraphs verbatim."""
+    raw = p.get("description") or p.get("tooltip") or ""
+    if not raw:
+        return ""
+    txt = " ".join(raw.split())  # collapse whitespace
+    cut = txt.split(". ", 1)[0]
+    if len(cut) > 120:
+        cut = cut[:117].rstrip() + "..."
+    return cut.rstrip(".")
+
+
+def _format_param_line(p: dict, indent: int = 0) -> str:
+    pad = "  " * indent
+    name = p.get("param_name", "?")
+    typ = p.get("type") or "?"
+    req = "required" if p.get("required") else "optional"
+    opts = p.get("options_json")
+    if isinstance(opts, list) and opts:
+        typ = f"select({' | '.join(str(o) for o in opts)})"
+    default = _strip_default(p.get("default_value"))
+    extras = []
+    if default not in (None, ""):
+        extras.append(f"default={default}")
+    desc = _short_desc(p)
+    head = f"{pad}- {name} ({typ}, {req})"
+    if extras:
+        head += f" [{', '.join(extras)}]"
+    if desc:
+        head += f" — {desc}"
+    return head
+
+
+def _render_op_schema_md(
+    op_row: dict,
+    params: list[dict],
+    visibility: dict,
+) -> str:
+    """Compact markdown skeleton for an op — replaces the 5KB nested-JSON
+    response with the same information in YAML-author-facing form."""
+    name = op_row.get("op_name", "?")
+    connector = op_row.get("connector_name", "?")
+    title = op_row.get("title") or ""
+    desc = op_row.get("description") or ""
+    head = f"`{name}` — {title}".rstrip(" —")
+    by_name = {p["param_name"]: p for p in params}
+
+    lines = [f"# {head}", f"connector: {connector}"]
+    if desc:
+        first = " ".join(desc.split()).split(". ", 1)[0]
+        if len(first) > 240:
+            first = first[:237].rstrip() + "..."
+        lines.append(f"_{first}_")
+    lines.append("")
+
+    if not visibility:
+        lines.append("## params")
+        for p in params:
+            lines.append(_format_param_line(p))
+    else:
+        always = visibility.get("always", [])
+        when = visibility.get("when", {})
+        if always:
+            lines.append("## always")
+            for n in always:
+                if n in by_name:
+                    lines.append(_format_param_line(by_name[n]))
+            lines.append("")
+        # Group `when` entries by gating select so each branch reads as
+        # one block instead of N flat `select=value` lines.
+        by_gate: dict[str, dict[str, list[str]]] = {}
+        for key, plist in when.items():
+            if "=" in key:
+                sel, val = key.split("=", 1)
+            else:
+                sel, val = key, "*"
+            by_gate.setdefault(sel, {})[val] = plist
+        for sel, branches in by_gate.items():
+            lines.append(f"## when {sel} = …")
+            for val, plist in branches.items():
+                lines.append(f"### {val}")
+                for n in plist:
+                    if n in by_name:
+                        lines.append(_format_param_line(by_name[n]))
+            lines.append("")
+
+    # Skeleton: required params from `always` + the first option of each
+    # gating select. Keeps the skeleton runnable rather than 50/50 guessed.
+    required_lines: list[str] = []
+    chosen_branch: dict[str, str] = {}
+    if visibility:
+        for n in visibility.get("always", []):
+            p = by_name.get(n)
+            if not p:
+                continue
+            if p.get("required") and p.get("type") == "select":
+                opts = p.get("options_json") or []
+                if isinstance(opts, list) and opts:
+                    chosen_branch[n] = str(opts[0])
+                    required_lines.append(f"      {n}: {opts[0]}")
+                else:
+                    required_lines.append(f"      {n}: <value>")
+            elif p.get("required"):
+                required_lines.append(f"      {n}: <value>")
+        # Walk picked branches recursively in case of nested selects.
+        pending = list(chosen_branch.items())
+        seen_gates = set(chosen_branch.keys())
+        while pending:
+            sel, val = pending.pop(0)
+            for key, plist in visibility.get("when", {}).items():
+                if key != f"{sel}={val}":
+                    continue
+                for n in plist:
+                    p = by_name.get(n)
+                    if not p or not p.get("required"):
+                        continue
+                    if p.get("type") == "select":
+                        opts = p.get("options_json") or []
+                        if isinstance(opts, list) and opts:
+                            required_lines.append(f"      {n}: {opts[0]}")
+                            if n not in seen_gates:
+                                pending.append((n, str(opts[0])))
+                                seen_gates.add(n)
+                        else:
+                            required_lines.append(f"      {n}: <value>")
+                    else:
+                        required_lines.append(f"      {n}: <value>")
+    else:
+        for p in params:
+            if p.get("required"):
+                required_lines.append(f"      {p['param_name']}: <value>")
+
+    skeleton = [
+        "## skeleton",
+        "```yaml",
+        f"- type: connector",
+        f"  name: {name}",
+        f"  connector: {connector}",
+        f"  operation: {name}",
+        f"  params:",
+        *required_lines,
+        "```",
+    ]
+    lines.extend(skeleton)
+    return "\n".join(lines)
+
+
 @mcp.tool()
 def get_op_schema(connector: str, op: str,
                   verbose: bool = False) -> dict[str, Any]:
@@ -510,66 +659,28 @@ def get_op_schema(connector: str, op: str,
                     except (json.JSONDecodeError, TypeError):
                         pass
             result["params"] = _dedupe_params(params)
-        else:
-            row = op_row[0]
-            slim_params = [
-                {k: p[k] for k in (
-                    "param_name", "title", "type", "required",
-                    "options_json", "description"
-                ) if p.get(k) not in (None, "")}
-                for p in _dedupe_params(params)
-            ]
-            result = {
-                "op_name": row.get("op_name"),
-                "connector_name": row.get("connector_name"),
-                "title": row.get("title"),
-                "description": row.get("description"),
-                "annotation": row.get("annotation"),
-                "params": slim_params,
-            }
-            for col in ("output_schema_json", "conditional_output_schema_json",
-                        "output_schema_observed"):
-                blob = row.get(col)
-                if not blob:
-                    continue
-                try:
-                    parsed = json.loads(blob)
-                    if isinstance(parsed, dict):
-                        result[f"{col}_keys"] = sorted(parsed.keys())[:30]
-                    else:
-                        result[f"{col}_summary"] = (
-                            f"<{type(parsed).__name__}, "
-                            f"{len(blob)} chars — pass verbose=True>"
-                        )
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            if param_groups:
+                result["param_groups_by_select"] = param_groups
+            if visibility:
+                result["visibility"] = visibility
+            return result
 
-        if param_groups:
-            result["param_groups_by_select"] = param_groups
-            result["param_groups_hint"] = (
-                "This op has gating select param(s); pick a value for each "
-                "key in `param_groups_by_select` and use ONLY the params "
-                "listed under that option (plus any nested_selects). Mixing "
-                "params across groups produces hidden-field errors at runtime."
-            )
-        if visibility:
-            result["visibility"] = visibility
-            result["visibility_hint"] = (
-                "Flat view: `always` lists params with no gating rule; "
-                "`when` keys (`<select>=<option>`) list params that appear "
-                "only when the gating select takes that value. Pick the "
-                "branch first, then use only the params from `always` plus "
-                "the matching `when` entry."
-            )
-
+        # Slim path: markdown skeleton. The agent reads YAML; returning
+        # YAML-shaped guidance instead of nested JSON cuts ~70% off the
+        # response and matches the format it's about to write.
+        deduped = _dedupe_params(params)
+        md = _render_op_schema_md(op_row[0], deduped, visibility)
+        out: dict[str, Any] = {
+            "op_name": op_row[0].get("op_name"),
+            "connector_name": op_row[0].get("connector_name"),
+            "markdown": md,
+        }
         if not op_row[0].get("output_schema_json") and \
                 not op_row[0].get("output_schema_observed"):
-            result["output_schema_hint"] = (
-                "No output schema available. Call run_op with sample "
-                "params to observe the real output shape and populate "
-                "output_schema_observed."
-            )
-        return result
+            out["output_schema"] = "none — call verbose=True or run_op to observe"
+        else:
+            out["output_schema"] = "available — pass verbose=True for full shape"
+        return out
 
 
 # Op-name prefixes that are almost certainly read-only API calls.
@@ -1302,6 +1413,76 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
 }
 
 
+# Reverse lookup: canonical FSR name → friendly short name. Built once
+# so get_step_type can slim responses regardless of which spelling the
+# caller used (the agent often passes the canonical name it saw in a
+# corpus row, not the friendly form).
+_CANONICAL_TO_SHORT: dict[str, str] = {v: k for k, v in _SHORT_TO_CANONICAL.items()
+                                       if k != "stop" and k != "end"}
+
+
+def _render_step_type_md(short: str, ff: dict, st_row: dict) -> str:
+    """Compact markdown for a step type. Replaces the nested
+    friendly_form JSON with a single annotated YAML skeleton + the
+    facts that aren't already in the YAML."""
+    canonical = st_row.get("name") or _SHORT_TO_CANONICAL.get(short, short)
+    label = st_row.get("label") or canonical
+    lines = [f"# step type: {short}  (canonical: `{canonical}` · {label})"]
+
+    note = ff.get("note") or ff.get("shape")
+    if note:
+        note = " ".join(note.split())
+        if len(note) > 320:
+            note = note[:317].rstrip() + "..."
+        lines.append("")
+        lines.append(note)
+
+    yaml_ex = ff.get("yaml_example")
+    if yaml_ex:
+        lines.append("")
+        lines.append("## skeleton")
+        lines.append("```yaml")
+        lines.append(yaml_ex.rstrip())
+        lines.append("```")
+
+    # Output-read hint when present (manual_input style steps consume
+    # input via `vars.steps.<name>.input.*`).
+    for k in ("reads_outputs_at", "reads_inputs_at"):
+        if ff.get(k):
+            lines.append("")
+            lines.append(f"reads at: `{ff[k]}`")
+            break
+
+    # Surface single-string supplementary shapes the friendly_form
+    # carries — `inputs_shape` for manual_input documents the `kind:`
+    # enum, `when_shape` for start_on_* documents the filter object,
+    # etc. Nested-dict extras (`message_block`) are too detailed for
+    # slim mode and stay verbose-only.
+    skip = {"note", "shape", "example", "yaml_example",
+            "accepted_keys", "accepted_keys_arguments",
+            "accepted_keys_step_level", "do_not_use",
+            "reads_outputs_at", "reads_inputs_at"}
+    extras: list[tuple[str, str]] = []
+    for k, val in ff.items():
+        if k in skip or not isinstance(val, str):
+            continue
+        extras.append((k, " ".join(val.split())))
+    if extras:
+        lines.append("")
+        lines.append("## notes")
+        for k, val in extras:
+            lines.append(f"- **{k}**: {val}")
+
+    pitfalls = ff.get("do_not_use") or ff.get("pitfalls")
+    if isinstance(pitfalls, list) and pitfalls:
+        lines.append("")
+        lines.append("## pitfalls")
+        for p in pitfalls:
+            lines.append(f"- {p}")
+
+    return "\n".join(lines)
+
+
 def _render_yaml_example(example: Any) -> str | None:
     """Render a friendly_form `example` dict as a YAML string.
 
@@ -1394,21 +1575,28 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        # Slim path: friendly_form is the only field the LLM authors
-        # against. Drop everything that's either internal plumbing
-        # (args_schema_json's handler script path), null, or pure meta
-        # (examples_note, common_pitfalls). Halves the response size on
-        # the most-called tool. Verbose mode keeps the full row +
-        # corpus examples for debugging unusual cases.
-        if short in _FRIENDLY_FORMS and not verbose:
+        # Slim path: a markdown skeleton beats nested JSON every time —
+        # the agent is about to author YAML and reads the rendered form
+        # the same way. Verbose mode keeps the full row + corpus
+        # examples for debugging unusual cases.
+        #
+        # Look up friendly form by EITHER the friendly short name the
+        # caller passed OR the canonical name it resolved to (the agent
+        # often passes canonical names it saw in corpus rows).
+        ff_key = short if short in _FRIENDLY_FORMS else \
+                 _CANONICAL_TO_SHORT.get(canonical) if \
+                 _CANONICAL_TO_SHORT.get(canonical) in _FRIENDLY_FORMS else None
+        if ff_key and not verbose:
             return {
                 "name": st["name"],
                 "label": st.get("label"),
                 "occurrences": st.get("occurrences"),
-                "friendly_form": _FRIENDLY_FORMS[short],
+                "markdown": _render_step_type_md(
+                    ff_key, _FRIENDLY_FORMS[ff_key], st
+                ),
             }
-        if short in _FRIENDLY_FORMS:
-            st["friendly_form"] = _FRIENDLY_FORMS[short]
+        if ff_key:
+            st["friendly_form"] = _FRIENDLY_FORMS[ff_key]
 
         limit = 3 if verbose else 1
         examples = _rows(

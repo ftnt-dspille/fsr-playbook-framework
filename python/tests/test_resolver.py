@@ -270,6 +270,106 @@ def test_typed_param_skips_jinja(db_path):
     assert not bad, [e.to_dict() for e in bad]
 
 
+def test_tier23_ipv4_validator_unit():
+    """Pure-function tests for the new observed_type validators. These
+    don't need the DB — they catch validator regressions cheaply."""
+    from compiler.resolver.connector_args import (
+        _is_ipv4, _is_url, _is_email, _is_iso8601,
+        _is_json_object, _is_json_array,
+    )
+    assert _is_ipv4("10.0.0.1")
+    assert _is_ipv4("0.0.0.0")
+    assert not _is_ipv4("999.0.0.1")
+    assert not _is_ipv4("hostname.example.com")
+    assert not _is_ipv4("::1")          # ipv6 — distinct observed_type
+    assert not _is_ipv4(12345)
+
+    assert _is_url("https://example.com/path?x=1")
+    assert _is_url("ftp://host")
+    assert not _is_url("example.com")    # no scheme
+    assert not _is_url("not a url")
+
+    assert _is_email("user@example.com")
+    assert _is_email("a.b+tag@host.tld")
+    assert not _is_email("no-at-sign")
+    assert not _is_email("user@host")    # no TLD-style suffix
+
+    assert _is_iso8601("2026-05-20T12:00:00")
+    assert _is_iso8601("2026-05-20")
+    assert not _is_iso8601("yesterday")
+    assert not _is_iso8601(1717200000)   # epoch — not iso
+
+    assert _is_json_object({"a": 1})
+    assert _is_json_object('{"a":1}')
+    assert not _is_json_object("[1,2]")  # array, not object
+    assert not _is_json_object("not json")
+
+    assert _is_json_array([1, 2])
+    assert _is_json_array("[1,2]")
+    assert not _is_json_array('{"a":1}')
+
+
+def test_tier23_ipv4_observed_type_fires(db_path):
+    """Integration: when observed_type='ipv4' is set on a text-widget
+    param, a non-IPv4 literal triggers the new diagnostic.
+
+    We mutate the DB in-process so the test is self-contained — the
+    Tier 2.2 live probe is what populates observed_type in production.
+    """
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(db_path)
+    # Snapshot the previous value so we can restore — db_path is shared
+    # across tests via the session fixture.
+    cur = conn.execute(
+        "SELECT observed_type FROM operation_params "
+        "WHERE connector_name='abuseipdb' AND op_name='ip_lookup' "
+        "  AND param_name='ip'")
+    row = cur.fetchone()
+    prev = row[0] if row else None
+    conn.execute(
+        "UPDATE operation_params SET observed_type='ipv4' "
+        "WHERE connector_name='abuseipdb' AND op_name='ip_lookup' "
+        "  AND param_name='ip'")
+    conn.commit()
+    try:
+        text = _yaml(
+            "        type: connector\n"
+            "        arguments:\n"
+            "          connector: abuseipdb\n"
+            "          operation: ip_lookup\n"
+            "          params:\n"
+            "            ip: not-an-ip\n"
+            "            days: 30\n"
+        )
+        r = compile_yaml(text, db_path)
+        bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+               and (e.path or "").endswith(".ip")
+               and "IPv4" in (e.message or "")]
+        assert bad, [e.to_dict() for e in r.errors]
+
+        # Jinja-templated value: no diagnostic.
+        text2 = _yaml(
+            "        type: connector\n"
+            "        arguments:\n"
+            "          connector: abuseipdb\n"
+            "          operation: ip_lookup\n"
+            "          params:\n"
+            "            ip: \"{{ vars.input.records.source_ip }}\"\n"
+            "            days: 30\n"
+        )
+        r2 = compile_yaml(text2, db_path)
+        bad2 = [e for e in r2.errors if (e.path or "").endswith(".ip")
+                and "IPv4" in (e.message or "")]
+        assert not bad2
+    finally:
+        conn.execute(
+            "UPDATE operation_params SET observed_type=? "
+            "WHERE connector_name='abuseipdb' AND op_name='ip_lookup' "
+            "  AND param_name='ip'", (prev,))
+        conn.commit()
+        conn.close()
+
+
 def test_unknown_next_step(db_path):
     text = """
 collection: T

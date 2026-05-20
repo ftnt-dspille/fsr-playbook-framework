@@ -64,28 +64,35 @@ def test_all_short_types_resolve():
 
 # ---- friendly_form coverage --------------------------------------
 
-def test_every_short_type_carries_friendly_form():
+def test_every_short_type_carries_markdown_or_examples():
+    """Slim mode returns a `markdown` skeleton for types with a
+    friendly_form; the rest fall back to corpus examples. Either way,
+    the response must give the agent something to author against."""
     for n in SHORT_TYPES:
         r = mcp_server.get_step_type(n)
-        assert "friendly_form" in r, f"{n} missing friendly_form"
+        assert "markdown" in r or "examples" in r, (
+            f"{n}: no markdown and no examples — nothing to author against"
+        )
 
 
-def test_friendly_form_has_example():
-    """A friendly_form without an example is useless to the LLM."""
+def test_markdown_carries_yaml_skeleton():
+    """The slim markdown response must include a fenced YAML skeleton
+    the agent can copy. Without it, the model has to reconstruct shape
+    from prose."""
     r = mcp_server.get_step_type("manual_input")
-    ff = r["friendly_form"]
-    assert "example" in ff
-    assert ff["example"]["type"] == "manual_input"
+    md = r["markdown"]
+    assert "```yaml" in md
+    assert "type: manual_input" in md
 
 
-def test_manual_input_friendly_form_warns_about_traps():
-    """`do_not_use` lists the wrong-shape mistakes the resolver now
+def test_manual_input_markdown_warns_about_traps():
+    """`pitfalls` section lists the wrong-shape mistakes the resolver
     hard-rejects. Keep them aligned."""
     r = mcp_server.get_step_type("manual_input")
-    pitfalls = " ".join(r["friendly_form"].get("do_not_use", []))
-    assert "textarea" in pitfalls
-    assert "label" in pitfalls
-    assert "message" in pitfalls
+    md = r["markdown"]
+    assert "textarea" in md
+    assert "label" in md
+    assert "message" in md
 
 
 # ---- slim vs verbose payload size --------------------------------
@@ -107,10 +114,10 @@ def test_code_snippet_default_avoids_18k_blob():
 
 def test_default_omits_raw_corpus_examples_when_friendly_form_present():
     r = mcp_server.get_step_type("manual_input")
-    # Slim path drops the corpus examples entirely — friendly_form has
-    # the only example the LLM needs.
+    # Slim path drops the corpus examples entirely — the markdown
+    # skeleton has the only example the LLM needs.
     assert "examples" not in r
-    assert "friendly_form" in r
+    assert "markdown" in r
 
 
 def test_verbose_returns_full_corpus():

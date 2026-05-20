@@ -84,11 +84,19 @@ CREATE TABLE IF NOT EXISTS operation_params (
     visible             INTEGER DEFAULT 1,
     editable            INTEGER DEFAULT 1,
     ord                 INTEGER DEFAULT 0,
+    -- Tier 2 static-type-validation columns. Populated by
+    -- probes.probe_param_types. `observed_type` is the resolved type
+    -- (int/float/bool/str/ipv4/url/iso8601/json_object/picklist/...);
+    -- `coerces_from` is a comma-separated list of input forms the
+    -- runtime accepts (e.g. "str,int"). Both NULL until probed.
+    observed_type       TEXT,
+    coerces_from        TEXT,
     PRIMARY KEY (connector_name, op_name, parent_param_name, condition_value, param_name),
     FOREIGN KEY (connector_name, op_name)
         REFERENCES operations(connector_name, op_name) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_op_params_op ON operation_params(connector_name, op_name);
+CREATE INDEX IF NOT EXISTS idx_op_params_observed_type ON operation_params(observed_type);
 
 CREATE TABLE IF NOT EXISTS operation_examples (
     connector_name  TEXT NOT NULL,
@@ -99,6 +107,32 @@ CREATE TABLE IF NOT EXISTS operation_examples (
     notes           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_op_examples ON operation_examples(connector_name, op_name);
+
+-- Tier 2.2 ledger. Each row is one (param, mutation) attempt against
+-- the live FSR. Promotion to operation_params.observed_type requires
+-- ≥3 corroborating rows (see probes.probe_param_types.promote). Kept
+-- separate from operation_params so widget-only passes don't clobber
+-- live-probe evidence and a re-run is incremental.
+CREATE TABLE IF NOT EXISTS param_type_probes (
+    connector_name      TEXT NOT NULL,
+    op_name             TEXT NOT NULL,
+    param_name          TEXT NOT NULL,
+    mutation_input      TEXT NOT NULL,    -- repr() of the mutated value
+    mutation_kind       TEXT NOT NULL,    -- 'string'|'int'|'list'|'dict'|'bool'|'enum_invalid'
+    response_status     TEXT NOT NULL,    -- 'mutation_err'|'baseline_ok'|'baseline_fail'|'transport_err'
+    error_message       TEXT,             -- raw FSR message, first 800 chars
+    inferred_type       TEXT,             -- classify_error() result (NULL on no match)
+    inferred_coerces    TEXT,
+    classifier_version  INTEGER NOT NULL DEFAULT 1,
+    probed_at           TEXT NOT NULL,
+    PRIMARY KEY (connector_name, op_name, param_name, mutation_input),
+    FOREIGN KEY (connector_name, op_name)
+        REFERENCES operations(connector_name, op_name) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_param_probes_op
+    ON param_type_probes(connector_name, op_name);
+CREATE INDEX IF NOT EXISTS idx_param_probes_inferred
+    ON param_type_probes(inferred_type);
 
 -- ---------- Step types ----------
 CREATE TABLE IF NOT EXISTS step_types (
@@ -448,7 +482,8 @@ SELECT
     default_value, default_value AS value,
     options_json, options_json AS options,
     tooltip, placeholder, description, visible, editable,
-    ord, ord AS "order"
+    ord, ord AS "order",
+    observed_type, coerces_from
 FROM operation_params;
 
 DROP VIEW IF EXISTS v_module_fields;

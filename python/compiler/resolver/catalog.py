@@ -177,6 +177,26 @@ class CatalogLookupMixin:
             return ptype, opts
         return ptype, None
 
+    def operation_param_observed_type(
+        self, connector: str, op: str, param: str,
+    ) -> tuple[str | None, str | None]:
+        """Return (observed_type, coerces_from) for one top-level param.
+
+        Populated by `probes.probe_param_types`. Tier 2.0 fills this in
+        from the widget column for typed widgets; Tier 2.2 refines via
+        live-probe evidence. Returns (None, None) when the column is
+        unset (text-widget params with no probe evidence) or the param
+        does not exist."""
+        row = self.conn.execute(
+            "SELECT observed_type, coerces_from FROM operation_params "
+            "WHERE connector_name = ? AND op_name = ? AND param_name = ? "
+            "  AND parent_param_name IS NULL AND condition_value IS NULL",
+            (connector, op, param),
+        ).fetchone()
+        if row is None:
+            return None, None
+        return row["observed_type"], row["coerces_from"]
+
     def operation_param_rules(
         self, connector: str, op: str,
     ) -> list[tuple[str, str | None, str | None]]:

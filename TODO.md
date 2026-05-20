@@ -53,6 +53,72 @@ Pull these into whichever next commit touches those files.
 
 ---
 
+## Strategic — Solution Pack generation (added 2026-05-20)
+
+**Premise:** Playbook generation in isolation produces curiosities, not
+value. The unit of customer-deliverable work in FortiSOAR is the
+*solution pack* — a bundle that ships custom modules (ORM-mapped
+PostgreSQL tables, the actual data substrate), connectors, playbooks,
+dashboards, roles, and pre-seeded picklists/views. A solution pack is
+an application; an island playbook is a snippet. Everything we've
+built so far (compiler, type validation, verify_playbook, the agent
+loop) makes the snippet-author faster — useful, but linear leverage.
+
+**Why this is the exponential lever:** if an agent can design a coherent
+*solution pack* — choose the data model, design the modules that map
+to it, wire the connectors that populate the data, write the playbooks
+that act on it, and bundle the result for distribution — the agent
+moves from "generates one step better than a human" to "generates an
+entire SOC use-case end-to-end." That's the difference between
+"helpful tool" and "platform multiplier." The playbooks in a solution
+pack also have **lifecycle**: triggered by module events, mutate
+module records, hand off between each other — they're a system, not
+an island. Type-flow, ownership, and idempotency questions all gain
+real stakes in this context.
+
+**What we'd need to learn / build (deep dive when we get here):**
+
+1. **Solution-pack export format.** What is the manifest schema? How
+   are module → playbook → connector dependencies expressed? How does
+   FortiSOAR install / uninstall / version one? Reverse the export
+   pipeline from the UI; sample real packs from the Fortinet
+   marketplace; document the canonical structure under
+   `docs/research/SOLUTION_PACKS.md`.
+2. **Module schema as ORM.** Modules in FSR are Doctrine entities over
+   PostgreSQL — picklists are FKs to a picklist table, lookups are
+   joins. Understanding this maps directly onto the static-type
+   validation work: an agent that designs a module knows the column
+   types, so playbook-vs-module type checks become a free byproduct.
+3. **Picklist + view + role coupling.** Every module carries a default
+   set of picklists, list views, detail layouts, and role permissions.
+   These are what make a pack feel like an application. Need a
+   `module_design` tool that proposes the full bundle from a use-case
+   prompt, not just the entity.
+4. **Trigger / lifecycle graph.** Solution-pack playbooks are wired
+   into module-event triggers (`onCreate`, `onUpdate`, status-change).
+   A pack is best modeled as a *graph* of (modules, triggers,
+   playbooks, connectors). Generation has to satisfy the whole graph.
+5. **Validation upgrade.** Today verify_playbook validates one
+   playbook in isolation. Solution-pack validation needs cross-
+   playbook checks: do the triggered playbooks actually exist? Are
+   module fields referenced in playbooks still present? Are picklist
+   values referenced statically still in the bundled picklist?
+
+**Why-park-this-now:** the foundations (typed resolver, run_op,
+catalog, op_safety) need to be solid before we layer pack-level
+generation on top. Tier 2.2 / 2.3 + render-path validator + verify_
+playbook all earn their keep regardless of whether we go pack-scale
+next, *and* they are prerequisites for any credible solution-pack
+agent. So: finish those, then open `SOLUTION_PACK_PLAN.md` and treat
+it as the strategic anchor for 2026-H2.
+
+**Concrete first move when we pick this up:** crack open one
+non-trivial Fortinet marketplace pack (e.g. SOC-Automation or
+Phishing-Triage), un-archive it, and write the structural map. That
+becomes the spec for what the agent has to be able to author.
+
+---
+
 ## Live-FSR round-trip probe
 
 `python/probes/probe_round_trip.py` synthesises a YAML playbook per

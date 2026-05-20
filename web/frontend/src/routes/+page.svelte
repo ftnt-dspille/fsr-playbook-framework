@@ -196,30 +196,6 @@
     if (m === 'cli') mode = 'cli';
     else if (m === 'design' || m === 'edit') mode = 'design';
 
-    // One-time migration: copy any localStorage drafts into the server
-    // drafts table so they show up in PlaybookHeader's bucketed picker
-    // alongside Design's drafts. The migration flag lives in localStorage
-    // so we only run it once per browser. Existing server drafts with
-    // the same name win (we don't overwrite); migration is best-effort
-    // and logs to status on failure rather than blocking page mount.
-    if (typeof localStorage !== 'undefined' && !localStorage.getItem('fsrpb.drafts.migrated_v1')) {
-      try {
-        const r = await playbookStore.migrateLocalDrafts(yamlStore.drafts);
-        if (r.migrated > 0) {
-          // Surface the migration count through the shared status pill
-          // (BuildBar reads playbookActions.status). The user sees
-          // `migrated N local draft(s)` once and can move on.
-          playbookActions.state.status = {
-            kind: 'ok',
-            msg: `migrated ${r.migrated} local draft${r.migrated === 1 ? '' : 's'}`
-          };
-        }
-        localStorage.setItem('fsrpb.drafts.migrated_v1', new Date().toISOString());
-      } catch (e) {
-        console.warn('localStorage drafts migration failed:', e);
-      }
-    }
-
     // Refresh-aware autoload. PlaybookHeader runs its own refresh on
     // mount; wait one tick so its bucket lists are populated, then:
     //   1. prefer the playbook the user was last editing (persisted by
@@ -294,13 +270,9 @@
       const finalYaml = detail.final_yaml as string | undefined;
       if (finalYaml && finalYaml.trim()) {
         const draftName = `Chat: ${detail.playbook_collection || sid.slice(0, 8)}`;
-        yamlStore.appendDraftRevision(draftName, finalYaml, 'replay', {
-          sessionId: sid,
-          message: `replay of session ${sid}`,
-        });
-        // loadDraft both seeds the buffer and sets activeDraftName, so
-        // Save updates this draft instead of prompting.
-        yamlStore.loadDraft(draftName);
+        // Persist as a server-side draft and make it active so Save
+        // updates this draft in place rather than prompting.
+        await playbookStore.createDraft(draftName, finalYaml);
       }
       const tag = detail.playbook_collection || sid;
       replayBanner = `Replaying session ${tag} (${turns.length} turn${turns.length === 1 ? '' : 's'})`;

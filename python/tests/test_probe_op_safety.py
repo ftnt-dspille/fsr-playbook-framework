@@ -86,6 +86,7 @@ def test_end_to_end_writes_rows(tmp_path, monkeypatch):
         required INT, default_value TEXT, options_json TEXT,
         tooltip TEXT, placeholder TEXT, description TEXT,
         visible INT, editable INT, ord INT,
+        observed_type TEXT, coerces_from TEXT,
         PRIMARY KEY (connector_name, op_name, parent_param_name, condition_value, param_name)
     );
     CREATE TABLE op_safety (

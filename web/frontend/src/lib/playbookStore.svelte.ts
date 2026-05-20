@@ -157,6 +157,11 @@ export const playbookStore = {
     if (state.active.kind === 'example') {
       return { ok: false, message: 'examples are read-only — clone to a draft first' };
     }
+    // No-op when the buffer matches what's already persisted — otherwise
+    // every Save click spawns an identical revision.
+    if (state.active.yaml === state.active.savedYaml) {
+      return { ok: true, message: 'no changes' };
+    }
     state.saving = true;
     state.error = null;
     try {
@@ -251,35 +256,4 @@ export const playbookStore = {
     state.error = null;
   },
 
-  /** Push localStorage-era drafts into the server table so they appear
-   * in PlaybookHeader alongside Design drafts. Skips any name already
-   * present on the server (no overwrite) and reports `{migrated, skipped}`
-   * counts so callers can surface a status message.
-   *
-   * Called once per browser via the `fsrpb.drafts.migrated_v1` flag —
-   * exposed here as a method (not free-floating in +page.svelte) so it
-   * can be unit-tested without rendering the page. */
-  async migrateLocalDrafts(
-    localDrafts: { name: string; text?: string; revisions?: { text: string }[] }[]
-  ): Promise<{ migrated: number; skipped: number }> {
-    await this.refresh();
-    const serverNames = new Set(state.drafts.map((d) => d.name));
-    let migrated = 0;
-    let skipped = 0;
-    for (const d of localDrafts) {
-      if (serverNames.has(d.name)) { skipped++; continue; }
-      const text = d.text ?? d.revisions?.[0]?.text;
-      if (!text) { skipped++; continue; }
-      try {
-        await putDraft(d.name, text, {
-          reason: 'migrated from localStorage', auto: false
-        });
-        migrated++;
-      } catch {
-        skipped++;
-      }
-    }
-    if (migrated > 0) await this.refresh();
-    return { migrated, skipped };
-  }
 };

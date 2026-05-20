@@ -169,8 +169,8 @@
     type="button"
     class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 font-medium hover:bg-[var(--bg-canvas)] disabled:opacity-50"
     onclick={onSave}
-    disabled={saving || !active}
-    title={isExample ? 'Examples are read-only — Clone & Edit' : 'Save current draft'}
+    disabled={saving || !active || (!isExample && !dirty)}
+    title={isExample ? 'Examples are read-only — Clone & Edit' : (dirty ? 'Save current draft' : 'No unsaved changes')}
   >{isExample ? 'Clone & Edit' : (saving ? 'Saving…' : 'Save')}</button>
 
   <button

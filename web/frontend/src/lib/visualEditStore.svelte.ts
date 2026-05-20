@@ -288,7 +288,16 @@ export const visualStore = {
         })
       });
       const data = await r.json();
-      return data.ok ? (data.yaml as string) : null;
+      if (!data.ok) return null;
+      // Keep `state.graph.source.yaml` in sync with what we just rendered.
+      // Otherwise autosave clears `state.dirty` but source.yaml still holds
+      // the pre-edit text — and the next Design→CLI toggle short-circuits
+      // renderToYaml (dirty=false), falls back to the stale source.yaml,
+      // and overwrites the up-to-date Monaco buffer.
+      if (state.graph) {
+        state.graph.source = { ...state.graph.source, yaml: data.yaml as string };
+      }
+      return data.yaml as string;
     } catch { return null; }
   },
 

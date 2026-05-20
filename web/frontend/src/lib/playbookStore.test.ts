@@ -121,6 +121,44 @@ describe('playbookStore', () => {
     expect(put?.body).toEqual({ yaml: 'a: 99\n', reason: 'test save', auto: false });
   });
 
+  it('save() is a no-op when buffer matches savedYaml (no duplicate revisions)', async () => {
+    mockFetch((url, init) => {
+      if (url === '/api/playbooks/draft/wip' && (init?.method ?? 'GET') === 'GET') {
+        return { kind: 'draft', name: 'wip', yaml: 'a: 1\n', created_ts: 't', updated_ts: 't' };
+      }
+      if (url === '/api/playbooks/draft/wip' && init?.method === 'PUT') {
+        return { ok: true, revision_id: 99, updated_ts: 't3' };
+      }
+      if (url === '/api/playbooks/draft/wip/revisions') {
+        return { count: 1, revisions: [{ id: 99, reason: 'manual save', is_auto: false, created_ts: 't3', size: 6 }] };
+      }
+      if (url === '/api/playbooks') return { count: 0, items: [] };
+      throw new Error(`unexpected ${url}`);
+    });
+
+    await playbookStore.open('draft', 'wip');
+    playbookStore.setYaml('a: 99\n');
+    const r1 = await playbookStore.save({ reason: 'first' });
+    expect(r1.ok).toBe(true);
+    const putsAfterFirst = calls.filter((c) => c.method === 'PUT').length;
+    expect(putsAfterFirst).toBe(1);
+
+    // Clicking Save again with no further edits must NOT mint a second revision.
+    const r2 = await playbookStore.save({ reason: 'second' });
+    expect(r2.ok).toBe(true);
+    expect(r2.message).toBe('no changes');
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+
+    // And a third click stays a no-op.
+    await playbookStore.save({ reason: 'third' });
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+
+    // After a real edit, Save resumes persisting.
+    playbookStore.setYaml('a: 100\n');
+    await playbookStore.save({ reason: 'fourth' });
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2);
+  });
+
   it('save() refuses while viewing an example', async () => {
     mockFetch((url) => {
       if (url.startsWith('/api/playbooks/example/')) return {
@@ -231,36 +269,6 @@ describe('playbookStore', () => {
     try { localStorage.setItem('fsrpb.last_opened', '{"kind":"banana","name":"x"}'); } catch {}
     expect(playbookStore.readLastOpened()).toBeNull();
     try { localStorage.removeItem('fsrpb.last_opened'); } catch {}
-  });
-
-  it('migrateLocalDrafts pushes localStorage drafts to server, skipping name collisions', async () => {
-    let putCalls: { name: string; body: any }[] = [];
-    mockFetch((url, init) => {
-      if (url === '/api/playbooks' && (init?.method ?? 'GET') === 'GET') {
-        // Server already has 'shared' so it should be skipped.
-        return { count: 1, items: [{ kind: 'draft', name: 'shared', size: 5, updated_ts: 't' }] };
-      }
-      const m = url.match(/^\/api\/playbooks\/draft\/([^/]+)$/);
-      if (m && init?.method === 'PUT') {
-        putCalls.push({ name: decodeURIComponent(m[1]), body: JSON.parse(String(init.body)) });
-        return { ok: true, revision_id: 1, updated_ts: 't' };
-      }
-      throw new Error(`unexpected ${url} ${init?.method}`);
-    });
-
-    const local = [
-      { name: 'shared', text: 'should be skipped\n' },                  // collides
-      { name: 'wip_a', text: 'aaa\n' },                                 // migrate
-      { name: 'wip_b', revisions: [{ text: 'bbb\n' }] },                // migrate (text via head revision)
-      { name: 'empty' }                                                 // skip (no text)
-    ];
-    const r = await playbookStore.migrateLocalDrafts(local);
-    expect(r.migrated).toBe(2);
-    expect(r.skipped).toBe(2);
-    const names = putCalls.map((c) => c.name).sort();
-    expect(names).toEqual(['wip_a', 'wip_b']);
-    // Reason is documented in the body so the revision history shows provenance.
-    expect(putCalls[0].body.reason).toMatch(/migrated/);
   });
 
   it('deleteDraft clears the active doc if the deleted name matched', async () => {

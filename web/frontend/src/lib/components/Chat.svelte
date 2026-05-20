@@ -10,7 +10,7 @@
   } from '$lib/api';
   import { postSse } from '$lib/sse';
   import { renderMarkdown } from '$lib/md';
-  import { yamlStore } from '$lib/yamlStore.svelte';
+  import { playbookStore } from '$lib/playbookStore.svelte';
   import { onMount, tick } from 'svelte';
   import LoopTelemetry from '$lib/components/LoopTelemetry.svelte';
   import { runStore } from '$lib/runStore.svelte';
@@ -300,13 +300,14 @@
         // is in addition, not a replacement.
         const name = draftName ?? pickDraftName(yaml, chatSessionId);
         draftName = name;
+        // Persist into the server-side drafts table so the new playbook
+        // shows up in the PlaybookHeader picker and becomes the active
+        // document — Save/Push/Validate all operate on what the chat just
+        // produced instead of the previously-open draft.
         try {
-          yamlStore.appendDraftRevision(name, yaml, 'agent', {
-            message: text,
-            sessionId: chatSessionId ?? undefined,
-          });
+          await playbookStore.createDraft(name, yaml);
         } catch (e) {
-          console.warn('appendDraftRevision failed', e);
+          console.warn('createDraft from chat failed', e);
         }
         onYamlReplace(yaml);
       } else {

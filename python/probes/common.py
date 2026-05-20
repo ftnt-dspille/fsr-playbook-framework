@@ -118,6 +118,10 @@ PROBE_TABLES: dict[str, tuple[str, ...]] = {
     "probe_jinja_corpus": ("jinja_expressions", "jinja_filter_usage"),
     "probe_playbook_steps": ("playbook_steps",),
     "probe_op_safety": ("op_safety",),
+    # probe_param_types UPDATEs columns on operation_params in place,
+    # plus owns the param_type_probes ledger. We don't wipe the ledger
+    # on every run — Phase 2.2 re-runs are deliberately incremental.
+    "probe_param_types": (),
 }
 
 
