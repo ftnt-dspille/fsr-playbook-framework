@@ -2773,8 +2773,8 @@ def cmd_demo_prep(args: argparse.Namespace) -> int:
 def cmd_evals(args: argparse.Namespace) -> int:
     """Run the LLM-evaluation harness over the task corpus.
 
-    Prints a per-cell score table (L1 compile / L2 resolve / L3 var-
-    reachability / L4 dry-run / gold byte-equal) plus per-model totals.
+    Prints a per-cell score table (Compiles / Runs / Works / gold byte-
+    equal) plus per-model totals.
     Use `--json` to capture the full matrix for archiving.
     """
     from evals.harness import (
@@ -2861,7 +2861,7 @@ def cmd_assert(args: argparse.Namespace) -> int:
 
 
 def cmd_resolve(args: argparse.Namespace) -> int:
-    """Run the L2 success-ladder gate: structural + live prechecks.
+    """Run the Compiles+Runs success-ladder gate: structural + live prechecks.
 
     Wraps the resolve_yaml MCP tool — useful for catching unresolved
     picklists and missing connector installs before push, in CI, or in
@@ -4207,7 +4207,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser(
         "resolve",
-        help="L2 gate: structural validation + live prechecks "
+        help="Compiles+Runs gate: structural validation + live prechecks "
              "(connector installed, picklist values resolvable)",
     )
     sp.add_argument("input")
@@ -4304,7 +4304,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser(
         "evals",
         help="LLM-evaluation harness: score each model's authoring on "
-             "the task corpus (L1..L4 + gold-fixture byte-equal)",
+             "the task corpus (Compiles / Runs / Works + gold-fixture byte-equal)",
     )
     sp.add_argument("--models", default="gold,echo",
                     help="comma-separated provider names "
@@ -4312,7 +4312,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--tasks", default=None,
                     help="comma-separated task names; default = all")
     sp.add_argument("--live", action="store_true",
-                    help="enable L2 (resolve) + L4 (dry-run) gates "
+                    help="enable live Runs gate (resolve + dry-run) "
                          "against the live FSR")
     sp.add_argument("--json", action="store_true",
                     help="emit the full matrix as JSON on stdout")
@@ -4329,7 +4329,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser(
         "assert",
-        help="L5 gate: assert post-run outcomes (record exists, "
+        help="Works gate: assert post-run outcomes (record exists, "
              "field equals, count) against the live FSR",
     )
     sp.add_argument("input",

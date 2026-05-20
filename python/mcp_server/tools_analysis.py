@@ -40,7 +40,7 @@ def step_through_playbook(yaml_text: str,
                           execute_safe_ops: bool = True,
                           execute_unsafe_ops: bool = False,
                           max_steps: int = 30) -> dict[str, Any]:
-    """L3 gate: walk a playbook step-by-step *without* pushing to FSR.
+    """Pre-push stepper: walk a playbook step-by-step *without* pushing to FSR.
 
     For each step in the chosen execution path:
       1. Render its arguments against the accumulated `vars.steps.*` +
@@ -713,7 +713,7 @@ def step_test(yaml_text: str,
               playbook: str | None = None,
               input: dict[str, Any] | None = None,
               execute_safe_ops: bool = True) -> dict[str, Any]:
-    """L4 single-step probe: render one step's args + (if safe) execute it.
+    """Single-step probe: render one step's args + (if safe) execute it.
 
     Targeted variant of `step_through_playbook` — pinpoints a single step
     by `id` (or by name with spaces→underscores). Useful for the visual
@@ -860,7 +860,7 @@ def step_test(yaml_text: str,
 
 
 # ---------------------------------------------------------------------------
-# Recipe prechecks (success-ladder L2 building blocks)
+# Recipe prechecks (building blocks for the Runs rung)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -947,11 +947,11 @@ def synthesize_http_step(entry_id: int,
 
 
 # ---------------------------------------------------------------------------
-# step_through_playbook — L3 success-ladder gate (in-editor stepper)
+# step_through_playbook — pre-push stepper (in-editor, no FSR writes)
 # ---------------------------------------------------------------------------
 
 # `dry_run_playbook` (compile + push + run + cleanup) is the full E2E loop
-# and modifies live FSR state. The stepper below is a *pre-push* L3 check:
+# and modifies live FSR state. The stepper below is a *pre-push* check:
 # walk the playbook step-by-step against accumulated context, render each
 # step's arguments, execute safe connector ops, simulate the rest, and
 # surface per-step outputs so the agent can spot rendering failures and

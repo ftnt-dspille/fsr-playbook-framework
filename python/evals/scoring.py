@@ -208,9 +208,17 @@ def score(
     final_text: str | None = None,
     audit: list[dict[str, Any]] | None = None,
     expected_approvals: dict[str, Any] | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
-    """Score a candidate YAML across confidence tiers + agent gates."""
+    """Score a candidate YAML across confidence tiers + agent gates.
+
+    `mode="refuse"` flips the success criteria for graceful-failure tasks
+    (e.g. `unknown_connector`): success = no YAML emitted, no verify call,
+    zero tier-3+ approvals. All authoring-tier gates become informational
+    so they neither help nor hurt the score.
+    """
     out: dict[str, Any] = {"levels": {}}
+    refuse = (mode == "refuse")
 
     # ----------------- confidence tier 1: draft (compile clean) ------------
     comp = _compile_obj(yaml_text)
@@ -304,6 +312,34 @@ def score(
     if not iters_lv.get("skipped"):
         # not counted toward fraction
         iters_lv["informational"] = True
+
+    # `matches_example` is byte-equality of compiled IR against a gold
+    # reference: useful diagnostic, but free-form LLM generation cannot
+    # reliably match cosmetic IR differences (optional fields, default
+    # values, step ordering). Demote to informational — `draft` and
+    # `verified` already gate functional correctness.
+    mex = out["levels"].get("matches_example", {})
+    if not mex.get("skipped"):
+        mex["informational"] = True
+
+    # Refuse-mode: the agent is expected to NOT produce a playbook. Flip
+    # the gates so the authoring tiers are informational and adherence
+    # passes when no YAML block is present.
+    if refuse:
+        for k in ("draft", "verified", "live_tested",
+                  "verify_called_before_submit",
+                  "final_verify_ready_to_push"):
+            lv = out["levels"].get(k, {})
+            if not lv.get("skipped"):
+                lv["informational"] = True
+        adh = out["levels"].get("adherence", {})
+        if not adh.get("skipped"):
+            # Invert: success = NO yaml block emitted.
+            had_yaml = bool(adh.get("passed"))
+            adh["passed"] = not had_yaml
+            adh["detail"] = ("correctly refused — no YAML emitted"
+                             if not had_yaml
+                             else "fabricated YAML for a refuse-mode task")
 
     counted = [v for k, v in out["levels"].items()
                if not v.get("skipped") and not v.get("informational")]

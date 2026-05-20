@@ -105,11 +105,11 @@ class UsageEvent:
 
 @dataclass
 class LadderRung:
-    """One step on the L1→L5 success ladder for the current YAML.
+    """One rung on the success ladder for the current YAML.
 
-    `id` is one of `compile`, `prechecks`, `reachability`, `dry_run`,
-    `outcome`. `state` is `passed`, `failed`, `skipped`, or `pending`.
-    `summary` is a short human string the UI renders verbatim.
+    `id` is one of `compiles`, `runs`, `works`. `state` is `passed`,
+    `failed`, `skipped`, or `pending`. `summary` is a short human
+    string the UI renders verbatim.
     """
     id: str
     label: str
@@ -129,7 +129,7 @@ class LadderEvent:
     error_count: int
     warning_count: int
     achieved: int
-    """Highest rung index passed (1-based; 0 means even L1 failed)."""
+    """Highest rung index passed (1-based; 0 means even Compiles failed)."""
     kind: Literal["ladder"] = "ladder"
 
 

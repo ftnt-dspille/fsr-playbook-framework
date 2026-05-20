@@ -125,6 +125,7 @@ def run_matrix(
                 final_text=final_text,
                 audit=audit,
                 expected_approvals=t.expected_approvals,
+                mode=t.mode,
             )
             row = {
                 "model": model_name,

@@ -477,6 +477,31 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
 
             for_each = None
             fe_raw = s_raw.get("for_each")
+            # Host step types that never legitimately carry `for_each` in
+            # the live corpus (369 hits across 11 step types — these
+            # never appear). Looping a control-flow step would be a
+            # nonsense or unsafe construct.
+            _FOR_EACH_DISALLOWED_HOSTS = {
+                "start", "start_on_create", "start_on_update",
+                "decision", "end", "manual_input",
+            }
+            if fe_raw is not None:
+                if stype in _FOR_EACH_DISALLOWED_HOSTS:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"for_each is not supported on step type "
+                            f"{stype!r}. Attach for_each to a data /"
+                            f" action step instead (create_record, "
+                            f"update_record, find_record, connector, "
+                            f"workflow_reference, set_variable, delay, "
+                            f"code_snippet, send_mail). Control-flow "
+                            f"steps (start*, decision, end, manual_input)"
+                            f" cannot be iterated."
+                        ),
+                        path=f"{sp}.for_each",
+                    ))
+                    fe_raw = None
             if fe_raw is not None:
                 if not isinstance(fe_raw, dict):
                     errors.append(CompileError(

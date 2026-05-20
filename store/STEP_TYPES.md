@@ -6,6 +6,8 @@ Each step type is ordered by **observed frequency** across the 43 step types and
 
 **Schema completeness caveat**: the `arguments` blob shown per step type is what the API returned — it's a partial schema (often just a `script` pointer + pre-bound args). To get canonical Python signatures for each step's celery handler, run `scripts/dump_step_types.py` on the FSR appliance and ingest the result. Until then, the **examples** section per step is the most reliable guide to what `arguments` should look like.
 
+**`for_each` is a step modifier, not a step type.** See [`docs/FOR_EACH.md`](../docs/FOR_EACH.md) for the host allowlist, fields, modes (sequential / parallel / bulk), and runtime shape of `vars.steps.<loop>`.
+
 ---
 
 ## `SetVariable`

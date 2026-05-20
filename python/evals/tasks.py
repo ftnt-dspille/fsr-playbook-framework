@@ -37,6 +37,10 @@ class Task:
     # Shape for the `appropriate_approval_requests` gate. None = default
     # ("exactly_zero" tier-3+ calls).
     expected_approvals: Optional[dict[str, Any]] = None
+    # Scoring mode. `None` = standard authoring task. `"refuse"` = the
+    # agent is expected to decline (e.g. `unknown_connector`); authoring
+    # gates become informational and adherence inverts.
+    mode: Optional[str] = None
 
     def gold_yaml_text(self) -> Optional[str]:
         if not self.gold_yaml_path:
@@ -59,6 +63,7 @@ def load_tasks(filter_names: list[str] | None = None) -> list[Task]:
             notes=data.get("notes", ""),
             approval_policy=data.get("approval_policy"),
             expected_approvals=data.get("expected_approvals"),
+            mode=data.get("mode"),
         ))
     if filter_names:
         wanted = set(filter_names)

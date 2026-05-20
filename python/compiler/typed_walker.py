@@ -447,6 +447,12 @@ def _validate_branch_jinja(
 ) -> list[Diagnostic]:
     by_id = {s.id: s for s in pb.steps}
     jinja_key_lookup = {_jinja_key(s): s for s in pb.steps}
+    # Normalised lookup: lowercase + non-alphanumeric collapsed to `_`.
+    # Used to distinguish "key doesn't resolve because of case/punctuation
+    # typo" from "step really doesn't run on this branch".
+    def _norm(k: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", k.lower()).strip("_")
+    normalised_lookup = {_norm(jk): jk for jk in jinja_key_lookup}
     diags: list[Diagnostic] = []
     visible: set[str] = set()  # jinja_keys that have run by the time we visit this step
 
@@ -479,14 +485,46 @@ def _validate_branch_jinja(
                                 ))
                         continue
                     if key not in visible:
-                        diags.append(Diagnostic(
-                            code="unreachable_step_reference",
-                            message=(f"vars.steps.{key} referenced in step "
-                                     f"{s.id!r} but {key!r} does not run on "
-                                     f"branch {branch_name!r}"),
-                            step=s.id, branch=branch_name,
-                            path=f"arguments.{sub}",
-                        ))
+                        # Distinguish three sub-cases:
+                        #  (a) typo / case-or-punct mismatch of a *visible* step
+                        #  (b) step exists in the playbook but is on a different branch
+                        #  (c) no such step at all
+                        actual = normalised_lookup.get(_norm(key))
+                        if actual is not None and actual in visible:
+                            diags.append(Diagnostic(
+                                code="unknown_step_reference",
+                                message=(
+                                    f"vars.steps.{key} referenced in step "
+                                    f"{s.id!r}: step reference key is case- "
+                                    f"and punctuation-sensitive. Did you "
+                                    f"mean vars.steps.{actual}? (FSR builds "
+                                    f"the key from the step's display name "
+                                    f"by replacing spaces with '_'; other "
+                                    f"characters are preserved verbatim)"),
+                                step=s.id, branch=branch_name,
+                                path=f"arguments.{sub}",
+                            ))
+                        elif actual is not None:
+                            diags.append(Diagnostic(
+                                code="unreachable_step_reference",
+                                message=(
+                                    f"vars.steps.{key} referenced in step "
+                                    f"{s.id!r} but step {actual!r} does not "
+                                    f"run on branch {branch_name!r} (it is "
+                                    f"defined on a different branch)"),
+                                step=s.id, branch=branch_name,
+                                path=f"arguments.{sub}",
+                            ))
+                        else:
+                            diags.append(Diagnostic(
+                                code="unknown_step_reference",
+                                message=(
+                                    f"vars.steps.{key} referenced in step "
+                                    f"{s.id!r} but no step named {key!r} "
+                                    f"exists in this playbook"),
+                                step=s.id, branch=branch_name,
+                                path=f"arguments.{sub}",
+                            ))
                         continue
                     shape, err = _resolve_path(key, rest, typed_env)
                     if err == "missing_field_on_step_output":

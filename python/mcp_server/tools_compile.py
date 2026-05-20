@@ -451,7 +451,7 @@ def _pick_next_fix(errors: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
-# resolve_yaml — L2 gate: structural validation + live prechecks
+# resolve_yaml — static-resolve check + live prechecks
 # ---------------------------------------------------------------------------
 
 _PICKLIST_LITERAL = re.compile(
@@ -509,7 +509,7 @@ def _extract_connectors_and_picklists(yaml_text: str) -> tuple[
 
 @mcp.tool()
 def resolve_yaml(yaml_text: str) -> dict[str, Any]:
-    """L2 success-ladder gate: full whole-YAML resolvability check.
+    """Static-resolve check: full whole-YAML resolvability check.
 
     Runs the structural validator (`validate_yaml` equivalent) and then,
     if a live FSR is configured, verifies that every connector the

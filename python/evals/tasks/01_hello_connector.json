@@ -2,5 +2,5 @@
   "name": "hello_connector",
   "prompt": "Author a manual-trigger FortiSOAR playbook called 'Hello Connector' that runs the smtp connector's 'send_email' operation with a fixed `to`, `subject`, and `body`. End the playbook with an `end` step. Output the complete YAML.",
   "gold_yaml_path": "examples/hello_connector.yaml",
-  "notes": "Smallest possible connector-call playbook. Tests L1 + gold."
+  "notes": "Smallest possible connector-call playbook. Tests Compiles + gold."
 }

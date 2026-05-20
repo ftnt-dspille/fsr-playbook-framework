@@ -38,6 +38,17 @@ checks in one shot, returning a structured punch list.
 while drafting, but `verify_playbook` is the only gate that authorizes
 showing the YAML to the user.
 
+## Pacing — draft early, iterate against verify
+
+After at most **3 research-only tool calls** (`find_connector`,
+`find_operation`, `get_op_schema`, `get_step_type`, `find_jinja_*`,
+etc.), emit a complete draft and call `verify_playbook`. Iterate from
+verify's `required_fixes` and `next_actions`, not from more reference
+lookups. Repeated calls to the same research tool with similar
+arguments are wasted turns — `verify_playbook` will tell you exactly
+which parameter or reference is wrong far faster than another schema
+fetch can.
+
 # Hard rules (do not violate)
 
 1. Top-level shape — every playbook YAML starts exactly like this:
@@ -130,6 +141,32 @@ showing the YAML to the user.
        start, start_on_create, start_on_update, set_variable, decision,
        connector, end, find_record, create_record, update_record,
        delay, manual_input, code_snippet, workflow_reference
+
+   **`for_each` is NOT a step type.** It is a top-level *modifier*
+   attached to any of the step types above. To loop a `create_record`
+   (or any step) over a list, put `for_each:` as a sibling of
+   `arguments:` on the existing step — never use `type: for_each` and
+   never nest sub-steps inside `arguments.steps`:
+       - type: create_record
+         name: Create Alert Per Item
+         for_each:
+           item: "{{ vars.steps.Build_Alerts.alerts_to_create }}"
+           parallel: false   # set true to fan out concurrently
+           condition: ""     # optional Jinja gate per iteration
+           # __bulk: true     # for IngestBulkFeed-style batched ingest
+           # batch_size: 100  # paired with __bulk
+         arguments:
+           module: alerts
+           operation: Replace
+           resource:
+             name: "{{ vars.item.name }}"
+             severity: "{{ vars.item.severity }}"
+   Inside the iterating step, the element is bound as `{{ vars.item }}`
+   (object fields under `vars.item.<field>`). Use this same pattern on
+   `workflow_reference` to invoke a child playbook per element, or on
+   `update_record` for bulk field updates. See "FSR runtime semantics"
+   below for how `vars.steps.<looped_step>` is structured after the
+   loop completes.
 
 7. Picklist values in `arguments:` are friendly strings ("High"), not
    IRIs. The compiler resolves them. Picklist trigger filters cannot

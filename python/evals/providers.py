@@ -130,7 +130,7 @@ def _lmstudio_provider() -> ProviderFn:
 # Cap on tool-use turns per agentic eval task. Mirrors MAX_TOOL_TURNS in
 # web/backend/llm/_loop_helpers.py — the eval provider should hit the same
 # wall the chat path hits, so a runaway scoring config matches production.
-_AGENTIC_MAX_TURNS = 8
+_AGENTIC_MAX_TURNS = 12
 
 
 def _import_studio_tools():

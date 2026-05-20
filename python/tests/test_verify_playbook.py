@@ -89,7 +89,11 @@ def test_unreachable_step_reference_blocks_push():
     assert res["ready_to_push"] is False
 
 
-def test_live_probe_off_emits_warning():
+def test_live_probe_off_no_blanket_warning():
+    """When live_probe=False is the requested mode we should NOT emit a
+    blanket warning — it just clutters every result with noise and
+    teaches the agent to ignore warnings. Specific stale-shape refs
+    still surface as `unknown_shape_downstream_reference`."""
     yaml = _yaml("""
         collection: TestCol
         playbooks:
@@ -105,7 +109,7 @@ def test_live_probe_off_emits_warning():
     """)
     res = verify_playbook(yaml_text=yaml, live_probe=False)
     codes = {w["code"] for w in res["warnings"]}
-    assert "live_probe_skipped_unsafe" in codes
+    assert "live_probe_skipped_unsafe" not in codes
 
 
 def test_next_actions_listed_when_blocked():

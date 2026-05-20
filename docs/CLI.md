@@ -201,7 +201,7 @@ Subcommands:
 | --- | --- | --- |
 | `--models` | comma-separated provider names (gold, echo, anthropic, openai, lmstudio) | default: `gold,echo` |
 | `--tasks` | comma-separated task names; default = all | — |
-| `--live` | enable L2 (resolve) + L4 (dry-run) gates against the live FSR | — |
+| `--live` | enable live Runs gate (resolve + dry-run) against the live FSR | — |
 | `--json` | emit the full matrix as JSON on stdout | — |
 
 ### `explain`

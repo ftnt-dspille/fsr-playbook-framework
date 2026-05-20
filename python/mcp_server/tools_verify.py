@@ -228,6 +228,7 @@ def verify_playbook(
     a playbook to the user until this returns `ready_to_push=True`.
 
     Required-fix codes (any present → ready_to_push=False):
+      - unknown_step_reference
       - unreachable_step_reference
       - missing_field_on_step_output
       - non_list_indexed
@@ -238,7 +239,6 @@ def verify_playbook(
 
     Warning codes (do not block):
       - unknown_shape_downstream_reference
-      - live_probe_skipped_unsafe
       - output_schema_stale
     """
     sys.path.insert(0, str(REPO_ROOT / "python"))
@@ -322,13 +322,10 @@ def verify_playbook(
                        f"{sum(1 for x in probe_latencies if 'error' in x)} failed",
         })
         evidence["live_probes"] = probe_latencies
-    else:
-        warnings.append({
-            "code": "live_probe_skipped_unsafe",
-            "message": ("live_probe=False; safe-op output shapes degrade to "
-                        "static schema and downstream refs may be over-permissive"),
-            "severity": "warning",
-        })
+    # When live_probe=False the caller has explicitly opted into static
+    # shape inference; we no longer emit a blanket warning for that. If
+    # individual references actually resolve through unknown shapes they
+    # surface as `unknown_shape_downstream_reference` (specific, useful).
 
     # Evidence
     if verbose:
@@ -367,7 +364,8 @@ def _finalize(checks_run, required_fixes, warnings, evidence) -> dict[str, Any]:
         "parse_error", "missing_field", "unknown_step_type",
         "required_op_param_missing", "op_param_unknown",
         "branch_target_missing", "unknown_connector", "unknown_operation",
-        "unreachable_step_reference", "missing_field_on_step_output",
+        "unknown_step_reference", "unreachable_step_reference",
+        "missing_field_on_step_output",
         "non_list_indexed",
     )
     for code in priority_codes:

@@ -3,10 +3,10 @@
 Uses the deterministic `gold` and `echo` providers so the suite is
 hermetic — no external LLM calls. Exercises:
   - YAML extraction from fenced/raw responses
-  - L1 / L3 / gold scoring gates
+  - Compiles / gold scoring gates
   - End-to-end matrix shape + per-model totals
 
-Live gates (L2, L4) are not asserted here — they require an FSR.
+Live gates (Runs, Works) are not asserted here — they require an FSR.
 """
 from __future__ import annotations
 
@@ -71,10 +71,12 @@ def test_run_matrix_gold_beats_echo():
     assert len(matrix["rows"]) == 2 * n_tasks
     gold_total = matrix["summary"]["gold"]
     echo_total = matrix["summary"]["echo"]
-    # Gold won't be 100% because L1.5 (no compiler warnings) flags some
-    # legacy fixtures and the unknown_connector task is intentionally
-    # gold-less. Just assert the order and that gold dominates echo.
-    assert gold_total["fraction"] >= 0.7
+    # Gold won't be 100% because the strict-whitelist sub-check flags some
+    # legacy fixtures, several harder tasks (soc_*, noc_*, itops_*) have
+    # no gold reference yet, and `matches_example` is now informational
+    # so it no longer lifts the gold provider's ceiling. Just assert the
+    # order and that gold dominates echo.
+    assert gold_total["fraction"] >= 0.6
     assert echo_total["score"] == 0
 
 

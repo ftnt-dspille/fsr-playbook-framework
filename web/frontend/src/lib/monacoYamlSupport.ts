@@ -24,6 +24,12 @@ export function ensureYamlSupport(monaco: any): void {
   if (!monaco || registered.has(monaco)) return;
   registered.add(monaco);
   registerYamlCompletions(monaco);
+  // Also register on the standalone `jinja` language so inline
+  // value editors (set_variable rows, condition fields) get the same
+  // typed `vars.*` path completions as the main YAML buffer. The
+  // YAML-key branches in the provider (type:/connector:/operation:)
+  // can never match Jinja-only content, so they're inert there.
+  registerYamlCompletions(monaco, 'jinja');
   registerYamlHover(monaco);
   registerJinjaHover(monaco);
   registerJinja(monaco);

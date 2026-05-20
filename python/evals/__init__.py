@@ -2,9 +2,9 @@
 
 `python/eval/` runs a fixed task set through one or more LLM providers
 and scores each candidate playbook against the success ladder
-(L1: compiles, L2: live prechecks pass, L3: variable refs reachable,
-L4: dry-run executes) plus an optional gold-fixture byte-equality
-check. Output is a structured matrix the demo can publish as
+(Compiles: parses + static checks pass, Runs: live FSR executes,
+Works: post-run assertions hold) plus an optional gold-fixture
+byte-equality check. Output is a structured matrix the demo can publish as
 "LLM-agnostic by measurement, not claim."
 
 Sub-modules:

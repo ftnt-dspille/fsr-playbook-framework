@@ -26,13 +26,12 @@
     busy: boolean;
   } = $props();
 
-  const RUNG_ORDER: LadderRung['id'][] = [
-    'compile',
-    'prechecks',
-    'reachability',
-    'dry_run',
-    'outcome'
-  ];
+  const RUNG_ORDER: LadderRung['id'][] = ['compiles', 'runs', 'works'];
+  const RUNG_LABELS: Record<LadderRung['id'], string> = {
+    compiles: 'Compiles',
+    runs: 'Runs',
+    works: 'Works'
+  };
 
   function rungAt(id: LadderRung['id']): LadderRung | undefined {
     return rungs.find((r) => r.id === id);
@@ -109,7 +108,7 @@
             ? `${rung.label}: ${state}${rung.summary ? ' — ' + rung.summary : ''}`
             : 'pending'}
         >
-          <span class="font-mono leading-none">L{i + 1}</span>
+          <span class="leading-none">{RUNG_LABELS[id]}</span>
           <span class="leading-none">{rungIcon(state)}</span>
         </div>
         {#if i < RUNG_ORDER.length - 1}

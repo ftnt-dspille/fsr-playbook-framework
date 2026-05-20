@@ -51,6 +51,42 @@ def test_unreachable_step_reference():
     assert "unreachable_step_reference" in codes
 
 
+def test_case_or_punct_mismatch_emits_unknown_with_did_you_mean():
+    """Regression: agent typed `Re_fetch_Ticket` but the step's display
+    name produces jinja_key `Re-fetch_Ticket` (hyphen preserved). Should
+    surface as `unknown_step_reference` with a did-you-mean, NOT as the
+    misleading `unreachable_step_reference`."""
+    coll = _coll(
+        Step(id="start", type="start", name="Start", next="refetch"),
+        Step(id="refetch", type="set_variable", name="Re-fetch Ticket",
+             arguments={"arg_list": [{"key": "foo", "value": "1"}]},
+             next="use"),
+        Step(id="use", type="set_variable", name="use",
+             arguments={"arg_list": [{"key": "x",
+                                      "value": "{{ vars.steps.Re_fetch_Ticket.foo }}"}]}),
+    )
+    res = walk_playbook(coll)
+    diags = [d for d in res.diagnostics
+             if d.code in ("unknown_step_reference",
+                           "unreachable_step_reference")]
+    assert len(diags) == 1
+    assert diags[0].code == "unknown_step_reference"
+    assert "Re-fetch_Ticket" in diags[0].message  # the suggested correct key
+
+
+def test_unknown_step_reference_when_step_doesnt_exist():
+    coll = _coll(
+        Step(id="start", type="start", name="Start", next="a"),
+        Step(id="a", type="set_variable", name="a",
+             arguments={"arg_list": [{"key": "x",
+                                      "value": "{{ vars.steps.nonexistent.foo }}"}]}),
+    )
+    res = walk_playbook(coll)
+    codes = {d.code for d in res.diagnostics}
+    assert "unknown_step_reference" in codes
+    assert "unreachable_step_reference" not in codes
+
+
 def test_missing_field_on_set_variable_output():
     coll = _coll(
         Step(id="start", type="start", name="Start", next="set"),

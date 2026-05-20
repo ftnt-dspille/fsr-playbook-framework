@@ -104,8 +104,11 @@ export function buildSnippet(name: string, pad: string): string {
   return fn ? fn(pad) : name;
 }
 
-export function registerYamlCompletions(monaco: any): { dispose: () => void } {
-  return monaco.languages.registerCompletionItemProvider('yaml', {
+export function registerYamlCompletions(
+  monaco: any,
+  languageId: string = 'yaml'
+): { dispose: () => void } {
+  return monaco.languages.registerCompletionItemProvider(languageId, {
     triggerCharacters: [':', ' ', '|', '.', '['],
     async provideCompletionItems(model: any, position: any) {
       const line = model.getLineContent(position.lineNumber);

@@ -24,6 +24,29 @@ class NormalizerMixin:
         st = self.step_type(step.type)
         if st is None:
             sug = self.suggest_step_type(step.type)
+            # Common authoring mistake: `type: for_each` (or `forEach`,
+            # `for-each`, `foreach`). `for_each` is a step *modifier*,
+            # not a step type — surface that explicitly so the agent
+            # doesn't waste turns guessing alternative step names.
+            if step.type and step.type.lower().replace("-", "_") in {
+                "for_each", "foreach"
+            }:
+                msg = (
+                    "for_each is a step modifier, not a step type. "
+                    "Remove `type: for_each` and instead attach a "
+                    "`for_each:` block (sibling to `arguments:`) on the "
+                    "step you want to iterate — e.g. `type: "
+                    "create_record` / `update_record` / "
+                    "`workflow_reference` with `for_each: {item: '{{ "
+                    "vars.list }}', parallel: false}`."
+                )
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_STEP_TYPE,
+                    message=msg,
+                    path=f"{path}.type",
+                    suggestion=msg,
+                ))
+                return
             errors.append(CompileError(
                 code=ErrorCode.UNKNOWN_STEP_TYPE,
                 message=f"unknown step type: {step.type!r}",

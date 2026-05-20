@@ -119,7 +119,16 @@
       // at the document root so they aren't clipped by parent
       // `overflow: hidden` containers — e.g. the JinjaTestModal's
       // pane wrappers, which were chopping the "View Problem" popover.
-      fixedOverflowWidgets: true
+      fixedOverflowWidgets: true,
+      // In compact mode the editor is a single-line value field; the
+      // default current-line highlight reads as a stray grey stripe,
+      // and Monaco's top/bottom padding leaves visible gutters. Strip
+      // both so the row feels like a plain input.
+      renderLineHighlight: compact ? 'none' : 'line',
+      padding: compact ? { top: 0, bottom: 0 } : undefined,
+      overviewRulerLanes: compact ? 0 : undefined,
+      overviewRulerBorder: compact ? false : undefined,
+      hideCursorInOverviewRuler: compact ? true : undefined
     });
     // When this slim wrapper hosts YAML or Jinja, register the shared
     // language providers so inline value editors (set_variable rows,

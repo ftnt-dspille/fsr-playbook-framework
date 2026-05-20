@@ -317,7 +317,7 @@ export async function compileYaml(text: string): Promise<CompileResult> {
 export type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
 export type LadderRung = {
-  id: 'compile' | 'prechecks' | 'reachability' | 'dry_run' | 'outcome';
+  id: 'compiles' | 'runs' | 'works';
   label: string;
   state: 'passed' | 'failed' | 'skipped' | 'pending';
   summary: string;

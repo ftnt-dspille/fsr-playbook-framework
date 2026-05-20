@@ -162,7 +162,7 @@
   // Roadmap cards — what's planned, with honest status. No emojis.
   const upcoming: Upcoming[] = [
     {
-      code: 'L2',
+      code: 'Compiles+',
       title: 'Static-resolve gate',
       body:
         'Catch unresolved picklists, missing connector installs, and dangling Jinja variable paths before push — not at runtime.',
@@ -174,7 +174,7 @@
       eta: 'Next'
     },
     {
-      code: 'L3',
+      code: 'Runs',
       title: 'Dry-run a playbook',
       body:
         'Step-by-step execution against the live FSR with rendered context piped from one step to the next, so failures surface in the editor instead of in production.',
@@ -186,7 +186,7 @@
       eta: 'In design'
     },
     {
-      code: 'L5',
+      code: 'Works',
       title: 'Outcome assertions',
       body:
         'Declarative success checks — record exists, field equals, count greater than N — so a playbook is "done" only when it produced the asked-for outcome.',

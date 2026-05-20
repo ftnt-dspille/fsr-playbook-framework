@@ -1,0 +1,443 @@
+{
+  "live": false,
+  "tasks": [
+    "noc_sla_breach_repoll"
+  ],
+  "models": [
+    "agentic_anthropic"
+  ],
+  "rows": [
+    {
+      "model": "agentic_anthropic",
+      "task": "noc_sla_breach_repoll",
+      "yaml": "I'll author this playbook step-by-step. Let me first gather the required information about connectors and operations.\nGood! PagerDuty connector is available. Let me get its operations:\nLet me check the create_incident operation and discover the severity picklist better:\nNow let me check the Severity picklist:\nPerfect. Now let me draft the complete playbook:\nI need to add the missing steps and fix the branch targets. Let me restructure:\nThe issue is that the decision condition references a step that may not run. I need to adjust the decision logic to use the stashed severity directly. Let me fix this:\nThe issue is that the \"Finish\" branch from the decision doesn't reach the \"Re_fetch_Ticket\" step on the same control flow. I need to ensure the decision only checks on the path after the re-fetch. Let me trace the structure\u2014actually, the issue is the step naming convention. Let me check the slug:\n\nThe \"Re-fetch Ticket\" step should generate slug \"Re_fetch_Ticket\". The walker is saying it doesn't run on the branch. This is because the decision is branching and the \"Finish\" path doesn't include \"Re_fetch_Ticket\" in its reachability. The typed walker is very strict: it only allows references to steps that are on the **same branch path** as the reference.\n\nThe fix: I need to ensure the decision only exists **after** Re_fetch_Ticket runs, which means it should come after all possible paths have access to it. Since the decision **is** after Re_fetch_Ticket, the walker should be seeing it. Let me check the slugification more carefully\u2014maybe it's a name mapping issue:",
+      "elapsed_ms": 227612,
+      "levels": {
+        "draft": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed",
+          "errors": [
+            {
+              "code": "parse_error",
+              "path": "",
+              "message": "YAML parse error: mapping values are not allowed here\n  in \"<unicode string>\", line 2, column 66:\n     ... lable. Let me get its operations:\n                                         ^",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "verified": {
+          "passed": false,
+          "skipped": false,
+          "required_fix_count": 1,
+          "warning_count": 0,
+          "detail": "1 required fix(es)"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "3 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 3,
+          "detail": "never reached ready_to_push=True",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": false,
+          "skipped": false,
+          "detail": "last verify did NOT return ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 14,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 3,
+          "tool": "verify_playbook",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": false,
+          "skipped": false,
+          "detail": "no fenced ```yaml block in final text"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 4,
+      "max": 8,
+      "fraction": 0.5,
+      "turns": 8,
+      "tool_calls": 14,
+      "trace": [
+        {
+          "name": "list_configured_connectors",
+          "args_chars": 15,
+          "result_chars": 2352
+        },
+        {
+          "name": "find_connector",
+          "args_chars": 18,
+          "result_chars": 275
+        },
+        {
+          "name": "picklist_for_field",
+          "args_chars": 42,
+          "result_chars": 91
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 57,
+          "result_chars": 292
+        },
+        {
+          "name": "resolve_picklist_value",
+          "args_chars": 59,
+          "result_chars": 91
+        },
+        {
+          "name": "resolve_picklist_value",
+          "args_chars": 63,
+          "result_chars": 91
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 68,
+          "result_chars": 4362
+        },
+        {
+          "name": "list_picklists",
+          "args_chars": 2,
+          "result_chars": 2319
+        },
+        {
+          "name": "resolve_picklist_value",
+          "args_chars": 46,
+          "result_chars": 122
+        },
+        {
+          "name": "resolve_picklist_value",
+          "args_chars": 50,
+          "result_chars": 126
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 4516,
+          "result_chars": 1286,
+          "verify": {
+            "ready_to_push": false,
+            "required_fix_count": 2,
+            "warning_count": 0
+          },
+          "verify_full": {
+            "ok": false,
+            "ready_to_push": false,
+            "required_fixes": [
+              {
+                "code": "unknown_next_step",
+                "message": "branch target 'Escalate Severity And Page Manager' does not match any step id",
+                "path": "playbooks[0].steps[6].branches.Not Acknowledged",
+                "suggestion": null,
+                "severity": "error"
+              },
+              {
+                "code": "unknown_next_step",
+                "message": "branch target 'Add Comment Already Critical' does not match any step id",
+                "path": "playbooks[0].steps[8].branches.Already Critical",
+                "suggestion": null,
+                "severity": "error"
+              }
+            ],
+            "warnings": [],
+            "checks_run": [
+              {
+                "name": "compile",
+                "ok": false,
+                "summary": "2 compiler issues"
+              }
+            ],
+            "evidence": {
+              "compile": {
+                "errors": [
+                  {
+                    "code": "unknown_next_step",
+                    "message": "branch target 'Escalate Severity And Page Manager' does not match any step id",
+                    "path": "playbooks[0].steps[6].branches.Not Acknowledged",
+                    "suggestion": null,
+                    "severity": "error"
+                  },
+                  {
+                    "code": "unknown_next_step",
+                    "message": "branch target 'Add Comment Already Critical' does not match any step id",
+                    "path": "playbooks[0].steps[8].branches.Already Critical",
+                    "suggestion": null,
+                    "severity": "error"
+                  }
+                ]
+              }
+            },
+            "next_actions": [
+              "unknown_next_step: branch target 'Escalate Severity And Page Manager' does not match any step id",
+              "unknown_next_step: branch target 'Add Comment Already Critical' does not match any step id"
+            ]
+          },
+          "verify_args": {
+            "yaml_text": "collection: Default\nplaybooks:\n  - name: NOC Ticket SLA Escalation\n    description: Trigger on NOC ticket update when sla_pct crosses 80 AND severity is High/Critical. Page primary on-call via PagerDuty, wait 15 min, then check acknowledged_at. If still null, page manager and escalate severity.\n    is_active: true\n    steps:\n      - type: start_on_update\n        name: NOC Ticket Update Check\n        arguments:\n          module: tickets\n          when:\n            logic: AND\n            filters:\n              - field: sla_pct\n                op: gt\n                value: \"80\"\n              - field: severity\n                op: in\n                value:\n                  - High\n                  - Critical\n      - type: set_variable\n        name: Stash Ticket Details\n        vars:\n          ticket_id: \"{{ vars.input.records[0]['@id'] }}\"\n          ticket_number: \"{{ vars.input.records[0].name }}\"\n          ticket_severity: \"{{ vars.input.records[0].severity }}\"\n          ticket_sla_pct: \"{{ vars.input.records[0].sla_pct }}\"\n        message:\n          content: \"NOC ticket escalation initiated - SLA at {{ vars.ticket_sla_pct }}%\"\n          tags: [noc_escalation, automation]\n      - type: connector\n        name: Page On Call via PagerDuty\n        arguments:\n          connector: pagerduty\n          operation: create_incident\n          config: \"\"\n          params:\n            from: \"{{ vars.input.params.creator_email | default('noc@company.com') }}\"\n            title: \"NOC Ticket {{ vars.ticket_number }} - SLA Escalation\"\n            description: \"Ticket {{ vars.ticket_number }} has exceeded 80% SLA threshold. Severity: {{ vars.ticket_severity }}. SLA At: {{ vars.ticket_sla_pct }}%\"\n            priority: \"Priority 1\"\n            urgency: \"High\"\n            incident_key: \"noc-ticket-{{ vars.ticket_number }}\"\n      - type: set_variable\n        name: Store PagerDuty Incident\n        vars:\n          pagerduty_incident_id: \"{{ vars.steps.Page_On_Call_via_PagerDuty.incident.id }}\"\n      - type: delay\n        name: Wait 15 Minutes\n        arguments:\n          minutes: 15\n      - type: find_record\n        name: Re-fetch Ticket\n        arguments:\n          module: tickets\n          query:\n            logic: AND\n            filters:\n              - field: \"@id\"\n                operator: eq\n                value: \"{{ vars.ticket_id }}\"\n          partial: true\n      - type: decision\n        name: Check Acknowledged Status\n        conditions:\n          - display: Acknowledged\n            when: \"{{ vars.steps.Re_fetch_Ticket['hydra:member'][0].acknowledged_at is not none }}\"\n            next: Finish\n          - display: Not Acknowledged\n            default: true\n            next: Escalate Severity And Page Manager\n      - type: connector\n        name: Page Manager via PagerDuty\n        arguments:\n          connector: pagerduty\n          operation: create_incident\n          config: \"\"\n          params:\n            from: \"{{ vars.input.params.creator_email | default('noc@company.com') }}\"\n            title: \"NOC Ticket {{ vars.ticket_number }} - MANAGER ESCALATION\"\n            description: \"Ticket {{ vars.ticket_number }} STILL UNACKNOWLEDGED after 15 minutes. Severity: {{ vars.ticket_severity }}. SLA At: {{ vars.ticket_sla_pct }}%. Escalating to manager.\"\n            priority: \"Priority 1\"\n            urgency: \"High\"\n            incident_key: \"noc-ticket-manager-{{ vars.ticket_number }}\"\n      - type: decision\n        name: Check Current Severity\n        conditions:\n          - display: Currently High\n            when: \"{{ vars.ticket_severity == 'High' }}\"\n            next: Update To Critical\n          - display: Already Critical\n            default: true\n            next: Add Comment Already Critical\n      - type: update_record\n        name: Update To Critical\n        arguments:\n          module: tickets\n          collection: \"{{ vars.ticket_id }}\"\n          resource:\n            severity: Critical\n      - type: set_variable\n        name: Record Escalation Action\n        vars:\n          escalation_note: \"Severity escalated from High to Critical due to unacknowledged SLA breach\"\n        message:\n          content: \"Severity escalated to Critical - ticket unacknowledged after 15 min\"\n          tags: [noc_escalation, severity_escalated]\n      - type: end\n        name: Finish\n"
+          }
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 5153,
+          "result_chars": 1666,
+          "verify": {
+            "ready_to_push": false,
+            "required_fix_count": 1,
+            "warning_count": 2
+          },
+          "verify_full": {
+            "ok": false,
+            "ready_to_push": false,
+            "required_fixes": [
+              {
+                "code": "unreachable_step_reference",
+                "message": "vars.steps.Re_fetch_Ticket referenced in step 'check_acknowledged_status' but 'Re_fetch_Ticket' does not run on branch 'noc_ticket_update_check'",
+                "step": "check_acknowledged_status",
+                "branch": "noc_ticket_update_check",
+                "path": "arguments.conditions[0].condition",
+                "suggestion": null,
+                "severity": "error"
+              }
+            ],
+            "warnings": [
+              {
+                "code": "unknown_shape_downstream_reference",
+                "message": "vars.steps.Page_On_Call_via_PagerDuty.incident.id resolves through unknown shape (connector_op safety=unknown; live shape not available)",
+                "step": "store_pagerduty_incident",
+                "branch": "noc_ticket_update_check",
+                "path": "arguments.arg_list[0].value",
+                "suggestion": null,
+                "severity": "warning"
+              },
+              {
+                "code": "live_probe_skipped_unsafe",
+                "message": "live_probe=False; safe-op output shapes degrade to static schema and downstream refs may be over-permissive",
+                "severity": "warning"
+              }
+            ],
+            "checks_run": [
+              {
+                "name": "compile",
+                "ok": true,
+                "summary": "compile clean"
+              },
+              {
+                "name": "typed_walk",
+                "ok": false,
+                "summary": "1 branch(es); 1 required fix(es)"
+              },
+              {
+                "name": "per_step_schema",
+                "ok": true,
+                "summary": "0 schema issue(s)"
+              }
+            ],
+            "evidence": {
+              "typed_walk": {
+                "branches": [
+                  {
+                    "name": "noc_ticket_update_check",
+                    "step_ids": [
+                      "noc_ticket_update_check",
+                      "stash_ticket_details",
+                      "page_on_call_via_pagerduty",
+                      "store_pagerduty_incident",
+                      "wait_15_minutes",
+                      "re_fetch_ticket",
+                      "check_acknowledged_status"
+                    ],
+                    "diagnostic_count": 2
+                  }
+                ]
+              }
+            },
+            "next_actions": [
+              "unreachable_step_reference: vars.steps.Re_fetch_Ticket referenced in step 'check_acknowledged_status' but 'Re_fetch_Ticket' does not run on branch '"
+            ]
+          },
+          "verify_args": {
+            "yaml_text": "collection: Default\nplaybooks:\n  - name: NOC Ticket SLA Escalation\n    description: Trigger on NOC ticket update when sla_pct crosses 80 AND severity is High/Critical. Page primary on-call via PagerDuty, wait 15 min, then check acknowledged_at. If still null, page manager and escalate severity.\n    is_active: true\n    steps:\n      - type: start_on_update\n        name: NOC Ticket Update Check\n        arguments:\n          module: tickets\n          when:\n            logic: AND\n            filters:\n              - field: sla_pct\n                op: gt\n                value: \"80\"\n              - field: severity\n                op: in\n                value:\n                  - High\n                  - Critical\n        next: Stash Ticket Details\n      - type: set_variable\n        name: Stash Ticket Details\n        vars:\n          ticket_id: \"{{ vars.input.records[0]['@id'] }}\"\n          ticket_number: \"{{ vars.input.records[0].name }}\"\n          ticket_severity: \"{{ vars.input.records[0].severity }}\"\n          ticket_sla_pct: \"{{ vars.input.records[0].sla_pct }}\"\n        message:\n          content: \"NOC ticket escalation initiated - SLA at {{ vars.ticket_sla_pct }}%\"\n          tags: [noc_escalation, automation]\n        next: Page On Call via PagerDuty\n      - type: connector\n        name: Page On Call via PagerDuty\n        arguments:\n          connector: pagerduty\n          operation: create_incident\n          config: \"\"\n          params:\n            from: \"{{ vars.input.params.creator_email | default('noc@company.com') }}\"\n            title: \"NOC Ticket {{ vars.ticket_number }} - SLA Escalation\"\n            description: \"Ticket {{ vars.ticket_number }} has exceeded 80% SLA threshold. Severity: {{ vars.ticket_severity }}. SLA At: {{ vars.ticket_sla_pct }}%\"\n            priority: \"Priority 1\"\n            urgency: \"High\"\n            incident_key: \"noc-ticket-{{ vars.ticket_number }}\"\n        next: Store PagerDuty Incident\n      - type: set_variable\n        name: Store PagerDuty Incident\n        vars:\n          pagerduty_incident_id: \"{{ vars.steps.Page_On_Call_via_PagerDuty.incident.id }}\"\n        next: Wait 15 Minutes\n      - type: delay\n        name: Wait 15 Minutes\n        arguments:\n          minutes: 15\n        next: Re-fetch Ticket\n      - type: find_record\n        name: Re-fetch Ticket\n        arguments:\n          module: tickets\n          query:\n            logic: AND\n            filters:\n              - field: \"@id\"\n                operator: eq\n                value: \"{{ vars.ticket_id }}\"\n          partial: true\n        next: Check Acknowledged Status\n      - type: decision\n        name: Check Acknowledged Status\n        conditions:\n          - display: Acknowledged\n            when: \"{{ vars.steps.Re_fetch_Ticket['hydra:member'][0].acknowledged_at is not none }}\"\n            next: Finish\n          - display: Not Acknowledged\n            default: true\n            next: Page Manager via PagerDuty\n      - type: connector\n        name: Page Manager via PagerDuty\n        arguments:\n          connector: pagerduty\n          operation: create_incident\n          config: \"\"\n          params:\n            from: \"{{ vars.input.params.creator_email | default('noc@company.com') }}\"\n            title: \"NOC Ticket {{ vars.ticket_number }} - MANAGER ESCALATION\"\n            description: \"Ticket {{ vars.ticket_number }} STILL UNACKNOWLEDGED after 15 minutes. Severity: {{ vars.ticket_severity }}. SLA At: {{ vars.ticket_sla_pct }}%. Escalating to manager.\"\n            priority: \"Priority 1\"\n            urgency: \"High\"\n            incident_key: \"noc-ticket-manager-{{ vars.ticket_number }}\"\n        next: Check Current Severity\n      - type: decision\n        name: Check Current Severity\n        conditions:\n          - display: Currently High\n            when: \"{{ vars.ticket_severity == 'High' }}\"\n            next: Update To Critical\n          - display: Already Critical\n            default: true\n            next: Add Comment Already Critical\n      - type: update_record\n        name: Update To Critical\n        arguments:\n          module: tickets\n          collection: \"{{ vars.ticket_id }}\"\n          resource:\n            severity: Critical\n        next: Record Escalation Action\n      - type: set_variable\n        name: Record Escalation Action\n        vars:\n          escalation_note: \"Severity escalated from High to Critical due to unacknowledged SLA breach\"\n        message:\n          content: \"Severity escalated to Critical - ticket unacknowledged after 15 min\"\n          tags: [noc_escalation, severity_escalated]\n        next: Finish\n      - type: set_variable\n        name: Add Comment Already Critical\n        vars:\n          top_severity_note: \"Already at Critical severity\"\n        message:\n          content: \"Ticket already at top severity (Critical) - manager paged\"\n          tags: [noc_escalation, already_critical]\n        next: Finish\n      - type: end\n        name: Finish\n"
+          }
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 5208,
+          "result_chars": 1574,
+          "verify": {
+            "ready_to_push": false,
+            "required_fix_count": 1,
+            "warning_count": 1
+          },
+          "verify_full": {
+            "ok": false,
+            "ready_to_push": false,
+            "required_fixes": [
+              {
+                "code": "unreachable_step_reference",
+                "message": "vars.steps.Re_fetch_Ticket referenced in step 'check_acknowledged_status' but 'Re_fetch_Ticket' does not run on branch 'noc_ticket_update_check'",
+                "step": "check_acknowledged_status",
+                "branch": "noc_ticket_update_check",
+                "path": "arguments.conditions[0].condition",
+                "suggestion": null,
+                "severity": "error"
+              }
+            ],
+            "warnings": [
+              {
+                "code": "unknown_shape_downstream_reference",
+                "message": "vars.steps.Page_On_Call_via_PagerDuty.incident.id resolves through unknown shape (connector_op safety=unknown; live shape not available)",
+                "step": "store_pagerduty_incident",
+                "branch": "noc_ticket_update_check",
+                "path": "arguments.arg_list[0].value",
+                "suggestion": null,
+                "severity": "warning"
+              }
+            ],
+            "checks_run": [
+              {
+                "name": "compile",
+                "ok": true,
+                "summary": "compile clean"
+              },
+              {
+                "name": "typed_walk",
+                "ok": false,
+                "summary": "1 branch(es); 1 required fix(es)"
+              },
+              {
+                "name": "per_step_schema",
+                "ok": true,
+                "summary": "0 schema issue(s)"
+              },
+              {
+                "name": "live_probe",
+                "ok": true,
+                "summary": "0 live op(s); 0 failed"
+              }
+            ],
+            "evidence": {
+              "live_probes": [],
+              "typed_walk": {
+                "branches": [
+                  {
+                    "name": "noc_ticket_update_check",
+                    "step_ids": [
+                      "noc_ticket_update_check",
+                      "stash_ticket_details",
+                      "page_on_call_via_pagerduty",
+                      "store_pagerduty_incident",
+                      "wait_15_minutes",
+                      "re_fetch_ticket",
+                      "check_acknowledged_status"
+                    ],
+                    "diagnostic_count": 2
+                  }
+                ]
+              }
+            },
+            "next_actions": [
+              "unreachable_step_reference: vars.steps.Re_fetch_Ticket referenced in step 'check_acknowledged_status' but 'Re_fetch_Ticket' does not run on branch '"
+            ]
+          },
+          "verify_args": {
+            "yaml_text": "collection: Default\nplaybooks:\n  - name: NOC Ticket SLA Escalation\n    description: Trigger on NOC ticket update when sla_pct crosses 80 AND severity is High/Critical. Page primary on-call via PagerDuty, wait 15 min, then check acknowledged_at. If still null, page manager and escalate severity.\n    is_active: true\n    steps:\n      - type: start_on_update\n        name: NOC Ticket Update Check\n        arguments:\n          module: tickets\n          when:\n            logic: AND\n            filters:\n              - field: sla_pct\n                op: gt\n                value: \"80\"\n              - field: severity\n                op: in\n                value:\n                  - High\n                  - Critical\n        next: Stash Ticket Details\n      - type: set_variable\n        name: Stash Ticket Details\n        vars:\n          ticket_id: \"{{ vars.input.records[0]['@id'] }}\"\n          ticket_number: \"{{ vars.input.records[0].name }}\"\n          ticket_severity: \"{{ vars.input.records[0].severity }}\"\n          ticket_sla_pct: \"{{ vars.input.records[0].sla_pct }}\"\n        message:\n          content: \"NOC ticket escalation initiated - SLA at {{ vars.ticket_sla_pct }}%\"\n          tags: [noc_escalation, automation]\n        next: Page On Call via PagerDuty\n      - type: connector\n        name: Page On Call via PagerDuty\n        arguments:\n          connector: pagerduty\n          operation: create_incident\n          config: \"\"\n          params:\n            from: \"{{ vars.input.params.creator_email | default('noc@company.com') }}\"\n            title: \"NOC Ticket {{ vars.ticket_number }} - SLA Escalation\"\n            description: \"Ticket {{ vars.ticket_number }} has exceeded 80% SLA threshold. Severity: {{ vars.ticket_severity }}. SLA At: {{ vars.ticket_sla_pct }}%\"\n            priority: \"Priority 1\"\n            urgency: \"High\"\n            incident_key: \"noc-ticket-{{ vars.ticket_number }}\"\n        next: Store PagerDuty Incident\n      - type: set_variable\n        name: Store PagerDuty Incident\n        vars:\n          pagerduty_incident_id: \"{{ vars.steps.Page_On_Call_via_PagerDuty.incident.id }}\"\n        next: Wait 15 Minutes\n      - type: delay\n        name: Wait 15 Minutes\n        arguments:\n          minutes: 15\n        next: Re-fetch Ticket\n      - type: find_record\n        name: Re-fetch Ticket\n        arguments:\n          module: tickets\n          query:\n            logic: AND\n            filters:\n              - field: \"@id\"\n                operator: eq\n                value: \"{{ vars.ticket_id }}\"\n          partial: true\n        next: Check Acknowledged Status\n      - type: decision\n        name: Check Acknowledged Status\n        conditions:\n          - display: Acknowledged\n            when: \"{{ vars.steps.Re_fetch_Ticket['hydra:member'][0].acknowledged_at is not none }}\"\n            next: Finish\n          - display: Not Acknowledged\n            default: true\n            next: Page Manager via PagerDuty\n      - type: connector\n        name: Page Manager via PagerDuty\n        arguments:\n          connector: pagerduty\n          operation: create_incident\n          config: \"\"\n          params:\n            from: \"{{ vars.input.params.creator_email | default('noc@company.com') }}\"\n            title: \"NOC Ticket {{ vars.ticket_number }} - MANAGER ESCALATION\"\n            description: \"Ticket {{ vars.ticket_number }} STILL UNACKNOWLEDGED after 15 minutes. Severity: {{ vars.ticket_severity }}. SLA At: {{ vars.ticket_sla_pct }}%. Escalating to manager.\"\n            priority: \"Priority 1\"\n            urgency: \"High\"\n            incident_key: \"noc-ticket-manager-{{ vars.ticket_number }}\"\n        next: Check Current Severity\n      - type: decision\n        name: Check Current Severity\n        conditions:\n          - display: Currently High\n            when: \"{{ vars.ticket_severity == 'High' }}\"\n            next: Update To Critical\n          - display: Already Critical\n            default: true\n            next: Add Comment Already Critical\n      - type: update_record\n        name: Update To Critical\n        arguments:\n          module: tickets\n          collection: \"{{ vars.ticket_id }}\"\n          resource:\n            severity: \"{{ 'Critical' | picklist('severity') }}\"\n        next: Record Escalation Action\n      - type: set_variable\n        name: Record Escalation Action\n        vars:\n          escalation_note: \"Severity escalated from High to Critical due to unacknowledged SLA breach\"\n        message:\n          content: \"Severity escalated to Critical - ticket unacknowledged after 15 min\"\n          tags: [noc_escalation, severity_escalated]\n        next: Finish\n      - type: set_variable\n        name: Add Comment Already Critical\n        vars:\n          top_severity_note: \"Already at Critical severity\"\n        message:\n          content: \"Ticket already at top severity (Critical) - manager paged\"\n          tags: [noc_escalation, already_critical]\n        next: Finish\n      - type: end\n        name: Finish\n",
+            "live_probe": true
+          }
+        },
+        {
+          "name": "step_through_playbook",
+          "args_chars": 5231,
+          "result_chars": 3947
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 484,
+          "output_tokens": 178,
+          "cache_creation_input_tokens": 12097,
+          "cache_read_input_tokens": 0
+        },
+        {
+          "input_tokens": 1676,
+          "output_tokens": 239,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12097
+        },
+        {
+          "input_tokens": 1669,
+          "output_tokens": 132,
+          "cache_creation_input_tokens": 482,
+          "cache_read_input_tokens": 12097
+        },
+        {
+          "input_tokens": 2645,
+          "output_tokens": 148,
+          "cache_creation_input_tokens": 1112,
+          "cache_read_input_tokens": 12655
+        },
+        {
+          "input_tokens": 2503,
+          "output_tokens": 1249,
+          "cache_creation_input_tokens": 384,
+          "cache_read_input_tokens": 13858
+        },
+        {
+          "input_tokens": 1967,
+          "output_tokens": 1418,
+          "cache_creation_input_tokens": 2055,
+          "cache_read_input_tokens": 14351
+        },
+        {
+          "input_tokens": 3597,
+          "output_tokens": 1467,
+          "cache_creation_input_tokens": 247,
+          "cache_read_input_tokens": 16492
+        },
+        {
+          "input_tokens": 3964,
+          "output_tokens": 1690,
+          "cache_creation_input_tokens": 383,
+          "cache_read_input_tokens": 17986
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "agentic_anthropic": {
+      "score": 4,
+      "max": 8,
+      "fraction": 0.5
+    }
+  },
+  "run_id": "20260519T205232Z",
+  "ts": "2026-05-19T20:52:32.572440+00:00"
+}

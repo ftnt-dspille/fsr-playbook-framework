@@ -1,4 +1,4 @@
-"""Recipe pre-emission prechecks (success-ladder L2 building blocks).
+"""Recipe pre-emission prechecks (building blocks for the Runs rung).
 
 A recipe that compiles is not a recipe that runs. Each function below
 catches one silent-failure surface that today only surfaces at runtime

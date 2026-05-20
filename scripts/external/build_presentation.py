@@ -151,11 +151,9 @@ SLIDES = [
     {
         "title": "The success ladder",
         "bullets": [
-            "L1 Compile — structurally valid YAML",
-            "L2 Static-resolve — connectors / ops / picklists / step-types / Jinja vars all exist",
-            "L3 Dry-run — step args render against expected upstream context",
-            "L4 Live single-step — step N actually executes on real FSR",
-            "L5 Post-run assert — playbook produced the asked-for outcome",
+            "Compiles — structurally valid YAML + every Jinja var reachable from a prior step",
+            "Runs — executes against real FSR (static-resolve + dry-run roll up here)",
+            "Works — post-run assertions hold (record exists, field equals, count > N)",
             "Each rung is deterministic + an MCP tool; failure returns structured {ok, code, suggestions}",
         ],
         "diagram": "ladder",
@@ -513,11 +511,9 @@ def _add_stats_grid(slide, prs, stats, subtitle_text=None, footer=None):
 
 def _add_diagram_ladder(slide, prs):
     rungs = [
-        ("L1", "Compile", "done"),
-        ("L2", "Static-resolve", "partial"),
-        ("L3", "Dry-run", "missing"),
-        ("L4", "Live step", "half"),
-        ("L5", "Post-run assert", "missing"),
+        ("", "Compiles", "done"),
+        ("", "Runs", "partial"),
+        ("", "Works", "missing"),
     ]
     top = Inches(5.0)
     box_w = Inches(2.3); box_h = Inches(1.0); gap = Inches(0.15)
