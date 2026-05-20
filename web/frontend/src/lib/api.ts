@@ -760,7 +760,7 @@ export async function getExample(name: string): Promise<{ kind: 'example'; name:
   return r.json();
 }
 
-export async function getDraft(name: string): Promise<{ kind: 'draft'; name: string; yaml: string; created_ts: string; updated_ts: string }> {
+export async function getDraft(name: string): Promise<{ kind: 'draft'; name: string; yaml: string; created_ts: string; updated_ts: string; revision_id: number }> {
   const r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}`);
   if (!r.ok) throw new Error(`draft ${r.status}`);
   return r.json();
@@ -768,8 +768,8 @@ export async function getDraft(name: string): Promise<{ kind: 'draft'; name: str
 
 /** Thrown by `putDraft` (and any other mutation that wants retry-aware
  *  behavior). `transient` flags errors the save mutation should retry:
- *  network failures + 5xx. 4xx is treated as permanent — those usually
- *  mean validation / auth / route-not-found and won't change on retry. */
+ *  network failures + 5xx. 4xx is treated as permanent. 409 is also
+ *  permanent but a special case the caller handles specifically. */
 export class SaveError extends Error {
   status: number | 'network';
   transient: boolean;
@@ -781,17 +781,50 @@ export class SaveError extends Error {
   }
 }
 
-export async function putDraft(name: string, yaml: string, opts: { reason?: string; auto?: boolean } = {}): Promise<{ ok: boolean; revision_id: number; updated_ts: string }> {
+/** 409 response body from the server's optimistic-concurrency check.
+ *  Surfaces enough state for the client to present a recoverable
+ *  conflict UI without a follow-up GET. */
+export type ConflictPayload = {
+  code: 'conflict';
+  message: string;
+  server_revision_id: number;
+  server_updated_ts: string;
+  server_yaml: string;
+};
+
+/** Thrown when the server rejects a save because the head moved (peer
+ *  tab saved first). Caller (playbookStore) catches this specifically
+ *  to enter the 'conflict' state instead of the generic 'error' state. */
+export class ConflictError extends Error {
+  payload: ConflictPayload;
+  constructor(payload: ConflictPayload) {
+    super(payload.message);
+    this.name = 'ConflictError';
+    this.payload = payload;
+  }
+}
+
+export async function putDraft(
+  name: string,
+  yaml: string,
+  opts: { reason?: string; auto?: boolean; ifMatch?: number | null } = {},
+): Promise<{ ok: boolean; revision_id: number; updated_ts: string }> {
   let r: Response;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (typeof opts.ifMatch === 'number') headers['If-Match'] = String(opts.ifMatch);
   try {
     r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ yaml, reason: opts.reason ?? null, auto: !!opts.auto })
     });
   } catch (e) {
-    // fetch only throws on network failure (DNS, offline, CORS preflight).
     throw new SaveError(`network: ${(e as Error).message}`, 'network');
+  }
+  if (r.status === 409) {
+    const body = await r.json().catch(() => null);
+    if (body && body.code === 'conflict') throw new ConflictError(body as ConflictPayload);
+    throw new SaveError('draft put 409 (malformed body)', 409);
   }
   if (!r.ok) {
     const detail = await r.text().catch(() => '');

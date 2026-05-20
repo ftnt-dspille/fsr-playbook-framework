@@ -23,7 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -55,7 +56,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
           name TEXT PRIMARY KEY,
           yaml TEXT NOT NULL,
           created_ts TEXT NOT NULL,
-          updated_ts TEXT NOT NULL
+          updated_ts TEXT NOT NULL,
+          -- Monotonic per-draft head pointer used by If-Match optimistic
+          -- concurrency. Bumped to lastrowid on every revision insert.
+          -- Pre-existing rows pre-migration: backfilled to MAX(rev.id)
+          -- below (or 0 if no revisions yet).
+          head_revision_id INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS draft_revisions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,6 +80,19 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
           ON draft_revisions(draft_name, is_auto, created_ts);
         """
     )
+    # Online migration: drafts.db files created before head_revision_id
+    # existed will have it via CREATE-table-IF-NOT-EXISTS no-op'ing the
+    # new schema, but the column itself won't be present. Detect + add.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(drafts)").fetchall()}
+    if "head_revision_id" not in cols:
+        conn.execute("ALTER TABLE drafts ADD COLUMN head_revision_id INTEGER NOT NULL DEFAULT 0")
+        # Backfill from MAX(rev.id) so existing drafts get a valid head
+        # pointer; If-Match comparisons stay meaningful from day one.
+        conn.execute(
+            "UPDATE drafts SET head_revision_id = COALESCE("
+            "  (SELECT MAX(id) FROM draft_revisions WHERE draft_name = drafts.name), 0)"
+        )
+        conn.commit()
 
 
 # Tiered retention for AUTO revisions. Manual saves (is_auto=0) are
@@ -242,7 +261,8 @@ def get_draft(name: str) -> dict[str, Any]:
     name = _validate_name(name)
     with _db() as conn:
         row = conn.execute(
-            "SELECT name, yaml, created_ts, updated_ts FROM drafts WHERE name=?",
+            "SELECT name, yaml, created_ts, updated_ts, head_revision_id "
+            "FROM drafts WHERE name=?",
             (name,),
         ).fetchone()
     if not row:
@@ -253,6 +273,7 @@ def get_draft(name: str) -> dict[str, Any]:
         "yaml": row["yaml"],
         "created_ts": row["created_ts"],
         "updated_ts": row["updated_ts"],
+        "revision_id": row["head_revision_id"],
     }
 
 
@@ -286,6 +307,7 @@ def clone_example(payload: CloneExample) -> dict[str, Any]:
             (name, yaml_text, f"cloned from example: {payload.example}", 0, now),
         )
         rev_id = cur.lastrowid
+        conn.execute("UPDATE drafts SET head_revision_id=? WHERE name=?", (rev_id, name))
         conn.commit()
     return {
         "ok": True,
@@ -299,19 +321,55 @@ def clone_example(payload: CloneExample) -> dict[str, Any]:
 
 
 @router.put("/draft/{name}")
-def put_draft(name: str, payload: DraftSave) -> dict[str, Any]:
+def put_draft(
+    name: str,
+    payload: DraftSave,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
     """Create-or-update the draft head; always inserts a revision row.
 
-    `auto=true` flags the revision as a system snapshot (mode switch,
-    picker change, deploy) so the Revisions UI can fade them visually
-    or bucket them under "Auto-snapshots" while named saves stay loud.
+    Optimistic concurrency: when the caller sends `If-Match: <id>`, the
+    server compares against the stored `head_revision_id`. A mismatch
+    returns 409 with the server's current state so the client can
+    surface a recoverable conflict UI instead of silently overwriting
+    a peer tab's edit.
+
+    Saves without `If-Match` skip the check — useful for first-time
+    creates and explicit "Overwrite" resolutions from the conflict UI.
+
+    `auto=true` flags the revision as a system snapshot.
     """
     name = _validate_name(name)
     now = _now()
     with _db() as conn:
         existing = conn.execute(
-            "SELECT created_ts FROM drafts WHERE name=?", (name,)
+            "SELECT created_ts, yaml, updated_ts, head_revision_id "
+            "FROM drafts WHERE name=?",
+            (name,),
         ).fetchone()
+        if existing and if_match is not None:
+            try:
+                expected_rev = int(if_match.strip('"'))
+            except ValueError:
+                raise HTTPException(400, "If-Match must be an integer revision id")
+            current_rev = existing["head_revision_id"]
+            if expected_rev != current_rev:
+                # 409 with server state lets the client present a
+                # diff / overwrite / reload-theirs choice.
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "code": "conflict",
+                        "message": (
+                            f"revision mismatch: expected {expected_rev}, "
+                            f"server has {current_rev}"
+                        ),
+                        "server_revision_id": current_rev,
+                        "server_updated_ts": existing["updated_ts"],
+                        "server_yaml": existing["yaml"],
+                    },
+                    status_code=409,
+                )
         if existing:
             conn.execute(
                 "UPDATE drafts SET yaml=?, updated_ts=? WHERE name=?",
@@ -332,6 +390,7 @@ def put_draft(name: str, payload: DraftSave) -> dict[str, Any]:
             (name, payload.yaml, payload.reason, 1 if payload.auto else 0, now),
         )
         rev_id = cursor.lastrowid
+        conn.execute("UPDATE drafts SET head_revision_id=? WHERE name=?", (rev_id, name))
         # Prune older auto-revisions in the same txn — keeps the table
         # bounded without a background job, and a crash mid-save can't
         # leave it half-pruned. Manual saves are never touched.

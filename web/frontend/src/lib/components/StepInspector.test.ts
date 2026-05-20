@@ -113,7 +113,8 @@ beforeEach(() => {
     kind: 'draft',
     name: 'demo',
     savedYaml: 'playbooks: []',
-    yaml: 'playbooks: []'
+    yaml: 'playbooks: []',
+    revisionId: null,
   };
 });
 afterEach(() => {

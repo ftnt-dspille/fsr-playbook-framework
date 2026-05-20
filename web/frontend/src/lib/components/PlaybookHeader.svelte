@@ -43,7 +43,18 @@
   let saveState = $derived(playbookStore.state.saveState);
   let lastSaveError = $derived(playbookStore.state.lastSaveError);
   let lastSavedAt = $derived(playbookStore.state.lastSavedAt);
+  let conflict = $derived(playbookStore.state.conflict);
   let isExample = $derived(playbookStore.isExample);
+
+  let resolvingConflict = $state(false);
+  async function resolveConflict(mode: 'overwrite' | 'reload') {
+    resolvingConflict = true;
+    try {
+      await playbookStore.resolveConflict(mode);
+    } finally {
+      resolvingConflict = false;
+    }
+  }
 
   // Re-render every 15s so "Saved Xs ago" stays roughly current. Cheap
   // — the parent is the always-mounted header.
@@ -189,6 +200,11 @@
     <span class="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300"
           title={saveState === 'retrying' ? lastSaveError ?? 'retrying…' : undefined}>
       {saveState === 'retrying' ? 'Retrying…' : 'Saving…'}
+    </span>
+  {:else if saveState === 'conflict'}
+    <span class="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200"
+          title="Another tab saved this draft — resolve below">
+      Conflict
     </span>
   {:else if saveState === 'error'}
     <span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:text-red-300"
@@ -390,5 +406,40 @@
         </li>
       {/each}
     </ul>
+  </div>
+{/if}
+
+<!-- Conflict resolution modal: a peer tab saved this draft while we
+     were editing. Show the situation and let the user choose. -->
+{#if conflict && saveState === 'conflict'}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div class="w-[32rem] max-w-full rounded-md border border-amber-300 bg-[var(--bg-canvas)] p-4 shadow-2xl dark:border-amber-700">
+      <h3 class="mb-1 text-sm font-semibold text-amber-700 dark:text-amber-300">Another tab saved this draft</h3>
+      <p class="mb-3 text-xs text-[var(--text-muted)]">
+        Server head is now revision #{conflict.server_revision_id}
+        (saved {fmtTs(conflict.server_updated_ts)}). Your local edits
+        are still in the editor — choose how to resolve.
+      </p>
+      <div class="flex flex-col gap-2 text-xs">
+        <button
+          type="button"
+          class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-1.5 text-left hover:bg-[var(--brand)]/10 disabled:opacity-50"
+          disabled={resolvingConflict}
+          onclick={() => resolveConflict('overwrite')}
+        >
+          <div class="font-medium text-[var(--text-default)]">Overwrite</div>
+          <div class="text-[10px] text-[var(--text-muted)]">Keep my edits and replace the server's revision. The peer's changes will be lost.</div>
+        </button>
+        <button
+          type="button"
+          class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-1.5 text-left hover:bg-[var(--brand)]/10 disabled:opacity-50"
+          disabled={resolvingConflict}
+          onclick={() => resolveConflict('reload')}
+        >
+          <div class="font-medium text-[var(--text-default)]">Reload theirs</div>
+          <div class="text-[10px] text-[var(--text-muted)]">Discard my local edits and load the server's version into the editor.</div>
+        </button>
+      </div>
+    </div>
   </div>
 {/if}

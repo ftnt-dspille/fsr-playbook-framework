@@ -379,6 +379,78 @@ describe('playbookStore — save mutation state machine', () => {
     expect(playbookStore.state.lastSaveError).toContain('400');
   });
 
+  it('409 from the server transitions to conflict and captures server state', async () => {
+    await openAndDirty((url, init) => {
+      if (url === '/api/playbooks/draft/wip' && init?.method === 'PUT') {
+        return new Response(JSON.stringify({
+          ok: false,
+          code: 'conflict',
+          message: 'revision mismatch',
+          server_revision_id: 42,
+          server_updated_ts: '2026-05-20T10:00:00Z',
+          server_yaml: 'peer: yes\n',
+        }), { status: 409 });
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    const r = await playbookStore.save({ reason: 'manual' });
+    expect(r.ok).toBe(false);
+    expect(playbookStore.state.saveState).toBe('conflict');
+    expect(playbookStore.state.conflict).toBeTruthy();
+    expect(playbookStore.state.conflict?.server_revision_id).toBe(42);
+    expect(playbookStore.state.conflict?.server_yaml).toBe('peer: yes\n');
+  });
+
+  it('resolveConflict("reload") adopts the server YAML and exits conflict', async () => {
+    await openAndDirty((url, init) => {
+      if (url === '/api/playbooks/draft/wip' && init?.method === 'PUT') {
+        return new Response(JSON.stringify({
+          ok: false, code: 'conflict', message: 'mismatch',
+          server_revision_id: 5, server_updated_ts: 't', server_yaml: 'peer\n'
+        }), { status: 409 });
+      }
+      if (url === '/api/playbooks/draft/wip/revisions') {
+        return { count: 0, revisions: [] };
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    await playbookStore.save({ reason: 'manual' });
+    const r = await playbookStore.resolveConflict('reload');
+    expect(r.ok).toBe(true);
+    expect(playbookStore.state.saveState).toBe('idle');
+    expect(playbookStore.currentYaml).toBe('peer\n');
+    expect(playbookStore.state.active?.revisionId).toBe(5);
+    expect(playbookStore.dirty).toBe(false);
+  });
+
+  it('resolveConflict("overwrite") adopts the server head and re-PUTs the local buffer', async () => {
+    let attempt = 0;
+    let lastIfMatch: string | null = null;
+    await openAndDirty((url, init) => {
+      if (url === '/api/playbooks/draft/wip' && init?.method === 'PUT') {
+        attempt++;
+        lastIfMatch = (init.headers as Record<string, string> | undefined)?.['If-Match'] ?? null;
+        if (attempt === 1) {
+          return new Response(JSON.stringify({
+            ok: false, code: 'conflict', message: 'mismatch',
+            server_revision_id: 9, server_updated_ts: 't', server_yaml: 'peer\n'
+          }), { status: 409 });
+        }
+        return new Response(JSON.stringify({ ok: true, revision_id: 10, updated_ts: 't' }), { status: 200 });
+      }
+      if (url === '/api/playbooks/draft/wip/revisions') return { count: 0, revisions: [] };
+      throw new Error(`unexpected ${url}`);
+    });
+    await playbookStore.save({ reason: 'manual' });
+    expect(playbookStore.state.saveState).toBe('conflict');
+    const r = await playbookStore.resolveConflict('overwrite');
+    expect(r.ok).toBe(true);
+    expect(playbookStore.state.saveState).toBe('saved-just-now');
+    // Second PUT carried If-Match=9 (the server's head as of the conflict).
+    expect(lastIfMatch).toBe('9');
+    expect(playbookStore.state.active?.revisionId).toBe(10);
+  });
+
   it('retrySave() clears error and re-attempts', async () => {
     vi.useFakeTimers();
     try {

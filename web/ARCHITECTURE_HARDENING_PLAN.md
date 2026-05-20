@@ -1,8 +1,18 @@
-# Architecture Hardening Plan
+# Architecture Hardening Plan — DONE
 
-Targets the four highest-payoff items from the architecture review.
-Single-user scope today; multi-user *capable* later (don't paint
-ourselves into a corner that blocks per-user isolation).
+All four items shipped. Final tallies: frontend 387 tests, backend 182,
+E2E 19 (588 total) all green, svelte-check 0 errors / 0 warnings.
+
+| Item | Status | Highlights |
+|---|---|---|
+| 1. Collapse YAML sources of truth | ✅ | 5 buffers → 1 (`playbookStore.currentYaml` / `replaceYaml`). `yamlStore` + `pageBindings.svelte.ts` deleted. `visualStore.renderToYaml` writes straight into the canonical buffer. Bonus: fixed 12 jsdom unhandled rejections from MonacoCode/MonacoYaml async-mount race. |
+| 2. Save mutation primitive | ✅ | `saveState` machine (`idle`/`pending`/`saving`/`retrying`/`error`/`conflict`/`saved-just-now`). Exp backoff on transient (5xx + network). Single-flight w/ post-save edit pickup so no edit is ever lost. `online` listener auto-retries on reconnect. Live pill + Retry button in `PlaybookHeader`. |
+| 3. Optimistic concurrency | ✅ | `drafts.head_revision_id` + online migration. PUT honors `If-Match`; 409 carries `{server_revision_id, server_updated_ts, server_yaml}`. Frontend surfaces a conflict modal with Overwrite / Reload-theirs. |
+| 4. Revision pruning | ✅ | Tiered retention for auto-saves (1min/10min/1hr/1day buckets across hour/day/week/month; >30d dropped). Manual saves kept forever. Atomic with the insert. New `(draft_name, is_auto, created_ts)` index. |
+
+See per-item details below for the implementation record.
+
+---
 
 ## Item 1 — Collapse the YAML sources of truth
 

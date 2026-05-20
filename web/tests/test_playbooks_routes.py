@@ -268,10 +268,11 @@ def test_pruning_collapses_old_auto_revisions_into_buckets(client):
         json={"yaml": "trigger\n", "reason": "trigger", "auto": True},
     )
 
-    # 12 revisions spanning 60 minutes, bucketed at 10min → 6 buckets
-    # survive (plus the just-inserted "trigger" revision which is in
-    # the youngest tier still <1min old, so it's exempt). The total
-    # count of backdated auto-revisions still present should be <= 6.
+    # 12 revisions spaced 5min apart across a 55-minute window,
+    # bucketed at 10min → 6 or 7 surviving buckets depending on
+    # wall-clock alignment (a window that crosses an extra 10-minute
+    # boundary picks up one more bucket). Upper bound is 7; lower
+    # bound is 1 (the window shouldn't vanish entirely).
     import sqlite3
     conn = sqlite3.connect(pb_routes.DRAFTS_DB)
     surviving = conn.execute(
@@ -281,9 +282,11 @@ def test_pruning_collapses_old_auto_revisions_into_buckets(client):
         inserted_ids,
     ).fetchone()[0]
     conn.close()
-    assert surviving <= 6, f"expected <=6 buckets in the day tier, got {surviving}"
-    # And we must have kept at least one (the whole window shouldn't vanish).
-    assert surviving >= 1
+    assert surviving <= 7, f"expected <=7 buckets in the day tier, got {surviving}"
+    assert surviving >= 1, "the day-tier window should not vanish entirely"
+    # Most of the 12 inputs must have been pruned (otherwise the
+    # bucketing isn't doing anything).
+    assert surviving <= 7 and surviving < 12
 
 
 def test_pruning_drops_auto_revisions_older_than_one_month(client):
@@ -318,6 +321,105 @@ def test_pruning_drops_auto_revisions_older_than_one_month(client):
     ).fetchone()
     conn.close()
     assert row is None, "auto-revision older than 30d should have been pruned"
+
+
+def test_get_and_put_return_revision_id_for_if_match(client):
+    """GET surfaces the head revision id; PUT returns the freshly
+    inserted one so the client can update its local pointer."""
+    r1 = client.put(
+        "/api/playbooks/draft/concurrent",
+        json={"yaml": "v: 1\n", "reason": "first", "auto": False},
+    )
+    rev1 = r1.json()["revision_id"]
+
+    g = client.get("/api/playbooks/draft/concurrent")
+    assert g.status_code == 200
+    assert g.json()["revision_id"] == rev1
+
+
+def test_put_with_matching_if_match_succeeds(client):
+    r1 = client.put(
+        "/api/playbooks/draft/match_ok",
+        json={"yaml": "v: 1\n", "reason": "first", "auto": False},
+    )
+    rev1 = r1.json()["revision_id"]
+
+    r2 = client.put(
+        "/api/playbooks/draft/match_ok",
+        headers={"If-Match": str(rev1)},
+        json={"yaml": "v: 2\n", "reason": "second", "auto": False},
+    )
+    assert r2.status_code == 200
+    rev2 = r2.json()["revision_id"]
+    assert rev2 != rev1
+    assert client.get("/api/playbooks/draft/match_ok").json()["revision_id"] == rev2
+
+
+def test_put_with_stale_if_match_returns_409_and_server_state(client):
+    """The conflict response is the recoverable contract: it must carry
+    the server's current YAML + revision id so the UI can present
+    diff / overwrite / reload choices without a follow-up GET."""
+    r1 = client.put(
+        "/api/playbooks/draft/conflict",
+        json={"yaml": "v: 1\n", "reason": "first", "auto": False},
+    )
+    rev1 = r1.json()["revision_id"]
+
+    # Peer tab saves first (no If-Match — simulates an existing client
+    # that hasn't been upgraded yet, or an explicit Overwrite).
+    r2 = client.put(
+        "/api/playbooks/draft/conflict",
+        json={"yaml": "v: peer\n", "reason": "peer", "auto": False},
+    )
+    rev2 = r2.json()["revision_id"]
+    assert rev2 != rev1
+
+    # Stale tab now tries to save with the original revision id.
+    r3 = client.put(
+        "/api/playbooks/draft/conflict",
+        headers={"If-Match": str(rev1)},
+        json={"yaml": "v: stale\n", "reason": "stale", "auto": False},
+    )
+    assert r3.status_code == 409
+    body = r3.json()
+    assert body["code"] == "conflict"
+    assert body["server_revision_id"] == rev2
+    assert body["server_yaml"] == "v: peer\n"
+
+
+def test_put_without_if_match_overwrites_unconditionally(client):
+    """The 'Overwrite' resolution path: client retries the PUT without
+    If-Match, server accepts."""
+    r1 = client.put(
+        "/api/playbooks/draft/overwrite",
+        json={"yaml": "v: 1\n", "reason": "first", "auto": False},
+    )
+    rev1 = r1.json()["revision_id"]
+    r_peer = client.put(
+        "/api/playbooks/draft/overwrite",
+        json={"yaml": "v: peer\n", "reason": "peer", "auto": False},
+    )
+    assert r_peer.json()["revision_id"] != rev1
+
+    r_force = client.put(
+        "/api/playbooks/draft/overwrite",
+        json={"yaml": "v: forced\n", "reason": "overwrite", "auto": False},
+    )
+    assert r_force.status_code == 200
+    assert client.get("/api/playbooks/draft/overwrite").json()["yaml"] == "v: forced\n"
+
+
+def test_put_with_garbage_if_match_returns_400(client):
+    client.put(
+        "/api/playbooks/draft/badmatch",
+        json={"yaml": "v: 1\n", "reason": "first", "auto": False},
+    )
+    r = client.put(
+        "/api/playbooks/draft/badmatch",
+        headers={"If-Match": "not-a-number"},
+        json={"yaml": "v: 2\n", "auto": False},
+    )
+    assert r.status_code == 400
 
 
 def test_get_example_serves_disk_yaml(client):

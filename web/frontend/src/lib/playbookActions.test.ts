@@ -50,7 +50,8 @@ function seedYaml(yaml: string) {
     kind: 'draft',
     name: 'fixture',
     savedYaml: yaml,
-    yaml
+    yaml,
+    revisionId: null,
   };
 }
 

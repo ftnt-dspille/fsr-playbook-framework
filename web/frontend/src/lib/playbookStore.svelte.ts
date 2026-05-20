@@ -23,6 +23,8 @@ import {
   cloneExample as cloneExampleApi,
   deleteDraft as deleteDraftApi,
   SaveError,
+  ConflictError,
+  type ConflictPayload,
   type PlaybookKind,
   type PlaybookListItem,
   type DraftRevision
@@ -39,6 +41,12 @@ type ActiveDoc = {
   savedYaml: string;
   /** Live editor buffer. Both modes read/write this. */
   yaml: string;
+  /** Server's head revision id at the time of last successful load /
+   *  save. Sent as `If-Match` on subsequent PUTs so the server can
+   *  reject a save that would overwrite a peer tab's edit. `null`
+   *  for examples (no draft head) and freshly-cloned drafts whose
+   *  initial revision the client hasn't roundtripped yet. */
+  revisionId: number | null;
 };
 
 /** Live state of the save mutation. Drives the header pill. */
@@ -48,6 +56,7 @@ export type SaveState =
   | 'saving'            // PUT in flight (first attempt)
   | 'retrying'          // last attempt failed transient; backing off
   | 'error'             // permanent failure / retries exhausted; awaits user
+  | 'conflict'          // peer tab raced us; server has a newer head
   | 'saved-just-now';   // fades back to 'idle' after a short delay
 
 type State = {
@@ -61,6 +70,9 @@ type State = {
   saveState: SaveState;
   /** Last save error message (for the 'error' state). Null otherwise. */
   lastSaveError: string | null;
+  /** Server state from the last 409 response. Drives the conflict
+   *  resolution modal. Null when not in 'conflict'. */
+  conflict: ConflictPayload | null;
   /** Epoch ms of the last successful save. Drives "Saved Xs ago". */
   lastSavedAt: number | null;
   /** Mirrors `saveState === 'saving' || 'retrying'` for callers that
@@ -78,6 +90,7 @@ const state = $state<State>({
   loading: false,
   saveState: 'idle',
   lastSaveError: null,
+  conflict: null,
   lastSavedAt: null,
   saving: false,
   error: null
@@ -153,31 +166,51 @@ async function runSave(opts: SaveOpts): Promise<{ ok: boolean; message?: string 
   const name = state.active.name;
   const snapshotYaml = state.active.yaml;
 
+  // Send the current revisionId so the server can detect a peer-tab
+  // race. Skipped when null (first save after create, or an explicit
+  // Overwrite resolution that cleared it).
+  const ifMatch = state.active.revisionId;
   try {
-    await putDraft(name, snapshotYaml, opts);
+    const resp = await putDraft(name, snapshotYaml, {
+      reason: opts.reason,
+      auto: opts.auto,
+      ifMatch: typeof ifMatch === 'number' ? ifMatch : null,
+    });
     if (state.active && state.active.name === name) {
       state.active.savedYaml = snapshotYaml;
+      state.active.revisionId = resp.revision_id;
     }
     state.lastSaveError = null;
     state.error = null;
+    state.conflict = null;
     state.lastSavedAt = Date.now();
     retryAttempt = 0;
     setSaveState('saved-just-now');
     scheduleFadeToIdle();
-    // Refresh revisions out-of-band; non-fatal if it fails.
     listDraftRevisions(name)
       .then((rl) => { if (state.active?.name === name) state.revisions = rl.revisions; })
       .catch(() => {});
     void playbookStore.refresh();
     inFlight = false;
-    // Pick up any edits that landed during the await.
     if (state.active && state.active.yaml !== state.active.savedYaml) {
-      // Re-run with the same opts (auto flag, etc).
       void runSave(opts);
     }
     return { ok: true };
   } catch (e) {
     inFlight = false;
+
+    // 409: peer tab beat us. Park the buffer + server state in
+    // `state.conflict` for the resolution UI; don't retry — the user
+    // must choose Overwrite vs Reload.
+    if (e instanceof ConflictError) {
+      state.conflict = e.payload;
+      state.lastSaveError = e.message;
+      state.error = state.lastSaveError;
+      retryAttempt = 0;
+      setSaveState('conflict');
+      return { ok: false, message: e.message };
+    }
+
     const err = e as Error & { transient?: boolean };
     const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
     const transient = (err instanceof SaveError && err.transient) || offline;
@@ -187,7 +220,6 @@ async function runSave(opts: SaveOpts): Promise<{ ok: boolean; message?: string 
     if (transient && retryAttempt < SAVE_MAX_RETRIES) {
       retryAttempt++;
       setSaveState('retrying');
-      // Exp backoff: 1s, 2s, 4s, 8s, 16s (capped at 30s).
       const delay = Math.min(30_000, 1000 * 2 ** (retryAttempt - 1));
       clearTimer(retryTimer);
       retryTimer = setTimeout(() => { void runSave(currentOpts); }, delay);
@@ -258,13 +290,15 @@ export const playbookStore = {
         kind,
         name,
         savedYaml: fetched.yaml,
-        yaml: fetched.yaml
+        yaml: fetched.yaml,
+        revisionId: kind === 'draft' ? (fetched as { revision_id?: number }).revision_id ?? null : null
       };
       state.revisions = [];
-      // A previous draft's transient error must not bleed into the
+      // A previous draft's error / conflict must not bleed into the
       // newly-opened doc's pill.
       state.lastSaveError = null;
       state.error = null;
+      state.conflict = null;
       retryAttempt = 0;
       clearTimer(retryTimer);
       setSaveState('idle');
@@ -339,6 +373,43 @@ export const playbookStore = {
       debounceTimer = null;
       void runSave(opts);
     }, SAVE_DEBOUNCE_MS);
+  },
+
+  /** Resolve the 'conflict' state. Two modes:
+   *   - 'overwrite': drop the If-Match and PUT again, blowing away
+   *     the peer's edits. Use when the current buffer is what the user
+   *     intends to ship.
+   *   - 'reload': discard the local buffer and adopt the server's
+   *     YAML. Use when the peer's edit is the one to keep.
+   *
+   *  Either way clears the conflict state. */
+  async resolveConflict(mode: 'overwrite' | 'reload'): Promise<{ ok: boolean; message?: string }> {
+    if (state.saveState !== 'conflict' || !state.conflict || !state.active) {
+      return { ok: false, message: 'no active conflict' };
+    }
+    if (mode === 'reload') {
+      const server = state.conflict;
+      state.active.yaml = server.server_yaml;
+      state.active.savedYaml = server.server_yaml;
+      state.active.revisionId = server.server_revision_id;
+      state.conflict = null;
+      state.lastSaveError = null;
+      state.error = null;
+      setSaveState('idle');
+      // Refresh revisions so the Revisions drawer reflects the peer's save.
+      listDraftRevisions(state.active.name)
+        .then((rl) => { if (state.active) state.revisions = rl.revisions; })
+        .catch(() => {});
+      return { ok: true };
+    }
+    // overwrite: adopt the server's head id so our next PUT's If-Match
+    // matches; then run the save unconditionally.
+    state.active.revisionId = state.conflict.server_revision_id;
+    state.conflict = null;
+    state.lastSaveError = null;
+    state.error = null;
+    setSaveState('idle');
+    return runSave(currentOpts);
   },
 
   /** User clicked "Retry" after a failure. Clear the error and kick a
@@ -494,6 +565,7 @@ export const playbookStore = {
     state.revisions = [];
     state.error = null;
     state.lastSaveError = null;
+    state.conflict = null;
     state.lastSavedAt = null;
     setSaveState('idle');
   },
