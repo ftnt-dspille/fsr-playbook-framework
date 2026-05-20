@@ -40,7 +40,31 @@
   let revisions = $derived(playbookStore.state.revisions);
   let dirty = $derived(playbookStore.dirty);
   let saving = $derived(playbookStore.state.saving);
+  let saveState = $derived(playbookStore.state.saveState);
+  let lastSaveError = $derived(playbookStore.state.lastSaveError);
+  let lastSavedAt = $derived(playbookStore.state.lastSavedAt);
   let isExample = $derived(playbookStore.isExample);
+
+  // Re-render every 15s so "Saved Xs ago" stays roughly current. Cheap
+  // — the parent is the always-mounted header.
+  let savedAgoTick = $state(0);
+  $effect(() => {
+    if (saveState !== 'saved-just-now' && lastSavedAt === null) return;
+    const id = setInterval(() => savedAgoTick++, 15_000);
+    return () => clearInterval(id);
+  });
+
+  /** "Saved 3s ago" — coarse-grained so a clock-tick re-render isn't
+   *  required for every second. */
+  function savedAgo(ts: number | null): string {
+    if (ts === null) return '';
+    void savedAgoTick;  // subscribe
+    const dt = Math.max(0, Date.now() - ts);
+    if (dt < 5_000) return 'just now';
+    if (dt < 60_000) return `${Math.round(dt / 1000)}s ago`;
+    if (dt < 60 * 60_000) return `${Math.round(dt / 60_000)}m ago`;
+    return `${Math.round(dt / 3_600_000)}h ago`;
+  }
 
   onMount(() => {
     void playbookStore.refresh();
@@ -161,7 +185,27 @@
     <span aria-hidden="true" class="text-[var(--text-faint)]">▾</span>
   </button>
 
-  {#if dirty}
+  {#if saveState === 'saving' || saveState === 'retrying'}
+    <span class="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300"
+          title={saveState === 'retrying' ? lastSaveError ?? 'retrying…' : undefined}>
+      {saveState === 'retrying' ? 'Retrying…' : 'Saving…'}
+    </span>
+  {:else if saveState === 'error'}
+    <span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:text-red-300"
+          title={lastSaveError ?? 'save failed'}>
+      Save failed
+    </span>
+    <button
+      type="button"
+      class="rounded border border-red-300 px-1.5 py-0.5 text-[10px] font-medium text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950"
+      onclick={() => playbookStore.retrySave()}
+      title="Retry the failed save"
+    >Retry</button>
+  {:else if saveState === 'saved-just-now'}
+    <span class="rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-300">
+      Saved {savedAgo(lastSavedAt)}
+    </span>
+  {:else if dirty}
     <span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">unsaved</span>
   {/if}
 

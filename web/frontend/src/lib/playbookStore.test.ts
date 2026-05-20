@@ -293,3 +293,117 @@ describe('playbookStore', () => {
     expect(playbookStore.state.active).toBeNull();
   });
 });
+
+
+describe('playbookStore — save mutation state machine', () => {
+  /** Spin up a draft + drive its YAML buffer; returns the put-call
+   *  counter so retry tests can assert the number of PUT attempts. */
+  async function openAndDirty(handler: (url: string, init?: RequestInit) => any) {
+    mockFetch((url, init) => {
+      if (url === '/api/playbooks/draft/wip' && (init?.method ?? 'GET') === 'GET') {
+        return { kind: 'draft', name: 'wip', yaml: 'a: 1\n', created_ts: 't', updated_ts: 't' };
+      }
+      if (url === '/api/playbooks/draft/wip/revisions' && (init?.method ?? 'GET') === 'GET') {
+        return { count: 0, revisions: [] };
+      }
+      if (url === '/api/playbooks') {
+        return { count: 0, items: [] };
+      }
+      return handler(url, init);
+    });
+    await playbookStore.open('draft', 'wip');
+    playbookStore.replaceYaml('a: 2\n');
+  }
+
+  it('save() transitions idle → saving → saved-just-now on success', async () => {
+    await openAndDirty((url, init) => {
+      if (url === '/api/playbooks/draft/wip' && init?.method === 'PUT') {
+        return { ok: true, revision_id: 1, updated_ts: 't' };
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    expect(playbookStore.state.saveState).toBe('idle');
+    const r = await playbookStore.save({ reason: 'manual' });
+    expect(r.ok).toBe(true);
+    expect(playbookStore.state.saveState).toBe('saved-just-now');
+    expect(playbookStore.state.lastSavedAt).toBeTypeOf('number');
+    expect(playbookStore.state.lastSaveError).toBeNull();
+  });
+
+  it('retries with backoff on transient 5xx then succeeds', async () => {
+    vi.useFakeTimers();
+    try {
+      let attempt = 0;
+      await openAndDirty((url, init) => {
+        if (url === '/api/playbooks/draft/wip' && init?.method === 'PUT') {
+          attempt++;
+          if (attempt < 3) return new Response('upstream down', { status: 502 });
+          return new Response(JSON.stringify({ ok: true, revision_id: attempt, updated_ts: 't' }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      });
+      // Kick the save; first attempt 502s → retrying with 1s backoff.
+      const pending = playbookStore.save({ reason: 'manual' });
+      // Drive the timers: backoff 1s, then 2s.
+      await vi.advanceTimersByTimeAsync(0);   // first PUT
+      expect(playbookStore.state.saveState).toBe('retrying');
+      await vi.advanceTimersByTimeAsync(1100); // retry #1 fires
+      expect(playbookStore.state.saveState).toBe('retrying');
+      await vi.advanceTimersByTimeAsync(2100); // retry #2 fires → succeeds
+      const r = await pending;
+      // save() returns from the FIRST runSave invocation; in this
+      // model that's the transient-fail return. The state machine
+      // continued retrying afterwards and ultimately succeeded —
+      // assertable via saveState.
+      void r;
+      expect(playbookStore.state.saveState).toBe('saved-just-now');
+      expect(attempt).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('permanent 4xx surfaces an error state without retrying', async () => {
+    let attempt = 0;
+    await openAndDirty((url, init) => {
+      if (url === '/api/playbooks/draft/wip' && init?.method === 'PUT') {
+        attempt++;
+        return new Response('bad name', { status: 400 });
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    const r = await playbookStore.save({ reason: 'manual' });
+    expect(r.ok).toBe(false);
+    expect(playbookStore.state.saveState).toBe('error');
+    expect(attempt).toBe(1);
+    expect(playbookStore.state.lastSaveError).toContain('400');
+  });
+
+  it('retrySave() clears error and re-attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      let fail = true;
+      await openAndDirty((url, init) => {
+        if (url === '/api/playbooks/draft/wip' && init?.method === 'PUT') {
+          if (fail) return new Response('nope', { status: 400 });
+          return new Response(JSON.stringify({ ok: true, revision_id: 1, updated_ts: 't' }), { status: 200 });
+        }
+        throw new Error(`unexpected ${url}`);
+      });
+      await playbookStore.save({ reason: 'manual' });
+      expect(playbookStore.state.saveState).toBe('error');
+
+      // Flip to success and retry.
+      fail = false;
+      playbookStore.retrySave();
+      await vi.advanceTimersByTimeAsync(0);
+      // Drain microtasks for the in-flight fetch + state updates.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(playbookStore.state.saveState).toBe('saved-just-now');
+      expect(playbookStore.state.lastSaveError).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

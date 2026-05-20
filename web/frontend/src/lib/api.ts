@@ -766,13 +766,37 @@ export async function getDraft(name: string): Promise<{ kind: 'draft'; name: str
   return r.json();
 }
 
+/** Thrown by `putDraft` (and any other mutation that wants retry-aware
+ *  behavior). `transient` flags errors the save mutation should retry:
+ *  network failures + 5xx. 4xx is treated as permanent — those usually
+ *  mean validation / auth / route-not-found and won't change on retry. */
+export class SaveError extends Error {
+  status: number | 'network';
+  transient: boolean;
+  constructor(message: string, status: number | 'network') {
+    super(message);
+    this.name = 'SaveError';
+    this.status = status;
+    this.transient = status === 'network' || (typeof status === 'number' && status >= 500);
+  }
+}
+
 export async function putDraft(name: string, yaml: string, opts: { reason?: string; auto?: boolean } = {}): Promise<{ ok: boolean; revision_id: number; updated_ts: string }> {
-  const r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ yaml, reason: opts.reason ?? null, auto: !!opts.auto })
-  });
-  if (!r.ok) throw new Error(`draft put ${r.status}`);
+  let r: Response;
+  try {
+    r = await fetch(`/api/playbooks/draft/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml, reason: opts.reason ?? null, auto: !!opts.auto })
+    });
+  } catch (e) {
+    // fetch only throws on network failure (DNS, offline, CORS preflight).
+    throw new SaveError(`network: ${(e as Error).message}`, 'network');
+  }
+  if (!r.ok) {
+    const detail = await r.text().catch(() => '');
+    throw new SaveError(`draft put ${r.status}${detail ? `: ${detail}` : ''}`, r.status);
+  }
   return r.json();
 }
 

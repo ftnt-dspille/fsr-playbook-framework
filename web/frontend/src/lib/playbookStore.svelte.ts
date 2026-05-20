@@ -22,6 +22,7 @@ import {
   getDraftRevision,
   cloneExample as cloneExampleApi,
   deleteDraft as deleteDraftApi,
+  SaveError,
   type PlaybookKind,
   type PlaybookListItem,
   type DraftRevision
@@ -40,6 +41,15 @@ type ActiveDoc = {
   yaml: string;
 };
 
+/** Live state of the save mutation. Drives the header pill. */
+export type SaveState =
+  | 'idle'              // clean buffer; nothing to do
+  | 'pending'           // debounce timer armed, waiting to fire
+  | 'saving'            // PUT in flight (first attempt)
+  | 'retrying'          // last attempt failed transient; backing off
+  | 'error'             // permanent failure / retries exhausted; awaits user
+  | 'saved-just-now';   // fades back to 'idle' after a short delay
+
 type State = {
   active: ActiveDoc | null;
   drafts: PlaybookListItem[];
@@ -48,7 +58,15 @@ type State = {
    * when active is an example or no draft loaded yet. */
   revisions: DraftRevision[];
   loading: boolean;
+  saveState: SaveState;
+  /** Last save error message (for the 'error' state). Null otherwise. */
+  lastSaveError: string | null;
+  /** Epoch ms of the last successful save. Drives "Saved Xs ago". */
+  lastSavedAt: number | null;
+  /** Mirrors `saveState === 'saving' || 'retrying'` for callers that
+   *  just need a boolean (existing UI / tests). */
   saving: boolean;
+  /** @deprecated use `lastSaveError`. Kept for transitional callers. */
   error: string | null;
 };
 
@@ -58,9 +76,142 @@ const state = $state<State>({
   examples: [],
   revisions: [],
   loading: false,
+  saveState: 'idle',
+  lastSaveError: null,
+  lastSavedAt: null,
   saving: false,
   error: null
 });
+
+// --- Save mutation machine (module-scoped because it's mechanical
+// timing state — not part of the reactive surface). ---
+const SAVE_DEBOUNCE_MS = 1000;
+const SAVE_MAX_RETRIES = 5;
+const SAVED_FADE_MS = 3000;
+
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let fadeTimer: ReturnType<typeof setTimeout> | null = null;
+let inFlight = false;
+let retryAttempt = 0;
+/** Options the current run started with — reused for retry / queued
+ *  re-runs so the same getLatestYaml / reason / auto flag stick. */
+let currentOpts: SaveOpts = {};
+let onlineListenerAttached = false;
+
+type SaveOpts = { reason?: string; auto?: boolean; getLatestYaml?: () => Promise<string> };
+
+function setSaveState(next: SaveState) {
+  state.saveState = next;
+  state.saving = next === 'saving' || next === 'retrying';
+}
+
+function clearTimer(t: ReturnType<typeof setTimeout> | null) {
+  if (t) clearTimeout(t);
+}
+
+function scheduleFadeToIdle() {
+  clearTimer(fadeTimer);
+  fadeTimer = setTimeout(() => {
+    if (state.saveState === 'saved-just-now') setSaveState('idle');
+  }, SAVED_FADE_MS);
+}
+
+/** Single-flight save core. Manages retries; on success, re-runs itself
+ *  if the buffer drifted during the await so no edit is ever lost. */
+async function runSave(opts: SaveOpts): Promise<{ ok: boolean; message?: string }> {
+  if (inFlight) {
+    // Edits during in-flight: just leave the buffer dirty. The current
+    // run's success path checks `yaml !== savedYaml` and recurses.
+    return { ok: false, message: 'save already in flight' };
+  }
+  if (!state.active) return { ok: false, message: 'no playbook loaded' };
+  if (state.active.kind === 'example') {
+    return { ok: false, message: 'examples are read-only — clone to a draft first' };
+  }
+
+  // Let the caller (autosave from the page) flush a peer surface
+  // (e.g. visual canvas) so we save the freshest YAML rather than the
+  // pre-flush buffer.
+  if (opts.getLatestYaml) {
+    try {
+      const latest = await opts.getLatestYaml();
+      if (typeof latest === 'string' && latest !== state.active.yaml) {
+        state.active.yaml = latest;
+      }
+    } catch { /* fall back to current buffer */ }
+  }
+
+  if (state.active.yaml === state.active.savedYaml) {
+    setSaveState('idle');
+    return { ok: true, message: 'no changes' };
+  }
+
+  inFlight = true;
+  currentOpts = opts;
+  setSaveState(retryAttempt > 0 ? 'retrying' : 'saving');
+  const name = state.active.name;
+  const snapshotYaml = state.active.yaml;
+
+  try {
+    await putDraft(name, snapshotYaml, opts);
+    if (state.active && state.active.name === name) {
+      state.active.savedYaml = snapshotYaml;
+    }
+    state.lastSaveError = null;
+    state.error = null;
+    state.lastSavedAt = Date.now();
+    retryAttempt = 0;
+    setSaveState('saved-just-now');
+    scheduleFadeToIdle();
+    // Refresh revisions out-of-band; non-fatal if it fails.
+    listDraftRevisions(name)
+      .then((rl) => { if (state.active?.name === name) state.revisions = rl.revisions; })
+      .catch(() => {});
+    void playbookStore.refresh();
+    inFlight = false;
+    // Pick up any edits that landed during the await.
+    if (state.active && state.active.yaml !== state.active.savedYaml) {
+      // Re-run with the same opts (auto flag, etc).
+      void runSave(opts);
+    }
+    return { ok: true };
+  } catch (e) {
+    inFlight = false;
+    const err = e as Error & { transient?: boolean };
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    const transient = (err instanceof SaveError && err.transient) || offline;
+    state.lastSaveError = err.message ?? 'save failed';
+    state.error = state.lastSaveError;
+
+    if (transient && retryAttempt < SAVE_MAX_RETRIES) {
+      retryAttempt++;
+      setSaveState('retrying');
+      // Exp backoff: 1s, 2s, 4s, 8s, 16s (capped at 30s).
+      const delay = Math.min(30_000, 1000 * 2 ** (retryAttempt - 1));
+      clearTimer(retryTimer);
+      retryTimer = setTimeout(() => { void runSave(currentOpts); }, delay);
+      return { ok: false, message: state.lastSaveError ?? undefined };
+    }
+
+    retryAttempt = 0;
+    setSaveState('error');
+    return { ok: false, message: state.lastSaveError ?? undefined };
+  }
+}
+
+/** Attach the navigator online listener once. When the browser comes
+ *  back online while we're in 'error', kick a retry automatically. */
+function ensureOnlineListener() {
+  if (onlineListenerAttached) return;
+  if (typeof window === 'undefined') return;
+  onlineListenerAttached = true;
+  window.addEventListener('online', () => {
+    if (state.saveState === 'error' && state.active && state.active.yaml !== state.active.savedYaml) {
+      playbookStore.retrySave();
+    }
+  });
+}
 
 function bucket(items: PlaybookListItem[]) {
   const drafts: PlaybookListItem[] = [];
@@ -110,6 +261,13 @@ export const playbookStore = {
         yaml: fetched.yaml
       };
       state.revisions = [];
+      // A previous draft's transient error must not bleed into the
+      // newly-opened doc's pill.
+      state.lastSaveError = null;
+      state.error = null;
+      retryAttempt = 0;
+      clearTimer(retryTimer);
+      setSaveState('idle');
       if (kind === 'draft') {
         try {
           const rl = await listDraftRevisions(name);
@@ -156,36 +314,45 @@ export const playbookStore = {
   },
 
   /** Persist the live buffer as a new revision on the active draft.
-   * `auto=true` flags it as a system-fired snapshot (mode switch /
-   * picker change / deploy). Examples have no save path — they must be
-   * cloned first. */
-  async save(opts: { reason?: string; auto?: boolean } = {}): Promise<{ ok: boolean; message?: string }> {
-    if (!state.active) return { ok: false, message: 'no playbook loaded' };
-    if (state.active.kind === 'example') {
-      return { ok: false, message: 'examples are read-only — clone to a draft first' };
+   *  Flushes any debounce timer + waits for the save to settle (or
+   *  enter 'error'), then returns. Goes through the same retry-aware
+   *  state machine the autosave uses.
+   *
+   *  Used by the manual Save button — autosave should call
+   *  `requestSave` instead so rapid edits coalesce. */
+  async save(opts: { reason?: string; auto?: boolean; getLatestYaml?: () => Promise<string> } = {}): Promise<{ ok: boolean; message?: string }> {
+    clearTimer(debounceTimer);
+    debounceTimer = null;
+    return runSave(opts);
+  },
+
+  /** Schedule a save: arms (or re-arms) the debounce timer so a flurry
+   *  of edits coalesces into one PUT. Cheap to call from every
+   *  keystroke / canvas mutation. */
+  requestSave(opts: SaveOpts = {}): void {
+    ensureOnlineListener();
+    if (!state.active || state.active.kind === 'example') return;
+    currentOpts = opts;
+    setSaveState('pending');
+    clearTimer(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      void runSave(opts);
+    }, SAVE_DEBOUNCE_MS);
+  },
+
+  /** User clicked "Retry" after a failure. Clear the error and kick a
+   *  fresh save immediately. */
+  retrySave(): { ok: boolean } {
+    if (state.saveState !== 'error' && state.saveState !== 'retrying') {
+      return { ok: false };
     }
-    // No-op when the buffer matches what's already persisted — otherwise
-    // every Save click spawns an identical revision.
-    if (state.active.yaml === state.active.savedYaml) {
-      return { ok: true, message: 'no changes' };
-    }
-    state.saving = true;
+    clearTimer(retryTimer);
+    retryAttempt = 0;
+    state.lastSaveError = null;
     state.error = null;
-    try {
-      await putDraft(state.active.name, state.active.yaml, opts);
-      state.active.savedYaml = state.active.yaml;
-      // Refresh revisions so the drawer reflects the new entry.
-      const rl = await listDraftRevisions(state.active.name);
-      state.revisions = rl.revisions;
-      // Picker `updated_ts` likely changed too.
-      void this.refresh();
-      return { ok: true };
-    } catch (e) {
-      state.error = (e as Error).message;
-      return { ok: false, message: state.error ?? undefined };
-    } finally {
-      state.saving = false;
-    }
+    void runSave(currentOpts);
+    return { ok: true };
   },
 
   /** Convenience: snapshot the current buffer as an auto-revision and
@@ -284,42 +451,51 @@ export const playbookStore = {
       if (a) opts.onActiveLoaded?.(a.yaml);
     });
 
-    // Debounced autosave. Any source of dirtiness (CLI keystroke,
-    // visual edit) re-arms a 1s timer; on fire we persist and re-run
-    // analyze + verify so badges/status reflect the saved buffer.
-    let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
-    let autosaveInFlight = false;
+    // Autosave: any source of dirtiness (CLI keystroke or visual edit)
+    // arms the save mutation. The mutation owns debounce timing,
+    // single-flight, retries, and error state — this effect just says
+    // "there's work to do".
     $effect(() => {
       const dirty = visualStore.state.dirty || this.dirty;
       const active = state.active;
       if (!dirty || !active || active.kind === 'example') return;
-      if (autosaveTimer) clearTimeout(autosaveTimer);
-      autosaveTimer = setTimeout(async () => {
-        if (autosaveInFlight) return;
-        autosaveInFlight = true;
-        try {
-          const latest = opts.getLatestYaml
-            ? await opts.getLatestYaml()
-            : this.currentYaml;
-          if (typeof latest === 'string') this.replaceYaml(latest, 'autosave-flush');
-          await this.save({ reason: 'autosave', auto: true });
-          visualStore.state.dirty = false;
-          if (!playbookActions.analyzeBusy) void playbookActions.analyze();
-          if (!playbookActions.verifyBusy) void playbookActions.runVerify();
-        } catch {
-          // Manual save still available; errors surface via normal channels.
-        } finally {
-          autosaveInFlight = false;
-        }
-      }, 1000);
+      this.requestSave({
+        reason: 'autosave',
+        auto: true,
+        getLatestYaml: opts.getLatestYaml
+      });
+    });
+
+    // After each successful save, fire analyze + verify so badges /
+    // status dot reflect the freshly-persisted buffer, and clear the
+    // visualStore dirty flag so a quick second edit can re-arm.
+    let lastSavedAtSeen: number | null = null;
+    $effect(() => {
+      const t = state.lastSavedAt;
+      if (t === null || t === lastSavedAtSeen) return;
+      lastSavedAtSeen = t;
+      visualStore.state.dirty = false;
+      if (!playbookActions.analyzeBusy) void playbookActions.analyze();
+      if (!playbookActions.verifyBusy) void playbookActions.runVerify();
     });
   },
 
-  /** Clear the active doc (used by replay flows / explicit "new"). */
+  /** Clear the active doc (used by replay flows / explicit "new").
+   *  Also cancels any in-flight or scheduled save — the buffer is
+   *  gone, so there's nothing left to persist. */
   reset(): void {
+    clearTimer(debounceTimer); debounceTimer = null;
+    clearTimer(retryTimer);    retryTimer = null;
+    clearTimer(fadeTimer);     fadeTimer = null;
+    inFlight = false;
+    retryAttempt = 0;
+    currentOpts = {};
     state.active = null;
     state.revisions = [];
     state.error = null;
+    state.lastSaveError = null;
+    state.lastSavedAt = null;
+    setSaveState('idle');
   },
 
 };
