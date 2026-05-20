@@ -102,6 +102,42 @@ def test_missing_field_on_set_variable_output():
     assert "missing_field_on_step_output" in codes
 
 
+def test_missing_field_case_mismatch_emits_did_you_mean():
+    """Regression: agent typed `.Known` but the field is `known` —
+    diagnostic should surface the exact case-corrected suggestion."""
+    coll = _coll(
+        Step(id="start", type="start", name="Start", next="set"),
+        Step(id="set", type="set_variable", name="set",
+             arguments={"arg_list": [{"key": "known", "value": "1"}]},
+             next="use"),
+        Step(id="use", type="set_variable", name="use",
+             arguments={"arg_list": [{"key": "x",
+                                      "value": "{{ vars.steps.set.Known }}"}]}),
+    )
+    res = walk_playbook(coll)
+    d = next(d for d in res.diagnostics
+             if d.code == "missing_field_on_step_output")
+    assert "case-sensitive" in d.message
+    assert "'known'" in d.message
+
+
+def test_missing_field_fuzzy_emits_did_you_mean():
+    coll = _coll(
+        Step(id="start", type="start", name="Start", next="set"),
+        Step(id="set", type="set_variable", name="set",
+             arguments={"arg_list": [{"key": "username",
+                                      "value": "1"}]},
+             next="use"),
+        Step(id="use", type="set_variable", name="use",
+             arguments={"arg_list": [{"key": "x",
+                                      "value": "{{ vars.steps.set.usrname }}"}]}),
+    )
+    res = walk_playbook(coll)
+    d = next(d for d in res.diagnostics
+             if d.code == "missing_field_on_step_output")
+    assert "Did you mean" in d.message and "'username'" in d.message
+
+
 def test_decision_forks_into_two_branches():
     coll = _coll(
         Step(id="start", type="start", name="Start", next="d"),
@@ -272,4 +308,9 @@ def test_non_list_indexed_is_error():
                                        "value": "{{ vars.steps.set.scalar[0] }}"}]}),
     )
     res = walk_playbook(coll)
-    assert any(d.code == "non_list_indexed" for d in res.diagnostics)
+    d = next(d for d in res.diagnostics if d.code == "non_list_indexed")
+    # New diagnostic names the actual non-list shape so the agent can
+    # choose the right access pattern (drop the index for a scalar,
+    # use `.<attr>` for an object, etc.).
+    assert any(s in d.message for s in
+               ("scalar shape", "object shape", "any shape", "unknown shape"))

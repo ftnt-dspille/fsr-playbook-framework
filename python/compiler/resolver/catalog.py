@@ -146,6 +146,37 @@ class CatalogLookupMixin:
             (connector, op),
         ).fetchall()
         return [r["param_name"] for r in rows]
+    def operation_param_enum(
+        self, connector: str, op: str, param: str,
+    ) -> tuple[str | None, list[str] | None]:
+        """Return (type, allowed_values) for one param, or (None, None)
+        if not found. Allowed values are returned only when `type` is a
+        picklist-shaped widget (`select` / `multiselect`, plus the
+        observed typo variants) and `options_json` parses to a list of
+        strings. Otherwise `allowed_values` is None even when the type
+        is set."""
+        import json as _json
+        row = self.conn.execute(
+            "SELECT type, options_json FROM operation_params "
+            "WHERE connector_name = ? AND op_name = ? AND param_name = ?",
+            (connector, op, param),
+        ).fetchone()
+        if row is None:
+            return None, None
+        ptype = row["type"]
+        if (ptype or "").lower() not in {"select", "multiselect", "mutiselect"}:
+            return ptype, None
+        raw = row["options_json"]
+        if not raw:
+            return ptype, None
+        try:
+            opts = _json.loads(raw)
+        except Exception:  # noqa: BLE001
+            return ptype, None
+        if isinstance(opts, list) and all(isinstance(o, str) for o in opts):
+            return ptype, opts
+        return ptype, None
+
     def operation_param_rules(
         self, connector: str, op: str,
     ) -> list[tuple[str, str | None, str | None]]:

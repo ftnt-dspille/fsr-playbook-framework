@@ -111,6 +111,165 @@ def test_unknown_param(db_path):
     assert any(e.code is ErrorCode.UNKNOWN_PARAM for e in r.errors)
 
 
+def test_picklist_enum_rejected_with_did_you_mean(db_path):
+    """apivoid.dnspropagation.dns_record_type accepts ['A','AAAA','NS',
+    'MX','TXT','SRV','SOA','CNAME','SPF','CAA']. A near-miss value
+    should be rejected with a fuzzy suggestion."""
+    text = _yaml(
+        "        type: connector\n"
+        "        arguments:\n"
+        "          connector: apivoid\n"
+        "          operation: dnspropagation\n"
+        "          params:\n"
+        "            dns_record_type: AAA\n"
+    )
+    r = compile_yaml(text, db_path)
+    bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+           and "dns_record_type" in (e.message or "")]
+    assert bad, [e.to_dict() for e in r.errors]
+    assert "'AAAA'" in bad[0].message
+
+
+def test_picklist_enum_case_mismatch_emits_case_hint(db_path):
+    text = _yaml(
+        "        type: connector\n"
+        "        arguments:\n"
+        "          connector: apivoid\n"
+        "          operation: dnspropagation\n"
+        "          params:\n"
+        "            dns_record_type: aaaa\n"
+    )
+    r = compile_yaml(text, db_path)
+    bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+           and "dns_record_type" in (e.message or "")]
+    assert bad
+    assert "case-sensitive" in bad[0].message
+    assert "'AAAA'" in bad[0].message
+
+
+def test_picklist_jinja_value_skipped(db_path):
+    """Jinja-templated values are deferred to runtime — no static
+    enum complaint, since we can't resolve the expression."""
+    text = _yaml(
+        "        type: connector\n"
+        "        arguments:\n"
+        "          connector: apivoid\n"
+        "          operation: dnspropagation\n"
+        "          params:\n"
+        "            dns_record_type: \"{{ vars.input.params.t }}\"\n"
+    )
+    r = compile_yaml(text, db_path)
+    bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+           and "dns_record_type" in (e.message or "")
+           and "not in enum" in (e.message or "")]
+    assert not bad
+
+
+def test_integer_param_rejects_non_numeric_literal(db_path):
+    """aws-access-analyzer.list_analyzers.size is type=integer.
+    A non-numeric literal should be rejected at compile time."""
+    text = _yaml(
+        "        type: connector\n"
+        "        arguments:\n"
+        "          connector: aws-access-analyzer\n"
+        "          operation: list_analyzers\n"
+        "          params:\n"
+        "            type: ACCOUNT\n"
+        "            size: many\n"
+    )
+    r = compile_yaml(text, db_path)
+    bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+           and "size" in (e.message or "")
+           and "integer" in (e.message or "")]
+    assert bad, [e.to_dict() for e in r.errors]
+
+
+def test_integer_param_accepts_numeric_string(db_path):
+    text = _yaml(
+        "        type: connector\n"
+        "        arguments:\n"
+        "          connector: aws-access-analyzer\n"
+        "          operation: list_analyzers\n"
+        "          params:\n"
+        "            type: ACCOUNT\n"
+        "            size: \"25\"\n"
+    )
+    r = compile_yaml(text, db_path)
+    bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+           and "size" in (e.message or "")
+           and "integer" in (e.message or "")]
+    assert not bad
+
+
+def test_checkbox_param_rejects_arbitrary_string(db_path):
+    text = _yaml(
+        "        type: connector\n"
+        "        arguments:\n"
+        "          connector: aws-access-analyzer\n"
+        "          operation: list_analyzers\n"
+        "          params:\n"
+        "            type: ACCOUNT\n"
+        "            assume_role: maybe\n"
+    )
+    r = compile_yaml(text, db_path)
+    bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+           and "assume_role" in (e.message or "")
+           and "boolean" in (e.message or "")]
+    assert bad
+
+
+def test_checkbox_param_accepts_native_bool_and_truthy_string(db_path):
+    for val in ("true", "false", "True", "yes", "1"):
+        text = _yaml(
+            "        type: connector\n"
+            "        arguments:\n"
+            "          connector: aws-access-analyzer\n"
+            "          operation: list_analyzers\n"
+            "          params:\n"
+            "            type: ACCOUNT\n"
+            f"            assume_role: {val}\n"
+        )
+        r = compile_yaml(text, db_path)
+        bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+               and "assume_role" in (e.message or "")
+               and "boolean" in (e.message or "")]
+        assert not bad, f"value {val!r} should be accepted"
+
+
+def test_decimal_param_rejects_non_numeric(db_path):
+    text = _yaml(
+        "        type: connector\n"
+        "        arguments:\n"
+        "          connector: claroty-xdome\n"
+        "          operation: get_vulnerabilities\n"
+        "          params:\n"
+        "            cvss_v3_score: critical\n"
+    )
+    r = compile_yaml(text, db_path)
+    bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+           and "cvss_v3_score" in (e.message or "")
+           and "number" in (e.message or "")]
+    assert bad
+
+
+def test_typed_param_skips_jinja(db_path):
+    """Jinja templates defer to runtime; no static type complaint."""
+    text = _yaml(
+        "        type: connector\n"
+        "        arguments:\n"
+        "          connector: aws-access-analyzer\n"
+        "          operation: list_analyzers\n"
+        "          params:\n"
+        "            type: ACCOUNT\n"
+        "            size: \"{{ vars.input.params.n }}\"\n"
+        "            assume_role: \"{{ vars.input.params.role }}\"\n"
+    )
+    r = compile_yaml(text, db_path)
+    bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
+           and (e.path or "").endswith((".size", ".assume_role"))]
+    assert not bad, [e.to_dict() for e in bad]
+
+
 def test_unknown_next_step(db_path):
     text = """
 collection: T

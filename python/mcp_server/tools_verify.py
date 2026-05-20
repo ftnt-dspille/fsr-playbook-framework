@@ -78,6 +78,23 @@ def _connector_op_exists(connector: str, op: str) -> bool:
         return False
 
 
+def _nearest_op_names(connector: str, bad_op: str, n: int = 3) -> list[str]:
+    """Top-N closest op names on `connector` by difflib ratio, so the
+    `op_param_unknown` diagnostic can suggest concrete alternatives
+    inline instead of asking the agent to run `find_operation`."""
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT op_name FROM operations WHERE connector_name=?",
+            (connector,),
+        ).fetchall()
+    except Exception:  # noqa: BLE001
+        return []
+    import difflib
+    ops = [r[0] for r in rows]
+    return difflib.get_close_matches(bad_op or "", ops, n=n, cutoff=0.3)
+
+
 def _connector_exists(name: str) -> bool:
     conn = _db()
     try:
@@ -158,12 +175,25 @@ def _per_step_schema_checks(coll) -> list[dict[str, Any]]:
                         "severity": "error",
                     })
                 elif connector and op and not _connector_op_exists(connector, op):
+                    near = _nearest_op_names(connector, op, n=3)
+                    if near:
+                        msg = (f"operation {op!r} not found on connector "
+                               f"{connector!r}. Did you mean: "
+                               f"{', '.join(repr(n) for n in near)}?")
+                        sug = f"replace with {near[0]!r}"
+                    else:
+                        msg = (f"operation {op!r} not found on connector "
+                               f"{connector!r}, and no close matches "
+                               f"exist — connector may be installed but "
+                               f"not yet probed, or the op name is wrong")
+                        sug = ("call `find_operation` against this "
+                               "connector to list real op names")
                     fixes.append({
                         "code": "op_param_unknown",
-                        "message": (f"operation {op!r} not found on connector "
-                                    f"{connector!r}"),
+                        "message": msg,
                         "step": s.id, "path": spath,
-                        "suggestion": "use `find_operation` to discover valid op names",
+                        "suggestion": sug,
+                        "near": near,
                         "severity": "error",
                     })
 

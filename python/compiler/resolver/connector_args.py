@@ -9,6 +9,56 @@ from ..errors import CompileError, ErrorCode
 from ..ir import Step
 
 
+def _coerces_to_int(v) -> bool:
+    """True if value is something the FSR runtime can pass to int().
+    Native ints (excluding bool, which is treated separately) pass; bare
+    strings pass only if int(str) succeeds. Floats are rejected — author
+    likely meant a decimal-typed param if they wrote 1.5."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return True
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return False
+        try:
+            int(s)
+            return True
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _coerces_to_float(v) -> bool:
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        return True
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return False
+        try:
+            float(s)
+            return True
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _coerces_to_bool(v) -> bool:
+    """True if value is bool-like. FSR's checkbox params accept native
+    bools, 'true'/'false' (case-insensitive), and 0/1 ints."""
+    if isinstance(v, bool):
+        return True
+    if isinstance(v, int) and v in (0, 1):
+        return True
+    if isinstance(v, str):
+        return v.strip().lower() in {"true", "false", "yes", "no", "1", "0"}
+    return False
+
+
 class ConnectorArgsMixin:
     """Methods for resolving connector args and checking routing."""
 
@@ -163,6 +213,122 @@ class ConnectorArgsMixin:
             self._check_param_visibility(
                 connector, operation, provided, path, errors,
             )
+            # Picklist enum validation. Only fires on literal string
+            # values; Jinja expressions are skipped (we can't resolve
+            # their value statically).
+            for p_name, p_val in provided.items():
+                if p_name not in valid_params:
+                    continue
+                _ptype, allowed = self.operation_param_enum(
+                    connector, operation, p_name)
+                if allowed is None:
+                    continue
+                # Multiselect accepts a list of strings; select accepts a
+                # single string. Both forms get the same enum check.
+                vals = p_val if isinstance(p_val, list) else [p_val]
+                for v in vals:
+                    if not isinstance(v, str):
+                        continue
+                    if "{{" in v or "{%" in v:
+                        continue  # Jinja-templated; defer to runtime
+                    if v in allowed:
+                        continue
+                    # Case-insensitive match → likely a casing typo.
+                    case_match = next(
+                        (a for a in allowed if a.lower() == v.lower()), None)
+                    if case_match:
+                        msg = (f"param {p_name!r} on "
+                               f"{connector}.{operation}: value {v!r} "
+                               f"not in enum (values are case-sensitive)"
+                               f". Did you mean {case_match!r}?")
+                        suggestion = f"replace with {case_match!r}"
+                    else:
+                        near = difflib.get_close_matches(
+                            v, allowed, n=3, cutoff=0.4)
+                        head = ", ".join(repr(o) for o in allowed[:10])
+                        if near:
+                            msg = (f"param {p_name!r} on "
+                                   f"{connector}.{operation}: value "
+                                   f"{v!r} not in enum. Did you mean: "
+                                   f"{', '.join(repr(n) for n in near)}?")
+                            suggestion = f"replace with {near[0]!r}"
+                        else:
+                            msg = (f"param {p_name!r} on "
+                                   f"{connector}.{operation}: value "
+                                   f"{v!r} not in enum. Allowed: {head}"
+                                   + (" …" if len(allowed) > 10 else ""))
+                            suggestion = (
+                                f"use one of: {head}"
+                                + (" …" if len(allowed) > 10 else ""))
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=msg,
+                        path=f"{path}.arguments.params.{p_name}",
+                        suggestion=suggestion,
+                    ))
+            # Scalar-type validation: integer / decimal / boolean.
+            # Same skip-Jinja rule as enum. We only flag literal values
+            # that *clearly* can't coerce; the FSR runtime does its own
+            # string → target-type coercion for genuinely-numeric and
+            # genuinely-boolean strings, so we tolerate them.
+            for p_name, p_val in provided.items():
+                if p_name not in valid_params:
+                    continue
+                ptype, _ = self.operation_param_enum(
+                    connector, operation, p_name)
+                if ptype is None:
+                    continue
+                ptype_low = ptype.lower()
+                # Skip Jinja-templated scalars at the value level. Lists
+                # (multiselect) are handled in the enum branch.
+                if isinstance(p_val, str) and (
+                        "{{" in p_val or "{%" in p_val):
+                    continue
+                # Numeric: integer / decimal / numeric / "intger" (typo).
+                if ptype_low in {"integer", "intger"}:
+                    if isinstance(p_val, bool) or not _coerces_to_int(p_val):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"param {p_name!r} on "
+                                f"{connector}.{operation} is type 'integer'"
+                                f" but got {p_val!r} "
+                                f"({type(p_val).__name__}) which does "
+                                f"not coerce to int"),
+                            path=f"{path}.arguments.params.{p_name}",
+                            suggestion=("pass an integer literal, an "
+                                        "integer-shaped string, or a "
+                                        "Jinja expression that yields "
+                                        "an int"),
+                        ))
+                elif ptype_low in {"decimal", "numeric"}:
+                    if isinstance(p_val, bool) or not _coerces_to_float(p_val):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"param {p_name!r} on "
+                                f"{connector}.{operation} is type "
+                                f"{ptype!r} but got {p_val!r} "
+                                f"({type(p_val).__name__}) which does "
+                                f"not coerce to a number"),
+                            path=f"{path}.arguments.params.{p_name}",
+                            suggestion="pass a number or numeric string",
+                        ))
+                # Boolean: checkbox / boolean.
+                elif ptype_low in {"checkbox", "boolean"}:
+                    if not _coerces_to_bool(p_val):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"param {p_name!r} on "
+                                f"{connector}.{operation} is type "
+                                f"{ptype!r} but got {p_val!r} "
+                                f"({type(p_val).__name__}) which does "
+                                f"not coerce to a boolean"),
+                            path=f"{path}.arguments.params.{p_name}",
+                            suggestion=("pass true / false (or 'true' / "
+                                        "'false' as a string)"),
+                        ))
 
         # Stamp the connector version onto the step (FSR JSON requires it).
         if "version" not in a and crow["version"]:

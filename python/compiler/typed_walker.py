@@ -531,21 +531,90 @@ def _validate_branch_jinja(
                         target = jinja_key_lookup.get(key)
                         valid = (sorted((typed_env[key].get("keys") or {}).keys())
                                  if typed_env[key].get("kind") == "object" else [])
+                        # The first `.<attr>` after the step key is the
+                        # missing field. Find it so we can suggest a
+                        # close match instead of just listing valid keys.
+                        bad_attr = ""
+                        if rest.startswith("."):
+                            bad_attr = rest.lstrip(".").split(".", 1)[0].split("[", 1)[0]
+                        # Case-insensitive exact match → typo; else
+                        # difflib top-3 for fuzzy "did you mean".
+                        case_match = next(
+                            (v for v in valid if v.lower() == bad_attr.lower()
+                             and v != bad_attr), None)
+                        if case_match:
+                            msg = (f"vars.steps.{key}{rest} in step "
+                                   f"{s.id!r}: {bad_attr!r} not in known "
+                                   f"shape of "
+                                   f"{target.id if target else key!r} — "
+                                   f"keys are case-sensitive. Did you "
+                                   f"mean {case_match!r}?")
+                        else:
+                            import difflib
+                            near = difflib.get_close_matches(
+                                bad_attr, valid, n=3, cutoff=0.4)
+                            if near:
+                                msg = (f"vars.steps.{key}{rest} in step "
+                                       f"{s.id!r}: {bad_attr!r} not in "
+                                       f"known shape of "
+                                       f"{target.id if target else key!r}. "
+                                       f"Did you mean: "
+                                       f"{', '.join(repr(n) for n in near)}?")
+                            else:
+                                head = ', '.join(valid[:8])
+                                msg = (f"vars.steps.{key}{rest} in step "
+                                       f"{s.id!r}: {bad_attr!r} not in "
+                                       f"known shape of "
+                                       f"{target.id if target else key!r}. "
+                                       f"Available keys: {head}. "
+                                       f"Universal output keys "
+                                       f"(`status`, `result`, `id`, "
+                                       f"`@id`) are also available on "
+                                       f"every step.")
                         diags.append(Diagnostic(
                             code="missing_field_on_step_output",
-                            message=(f"vars.steps.{key}{rest} in step "
-                                     f"{s.id!r}: path not in known shape "
-                                     f"of {target.id if target else key!r} "
-                                     f"({', '.join(valid[:8])})"),
+                            message=msg,
                             step=s.id, branch=branch_name,
                             path=f"arguments.{sub}",
                         ))
                     elif err == "non_list_indexed":
+                        # Tell the agent what the actual shape is so it
+                        # can pick the right access pattern (object →
+                        # `.attr`, scalar → drop the index, common FSR
+                        # envelope `{hydra:member: [...]}` → recommend
+                        # the right key).
+                        st = typed_env.get(key) or {}
+                        kind = st.get("kind", "unknown")
+                        suggestion = ""
+                        if kind == "object":
+                            obj_keys = list((st.get("keys") or {}).keys())
+                            list_keys = [
+                                k for k in obj_keys
+                                if (st["keys"][k] or {}).get("kind") == "list"
+                            ]
+                            if "hydra:member" in obj_keys:
+                                suggestion = (
+                                    " — this resolves to a Hydra "
+                                    "envelope; index the inner list: "
+                                    "`vars.steps.{0}['hydra:member'][0]"
+                                    "`".format(key))
+                            elif list_keys:
+                                suggestion = (
+                                    " — this is an object; the list-"
+                                    "valued keys are: "
+                                    f"{', '.join(list_keys[:5])}")
+                            else:
+                                suggestion = (
+                                    " — this is an object, not a list. "
+                                    "Use `.<attr>` instead of `[…]`")
+                        elif kind in ("scalar", "any"):
+                            suggestion = (
+                                " — this is a scalar; drop the index")
                         diags.append(Diagnostic(
                             code="non_list_indexed",
                             message=(f"vars.steps.{key}{rest} in step "
                                      f"{s.id!r}: indexing `[…]` on a "
-                                     "non-list shape"),
+                                     f"{kind} shape{suggestion}"),
                             step=s.id, branch=branch_name,
                             path=f"arguments.{sub}",
                         ))
