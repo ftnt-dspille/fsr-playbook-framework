@@ -629,6 +629,11 @@ export type VisualGraph = {
   collection: { name: string; description: string; visible: boolean } | null;
   playbooks: VisualPlaybook[];
   layout_present: boolean;
+  /** Per-playbook → per-step synthetic values from the `# fsrpb:samples`
+   *  sidecar. Today only `manual_input` writes here (`{input: {...}}`),
+   *  but the shape is open so future step types can drop in. Optional
+   *  on the type so existing test fixtures don't need a backfill. */
+  samples?: Record<string, Record<string, unknown>>;
   errors: { code: string | null; message: string; path: string | null }[];
   source: { path: string | null; yaml: string };
 };
@@ -652,6 +657,26 @@ export async function getVisualFromBuffer(text: string): Promise<VisualGraph> {
     body: JSON.stringify({ text })
   });
   if (!r.ok) throw new Error(`visual/buffer ${r.status}`);
+  return r.json();
+}
+
+/**
+ * Rewrite the `# fsrpb:samples` sidecar block on a YAML buffer.
+ *
+ * Whole-map writes (not per-step PATCH) — see the backend route for
+ * the rationale. Caller is expected to splice the returned `yaml`
+ * back into the playbook store.
+ */
+export async function writeSamples(
+  yamlText: string,
+  samples: Record<string, Record<string, unknown>>
+): Promise<{ ok: boolean; yaml: string }> {
+  const r = await fetch('/api/visual/samples', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ yaml_text: yamlText, samples })
+  });
+  if (!r.ok) throw new Error(`visual/samples ${r.status}`);
   return r.json();
 }
 

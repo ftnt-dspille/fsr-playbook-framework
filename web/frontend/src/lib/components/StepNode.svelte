@@ -19,6 +19,10 @@
   // (unknown-shape, live-probe-skipped), or null (no diagnostics for
   // this step on the latest verify run).
   let verifyStatus = $derived(props.data.verifyStatus as 'error' | 'warning' | null);
+  // Manual-input nodes get a "sample saved" chip so the author knows at
+  // a glance which ones already have synthetic answers feeding the
+  // downstream Verify/Render path.
+  let hasSample = $derived(!!props.data.hasSample);
   let direction = $derived((props.data.direction as 'TB' | 'LR' | undefined) ?? 'TB');
   let playbookIdx = $derived((props.data.playbookIdx as number | undefined) ?? 0);
 
@@ -179,6 +183,13 @@
           style="background: {VERIF_DOT[verification.status] ?? '#9ca3af'}"
           aria-label="verification {verification.status}"
         ></span>
+      {/if}
+      {#if hasSample}
+        <span
+          class="inline-flex items-center rounded-full bg-emerald-500/20 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-emerald-700"
+          title="sample answers saved — downstream Verify renders against these"
+          aria-label="sample saved"
+        >sample</span>
       {/if}
       {#if verifyStatus}
         <!-- verify_playbook per-step status. Distinct from the

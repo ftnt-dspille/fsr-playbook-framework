@@ -15,7 +15,7 @@ truth; this module is a thin view over it that adds two things:
 2.  **Identity / structural-preserving write** — `from_visual(graph,
     original_yaml)` uses `ruamel.yaml` round-trip mode to mutate the
     original document in place: positions are persisted to a
-    `# fsrpb:layout` block at the top of the file, and step-level
+    `# fsrpb:layout` block at the bottom of the file, and step-level
     edits write back through the same key paths the parser reads. When
     nothing changed, the output is byte-identical to the input — that
     invariant is what the VISUAL_EDITOR_PLAN Phase 0.3 CI test pins.
@@ -34,6 +34,10 @@ from typing import Any
 
 from . import ir
 from .parser import parse_yaml
+from .samples import (
+    append_samples,
+    extract_samples_block,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -143,27 +147,29 @@ def _step_node(step: ir.Step, position: dict | None) -> dict[str, Any]:
 # Storing as a header comment keeps the FSR-relevant body untouched and
 # makes the round-trip CI test trivial (only one place to look).
 
-_LAYOUT_HEAD_RE = re.compile(r"\A\s*#\s*fsrpb:layout\s*\n")
-_LAYOUT_END_RE = re.compile(r"#\s*fsrpb:layout-end\s*\n")
+_LAYOUT_HEAD_RE = re.compile(r"(?m)^\s*#\s*fsrpb:layout\s*\n")
+_LAYOUT_END_RE = re.compile(r"#\s*fsrpb:layout-end\s*\n?")
 
 
 def _extract_layout_block(text: str) -> tuple[dict[str, dict[str, list[int]]], str]:
-    """Pull the layout block out of the YAML head if present.
+    """Pull the layout block out of the YAML if present.
 
     The block opens with `# fsrpb:layout` and closes with
     `# fsrpb:layout-end`. Lines between are `# <json>` comments holding
-    the serialized layout map (playbook name → step id → [x, y]).
-    Missing/malformed → empty map + original text.
+    the serialized layout map (playbook name → step id → [x, y]). The
+    block may live at the top or bottom of the file — we search for the
+    first occurrence. Missing/malformed → empty map + original text.
     """
-    head = _LAYOUT_HEAD_RE.match(text)
+    head = _LAYOUT_HEAD_RE.search(text)
     if not head:
         return {}, text
+    before = text[: head.start()]
     rest = text[head.end():]
     end = _LAYOUT_END_RE.search(rest)
     if not end:
         return {}, text
     block = rest[: end.start()]
-    body = rest[end.end():]
+    after = rest[end.end():]
     json_lines = []
     for ln in block.splitlines():
         s = ln.lstrip()
@@ -177,7 +183,7 @@ def _extract_layout_block(text: str) -> tuple[dict[str, dict[str, list[int]]], s
             return {}, text
     except Exception:
         return {}, text
-    return layout, body
+    return layout, before + after
 
 
 def _emit_layout_block(layout: dict[str, dict[str, list[int]]]) -> str:
@@ -212,13 +218,18 @@ def to_visual(yaml_text: str) -> dict[str, Any]:
           errors: [...],           # parser errors as plain dicts
         }
     """
+    # Both sidecar blocks live at the YAML footer. We strip them only to
+    # recover the map — parser tolerates them (they're comments), but
+    # callers also want the structured form.
     layout_map, _body = _extract_layout_block(yaml_text)
+    samples_map, _body2 = extract_samples_block(yaml_text)
     coll, errs = parse_yaml(yaml_text)
     if coll is None:
         return {
             "collection": None,
             "playbooks": [],
             "layout_present": bool(layout_map),
+            "samples": samples_map,
             "errors": [_err_to_dict(e) for e in errs],
         }
 
@@ -268,6 +279,10 @@ def to_visual(yaml_text: str) -> dict[str, Any]:
         },
         "playbooks": pbs_out,
         "layout_present": bool(layout_map),
+        # Per-step synthetic values for `manual_input` (and future step
+        # types). Shape: `{playbook_name: {step_id: {<key>: <value>}}}`.
+        # Empty dict when no samples block is present.
+        "samples": samples_map,
         "errors": [_err_to_dict(e) for e in errs],
     }
 
@@ -287,7 +302,7 @@ def from_visual(graph: dict[str, Any], original_yaml: str) -> str:
     the returned string MUST equal `original_yaml` byte-for-byte.
     Phase 0.3 CI pins this.
 
-    Position-only updates re-emit the `# fsrpb:layout` header block
+    Position-only updates re-emit the `# fsrpb:layout` footer block
     and leave the body intact (pure-stdlib path).
 
     Structural edits — `arguments`, `name`, `comment`, `for_each`,
@@ -298,23 +313,43 @@ def from_visual(graph: dict[str, Any], original_yaml: str) -> str:
     """
     new_layout = _collect_layout_from_graph(graph)
     existing_layout, body = _extract_layout_block(original_yaml)
+    existing_samples, body = extract_samples_block(body)
+    # `graph["samples"]` is authoritative when present (the writer just
+    # edited them); fall back to whatever was already in the YAML so a
+    # graph payload that omits the key doesn't accidentally erase them.
+    new_samples = (
+        graph["samples"] if isinstance(graph.get("samples"), dict)
+        else existing_samples
+    )
     diff = _diff_against_original(graph, original_yaml)
 
     if not diff.has_structural_edits:
-        if new_layout == existing_layout:
+        if new_layout == existing_layout and new_samples == existing_samples:
             return original_yaml
-        header = _emit_layout_block(new_layout)
-        return (header + body) if header else body
+        return _append_sidecars(body, new_layout, new_samples)
 
     new_body = _apply_structural_edits(body, diff, graph)
-    if new_layout != existing_layout:
-        header = _emit_layout_block(new_layout)
-        return (header + new_body) if header else new_body
-    # Preserve the original layout block if one was there and the
-    # caller didn't change positions.
-    if existing_layout:
-        return _emit_layout_block(existing_layout) + new_body
-    return new_body
+    return _append_sidecars(new_body, new_layout, new_samples)
+
+
+def _append_sidecars(body: str,
+                      layout: dict[str, dict[str, list[int]]],
+                      samples: dict[str, dict[str, Any]]) -> str:
+    """Layout first, then samples — fixed order so round-trips are
+    byte-stable. Each is a no-op on its empty map."""
+    out = _append_layout(body, layout)
+    out = append_samples(out, samples)
+    return out
+
+
+def _append_layout(body: str, layout: dict[str, dict[str, list[int]]]) -> str:
+    """Tack the layout block onto the end of `body`. Empty layout → body
+    unchanged so files that never had a layout stay byte-identical."""
+    footer = _emit_layout_block(layout)
+    if not footer:
+        return body
+    sep = "" if body.endswith("\n") or not body else "\n"
+    return body + sep + footer
 
 
 # ---------------------------------------------------------------------------
@@ -575,12 +610,25 @@ def _splice_arguments(s_doc: Any, new_args: dict) -> None:
                 if isinstance(item, dict) and item.get("name")
             }
 
+    # Preserve the original document's style: hoisted keys stay hoisted,
+    # nested keys stay nested. A key that lived under `arguments:` should
+    # NOT be promoted to the step level just because the IR re-emits it
+    # via `new_args` (which always carries the union of both forms).
+    existing_arg_doc = s_doc.get("arguments")
+    nested_keys = (
+        set(existing_arg_doc.keys()) if isinstance(existing_arg_doc, dict) else set()
+    )
+
     for hoisted in _HOISTED_ARG_KEYS:
         if hoisted in s_doc and hoisted in new_args:
             s_doc[hoisted] = new_args.pop(hoisted)
         elif hoisted in s_doc and hoisted not in new_args:
             # The graph dropped this key — remove it from the doc too.
             del s_doc[hoisted]
+        elif hoisted in nested_keys:
+            # Was nested under `arguments:` originally; leave the
+            # remaining-keys block below to write it back there.
+            continue
         elif hoisted not in s_doc and hoisted in new_args:
             # New top-level shortcut requested by the edit.
             s_doc[hoisted] = new_args.pop(hoisted)

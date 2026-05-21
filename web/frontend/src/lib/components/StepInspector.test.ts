@@ -195,9 +195,11 @@ describe('StepInspector', () => {
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Render' }));
-    await waitFor(() => expect(screen.getAllByText('rendered').length).toBeGreaterThan(0));
-    expect(screen.getByText('JIR-1')).toBeTruthy();
-    // Non-template strings are shown as literals (no "rendered" label needed).
+    // Rendered values appear as a <pre> sibling of the provenance chip.
+    // Wait on the actual value text (not the legend's word "stub",
+    // which is always present in the help paragraph).
+    await waitFor(() => expect(screen.getByText('JIR-1')).toBeTruthy());
+    // Non-template strings are shown as literals (no chip at all).
     expect(screen.getByText('jira')).toBeTruthy();
   });
 

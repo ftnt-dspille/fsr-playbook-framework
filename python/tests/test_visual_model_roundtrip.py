@@ -38,8 +38,10 @@ def test_layout_block_persists_and_is_stable() -> None:
     g = to_visual(text)
     g["playbooks"][0]["nodes"][0]["position"] = {"x": 12, "y": 34}
     out = from_visual(g, text)
-    assert out.startswith("# fsrpb:layout\n"), "layout header missing"
-    assert "# fsrpb:layout-end\n" in out, "layout terminator missing"
+    # Layout block now lives at the bottom of the file so the YAML body
+    # opens with the playbook itself — readable diffs, no header noise.
+    assert "# fsrpb:layout\n" in out, "layout marker missing"
+    assert out.rstrip().endswith("# fsrpb:layout-end"), "layout block should be at footer"
 
     g2 = to_visual(out)
     pos = g2["playbooks"][0]["nodes"][0]["position"]
@@ -123,6 +125,55 @@ def test_edge_source_move_round_trips() -> None:
     # The new source carries the rewired edge.
     assert any(x["source"] == new_source and x["target"] == e["target"]
                 for x in g2["playbooks"][0]["edges"])
+
+
+def test_arg_edit_keeps_nested_keys_under_arguments() -> None:
+    """Regression: editing a connector step's args (e.g. adding
+    `mock_result`) must NOT promote nested `connector` / `operation` /
+    `params` to the step level. Doing so left both forms in the YAML
+    and broke validation. The fix preserves the original nested style
+    via the existing arguments-block lookup."""
+    import textwrap
+    text = textwrap.dedent(
+        """\
+        playbooks:
+          - name: Demo
+            steps:
+              - type: start
+                name: Start
+                next: Block IP
+              - type: connector
+                name: Block IP
+                arguments:
+                  connector: fortigate-firewall
+                  operation: block_ip_new
+                  params:
+                    method: Quarantine Based
+                next: End
+              - type: end
+                name: End
+        """
+    )
+    g = to_visual(text)
+    block = next(n for n in g["playbooks"][0]["nodes"] if n["id"] == "block_ip")
+    # Emulate `saveAsMock` adding a `mock_result` key alongside the
+    # existing nested args.
+    block["arguments"] = {**block["arguments"], "mock_result": {"already_blocked": ["1.1.1.1"]}}
+    out = from_visual(g, text)
+    # connector / operation / params must remain under `arguments:`,
+    # not at the step level (which is what triggered the duplicate-keys
+    # bug). Re-parse and check structural location rather than matching
+    # whitespace fragility.
+    import yaml as _yaml
+    doc = _yaml.safe_load(out)
+    step = next(s for s in doc["playbooks"][0]["steps"] if s.get("name") == "Block IP")
+    assert "connector" not in step, step    # not hoisted to step level
+    assert "operation" not in step, step
+    assert "params" not in step, step
+    assert step["arguments"]["connector"] == "fortigate-firewall"
+    assert step["arguments"]["operation"] == "block_ip_new"
+    assert step["arguments"]["params"]["method"] == "Quarantine Based"
+    assert step["arguments"]["mock_result"]["already_blocked"] == ["1.1.1.1"]
 
 
 def test_linear_next_retarget_round_trips() -> None:

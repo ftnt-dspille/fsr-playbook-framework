@@ -8,6 +8,7 @@
   import StepInspectorExamplesTab from './StepInspectorExamplesTab.svelte';
   import StepInspectorBranchesTab from './StepInspectorBranchesTab.svelte';
   import StepInspectorVerifyTab from './StepInspectorVerifyTab.svelte';
+  import StepInspectorSimulateTab from './StepInspectorSimulateTab.svelte';
   import StepDraftModal from './StepDraftModal.svelte';
   import { visualStore } from '../visualEditStore.svelte';
 
@@ -37,7 +38,7 @@
     onDelete?.(id);
   }
 
-  type Tab = 'args' | 'examples' | 'verify' | 'raw';
+  type Tab = 'args' | 'examples' | 'verify' | 'simulate' | 'raw';
   let activeTab: Tab = $state('args');
 
   // Reset to the most useful default tab whenever the user picks a
@@ -73,6 +74,10 @@
     : false);
   let showBranches = $derived(node?.type === 'decision' || node?.type === 'manual_input');
   let showVerify = $derived(node ? node.family !== 'terminal' : false);
+  // Simulate tab: only `manual_input` steps today. Surfaces a form
+  // that writes per-input answers into the `# fsrpb:samples` sidecar
+  // so downstream steps can render their Jinja against synthetic data.
+  let showSimulate = $derived(node?.type === 'manual_input');
 
   // Trigger nodes' "args" are tiny — fall back to Raw so the user
   // lands on something useful. Decision / manual_input now keep
@@ -82,6 +87,7 @@
   let TABS = $derived<{ key: Tab; label: string }[]>([
     ...(showArgs ? [{ key: 'args' as Tab, label: 'Args' }] : []),
     ...(showExamples ? [{ key: 'examples' as Tab, label: 'Examples' }] : []),
+    ...(showSimulate ? [{ key: 'simulate' as Tab, label: 'Simulate' }] : []),
     ...(showVerify ? [{ key: 'verify' as Tab, label: 'Verify' }] : []),
     { key: 'raw', label: 'Raw' }
   ]);
@@ -191,8 +197,10 @@
         {/if}
       {:else if activeTab === 'examples'}
         <StepInspectorExamplesTab {node} {playbook} {playbookIdx} />
+      {:else if activeTab === 'simulate'}
+        <StepInspectorSimulateTab {node} {playbook} />
       {:else if activeTab === 'verify'}
-        <StepInspectorVerifyTab {node} />
+        <StepInspectorVerifyTab {node} {playbookIdx} />
       {:else}
         <section class="mb-3">
           <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Comment</div>

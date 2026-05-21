@@ -16,6 +16,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from compiler.visual_model import to_visual, from_visual
+from compiler.samples import (
+    append_samples,
+    extract_samples_block,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES_DIR = REPO_ROOT / "examples"
@@ -165,3 +169,30 @@ def write_file(payload: FileWriteIn) -> dict[str, Any]:
             "Use POST /api/playbooks/draft/from-example."
         ),
     }
+
+
+class SamplesIn(BaseModel):
+    """Replace the entire `# fsrpb:samples` sidecar block.
+
+    Whole-map writes are fine here — the block is tiny, the diff cost
+    is dominated by network not bytes, and per-step PATCH would invite
+    last-writer-wins races with no real upside.
+    """
+    yaml_text: str
+    samples: dict[str, dict[str, Any]]
+
+
+@router.post("/samples")
+def write_samples(payload: SamplesIn) -> dict[str, Any]:
+    """Rewrite the samples sidecar block on a YAML buffer.
+
+    Returns `{ok, yaml}` so the caller can splice the new buffer back
+    into the playbook store without an extra round-trip. The samples
+    map is per-playbook → per-step → arbitrary payload (today: just
+    `{input: {...}}` for `manual_input`); the backend doesn't validate
+    keys against the IR so future step types can drop in samples
+    without a backend release.
+    """
+    _existing, body = extract_samples_block(payload.yaml_text)
+    new_yaml = append_samples(body, payload.samples)
+    return {"ok": True, "yaml": new_yaml}

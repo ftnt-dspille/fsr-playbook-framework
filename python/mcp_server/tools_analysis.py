@@ -712,7 +712,8 @@ def step_test(yaml_text: str,
               step_id: str,
               playbook: str | None = None,
               input: dict[str, Any] | None = None,
-              execute_safe_ops: bool = True) -> dict[str, Any]:
+              execute_safe_ops: bool = True,
+              confirm: bool = False) -> dict[str, Any]:
     """Single-step probe: render one step's args + (if safe) execute it.
 
     Targeted variant of `step_through_playbook` — pinpoints a single step
@@ -728,6 +729,11 @@ def step_test(yaml_text: str,
       playbook: which playbook to look in (defaults to the first).
       input: vars.input.params.* for jinja rendering.
       execute_safe_ops: if False, render only — never live-execute.
+      confirm: if True, execute non-safe ops too (user has acknowledged
+        the risk via the Verify-tab confirm dialog). Without this, a
+        non-safe op short-circuits with `status="needs_confirm"` and a
+        `risk` / `risk_category` payload the UI uses to render its
+        warning. Safe ops execute either way.
 
     Returns:
       `{ok, step_id, type, rendered_args, output, output_top_keys,
@@ -746,6 +752,10 @@ def step_test(yaml_text: str,
     pb = next((p for p in pbs if p.get("name") == playbook), pbs[0])
     steps = pb.get("steps") or []
 
+    # Match the IR's id-synthesis: when a step omits `id:`, the parser
+    # slugifies `name:` (lowercase, non-alphanum → `_`). The visual layer
+    # sends that synthesized id, so we must apply the same algorithm here.
+    from compiler.parser import _slugify  # local import: avoid cold-start cost
     target = None
     for s in steps:
         if not isinstance(s, dict):
@@ -753,18 +763,53 @@ def step_test(yaml_text: str,
         if s.get("id") == step_id:
             target = s
             break
-        nm = (s.get("name") or "").replace(" ", "_")
-        if nm == step_id:
+        nm = s.get("name")
+        if isinstance(nm, str) and nm and _slugify(nm) == step_id:
             target = s
             break
     if target is None:
         return {"ok": False, "error": f"step {step_id!r} not found"}
 
-    sid = target.get("id", step_id)
+    sid = target.get("id") or (_slugify(target["name"]) if target.get("name") else step_id)
     stype = target.get("type", "")
     raw_args = target.get("arguments") or target.get("args") or {}
     vars_ctx: dict[str, Any] = {"input": {"params": dict(input or {})},
                                  "steps": {}}
+    # Overlay manual_input samples + any future per-step synthetic values
+    # from the `# fsrpb:samples` sidecar so downstream Jinja in this step
+    # resolves against the author's test data without a live run.
+    #
+    # Samples are stored by step.id (slug), but FSR's runtime keys
+    # `vars.steps.<key>` by `name.replace(" ", "_")` (see
+    # `compiler.typed_walker._jinja_key`). Expose under both forms so a
+    # template using either resolves correctly.
+    from compiler.samples import extract_samples_block, overlay_into_vars
+    samples_map, _stripped = extract_samples_block(yaml_text)
+    pb_samples = samples_map.get(pb.get("name") or "", {}) or {}
+    expanded: dict[str, Any] = {}
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        nm = s.get("name")
+        # Distinct local name — outer `sid` (the target's id) must
+        # survive this loop intact for the result record.
+        sid_iter = s.get("id") or (_slugify(nm) if isinstance(nm, str) and nm else None)
+        if not sid_iter:
+            continue
+        # Step-level mock_result wins over the sidecar sample for the
+        # same step — authors typically save a mock right after a real
+        # Test step run, so it's the freshest synthetic value we have.
+        # Surfaced under the step output shape FSR exposes
+        # (vars.steps.<key> directly = the connector's response body).
+        s_args = s.get("arguments") if isinstance(s.get("arguments"), dict) else {}
+        mock = s_args.get("mock_result") if isinstance(s_args, dict) else None
+        payload = mock if mock is not None else pb_samples.get(sid_iter)
+        if payload is None:
+            continue
+        expanded[sid_iter] = payload
+        if isinstance(nm, str) and nm:
+            expanded[nm.replace(" ", "_")] = payload
+    overlay_into_vars(expanded, vars_ctx)
 
     client = _shared._live_client()
     render_errors: list[str] = []
@@ -826,17 +871,40 @@ def step_test(yaml_text: str,
 
     cat = _shared._safe_op_category(cn, opn)
     risk = tools_discovery._op_risk(opn, cat)
-    if risk != "safe":
-        record["status"] = "skipped"
-        record["note"] = f"non-safe op (risk={risk}); not executed"
+    if risk != "safe" and not confirm:
+        # Surface the risk to the UI instead of silently skipping. The
+        # Verify tab renders the warning + a "Run anyway" affordance that
+        # re-invokes step_test with confirm=True.
+        record["status"] = "needs_confirm"
+        record["risk"] = risk
+        record["risk_category"] = cat
+        record["note"] = (
+            f"{opn!r} is classified {risk} ({cat}). Re-run with confirm=true "
+            "to execute against the live FSR instance."
+        )
         return record
 
+    # The rendered args envelope is `{connector, operation, config,
+    # params: {...}}` — we have to pass just the inner connector params
+    # to run_op. Sending the envelope as-is means the connector can't
+    # find any of its declared params (it sees keys like `connector` /
+    # `operation` / `params` at the top level instead).
+    inner_params: dict[str, Any] = {}
+    if isinstance(rendered, dict):
+        p = rendered.get("params")
+        if isinstance(p, dict):
+            inner_params = p
+        else:
+            # Fallback for shapes that already pass the param dict
+            # directly (older friendly form / non-standard YAML).
+            inner_params = {k: v for k, v in rendered.items()
+                            if k not in {"connector", "operation", "config", "params"}}
     try:
         op_result = tools_execution.run_op(connector=cn, op=opn,
-                           params=rendered if isinstance(rendered, dict) else {},
-                           confirm=False)
+                           params=inner_params,
+                           confirm=confirm)
     except Exception as exc:  # noqa: BLE001
-        tools_execution._record_verification(cn, opn, "step_test_fail", str(exc)[:2000])
+        tools_execution._record_verification(cn, opn, "tested_fail", str(exc)[:2000])
         record["ok"] = False
         record["status"] = "exec_failed"
         record["note"] = str(exc)
@@ -847,13 +915,13 @@ def step_test(yaml_text: str,
         record["output"] = op_result.get("data")
         record["output_top_keys"] = op_result.get("output_top_keys") or []
         record["status"] = "executed"
-        tools_execution._record_verification(cn, opn, "step_test_pass",
+        tools_execution._record_verification(cn, opn, "tested_pass",
                              f"step {sid!r} executed via step_test")
     else:
         record["ok"] = False
         record["status"] = "exec_failed"
         record["note"] = op_result.get("message", "") or "run_op returned ok=false"
-        tools_execution._record_verification(cn, opn, "step_test_fail",
+        tools_execution._record_verification(cn, opn, "tested_fail",
                              record["note"][:2000])
     record["verification_recorded"] = True
     return record

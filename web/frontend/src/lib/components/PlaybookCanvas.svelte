@@ -105,6 +105,14 @@
           playbookActions.verifyByStep.get(n.id)
           ?? playbookActions.verifyByStep.get((n.name ?? n.id).replace(/\s+/g, '_'))
           ?? null,
+        // Surface a "has sample" hint for nodes the author already
+        // seeded with synthetic data. Two sources count: the
+        // `# fsrpb:samples` sidecar (manual_input answers) and a
+        // step-level `mock_result` saved off a Test step run.
+        hasSample: !!(
+          (visualStore.state.graph?.samples ?? {})[playbook.name]?.[n.id]
+          || (n.arguments as Record<string, unknown> | undefined)?.mock_result !== undefined
+        ),
         direction,
         playbookIdx
       }

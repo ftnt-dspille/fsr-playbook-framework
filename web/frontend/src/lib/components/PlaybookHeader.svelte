@@ -9,6 +9,7 @@
    */
   import { onMount } from 'svelte';
   import { playbookStore } from '$lib/playbookStore.svelte';
+  import { visualStore } from '$lib/visualEditStore.svelte';
 
   type Props = {
     /** Optional flush hook the host page provides to capture the
@@ -38,7 +39,13 @@
   let drafts = $derived(playbookStore.state.drafts);
   let examples = $derived(playbookStore.state.examples);
   let revisions = $derived(playbookStore.state.revisions);
-  let dirty = $derived(playbookStore.dirty);
+  // Dirty if EITHER the YAML buffer diverged from disk (CLI/Monaco edits,
+  // sample-sidecar writes) OR the in-memory visual graph has pending
+  // edits that haven't been rendered to YAML yet (Args-tab inputs editor,
+  // node args / branches, etc.). Without the visual half the Save button
+  // stayed disabled until autosave flushed the graph through
+  // `renderToYaml`, which felt broken to the user.
+  let dirty = $derived(playbookStore.dirty || visualStore.state.dirty);
   let saving = $derived(playbookStore.state.saving);
   let saveState = $derived(playbookStore.state.saveState);
   let lastSaveError = $derived(playbookStore.state.lastSaveError);
