@@ -305,6 +305,131 @@ def recycled_uuids(cls: dict[str, dict[str, _Row]]) -> dict[str, list[str]]:
     }
 
 
+# Entities with a global unique-name constraint. Empirically: pushing a
+# collection or workflow whose name matches a recycle-bin row (different
+# uuid) hits HTTP 500 UniqueConstraintViolationException on `name` —
+# the soft-deleted row still reserves the slot. Steps/routes are
+# name-unique only inside their parent and rarely collide cross-push.
+NAME_UNIQUE_ENTITIES = ("workflow_collections", "workflows")
+
+
+def find_name_collisions(
+    client, inv: Inventory,
+) -> dict[str, list[dict]]:
+    """Find recycle-bin rows whose name matches one of ours but whose
+    uuid does NOT — these block create-by-name even though our uuid
+    preflight says fresh.
+
+    Returns ``{entity: [{"uuid", "name", "deletedAt"}, …]}``. Empty
+    means no rename will be needed.
+    """
+    out: dict[str, list[dict]] = {}
+    for entity in NAME_UNIQUE_ENTITIES:
+        our_uuids = set(inv.by_entity.get(entity) or [])
+        names = sorted({inv.names[u] for u in our_uuids if u in inv.names})
+        if not names:
+            continue
+        r = client.session.post(
+            f"{client.base_url}/api/query/{entity}?$showDeleted=true",
+            json={
+                "showDeleted": True,
+                "logic": "AND",
+                "limit": max(len(names) * 4, 16),
+                "filters": [{
+                    "field": "name", "operator": "in",
+                    "value": names, "type": "primitive",
+                }],
+            },
+            verify=client.verify_ssl, timeout=30,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(
+                f"name-collision query {entity!r} failed: HTTP "
+                f"{r.status_code} {r.text[:200]}"
+            )
+        members = (r.json() or {}).get("hydra:member", []) or []
+        hits: list[dict] = []
+        for m in members:
+            u = m.get("uuid")
+            if not u or u in our_uuids:
+                continue
+            # Only recycle-bin collisions are ours to rename. A LIVE row
+            # owned by someone else is intentionally NOT touched —
+            # surface it to the caller as a hard conflict instead.
+            if not m.get("deletedAt"):
+                continue
+            hits.append({
+                "uuid": u,
+                "name": m.get("name"),
+                "deletedAt": m.get("deletedAt"),
+            })
+        if hits:
+            out[entity] = hits
+    return out
+
+
+def rename_name_collisions(
+    client, collisions: dict[str, list[dict]],
+) -> tuple[int, list[str]]:
+    """Free unique-name slots held by recycle-bin rows by PUTting them
+    with name suffixed ``__recycled_<epoch>``. The row stays in the
+    recycle bin — only the name moves out of the way so the new push
+    can create-by-name.
+
+    Returns (renamed_count, errors).
+    """
+    import time
+    suffix = f"__recycled_{int(time.time())}"
+    renamed = 0
+    errors: list[str] = []
+    for entity, rows in collisions.items():
+        for row in rows:
+            uuid = row["uuid"]
+            try:
+                gr = client.session.get(
+                    f"{client.base_url}/api/3/{entity}/{uuid}?$showDeleted=true",
+                    verify=client.verify_ssl, timeout=20,
+                )
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{entity}/{uuid}: GET raised {e!r}")
+                continue
+            if gr.status_code != 200:
+                errors.append(
+                    f"{entity}/{uuid}: GET HTTP {gr.status_code}"
+                )
+                continue
+            try:
+                body = gr.json() or {}
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{entity}/{uuid}: JSON parse {e!r}")
+                continue
+            clean = {k: v for k, v in body.items() if not k.startswith("@")}
+            original = body.get("name") or ""
+            # Idempotency: if a prior rename already suffixed this row,
+            # don't pile another suffix on. Match the literal token.
+            if "__recycled_" not in original:
+                clean["name"] = f"{original}{suffix}"
+            else:
+                renamed += 1
+                continue
+            try:
+                pr = client.session.put(
+                    f"{client.base_url}/api/3/{entity}/{uuid}?$showDeleted=true",
+                    json=clean, verify=client.verify_ssl, timeout=30,
+                )
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{entity}/{uuid}: PUT raised {e!r}")
+                continue
+            if pr.status_code >= 400:
+                errors.append(
+                    f"{entity}/{uuid}: PUT HTTP {pr.status_code} "
+                    f"{pr.text[:200]}"
+                )
+                continue
+            renamed += 1
+    return renamed, errors
+
+
 def restore_recycled(
     client,
     recycled: dict[str, list[str]],

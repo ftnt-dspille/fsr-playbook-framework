@@ -673,6 +673,38 @@ def cmd_push(args: argparse.Namespace) -> int:
             return False, e, "PREFLIGHT_FAIL"
         print(_pre.summarize(inv, cls), file=sys.stderr)
 
+        # Free unique-name slots held by recycle-bin rows whose uuid
+        # differs from ours. FSR's unique-name constraint reserves the
+        # name even for soft-deleted rows, so a name-only collision
+        # would HTTP 500 the bulkupsert with UniqueConstraintViolation.
+        # Rename (suffix __recycled_<epoch>) rather than hard-delete:
+        # the row stays restorable, only its name moves aside.
+        try:
+            collisions = _pre.find_name_collisions(client, inv)
+        except Exception as e:  # noqa: BLE001
+            return False, e, "NAME_COLLISION_CHECK_FAIL"
+        if collisions:
+            total = sum(len(v) for v in collisions.values())
+            print(
+                f"preflight: {total} recycle-bin name collision(s); "
+                f"renaming to free the unique-name slot",
+                file=sys.stderr,
+            )
+            for entity, rows in collisions.items():
+                for row in rows:
+                    print(
+                        f"  RENAME  {entity}/{row['uuid']}  "
+                        f"{row.get('name')!r}",
+                        file=sys.stderr,
+                    )
+            renamed, errs = _pre.rename_name_collisions(client, collisions)
+            for err in errs:
+                print(f"  rename error: {err}", file=sys.stderr)
+            if errs:
+                return False, RuntimeError(
+                    f"rename failed for {len(errs)} row(s); aborting push"
+                ), "RENAME_FAIL"
+
         # Restore any recycled rows BEFORE bulkupsert. The PHP-8 bug at
         # UpsertController.php line 89 makes bulkupsert fail on any row
         # whose deletedAt is non-null. Restoring is one PUT per row,

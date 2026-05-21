@@ -87,46 +87,11 @@
     initialTurns?: Turn[];
   } = $props();
 
-  // "Empty" YAML buffers we should NOT send as agent context — sending
-  // them causes the agent to extend the scaffold instead of authoring
-  // fresh. Heuristic: blank, comment-only, or only-comments + "Welcome"
-  // marker. Authors with a real playbook in the editor pass the check.
-  function isMeaningfulYaml(text: string): boolean {
-    const stripped = text
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith('#'))
-      .join('\n');
-    if (stripped.length < 40) return false;
-    if (text.includes('# Welcome — try one of these to get started:')) return false;
-    if (text.includes('# ... rest of your current workflow content ...')) return false;
-    return true;
-  }
-
-  // User-controlled override. Defaults to "include only when the
-  // buffer looks meaningful". User can flip both ways. Initialized
-  // false; the effect below seeds it from the live `currentYaml`
-  // prop on first run (Svelte 5 won't track the prop in $state init).
+  // User-controlled toggle. Off by default — including the YAML is
+  // an explicit opt-in so the model doesn't get fed a buffer the user
+  // didn't mean to share. The user flips it on when they actually
+  // want the editor's contents as context.
   let includeYaml = $state(false);
-  // Re-sync the default whenever the upstream buffer changes between
-  // empty and meaningful (e.g. user types real YAML, or resets back to
-  // placeholder). Only auto-flip when the current toggle matches the
-  // previous default — so an explicit user choice sticks.
-  // Non-reactive tracker — only read/written from inside the effect
-  // below. Marking this $state would cause a self-triggering update
-  // loop (effect_update_depth_exceeded).
-  let yamlPrevMeaningful = false;
-  $effect(() => {
-    const nowMeaningful = isMeaningfulYaml(currentYaml);
-    if (nowMeaningful !== yamlPrevMeaningful) {
-      // Author flipped the buffer state; re-evaluate default unless
-      // they've explicitly diverged.
-      if (includeYaml === yamlPrevMeaningful) {
-        includeYaml = nowMeaningful;
-      }
-      yamlPrevMeaningful = nowMeaningful;
-    }
-  });
 
   let turns = $state<Turn[]>([]);
   // Re-seed `turns` whenever the parent passes a fresh `initialTurns`
