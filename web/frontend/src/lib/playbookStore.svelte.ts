@@ -98,7 +98,7 @@ const state = $state<State>({
 
 // --- Save mutation machine (module-scoped because it's mechanical
 // timing state — not part of the reactive surface). ---
-const SAVE_DEBOUNCE_MS = 1000;
+const SAVE_DEBOUNCE_MS = 5000;
 const SAVE_MAX_RETRIES = 5;
 const SAVED_FADE_MS = 3000;
 

@@ -370,6 +370,25 @@ def put_draft(
                     },
                     status_code=409,
                 )
+        # No-op guard: if the incoming YAML matches what's already stored
+        # AND there's a head revision to point at, skip both the UPDATE
+        # and the revision INSERT. Autosave fires on every dirtiness
+        # signal, and identity edits (whitespace round-trip via the
+        # visual canvas, re-renders that don't change the doc) used to
+        # flood the revision table with duplicates.
+        if (
+            existing
+            and existing["yaml"] == payload.yaml
+            and existing["head_revision_id"] is not None
+        ):
+            return {
+                "ok": True,
+                "kind": "draft",
+                "name": name,
+                "created_ts": existing["created_ts"],
+                "updated_ts": existing["updated_ts"],
+                "revision_id": existing["head_revision_id"],
+            }
         if existing:
             conn.execute(
                 "UPDATE drafts SET yaml=?, updated_ts=? WHERE name=?",

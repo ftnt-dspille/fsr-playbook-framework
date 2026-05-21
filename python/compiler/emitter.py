@@ -394,7 +394,15 @@ def emit(collection: Collection) -> dict[str, Any]:
             # string formats with NotNormalizableValueException, verified live
             # 2026-05-06 against /api/3/workflow_collections).
             "lastModifyDate": int(datetime.now(timezone.utc).timestamp()),
-            "collection": None,  # populated by FSR import
+            # Stamp the parent-collection IRI explicitly. Fresh POST to
+            # `/api/3/workflow_collections` populates this from the parent
+            # row, but bulkupsert on a row whose `deletedAt` we just
+            # cleared via the recycle-bin restore does NOT — the workflow
+            # comes back with `collection: null`, which makes the FSR UI's
+            # breadcrumb resolver (and `?collection=<uuid>` filters) treat
+            # the playbook as orphaned. Stamping it here keeps the parent
+            # link intact through restore + upsert.
+            "collection": f"/api/3/workflow_collections/{coll_uuid}",
             "versions": [],
             "triggerStep": trigger_step_iri,
             "steps": steps_out,

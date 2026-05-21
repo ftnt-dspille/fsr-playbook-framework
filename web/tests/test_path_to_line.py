@@ -111,3 +111,40 @@ playbooks:
     # Should land on the step header (5) since `conditions[0]` isn't
     # itself a top-level key of the step.
     assert line == 5
+
+
+def test_nested_list_items_arent_counted_as_steps():
+    # Regression: nested `- ` items inside a step's arguments (option
+    # entries, filter primitives, …) used to be counted as top-level
+    # steps. An error on `steps[1].arguments.module` would then land on
+    # a random nested line instead of step 1's header.
+    yaml = """\
+collection: "x"
+playbooks:
+- name: p
+  steps:
+  - name: Approve IP Block
+    type: manual_input
+    arguments:
+      input:
+        title: "Approve IP Block"
+        options:
+        - display: Approve
+          primary: true
+          next: Block IP on FortiGate
+        - display: Reject
+          next: end
+  - name: Find target
+    type: find_record
+    arguments:
+      query:
+        logic: AND
+        filters:
+        - type: primitive
+          field: uuid
+"""
+    # steps[1] is the find_record step — its header is line 16.
+    # Missing `module` falls back to the step header, not a nested
+    # `- display:` or `- type: primitive` line.
+    line = _path_to_line(yaml, "playbooks[0].steps[1].arguments.module")
+    assert line == 16

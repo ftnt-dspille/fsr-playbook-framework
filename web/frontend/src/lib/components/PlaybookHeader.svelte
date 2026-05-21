@@ -240,12 +240,44 @@
     disabled={!active}
   >Save as…</button>
 
-  <button
-    type="button"
-    class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 font-medium hover:bg-[var(--bg-canvas)] disabled:opacity-50"
-    onclick={() => (revisionsOpen = !revisionsOpen)}
-    disabled={!active || active.kind !== 'draft' || revisions.length === 0}
-  >Revisions{revisions.length ? ` (${revisions.length})` : ''}</button>
+  <div class="relative">
+    <button
+      type="button"
+      class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 font-medium hover:bg-[var(--bg-canvas)] disabled:opacity-50"
+      onclick={() => (revisionsOpen = !revisionsOpen)}
+      disabled={!active || active.kind !== 'draft' || revisions.length === 0}
+    >Revisions{revisions.length ? ` (${revisions.length})` : ''}</button>
+
+    {#if revisionsOpen && active?.kind === 'draft'}
+      <div class="absolute left-0 top-full mt-1 z-40 max-h-[28rem] w-96 overflow-auto rounded-md border border-[var(--border-soft)] bg-[var(--bg-canvas)] shadow-xl">
+        <header class="sticky top-0 flex items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          <span>Revisions for {active.name}</span>
+          <button type="button" class="text-[var(--text-faint)] hover:text-[var(--text-muted)]" onclick={() => (revisionsOpen = false)}>×</button>
+        </header>
+        <ul>
+          {#each revisions as rev (rev.id)}
+            <li class="border-b border-[var(--border-soft)] px-3 py-2 hover:bg-[var(--bg-elev)]">
+              <div class="flex items-baseline justify-between gap-2 text-xs">
+                <span class="font-mono text-[var(--text-default)]">#{rev.id}</span>
+                <span class="text-[10px] text-[var(--text-faint)]">{fmtTs(rev.created_ts)}</span>
+              </div>
+              <div class="mt-0.5 flex items-center gap-2 text-[11px]">
+                <span class={rev.is_auto ? 'text-[var(--text-faint)]' : 'text-[var(--text-default)]'}>
+                  {rev.is_auto ? '⟲ auto' : '◆ manual'}
+                </span>
+                {#if rev.reason}<span class="truncate text-[var(--text-muted)]">{rev.reason}</span>{/if}
+              </div>
+              <button
+                type="button"
+                class="mt-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 text-[10px] font-medium hover:bg-[var(--bg-canvas)]"
+                onclick={() => onLoadRevision(rev.id)}
+              >Load into editor</button>
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+  </div>
 
   <button
     type="button"
@@ -375,37 +407,6 @@
       <button type="button" class="rounded border border-[var(--border-soft)] px-2 py-0.5 text-xs" onclick={() => (cloningExample = null)}>Cancel</button>
       <button type="button" class="rounded bg-[var(--brand)] px-2 py-0.5 text-xs text-white" onclick={onCloneCommit}>Clone &amp; Edit</button>
     </div>
-  </div>
-{/if}
-
-<!-- Revisions drawer -->
-{#if revisionsOpen && active?.kind === 'draft'}
-  <div class="absolute right-4 top-12 z-40 max-h-[28rem] w-96 overflow-auto rounded-md border border-[var(--border-soft)] bg-[var(--bg-canvas)] shadow-xl">
-    <header class="sticky top-0 flex items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-      <span>Revisions for {active.name}</span>
-      <button type="button" class="text-[var(--text-faint)] hover:text-[var(--text-muted)]" onclick={() => (revisionsOpen = false)}>×</button>
-    </header>
-    <ul>
-      {#each revisions as rev (rev.id)}
-        <li class="border-b border-[var(--border-soft)] px-3 py-2 hover:bg-[var(--bg-elev)]">
-          <div class="flex items-baseline justify-between gap-2 text-xs">
-            <span class="font-mono text-[var(--text-default)]">#{rev.id}</span>
-            <span class="text-[10px] text-[var(--text-faint)]">{fmtTs(rev.created_ts)}</span>
-          </div>
-          <div class="mt-0.5 flex items-center gap-2 text-[11px]">
-            <span class={rev.is_auto ? 'text-[var(--text-faint)]' : 'text-[var(--text-default)]'}>
-              {rev.is_auto ? '⟲ auto' : '◆ manual'}
-            </span>
-            {#if rev.reason}<span class="truncate text-[var(--text-muted)]">{rev.reason}</span>{/if}
-          </div>
-          <button
-            type="button"
-            class="mt-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 text-[10px] font-medium hover:bg-[var(--bg-canvas)]"
-            onclick={() => onLoadRevision(rev.id)}
-          >Load into editor</button>
-        </li>
-      {/each}
-    </ul>
   </div>
 {/if}
 

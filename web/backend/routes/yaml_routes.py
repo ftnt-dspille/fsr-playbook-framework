@@ -71,21 +71,45 @@ def _path_to_line(text: str, path: str) -> int:
         if m:
             step_n = int(m.group(1))
             in_steps = False
+            steps_key_indent = -1
+            sibling_indent = -1  # indent of top-level step `- ` items
             seen = -1
             step_start_line = None
             step_start_indent = -1
             for i, ln in enumerate(lines, start=1):
                 stripped = ln.lstrip()
+                if not stripped:
+                    continue
+                indent = len(ln) - len(stripped)
                 if stripped.startswith("steps:"):
                     in_steps = True
+                    steps_key_indent = indent
+                    sibling_indent = -1
                     continue
-                if in_steps and stripped.startswith("- "):
-                    seen += 1
-                    if seen == step_n:
-                        step_start_line = i
-                        step_start_indent = len(ln) - len(stripped)
-                    elif seen > step_n:
-                        break
+                if not in_steps:
+                    continue
+                # Leaving the steps block: a non-list line dedented to or
+                # past the `steps:` key means we've moved on to a sibling
+                # section (or the next playbook).
+                if not stripped.startswith("- ") and indent <= steps_key_indent:
+                    in_steps = False
+                    continue
+                if not stripped.startswith("- "):
+                    continue
+                # First `- ` after `steps:` establishes the sibling indent
+                # for step items. Nested list items (option entries, filter
+                # primitives, etc.) sit at deeper indents and must not be
+                # counted as steps.
+                if sibling_indent < 0:
+                    sibling_indent = indent
+                if indent != sibling_indent:
+                    continue
+                seen += 1
+                if seen == step_n:
+                    step_start_line = i
+                    step_start_indent = indent
+                elif seen > step_n:
+                    break
             if step_start_line is not None:
                 # If the path ends in `.<key>` (e.g. ".type", ".arguments"),
                 # find that key inside this step block so the squiggle
@@ -118,7 +142,95 @@ def _path_to_line(text: str, path: str) -> int:
     return 1
 
 
+_MISPLACED_ARG_RE = re.compile(r"^(playbooks\[\d+\])\.steps\[(\d+)\]\.arguments\.([A-Za-z_][A-Za-z0-9_]*)$")
+
+
+def _detect_misplaced_arg(text: str, path: str) -> int | None:
+    """If an `arguments.<key>` field is reported missing but `<key>:` is
+    sitting at the step level (sibling of `arguments:`), return its 1-based
+    line so we can suggest indenting it. Returns None otherwise.
+    """
+    m = _MISPLACED_ARG_RE.match(path or "")
+    if not m:
+        return None
+    step_n, key = int(m.group(2)), m.group(3)
+    lines = text.splitlines()
+    in_steps = False
+    steps_key_indent = -1
+    sibling_indent = -1
+    seen = -1
+    step_start_line = None
+    step_start_indent = -1
+    next_step_line = None
+    for i, ln in enumerate(lines, start=1):
+        stripped = ln.lstrip()
+        if not stripped:
+            continue
+        indent = len(ln) - len(stripped)
+        if stripped.startswith("steps:"):
+            in_steps = True
+            steps_key_indent = indent
+            sibling_indent = -1
+            continue
+        if not in_steps:
+            continue
+        if not stripped.startswith("- ") and indent <= steps_key_indent:
+            in_steps = False
+            continue
+        if not stripped.startswith("- "):
+            continue
+        if sibling_indent < 0:
+            sibling_indent = indent
+        if indent != sibling_indent:
+            continue
+        seen += 1
+        if seen == step_n:
+            step_start_line = i
+            step_start_indent = indent
+        elif seen == step_n + 1:
+            next_step_line = i
+            break
+    if step_start_line is None:
+        return None
+    end_line = (next_step_line - 1) if next_step_line else len(lines)
+    # Inside this step block, find the indent of `arguments:` (if any)
+    # and a `<key>:` line that sits at the same indent (i.e. a sibling,
+    # not a child of arguments).
+    args_indent = None
+    for j in range(step_start_line, end_line + 1):
+        ln = lines[j - 1]
+        stripped_j = ln.lstrip()
+        if stripped_j.startswith("arguments:"):
+            args_indent = len(ln) - len(stripped_j)
+            break
+    if args_indent is None:
+        return None
+    for j in range(step_start_line, end_line + 1):
+        ln = lines[j - 1]
+        stripped_j = ln.lstrip()
+        indent_j = len(ln) - len(stripped_j)
+        # Strip a leading `- ` on the step's first line so `- name:` style
+        # doesn't trip the indent check.
+        if stripped_j.startswith("- "):
+            indent_j += 2
+            stripped_j = stripped_j[2:]
+        if indent_j != args_indent:
+            continue
+        if stripped_j.startswith(key + ":"):
+            return j
+    return None
+
+
 def _err_to_marker(text: str, e) -> Marker:
+    suggestion = e.suggestion or e.near
+    if e.code.value == "missing_field":
+        misplaced_line = _detect_misplaced_arg(text, e.path)
+        if misplaced_line is not None:
+            key = e.path.rsplit(".", 1)[-1]
+            suggestion = (
+                f"found {key!r} at the step level (line {misplaced_line}) — "
+                f"indent it under `arguments:` so it's `arguments.{key}`"
+            )
     return Marker(
         line=_path_to_line(text, e.path),
         col=1,
@@ -126,7 +238,7 @@ def _err_to_marker(text: str, e) -> Marker:
         code=e.code.value,
         message=e.message,
         path=e.path,
-        suggestion=e.suggestion or e.near,
+        suggestion=suggestion,
     )
 
 

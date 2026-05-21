@@ -24,6 +24,24 @@ def test_routes_synthesized(db_path, repo_root):
     assert len(pairs) == 2
 
 
+def test_workflow_collection_link_is_stamped(db_path, repo_root):
+    """Regression: the recycle-bin-restore + bulkupsert path used to leave
+    a workflow's `collection` field null, which orphaned the playbook in
+    the FSR UI (empty breadcrumbs, `?collection=<uuid>` filter found 0
+    results). Workflows must carry the parent collection IRI in the
+    emitted payload so bulkupsert preserves the relation across a restore.
+    """
+    r = compile_yaml(_hello(repo_root), db_path)
+    coll = r.fsr_json["data"][0]
+    coll_uuid = coll["uuid"]
+    expected_iri = f"/api/3/workflow_collections/{coll_uuid}"
+    for wf in coll["workflows"]:
+        assert wf["collection"] == expected_iri, (
+            f"workflow {wf['name']!r} missing collection IRI: "
+            f"{wf['collection']!r}"
+        )
+
+
 def test_step_type_iri_format(db_path, repo_root):
     r = compile_yaml(_hello(repo_root), db_path)
     for step in r.fsr_json["data"][0]["workflows"][0]["steps"]:
