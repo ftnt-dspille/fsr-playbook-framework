@@ -10,6 +10,13 @@
   import { onMount } from 'svelte';
   import { playbookStore } from '$lib/playbookStore.svelte';
   import { visualStore } from '$lib/visualEditStore.svelte';
+  import { commands, fmtHotkey } from '$lib/commands.svelte';
+
+  // Cached hotkey display strings — fmtHotkey is platform-aware so the
+  // tooltips show ⌘S on macOS and Ctrl+S elsewhere automatically.
+  const HK_SAVE = fmtHotkey(['Mod', 'S']);
+  const HK_TOGGLE_MODE = fmtHotkey(['Mod', '/']);
+  const HK_PALETTE = fmtHotkey(['Mod', 'K']);
 
   type Props = {
     /** Optional flush hook the host page provides to capture the
@@ -86,6 +93,12 @@
 
   onMount(() => {
     void playbookStore.refresh();
+    // Listen for the global Cmd+P keybinding — the page dispatches a
+    // window event rather than lifting picker state up, which keeps
+    // the picker logic colocated here.
+    const onOpen = () => { pickerOpen = true; };
+    window.addEventListener('fsrpb:open-playbook-picker', onOpen);
+    return () => window.removeEventListener('fsrpb:open-playbook-picker', onOpen);
   });
 
   async function pick(kind: 'draft' | 'example', name: string) {
@@ -237,7 +250,9 @@
     class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 font-medium hover:bg-[var(--bg-canvas)] disabled:opacity-50"
     onclick={onSave}
     disabled={saving || !active || (!isExample && !dirty)}
-    title={isExample ? 'Examples are read-only — Clone & Edit' : (dirty ? 'Save current draft' : 'No unsaved changes')}
+    title={isExample
+      ? `Examples are read-only — Clone & Edit (${HK_SAVE})`
+      : (dirty ? `Save current draft (${HK_SAVE})` : `No unsaved changes (${HK_SAVE})`)}
   >{isExample ? 'Clone & Edit' : (saving ? 'Saving…' : 'Save')}</button>
 
   <button
@@ -304,7 +319,8 @@
        header so the previous standalone toggle row goes away — saves
        a full row of vertical chrome on first paint. -->
   {#if mode && onModeChange}
-    <div class="ml-auto inline-flex rounded border border-[var(--border-soft)] p-0.5">
+    <div class="ml-auto inline-flex rounded border border-[var(--border-soft)] p-0.5"
+         title="Toggle Design / CLI ({HK_TOGGLE_MODE})">
       <button
         type="button"
         class="rounded px-2.5 py-0.5 font-medium {mode === 'design' ? 'bg-[var(--brand)] text-white' : 'text-[var(--text-muted)]'}"
@@ -319,6 +335,23 @@
       >CLI</button>
     </div>
   {/if}
+
+  <!-- Right-edge hint chip: surfaces the command palette + help so
+       users discover the keyboard layer without a tour. Clicking the
+       chip opens the palette; the kbd badges are pure display. Hover
+       any other header button to see its specific shortcut. -->
+  <button
+    type="button"
+    class="{mode && onModeChange ? '' : 'ml-auto'} inline-flex items-center gap-1 rounded border border-transparent px-1.5 py-0.5 text-[10px] text-[var(--text-faint)] hover:border-[var(--border-soft)] hover:text-[var(--text-muted)]"
+    onclick={() => (commands.paletteOpen = true)}
+    title="Open command palette — searchable list of every shortcut"
+  >
+    <kbd class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1 font-mono text-[10px]">{HK_PALETTE}</kbd>
+    <span>commands</span>
+    <span aria-hidden="true">·</span>
+    <kbd class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1 font-mono text-[10px]">?</kbd>
+    <span>help</span>
+  </button>
 
   {#if actionError}
     <span class="ml-2 rounded border border-red-300 bg-red-50 px-2 py-0.5 text-[11px] text-red-800">{actionError}</span>

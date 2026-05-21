@@ -11,6 +11,10 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { messagesToTurns, type ReplayTurn } from '$lib/sessionReplay';
+  import { commands, modPressed, fmtHotkey } from '$lib/commands.svelte';
+  import { installKeybindings } from '$lib/keybindings';
+  import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 
   // Active-doc sync + debounced autosave + auto-verify all live on
   // `playbookStore`. Registering them here scopes the effects to this
@@ -277,6 +281,102 @@
     drawerOpen = true;
   }
 
+  // ---- Global keyboard shortcuts + command palette --------------------
+  // Page-scope commands: navigation + run + help. Node-scope commands
+  // (Delete / Test step) register from EditWorkspace where the
+  // selection state lives. The keybindings module walks the registry
+  // on every keydown and runs the first matcher.
+  onMount(() => {
+    const teardownKeys = installKeybindings();
+    const teardownCmds = commands.registerMany([
+      {
+        id: 'palette.open',
+        label: 'Open command palette',
+        hotkey: fmtHotkey(['Mod', 'K']),
+        group: 'Navigation',
+        match: (ev) => modPressed(ev) && ev.key.toLowerCase() === 'k',
+        run: () => { commands.paletteOpen = true; },
+      },
+      {
+        id: 'help.toggle',
+        label: 'Show keyboard shortcuts',
+        hotkey: '?',
+        group: 'Help',
+        // `?` is Shift+/ on most layouts; we only fire when no input is
+        // focused (keybindings.ts already gates editable targets out
+        // unless the command explicitly opts in).
+        match: (ev) => !modPressed(ev) && !ev.altKey && ev.key === '?',
+        run: () => { commands.helpOpen = !commands.helpOpen; },
+      },
+      {
+        id: 'file.save',
+        label: 'Save playbook',
+        hotkey: fmtHotkey(['Mod', 'S']),
+        group: 'File',
+        match: (ev) => modPressed(ev) && ev.key.toLowerCase() === 's',
+        enabled: () => !!playbookStore.state.active && !playbookStore.isExample,
+        run: async () => {
+          // Mirror PlaybookHeader.onSave: flush visual edits into the
+          // canonical buffer first, then persist.
+          try {
+            const latest = await getActiveYaml();
+            if (typeof latest === 'string') playbookStore.replaceYaml(latest);
+          } catch {}
+          await playbookStore.save({ reason: 'cmd+s' });
+        },
+      },
+      {
+        id: 'edit.undo',
+        label: 'Undo',
+        hotkey: fmtHotkey(['Mod', 'Z']),
+        group: 'Edit',
+        match: (ev) => modPressed(ev) && !ev.shiftKey && ev.key.toLowerCase() === 'z',
+        enabled: () => visualStore.state.undoStack.length > 0,
+        run: () => { visualStore.undo(); },
+      },
+      {
+        id: 'edit.redo',
+        label: 'Redo',
+        hotkey: fmtHotkey(['Shift', 'Mod', 'Z']),
+        group: 'Edit',
+        match: (ev) => modPressed(ev) && ev.shiftKey && ev.key.toLowerCase() === 'z',
+        enabled: () => visualStore.state.redoStack.length > 0,
+        run: () => { visualStore.redo(); },
+      },
+      {
+        id: 'run.push',
+        label: 'Push playbook to FSR',
+        hotkey: fmtHotkey(['Mod', 'Enter']),
+        group: 'Run',
+        match: (ev) => modPressed(ev) && ev.key === 'Enter',
+        enabled: () => !!playbookStore.state.active,
+        run: async () => { await playbookActions.push(); },
+      },
+      {
+        id: 'nav.toggleMode',
+        label: 'Toggle Design / CLI',
+        hotkey: fmtHotkey(['Mod', '/']),
+        group: 'Navigation',
+        match: (ev) => modPressed(ev) && ev.key === '/',
+        run: () => { void setMode(mode === 'design' ? 'cli' : 'design'); },
+      },
+      {
+        id: 'nav.pickPlaybook',
+        label: 'Open playbook picker',
+        hotkey: fmtHotkey(['Mod', 'P']),
+        group: 'Navigation',
+        match: (ev) => modPressed(ev) && ev.key.toLowerCase() === 'p',
+        run: () => {
+          // PlaybookHeader owns the picker; emit a custom event it
+          // listens for. Lightest-weight wire-up that doesn't require
+          // lifting picker state to the page.
+          window.dispatchEvent(new CustomEvent('fsrpb:open-playbook-picker'));
+        },
+      },
+    ]);
+    return () => { teardownKeys(); teardownCmds(); };
+  });
+
 </script>
 
 <div class="flex h-full flex-col">
@@ -349,3 +449,9 @@
   />
 </div>
 </div>
+
+<!-- Cmd+K palette + `?` shortcut help. Mounted at the page root so
+     they overlay everything. Both subscribe to the same command
+     registry, so newly-registered commands surface here automatically. -->
+<CommandPalette />
+<ShortcutHelp />

@@ -22,6 +22,10 @@
   import JinjaTestModal from '$lib/components/JinjaTestModal.svelte';
   import PlaybookGuards from '$lib/components/PlaybookGuards.svelte';
   import { visualStore } from '$lib/visualEditStore.svelte';
+  import { commands, modPressed, fmtHotkey } from '$lib/commands.svelte';
+  import { onMount } from 'svelte';
+  import { callMcpTool } from '$lib/api';
+  import { playbookStore } from '$lib/playbookStore.svelte';
 
   type Props = {
     /** Pop the bottom diagnostics drawer to a specific tab. Forwarded
@@ -98,6 +102,47 @@
     activePbIdx = pending.playbookIdx;
     selectedNodeId = pending.nodeId;
     visualStore.consumePendingSelection();
+  });
+
+  // Node-scope shortcuts. Registered here (not in +page.svelte) because
+  // they need live access to the selection. The command registry handles
+  // the cross-component sharing — the palette + keybindings see these
+  // alongside the page-level commands.
+  onMount(() => {
+    return commands.registerMany([
+      {
+        id: 'node.delete',
+        label: 'Delete selected node',
+        hotkey: 'Del',
+        group: 'Edit',
+        enabled: () => !!selectedNodeId,
+        match: (ev) => (ev.key === 'Delete' || ev.key === 'Backspace') && !modPressed(ev),
+        run: () => {
+          if (!selectedNodeId) return;
+          if (!confirm(`Delete step '${selectedNode?.name ?? selectedNodeId}'?`)) return;
+          visualStore.removeNode(activePbIdx, selectedNodeId);
+          selectedNodeId = null;
+        },
+      },
+      {
+        id: 'node.testStep',
+        label: 'Test selected step',
+        hotkey: fmtHotkey(['Mod', 'T']),
+        group: 'Run',
+        enabled: () => !!selectedNode && selectedNode.family !== 'terminal',
+        match: (ev) => modPressed(ev) && ev.key.toLowerCase() === 't',
+        run: async () => {
+          if (!selectedNode) return;
+          // Surface the inspector + Verify tab so the user sees the
+          // result, then fire step_test against the current YAML buffer.
+          inspectorOpen = true;
+          await callMcpTool('step_test', {
+            yaml_text: playbookStore.currentYaml,
+            step_id: selectedNode.id,
+          });
+        },
+      },
+    ]);
   });
 </script>
 

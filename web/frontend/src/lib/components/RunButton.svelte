@@ -9,6 +9,8 @@
    * button does what the user actually wants without re-opening the menu.
    */
   import { playbookActions } from '$lib/playbookActions.svelte';
+  import { fmtHotkey } from '$lib/commands.svelte';
+  const HK_PUSH = fmtHotkey(['Mod', 'Enter']);
 
   // We portal the open menu into <body> so its `position:fixed` children
   // stack at the document root — otherwise an ancestor flex / overflow /
@@ -85,7 +87,7 @@
     type="button"
     class="rounded-l border border-r-0 border-orange-700/40 bg-orange-500/10 px-3 py-0.5 text-xs font-medium text-orange-700 hover:bg-orange-500/20 dark:text-orange-300"
     onclick={() => fire(lastVariant)}
-    title={primaryLabel}
+    title={`${primaryLabel} (${HK_PUSH})`}
   >
     <span aria-hidden="true">▶</span> {primaryLabel}
   </button>
