@@ -24,6 +24,11 @@ export type Command = {
   /** Predicate fired against window keydown events. Return true to run
    *  this command. Omit for palette-only commands. */
   match?: (ev: KeyboardEvent) => boolean;
+  /** Opt-in to firing even when the user is typing in an input /
+   *  textarea / Monaco. Default false — most commands shouldn't eat
+   *  keystrokes meant for a field. Use for Esc-style close commands
+   *  and Cmd+S-style global saves. */
+  runInInputs?: boolean;
   /** Bucket for grouping in the palette + help overlay. */
   group?: 'File' | 'Edit' | 'Navigation' | 'Run' | 'Help';
   /** Disabled commands stay listed but greyed out, so users can see

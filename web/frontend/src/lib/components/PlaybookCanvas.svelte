@@ -29,8 +29,14 @@
     playbookIdx: number;
     direction?: 'TB' | 'LR';
     onSelect?: (node: VisualNode | null) => void;
+    /** Authoritative selection (driven by EditWorkspace's
+     *  `selectedNodeId`). When set, the matching SvelteFlow node gets
+     *  `selected: true` so the blue outline tracks programmatic
+     *  selection changes — needed for keyboard nav (↑/↓/←/→), which
+     *  shifts `selectedNodeId` without going through `onnodeclick`. */
+    selectedNodeId?: string | null;
   };
-  let { playbook, playbookIdx, direction = 'TB', onSelect }: Props = $props();
+  let { playbook, playbookIdx, direction = 'TB', onSelect, selectedNodeId = null }: Props = $props();
 
   const nodeTypes = { step: StepNode };
   const edgeTypes = { default: FlowEdge, smoothstep: FlowEdge, bezier: FlowEdge };
@@ -94,6 +100,10 @@
       id: n.id,
       type: 'step',
       position: n.position,
+      // Drives the blue selection outline. Updated when EditWorkspace
+      // changes `selectedNodeId` (keyboard nav, inspector → focus
+      // signals) so the canvas stays in sync with the inspector pane.
+      selected: n.id === selectedNodeId,
       data: {
         node: n,
         verification: verifs[n.id] ?? null,

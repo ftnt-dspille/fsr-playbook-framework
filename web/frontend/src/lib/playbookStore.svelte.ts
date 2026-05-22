@@ -545,7 +545,10 @@ export const playbookStore = {
       const t = state.lastSavedAt;
       if (t === null || t === lastSavedAtSeen) return;
       lastSavedAtSeen = t;
-      visualStore.state.dirty = false;
+      // markSaved both clears the dirty flag AND snapshots the current
+      // graph as the "saved" baseline, so a subsequent undo back to
+      // this state correctly resolves dirty=false.
+      visualStore.markSaved();
       if (!playbookActions.analyzeBusy) void playbookActions.analyze();
       if (!playbookActions.verifyBusy) void playbookActions.runVerify();
     });

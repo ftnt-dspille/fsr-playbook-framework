@@ -15,17 +15,23 @@ export function installKeybindings(): () => void {
     const editable = isEditableTarget(ev.target);
     for (const cmd of commands.list) {
       if (!cmd.match) continue;
-      if (cmd.enabled && !cmd.enabled()) continue;
-      // Default: skip when typing in a field. Commands that need to
-      // fire there set their `match()` to inspect the target itself.
-      if (editable && !cmd.match(ev)) continue;
+      if (editable && !cmd.runInInputs) continue;
       if (!cmd.match(ev)) continue;
+      // Always swallow a matching hotkey, even when the command is
+      // disabled — otherwise the browser default takes over (Cmd+Z
+      // history nav, Cmd+S "save page", etc.) and surprises the user.
+      // Disabled simply means "no-op", not "let the browser have it".
       ev.preventDefault();
       ev.stopPropagation();
+      if (cmd.enabled && !cmd.enabled()) return;
       void cmd.run();
       return;
     }
   };
-  window.addEventListener('keydown', onKey);
-  return () => window.removeEventListener('keydown', onKey);
+  // Capture phase so we intercept before react-flow's own keydown
+  // handler (which moves the focused node on arrow keys). Without
+  // capture, arrow-key node navigation translated the node instead of
+  // shifting the selection outline.
+  window.addEventListener('keydown', onKey, true);
+  return () => window.removeEventListener('keydown', onKey, true);
 }

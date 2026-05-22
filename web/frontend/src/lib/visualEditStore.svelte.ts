@@ -26,6 +26,12 @@ type State = {
    * the canvas-owning component (EditWorkspace) which reflects it
    * into its own selection state. Cleared after consumption. */
   pendingSelection: { playbookIdx: number; nodeId: string } | null;
+  /** Serialized snapshot of `graph` at the moment of the most recent
+   *  save. Used by undo/redo to decide whether the restored graph is
+   *  the same as the persisted state — without this, walking back to
+   *  the saved point still flags as dirty. JSON-stringified up front so
+   *  comparisons are cheap (no per-call serialize). */
+  savedGraphJson: string | null;
 };
 
 const state = $state<State>({
@@ -36,7 +42,8 @@ const state = $state<State>({
   saveError: null,
   undoStack: [],
   redoStack: [],
-  pendingSelection: null
+  pendingSelection: null,
+  savedGraphJson: null,
 });
 
 const MAX_HISTORY = 50;
@@ -71,6 +78,16 @@ export const visualStore = {
     state.saveError = null;
     state.undoStack = [];
     state.redoStack = [];
+    state.savedGraphJson = JSON.stringify(graph);
+  },
+
+  /** Mark the current graph as the saved baseline. Called by the
+   *  page's autosave-clear effect right after a successful save so
+   *  later undo/redo can detect when the user has walked back to the
+   *  persisted state and de-flag dirty. */
+  markSaved() {
+    state.savedGraphJson = state.graph ? JSON.stringify(state.graph) : null;
+    state.dirty = false;
   },
 
   /** Pop one undo snapshot back into `graph`, pushing the current state
@@ -79,7 +96,7 @@ export const visualStore = {
     if (!state.graph || state.undoStack.length === 0) return;
     state.redoStack.push(deepClone(state.graph));
     state.graph = state.undoStack.pop()!;
-    state.dirty = true;
+    state.dirty = JSON.stringify(state.graph) !== state.savedGraphJson;
   },
 
   /** Inverse of undo. */
@@ -87,7 +104,7 @@ export const visualStore = {
     if (!state.graph || state.redoStack.length === 0) return;
     state.undoStack.push(deepClone(state.graph));
     state.graph = state.redoStack.pop()!;
-    state.dirty = true;
+    state.dirty = JSON.stringify(state.graph) !== state.savedGraphJson;
   },
 
   get canUndo() { return state.undoStack.length > 0; },

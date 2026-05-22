@@ -83,16 +83,16 @@
     aria-label="Command palette"
     onclick={(e) => { if (e.target === e.currentTarget) commands.paletteOpen = false; }}
   >
-    <div class="w-full max-w-xl rounded-lg border border-[var(--border-soft)] bg-[var(--bg-canvas)] shadow-2xl">
+    <div class="w-full max-w-2xl rounded-lg border border-[var(--border-soft)] bg-[var(--bg-canvas)] shadow-2xl">
       <input
         type="text"
         autofocus
         bind:value={query}
         onkeydown={onKey}
         placeholder="Type a command…"
-        class="w-full rounded-t-lg border-b border-[var(--border-soft)] bg-transparent px-4 py-3 text-sm text-[var(--text-default)] placeholder:text-[var(--text-faint)] focus:outline-none"
+        class="w-full rounded-t-lg border-b border-[var(--border-soft)] bg-transparent px-4 py-3.5 text-base text-[var(--text-default)] placeholder:text-[var(--text-faint)] focus:outline-none"
       />
-      <ul class="max-h-80 overflow-auto py-1">
+      <ul class="max-h-[60vh] overflow-auto py-1.5">
         {#if filtered.length === 0}
           <li class="px-4 py-3 text-xs italic text-[var(--text-faint)]">
             No commands match.
@@ -106,18 +106,18 @@
                 disabled={disabled}
                 onmouseenter={() => (highlightIdx = i)}
                 onclick={() => pick(cmd.id)}
-                class="flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm
+                class="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-base
                        {i === highlightIdx ? 'bg-[var(--bg-elev)]' : ''}
                        {disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-[var(--bg-elev)]'}"
               >
                 <span class="flex items-baseline gap-2">
                   <span class="text-[var(--text-default)]">{cmd.label}</span>
                   {#if cmd.group}
-                    <span class="text-[10px] uppercase tracking-wider text-[var(--text-faint)]">{cmd.group}</span>
+                    <span class="text-[11px] uppercase tracking-wider text-[var(--text-faint)]">{cmd.group}</span>
                   {/if}
                 </span>
                 {#if cmd.hotkey}
-                  <kbd class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-muted)]">{cmd.hotkey}</kbd>
+                  <kbd class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 font-mono text-xs text-[var(--text-muted)]">{cmd.hotkey}</kbd>
                 {/if}
               </button>
             </li>

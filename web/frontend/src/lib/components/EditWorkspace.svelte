@@ -142,8 +142,62 @@
           });
         },
       },
+      // Arrow-key navigation: walks the graph edges from the selected
+      // node. ↓/→ = forward (first outgoing target), ↑/← = backward
+      // (first incoming source). Disabled when no node is selected so
+      // arrow keys keep their default behavior on the canvas / page.
+      ...arrowNavCommand('node.navDown', 'Select next step (↓)', 'ArrowDown', 'forward'),
+      ...arrowNavCommand('node.navUp', 'Select previous step (↑)', 'ArrowUp', 'backward'),
+      ...arrowNavCommand('node.navRight', 'Select next step (→)', 'ArrowRight', 'forward'),
+      ...arrowNavCommand('node.navLeft', 'Select previous step (←)', 'ArrowLeft', 'backward'),
     ]);
   });
+
+  /** Build a command that walks `direction` along the selected node's
+   *  graph edges. Returned as an array so the registerMany spread can
+   *  include the (single-element) result inline above. */
+  function arrowNavCommand(
+    id: string,
+    label: string,
+    key: string,
+    direction: 'forward' | 'backward'
+  ) {
+    return [{
+      id,
+      label,
+      hotkey: key === 'ArrowDown' ? '↓'
+            : key === 'ArrowUp' ? '↑'
+            : key === 'ArrowRight' ? '→'
+            : '←',
+      group: 'Navigation' as const,
+      // Stay enabled even when nothing is selected so the first arrow
+      // press seeds the selection (otherwise users have to click a
+      // node before keyboard nav becomes useful).
+      enabled: () => !!graph?.playbooks[activePbIdx]?.nodes.length,
+      match: (ev: KeyboardEvent) => ev.key === key && !modPressed(ev) && !ev.shiftKey && !ev.altKey,
+      run: () => {
+        const pb = graph?.playbooks[activePbIdx];
+        if (!pb || pb.nodes.length === 0) return;
+        // Cold start: seed selection with the trigger step (or the
+        // first node) so ↓ / → land somewhere sensible from a blank
+        // canvas. ↑ / ← from cold start pick the last node — natural
+        // for "I want to look at the end of the playbook" too.
+        if (!selectedNodeId) {
+          const first =
+            (pb.trigger_step_id && pb.nodes.find((n) => n.id === pb.trigger_step_id)?.id)
+            ?? pb.nodes[0].id;
+          selectedNodeId = direction === 'forward' ? first : pb.nodes[pb.nodes.length - 1].id;
+          return;
+        }
+        const edges = pb.edges ?? [];
+        const candidates = direction === 'forward'
+          ? edges.filter((e) => e.source === selectedNodeId).map((e) => e.target)
+          : edges.filter((e) => e.target === selectedNodeId).map((e) => e.source);
+        const next = candidates.find((nid) => pb.nodes.some((n) => n.id === nid));
+        if (next) selectedNodeId = next;
+      },
+    }];
+  }
 </script>
 
 <div class="flex h-full min-h-0 flex-1 flex-col">
@@ -179,6 +233,7 @@
           playbook={graph.playbooks[activePbIdx]}
           playbookIdx={activePbIdx}
           direction={layoutDir}
+          {selectedNodeId}
           onSelect={(n) => (selectedNodeId = n?.id ?? null)}
         />
       {:else}

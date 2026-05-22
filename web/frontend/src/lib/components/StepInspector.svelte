@@ -11,6 +11,8 @@
   import StepInspectorSimulateTab from './StepInspectorSimulateTab.svelte';
   import StepDraftModal from './StepDraftModal.svelte';
   import { visualStore } from '../visualEditStore.svelte';
+  import { commands, modPressed, fmtHotkey } from '../commands.svelte';
+  import { onMount } from 'svelte';
 
   type Props = {
     node: VisualNode | null;
@@ -130,6 +132,43 @@
     visualStore.setArgs(playbookIdx, node.id, next);
     draftOpen = false;
   }
+
+  /** Cycle to an adjacent inspector tab. Wraps around so repeated
+   *  presses just loop. No-op when the inspector has no node and
+   *  therefore no visible tabs. */
+  function cycleTab(delta: 1 | -1) {
+    if (!node || TABS.length === 0) return;
+    const idx = TABS.findIndex((t) => t.key === activeTab);
+    const base = idx < 0 ? 0 : idx;
+    const len = TABS.length;
+    activeTab = TABS[(base + delta + len) % len].key;
+  }
+
+  // ⌘[ / ⌘] cycles inspector tabs — matches Chrome/VS Code muscle
+  // memory. Only fires when a node is selected (so the inspector is
+  // actually showing tabs); otherwise the browser keeps its default.
+  onMount(() => {
+    return commands.registerMany([
+      {
+        id: 'inspector.nextTab',
+        label: 'Next inspector tab',
+        hotkey: fmtHotkey(['Mod', ']']),
+        group: 'Navigation',
+        enabled: () => !!node && TABS.length > 1,
+        match: (ev) => modPressed(ev) && !ev.shiftKey && ev.key === ']',
+        run: () => cycleTab(1),
+      },
+      {
+        id: 'inspector.prevTab',
+        label: 'Previous inspector tab',
+        hotkey: fmtHotkey(['Mod', '[']),
+        group: 'Navigation',
+        enabled: () => !!node && TABS.length > 1,
+        match: (ev) => modPressed(ev) && !ev.shiftKey && ev.key === '[',
+        run: () => cycleTab(-1),
+      },
+    ]);
+  });
 </script>
 
 <aside class="flex h-full w-96 flex-col border-l border-[var(--border-soft)] bg-[var(--bg-canvas)]">

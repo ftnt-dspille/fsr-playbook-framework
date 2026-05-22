@@ -294,8 +294,22 @@
         label: 'Open command palette',
         hotkey: fmtHotkey(['Mod', 'K']),
         group: 'Navigation',
+        runInInputs: true,  // Cmd+K should work even while typing
         match: (ev) => modPressed(ev) && ev.key.toLowerCase() === 'k',
         run: () => { commands.paletteOpen = true; },
+      },
+      {
+        id: 'modal.dismiss',
+        label: 'Close palette / help',
+        hotkey: 'Esc',
+        group: 'Navigation',
+        runInInputs: true,
+        enabled: () => commands.paletteOpen || commands.helpOpen,
+        match: (ev) => ev.key === 'Escape' && !modPressed(ev),
+        run: () => {
+          commands.paletteOpen = false;
+          commands.helpOpen = false;
+        },
       },
       {
         id: 'help.toggle',
@@ -313,6 +327,7 @@
         label: 'Save playbook',
         hotkey: fmtHotkey(['Mod', 'S']),
         group: 'File',
+        runInInputs: true,  // Cmd+S should always save, even from Monaco
         match: (ev) => modPressed(ev) && ev.key.toLowerCase() === 's',
         enabled: () => !!playbookStore.state.active && !playbookStore.isExample,
         run: async () => {

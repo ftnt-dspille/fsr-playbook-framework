@@ -40,6 +40,24 @@
   let saveAsName = $state('');
   let cloningExample: string | null = $state(null);
   let cloneDraftName = $state('');
+  // New-draft modal — replaces the old window.prompt() with a styled
+  // dialog that matches Save-As / Clone. Name + busy + inline error.
+  let newOpen = $state(false);
+  let newName = $state('');
+  let newBusy = $state(false);
+  let newError: string | null = $state(null);
+  // Suggest a unique default each time the modal opens so the user can
+  // just hit Enter — bumps `untitled`, `untitled_2`, … against the
+  // existing draft list.
+  function suggestNewName(): string {
+    const taken = new Set(playbookStore.state.drafts.map((d) => d.name));
+    if (!taken.has('untitled')) return 'untitled';
+    for (let i = 2; i < 999; i++) {
+      const candidate = `untitled_${i}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+    return `untitled_${Date.now()}`;
+  }
   let actionError: string | null = $state(null);
 
   let active = $derived(playbookStore.state.active);
@@ -162,14 +180,19 @@
     if (!r.ok) actionError = r.message ?? 'delete failed';
   }
 
-  async function onNewBlank() {
-    const name = prompt('New draft name:');
-    if (!name) return;
+  function onNewBlank() {
+    newError = null;
+    newName = suggestNewName();
+    newOpen = true;
+  }
+
+  async function onCreateNewDraft() {
+    const trimmed = newName.trim();
+    if (!trimmed) { newError = 'name is required'; return; }
     // Scaffold new drafts with sensible defaults: active so trigger
     // pushes actually fire, debug so authors see step output without
     // flipping a knob. Both can be overridden via the inspector once
     // the playbook is in production.
-    const trimmed = name.trim();
     const safe = trimmed.replace(/"/g, '\\"');
     const yaml = [
       `collection: "${safe}"`,
@@ -185,8 +208,11 @@
       '        type: start',
       '',
     ].join('\n');
+    newBusy = true;
     const r = await playbookStore.createDraft(trimmed, yaml);
-    if (!r.ok) actionError = r.message ?? 'create failed';
+    newBusy = false;
+    if (!r.ok) { newError = r.message ?? 'create failed'; return; }
+    newOpen = false;
   }
 
   function fmtTs(ts: string): string {
@@ -409,6 +435,54 @@
           </ul>
         {/if}
       </section>
+    </div>
+  </div>
+{/if}
+
+<!-- New-draft modal. Same visual language as Save-As / Clone so the
+     three flows feel like one family — beats the OS prompt(). -->
+{#if newOpen}
+  <div
+    class="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 pt-[20vh]"
+    role="dialog"
+    aria-label="Create new playbook draft"
+    onclick={(e) => { if (e.target === e.currentTarget) newOpen = false; }}
+  >
+    <div class="w-full max-w-sm rounded-lg border border-[var(--border-soft)] bg-[var(--bg-canvas)] p-4 shadow-2xl">
+      <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">New playbook draft</div>
+      <p class="mb-3 text-[11px] text-[var(--text-faint)]">
+        Creates an empty draft with a single <code class="font-mono">start</code> step.
+      </p>
+      <label class="block text-xs text-[var(--text-muted)]">
+        <span class="block">Draft name</span>
+        <input
+          type="text"
+          autofocus
+          bind:value={newName}
+          onkeydown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); void onCreateNewDraft(); }
+            if (e.key === 'Escape') { e.preventDefault(); newOpen = false; }
+          }}
+          class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 font-mono text-sm text-[var(--text-default)]"
+          placeholder="e.g. block_ip_remediation"
+        />
+      </label>
+      {#if newError}
+        <p class="mt-2 text-xs text-rose-600 dark:text-rose-400">{newError}</p>
+      {/if}
+      <div class="mt-3 flex justify-end gap-2">
+        <button
+          type="button"
+          class="rounded border border-[var(--border-soft)] px-3 py-1 text-xs hover:bg-[var(--bg-elev)]"
+          onclick={() => (newOpen = false)}
+        >Cancel</button>
+        <button
+          type="button"
+          class="rounded bg-[var(--brand)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+          onclick={onCreateNewDraft}
+          disabled={newBusy || !newName.trim()}
+        >{newBusy ? 'Creating…' : 'Create draft'}</button>
+      </div>
     </div>
   </div>
 {/if}
