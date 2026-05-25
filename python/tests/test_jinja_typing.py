@@ -24,13 +24,21 @@ def _macros_conn() -> sqlite3.Connection:
     conn.execute("""
         CREATE TABLE jinja_macros (
             name TEXT PRIMARY KEY,
+            input_type_hint TEXT,
             output_type_declared TEXT
         )""")
     conn.executemany(
-        "INSERT INTO jinja_macros (name, output_type_declared) VALUES (?,?)",
-        [("int", "integer"), ("float", "number"), ("string", "string"),
-         ("length", "integer"), ("upper", "string"), ("list", "list"),
-         ("tojson", "string"), ("first", "any"), ("default", "any")],
+        "INSERT INTO jinja_macros (name, input_type_hint, output_type_declared) "
+        "VALUES (?,?,?)",
+        [("int",    None,      "integer"),
+         ("float",  None,      "number"),
+         ("string", None,      "string"),
+         ("length", None,      "integer"),
+         ("upper",  "string",  "string"),
+         ("list",   None,      "list"),
+         ("tojson", None,      "string"),
+         ("first",  "list",    "any"),
+         ("default", None,     "any")],
     )
     conn.commit()
     return conn
@@ -118,9 +126,16 @@ def test_infer_none_for_non_strings():
 
 
 def test_infer_survives_missing_macros_table():
-    """A DB without `jinja_macros` should yield None, not raise."""
+    """A DB without `jinja_macros` should yield None, not raise — for
+    filters that aren't in the hand-curated map. Curated filters
+    short-circuit before the DB is consulted, which is intentional."""
     empty = sqlite3.connect(":memory:")
-    assert infer_terminal_observed_type("{{ x | int }}", empty) is None
+    # `unknown_zzz` isn't in either source.
+    assert infer_terminal_observed_type(
+        "{{ x | unknown_zzz }}", empty) is None
+    # Curated entries still resolve even without the DB:
+    assert infer_terminal_observed_type(
+        "{{ x | int }}", empty) == "int"
 
 
 # --------------------------------------------------------------------- target
@@ -156,3 +171,61 @@ def test_param_target_observed_type(widget, observed, expected):
 ])
 def test_types_compatible(inferred, target, expected):
     assert _types_compatible(inferred, target) is expected
+
+
+# --------------------------------------------------------------------- curated
+
+
+def test_hand_curated_overrides_db():
+    """`int` and similar live in the DB, but `b64encode` only exists in
+    the hand-curated map. Both should resolve to the same shape via
+    `filter_signature`."""
+    from compiler.jinja_typing import filter_signature
+    conn = _macros_conn()
+    assert filter_signature("b64encode", conn) == (None, "string")
+    # And the curated entry wins even when the DB disagrees:
+    conn.execute(
+        "INSERT INTO jinja_macros (name, input_type_hint, output_type_declared) "
+        "VALUES ('b64encode', 'foo', 'integer')")
+    assert filter_signature("b64encode", conn) == (None, "string")
+
+
+def test_hand_curated_long_tail():
+    """Spot-check several formerly-NULL macros now have signatures."""
+    from compiler.jinja_typing import _HAND_CURATED
+    for name in ("b64encode", "json2html", "dict2items", "items2dict",
+                 "fromIRI", "ipaddr", "from_yaml_all", "human_readable",
+                 "bool", "count", "json_query"):
+        assert name in _HAND_CURATED
+
+
+# --------------------------------------------------------------------- chain
+
+
+def test_validate_chain_ok_when_short():
+    from compiler.jinja_typing import validate_chain
+    # No filters: nothing to validate.
+    assert validate_chain("vars.x", _macros_conn()) is None
+    # One filter: still nothing.
+    assert validate_chain("vars.x | int", _macros_conn()) is None
+
+
+def test_validate_chain_ok_compatible():
+    from compiler.jinja_typing import validate_chain
+    # int -> string consumer is fine because string accepts anything.
+    assert validate_chain("vars.x | int | tojson", _macros_conn()) is None
+
+
+def test_validate_chain_flags_mismatch():
+    from compiler.jinja_typing import validate_chain
+    # `length` produces integer; `upper` expects string.
+    bad = validate_chain("vars.x | length | upper", _macros_conn())
+    assert bad is not None
+    prod, cons, want = bad
+    assert prod == "length" and cons == "upper" and want == "string"
+
+
+def test_validate_chain_silence_on_unknown():
+    from compiler.jinja_typing import validate_chain
+    # `first` has output_type=any → no mismatch claim downstream.
+    assert validate_chain("vars.x | first | int", _macros_conn()) is None

@@ -451,7 +451,34 @@ class ConnectorArgsMixin:
                 if isinstance(p_val, str) and (
                         "{{" in p_val or "{%" in p_val):
                     if "{%" not in p_val:
-                        from ..jinja_typing import infer_terminal_observed_type
+                        from ..jinja_typing import (
+                            infer_terminal_observed_type,
+                            validate_chain, extract_pure_jinja,
+                        )
+                        # Tier 3.1: chain-internal validation. Catches
+                        # bugs like `| int | upper` where the agent
+                        # mixed up the filter order — the integer
+                        # output can't feed `upper`'s string input.
+                        expr_inner = extract_pure_jinja(p_val)
+                        if expr_inner is not None:
+                            bad = validate_chain(expr_inner, self.conn)
+                            if bad is not None:
+                                prod, cons, want = bad
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message=(
+                                        f"param {p_name!r} on "
+                                        f"{connector}.{operation}: "
+                                        f"Jinja filter {cons!r} expects "
+                                        f"{want!r} but the preceding "
+                                        f"filter {prod!r} produces a "
+                                        "different type"),
+                                    path=f"{path}.arguments.params.{p_name}",
+                                    suggestion=(
+                                        "reorder the filter chain so "
+                                        f"{cons!r} sees the type it "
+                                        "needs, or drop one of them"),
+                                ))
                         inferred = infer_terminal_observed_type(p_val, self.conn)
                         if inferred is not None:
                             target = _param_target_observed_type(

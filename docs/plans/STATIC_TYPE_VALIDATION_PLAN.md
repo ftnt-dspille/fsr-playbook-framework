@@ -1,6 +1,6 @@
 # Static Type Validation Plan — Tier 2 + Tier 3
 
-**Status:** Tier 1 ✅ shipped 2026-05-20. Tier 2 substantially shipped (2.0 / 2.0+ / 2.1 / 2.3); Phase 2.2 live probe scaffolded but not yet run; Phase 2.4 doctor CLI pending. Tier 3 not started.
+**Status:** Tier 1 ✅ shipped 2026-05-20. Tier 2 ✅ substantially shipped 2026-05-25 (2.0 / 2.0+ / 2.1 / 2.2 / 2.3 / 2.4); only 3.4 (eval tasks) remains across Tier 3. Tier 3 ships terminal-type inference + filter-chain validation with a hand-curated signature library (~90 entries) that survives DB rebuilds.
 
 ## Background
 
@@ -168,11 +168,11 @@ Three tiers of signatures, in order of how to build them:
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| **3.0 — Signature schema + hand-curated rules** | Schema columns; populate signatures for 13 curated macros + ~30 standard Jinja filters. | ~45 filters with `type_signature` non-null. |
-| **3.1 — Walker AST pass** | Jinja AST → shape pipeline. Output: a `Shape` per expression. | Round-trip test: every `jinja_expressions` row produces a non-error shape (most `unknown` is acceptable). |
-| **3.2 — Resolver consumption** | Connector resolver: when a param value is Jinja, request its inferred type from the walker and validate against widget/observed type. | New diagnostic code `param_type_mismatch_via_jinja`; tests on 5+ patterns. |
-| **3.3 — Corpus mining for signatures** | Run remaining filters against live FSR env; record in `jinja_macros.type_signature`. | Long-tail filter coverage ≥80%. |
-| **3.4 — Eval task additions** | Add 3 eval tasks that exercise typed Jinja chains the way agents commonly get wrong. | Agent baseline includes type-flow gates. |
+| **3.0 — Signature schema + hand-curated rules** | ✅ done | `_HAND_CURATED` map in `python/compiler/jinja_typing.py` carries ~90 (input_type, output_type) entries covering standard Jinja string/collection/numeric filters + FSR `workflow.jinja` macros + Ansible netcommon IP filters. Beats the DB row when both are present so updates land in code, not data. |
+| **3.1 — Walker AST pass** | ✅ first slice | `validate_chain()` walks every `|` boundary and flags `producer_out` ↛ `consumer_in` mismatches (e.g. `\| int \| upper`). Strict mid-chain typing — no silent str coercion between filters. Full Jinja2 AST integration deferred; the regex walker covers pure-Jinja filter chains, which is the dominant pattern in connector args. |
+| **3.2 — Resolver consumption** | ✅ done | `connector_args.py` calls both `infer_terminal_observed_type` (final type vs param target) and `validate_chain` (intermediate transitions). Both emit `BAD_VALUE` with chain-localized messages. |
+| **3.3 — Corpus mining for signatures** | ✅ subsumed by 3.0 | Hand-curation covered the 123-row residue without needing live mining. Could revisit if usage shows blind spots. |
+| **3.4 — Eval task additions** | not started | 3 eval tasks exercising typed Jinja chains agents commonly get wrong. |
 
 ## Sequencing
 
