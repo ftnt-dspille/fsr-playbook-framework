@@ -43,6 +43,50 @@ def _verify(yaml_text: str, *, live: bool) -> dict[str, Any]:
     return verify_playbook(yaml_text=yaml_text, live_probe=live)
 
 
+def _live_tested_blocker(yaml_text: str) -> tuple[str, str] | None:
+    """Detect playbook structures the /notrigger dry-run path cannot
+    actually run to completion. Returns (code, summary) for skip, or
+    None when the playbook is safe to dry-run.
+
+    - `manual_input` steps suspend waiting for a human; eval polling
+      will always hit the 180s timeout.
+    - `start_on_create` / `start_on_update` / `start_on_action`
+      triggers fire on real record events and need an actual record
+      IRI in body; /notrigger has no record context.
+    """
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text)
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(doc, dict):
+        return None
+    pbs = doc.get("playbooks") or []
+    if not isinstance(pbs, list) or not pbs:
+        return None
+    record_triggers = {"start_on_create", "start_on_update",
+                       "start_on_action", "cybersponse.action"}
+    for pb in pbs:
+        if not isinstance(pb, dict):
+            continue
+        steps = pb.get("steps") or []
+        if not isinstance(steps, list):
+            continue
+        for s in steps:
+            if not isinstance(s, dict):
+                continue
+            t = s.get("type") or ""
+            if t == "manual_input":
+                return ("manual_input_blocks_dry_run",
+                        "playbook contains manual_input — /notrigger "
+                        "dry-run will block awaiting human input")
+            if t in record_triggers:
+                return ("record_trigger_requires_record",
+                        f"trigger {t!r} fires on real record events; "
+                        "/notrigger dry-run has no record context")
+    return None
+
+
 def _first_playbook_name(yaml_text: str) -> str | None:
     """Best-effort: pull the first playbook's name out of the YAML so
     the scoring harness can dry-run without an explicit override."""
@@ -263,31 +307,43 @@ def score(
 
     # ----------------- confidence tier 3: live_tested ----------------------
     if live:
-        try:
-            from mcp_server import dry_run_playbook  # noqa: PLC0415
-            kw = dict(dry_run_kwargs or {})
-            # Infer playbook name from the YAML when the caller didn't
-            # pin one. Lets re-baseline runs exercise tier-3 without
-            # every task carrying a `dry_run_kwargs.playbook` override.
-            if "playbook" not in kw:
-                inferred = _first_playbook_name(yaml_text)
-                if inferred:
-                    kw["playbook"] = inferred
-            dr = dry_run_playbook(yaml_text, **kw) if kw else None
-            if dr is None:
-                dr = {"ok": False, "code": "no_dry_run_target",
-                      "message": "dry_run_kwargs missing `playbook` name"}
+        # Structural skip: playbooks that block on human input or need
+        # a real record context can't reach a terminal state via the
+        # eval's /notrigger dry-run. Marking these as skipped (with a
+        # specific reason) keeps the harness honest and avoids 180s
+        # timeouts per task. The agent-loop gates still grade these.
+        blocker = _live_tested_blocker(yaml_text)
+        if blocker is not None:
             out["levels"]["live_tested"] = {
-                "passed": bool(dr.get("ok")),
-                "skipped": False,
-                "code": dr.get("code"),
-                "summary": dr.get("status") or dr.get("message"),
+                "passed": False, "skipped": True, "code": blocker[0],
+                "summary": blocker[1],
             }
-        except Exception as exc:  # noqa: BLE001
-            out["levels"]["live_tested"] = {
-                "passed": False, "skipped": False,
-                "detail": f"dry-run raised: {exc!r}",
-            }
+        else:
+            try:
+                from mcp_server import dry_run_playbook  # noqa: PLC0415
+                kw = dict(dry_run_kwargs or {})
+                # Infer playbook name from the YAML when the caller didn't
+                # pin one. Lets re-baseline runs exercise tier-3 without
+                # every task carrying a `dry_run_kwargs.playbook` override.
+                if "playbook" not in kw:
+                    inferred = _first_playbook_name(yaml_text)
+                    if inferred:
+                        kw["playbook"] = inferred
+                dr = dry_run_playbook(yaml_text, **kw) if kw else None
+                if dr is None:
+                    dr = {"ok": False, "code": "no_dry_run_target",
+                          "message": "dry_run_kwargs missing `playbook` name"}
+                out["levels"]["live_tested"] = {
+                    "passed": bool(dr.get("ok")),
+                    "skipped": False,
+                    "code": dr.get("code"),
+                    "summary": dr.get("status") or dr.get("message"),
+                }
+            except Exception as exc:  # noqa: BLE001
+                out["levels"]["live_tested"] = {
+                    "passed": False, "skipped": False,
+                    "detail": f"dry-run raised: {exc!r}",
+                }
     else:
         out["levels"]["live_tested"] = {"passed": False, "skipped": True}
 

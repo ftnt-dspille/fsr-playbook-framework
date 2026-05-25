@@ -1,0 +1,774 @@
+{
+  "live": true,
+  "tasks": [
+    "manual_input_branch",
+    "manual_input_then_act",
+    "unknown_connector",
+    "manual_input_block_ip",
+    "soc_phish_block_with_approval"
+  ],
+  "models": [
+    "agentic_anthropic"
+  ],
+  "rows": [
+    {
+      "model": "agentic_anthropic",
+      "task": "manual_input_branch",
+      "yaml": "collection: General\nplaybooks:\n  - name: Manual Approve or Reject\n    description: Manual trigger that pauses for analyst approval, then stamps the chosen verdict.\n    is_active: true\n    steps:\n      - type: start\n        name: Start\n        next: Analyst Decision\n\n      - type: manual_input\n        name: Analyst Decision\n        arguments:\n          title: \"Approve or Reject?\"\n          description: \"Review the details and choose an action.\"\n        options:\n          - display: Approve\n            primary: true\n            next: Set Approved Verdict\n          - display: Reject\n            next: Set Rejected Verdict\n\n      - type: set_variable\n        name: Set Approved Verdict\n        vars:\n          verdict: approved\n        next: End Approved\n\n      - type: set_variable\n        name: Set Rejected Verdict\n        vars:\n          verdict: rejected\n        next: End Rejected\n\n      - type: end\n        name: End Approved\n\n      - type: end\n        name: End Rejected",
+      "elapsed_ms": 28171,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 0,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true,
+          "code": "manual_input_blocks_dry_run",
+          "summary": "playbook contains manual_input \u2014 /notrigger dry-run will block awaiting human input"
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compiled JSON differs from the reference example",
+          "informational": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "1 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 1,
+          "detail": "1 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 2,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 1,
+          "tool": "get_step_type",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 8,
+      "max": 8,
+      "fraction": 1.0,
+      "turns": 3,
+      "tool_calls": 2,
+      "trace": [
+        {
+          "name": "get_step_type",
+          "args_chars": 41,
+          "result_chars": 6005
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 1042,
+          "result_chars": 646,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 0
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 377,
+          "output_tokens": 103,
+          "cache_creation_input_tokens": 12589,
+          "cache_read_input_tokens": 0
+        },
+        {
+          "input_tokens": 2457,
+          "output_tokens": 320,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 2599,
+          "output_tokens": 541,
+          "cache_creation_input_tokens": 405,
+          "cache_read_input_tokens": 12589
+        }
+      ]
+    },
+    {
+      "model": "agentic_anthropic",
+      "task": "manual_input_then_act",
+      "yaml": "Start\n  \u2514\u2500\u25ba Confirm Block Action  (manual_input)\n        \u251c\u2500 Approve \u2500\u2500\u25ba Record Approval  (set_variable + comment)  \u2500\u2500\u25ba End Approved\n        \u2514\u2500 Reject  \u2500\u2500\u25ba Record Rejection (set_variable + comment)  \u2500\u2500\u25ba End Rejected",
+      "elapsed_ms": 28498,
+      "levels": {
+        "draft": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed",
+          "errors": [
+            {
+              "code": "parse_error",
+              "path": "",
+              "message": "top level must be a mapping (collection: ..., playbooks: [...])",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ]
+        },
+        "verified": {
+          "passed": false,
+          "skipped": false,
+          "required_fix_count": 1,
+          "warning_count": 0,
+          "detail": "1 required fix(es)"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": false,
+          "code": "no_dry_run_target",
+          "summary": "dry_run_kwargs missing `playbook` name"
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed \u2014 see draft errors",
+          "informational": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "1 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 1,
+          "detail": "1 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 3,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 1,
+          "tool": "get_step_type",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 6,
+      "max": 9,
+      "fraction": 0.6666666666666666,
+      "turns": 3,
+      "tool_calls": 3,
+      "trace": [
+        {
+          "name": "get_step_type",
+          "args_chars": 41,
+          "result_chars": 6005
+        },
+        {
+          "name": "emit_decision_step",
+          "args_chars": 147,
+          "result_chars": 199
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 2050,
+          "result_chars": 653,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 0
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 398,
+          "output_tokens": 201,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 2698,
+          "output_tokens": 565,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 3009,
+          "output_tokens": 891,
+          "cache_creation_input_tokens": 485,
+          "cache_read_input_tokens": 12589
+        }
+      ]
+    },
+    {
+      "model": "agentic_anthropic",
+      "task": "unknown_connector",
+      "yaml": "Let me check whether this connector actually exists before authoring anything.\n\ud83d\udeab **Connector not found \u2014 playbook not authored.**\n\nThe connector `totally-made-up-connector` **does not exist** in the FortiSOAR connector catalog. The search returned zero matches, and the closest phonetic/fuzzy suggestions are completely unrelated connectors:\n\n- `zscaler-client-connector`\n- `otbase-inventory`\n- `nmap-scanner`\n\nNone of those are what you described, so I'm **not fabricating a connector step** around a name I can't verify. Doing so would produce a playbook that silently fails at runtime (or fails to compile entirely) because the resolver validates connector identity and operation names against the live catalog.\n\n---\n\n## What to do next\n\n1. **Verify the connector name.** Check *Settings \u2192 Connectors* in your FortiSOAR instance. The name in the catalog (not the display label) is what goes in `connector:`.\n\n2. **Try a fuzzy search yourself.** If you know part of the real name, tell me and I'll re-run `find_connector` with that fragment.\n\n3. **Check if it's installed but not configured.** A connector can be installed (visible in the catalog) but not yet configured (no active credential set). I can run `list_configured_connectors` to show only the ones that are fully active on your instance.\n\n4. **If this is a custom/private connector**, share the connector's `info.json` or `operations.py` and I can author against its actual operation schema.\n\nOnce you confirm the real connector name and operation, I'll author the playbook correctly.",
+      "elapsed_ms": 11770,
+      "levels": {
+        "draft": {
+          "passed": false,
+          "skipped": false,
+          "detail": "compile failed",
+          "errors": [
+            {
+              "code": "parse_error",
+              "path": "",
+              "message": "YAML parse error: mapping values are not allowed here\n  in \"<unicode string>\", line 4, column 210:\n     ...  completely unrelated connectors:\n                                         ^",
+              "suggestion": "",
+              "suggestions": []
+            }
+          ],
+          "informational": true
+        },
+        "verified": {
+          "passed": false,
+          "skipped": false,
+          "required_fix_count": 1,
+          "warning_count": 0,
+          "detail": "1 required fix(es)",
+          "informational": true
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": false,
+          "code": "no_dry_run_target",
+          "summary": "dry_run_kwargs missing `playbook` name",
+          "informational": true
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": false,
+          "skipped": false,
+          "detail": "agent never called verify_playbook",
+          "informational": true
+        },
+        "verify_iterations_until_ready": {
+          "passed": false,
+          "skipped": false,
+          "iterations": 0,
+          "detail": "no verify calls",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": false,
+          "skipped": false,
+          "detail": "last verify did NOT return ready_to_push=True",
+          "informational": true
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 1,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 1,
+          "tool": "find_connector",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "correctly refused \u2014 no YAML emitted"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 4,
+      "max": 4,
+      "fraction": 1.0,
+      "turns": 2,
+      "tool_calls": 1,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 34,
+          "result_chars": 278
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 411,
+          "output_tokens": 73,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 583,
+          "output_tokens": 366,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        }
+      ]
+    },
+    {
+      "model": "agentic_anthropic",
+      "task": "manual_input_block_ip",
+      "yaml": "collection: SOC Response\nplaybooks:\n  - name: FortiGate IP Block or Allow\n    description: >\n      Prompts an analyst to enter an IP address and choose Block or Allow.\n      On Block, calls the FortiGate block_ip_new operation (Quarantine Based).\n      On Allow, logs a note via set_variable.\n    is_active: true\n    steps:\n      - type: start\n        name: Start\n        next: Get Analyst Input\n\n      - type: manual_input\n        name: Get Analyst Input\n        arguments:\n          title: \"IP Address Action\"\n          description: \"Enter the IP address you want to act on and select the desired action.\"\n          inputs:\n            - name: ip_address\n              kind: ipv4\n              label: IP Address\n              required: true\n              tooltip: \"Enter the IPv4 address to block or allow (e.g. 192.168.1.10)\"\n            - name: action\n              kind: select\n              label: Action\n              required: true\n              options:\n                - block\n                - allow\n        options:\n          - display: Block\n            primary: true\n            next: Check Analyst Action\n          - display: Allow\n            next: Check Analyst Action\n\n      - type: decision\n        name: Check Analyst Action\n        conditions:\n          - display: Block\n            when: \"{{ vars.steps.Get_Analyst_Input.input.action == 'block' }}\"\n            next: Block IP on FortiGate\n          - display: Allow\n            default: true\n            next: Log Allow Decision\n\n      - type: connector\n        name: Block IP on FortiGate\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip_new\n          config: \"\"\n          params:\n            method: \"Quarantine Based\"\n            ip_addresses: \"{{ vars.steps.Get_Analyst_Input.input.ip_address }}\"\n            time_to_live: \"6 Hour\"\n        next: Log Block Result\n\n      - type: set_variable\n        name: Log Block Result\n        vars:\n          block_status: \"Blocked {{ vars.steps.Get_Analyst_Input.input.ip_address }} on FortiGate. Result: {{ vars.steps.Block_IP_on_FortiGate }}\"\n        next: End\n\n      - type: set_variable\n        name: Log Allow Decision\n        vars:\n          allow_note: \"Analyst chose to ALLOW {{ vars.steps.Get_Analyst_Input.input.ip_address }} \u2014 no block action taken.\"\n        next: End\n\n      - type: end\n        name: End",
+      "elapsed_ms": 51874,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 0,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true,
+          "code": "manual_input_blocks_dry_run",
+          "summary": "playbook contains manual_input \u2014 /notrigger dry-run will block awaiting human input"
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "1 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 1,
+          "detail": "1 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 8,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 2,
+          "tool": "find_operation",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 8,
+      "max": 8,
+      "fraction": 1.0,
+      "turns": 7,
+      "tool_calls": 8,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 27,
+          "result_chars": 248
+        },
+        {
+          "name": "get_step_type",
+          "args_chars": 41,
+          "result_chars": 6005
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 74,
+          "result_chars": 284
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 52,
+          "result_chars": 495
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 76,
+          "result_chars": 11619
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 74,
+          "result_chars": 8657
+        },
+        {
+          "name": "emit_decision_step",
+          "args_chars": 237,
+          "result_chars": 289
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 2506,
+          "result_chars": 2261,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 0
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 436,
+          "output_tokens": 138,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 2692,
+          "output_tokens": 115,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 2447,
+          "output_tokens": 197,
+          "cache_creation_input_tokens": 458,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 4289,
+          "output_tokens": 120,
+          "cache_creation_input_tokens": 2205,
+          "cache_read_input_tokens": 13097
+        },
+        {
+          "input_tokens": 6899,
+          "output_tokens": 198,
+          "cache_creation_input_tokens": 139,
+          "cache_read_input_tokens": 15396
+        },
+        {
+          "input_tokens": 3124,
+          "output_tokens": 712,
+          "cache_creation_input_tokens": 4009,
+          "cache_read_input_tokens": 15603
+        },
+        {
+          "input_tokens": 1748,
+          "output_tokens": 1096,
+          "cache_creation_input_tokens": 2772,
+          "cache_read_input_tokens": 19711
+        }
+      ]
+    },
+    {
+      "model": "agentic_anthropic",
+      "task": "soc_phish_block_with_approval",
+      "yaml": "collection: Phishing Response\nplaybooks:\n  - name: Phishing Alert IP Triage\n    description: >\n      On phishing-tagged alert creation, scores every sender IP via VirusTotal.\n      Prompts an analyst to block any high-score IPs (score > 50) via FortiGate,\n      then posts a summary comment back to the alert.\n    is_active: true\n    steps:\n\n      # \u2500\u2500 1. Trigger \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: start_on_create\n        name: On Phishing Alert Created\n        arguments:\n          module: alerts\n          when:\n            logic: AND\n            filters:\n              - field: name\n                op: contains\n                value: phish\n        next: Score Each Sender IP\n\n      # \u2500\u2500 2. Score every IP in sender_ips (sequential for_each) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      # VT query_ip returns: { ip, country, detections, is_malicious, reputation }\n      # where `reputation` is the numeric VirusTotal community score (int).\n      - type: connector\n        name: Score Each Sender IP\n        for_each:\n          item: \"{{ vars.input.records[0].sender_ips }}\"\n          parallel: false\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: ''\n          params:\n            ip: \"{{ vars.item }}\"\n        next: Collect High Score IPs\n\n      # \u2500\u2500 3. Extract IPs whose reputation score > 50 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      # vars.steps.Score_Each_Sender_IP is the list of per-iteration result dicts.\n      # Each dict carries the connector's output keys at top level.\n      - type: set_variable\n        name: Collect High Score IPs\n        vars:\n          # Full list of dicts for the summary comment\n          scored_ips: \"{{ vars.steps.Score_Each_Sender_IP | list }}\"\n          # Only the IP strings (not full dicts) for the FortiGate block call\n          high_score_ips: >-\n            {{ vars.steps.Score_Each_Sender_IP\n               | selectattr('reputation', 'defined')\n               | selectattr('reputation', 'ne', None)\n               | list\n               | selectattr('reputation', 'greaterthan', 50)\n               | map(attribute='ip')\n               | list }}\n        next: Any High Score IP\n\n      # \u2500\u2500 4. Branch: any IP above threshold? \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: decision\n        name: Any High Score IP\n        conditions:\n          - display: Score above 50 found\n            when: \"{{ vars.high_score_ips | length > 0 }}\"\n            next: Analyst Block Decision\n          - display: All IPs clean\n            default: true\n            next: Post Summary Comment\n\n      # \u2500\u2500 5. Ask analyst: Block or Skip \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: manual_input\n        name: Analyst Block Decision\n        arguments:\n          title: \"High-Reputation IPs Detected \u2014 Block?\"\n          description: >-\n            The following sender IPs scored above 50 on VirusTotal:\n            {{ vars.high_score_ips | join(', ') }}.\n            Choose 'Block' to quarantine them via FortiGate (permanent\n            quarantine), or 'Skip' to leave them unblocked.\n          inputs:\n            - name: analyst_action\n              kind: select\n              label: \"Action\"\n              options:\n                - Block\n                - Skip\n              required: true\n        options:\n          - display: Block\n            primary: true\n            next: Analyst Chose Block\n          - display: Skip\n            next: Analyst Chose Block\n\n      # \u2500\u2500 6. Route on analyst's choice \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: decision\n        name: Analyst Chose Block\n        conditions:\n          - display: Block selected\n            when: \"{{ vars.steps.Analyst_Block_Decision.analyst_action == 'Block' }}\"\n            next: Block High Score IPs\n          - display: Skip selected\n            default: true\n            next: Post Summary Comment\n\n      # \u2500\u2500 7. Block each high-score IP via FortiGate quarantine \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      # Iterates over the plain-IP-string list built in step 3.\n      - type: connector\n        name: Block High Score IPs\n        for_each:\n          item: \"{{ vars.high_score_ips }}\"\n          parallel: false\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip_new\n          config: ''\n          params:\n            method: Quarantine Based\n            ip_addresses: \"{{ vars.item }}\"\n            time_to_live: Never\n        next: Post Summary Comment\n\n      # \u2500\u2500 8. Post summary comment to the originating alert \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: set_variable\n        name: Post Summary Comment\n        vars:\n          _noop: done\n        message:\n          content: >-\n            ## Phishing Alert IP Triage Summary\n\n            **Sender IPs scored by VirusTotal:**\n            {% for entry in vars.steps.Score_Each_Sender_IP %}\n            | IP | Reputation | Flag |\n            |---|---|---|\n            {% endfor %}\n            {% for entry in vars.steps.Score_Each_Sender_IP %}\n            | `{{ entry.ip }}` | {{ entry.reputation }} | {% if entry.reputation | int > 50 %}\u26a0\ufe0f HIGH{% else %}\u2705 OK{% endif %} |\n            {% endfor %}\n\n            **High-score IPs (score > 50):** `{{ vars.high_score_ips | join('`, `') or 'None' }}`\n\n            **Action taken:** {{ vars.steps.Analyst_Block_Decision.analyst_action | default('N/A \u2014 no high-score IPs detected') }}\n        next: End\n\n      # \u2500\u2500 9. Terminal node \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n      - type: end\n        name: End",
+      "elapsed_ms": 115554,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 2,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true,
+          "code": "record_trigger_requires_record",
+          "summary": "trigger 'start_on_create' fires on real record events; /notrigger dry-run has no record context"
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "3 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 1,
+          "detail": "1 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 14,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 3,
+          "tool": "verify_playbook",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 8,
+      "max": 8,
+      "fraction": 1.0,
+      "turns": 10,
+      "tool_calls": 14,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 19,
+          "result_chars": 798
+        },
+        {
+          "name": "find_connector",
+          "args_chars": 18,
+          "result_chars": 248
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 49,
+          "result_chars": 701
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 57,
+          "result_chars": 284
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 45,
+          "result_chars": 839
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 59,
+          "result_chars": 4596
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 52,
+          "result_chars": 495
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 57,
+          "result_chars": 2898
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 62,
+          "result_chars": 1424
+        },
+        {
+          "name": "emit_decision_step",
+          "args_chars": 240,
+          "result_chars": 292
+        },
+        {
+          "name": "emit_decision_step",
+          "args_chars": 261,
+          "result_chars": 313
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 6271,
+          "result_chars": 1543,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 3
+          }
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 6073,
+          "result_chars": 877,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 1
+          }
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 7135,
+          "result_chars": 1210,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 2
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 476,
+          "output_tokens": 119,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 1049,
+          "output_tokens": 150,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 1077,
+          "output_tokens": 233,
+          "cache_creation_input_tokens": 499,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 2675,
+          "output_tokens": 177,
+          "cache_creation_input_tokens": 519,
+          "cache_read_input_tokens": 13136
+        },
+        {
+          "input_tokens": 3735,
+          "output_tokens": 201,
+          "cache_creation_input_tokens": 480,
+          "cache_read_input_tokens": 13720
+        },
+        {
+          "input_tokens": 1893,
+          "output_tokens": 151,
+          "cache_creation_input_tokens": 2081,
+          "cache_read_input_tokens": 14268
+        },
+        {
+          "input_tokens": 514,
+          "output_tokens": 1338,
+          "cache_creation_input_tokens": 1564,
+          "cache_read_input_tokens": 16422
+        },
+        {
+          "input_tokens": 1944,
+          "output_tokens": 1454,
+          "cache_creation_input_tokens": 257,
+          "cache_read_input_tokens": 18136
+        },
+        {
+          "input_tokens": 3582,
+          "output_tokens": 1628,
+          "cache_creation_input_tokens": 271,
+          "cache_read_input_tokens": 18241
+        },
+        {
+          "input_tokens": 3597,
+          "output_tokens": 2373,
+          "cache_creation_input_tokens": 688,
+          "cache_read_input_tokens": 19838
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "agentic_anthropic": {
+      "score": 34,
+      "max": 37,
+      "fraction": 0.918918918918919
+    }
+  },
+  "run_id": "20260525T175630Z",
+  "ts": "2026-05-25T17:56:30.208037+00:00"
+}
