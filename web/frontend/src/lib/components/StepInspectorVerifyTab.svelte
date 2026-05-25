@@ -277,6 +277,67 @@
   let busy = $state(false);
   let lastRunAt: string | null = $state(null);
 
+  // ─── Static checks (Tier 1/2/3 diagnostics filtered to this step) ────
+  // The whole-playbook verify gate already runs in `buildContext`; the
+  // result carries every required_fix with a `step` field. Surfacing
+  // the subset that fires on the focused step makes them actionable
+  // without forcing the user to leave the inspector for the global
+  // diagnostics drawer.
+
+  type StepFix = {
+    code: string;
+    message: string;
+    path: string | null;
+    suggestion: string | null;
+  };
+  let stepFixes = $state<StepFix[]>([]);
+  let stepWarnings = $state<StepFix[]>([]);
+  let staticChecksBusy = $state(false);
+  let staticChecksTs: string | null = $state(null);
+
+  function _normaliseFix(raw: Record<string, unknown>): StepFix {
+    return {
+      code: String(raw['code'] ?? 'unknown'),
+      message: String(raw['message'] ?? ''),
+      path: raw['path'] != null ? String(raw['path']) : null,
+      suggestion: raw['suggestion'] != null ? String(raw['suggestion']) : null,
+    };
+  }
+
+  function _matchesNode(raw: Record<string, unknown>): boolean {
+    // Walker diagnostics carry `step` keyed by step.id; resolver
+    // diagnostics carry `path` like `playbooks[0].steps[2].arguments.…`.
+    // Match on either.
+    const sid = raw['step'];
+    if (typeof sid === 'string' && sid && (sid === node.id || sid === node.name?.replace(/ /g, '_'))) {
+      return true;
+    }
+    const path = raw['path'];
+    if (typeof path === 'string' && path.includes(`.steps[${playbookIdx}]`)) {
+      // Crude: scan for the step's index in the IR-style path; not
+      // perfect when steps reorder but covers the dominant case.
+      // (Future: thread node.irIndex through if needed.)
+      return path.includes(`.${node.id}.`) || path.includes(`.${node.name}.`);
+    }
+    return false;
+  }
+
+  async function runStaticChecks() {
+    const yaml = playbookStore.currentYaml;
+    if (!yaml) return;
+    staticChecksBusy = true;
+    try {
+      const verify = await verifyPlaybook(yaml, { verbose: false });
+      const fixes = (verify.required_fixes ?? []) as Record<string, unknown>[];
+      const warns = (verify.warnings ?? []) as Record<string, unknown>[];
+      stepFixes = fixes.filter(_matchesNode).map(_normaliseFix);
+      stepWarnings = warns.filter(_matchesNode).map(_normaliseFix);
+      staticChecksTs = new Date().toLocaleTimeString();
+    } finally {
+      staticChecksBusy = false;
+    }
+  }
+
   function isTemplateString(v: unknown): v is string {
     return typeof v === 'string' && v.includes('{{');
   }
@@ -467,6 +528,59 @@
 </script>
 
 <section class="space-y-3">
+  <!-- Static checks: Tier 1/2/3 diagnostics filtered to this step.
+       Sits above Render args because static fixes block runtime even
+       if rendering looks fine — fixing them first is the right loop. -->
+  <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
+    <div class="flex items-center justify-between gap-2">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Static checks</div>
+        <p class="mt-0.5 text-xs text-[var(--text-faint)]">
+          Compile-time fixes from <code class="font-mono">verify_playbook</code> scoped
+          to this step (Tier&nbsp;1 widget / Tier&nbsp;2 observed_type /
+          Tier&nbsp;3 Jinja chain).
+        </p>
+      </div>
+      <button
+        type="button"
+        class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-canvas)] disabled:opacity-50"
+        onclick={runStaticChecks}
+        disabled={staticChecksBusy}
+      >{staticChecksBusy ? 'Checking…' : 'Re-check'}</button>
+    </div>
+    {#if staticChecksTs}
+      <div class="mt-1 text-[10px] text-[var(--text-faint)]">last check: {staticChecksTs}</div>
+    {/if}
+    {#if stepFixes.length === 0 && stepWarnings.length === 0 && staticChecksTs}
+      <p class="mt-2 text-xs text-emerald-600 dark:text-emerald-400">no static issues on this step</p>
+    {/if}
+    {#each stepFixes as f}
+      <div class="mt-2 rounded border-l-2 border-rose-500 bg-rose-50 dark:bg-rose-900/20 px-2 py-1.5">
+        <div class="flex items-baseline gap-2">
+          <span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700 dark:text-rose-400">{f.code}</span>
+          {#if f.path}
+            <span class="font-mono text-[10px] text-[var(--text-faint)]">{f.path}</span>
+          {/if}
+        </div>
+        <p class="mt-1 text-xs text-[var(--text-default)]">{f.message}</p>
+        {#if f.suggestion}
+          <p class="mt-1 text-[11px] italic text-[var(--text-muted)]">→ {f.suggestion}</p>
+        {/if}
+      </div>
+    {/each}
+    {#each stepWarnings as w}
+      <div class="mt-2 rounded border-l-2 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-2 py-1.5">
+        <div class="flex items-baseline gap-2">
+          <span class="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">{w.code}</span>
+          {#if w.path}
+            <span class="font-mono text-[10px] text-[var(--text-faint)]">{w.path}</span>
+          {/if}
+        </div>
+        <p class="mt-1 text-xs text-[var(--text-default)]">{w.message}</p>
+      </div>
+    {/each}
+  </section>
+
   <header class="flex items-center justify-between gap-3">
     <div>
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Render args</div>
