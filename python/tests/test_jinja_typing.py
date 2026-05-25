@@ -229,3 +229,106 @@ def test_validate_chain_silence_on_unknown():
     from compiler.jinja_typing import validate_chain
     # `first` has output_type=any → no mismatch claim downstream.
     assert validate_chain("vars.x | first | int", _macros_conn()) is None
+
+
+# --------------------------------------------------------------------- walker
+
+
+def _walk(yaml_text: str):
+    """Compile a playbook and run the typed walker. Returns the
+    diagnostic codes (deduped) so tests can assert presence/absence."""
+    import sys
+    sys.path.insert(0, "python")
+    from compiler import parse_yaml
+    from compiler.typed_walker import walk_playbook
+    coll, _errs = parse_yaml(yaml_text)
+    assert coll is not None, "parse failed in test fixture"
+    walk = walk_playbook(coll)
+    return [d.code for d in walk.diagnostics]
+
+
+def test_walker_flags_bad_chain_in_set_variable():
+    codes = _walk("""
+collection: T
+playbooks:
+  - name: pb
+    is_active: true
+    steps:
+      - type: start
+        name: Start
+        next: SetIt
+      - type: set_variable
+        name: SetIt
+        vars:
+          oops: "{{ vars.input.foo | int | upper }}"
+""")
+    assert "bad_jinja_filter_chain" in codes
+
+
+def test_walker_flags_bad_chain_in_for_each():
+    codes = _walk("""
+collection: T
+playbooks:
+  - name: pb
+    is_active: true
+    steps:
+      - type: start
+        name: Start
+        next: Loop
+      - type: set_variable
+        name: Loop
+        for_each:
+          item: "{{ records | length | upper }}"
+          parallel: false
+        vars:
+          x: "{{ vars.item }}"
+""")
+    assert "bad_jinja_filter_chain" in codes
+
+
+def test_walker_silent_on_valid_jinja():
+    codes = _walk("""
+collection: T
+playbooks:
+  - name: pb
+    is_active: true
+    steps:
+      - type: start
+        name: Start
+        next: SetIt
+      - type: set_variable
+        name: SetIt
+        vars:
+          n:  "{{ vars.input.items | length }}"
+          up: "{{ vars.input.name | upper }}"
+""")
+    assert "bad_jinja_filter_chain" not in codes
+
+
+def test_walker_does_not_double_fire_across_branches():
+    """A step shared by two decision branches must not produce the
+    same chain diagnostic twice."""
+    codes = _walk("""
+collection: T
+playbooks:
+  - name: pb
+    is_active: true
+    steps:
+      - type: start
+        name: Start
+        next: Gate
+      - type: decision
+        name: Gate
+        conditions:
+          - label: "yes"
+            condition: "{{ vars.input.flag == True }}"
+            next: BadStep
+          - label: "no"
+            condition: "{{ vars.input.flag == False }}"
+            next: BadStep
+      - type: set_variable
+        name: BadStep
+        vars:
+          oops: "{{ vars.x | int | upper }}"
+""")
+    assert codes.count("bad_jinja_filter_chain") == 1

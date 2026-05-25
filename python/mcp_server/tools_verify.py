@@ -425,6 +425,7 @@ def _finalize(checks_run, required_fixes, warnings, evidence) -> dict[str, Any]:
         "unknown_step_reference", "unreachable_step_reference",
         "missing_field_on_step_output",
         "non_list_indexed",
+        "bad_jinja_filter_chain",
     )
     for code in priority_codes:
         for fx in required_fixes:

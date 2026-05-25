@@ -636,6 +636,54 @@ def _validate_branch_jinja(
 # Top-level entry
 # ---------------------------------------------------------------------------
 
+def _validate_jinja_filter_chains(pb: Playbook) -> list[Diagnostic]:
+    """Tier 3 chain validation across the whole playbook.
+
+    The resolver only sees connector_op param values; this pass sweeps
+    every string field on every step (set_variable, decision, manual_input,
+    workflow_reference, for_each.item, ...) and flags filter-chain bugs
+    like `| length | upper` regardless of context. Pure regex walk; no
+    branch awareness needed since the diagnostic is purely syntactic.
+
+    Uses `_HAND_CURATED` only (no DB) — the curated map covers ~90 of
+    the most common filters and the resolver's connector-arg path
+    handles the long tail with DB lookup.
+    """
+    from .jinja_typing import validate_chain
+    diags: list[Diagnostic] = []
+    # Each step exposes Jinja in `arguments` (most common) and `for_each`
+    # (item / condition expressions). `branches` and `next` only carry
+    # step ids; `comment` is a free-form label that may contain Jinja but
+    # never executes against runtime data. Scan the first two.
+    scan_fields = ("arguments", "for_each")
+    for s in pb.steps:
+        for field_name in scan_fields:
+            container = getattr(s, field_name, None)
+            if not container:
+                continue
+            for sub, val in _walk_strings(container):
+                if not isinstance(val, str) or "{{" not in val:
+                    continue
+                for m in _JINJA_EXPR_RE.finditer(val):
+                    inner = m.group(1).strip()
+                    bad = validate_chain(inner, None)
+                    if bad is None:
+                        continue
+                    prod, cons, want = bad
+                    diags.append(Diagnostic(
+                        code="bad_jinja_filter_chain",
+                        message=(
+                            f"Jinja filter {cons!r} expects {want!r} but "
+                            f"the preceding filter {prod!r} produces a "
+                            "different type"),
+                        step=s.id, path=f"{field_name}.{sub}",
+                        suggestion=(
+                            "reorder or remove a filter so each `|` "
+                            "boundary matches"),
+                    ))
+    return diags
+
+
 def walk_playbook(
     coll: Collection,
     playbook_name: str | None = None,
@@ -670,7 +718,10 @@ def walk_playbook(
     branch_paths = _enumerate_branches(pb)
     by_id = {s.id: s for s in pb.steps}
     branches: list[BranchResult] = []
-    all_diags: list[Diagnostic] = []
+    # Tier 3 filter-chain check is playbook-level (purely syntactic),
+    # not branch-level — emitting it once per step prevents the same
+    # diagnostic firing in every branch the step appears on.
+    all_diags: list[Diagnostic] = _validate_jinja_filter_chains(pb)
 
     for ids in branch_paths:
         typed_env: dict[str, Shape] = {}
