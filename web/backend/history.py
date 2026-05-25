@@ -122,6 +122,28 @@ CREATE INDEX IF NOT EXISTS chat_messages_session
 -- review notes — what worked, what broke, what to investigate.
 -- `tags` is a comma-separated set of short labels (e.g. "wrong_step,
 -- missed_branch"); UI may build out of these later.
+-- One row per `verify_playbook` call. Lets us measure the agent loop's
+-- forcing-function: did verify get called before submit, how many
+-- iterations until ready_to_push, and which fix codes recur. Joined
+-- back to chat sessions via `session_id` when verify ran inside a chat
+-- (NULL for CLI / eval runs). `codes` is a JSON array of distinct
+-- required_fix codes; `iteration` is the per-session 1-based call count.
+CREATE TABLE IF NOT EXISTS verify_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    session_id TEXT,
+    yaml_sha TEXT,
+    playbook_name TEXT,
+    ready_to_push INTEGER NOT NULL,
+    required_fix_count INTEGER NOT NULL DEFAULT 0,
+    warning_count INTEGER NOT NULL DEFAULT 0,
+    codes TEXT,
+    live_probe INTEGER NOT NULL DEFAULT 0,
+    iteration INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS verify_runs_ts ON verify_runs(ts DESC);
+CREATE INDEX IF NOT EXISTS verify_runs_session ON verify_runs(session_id, ts);
+
 CREATE TABLE IF NOT EXISTS chat_feedback (
     session_id TEXT PRIMARY KEY,
     rating TEXT NOT NULL,
@@ -324,6 +346,81 @@ def get_chat_messages(session_id: str) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
     except Exception:
         return []
+
+
+# ---- verify_playbook telemetry -----------------------------------
+
+def record_verify_run(
+    *,
+    yaml_sha: str | None,
+    playbook_name: str | None,
+    ready_to_push: bool,
+    required_fix_codes: list[str],
+    warning_count: int,
+    live_probe: bool,
+    session_id: str | None = None,
+) -> int | None:
+    """Persist one verify_playbook call. Best-effort; never raises.
+    `required_fix_codes` is the distinct codes from the punch list
+    (order preserved). Iteration is computed per-session at write time."""
+    try:
+        conn = _connect()
+        sid = session_id or read_active_session()
+        iteration = 1
+        if sid:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM verify_runs WHERE session_id=?",
+                (sid,),
+            ).fetchone()
+            iteration = (row[0] or 0) + 1
+        codes_json = json.dumps(list(dict.fromkeys(required_fix_codes or [])))
+        cur = conn.execute(
+            """INSERT INTO verify_runs
+               (ts, session_id, yaml_sha, playbook_name, ready_to_push,
+                required_fix_count, warning_count, codes, live_probe, iteration)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (_now(), sid, yaml_sha, playbook_name,
+             1 if ready_to_push else 0,
+             len(required_fix_codes or []), warning_count,
+             codes_json, 1 if live_probe else 0, iteration),
+        )
+        rid = cur.lastrowid
+        conn.close()
+        return rid
+    except Exception:
+        return None
+
+
+def session_verify_stats(session_id: str) -> dict[str, Any]:
+    """Return verify-loop metrics for one chat session. Powers the
+    Phase 4 eval gates: verify_called_before_submit, iterations_until_ready,
+    final_verify_ready_to_push."""
+    try:
+        conn = _connect()
+        rows = conn.execute(
+            """SELECT ready_to_push, required_fix_count, codes, ts
+               FROM verify_runs WHERE session_id=? ORDER BY id ASC""",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return {"called": False, "iterations": 0,
+                "iterations_until_ready": None, "final_ready": None}
+    if not rows:
+        return {"called": False, "iterations": 0,
+                "iterations_until_ready": None, "final_ready": None}
+    final_ready = bool(rows[-1]["ready_to_push"])
+    iterations_until_ready = None
+    for i, r in enumerate(rows, start=1):
+        if r["ready_to_push"]:
+            iterations_until_ready = i
+            break
+    return {
+        "called": True,
+        "iterations": len(rows),
+        "iterations_until_ready": iterations_until_ready,
+        "final_ready": final_ready,
+    }
 
 
 # ---- chat ↔ push correlation -------------------------------------

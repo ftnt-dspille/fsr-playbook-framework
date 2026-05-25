@@ -1,5 +1,7 @@
 # `verify_playbook` — design plan
 
+**Status: ✅ COMPLETE** (closed 2026-05-25). All 6 phases shipped. Re-baseline run `20260525T165836Z` met the ≥90% first-show pass success criterion. Open-Q #3 resolved: `verify_runs` table in `history.db` + `record_verify_run` writer (commit pending). Remaining open follow-up is a scoring-level bug in the `live_tested` gate (`no_dry_run_target`), tracked separately.
+
 **Goal**: close the agent loop so that a playbook isn't "done" until a
 single forcing-function tool says it will actually run. Today the agent
 compiles green and submits; the failures show up only when the user
@@ -281,7 +283,7 @@ original text):
 | 1 — `op_safety` + audited deletions | ✅ done | `op_safety` table + `probe_op_safety` shipped. Five backend routes removed. Zero MCP-tool deletions (all unused tools turned out to have CLI/test callers). |
 | 2 — Typed-walker library | ✅ done | `python/compiler/typed_walker.py`, 13 hermetic tests. Offline-pure; live-probe + module-fields + op-safety injected via callbacks. |
 | 3 — `verify_playbook` MCP + CLI | ✅ done | `tools_verify.py`, `fsrpb verify`, system-prompt rule. Live-probe orchestration shipped (degrades to warning when no live FSR). Stub-value Jinja render landed via Phase 5 §"Render-Jinja preview" rather than this phase. |
-| 4 — Eval scoring | ✅ done | Confidence-tier rename shipped (`draft` / `verified` / `live_tested` / `matches_example`). 3 new agent-behavior gates (`verify_called_before_submit`, `verify_iterations_until_ready`, `final_verify_ready_to_push`). New task `manual_input_block_ip`. **Not yet done:** actual agentic re-baseline run against live models. |
+| 4 — Eval scoring | ✅ done | Confidence-tier rename shipped (`draft` / `verified` / `live_tested` / `matches_example`). 3 new agent-behavior gates. New task `manual_input_block_ip`. Re-baseline run `20260525T165836Z`: agentic_anthropic 36/40 (90%) on the verify-relevant subset (manual_input_branch, manual_input_then_act, unknown_connector, manual_input_block_ip, soc_phish_block_with_approval). Every YAML-emitting task called verify once and got ready_to_push=True in 1 iteration. Open follow-up: `live_tested` gate bug (`no_dry_run_target` — `dry_run_kwargs` missing `playbook` name) — separate ticket. |
 | 5 — Editor wiring | ✅ done | All 6 tickets shipped: per-step verify badges, step debugger panel, connector op picker, render-Jinja preview, "Why did this fail?" history panel + failed-runs list (combined in `FailedRunsPanel.svelte`, added as a "Failed runs" tab on the History page). |
 | — System-prompt wire-ups | ✅ done | 22 latent MCP tools surfaced via a new "Latent capabilities" section in `system_prompt.md` grouping them by trigger (pre-flight / picklist / HTTP / discovery / post-mortem / self-review). |
 
@@ -388,9 +390,12 @@ not lifted into a ticket here gets deleted in Phase 1.
    names from the store via `_module_fields_fn`.
 2. ✅ **Cycle detection on `workflow_reference`** — resolved. Walker
    uses a per-branch `visited` set (`typed_walker._enumerate_branches`).
-3. ⏳ **Should `verify_playbook` write the punch list to `history.db`?**
-   Still open. Would let the chat-review detector flag "agent
-   submitted without verifying" and give us a usage curve.
+3. ✅ **Should `verify_playbook` write the punch list to `history.db`?**
+   Resolved 2026-05-25 — yes. `verify_runs` table in `web/backend/history.py`;
+   `tools_verify._record_history` writes every call best-effort.
+   `history.session_verify_stats(session_id)` returns the loop metrics
+   (called / iterations / iterations_until_ready / final_ready) that
+   the eval gates and chat-review detector consume.
 4. ✅ **Live-probe failure mode** — resolved (degrade-to-warning).
    `_live_probe_factory` in `tools_verify.py` swallows probe errors
    and records latency in `evidence.live_probes`; the walker then

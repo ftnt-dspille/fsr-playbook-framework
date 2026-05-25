@@ -301,7 +301,10 @@ def verify_playbook(
         checks_run.append({"name": "compile", "ok": False,
                            "summary": f"{len(compile_errors)} compiler issues"})
         evidence["compile"] = {"errors": compile_errors}
-        return _finalize(checks_run, required_fixes, warnings, evidence)
+        result = _finalize(checks_run, required_fixes, warnings, evidence)
+        _record_history(yaml_text, playbook, result["ready_to_push"],
+                        required_fixes, warnings, live_probe)
+        return result
     checks_run.append({"name": "compile", "ok": True,
                        "summary": "compile clean"})
 
@@ -380,7 +383,32 @@ def verify_playbook(
                          for b in walk.branches],
         }
 
-    return _finalize(checks_run, required_fixes, warnings, evidence)
+    result = _finalize(checks_run, required_fixes, warnings, evidence)
+    _record_history(yaml_text, playbook, result["ready_to_push"],
+                    required_fixes, warnings, live_probe)
+    return result
+
+
+def _record_history(yaml_text: str, playbook: str | None, ready: bool,
+                    required_fixes: list, warnings: list,
+                    live_probe: bool) -> None:
+    """Best-effort telemetry write to history.db (verify_runs table).
+    Resolves open-Q #3 from VERIFY_PLAYBOOK_PLAN: enables the
+    'agent submitted without verifying' detector + 2-week regression
+    measurement. Never raises."""
+    try:
+        import hashlib
+        sys.path.insert(0, str(REPO_ROOT / "web"))
+        from backend import history as history_db  # noqa: PLC0415
+        sha = hashlib.sha1((yaml_text or "").encode("utf-8")).hexdigest()[:16]
+        codes = [f.get("code", "?") for f in required_fixes]
+        history_db.record_verify_run(
+            yaml_sha=sha, playbook_name=playbook,
+            ready_to_push=ready, required_fix_codes=codes,
+            warning_count=len(warnings), live_probe=live_probe,
+        )
+    except Exception:
+        pass
 
 
 def _finalize(checks_run, required_fixes, warnings, evidence) -> dict[str, Any]:

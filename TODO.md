@@ -12,7 +12,7 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 | Plan | Scope | Status |
 |---|---|---|
-| [`VERIFY_PLAYBOOK_PLAN.md`](docs/plans/VERIFY_PLAYBOOK_PLAN.md) | Single `verify_playbook` forcing-function tool that gates "done" for the agent loop. Trust audit + tool consolidation. | In progress; `verify_playbook` MCP tool + confidence-tier scoring shipped (commit b14ca1c) |
+| [`VERIFY_PLAYBOOK_PLAN.md`](docs/archive/VERIFY_PLAYBOOK_PLAN.md) | Single `verify_playbook` forcing-function tool that gates "done" for the agent loop. Trust audit + tool consolidation. | ✅ complete (2026-05-25). Re-baseline `20260525T165836Z`: agentic_anthropic 36/40 (90%) on verify-relevant subset. `verify_runs` history table + `session_verify_stats` reader shipped. Follow-up: `live_tested`-gate `no_dry_run_target` bug — separate ticket. |
 | [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector wired to every MCP tool; debug runner. | Phase 1–4 shipped; inspector polish + debug runner ongoing |
 | [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 shipped (`render_paths.py`, `render_analyzer.py`); heuristic catalog ongoing |
 | [`AGENT_QUALITY_PLAN.md`](docs/plans/AGENT_QUALITY_PLAN.md) | Evidence base for agent tuning: what the agent actually looks up, data-store gaps, prompt-adherence baseline. | Phase 1A/B/C shipped (`fsrpb agent-stats`); Phase 2/3 pending |
@@ -557,6 +557,8 @@ Open:
 
 Each item is grounded in something a recent session exposed; estimates
 assume the patterns established in 2026-05-03/04 are followed.
+
+0. **Eval scoring bug — `live_tested` gate `no_dry_run_target`** (surfaced 2026-05-25 by re-baseline run `20260525T165836Z`). Every YAML-emitting task in the re-baseline lost 1 point because the eval's `dry_run_kwargs` is built without a `playbook` name. Fix is in `python/evals/scoring.py` (or wherever the `live_tested` level constructs the dry-run call) — populate `playbook` from the compiled IR's first playbook name. ~30 min.
 
 1. **Slim the other big tools the way `get_step_type` was slimmed.**
    Token analyzer + history db are built (`fsrpb chat-stats`,
