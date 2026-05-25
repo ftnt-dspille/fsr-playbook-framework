@@ -1,0 +1,476 @@
+{
+  "live": true,
+  "tasks": [
+    "jinja_chain_count_summary",
+    "jinja_chain_ip_extract",
+    "jinja_chain_json_payload"
+  ],
+  "models": [
+    "agentic_anthropic"
+  ],
+  "rows": [
+    {
+      "model": "agentic_anthropic",
+      "task": "jinja_chain_count_summary",
+      "yaml": "collection: General\nplaybooks:\n  - name: Alert Artifact Count to Slack\n    description: On alert creation, counts artifactsRelatedToAlerts and posts to Slack.\n    is_active: true\n    steps:\n      - type: start_on_create\n        name: On Alert Created\n        arguments:\n          module: alerts\n        next: Build Message\n\n      - type: set_variable\n        name: Build Message\n        vars:\n          slack_message: \"Alert artifacts: {{ vars.input.records[0].artifactsRelatedToAlerts | length }}\"\n        next: Send Slack Message\n\n      - type: connector\n        name: Send Slack Message\n        arguments:\n          connector: slack\n          operation: send_message\n          config: ''\n          params:\n            message: \"{{ vars.slack_message }}\"\n        next: End\n\n      - type: end\n        name: End",
+      "elapsed_ms": 23776,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 0,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true,
+          "code": "record_trigger_requires_record",
+          "summary": "trigger 'start_on_create' fires on real record events; /notrigger dry-run has no record context"
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "1 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 1,
+          "detail": "1 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 4,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 1,
+          "tool": "find_connector",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 8,
+      "max": 8,
+      "fraction": 1.0,
+      "turns": 4,
+      "tool_calls": 4,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 14,
+          "result_chars": 204
+        },
+        {
+          "name": "find_jinja_filter",
+          "args_chars": 26,
+          "result_chars": 2
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 60,
+          "result_chars": 1534
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 865,
+          "result_chars": 503,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 0
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 435,
+          "output_tokens": 112,
+          "cache_creation_input_tokens": 12589,
+          "cache_read_input_tokens": 0
+        },
+        {
+          "input_tokens": 235,
+          "output_tokens": 88,
+          "cache_creation_input_tokens": 452,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 785,
+          "output_tokens": 300,
+          "cache_creation_input_tokens": 452,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 948,
+          "output_tokens": 515,
+          "cache_creation_input_tokens": 278,
+          "cache_read_input_tokens": 13086
+        }
+      ]
+    },
+    {
+      "model": "agentic_anthropic",
+      "task": "jinja_chain_ip_extract",
+      "yaml": "collection: Threat Intelligence\nplaybooks:\n  - name: VT IP Lookup on Alert Creation\n    description: On alert creation, extracts the first source IP and submits it to VirusTotal for reputation scoring.\n    is_active: true\n    steps:\n      - type: start_on_create\n        name: On Alert Created\n        arguments:\n          module: alerts\n        next: Extract Target IP\n\n      - type: set_variable\n        name: Extract Target IP\n        vars:\n          target_ip: \"{{ vars.input.records[0].sourceIps[0] }}\"\n        next: Query VirusTotal\n\n      - type: connector\n        name: Query VirusTotal\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: ''\n          params:\n            ip: \"{{ vars.target_ip }}\"\n        next: End\n\n      - type: end\n        name: End",
+      "elapsed_ms": 23471,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 0,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": true,
+          "code": "record_trigger_requires_record",
+          "summary": "trigger 'start_on_create' fires on real record events; /notrigger dry-run has no record context"
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "1 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 1,
+          "detail": "1 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 3,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 1,
+          "tool": "find_connector",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 8,
+      "max": 8,
+      "fraction": 1.0,
+      "turns": 3,
+      "tool_calls": 3,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 19,
+          "result_chars": 798
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 44,
+          "result_chars": 1370
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 862,
+          "result_chars": 505,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 0
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 420,
+          "output_tokens": 132,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 891,
+          "output_tokens": 303,
+          "cache_creation_input_tokens": 439,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 1382,
+          "output_tokens": 545,
+          "cache_creation_input_tokens": 439,
+          "cache_read_input_tokens": 12589
+        }
+      ]
+    },
+    {
+      "model": "agentic_anthropic",
+      "task": "jinja_chain_json_payload",
+      "yaml": "collection: My Collection\nplaybooks:\n  - name: Post Artifact Count and Names to Webhook\n    description: >\n      Builds a JSON payload containing the count and names of artifacts\n      related to the triggering alert, then POSTs it to a webhook via\n      cyops_utilities api_call.\n    is_active: true\n    steps:\n\n      - type: start\n        name: Start\n        arguments:\n          module: alerts\n          button_label: Post Artifacts to Webhook\n          run_mode: per_record\n        next: Build Payload\n\n      - type: set_variable\n        name: Build Payload\n        vars:\n          artifact_count: \"{{ vars.input.records[0].artifactsRelatedToAlerts | length }}\"\n          artifact_names: \"{{ vars.input.records[0].artifactsRelatedToAlerts | map(attribute='value') | list }}\"\n          webhook_body: \"{{ {'count': vars.artifact_count, 'names': vars.artifact_names} | to_json }}\"\n        next: Post to Webhook\n\n      - type: connector\n        name: Post to Webhook\n        arguments:\n          connector: cyops_utilities\n          operation: api_call\n          config: ''\n          params:\n            url: 'https://your-webhook-endpoint.example.com/hook'\n            method: POST\n            body: '{{ vars.webhook_body }}'\n            headers: '{\"Content-Type\": \"application/json\"}'\n            verify: true\n        next: End\n\n      - type: end\n        name: End",
+      "elapsed_ms": 64999,
+      "levels": {
+        "draft": {
+          "passed": true,
+          "skipped": false,
+          "detail": "compiles",
+          "errors": []
+        },
+        "verified": {
+          "passed": true,
+          "skipped": false,
+          "required_fix_count": 0,
+          "warning_count": 0,
+          "detail": "verify_playbook ready_to_push=True"
+        },
+        "live_tested": {
+          "passed": false,
+          "skipped": false,
+          "code": null,
+          "summary": "failed"
+        },
+        "matches_example": {
+          "passed": false,
+          "skipped": true
+        },
+        "verify_called_before_submit": {
+          "passed": true,
+          "skipped": false,
+          "detail": "3 verify_playbook call(s)"
+        },
+        "verify_iterations_until_ready": {
+          "passed": true,
+          "skipped": false,
+          "iterations": 3,
+          "detail": "3 verify cycle(s) until ready",
+          "informational": true
+        },
+        "final_verify_ready_to_push": {
+          "passed": true,
+          "skipped": false,
+          "detail": "last verify returned ready_to_push=True"
+        },
+        "tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 11,
+          "limit": 20
+        },
+        "no_spiral": {
+          "passed": true,
+          "skipped": false,
+          "longest_run": 3,
+          "tool": "verify_playbook",
+          "limit": 4
+        },
+        "adherence": {
+          "passed": true,
+          "skipped": false,
+          "detail": "yaml block present"
+        },
+        "appropriate_approval_requests": {
+          "passed": true,
+          "skipped": false,
+          "tier_3_plus_calls": 0,
+          "detail": "no tier-3+ calls, as expected"
+        }
+      },
+      "score": 8,
+      "max": 9,
+      "fraction": 0.8888888888888888,
+      "turns": 9,
+      "tool_calls": 11,
+      "trace": [
+        {
+          "name": "find_connector",
+          "args_chars": 24,
+          "result_chars": 214
+        },
+        {
+          "name": "find_jinja_filter",
+          "args_chars": 28,
+          "result_chars": 2
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 76,
+          "result_chars": 350
+        },
+        {
+          "name": "find_jinja_filter",
+          "args_chars": 37,
+          "result_chars": 2
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 76,
+          "result_chars": 202
+        },
+        {
+          "name": "find_jinja_pattern",
+          "args_chars": 16,
+          "result_chars": 1703
+        },
+        {
+          "name": "find_operation",
+          "args_chars": 65,
+          "result_chars": 891
+        },
+        {
+          "name": "get_op_schema",
+          "args_chars": 67,
+          "result_chars": 5370
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 1387,
+          "result_chars": 914,
+          "verify": {
+            "ready_to_push": false,
+            "required_fix_count": 1,
+            "warning_count": 0
+          }
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 1407,
+          "result_chars": 914,
+          "verify": {
+            "ready_to_push": false,
+            "required_fix_count": 1,
+            "warning_count": 0
+          }
+        },
+        {
+          "name": "verify_playbook",
+          "args_chars": 1438,
+          "result_chars": 478,
+          "verify": {
+            "ready_to_push": true,
+            "required_fix_count": 0,
+            "warning_count": 0
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 457,
+          "output_tokens": 116,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 244,
+          "output_tokens": 136,
+          "cache_creation_input_tokens": 473,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 568,
+          "output_tokens": 161,
+          "cache_creation_input_tokens": 473,
+          "cache_read_input_tokens": 12589
+        },
+        {
+          "input_tokens": 1108,
+          "output_tokens": 140,
+          "cache_creation_input_tokens": 281,
+          "cache_read_input_tokens": 13110
+        },
+        {
+          "input_tokens": 1283,
+          "output_tokens": 127,
+          "cache_creation_input_tokens": 215,
+          "cache_read_input_tokens": 13442
+        },
+        {
+          "input_tokens": 2061,
+          "output_tokens": 504,
+          "cache_creation_input_tokens": 807,
+          "cache_read_input_tokens": 13741
+        },
+        {
+          "input_tokens": 2448,
+          "output_tokens": 471,
+          "cache_creation_input_tokens": 333,
+          "cache_read_input_tokens": 14639
+        },
+        {
+          "input_tokens": 1489,
+          "output_tokens": 487,
+          "cache_creation_input_tokens": 1642,
+          "cache_read_input_tokens": 15067
+        },
+        {
+          "input_tokens": 1394,
+          "output_tokens": 743,
+          "cache_creation_input_tokens": 356,
+          "cache_read_input_tokens": 17113
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "agentic_anthropic": {
+      "score": 24,
+      "max": 25,
+      "fraction": 0.96
+    }
+  },
+  "run_id": "20260525T203108Z",
+  "ts": "2026-05-25T20:31:08.642682+00:00"
+}

@@ -72,11 +72,11 @@ def test_run_matrix_gold_beats_echo():
     gold_total = matrix["summary"]["gold"]
     echo_total = matrix["summary"]["echo"]
     # Gold won't be 100% because the strict-whitelist sub-check flags some
-    # legacy fixtures, several harder tasks (soc_*, noc_*, itops_*) have
-    # no gold reference yet, and `matches_example` is now informational
-    # so it no longer lifts the gold provider's ceiling. Just assert the
-    # order and that gold dominates echo.
-    assert gold_total["fraction"] >= 0.6
+    # legacy fixtures, several harder tasks (soc_*, noc_*, itops_*,
+    # jinja_chain_*) have no gold reference yet, and `matches_example` is
+    # now informational so it no longer lifts the gold provider's ceiling.
+    # Just assert the order and that gold dominates echo.
+    assert gold_total["fraction"] >= 0.55
     assert echo_total["score"] == 0
 
 

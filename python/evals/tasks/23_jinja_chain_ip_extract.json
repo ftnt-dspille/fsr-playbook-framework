@@ -1,0 +1,5 @@
+{
+  "name": "jinja_chain_ip_extract",
+  "prompt": "Author a FortiSOAR playbook that, on alert creation, picks the first IP out of `vars.input.records[0].sourceIps` (a list of strings) and submits it to the virustotal connector's query_ip operation. The IP param expects an IPv4 string. Use exactly one set_variable step before the virustotal step to bind the extracted IP into a variable named `target_ip`. Output complete YAML.",
+  "notes": "Tier 3.4: forces correct list→scalar extraction. Right answer: `{{ vars.input.records[0].sourceIps | first }}` or `[0]` index. Common wrong shapes that Tier 3 must catch: `{{ ... | length }}` (int into ipv4 param — fails terminal-type check), `{{ ... | string }}` (string of the whole list, not a valid ipv4 — would pass Tier 3 because str→ipv4 is allowed-by-convention, but the resolver's observed_type validator would later reject it). Success = ready_to_push=True with the agent's final YAML using a list-indexing or first-style extraction."
+}
