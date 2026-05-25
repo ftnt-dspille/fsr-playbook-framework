@@ -2980,6 +2980,112 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if result.get("ready_to_push") else 1
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Print the probe-derived param-type table for a connector.
+
+    Useful for connector authors and for spot-checking what the static
+    type validator will accept on each op. Reads `operation_params`
+    directly — no FSR calls. Phase 2.4 of STATIC_TYPE_VALIDATION_PLAN.
+    """
+    import sqlite3
+    from mcp_server._shared import DB_PATH
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    cn = conn.execute(
+        "SELECT 1 FROM connectors WHERE name=?", (args.connector,),
+    ).fetchone()
+    if cn is None:
+        # Suggest near matches so the user can correct a typo without
+        # rerunning `find_connector`.
+        import difflib
+        all_names = [r[0] for r in conn.execute(
+            "SELECT name FROM connectors").fetchall()]
+        near = difflib.get_close_matches(args.connector, all_names, n=3)
+        print(f"connector {args.connector!r} not found in store",
+              file=sys.stderr)
+        if near:
+            print(f"  did you mean: {', '.join(repr(n) for n in near)}",
+                  file=sys.stderr)
+        return 2
+    ops = conn.execute(
+        "SELECT op_name FROM operations WHERE connector_name=? "
+        "ORDER BY op_name", (args.connector,),
+    ).fetchall()
+    rows = conn.execute(
+        "SELECT op_name, param_name, type AS widget, observed_type, "
+        "       coerces_from, parent_param_name, options_json "
+        "FROM operation_params WHERE connector_name=? "
+        "ORDER BY op_name, parent_param_name IS NOT NULL, param_name",
+        (args.connector,),
+    ).fetchall()
+    if args.json:
+        out = {
+            "connector": args.connector,
+            "op_count": len(ops),
+            "param_count": len(rows),
+            "params": [dict(r) for r in rows],
+            "coverage": _doctor_coverage([dict(r) for r in rows]),
+        }
+        print(json.dumps(out, indent=2, default=str))
+        conn.close()
+        return 0
+
+    print(f"connector: {args.connector}")
+    print(f"  {len(ops)} operation(s), {len(rows)} param(s)")
+    cov = _doctor_coverage([dict(r) for r in rows])
+    print(f"  typed: {cov['typed']}/{cov['total']} "
+          f"({cov['fraction']:.0%}) — "
+          f"{cov['by_widget']} by widget, "
+          f"{cov['by_name_or_probe']} by name/probe")
+    print()
+    by_op: dict[str, list] = {}
+    for r in rows:
+        by_op.setdefault(r["op_name"], []).append(r)
+    op_filter = (args.op or "").lower()
+    for op_name in sorted(by_op):
+        if op_filter and op_filter not in op_name.lower():
+            continue
+        print(f"  {op_name}")
+        for r in by_op[op_name]:
+            obs = r["observed_type"] or "—"
+            coerce = (f" coerces_from={r['coerces_from']}"
+                      if r["coerces_from"] else "")
+            indent = "    └─ " if r["parent_param_name"] else "    "
+            opts = " [picklist]" if r["options_json"] else ""
+            print(f"{indent}{r['param_name']:30s}  "
+                  f"widget={r['widget'] or '?':10s}  "
+                  f"observed_type={obs}{coerce}{opts}")
+        print()
+    conn.close()
+    return 0
+
+
+def _doctor_coverage(rows: list[dict]) -> dict[str, Any]:
+    """Coverage summary used by both human and --json output. `by_widget`
+    is rows where the widget alone settled the type; `by_name_or_probe`
+    is the residue picked up later (name-pattern pass or live probe)."""
+    total = len(rows)
+    typed = sum(1 for r in rows if r.get("observed_type"))
+    by_widget = sum(
+        1 for r in rows
+        if r.get("observed_type") and (
+            (r.get("widget") or "").lower() in {
+                "integer", "intger", "decimal", "numeric", "checkbox",
+                "boolean", "password", "json", "object", "date",
+                "datetime", "richtext", "textarea", "select",
+                "multiselect"} or r.get("options_json"))
+    )
+    return {
+        "total": total,
+        "typed": typed,
+        "untyped": total - typed,
+        "fraction": (typed / total) if total else 0.0,
+        "by_widget": by_widget,
+        "by_name_or_probe": typed - by_widget,
+    }
+
+
 def cmd_generate_recipe(args: argparse.Namespace) -> int:
     from recipes import generate_threat_feed_recipe, generate_data_ingest_recipe
     from recipes.prechecks import run_recipe_prechecks
@@ -4236,6 +4342,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true",
                     help="emit raw result as JSON on stdout")
     sp.set_defaults(func=cmd_verify)
+
+    sp = sub.add_parser(
+        "doctor",
+        help="print the probe-derived param-type table for a connector",
+    )
+    sp.add_argument("connector", help="connector name (use `find_connector` to discover)")
+    sp.add_argument("--op", default=None,
+                    help="filter to ops whose name contains this substring")
+    sp.add_argument("--json", action="store_true",
+                    help="emit the table as JSON on stdout")
+    sp.set_defaults(func=cmd_doctor)
 
     sp = sub.add_parser(
         "resolve",
