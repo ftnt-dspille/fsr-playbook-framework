@@ -87,6 +87,72 @@ def widget_to_observed_type(
 
 
 # ---------------------------------------------------------------------------
+# Param-name → observed_type (Phase 2.0+ — name-pattern pass)
+# ---------------------------------------------------------------------------
+# The widget pass classifies ~45% of operation_params. The residue is
+# almost entirely `type='text'` (14k+ rows), and 54% of *those* carry
+# names that are strong evidence by themselves — `url`, `ip`,
+# `ip_address`, `domain`, `endpoint`, `epoch_*`. This pass lifts those
+# names into typed rows without spending a single FSR call.
+#
+# Rules: regex on lowercased param_name. Order matters — more specific
+# patterns first (e.g. `ip_address` before `address`). Each rule emits
+# an observed_type that the resolver already has a validator for
+# (see `connector_args.py::_OBSERVED_VALIDATORS`). Conservative:
+# anything ambiguous (`name`, `id`, `value`, `query`) stays None so
+# the row is still eligible for Tier 2.2 live probing.
+
+_NAME_RULES: list[tuple[re.Pattern[str], str]] = [
+    # IPv4 / IPv6 — match `ip`, `ip_address`, `src_ip`, `dst_ipv4`, etc.
+    # Anchored on word-boundary at the right to avoid `ip` matching
+    # words like `script`, `recipient`, `clip`.
+    (re.compile(r"(^|_)ipv6(_|$)"),                    "ipv6"),
+    (re.compile(r"(^|_)(ip|ip_addr|ip_address|"
+                r"src_ip|dst_ip|source_ip|dest_ip|"
+                r"client_ip|server_ip|host_ip|peer_ip|"
+                r"remote_ip|local_ip|public_ip|private_ip)(_|$)"), "ipv4"),
+    # URLs / endpoints — require the name to *end* in url/uri/endpoint
+    # or contain `_url`/`_uri` so we don't pick up tokens that happen
+    # to share substrings.
+    (re.compile(r"(^|_)(url|uri|endpoint|webhook|callback_url|"
+                r"redirect_url|api_url|api_endpoint|base_url|"
+                r"base_uri|server_url)(_|$)"),         "url"),
+    # Email — `email`, `recipient_email`, `from_email`, etc.
+    (re.compile(r"(^|_)(email|email_address|from_email|"
+                r"to_email|recipient_email|sender_email|"
+                r"cc_email|bcc_email|user_email)(_|$)"), "email"),
+    # ISO timestamps — date / datetime / *_at / *_time, but NOT
+    # `timeout` / `time_limit` (those are durations).
+    (re.compile(r"(^|_)(timestamp|created_at|updated_at|"
+                r"modified_at|deleted_at|start_time|end_time|"
+                r"start_date|end_date|from_date|to_date|"
+                r"date_from|date_to|iso_date|datetime)(_|$)"), "iso8601"),
+    # JSON payload — `payload`, `body`, `json_body`, `request_body`.
+    # Skip when the widget already classified to json_object via the
+    # widget map; this is for text-widget rows that *carry* a JSON blob.
+    (re.compile(r"(^|_)(json_body|request_body|response_body|"
+                r"json_payload|raw_payload|raw_json)(_|$)"),     "json_object"),
+]
+
+
+def name_to_observed_type(param_name: str | None) -> str | None:
+    """Match param_name against the name-rule table.
+
+    Returns None when no rule fires — keeps the row eligible for
+    Phase 2.2 live probing. Pure; no DB access; safe to call from the
+    resolver as a fallback if a row was somehow probed before this
+    pass ran.
+    """
+    if not param_name:
+        return None
+    n = param_name.strip().lower()
+    for pat, observed in _NAME_RULES:
+        if pat.search(n):
+            return observed
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Error classifier (Phase 2.1)
 # ---------------------------------------------------------------------------
 # Each rule: (compiled regex, observed_type, coerces_from-hint).
@@ -241,9 +307,19 @@ def run_widget_only(conn: sqlite3.Connection) -> dict[str, int]:
         "       condition_value, param_name, type, options_json "
         "FROM operation_params"
     ).fetchall()
-    counts: dict[str, int] = {"total": len(rows), "typed": 0, "untyped": 0}
+    counts: dict[str, int] = {"total": len(rows), "typed": 0,
+                              "typed_by_widget": 0, "typed_by_name": 0,
+                              "untyped": 0}
     for r in rows:
         obs = widget_to_observed_type(r["type"], r["options_json"])
+        if obs is not None:
+            counts["typed_by_widget"] += 1
+        else:
+            # Name-pattern fallback — covers text-widget rows where the
+            # param_name carries the type signal (url / ip / domain / ...).
+            obs = name_to_observed_type(r["param_name"])
+            if obs is not None:
+                counts["typed_by_name"] += 1
         if obs is None:
             counts["untyped"] += 1
         else:

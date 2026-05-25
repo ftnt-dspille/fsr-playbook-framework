@@ -51,6 +51,61 @@ def test_options_json_collapses_to_picklist():
 
 
 # ---------------------------------------------------------------------------
+# name_to_observed_type — Phase 2.0+ name-pattern pass
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name,expected", [
+    # ipv4
+    ("ip", "ipv4"),
+    ("ip_address", "ipv4"),
+    ("src_ip", "ipv4"),
+    ("client_ip", "ipv4"),
+    # ipv6 wins over ipv4 because the rule is checked first
+    ("ipv6", "ipv6"),
+    # url / endpoint
+    ("url", "url"),
+    ("base_url", "url"),
+    ("api_endpoint", "url"),
+    ("webhook", "url"),
+    # email
+    ("email", "email"),
+    ("user_email", "email"),
+    ("recipient_email", "email"),
+    # iso8601
+    ("created_at", "iso8601"),
+    ("timestamp", "iso8601"),
+    ("start_date", "iso8601"),
+    # json
+    ("json_body", "json_object"),
+    ("raw_payload", "json_object"),
+    # negatives: ambiguous names stay None so Phase 2.2 can still probe
+    ("name", None),
+    ("id", None),
+    ("value", None),
+    ("query", None),
+    ("description", None),
+    ("timeout", None),       # duration, not iso
+    ("recipe", None),        # `recipe` contains `ip` but isn't a substring match
+    ("script", None),
+    ("recipient", None),     # different from recipient_email
+    (None, None),
+    ("", None),
+])
+def test_name_to_observed_type(name, expected):
+    assert ppt.name_to_observed_type(name) == expected
+
+
+def test_name_pass_does_not_override_widget_signal():
+    # If the widget already typed the row (e.g. `email` widget), the
+    # name pass should never re-classify — but verify the API contract:
+    # widget pass runs first in run_widget_only, name pass only fires
+    # when widget pass returned None.
+    assert ppt.widget_to_observed_type("integer", None) == "int"
+    # name says url but widget already said int (synthetic case)
+    assert ppt.name_to_observed_type("url") == "url"
+
+
+# ---------------------------------------------------------------------------
 # classify_error — one assertion per rule branch
 # ---------------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 # Static Type Validation Plan — Tier 2 + Tier 3
 
-**Status:** Tier 1 ✅ shipped 2026-05-20. Tier 2 + 3 not started.
+**Status:** Tier 1 ✅ shipped 2026-05-20. Tier 2 substantially shipped (2.0 / 2.0+ / 2.1 / 2.3); Phase 2.2 live probe scaffolded but not yet run; Phase 2.4 doctor CLI pending. Tier 3 not started.
 
 ## Background
 
@@ -103,13 +103,14 @@ New probe: `python/probes/probe_param_types.py`.
 
 ### Phase plan
 
-| Phase | Scope | Exit criteria |
+| Phase | Status | Scope / Notes |
 |---|---|---|
-| **2.0 — Schema + probe skeleton** | Add columns; write the probe loop with classification stubs; populate `observed_type` from widget type alone (no probing yet). | Schema migrated; `observed_type` non-null for every row Tier 1 already covers. |
-| **2.1 — Classifier rules** | Hand-derive ~12 error-pattern regexes from the FSR codebase + recent run_op output. Each maps to an `observed_type`. | ≥80% of safe-op param errors classify; rest fall into `unknown`. |
-| **2.2 — Run the probe** | Single full pass over the live safe-op set. Persist results. | `observed_type` populated for ≥1,500 params beyond the Tier 1 coverage. |
-| **2.3 — Wire into the resolver** | `connector_args.py` reads `observed_type`; adds `ipv4` / `url` / `iri` / `epoch_*` literal checks with did-you-mean. | New diagnostics fire in tests; baseline eval shows no regressions. |
-| **2.4 — Doctor mode** | `fsrpb doctor connector <name>` prints the probe-derived type table for a connector — useful for connector authors. | CLI verb shipped. |
+| **2.0 — Schema + probe skeleton** | ✅ done | Columns added; widget-only pass shipped. 11,566 / 26,093 params typed (44%). |
+| **2.0+ — Name-pattern pass** | ✅ done 2026-05-25 | `name_to_observed_type()` runs as fallback when widget pass returns None. Lifts ipv4 / url / email / ipv6 / iso8601 from `param_name` directly. Coverage now 12,317 / 26,093 (47%, +751 rows over widget-only). Cheap: no FSR calls, idempotent. |
+| **2.1 — Classifier rules** | ✅ done | `classify_error` regex table covers stdlib int/float/bool + validators / ipaddress / email_validator / dateutil errors. |
+| **2.2 — Run the probe** | ⏳ scaffolded, not run | `run_live_probe` exists with dry-run mode; only 69 rows currently in `param_type_probes`. Real pass is ~5h against safe ops. Lower priority now that name-pattern pass captured the easy wins. |
+| **2.3 — Wire into the resolver** | ✅ done | `connector_args.py:103-116` registers validators for ipv4 / url / email / iso8601 / json_object / json_array. New name-pattern coverage produces diagnostics immediately. |
+| **2.4 — Doctor mode** | not started | `fsrpb doctor connector <name>` for connector authors. |
 
 ## Tier 3 — Jinja flow typing
 
