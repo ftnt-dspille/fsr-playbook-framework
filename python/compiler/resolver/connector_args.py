@@ -116,6 +116,61 @@ _OBSERVED_VALIDATORS: dict[str, tuple[str, "callable", str]] = {
 }
 
 
+def _param_target_observed_type(
+    widget_low: str, observed: str | None,
+) -> str | None:
+    """Collapse a param's widget + observed_type into the single tag
+    Tier 3 compares against. Lets us validate `{{ x | int }}` against
+    integer-widget params (which have observed_type='int') the same
+    way we'd validate text-widget params that probed as `ipv4`."""
+    if widget_low in {"integer", "intger"}:
+        return "int"
+    if widget_low in {"decimal", "numeric"}:
+        return "float"
+    if widget_low in {"checkbox", "boolean"}:
+        return "bool"
+    if widget_low in {"json", "object"}:
+        return "json_object"
+    if widget_low in {"text", "textarea", "richtext"}:
+        return observed  # may still be None for unprobed text params
+    return None
+
+
+# Pairs where Tier 3's inferred terminal type is *acceptable* for the
+# param's target type even when not byte-identical. The resolver runs
+# in "claim mismatch" mode — silence is acceptance — so we only need
+# to encode looseness, not strict equality.
+_COMPATIBLE_PAIRS: set[tuple[str, str]] = {
+    ("int", "float"),       # FSR float fields accept ints
+    ("int", "str"),         # str-typed params str() anything
+    ("float", "str"),
+    ("bool", "str"),
+    ("str", "ipv4"),        # Jinja `| string` can carry a valid ipv4
+    ("str", "url"),
+    ("str", "email"),
+    ("str", "iso8601"),
+    ("str", "ipv6"),
+    ("json_array", "list"),
+    ("json_object", "dict"),
+}
+
+
+def _types_compatible(inferred: str, target: str) -> bool:
+    """True iff `inferred` is acceptable for a param wanting `target`.
+
+    The exact-match case is the common one (`| int` into integer widget).
+    The `_COMPATIBLE_PAIRS` table covers the looseness FSR's runtime
+    actually accepts (numeric promotion, str-of-anything passing
+    through). When in doubt, return True — false positives waste the
+    agent's loop budget.
+    """
+    if inferred == target:
+        return True
+    if (inferred, target) in _COMPATIBLE_PAIRS:
+        return True
+    return False
+
+
 def _coerces_to_int(v) -> bool:
     """True if value is something the FSR runtime can pass to int().
     Native ints (excluding bool, which is treated separately) pass; bare
@@ -386,10 +441,39 @@ class ConnectorArgsMixin:
                 if ptype is None:
                     continue
                 ptype_low = ptype.lower()
-                # Skip Jinja-templated scalars at the value level. Lists
-                # (multiselect) are handled in the enum branch.
+                # Tier 3 first slice: when the value is a *pure* Jinja
+                # block (one `{{ … }}` with no surrounding text) and the
+                # terminal filter has a declared output type, we can
+                # validate the chain's terminal type against the param's
+                # target type without resolving the expression. Skip the
+                # static literal checks below either way for Jinja values
+                # — those are still resolved at runtime.
                 if isinstance(p_val, str) and (
                         "{{" in p_val or "{%" in p_val):
+                    if "{%" not in p_val:
+                        from ..jinja_typing import infer_terminal_observed_type
+                        inferred = infer_terminal_observed_type(p_val, self.conn)
+                        if inferred is not None:
+                            target = _param_target_observed_type(
+                                ptype_low,
+                                self.operation_param_observed_type(
+                                    connector, operation, p_name)[0],
+                            )
+                            if target is not None and not _types_compatible(
+                                    inferred, target):
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message=(
+                                        f"param {p_name!r} on "
+                                        f"{connector}.{operation} expects "
+                                        f"{target!r} but the Jinja filter "
+                                        f"chain produces {inferred!r}"),
+                                    path=f"{path}.arguments.params.{p_name}",
+                                    suggestion=(
+                                        "drop the trailing filter or "
+                                        "replace it with one that yields "
+                                        f"{target!r}"),
+                                ))
                     continue
                 # Numeric: integer / decimal / numeric / "intger" (typo).
                 if ptype_low in {"integer", "intger"}:

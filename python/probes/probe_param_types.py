@@ -384,6 +384,44 @@ _MUTATIONS_BY_TYPE: dict[str, list[tuple[str, Any]]] = {
     "picklist": [
         ("enum_invalid", "__no_such_value_zzzz__"),
     ],
+    # Phase 2.0+ name-pattern types — mutations chosen to elicit the
+    # validator error specific to each. The classifier sees the
+    # connector's reaction and confirms the inferred type.
+    "ipv4": [
+        ("not_dotted_quad", "not-an-ip"),
+        ("bad_octet",       "999.999.999.999"),
+        ("int",             12345),
+    ],
+    "url": [
+        ("no_scheme",      "example.com/path"),
+        ("malformed",      "://://"),
+        ("int",            12345),
+    ],
+    "email": [
+        ("no_at_sign",     "alice.example.com"),
+        ("no_tld",         "alice@example"),
+        ("int",            12345),
+    ],
+    "iso8601": [
+        ("garbage",        "not-a-date"),
+        ("epoch_seconds",  1700000000),
+        ("list",           [2026, 5, 25]),
+    ],
+    "ipv6": [
+        ("v4_form",        "10.0.0.1"),
+        ("malformed",      "::not::an::address"),
+        ("int",            12345),
+    ],
+    "json_object": [
+        ("scalar_int",     42),
+        ("malformed_str",  "{not valid json"),
+        ("array_form",     [1, 2]),
+    ],
+    "json_array": [
+        ("scalar_int",     42),
+        ("malformed_str",  "[not valid"),
+        ("object_form",    {"a": 1}),
+    ],
     # `str`-typed params: the runtime usually str()-coerces anything,
     # so a list/dict is what tends to trip type-checked connectors.
     "str": [
