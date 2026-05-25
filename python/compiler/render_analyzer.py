@@ -97,6 +97,9 @@ def analyze(trace: list[dict[str, Any]],
     diagnostics.extend(_c3_required_empty(trace, playbook))
     if picklist_validator is not None:
         diagnostics.extend(_c4_picklist_drift(trace, picklist_validator))
+    diagnostics.extend(_c6_index_non_list(trace, by_jkey))
+    diagnostics.extend(_c9_loop_var_leak(trace, playbook))
+    diagnostics.extend(_c10_dead_step(trace, by_jkey))
     return diagnostics
 
 
@@ -443,6 +446,184 @@ def _c4_picklist_drift(trace: list[dict[str, Any]],
                 actual=value,
                 extra={"picklist": picklist},
             ))
+    return out
+
+
+# ---------------------------------------------------------------------
+# C6 index_into_non_list
+# ---------------------------------------------------------------------
+
+def _c6_index_non_list(trace: list[dict[str, Any]],
+                       by_jkey: dict[str, dict[str, Any]]) -> list[Diagnostic]:
+    """Flag `vars.steps.X.Y[N]` (or `[*]`) when the producer's
+    output_shape says Y is a dict or scalar — indexing it raises
+    `'dict' object is not subscriptable` at runtime. The render path
+    walker records subscripts on `segments` as the literal `"[0]"`-
+    shaped strings; we read them off the consumed_paths entry.
+    """
+    out: list[Diagnostic] = []
+    for rec in trace:
+        sid = rec.get("step_id", "")
+        for ref in rec.get("consumed_paths", []):
+            if ref.get("root") != "steps":
+                continue
+            segments = ref.get("segments") or []
+            if not segments:
+                continue
+            # Find a subscript that isn't the first segment — `X[N]` on
+            # the producer key itself is fine (means "first record of
+            # the step's output list").
+            sub_idx = next(
+                (i for i, s in enumerate(segments)
+                 if isinstance(s, str) and s.startswith("[")),
+                None,
+            )
+            if sub_idx is None or sub_idx == 0:
+                continue
+            producer = ref.get("source_step_id", "")
+            prod_rec = by_jkey.get(producer)
+            if prod_rec is None:
+                continue
+            shape = prod_rec.get("output_shape")
+            if not isinstance(shape, dict) or shape.get("kind") != "dict":
+                continue
+            # Walk to the attr being indexed.
+            cur_top_keys = shape.get("top_keys") or []
+            attr_chain = [s for s in segments[:sub_idx]
+                          if isinstance(s, str) and not s.startswith("[")]
+            target = attr_chain[-1] if attr_chain else None
+            if target is None or target not in cur_top_keys:
+                continue
+            types = shape.get("types") or {}
+            t = types.get(target, "")
+            if t in {"list", "tuple"} or t == "":
+                continue
+            out.append(Diagnostic(
+                kind="index_into_non_list",
+                severity="warning",
+                step_id=sid,
+                path=ref["path"],
+                location=ref.get("location", ""),
+                message=(f"indexing into {target!r} which is "
+                         f"{t!r} on {producer!r}, not a list — "
+                         "this raises at runtime"),
+                suggestion=("remove the [N] index, or fix the upstream "
+                            "step to produce a list"),
+                extra={"producer": producer, "attr": target,
+                       "shape_kind": t},
+            ))
+    return out
+
+
+# ---------------------------------------------------------------------
+# C9 loop_var_leak
+# ---------------------------------------------------------------------
+
+def _c9_loop_var_leak(trace: list[dict[str, Any]],
+                      playbook: dict[str, Any] | None) -> list[Diagnostic]:
+    """`vars.item` (and `vars.item_index`) only exist inside the body
+    of a `for_each` step. Authors sometimes paste a Jinja from a
+    loop-internal step into a downstream consumer; that ref evaluates
+    to undefined at runtime. Detect by scanning consumed_paths for
+    `root == 'item'` and checking whether the step is inside an
+    enclosing for_each scope.
+    """
+    if not playbook:
+        return []
+    steps = playbook.get("steps") or []
+    # Build a set of step ids that live in a for_each body. The
+    # simplified IR carries for_each at the loop step itself, so
+    # everything that's downstream-while-still-on-this-iteration is
+    # the loop body. Cheapest heuristic: any step whose own dict has
+    # `for_each` set is itself a loop step (vars.item is valid in
+    # *its* arguments); steps reachable only via the loop's `next`
+    # are downstream of the loop — vars.item is not valid there.
+    loop_step_ids = {
+        s.get("id") or s.get("name") for s in steps
+        if isinstance(s, dict) and s.get("for_each")
+    }
+    out: list[Diagnostic] = []
+    for rec in trace:
+        sid = rec.get("step_id", "")
+        if sid in loop_step_ids:
+            continue
+        for ref in rec.get("consumed_paths", []):
+            if ref.get("root") != "item":
+                continue
+            out.append(Diagnostic(
+                kind="loop_var_leak",
+                severity="error",
+                step_id=sid,
+                path=ref["path"],
+                location=ref.get("location", ""),
+                message=(f"references `vars.item` outside a for_each "
+                         "body — undefined at runtime"),
+                suggestion=("either move this step inside the for_each, "
+                            "or refer to the for_each step's output "
+                            "(`vars.steps.<loop>.<key>`) which collects "
+                            "the per-iteration results"),
+            ))
+    return out
+
+
+# ---------------------------------------------------------------------
+# C10 dead_step
+# ---------------------------------------------------------------------
+
+def _c10_dead_step(trace: list[dict[str, Any]],
+                   by_jkey: dict[str, dict[str, Any]]) -> list[Diagnostic]:
+    """A step whose output is never read by any downstream consumer.
+    Info-level only — sometimes intentional (logging, side-effect
+    record_crud writes that the next step doesn't need). Skip step
+    types whose primary value is the side effect: connector_op writes
+    (unsafe), record_crud writes, code_snippet (assumed intentional),
+    decision (no output), delay, manual_input (output by definition
+    consumed downstream when used). Focus on set_variable + safe
+    connector reads + find_records that nobody references.
+    """
+    skip_types = {
+        "decision", "delay", "manual_input", "start",
+        "code_snippet", "workflow_reference",
+    }
+    referenced_producers: set[str] = set()
+    for rec in trace:
+        for ref in rec.get("consumed_paths") or []:
+            if ref.get("root") != "steps":
+                continue
+            src = ref.get("source_step_id")
+            if src:
+                referenced_producers.add(src)
+    out: list[Diagnostic] = []
+    for rec in trace:
+        sid = rec.get("step_id", "")
+        jkey = rec.get("_jkey", sid)
+        if rec.get("type", "") in skip_types:
+            continue
+        # Don't flag connector ops that wrote to the world — those are
+        # side-effect-positive even if their output isn't consumed.
+        # `simulated_from == 'mock_result'` + status "unsafe_simulated"
+        # is the agent's signal that this step was a destructive write.
+        status = (rec.get("status") or "").lower()
+        if status in {"unsafe_simulated", "simulated_destructive"}:
+            continue
+        if jkey in referenced_producers or sid in referenced_producers:
+            continue
+        # Only flag steps that *did* produce something — skipping
+        # default-empty / errored frames keeps the noise down.
+        if not rec.get("output"):
+            continue
+        out.append(Diagnostic(
+            kind="dead_step",
+            severity="info",
+            step_id=sid,
+            path="",
+            location="",
+            message=(f"step output is never consumed by a downstream "
+                     "step — confirm this is intentional (logging / "
+                     "side effect) or remove the step"),
+            suggestion=("delete the step if you don't need its output; "
+                        "or reference it from a later step's args"),
+        ))
     return out
 
 

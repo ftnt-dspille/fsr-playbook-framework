@@ -283,12 +283,26 @@ server-side.
 
 ### Phase 5 — Analyzer v2 (remaining checks)
 
-- [ ] **5.1** C5 type mismatch.
-- [ ] **5.2** C6 index-into-non-list.
+- [x] **5.1** C5 type mismatch — **superseded** by Tier 3 of
+      STATIC_TYPE_VALIDATION_PLAN (commits `c10418a` / `a3fb9ca`).
+      Resolver + walker now emit `bad_value` / `bad_jinja_filter_chain`
+      diagnostics for the same shape mismatches the render-path
+      analyzer would have caught, with better intra-chain coverage.
+- [x] **5.2** C6 index-into-non-list — shipped 2026-05-25
+      (`_c6_index_non_list`). Severity warning; uses producer's
+      `output_shape.types` to confirm the indexed attr isn't list-
+      typed before flagging.
 - [ ] **5.3** C7 decision references unset path.
 - [ ] **5.4** C8 MI mode/output mismatch (reuse MI catalog).
-- [ ] **5.5** C9 for-each loop-var leak.
-- [ ] **5.6** C10 dead step.
+- [x] **5.5** C9 for-each loop-var leak — shipped 2026-05-25
+      (`_c9_loop_var_leak`). Flags `vars.item` consumed outside any
+      for_each body; severity error since the runtime evaluates the
+      reference as undefined.
+- [x] **5.6** C10 dead step — shipped 2026-05-25 (`_c10_dead_step`).
+      Info-level (sometimes intentional for side-effect writes); skips
+      step types whose primary value isn't an output (decision /
+      delay / manual_input / start / code_snippet / workflow_reference)
+      and unsafe-simulated destructive ops.
 
 ### Phase 6 — AI fix layer
 

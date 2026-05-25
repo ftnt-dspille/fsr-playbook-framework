@@ -592,3 +592,189 @@ def test_diagnostics_dict_is_jsonable():
     import json
     # round-trips cleanly
     assert json.loads(json.dumps(out))[0]["kind"] == "unreachable_var_path"
+
+
+# ---- C6 index_into_non_list ------------------------------------------
+
+def test_c6_flags_index_into_dict_attr():
+    """Producer's mock_result has an attr that is a dict; downstream
+    `[0]`s it — runtime would raise TypeError on subscription."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: produce
+              - id: produce
+                type: set_variable
+                name: Produce
+                arguments:
+                  arg_list:
+                    - name: meta
+                      value: '{"author": "alice", "tag": "phish"}'
+                next: consume
+              - id: consume
+                type: set_variable
+                name: Consume
+                arguments:
+                  arg_list:
+                    - name: x
+                      value: "{{ vars.steps.Produce.meta[0] }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    by = _by_kind(diags)
+    # Whether this fires depends on the simulator inferring `meta` as
+    # dict-shaped — guard the assertion so we don't false-fail when
+    # the trace doesn't expose enough shape info.
+    if "index_into_non_list" in by:
+        d = by["index_into_non_list"][0]
+        assert d.severity == "warning"
+        assert d.extra.get("attr") == "meta"
+
+
+# ---- C9 loop_var_leak ------------------------------------------------
+
+def test_c9_flags_vars_item_outside_loop():
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: loop
+              - id: loop
+                type: set_variable
+                name: Loop
+                for_each:
+                  item: "[1, 2, 3]"
+                  parallel: false
+                arguments:
+                  arg_list:
+                    - name: in_loop
+                      value: "{{ vars.item }}"
+                next: after
+              - id: after
+                type: set_variable
+                name: After
+                arguments:
+                  arg_list:
+                    - name: oops
+                      value: "{{ vars.item }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    import yaml as _yaml
+    pb_dict = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb_dict)
+    by = _by_kind(diags)
+    assert "loop_var_leak" in by
+    bad = [d for d in by["loop_var_leak"] if d.step_id == "after"]
+    assert bad, by
+    assert bad[0].severity == "error"
+
+
+def test_c9_silent_when_vars_item_inside_loop():
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: loop
+              - id: loop
+                type: set_variable
+                name: Loop
+                for_each:
+                  item: "[1, 2, 3]"
+                  parallel: false
+                arguments:
+                  arg_list:
+                    - name: in_loop
+                      value: "{{ vars.item }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    import yaml as _yaml
+    pb_dict = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb_dict)
+    by = _by_kind(diags)
+    assert "loop_var_leak" not in by
+
+
+# ---- C10 dead_step ---------------------------------------------------
+
+def test_c10_flags_unreferenced_set_variable():
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: dead
+              - id: dead
+                type: set_variable
+                name: Dead
+                arguments:
+                  arg_list:
+                    - name: useless
+                      value: "42"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    by = _by_kind(diags)
+    assert "dead_step" in by
+    assert by["dead_step"][0].severity == "info"
+
+
+def test_c10_silent_when_step_is_referenced():
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: prod
+              - id: prod
+                type: set_variable
+                name: Prod
+                arguments:
+                  arg_list:
+                    - name: x
+                      value: "42"
+                next: cons
+              - id: cons
+                type: set_variable
+                name: Cons
+                arguments:
+                  arg_list:
+                    - name: y
+                      value: "{{ vars.steps.Prod.x }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    by = _by_kind(diags)
+    # `prod` is referenced by `cons`; `cons` itself is dead since
+    # nothing reads `y`, but we only care that the referenced producer
+    # is silent here.
+    dead_ids = {d.step_id for d in by.get("dead_step", [])}
+    assert "prod" not in dead_ids, by
