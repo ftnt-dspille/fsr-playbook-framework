@@ -1,6 +1,6 @@
 # FSRPlaybookYaml — TODO / resume state
 
-**Last touched**: 2026-05-18. Live FSR target: `https://10.99.249.205` (label `dev`).
+**Last touched**: 2026-05-25. Live FSR target: `https://10.99.249.205` (label `dev`).
 
 This file is the master backlog + resume state. Deep multi-phase plans
 live under `docs/plans/`; frozen research/audit snapshots under
@@ -13,8 +13,8 @@ live under `docs/plans/`; frozen research/audit snapshots under
 | Plan | Scope | Status |
 |---|---|---|
 | [`VERIFY_PLAYBOOK_PLAN.md`](docs/archive/VERIFY_PLAYBOOK_PLAN.md) | Single `verify_playbook` forcing-function tool that gates "done" for the agent loop. Trust audit + tool consolidation. | ✅ complete (2026-05-25). Re-baseline `20260525T165836Z`: agentic_anthropic 36/40 (90%) on verify-relevant subset. `verify_runs` history table + `session_verify_stats` reader shipped. Follow-up: `live_tested`-gate `no_dry_run_target` bug — separate ticket. |
-| [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector wired to every MCP tool; debug runner. | Phase 1–4 shipped; inspector polish + debug runner ongoing |
-| [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 shipped (`render_paths.py`, `render_analyzer.py`); heuristic catalog ongoing |
+| [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector wired to every MCP tool; debug runner. | Phases 1–4 + 4.5 shipped. **Phase 5 MVP ✅** 2026-05-25 (debug-runner drawer: run + trace tape + step detail). Inspector now surfaces verify_playbook fixes scoped to the focused step. Remaining: 5.3 breakpoints / 5.4 branch chooser / 5.5 watch panel / 5.7 trigger payload editor (need server-side pause); Phase 6 toolbar gaps (6.2 Resolve, 6.3 Dry-run, 6.4 Assert, 6.6 Recipe export); Phase 6.5 Variable picker side panel (G27/G28); G11 pane-click create-step popover. |
+| [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 + Phase 6.1 shipped. **Phase 5 v2 ✅** 2026-05-25 (C6 index-into-non-list / C9 for-each loop-var leak / C10 dead step; C5 superseded by Tier 3). Remaining: C7 decision-references-unset-path, C8 MI mode/output mismatch (needs MI catalog), 6.2/6.3 fix-apply + bulk-fix, 4.1-4.7 visual-editor surfacing pass, 7.3 agent fail-fast on skipped authoring tools. |
 | [`AGENT_QUALITY_PLAN.md`](docs/plans/AGENT_QUALITY_PLAN.md) | Evidence base for agent tuning: what the agent actually looks up, data-store gaps, prompt-adherence baseline. | Phase 1A/B/C shipped (`fsrpb agent-stats`); Phase 2/3 pending |
 | [`CONNECTOR_INTEGRATION_PLAN.md`](docs/plans/CONNECTOR_INTEGRATION_PLAN.md) | Catalog-grounded HTTP-shaped authoring: `find_api_*` + `propose_http_fallback` so the agent can ground "do X with vendor Y" requests in real OpenAPI fixtures (36k fixtures, 6.9k products). Supersedes TODO D3 + HTTP-virtual-connector items. | **Phases 0 / 0.5 / 0.6 done** (2026-05-18). Path fix to `fortisoar/corpus_builder/catalog.sqlite` + `FSRPB_API_CATALOG` env + intent-aware fixture ranking (auth-prelude demotion + intent-token overlap + verb-method tie-break). Phases 1-3 **descoped** — validator/replay are connector-author tools, different audience; toolkit stays where it lives. Phase 4 (editor "use http fallback" affordance) + Phase 5 (connector-lifecycle mining) still viable as separate follow-ups. |
 | [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Three orthogonal refinements: (A) static reference data into the prompt cache, (B) constrained generation for hot shapes via `emit_*` tools, (C) separate "enhance" path from "build" path with `verify_enhancement` + intent-tagged metrics. | **Refinement A done** (commit `18adb53` — 14.9 KB cached prefix). B + C pending. |
@@ -35,6 +35,78 @@ live under `docs/plans/`; frozen research/audit snapshots under
 **Cross-project**:
 
 - [`Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`](../Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md) — original cross-project plan; referenced from global `~/.claude/CLAUDE.md`.
+
+## Next steps (resume state, 2026-05-25)
+
+Ordered roughly by leverage. Pick from this list when restarting; each
+points to deeper detail in its plan.
+
+**A. Strategic anchor (H2 lever):**
+1. **Solution Pack research kickoff.** Open
+   `docs/research/SOLUTION_PACKS.md` (currently missing — create it).
+   Crack open one Fortinet marketplace pack (recommend
+   SOC-Automation or Phishing-Triage), un-archive it, write the
+   structural map: manifest schema, module ↔ playbook ↔ connector
+   ↔ picklist dependency graph, lifecycle (install/uninstall/version).
+   This is the spec a pack-generation agent has to be able to author.
+   Cross-ref: `Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md` 2026-05-20
+   strategic block. Park condition is now satisfied
+   (verify_playbook + Tier 2/3 + render-path v2 all firm).
+
+**B. Tier 3 / render-path tail (highest agent-loop impact):**
+2. **C7 decision-references-unset-path** in `render_analyzer.py` —
+   flag branch conditions whose vars-path refs were never set on
+   the path-to-this-decision. Reuses render-path graph.
+3. **C8 MI mode/output mismatch** — needs an MI mode → output-keys
+   catalog. Output: downstream reads a key the chosen MI mode can't
+   produce.
+4. **Tier 3 corpus mining for long-tail filters** — the 90-entry
+   curated map covers the dominant filters; corpus-mining the
+   remainder would lift coverage on niche `workflow.jinja` macros.
+   Lowest-priority since the agent loop has the curated set.
+
+**C. Debug-runner tail (depends on server-side pause):**
+5. **Server-side pause/resume** for `step_through_playbook` so the
+   debug drawer's ⏭ / ⏯ / ⏹ become real REPL controls. Required for
+   5.3 breakpoints, 5.4 branch chooser, 5.5 watch panel, 5.7 trigger
+   payload editor. Non-trivial; would carry a session-id around.
+
+**D. Visual editor surface polish:**
+6. **Phase 6 toolbar gaps** — Resolve (6.2), Dry-run (6.3), Assert
+   (6.4) buttons; Recipe export (6.6). Mostly thin frontend wrappers
+   over existing MCP tools.
+7. **G11 pane-click create-step popover** — corpus-driven next-step
+   suggestions mining `playbook_steps` for what usually follows the
+   selected anchor.
+8. **G19/T3 Jinja Test modal** — currently a stub button; port
+   logic from `WebstormProjects/widget-jinja-editor/`.
+9. **G27/G28 Variable picker side panel** — Input/Output + Functions
+   + Global Variables tabs; click to insert at the focused arg's caret.
+
+**E. Eval / agent-quality tail:**
+10. **AGENT_QUALITY_PLAN Phase 2/3** — phases past `fsrpb agent-stats`.
+11. **AGENT_LOOP_REFINEMENT B + C** — DEPRIORITIZED per global
+    memory (`priority_agent_loop_deprioritized.md`).
+
+**F. Carry-over polish:**
+12. **Eval scoring fix #0** at the top of "Backlog (open)" —
+    `no_dry_run_target` is already fixed (commit `5393510`). Stale
+    line; remove on the next TODO sweep.
+
+**G. Smaller items surfaced this session that aren't yet on a plan:**
+13. **Frontend: pre-existing svelte-check errors** on the Test step
+    result rendering in `StepInspectorVerifyTab.svelte` (lines 717-ish:
+    `stepTestResult` possibly null + missing `output` on a union
+    branch). Touched-adjacent files in this session but didn't fix —
+    needs a discriminated-union narrow.
+14. **Future Tier 3.5: typed-walker also reports terminal-type
+    mismatches** (resolver does this only for connector_op params;
+    walker only does chain validation). Symmetric coverage so that
+    a `set_variable.vars` field of type "string" can be checked
+    against `{{ ... | length }}`. Lower priority since set_variable
+    fields aren't widget-typed.
+
+---
 
 **Working-tree carry-overs** (changes not yet committed because the
 files had pre-existing WIP from other sessions):
