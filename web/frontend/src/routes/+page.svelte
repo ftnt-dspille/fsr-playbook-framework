@@ -217,7 +217,7 @@
   // so Design and CLI share one source of truth (the BuildBar fires
   // actions, the DiagnosticsDrawer reads results). Markers also feed
   // the Monaco gutter when the user is on CLI.
-  let drawerTab = $state<'diagnostics' | 'fixes' | 'deploy'>('diagnostics');
+  let drawerTab = $state<'diagnostics' | 'fixes' | 'deploy' | 'debug'>('diagnostics');
   // Monaco editor + namespace handles, populated via MonacoYaml's onEditor.
   // DiagnosticsList uses these to apply per-row fixes via executeEdits so
   // each fix lands in the editor's undo stack (Cmd-Z reverts cleanly).
@@ -276,7 +276,7 @@
     debounceId = setTimeout(() => playbookActions.validate(), 400);
   });
 
-  function showDrawer(tab: 'diagnostics' | 'fixes' | 'deploy') {
+  function showDrawer(tab: 'diagnostics' | 'fixes' | 'deploy' | 'debug') {
     drawerTab = tab;
     drawerOpen = true;
   }

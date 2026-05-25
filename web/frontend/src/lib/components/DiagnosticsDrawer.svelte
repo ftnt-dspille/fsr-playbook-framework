@@ -11,12 +11,13 @@
   import DiagnosticsList from './DiagnosticsList.svelte';
   import RenderPathDiagnostics from './RenderPathDiagnostics.svelte';
   import DeployPanel from './DeployPanel.svelte';
+  import DebugPanel from './DebugPanel.svelte';
   import { playbookActions } from '$lib/playbookActions.svelte';
   import { runStore } from '$lib/runStore.svelte';
   import { visualStore } from '$lib/visualEditStore.svelte';
   import type { SuggestedFix } from '$lib/api';
 
-  type Tab = 'diagnostics' | 'fixes' | 'deploy';
+  type Tab = 'diagnostics' | 'fixes' | 'deploy' | 'debug';
   type Props = {
     open: boolean;
     tab: Tab;
@@ -80,6 +81,7 @@
   <div class="flex items-center gap-1 border-b border-[var(--border-soft)] px-2 py-1.5">
     {#each [
       { id: 'diagnostics' as Tab, label: 'Issues' },
+      { id: 'debug' as Tab, label: 'Debug' },
       { id: 'deploy' as Tab, label: 'Deploy' }
     ] as t}
       {@const active = effectiveTab === t.id && open}
@@ -170,6 +172,8 @@
             {/if}
           {/if}
         </div>
+      {:else if effectiveTab === 'debug'}
+        <DebugPanel />
       {:else if effectiveTab === 'deploy'}
         <DeployPanel />
       {/if}

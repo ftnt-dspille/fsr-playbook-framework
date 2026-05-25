@@ -11,7 +11,7 @@
   import RunButton from './RunButton.svelte';
 
   type Props = {
-    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'deploy') => void;
+    onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'deploy' | 'debug') => void;
   };
   let { onShowDrawer }: Props = $props();
 

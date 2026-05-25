@@ -227,6 +227,63 @@ export async function verifyPlaybook(
   };
 }
 
+// Debug runner — drives `step_through_playbook` for the Debug drawer.
+// One call returns the full trace; the UI scrubs through it rather
+// than maintaining a separate server-side session, which keeps the
+// MVP simple (no breakpoints / pause yet).
+export type DebugStepFrame = {
+  step_id: string;
+  type: string;
+  rendered_args: unknown;
+  output: unknown;
+  output_top_keys?: string[];
+  status: string;
+  note?: string;
+};
+export type DebugRunResult = {
+  ok: boolean;
+  playbook?: string;
+  trace: DebugStepFrame[];
+  first_error?: { step_id: string; message: string } | null;
+  steps_executed?: number;
+  error?: string;
+};
+
+export async function stepThroughPlaybook(
+  yamlText: string,
+  opts: {
+    playbook?: string;
+    input?: Record<string, unknown>;
+    branchChoices?: Record<string, string>;
+    manualChoices?: Record<string, string>;
+    executeSafeOps?: boolean;
+    maxSteps?: number;
+  } = {}
+): Promise<DebugRunResult> {
+  const r = await callMcpTool<Record<string, unknown>>('step_through_playbook', {
+    yaml_text: yamlText,
+    playbook: opts.playbook,
+    input: opts.input,
+    branch_choices: opts.branchChoices,
+    manual_choices: opts.manualChoices,
+    execute_safe_ops: opts.executeSafeOps ?? true,
+    max_steps: opts.maxSteps ?? 30,
+  });
+  if (!r.ok || !r.result) {
+    return { ok: false, trace: [], error: r.error ?? 'step_through_playbook failed' };
+  }
+  const res = r.result as Record<string, unknown>;
+  return {
+    ok: Boolean(res['ok']),
+    playbook: typeof res['playbook'] === 'string' ? res['playbook'] : undefined,
+    trace: (res['trace'] as DebugStepFrame[]) ?? [],
+    first_error: (res['first_error'] as DebugRunResult['first_error']) ?? null,
+    steps_executed: typeof res['steps_executed'] === 'number' ? res['steps_executed'] : undefined,
+    error: typeof res['error'] === 'string' ? res['error'] : undefined,
+  };
+}
+
+
 export async function suggestFixForDiagnostic(d: Diagnostic): Promise<SuggestedFix> {
   const r = await callMcpTool<SuggestedFix>('suggest_fix_for_diagnostic', { diagnostic: d });
   if (!r.ok || !r.result) return { ok: false, reason: r.error ?? 'mcp call failed' };
