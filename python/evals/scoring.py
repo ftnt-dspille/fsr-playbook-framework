@@ -43,6 +43,22 @@ def _verify(yaml_text: str, *, live: bool) -> dict[str, Any]:
     return verify_playbook(yaml_text=yaml_text, live_probe=live)
 
 
+def _first_playbook_name(yaml_text: str) -> str | None:
+    """Best-effort: pull the first playbook's name out of the YAML so
+    the scoring harness can dry-run without an explicit override."""
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text)
+        if isinstance(doc, dict):
+            pbs = doc.get("playbooks") or []
+            if pbs and isinstance(pbs[0], dict):
+                name = pbs[0].get("name")
+                return name if isinstance(name, str) and name else None
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def _compile_obj(yaml_text: str) -> dict[str, Any]:
     from mcp_server import compile_yaml
     return compile_yaml(yaml_text, verbose=True)
@@ -250,6 +266,13 @@ def score(
         try:
             from mcp_server import dry_run_playbook  # noqa: PLC0415
             kw = dict(dry_run_kwargs or {})
+            # Infer playbook name from the YAML when the caller didn't
+            # pin one. Lets re-baseline runs exercise tier-3 without
+            # every task carrying a `dry_run_kwargs.playbook` override.
+            if "playbook" not in kw:
+                inferred = _first_playbook_name(yaml_text)
+                if inferred:
+                    kw["playbook"] = inferred
             dr = dry_run_playbook(yaml_text, **kw) if kw else None
             if dr is None:
                 dr = {"ok": False, "code": "no_dry_run_target",
