@@ -81,6 +81,11 @@ class TurnResult:
     last_assistant_yaml: Optional[str] = None
     tags: dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
+    final_seq: int = 0
+    """Next available seq value in the current turn after the stream
+    completes. Consumers persisting post-stream rows (e.g. the web
+    app's ladder snapshot) use this to avoid colliding with the
+    transcript rows the function already wrote."""
 
 
 class _TextCoalescer:
@@ -331,6 +336,7 @@ async def run_agent_turn(
         await _fire_event_callback(on_event, err_ev)
         result.transcript.append(err_ev)
 
+    result.final_seq = seq_in_turn
     return result
 
 

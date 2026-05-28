@@ -30,9 +30,13 @@ from fsr_core.llm.provider import (
 )
 from fsr_core.llm import approvals as _approval_store
 from fsr_core.llm import ladder as _ladder
+from fsr_core.llm.run_turn import run_agent_turn, resume_agent_turn
 from backend.system_prompt import build_system_prompt
 from backend import history as history_db
+from backend._history_sink import BackendHistorySink
 from fsr_core.llm.usage_log import est_tokens, log_turn
+
+import asyncio
 
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -318,156 +322,104 @@ async def chat(body: ChatIn) -> EventSourceResponse:
     system_prompt = build_system_prompt(intent)
 
     async def gen() -> AsyncIterator[dict[str, Any]]:
+        # Producer/consumer over a queue so we can stream SSE frames as
+        # events arrive (run_agent_turn awaits its provider stream).
+        # The producer task calls run_agent_turn with on_event=queue.put;
+        # this generator pops events off the queue and yields SSE frames.
+        # When the producer finishes it enqueues a sentinel carrying the
+        # final TurnResult so post-stream logic (active-session toggle,
+        # ladder eval) can run with the captured state.
         active_session_written = False
-        # Per-turn transcript buffer: full message texts get persisted
-        # to chat_messages on each UsageEvent (turn boundary).
-        seq_in_turn = 0
-        session_id: str | None = None
-        # Buffer the latest YAML the assistant emitted so we can score
-        # the ladder against the freshest draft after the turn completes.
-        latest_assistant_yaml: str | None = None
-        # Coalesce consecutive `TextEvent`s into one transcript row.
-        # Streaming providers (esp. OpenAI-compat / LM Studio) emit
-        # one delta per token, so persisting each as a row turns the
-        # history view into hundreds of tiny bordered fragments. We
-        # accumulate and flush at turn / tool / stream boundaries.
-        assistant_buf: list[str] = []
-        assistant_buf_turn: int | None = None
-        assistant_buf_seq: int | None = None
+        queue: asyncio.Queue = asyncio.Queue()
+        _DONE = object()
 
-        def _flush_assistant_text() -> None:
-            nonlocal assistant_buf, assistant_buf_turn, assistant_buf_seq
-            if not assistant_buf or session_id is None:
-                assistant_buf = []
-                assistant_buf_turn = None
-                assistant_buf_seq = None
-                return
-            history_db.record_chat_message(
-                session_id,
-                assistant_buf_turn or _current_turn(messages),
-                assistant_buf_seq if assistant_buf_seq is not None else 0,
-                kind="assistant_text",
-                content="".join(assistant_buf),
-            )
-            assistant_buf = []
-            assistant_buf_turn = None
-            assistant_buf_seq = None
-        try:
-            # tools=[] → provider self-fills with the right schema shape
-            # (Anthropic input_schema vs OpenAI function-calling).
-            async for ev in provider.stream(
-                system=system_prompt, messages=messages,
-                tools=[], tags=tags,
-            ):
+        async def _on_event(ev: Event) -> None:
+            await queue.put(ev)
+
+        history_sink = BackendHistorySink()
+
+        # Per-UsageEvent web-side bookkeeping that the route owns:
+        # write the chat_turns row, the active-session marker, and
+        # the per-turn telemetry print. Wired via a closure so the
+        # producer task can call into nonlocal state.
+        def _on_usage(ev: UsageEvent) -> None:
+            nonlocal active_session_written
+            _persist_usage(ev)
+            if not active_session_written:
+                history_db.write_active_session(ev.session_id)
+                active_session_written = True
+
+        async def _produce() -> Any:
+            # Wrap on_event so UsageEvents trigger the side-effect
+            # callback BEFORE they reach the queue / SSE stream.
+            async def cb(ev: Event) -> None:
                 if isinstance(ev, UsageEvent):
-                    _flush_assistant_text()
-                    _persist_usage(ev)
-                    if not active_session_written:
-                        history_db.write_active_session(ev.session_id)
-                        active_session_written = True
-                    # First UsageEvent of a chat: capture the user
-                    # prompt(s) that led to this turn so the transcript
-                    # is self-contained on replay.
-                    if session_id is None:
-                        session_id = ev.session_id
-                        for i, m in enumerate(messages):
-                            if m.role == "user" and isinstance(m.content, str):
-                                history_db.record_chat_message(
-                                    session_id, ev.turn, -100 + i,
-                                    kind="user", content=m.content,
-                                )
-                    # NOTE: do NOT reset seq_in_turn here. The transcript
-                    # row's `turn` column is `_current_turn(messages)` —
-                    # constant for the whole POST request — while
-                    # UsageEvent fires once per *LLM* round-trip inside
-                    # the tool-use loop. Resetting seq each round caused
-                    # later rounds' rows to collide with earlier ones on
-                    # (session_id, turn, seq) and INSERT OR REPLACE
-                    # silently overwrote the earlier text/tool_use/
-                    # tool_result rows, leaving only the final round
-                    # visible in the transcript and in replay.
-                elif session_id and isinstance(ev, TextEvent):
-                    if not assistant_buf:
-                        assistant_buf_turn = _current_turn(messages)
-                        assistant_buf_seq = seq_in_turn
-                        seq_in_turn += 1
-                    assistant_buf.append(ev.text)
-                    # Sniff out a fenced ```yaml block from the running
-                    # buffer so a block split across deltas still scores.
-                    from fsr_core.llm._loop_helpers import extract_yaml_block
-                    found = extract_yaml_block("".join(assistant_buf))
-                    if found:
-                        latest_assistant_yaml = found
-                elif session_id and isinstance(ev, ToolUseEvent):
-                    _flush_assistant_text()
-                    history_db.record_chat_message(
-                        session_id, _current_turn(messages), seq_in_turn,
-                        kind="tool_use", name=ev.name,
-                        content=json.dumps(ev.arguments, default=str),
-                    )
-                    seq_in_turn += 1
-                    # If the assistant is validating/compiling a YAML body,
-                    # tag this and subsequent turns with its collection +
-                    # sha — so sessions that authored a playbook in chat
-                    # but never round-tripped through the editor still
-                    # show up in the History list with a real title.
-                    # Mutating `tags` in place propagates to UsageEvents
-                    # since the provider keeps the same dict reference.
-                    if ev.name in ("validate_yaml", "compile_yaml"):
-                        yaml_arg = ev.arguments.get("yaml_text") \
-                            if isinstance(ev.arguments, dict) else None
-                        derived = _yaml_tags(yaml_arg)
-                        if derived:
-                            tags.update(derived)
-                elif session_id and isinstance(ev, ToolResultEvent):
-                    _flush_assistant_text()
-                    payload = ev.result if isinstance(ev.result, str) \
-                        else json.dumps(ev.result, default=str)
-                    history_db.record_chat_message(
-                        session_id, _current_turn(messages), seq_in_turn,
-                        kind="tool_result", name=ev.call_id,
-                        content=payload,
-                    )
-                    seq_in_turn += 1
-                yield _serialize(ev)
+                    _on_usage(ev)
+                await _on_event(ev)
 
-            # Final flush in case the stream ended without a terminal
-            # UsageEvent (e.g. ErrorEvent / DoneEvent without usage).
-            _flush_assistant_text()
+            try:
+                result = await run_agent_turn(
+                    provider=provider,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=[],
+                    tags=tags,
+                    on_event=cb,
+                    history_sink=history_sink,
+                    turn_for_history=_current_turn(messages),
+                )
+                await queue.put((_DONE, result))
+                return result
+            except Exception as exc:  # noqa: BLE001
+                # run_agent_turn already catches stream errors; this
+                # is for setup/teardown failures only.
+                await queue.put((_DONE, None))
+                raise
+
+        producer = asyncio.create_task(_produce())
+        result = None
+        try:
+            while True:
+                item = await queue.get()
+                if isinstance(item, tuple) and len(item) == 2 and item[0] is _DONE:
+                    result = item[1]
+                    break
+                yield _serialize(item)
+
+            await producer  # surface any setup-time exception
 
             # End-of-turn: score the ladder against the freshest YAML
             # we have. Prefer the assistant's just-emitted block; fall
             # back to the editor buffer the user sent in. Skip placeholder
             # YAML so the rung doesn't fire with no real content.
-            target = latest_assistant_yaml or (
-                body.current_yaml if _is_meaningful_yaml(body.current_yaml) else None
-            )
-            if target:
-                try:
-                    ladder = _ladder.evaluate(target)
-                    # Persist the snapshot so a session replay or audit
-                    # query can reconstruct the loop state at this turn.
-                    if session_id:
-                        snapshot = {
-                            "rungs": [
-                                {"id": r.id, "label": r.label,
-                                 "state": r.state, "summary": r.summary}
-                                for r in ladder.rungs
-                            ],
-                            "error_count": ladder.error_count,
-                            "warning_count": ladder.warning_count,
-                            "achieved": ladder.achieved,
-                        }
-                        history_db.record_chat_message(
-                            session_id, _current_turn(messages), seq_in_turn,
-                            kind="ladder",
-                            content=json.dumps(snapshot),
-                        )
-                        seq_in_turn += 1
-                    yield _serialize(ladder)
-                except Exception as exc:  # noqa: BLE001
-                    # Never let scoring break a chat turn.
-                    print(f"[chat] ladder eval failed: {exc!r}", flush=True)
+            if result is not None:
+                target = result.last_assistant_yaml or (
+                    body.current_yaml if _is_meaningful_yaml(body.current_yaml) else None
+                )
+                if target:
+                    try:
+                        ladder = _ladder.evaluate(target)
+                        if result.session_id:
+                            snapshot = {
+                                "rungs": [
+                                    {"id": r.id, "label": r.label,
+                                     "state": r.state, "summary": r.summary}
+                                    for r in ladder.rungs
+                                ],
+                                "error_count": ladder.error_count,
+                                "warning_count": ladder.warning_count,
+                                "achieved": ladder.achieved,
+                            }
+                            history_db.record_chat_message(
+                                result.session_id, _current_turn(messages),
+                                result.final_seq,
+                                kind="ladder",
+                                content=json.dumps(snapshot),
+                            )
+                        yield _serialize(ladder)
+                    except Exception as exc:  # noqa: BLE001
+                        # Never let scoring break a chat turn.
+                        print(f"[chat] ladder eval failed: {exc!r}", flush=True)
         finally:
             if active_session_written:
                 history_db.write_active_session(None)
@@ -564,56 +516,47 @@ async def resolve_approval(
     provider = get_provider(chosen)
 
     async def gen() -> AsyncIterator[dict[str, Any]]:
-        # Mirrors /api/chat: persist text / tool_use / tool_result rows
-        # into the existing session's transcript. We don't re-run the
-        # ladder eval here — resume is about whether a tool fired, not
-        # about fresh YAML emission.
-        session_id = suspended.session_id
-        seq_in_turn = 0
-        assistant_buf: list[str] = []
+        # Mirrors /api/chat's producer/consumer queue. No ladder eval on
+        # resume — resume is about whether a tool fired, not about fresh
+        # YAML emission.
+        queue: asyncio.Queue = asyncio.Queue()
+        _DONE = object()
+        history_sink = BackendHistorySink()
 
-        def _flush() -> None:
-            nonlocal assistant_buf
-            if not assistant_buf:
-                return
-            history_db.record_chat_message(
-                session_id, 0, seq_in_turn,
-                kind="assistant_text", content="".join(assistant_buf),
+        async def cb(ev: Event) -> None:
+            if isinstance(ev, UsageEvent):
+                _persist_usage(ev)
+            await queue.put(ev)
+
+        async def _produce() -> None:
+            result = await resume_agent_turn(
+                provider=provider,
+                suspended=suspended,
+                decision=body.decision,
+                on_event=cb,
+                history_sink=history_sink,
+                turn_for_history=0,
             )
-            assistant_buf = []
+            await queue.put((_DONE, result))
 
+        producer = asyncio.create_task(_produce())
         try:
-            resume_fn = getattr(provider, "resume", None)
-            if resume_fn is None:
-                yield {"event": "error",
-                       "data": json.dumps({"message": "provider does not support approval resume"})}
+            while True:
+                item = await queue.get()
+                if isinstance(item, tuple) and len(item) == 2 and item[0] is _DONE:
+                    result = item[1]
+                    break
+                yield _serialize(item)
+            await producer
+            # resume_agent_turn surfaces failures as ErrorEvents in the
+            # transcript (already streamed via cb above) and sets
+            # result.error. The route doesn't need an extra yield —
+            # the client already saw the error event.
+            if result.stop_reason == "config_error" and not any(
+                isinstance(e, ErrorEvent) for e in result.transcript
+            ):
+                # Shouldn't happen — defensive.
                 yield {"event": "done", "data": json.dumps({"stop_reason": "config_error"})}
-                return
-            async for ev in resume_fn(suspended=suspended, decision=body.decision):
-                if isinstance(ev, UsageEvent):
-                    _flush()
-                    _persist_usage(ev)
-                elif isinstance(ev, TextEvent):
-                    assistant_buf.append(ev.text)
-                elif isinstance(ev, ToolUseEvent):
-                    _flush()
-                    history_db.record_chat_message(
-                        session_id, 0, seq_in_turn,
-                        kind="tool_use", name=ev.name,
-                        content=json.dumps(ev.arguments, default=str),
-                    )
-                    seq_in_turn += 1
-                elif isinstance(ev, ToolResultEvent):
-                    _flush()
-                    payload = ev.result if isinstance(ev.result, str) \
-                        else json.dumps(ev.result, default=str)
-                    history_db.record_chat_message(
-                        session_id, 0, seq_in_turn,
-                        kind="tool_result", name=ev.call_id, content=payload,
-                    )
-                    seq_in_turn += 1
-                yield _serialize(ev)
-            _flush()
         except Exception as exc:  # noqa: BLE001
             yield {"event": "error",
                    "data": json.dumps({"message": f"resume failed: {exc}"})}
