@@ -147,6 +147,17 @@ make package        # rebuild .so
 
 ---
 
+## Status (2026-05-28)
+
+- **Phase 1 (in-place extraction)** ✅ complete on `main`. `fsr_core/` lives at the repo root; web backend consumes it directly. Audit + protocols in `docs/plans/FSR_CORE_EXTRACTION_AUDIT.md`.
+- **Phase 3 (connector standup)** — initial cut shipped on `~/PycharmProjects/ConnectorsV2/fsr-playbook-builder`:
+  - All 10 operations declared in `info.json` with password-typed `anthropic_api_key`
+  - **Real:** `health_check`, `compile_yaml`, `validate_yaml`, `resolve_yaml`, `push_playbook` (via `integrations.crudhub.make_request`), `chat_turn`, `chat_resume`, `chat_history`
+  - **Stubbed:** `dry_run_playbook`, `render_jinja` (need their own fsr_core entry points)
+  - sqlite-backed `Storage` + `PersistedApprovalGateway` so paused HITL turns survive worker restart
+  - 29 tests passing; `fsr_core` consumed via editable install for now (submodule deferred per Phase 2)
+- **Agent-loop lift** ✅ done on `agent-loop-lift` branch (5 commits). `fsr_core.llm.run_agent_turn` is the shared consumer used by both `web/backend/routes/chat.py` and the connector. Plan + risk list in `docs/plans/AGENT_LOOP_LIFT_PLAN.md`.
+
 ## Resolved decisions (2026-05-28)
 
 1. **Packaging.** Pure-Python `.tgz` built with the FortiSOAR RDK (`fsr build`); runtime Python 3.9+. No restriction on `anthropic`, `pydantic`, `sqlalchemy`, `pyyaml`, `jinja2`. Cython `.so` compilation optional, deferred. Evidence: `Miscellaneous/fortisoar/fsr_connector_toolkit/tests/CONNECTOR_BUILDING_GUIDE.md` L56-61, L2712, L2751, L2970.
