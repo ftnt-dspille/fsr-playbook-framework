@@ -60,6 +60,7 @@ class AnthropicProvider:
         model: str = DEFAULT_MODEL,
         api_key: str | None = None,
         client: AsyncAnthropic | None = None,
+        approval_gateway: Any = None,
     ):
         self.model = model or DEFAULT_MODEL
         # max_retries=5 (SDK default is 2). Failed retries cost nothing —
@@ -73,6 +74,12 @@ class AnthropicProvider:
         else:
             # Falls back to ANTHROPIC_API_KEY env var via SDK default.
             self._client = AsyncAnthropic(max_retries=5)
+        # ApprovalGateway impl (fsr_core.protocols.ApprovalGateway). When
+        # None, falls back to the module-level singleton in
+        # `fsr_core.llm.approvals` — that's what the web backend uses.
+        # The FortiSOAR connector passes a PersistedApprovalGateway so
+        # paused HITL turns survive worker restarts.
+        self._approval_gateway = approval_gateway
 
     async def resume(
         self,
@@ -358,7 +365,7 @@ class AnthropicProvider:
                     # can fill them with placeholder denials.
                     pending_remaining = list(tool_calls[i + 1:])
                     approval_id = result["approval_id"]
-                    _approvals.stash(_approvals.SuspendedSession(
+                    suspended_session = _approvals.SuspendedSession(
                         approval_id=approval_id,
                         session_id=session_id,
                         tool=name,
@@ -371,7 +378,11 @@ class AnthropicProvider:
                         system=system,
                         tags=dict(tags),
                         summary=result.get("summary"),
-                    ))
+                    )
+                    if self._approval_gateway is not None:
+                        self._approval_gateway.stash(suspended_session)
+                    else:
+                        _approvals.stash(suspended_session)
                     pending = ApprovalRequestEvent(
                         approval_id=approval_id,
                         tool_use_id=call_id,
