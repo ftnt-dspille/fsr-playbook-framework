@@ -29,7 +29,6 @@ def _parse(yaml_text: str):
     """Parse → IR. Returns (Collection | None, errors). Wraps the sys.path
     setup the verify path also does so this module can be called from the
     MCP entry point or from web tests interchangeably."""
-    sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
         from fsr_core.compiler import parse_yaml
     except ImportError as exc:

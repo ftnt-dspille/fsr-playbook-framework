@@ -383,7 +383,6 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
     to fix before declaring done — they don't block compile but they
     almost always mean the playbook won't behave correctly at runtime.
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
         from fsr_core.compiler import compile_yaml as _compile
     except ImportError as exc:
@@ -600,7 +599,6 @@ def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
     On failure: `{ok: false, errors: [...]}` with structured compiler
     errors regardless of verbose.
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
         from fsr_core.compiler import compile_yaml as _compile
     except ImportError as exc:

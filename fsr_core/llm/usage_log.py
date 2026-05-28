@@ -43,7 +43,9 @@ def default_log_path() -> Path:
     env = os.environ.get("STUDIO_USAGE_LOG")
     if env:
         return Path(env).expanduser()
-    return Path(__file__).resolve().parents[1] / "usage.jsonl"
+    # Historical default: web/backend/usage.jsonl at the repo root.
+    # Connectors should override via STUDIO_USAGE_LOG.
+    return Path(__file__).resolve().parents[2] / "web" / "backend" / "usage.jsonl"
 
 
 def est_tokens(chars: int) -> int:

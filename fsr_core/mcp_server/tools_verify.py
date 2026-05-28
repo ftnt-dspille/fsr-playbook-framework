@@ -271,7 +271,6 @@ def verify_playbook(
       - unknown_shape_downstream_reference
       - output_schema_stale
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
         from fsr_core.compiler import compile_yaml as _compile, parse_yaml
         from fsr_core.compiler.typed_walker import walk_playbook
