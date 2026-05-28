@@ -778,3 +778,235 @@ def test_c10_silent_when_step_is_referenced():
     # is silent here.
     dead_ids = {d.step_id for d in by.get("dead_step", [])}
     assert "prod" not in dead_ids, by
+
+
+# ---- C7 decision_unset_path ------------------------------------------
+
+def test_c7_flags_sibling_branch_reference():
+    """A decision on branch B references a step that only runs on
+    branch A — its output is never set on the path that reaches this
+    decision."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: outer
+              - id: outer
+                type: decision
+                name: Outer
+                arguments:
+                  conditions:
+                    - display: "A"
+                      when: "true"
+                      next: prod_a
+                    - display: "B"
+                      default: true
+                      next: inner
+              - id: prod_a
+                type: set_variable
+                name: ProdA
+                arguments:
+                  arg_list:
+                    - name: hits
+                      value: 5
+                next: stop
+              - id: inner
+                type: decision
+                name: Inner
+                arguments:
+                  conditions:
+                    - display: "Yes"
+                      when: "{{ vars.steps.ProdA.hits > 0 }}"
+                      next: stop
+                    - display: "Else"
+                      default: true
+                      next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    import yaml as _yaml
+    pb_dict = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb_dict)
+    by = _by_kind(diags)
+    assert "decision_unset_path" in by, by
+    d = by["decision_unset_path"][0]
+    assert d.step_id == "inner"
+    assert d.extra.get("producer_step") == "ProdA"
+    assert d.severity == "warning"
+
+
+def test_c7_silent_when_producer_is_predecessor():
+    """Straight-line: producer runs before the decision on every
+    path → no diagnostic."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: prod
+              - id: prod
+                type: set_variable
+                name: Prod
+                arguments:
+                  arg_list:
+                    - name: hits
+                      value: 5
+                next: d
+              - id: d
+                type: decision
+                name: D
+                arguments:
+                  conditions:
+                    - display: "Yes"
+                      when: "{{ vars.steps.Prod.hits > 0 }}"
+                      next: stop
+                    - display: "Else"
+                      default: true
+                      next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    import yaml as _yaml
+    pb_dict = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb_dict)
+    by = _by_kind(diags)
+    assert "decision_unset_path" not in by, by
+
+
+# ---- C8 mi_mode_mismatch ---------------------------------------------
+
+def _mi_yaml(mi_block, read_value):
+    return textwrap.dedent(f"""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: mi
+              - id: mi
+                type: manual_input
+                name: MI
+                {mi_block}
+                next: read
+              - id: read
+                type: set_variable
+                name: Read
+                arguments:
+                  arg_list:
+                    - name: r
+                      value: "{read_value}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+
+
+def test_c8_flags_undeclared_input_field_on_inputbased():
+    yaml = _mi_yaml(
+        """arguments:
+                  type: InputBased
+                  input:
+                    schema:
+                      inputVariables:
+                        - {name: reason, type: text}
+                  response_mapping:
+                    options:
+                      - {option: OK, step_iri: null}""",
+        "{{ vars.steps.MI.input.notdeclared }}",
+    )
+    import yaml as _yaml
+    pb = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb)
+    by = _by_kind(diags)
+    assert "mi_mode_mismatch" in by, by
+    d = by["mi_mode_mismatch"][0]
+    assert d.severity == "error"
+    assert d.actual == "notdeclared"
+    assert d.expected == ["reason"]
+
+
+def test_c8_silent_when_declared_input_field_used():
+    yaml = _mi_yaml(
+        """arguments:
+                  type: InputBased
+                  input:
+                    schema:
+                      inputVariables:
+                        - {name: reason, type: text}
+                  response_mapping:
+                    options:
+                      - {option: OK, step_iri: null}""",
+        "{{ vars.steps.MI.input.reason }}",
+    )
+    import yaml as _yaml
+    pb = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb)
+    by = _by_kind(diags)
+    assert "mi_mode_mismatch" not in by, by
+
+
+def test_c8_flags_input_read_on_decisionbased():
+    yaml = _mi_yaml(
+        """arguments:
+                  type: DecisionBased
+                  response_mapping:
+                    options:
+                      - {option: OK, step_iri: null}""",
+        "{{ vars.steps.MI.input.anything }}",
+    )
+    import yaml as _yaml
+    pb = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb)
+    by = _by_kind(diags)
+    assert "mi_mode_mismatch" in by, by
+    d = by["mi_mode_mismatch"][0]
+    assert d.severity == "error"
+    assert d.extra["mode"] == "DecisionBased"
+
+
+def test_c8_allows_system_metadata_keys():
+    yaml = _mi_yaml(
+        """arguments:
+                  type: InputBased
+                  input:
+                    schema:
+                      inputVariables:
+                        - {name: reason, type: text}
+                  response_mapping:
+                    options:
+                      - {option: OK, step_iri: null}""",
+        "{{ vars.steps.MI.userid }}",
+    )
+    import yaml as _yaml
+    pb = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb)
+    by = _by_kind(diags)
+    assert "mi_mode_mismatch" not in by, by
+
+
+def test_c8_warns_on_buttononly_inputbased_when_input_read():
+    """InputBased MI with no declared inputVariables — can't prove
+    mismatch, so warn instead of error."""
+    yaml = _mi_yaml(
+        """arguments:
+                  type: InputBased
+                  response_mapping:
+                    options:
+                      - {option: OK, step_iri: null}""",
+        "{{ vars.steps.MI.input.something }}",
+    )
+    import yaml as _yaml
+    pb = _yaml.safe_load(yaml)["playbooks"][0]
+    diags = analyze(_trace(yaml), playbook=pb)
+    by = _by_kind(diags)
+    assert "mi_mode_mismatch" in by, by
+    assert by["mi_mode_mismatch"][0].severity == "warning"

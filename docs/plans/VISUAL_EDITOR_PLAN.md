@@ -470,15 +470,35 @@ Remaining post-audit work, tracked here so it doesn't fall off:
 
 ### Phase 5 — Debug runner (whole-playbook REPL)
 
-- [ ] **5.1** Bottom debug drawer; toolbar toggle.
-- [ ] **5.2** Run controls (▶ ⏭ ⏯ ⏹) wired to
-      `step_through_playbook` with `branch_choices`.
-- [ ] **5.3** Breakpoint gutter on canvas nodes.
+- [x] **5.1** Bottom debug drawer; toolbar toggle.
+- [x] **5.2** Run controls — **shipped 2026-05-25**, **UX
+      consolidated 2026-05-26** to 3 buttons (▶ Run / ⏭ Step / ⏹
+      Stop). ▶ Run creates a session AND continues end-to-end in one
+      click; ⏭ Step also creates if needed + advances one and
+      auto-skips the trivial trigger entry; ⏹ Stop drops session,
+      trace stays visible; Run/Restart label flips after done/stop
+      so the rerun path is obvious. Server-side stateful sessions
+      via 5 MCP tools (`start_debug_session` / `step_debug_session`
+      / `continue_debug_session` / `stop_debug_session` /
+      `get_debug_session`) in `tools_analysis.py` +
+      `mcp_server/debug_session.py`. Frontend at `DebugPanel.svelte`
+      + `api.ts`. Also fixed 2026-05-26: friendly-YAML decision
+      branching + manual_input option routing (via
+      `_normalize_friendly_steps`); `as_status()` now includes the
+      full trace. 9 frontend tests + 12 session tests + 11 e2e
+      against real `examples/*.yaml`.
+- [x] **5.3** Breakpoints (tile click toggles, ⏯ continues until
+      BP hit). Canvas-gutter UI still pending.
 - [ ] **5.4** Branch chooser UI when execution hits a Decision.
+      Server side ready (`branch_choice_override` on
+      `step_debug_session`); UI affordance not yet wired.
 - [ ] **5.5** Watch panel (pin `vars.steps.X.Y`); auto-populate with
-      reachable predecessors.
-- [ ] **5.6** Trace tape (clickable tiles to jump back).
+      reachable predecessors. Server exposes `vars_keys` via
+      `get_debug_session` — pin UI pending.
+- [x] **5.6** Trace tape (clickable tiles to jump back).
 - [ ] **5.7** Trigger payload editor (schema from `module_fields`).
+      Server side ready (`input` arg on `start_debug_session`);
+      UI form not yet built.
 - [ ] **5.8** "Run from selected step" — re-execute downstream from
       any tile with edited inputs.
 

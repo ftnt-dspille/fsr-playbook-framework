@@ -1,6 +1,6 @@
 # Static Type Validation Plan — Tier 2 + Tier 3
 
-**Status:** Tier 1 ✅ shipped 2026-05-20. Tier 2 ✅ substantially shipped 2026-05-25 (2.0 / 2.0+ / 2.1 / 2.2 / 2.3 / 2.4); only 3.4 (eval tasks) remains across Tier 3. Tier 3 ships terminal-type inference + filter-chain validation with a hand-curated signature library (~90 entries) that survives DB rebuilds.
+**Status:** Tier 1 ✅ shipped 2026-05-20. Tier 2 ✅ shipped 2026-05-25 (all phases). Tier 3 ✅ shipped 2026-05-25 — terminal-type inference + filter-chain validation across the playbook (resolver + walker), hand-curated signature library (~90 entries) surviving DB rebuilds, and re-baseline confirms agents self-correct via `bad_jinja_filter_chain` in the verify loop. The plan is now closed; future static-type work (e.g. typed branches on decision conditions) ships as separate tickets.
 
 ## Background
 
@@ -172,7 +172,7 @@ Three tiers of signatures, in order of how to build them:
 | **3.1 — Walker AST pass** | ✅ first slice | `validate_chain()` walks every `|` boundary and flags `producer_out` ↛ `consumer_in` mismatches (e.g. `\| int \| upper`). Strict mid-chain typing — no silent str coercion between filters. Full Jinja2 AST integration deferred; the regex walker covers pure-Jinja filter chains, which is the dominant pattern in connector args. |
 | **3.2 — Resolver consumption** | ✅ done | `connector_args.py` calls both `infer_terminal_observed_type` (final type vs param target) and `validate_chain` (intermediate transitions). Both emit `BAD_VALUE` with chain-localized messages. |
 | **3.3 — Corpus mining for signatures** | ✅ subsumed by 3.0 | Hand-curation covered the 123-row residue without needing live mining. Could revisit if usage shows blind spots. |
-| **3.4 — Eval task additions** | not started | 3 eval tasks exercising typed Jinja chains agents commonly get wrong. |
+| **3.4 — Eval task additions** | ✅ done 2026-05-25 | 3 tasks shipped (`jinja_chain_count_summary`, `jinja_chain_ip_extract`, `jinja_chain_json_payload`). Re-baseline run `20260525T203108Z`: agent landed ready_to_push on all three (24/25). Json-payload task took 3 verify iterations — history.db (rows 918/919 → 920/921) shows the agent emitted bad chains, saw `bad_jinja_filter_chain`, self-corrected. Confirms the diagnostic actually changes agent behavior, not just compile output. |
 
 ## Sequencing
 

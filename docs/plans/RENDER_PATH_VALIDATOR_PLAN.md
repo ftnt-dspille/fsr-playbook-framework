@@ -292,8 +292,8 @@ server-side.
       (`_c6_index_non_list`). Severity warning; uses producer's
       `output_shape.types` to confirm the indexed attr isn't list-
       typed before flagging.
-- [ ] **5.3** C7 decision references unset path.
-- [ ] **5.4** C8 MI mode/output mismatch (reuse MI catalog).
+- [x] **5.3** C7 decision references unset path — shipped 2026-05-25 (`_c7_decision_unset_path`, static graph predecessor check; flags decision branch jinja referencing a step that's on no backward path from start to this decision).
+- [x] **5.4** C8 MI mode/output mismatch — shipped 2026-05-25 (`_c8_mi_mode_mismatch` in `render_analyzer.py` + `compiler/mi_output_catalog.py` + 5 tests). Flags `input.X` reads off DecisionBased MI (no form) and `input.X` reads off InputBased MI where X is not in declared `inputVariables`. Button-only InputBased downgrades to warning. Catalog spec at `docs/research/MI_OUTPUT_CATALOG.md`.
 - [x] **5.5** C9 for-each loop-var leak — shipped 2026-05-25
       (`_c9_loop_var_leak`). Flags `vars.item` consumed outside any
       for_each body; severity error since the runtime evaluates the

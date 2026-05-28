@@ -23,6 +23,10 @@
   // a glance which ones already have synthetic answers feeding the
   // downstream Verify/Render path.
   let hasSample = $derived(!!props.data.hasSample);
+  // Red dot in the upper-left when the user has flagged this node as
+  // a debug-runner breakpoint (DebugPanel ↔ debugStore — keeps the
+  // canvas + trace tape in sync without prop-drilling a callback).
+  let isBreakpoint = $derived(!!props.data.isBreakpoint);
   let direction = $derived((props.data.direction as 'TB' | 'LR' | undefined) ?? 'TB');
   let playbookIdx = $derived((props.data.playbookIdx as number | undefined) ?? 0);
 
@@ -145,10 +149,21 @@
 </script>
 
 <div
-  class="rounded-lg border-2 px-3 py-2 shadow-sm transition-all hover:shadow-md {selected ? 'fsrpb-step-selected' : ''}"
+  class="relative rounded-lg border-2 px-3 py-2 shadow-sm transition-all hover:shadow-md {selected ? 'fsrpb-step-selected' : ''}"
   style="background: {style.bg}; border-color: {style.border}; min-width: 200px; max-width: 240px;"
   data-selected={selected}
 >
+  {#if isBreakpoint}
+    <!-- Debug-runner breakpoint dot. Mirrors the rose outline used on
+         the DebugPanel trace tape so the same step reads as "armed" in
+         both surfaces. Pure presentational — toggling still happens
+         from the trace tape (shift-click / dbl-click). -->
+    <span
+      class="absolute -left-1.5 -top-1.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-rose-500 ring-2 ring-white dark:ring-zinc-900"
+      title="debug breakpoint — runner will pause BEFORE this step"
+      aria-label="breakpoint set"
+    ></span>
+  {/if}
   <!-- G41 + G44: source AND target handles on all four sides. Edges
        pick which pair to use per-edge based on the relative positions
        of source/target nodes (computed in PlaybookCanvas), so each

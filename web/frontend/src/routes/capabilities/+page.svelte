@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { TOOL_GROUPS, TOOL_TOTAL, accentClasses as accentLib, flagBadge } from '$lib/mcpTools';
   type Tool = { name: string };
   type Card = {
     code: string; // short uppercase tag in lieu of an icon
@@ -259,7 +260,7 @@
   };
 
   const headlineStats = [
-    { v: '20+', l: 'MCP tools' },
+    { v: String(TOOL_TOTAL), l: 'MCP tools' },
     { v: '714', l: 'connectors' },
     { v: '6,773', l: 'operations' },
     { v: '1,664', l: 'workflows mined' },
@@ -359,6 +360,57 @@
         </article>
       {/each}
     </div>
+
+    <!-- Full MCP tool breakdown -->
+    <section class="mt-16" id="mcp-tools">
+      <div class="mb-5 flex items-baseline justify-between">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--text-faint)]">
+          MCP tools ({TOOL_TOTAL}) — by category
+        </h2>
+        <a href="/docs#tools" class="text-xs text-[var(--text-faint)] hover:text-[var(--text-muted)]">Full reference in Docs →</a>
+      </div>
+      <p class="mb-5 max-w-3xl text-sm text-[var(--text-muted)]">
+        Every tool exposed by <code class="rounded bg-[var(--bg-panel)] px-1 text-xs">python -m mcp_server</code>. The Studio chat has access to all of them; outside agents (Claude Code, IDE plugins) reach the same surface over stdio MCP. Tags below: <span class="font-mono text-[10px]">safe</span>/<span class="font-mono text-[10px]">mutating</span>, plus whether the tool calls the <span class="font-mono text-[10px]">live-fsr</span> appliance or runs <span class="font-mono text-[10px]">local</span> against the reference store.
+      </p>
+
+      <div class="mb-6 flex flex-wrap gap-2 text-[11px]">
+        <span class="inline-flex items-center rounded border {flagBadge.safe} px-1.5 py-0.5 font-mono">safe</span>
+        <span class="inline-flex items-center rounded border {flagBadge.mutating} px-1.5 py-0.5 font-mono">mutating</span>
+        <span class="inline-flex items-center rounded border {flagBadge['live-fsr']} px-1.5 py-0.5 font-mono">live-fsr</span>
+        <span class="inline-flex items-center rounded border {flagBadge.local} px-1.5 py-0.5 font-mono">local</span>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        {#each TOOL_GROUPS as g}
+          {@const a = accentLib[g.accent]}
+          <article class="flex flex-col rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 p-5">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <h3 class="flex items-center gap-2 text-base font-semibold text-[var(--text-default)]">
+                <span class="inline-flex items-center rounded border {a.border} {a.bg} px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider {a.text}">{g.id}</span>
+                {g.title}
+              </h3>
+              <span class="text-xs text-[var(--text-faint)]">{g.tools.length}</span>
+            </div>
+            <p class="mb-3 text-sm text-[var(--text-muted)]">{g.intro}</p>
+            <ul class="space-y-1.5 text-sm">
+              {#each g.tools as t}
+                <li class="flex flex-col gap-0.5 border-t border-[var(--border-soft)] pt-1.5 first:border-t-0 first:pt-0">
+                  <div class="flex items-center gap-2">
+                    <code class="font-mono text-xs text-[var(--text-default)]">{t.name}</code>
+                    {#if t.flags?.length}
+                      {#each t.flags as f}
+                        <span class="inline-flex items-center rounded border {flagBadge[f]} px-1 py-px font-mono text-[10px]">{f}</span>
+                      {/each}
+                    {/if}
+                  </div>
+                  <span class="text-xs leading-snug text-[var(--text-muted)]">{t.blurb}</span>
+                </li>
+              {/each}
+            </ul>
+          </article>
+        {/each}
+      </div>
+    </section>
 
     <!-- Roadmap / coming soon -->
     <section class="mt-16">

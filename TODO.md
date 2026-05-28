@@ -1,6 +1,6 @@
 # FSRPlaybookYaml — TODO / resume state
 
-**Last touched**: 2026-05-25. Live FSR target: `https://10.99.249.205` (label `dev`).
+**Last touched**: 2026-05-26. Live FSR target: `https://10.99.249.205` (label `dev`).
 
 This file is the master backlog + resume state. Deep multi-phase plans
 live under `docs/plans/`; frozen research/audit snapshots under
@@ -13,8 +13,8 @@ live under `docs/plans/`; frozen research/audit snapshots under
 | Plan | Scope | Status |
 |---|---|---|
 | [`VERIFY_PLAYBOOK_PLAN.md`](docs/archive/VERIFY_PLAYBOOK_PLAN.md) | Single `verify_playbook` forcing-function tool that gates "done" for the agent loop. Trust audit + tool consolidation. | ✅ complete (2026-05-25). Re-baseline `20260525T165836Z`: agentic_anthropic 36/40 (90%) on verify-relevant subset. `verify_runs` history table + `session_verify_stats` reader shipped. Follow-up: `live_tested`-gate `no_dry_run_target` bug — separate ticket. |
-| [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector wired to every MCP tool; debug runner. | Phases 1–4 + 4.5 shipped. **Phase 5 MVP ✅** 2026-05-25 (debug-runner drawer: run + trace tape + step detail). Inspector now surfaces verify_playbook fixes scoped to the focused step. Remaining: 5.3 breakpoints / 5.4 branch chooser / 5.5 watch panel / 5.7 trigger payload editor (need server-side pause); Phase 6 toolbar gaps (6.2 Resolve, 6.3 Dry-run, 6.4 Assert, 6.6 Recipe export); Phase 6.5 Variable picker side panel (G27/G28); G11 pane-click create-step popover. |
-| [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 + Phase 6.1 shipped. **Phase 5 v2 ✅** 2026-05-25 (C6 index-into-non-list / C9 for-each loop-var leak / C10 dead step; C5 superseded by Tier 3). Remaining: C7 decision-references-unset-path, C8 MI mode/output mismatch (needs MI catalog), 6.2/6.3 fix-apply + bulk-fix, 4.1-4.7 visual-editor surfacing pass, 7.3 agent fail-fast on skipped authoring tools. |
+| [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector wired to every MCP tool; debug runner. | Phases 1–4 + 4.5 shipped. **Phase 5 server-side pause/resume ✅** 2026-05-25 (5 new MCP tools + `mcp_server/debug_session.py` + DebugPanel rewire + 12 tests). **Debug + Inspector UX polish ✅** 2026-05-26: `_normalize_friendly_steps` fixes friendly-YAML decision branching + MI option routing in the simulator; `as_status()` now returns full trace (fixes "0 steps walked yet" bug); 3-button toolbar (▶ Run / ⏭ Step / ⏹ Stop) where Run creates + continues end-to-end; Stop → ↺ Restart label; Step auto-skips trigger entry. Inspector consolidation: Simulate → Samples (now applies to any mockable step — manual_input sidecar + connector mock_result); Verify tab collapsed from 5 sections to 1 (one ▶ Run this step button + auto-loaded issues banner + one-line history); MI Samples tab gets a prompt-wireframe preview (title + description + inputs + option buttons). 11 e2e tests against real `examples/*.yaml` (caught 3 latent bugs in the simulator). Remaining: 5.4 branch chooser UI / 5.5 watch panel UI / 5.7 trigger payload editor UI (all server-side ready); canvas breakpoint gutter; Phase 6 toolbar gaps (6.2 Resolve, 6.3 Dry-run, 6.4 Assert, 6.6 Recipe export); Phase 6.5 Variable picker side panel (G27/G28); G11 pane-click create-step popover; **manual browser smoke of the new debug + inspector UX (never verified end-to-end live)**. |
+| [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 + Phase 6.1 shipped. **Phase 5 complete ✅** 2026-05-25 (C6 index-into-non-list / C7 decision-references-unset-path / C8 MI mode/output mismatch / C9 for-each loop-var leak / C10 dead step; C5 superseded by Tier 3). Remaining: 6.2/6.3 fix-apply + bulk-fix, 4.1-4.7 visual-editor surfacing pass, 7.3 agent fail-fast on skipped authoring tools. |
 | [`AGENT_QUALITY_PLAN.md`](docs/plans/AGENT_QUALITY_PLAN.md) | Evidence base for agent tuning: what the agent actually looks up, data-store gaps, prompt-adherence baseline. | Phase 1A/B/C shipped (`fsrpb agent-stats`); Phase 2/3 pending |
 | [`CONNECTOR_INTEGRATION_PLAN.md`](docs/plans/CONNECTOR_INTEGRATION_PLAN.md) | Catalog-grounded HTTP-shaped authoring: `find_api_*` + `propose_http_fallback` so the agent can ground "do X with vendor Y" requests in real OpenAPI fixtures (36k fixtures, 6.9k products). Supersedes TODO D3 + HTTP-virtual-connector items. | **Phases 0 / 0.5 / 0.6 done** (2026-05-18). Path fix to `fortisoar/corpus_builder/catalog.sqlite` + `FSRPB_API_CATALOG` env + intent-aware fixture ranking (auth-prelude demotion + intent-token overlap + verb-method tie-break). Phases 1-3 **descoped** — validator/replay are connector-author tools, different audience; toolkit stays where it lives. Phase 4 (editor "use http fallback" affordance) + Phase 5 (connector-lifecycle mining) still viable as separate follow-ups. |
 | [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Three orthogonal refinements: (A) static reference data into the prompt cache, (B) constrained generation for hot shapes via `emit_*` tools, (C) separate "enhance" path from "build" path with `verify_enhancement` + intent-tagged metrics. | **Refinement A done** (commit `18adb53` — 14.9 KB cached prefix). B + C pending. |
@@ -36,12 +36,35 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 - [`Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`](../Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md) — original cross-project plan; referenced from global `~/.claude/CLAUDE.md`.
 
-## Next steps (resume state, 2026-05-25)
+## Next steps (resume state, 2026-05-26)
 
 Ordered roughly by leverage. Pick from this list when restarting; each
 points to deeper detail in its plan.
 
-**A. Strategic anchor (H2 lever):**
+**A. Verify the recent UX work in a real browser** (do this FIRST).
+The debug runner + inspector consolidation shipped 2026-05-26 with
+408 frontend tests + 682 backend tests passing, but **was never
+opened in an actual browser**. Smoke-walk:
+
+   - Open a playbook (e.g. one of `examples/*.yaml`).
+   - In the debug drawer: click ▶ Run (one click — should walk
+     end-to-end). Click Stop → Restart should appear. Run again with
+     a shift-clicked breakpoint to confirm pause behavior.
+   - Click a manual_input step → Inspector → **Samples** tab.
+     Confirm the prompt-preview wireframe shows title + description
+     + input field labels + option buttons (any of approve / reject /
+     etc).
+   - Click a connector step → Inspector → **Samples** tab. Confirm
+     the `mock_result` JSON editor renders. Save a mock, switch to
+     **Verify** tab, click ▶ Run this step, confirm result panel.
+   - Confirm the **Verify** tab is one tight box (issues banner only
+     if there ARE issues; one Run button; one-line history). No
+     "What this step resolves to" details.
+   - If anything is off, the work is in `web/frontend/src/lib/
+     components/{DebugPanel,StepInspector,StepInspectorVerifyTab,
+     StepInspectorSimulateTab}.svelte`.
+
+**B. Strategic anchor (H2 lever):**
 1. **Solution Pack research kickoff.** Open
    `docs/research/SOLUTION_PACKS.md` (currently missing — create it).
    Crack open one Fortinet marketplace pack (recommend
@@ -53,53 +76,75 @@ points to deeper detail in its plan.
    strategic block. Park condition is now satisfied
    (verify_playbook + Tier 2/3 + render-path v2 all firm).
 
-**B. Tier 3 / render-path tail (highest agent-loop impact):**
-2. **C7 decision-references-unset-path** in `render_analyzer.py` —
-   flag branch conditions whose vars-path refs were never set on
-   the path-to-this-decision. Reuses render-path graph.
-3. **C8 MI mode/output mismatch** — needs an MI mode → output-keys
-   catalog. Output: downstream reads a key the chosen MI mode can't
-   produce.
-4. **Tier 3 corpus mining for long-tail filters** — the 90-entry
-   curated map covers the dominant filters; corpus-mining the
-   remainder would lift coverage on niche `workflow.jinja` macros.
-   Lowest-priority since the agent loop has the curated set.
+**C. Debug-runner UI tail** (server-side ready, just needs UI):
+2. **5.4 Branch chooser modal** — when execution pauses at a Decision
+   step, pop a small modal asking which branch to take. Server
+   already accepts `branch_choice_override` on `step_debug_session`.
+   ~30 min — pure frontend.
+3. **5.5 Watch panel** — pin specific `vars.steps.X.Y` paths; the
+   panel polls `get_debug_session` (which already returns `vars_keys`)
+   and resolves each pinned path. ~1 hr.
+4. **5.7 Trigger payload editor** — form built from
+   `module_fields` for the playbook's trigger module; binds to the
+   `input` arg on `start_debug_session`. ~2 hr.
+5. **Canvas-gutter breakpoint UI** — current breakpoint toggle is
+   only on the trace tape. Add a small dot indicator on canvas nodes
+   too. ~1 hr.
 
-**C. Debug-runner tail (depends on server-side pause):**
-5. **Server-side pause/resume** for `step_through_playbook` so the
-   debug drawer's ⏭ / ⏯ / ⏹ become real REPL controls. Required for
-   5.3 breakpoints, 5.4 branch chooser, 5.5 watch panel, 5.7 trigger
-   payload editor. Non-trivial; would carry a session-id around.
+**D. Debug-runner performance** (surfaced 2026-05-26):
+6. **Batch `render_jinja` calls server-side.** The simulator's
+   `_render_walk` posts ONE HTTP request per templated string. For
+   a step with N templated args against a live FSR, latency is N ×
+   200-1000ms. Batch the renders into a single endpoint call (or
+   short-circuit aggressively when no `{{` is present — already
+   does this client-side, verify it's tight on the server too).
 
-**D. Visual editor surface polish:**
-6. **Phase 6 toolbar gaps** — Resolve (6.2), Dry-run (6.3), Assert
-   (6.4) buttons; Recipe export (6.6). Mostly thin frontend wrappers
-   over existing MCP tools.
-7. **G11 pane-click create-step popover** — corpus-driven next-step
-   suggestions mining `playbook_steps` for what usually follows the
-   selected anchor.
-8. **G19/T3 Jinja Test modal** — currently a stub button; port
-   logic from `WebstormProjects/widget-jinja-editor/`.
-9. **G27/G28 Variable picker side panel** — Input/Output + Functions
-   + Global Variables tabs; click to insert at the focused arg's caret.
+**E. Render-path tail** (Phase 5 complete; just remainders):
+7. **6.2/6.3 fix-apply + bulk-fix** in `analyze_playbook` → click a
+   diagnostic to apply its suggested fix; bulk for many.
+8. **4.1-4.7 visual-editor diagnostic surfacing pass** —
+   render-path warnings should show up on canvas nodes too, not just
+   the inspector.
+9. **7.3 Agent fail-fast on skipped authoring tools** — if the agent
+   bypasses a tier-1 tool, surface as a hard error.
+10. **Tier 3 corpus mining for long-tail filters** — the 90-entry
+    curated map covers the dominant filters; corpus-mining the
+    remainder would lift coverage on niche `workflow.jinja` macros.
+    Lowest priority since the agent loop has the curated set.
 
-**E. Eval / agent-quality tail:**
-10. **AGENT_QUALITY_PLAN Phase 2/3** — phases past `fsrpb agent-stats`.
-11. **AGENT_LOOP_REFINEMENT B + C** — DEPRIORITIZED per global
+**F. Visual editor surface polish:**
+11. **Phase 6 toolbar gaps** — Resolve (6.2), Dry-run (6.3), Assert
+    (6.4) buttons; Recipe export (6.6). Mostly thin frontend wrappers
+    over existing MCP tools.
+12. **G11 pane-click create-step popover** — corpus-driven next-step
+    suggestions mining `playbook_steps` for what usually follows the
+    selected anchor.
+13. **G19/T3 Jinja Test modal** — currently a stub button; port
+    logic from `WebstormProjects/widget-jinja-editor/`.
+14. **G27/G28 Variable picker side panel** — Input/Output + Functions
+    + Global Variables tabs; click to insert at the focused arg's caret.
+
+**G. Eval / agent-quality tail:**
+15. **AGENT_QUALITY_PLAN Phase 2/3** — phases past `fsrpb agent-stats`.
+16. **AGENT_LOOP_REFINEMENT B + C** — DEPRIORITIZED per global
     memory (`priority_agent_loop_deprioritized.md`).
 
-**F. Carry-over polish:**
-12. **Eval scoring fix #0** at the top of "Backlog (open)" —
+**H. Carry-over polish:**
+17. **Eval scoring fix #0** at the top of "Backlog (open)" —
     `no_dry_run_target` is already fixed (commit `5393510`). Stale
     line; remove on the next TODO sweep.
 
-**G. Smaller items surfaced this session that aren't yet on a plan:**
-13. **Frontend: pre-existing svelte-check errors** on the Test step
-    result rendering in `StepInspectorVerifyTab.svelte` (lines 717-ish:
-    `stepTestResult` possibly null + missing `output` on a union
-    branch). Touched-adjacent files in this session but didn't fix —
-    needs a discriminated-union narrow.
-14. **Future Tier 3.5: typed-walker also reports terminal-type
+**I. Smaller items not yet on a plan:**
+18. **Live Jinja resolve in MI prompt preview** — current preview shows
+    `{{ ... }}` raw. Could call `render_jinja` against saved samples
+    to show resolved title/description. ~30 min if added.
+19. **Consolidate the two simulator implementations** —
+    `tools_analysis.step_through_playbook` and
+    `debug_session._execute_one_step` both loop step-by-step, sharing
+    only helpers. Tracked as tech debt in
+    `mcp_server/debug_session.py` docstring; safe to keep parallel
+    while debug runner is still maturing.
+20. **Future Tier 3.5: typed-walker also reports terminal-type
     mismatches** (resolver does this only for connector_op params;
     walker only does chain validation). Symmetric coverage so that
     a `set_variable.vars` field of type "string" can be checked

@@ -26,8 +26,17 @@ Severity:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from compiler.mi_output_catalog import (
+    MI_OUTPUT_KEYS,
+    MI_SYSTEM_KEYS,
+    APPROVAL_MI_STEP_TYPES,
+    declared_input_names,
+    normalize_mode,
+)
 
 
 @dataclass
@@ -98,6 +107,8 @@ def analyze(trace: list[dict[str, Any]],
     if picklist_validator is not None:
         diagnostics.extend(_c4_picklist_drift(trace, picklist_validator))
     diagnostics.extend(_c6_index_non_list(trace, by_jkey))
+    diagnostics.extend(_c7_decision_unset_path(playbook))
+    diagnostics.extend(_c8_mi_mode_mismatch(trace, playbook))
     diagnostics.extend(_c9_loop_var_leak(trace, playbook))
     diagnostics.extend(_c10_dead_step(trace, by_jkey))
     return diagnostics
@@ -512,6 +523,312 @@ def _c6_index_non_list(trace: list[dict[str, Any]],
                 extra={"producer": producer, "attr": target,
                        "shape_kind": t},
             ))
+    return out
+
+
+# ---------------------------------------------------------------------
+# C7 decision_unset_path
+# ---------------------------------------------------------------------
+
+_VARS_STEPS_RE = re.compile(r"\bvars\.steps\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _c7_decision_unset_path(playbook: dict[str, Any] | None) -> list[Diagnostic]:
+    """Static-graph check: a decision branch condition references
+    `vars.steps.X.…` where X is NOT on any execution path from start
+    to this decision — so X's output won't exist when the branch
+    evaluates. Complements C1 (which works on the trace's linear
+    order) by catching sibling-branch references that the trace's
+    chosen path might miss.
+    """
+    if not playbook:
+        return []
+    steps = playbook.get("steps") or []
+    if not steps:
+        return []
+
+    # Build step lookup tolerant of name vs id vs jkey (spaces→_).
+    step_index: dict[str, dict[str, Any]] = {}
+    canonical: dict[str, str] = {}  # any key → canonical (id or name)
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        name = s.get("name") or ""
+        sid = s.get("id") or name
+        cid = sid or name
+        if not cid:
+            continue
+        jkey = (name or sid).replace(" ", "_")
+        for k in (sid, name, jkey):
+            if k and k not in step_index:
+                step_index[k] = s
+                canonical[k] = cid
+
+    # Forward adjacency: linear `next` plus decision branch nexts.
+    adj: dict[str, set[str]] = {}
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        sid = s.get("id") or s.get("name") or ""
+        if not sid:
+            continue
+        succs: set[str] = set()
+        nxt = s.get("next")
+        if isinstance(nxt, str) and nxt:
+            succs.add(nxt)
+        if s.get("type") == "decision":
+            args = s.get("arguments") or {}
+            for c in (args.get("conditions")
+                      or s.get("conditions") or []):
+                if isinstance(c, dict):
+                    n = c.get("next")
+                    if isinstance(n, str) and n:
+                        succs.add(n)
+            for v in (s.get("branches") or {}).values():
+                if isinstance(v, str) and v:
+                    succs.add(v)
+        norm: set[str] = set()
+        for x in succs:
+            c = canonical.get(x)
+            if c:
+                norm.add(c)
+        adj[sid] = norm
+
+    # Reverse adjacency for predecessor walk.
+    radj: dict[str, set[str]] = {}
+    for u, vs in adj.items():
+        for v in vs:
+            radj.setdefault(v, set()).add(u)
+
+    def predecessors(target: str) -> set[str]:
+        seen: set[str] = set()
+        stack = [target]
+        while stack:
+            cur = stack.pop()
+            for p in radj.get(cur, ()):
+                if p not in seen:
+                    seen.add(p)
+                    stack.append(p)
+        return seen
+
+    out: list[Diagnostic] = []
+    for s in steps:
+        if not isinstance(s, dict) or s.get("type") != "decision":
+            continue
+        sid = s.get("id") or s.get("name") or ""
+        if not sid:
+            continue
+        preds = predecessors(sid)
+        # Names/jkeys of predecessor steps for ref-matching.
+        pred_keys: set[str] = set()
+        for p in preds:
+            t = step_index.get(p)
+            if not t:
+                continue
+            pname = t.get("name") or ""
+            psid = t.get("id") or pname
+            for k in (psid, pname, pname.replace(" ", "_") if pname else ""):
+                if k:
+                    pred_keys.add(k)
+
+        conditions = ((s.get("arguments") or {}).get("conditions")
+                      or s.get("conditions") or [])
+        for idx, c in enumerate(conditions):
+            if not isinstance(c, dict):
+                continue
+            expr = c.get("condition") or c.get("when") or ""
+            if not isinstance(expr, str) or not expr:
+                continue
+            seen_in_expr: set[str] = set()
+            for m in _VARS_STEPS_RE.finditer(expr):
+                producer = m.group(1)
+                if not producer or producer in seen_in_expr:
+                    continue
+                seen_in_expr.add(producer)
+                # Skip unknown producers — C1 already flags those when
+                # they appear in the trace's consumed_paths.
+                if producer not in step_index:
+                    continue
+                if producer in pred_keys:
+                    continue
+                out.append(Diagnostic(
+                    kind="decision_unset_path",
+                    severity="warning",
+                    step_id=sid,
+                    path=f"vars.steps.{producer}",
+                    location=f"arguments.conditions[{idx}].condition",
+                    message=(f"decision branch references step "
+                             f"{producer!r}, but no path from start "
+                             f"reaches this decision through "
+                             f"{producer!r} — its output won't be set"),
+                    suggestion=("move the producer onto every path "
+                                "into this decision, or reference a "
+                                "step that always runs before it"),
+                    extra={"producer_step": producer,
+                           "branch_index": idx},
+                ))
+    return out
+
+
+# ---------------------------------------------------------------------
+# C8 mi_mode_mismatch
+# ---------------------------------------------------------------------
+
+def _c8_mi_mode_mismatch(trace: list[dict[str, Any]],
+                        playbook: dict[str, Any] | None) -> list[Diagnostic]:
+    """A downstream consumer reads `vars.steps.<MI>.<key>...` where
+    the MI step's mode can't produce `<key>`. Concretely:
+
+    * DecisionBased MI reading `input.*` — DecisionBased has no form,
+      so `input` is undefined at runtime.
+    * InputBased MI reading `input.<X>` where `<X>` isn't in the
+      declared `inputVariables[].name` — runtime returns undefined.
+
+    Catalog of legal keys per mode lives in
+    `compiler.mi_output_catalog`; corpus mining behind it is documented
+    in `docs/research/MI_OUTPUT_CATALOG.md`.
+    """
+    if not playbook:
+        return []
+    steps = playbook.get("steps") or []
+    if not steps:
+        return []
+
+    # Build MI index: jkey/id/name → (mode, declared_input_names).
+    mi_index: dict[str, tuple[str, list[str]]] = {}
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        stype = s.get("type") or ""
+        # `manual_input` is the friendly type; wire form uses
+        # `ManualInput` / `ApprovalManualInput`. Accept all.
+        is_mi = (stype == "manual_input"
+                 or stype in APPROVAL_MI_STEP_TYPES
+                 or stype == "ManualInput")
+        if not is_mi:
+            continue
+        args = s.get("arguments") or {}
+        mode = normalize_mode(args.get("type"), step_type=stype)
+        declared = declared_input_names(args)
+        name = s.get("name") or ""
+        sid = s.get("id") or name
+        jkey = (name or sid).replace(" ", "_")
+        for k in (sid, name, jkey):
+            if k:
+                mi_index.setdefault(k, (mode, declared))
+
+    if not mi_index:
+        return []
+
+    out: list[Diagnostic] = []
+    for rec in trace:
+        sid = rec.get("step_id", "")
+        for ref in rec.get("consumed_paths") or []:
+            if ref.get("root") != "steps":
+                continue
+            producer = ref.get("source_step_id") or ""
+            mi = mi_index.get(producer)
+            if mi is None:
+                continue
+            mode, declared = mi
+            mode_spec = MI_OUTPUT_KEYS.get(mode) or {}
+            segments = ref.get("segments") or []
+            # segments[0]=='steps', segments[1]==producer; the consumer
+            # key is segments[2] (the first attribute on the producer's
+            # output).
+            if len(segments) < 3:
+                continue
+            key = segments[2]
+            if not isinstance(key, str) or key.startswith("["):
+                continue
+            # System-injected keys are always legal.
+            if key in MI_SYSTEM_KEYS:
+                continue
+            form_key = mode_spec.get("form_key")
+            allow_input_star = mode_spec.get("allow_input_star", False)
+            # Special-case `input.*` reads regardless of the mode's
+            # form_key — for DecisionBased the form_key is None and we
+            # still need to flag the read as an error.
+            if key == "input":
+                if not allow_input_star:
+                    out.append(Diagnostic(
+                        kind="mi_mode_mismatch",
+                        severity="error",
+                        step_id=sid,
+                        path=ref["path"],
+                        location=ref.get("location", ""),
+                        message=(f"reads {form_key}.* off manual_input "
+                                 f"{producer!r}, but its mode is "
+                                 f"{mode!r} — no input form to source "
+                                 "from"),
+                        suggestion=("switch the manual_input to "
+                                    "InputBased and declare the "
+                                    "needed inputVariables, or read "
+                                    "from a different producer"),
+                        extra={"producer_step": producer, "mode": mode},
+                    ))
+                    continue
+                # InputBased + form_key access — check declared list.
+                if len(segments) < 4:
+                    continue
+                sub = segments[3]
+                if not isinstance(sub, str) or sub.startswith("["):
+                    continue
+                if not declared:
+                    # Button-only InputBased: can't prove mismatch.
+                    # Downgrade to warning so we don't spam.
+                    out.append(Diagnostic(
+                        kind="mi_mode_mismatch",
+                        severity="warning",
+                        step_id=sid,
+                        path=ref["path"],
+                        location=ref.get("location", ""),
+                        message=(f"reads input.{sub} off manual_input "
+                                 f"{producer!r}, but it declares no "
+                                 "inputVariables — confirm the form "
+                                 "actually collects this field"),
+                        suggestion=("add the field to "
+                                    "arguments.input.schema."
+                                    "inputVariables, or fix the "
+                                    "consumer to read a declared "
+                                    "field"),
+                        extra={"producer_step": producer, "mode": mode,
+                               "declared": declared},
+                    ))
+                    continue
+                if sub not in declared:
+                    out.append(Diagnostic(
+                        kind="mi_mode_mismatch",
+                        severity="error",
+                        step_id=sid,
+                        path=ref["path"],
+                        location=ref.get("location", ""),
+                        message=(f"reads input.{sub!s} off manual_input "
+                                 f"{producer!r}, but its form doesn't "
+                                 f"collect that field "
+                                 f"(declared: {declared})"),
+                        suggestion=_suggest_close_key(sub, declared)
+                                    or ("add the field to "
+                                        "inputVariables or rename the "
+                                        "consumer to a declared name"),
+                        expected=declared,
+                        actual=sub,
+                        extra={"producer_step": producer, "mode": mode},
+                    ))
+            # Other top-level keys: warn (undocumented attribute).
+            else:
+                out.append(Diagnostic(
+                    kind="mi_mode_mismatch",
+                    severity="warning",
+                    step_id=sid,
+                    path=ref["path"],
+                    location=ref.get("location", ""),
+                    message=(f"reads {key!r} off manual_input "
+                             f"{producer!r}; expected one of "
+                             f"input.*, {sorted(MI_SYSTEM_KEYS)}"),
+                    suggestion="",
+                    extra={"producer_step": producer, "mode": mode},
+                ))
     return out
 
 

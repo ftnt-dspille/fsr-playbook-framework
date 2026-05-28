@@ -18,6 +18,7 @@
 
   import { visualStore } from '../visualEditStore.svelte';
   import { playbookActions } from '../playbookActions.svelte';
+  import { debugStore } from '../debugStore.svelte';
 
   type DropPayload =
     | { kind: 'step_type'; type: string; label: string; detail?: string }
@@ -123,6 +124,10 @@
           (visualStore.state.graph?.samples ?? {})[playbook.name]?.[n.id]
           || (n.arguments as Record<string, unknown> | undefined)?.mock_result !== undefined
         ),
+        // Debug runner breakpoint (VISUAL_EDITOR_PLAN 5.4 tail) — shared
+        // with DebugPanel via `debugStore` so the canvas + trace tape
+        // stay in lockstep without prop-drilling.
+        isBreakpoint: debugStore.breakpoints.has(n.id),
         direction,
         playbookIdx
       }

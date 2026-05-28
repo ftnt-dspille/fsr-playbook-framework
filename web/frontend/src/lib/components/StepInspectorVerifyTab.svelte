@@ -333,6 +333,12 @@
       stepFixes = fixes.filter(_matchesNode).map(_normaliseFix);
       stepWarnings = warns.filter(_matchesNode).map(_normaliseFix);
       staticChecksTs = new Date().toLocaleTimeString();
+    } catch {
+      // Auto-run swallows failures so an offline verify_playbook
+      // endpoint doesn't spam unhandled rejections; the manual ↻
+      // button still surfaces errors when explicitly invoked.
+      stepFixes = [];
+      stepWarnings = [];
     } finally {
       staticChecksBusy = false;
     }
@@ -525,152 +531,94 @@
   }
 
   let entries = $derived(Object.entries(results));
+
+  // Auto-run on tab open + whenever the focused node changes. We
+  // no longer auto-render args — step_test (Run this step) returns
+  // the rendered_args alongside execution status, so the standalone
+  // render call is now dead surface. Keep the function around in
+  // case a future "preview" view wants it.
+  let autoRanFor = $state<string | null>(null);
+  $effect(() => {
+    const key = node?.id ?? null;
+    if (!key || key === autoRanFor) return;
+    autoRanFor = key;
+    void runStaticChecks();
+    void loadHistory();
+  });
 </script>
 
 <section class="space-y-3">
-  <!-- Static checks: Tier 1/2/3 diagnostics filtered to this step.
-       Sits above Render args because static fixes block runtime even
-       if rendering looks fine — fixing them first is the right loop. -->
-  <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
-    <div class="flex items-center justify-between gap-2">
-      <div>
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Static checks</div>
-        <p class="mt-0.5 text-xs text-[var(--text-faint)]">
-          Compile-time fixes from <code class="font-mono">verify_playbook</code> scoped
-          to this step (Tier&nbsp;1 widget / Tier&nbsp;2 observed_type /
-          Tier&nbsp;3 Jinja chain).
-        </p>
-      </div>
-      <button
-        type="button"
-        class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-canvas)] disabled:opacity-50"
-        onclick={runStaticChecks}
-        disabled={staticChecksBusy}
-      >{staticChecksBusy ? 'Checking…' : 'Re-check'}</button>
-    </div>
-    {#if staticChecksTs}
-      <div class="mt-1 text-[10px] text-[var(--text-faint)]">last check: {staticChecksTs}</div>
-    {/if}
-    {#if stepFixes.length === 0 && stepWarnings.length === 0 && staticChecksTs}
-      <p class="mt-2 text-xs text-emerald-600 dark:text-emerald-400">no static issues on this step</p>
-    {/if}
-    {#each stepFixes as f}
-      <div class="mt-2 rounded border-l-2 border-rose-500 bg-rose-50 dark:bg-rose-900/20 px-2 py-1.5">
-        <div class="flex items-baseline gap-2">
-          <span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700 dark:text-rose-400">{f.code}</span>
-          {#if f.path}
-            <span class="font-mono text-[10px] text-[var(--text-faint)]">{f.path}</span>
-          {/if}
+  <!-- Step-scoped static issues: shown ONLY when there's something to
+       fix. No header, no Re-check button, no zero-state message. If the
+       step is clean, this section is invisible. -->
+  {#if stepFixes.length > 0 || stepWarnings.length > 0}
+    <section class="space-y-2">
+      {#each stepFixes as f}
+        <div class="rounded border-l-2 border-rose-500 bg-rose-50 dark:bg-rose-900/20 px-2 py-1.5">
+          <div class="flex items-baseline gap-2">
+            <span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700 dark:text-rose-400">{f.code}</span>
+            {#if f.path}<span class="font-mono text-[10px] text-[var(--text-faint)]">{f.path}</span>{/if}
+          </div>
+          <p class="mt-1 text-xs text-[var(--text-default)]">{f.message}</p>
+          {#if f.suggestion}<p class="mt-1 text-[11px] italic text-[var(--text-muted)]">→ {f.suggestion}</p>{/if}
         </div>
-        <p class="mt-1 text-xs text-[var(--text-default)]">{f.message}</p>
-        {#if f.suggestion}
-          <p class="mt-1 text-[11px] italic text-[var(--text-muted)]">→ {f.suggestion}</p>
-        {/if}
-      </div>
-    {/each}
-    {#each stepWarnings as w}
-      <div class="mt-2 rounded border-l-2 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-2 py-1.5">
-        <div class="flex items-baseline gap-2">
-          <span class="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">{w.code}</span>
-          {#if w.path}
-            <span class="font-mono text-[10px] text-[var(--text-faint)]">{w.path}</span>
-          {/if}
+      {/each}
+      {#each stepWarnings as w}
+        <div class="rounded border-l-2 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-2 py-1.5">
+          <div class="flex items-baseline gap-2">
+            <span class="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">{w.code}</span>
+            {#if w.path}<span class="font-mono text-[10px] text-[var(--text-faint)]">{w.path}</span>{/if}
+          </div>
+          <p class="mt-1 text-xs text-[var(--text-default)]">{w.message}</p>
         </div>
-        <p class="mt-1 text-xs text-[var(--text-default)]">{w.message}</p>
-      </div>
-    {/each}
-  </section>
-
-  <header class="flex items-center justify-between gap-3">
-    <div>
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Render args</div>
-      <p class="mt-0.5 text-xs text-[var(--text-faint)]">
-        Replace every <code class="font-mono">{`{{ … }}`}</code> in this
-        step with what it will actually become at runtime. Output appears
-        in <strong>Rendered args</strong> below.
-      </p>
-    </div>
-    <button
-      type="button"
-      class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-canvas)] disabled:opacity-50"
-      onclick={runRender}
-      disabled={busy}
-    >{busy ? 'Rendering…' : 'Render'}</button>
-  </header>
-
-  {#if lastRunAt}
-    <div class="text-[10px] text-[var(--text-faint)]">last run: {lastRunAt}</div>
+      {/each}
+    </section>
   {/if}
 
+  <!-- The single deliberate action on this tab. Beneath it: rendered
+       arg preview (auto-loaded), result status (after click), history
+       line (auto-loaded), and Save-as-mock (after connector exec).
+       Everything that was once 5 separate sections lives in one block. -->
   <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
     <div class="flex items-center justify-between gap-2">
       <div>
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Past test runs</div>
-        <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
-          {#if node.family === 'connector_op'}
-            Verifications for <code class="font-mono">{historyKey || 'this operation'}</code>.
-          {:else}
-            Verifications for any <code class="font-mono">{node.type}</code> step.
-          {/if}
-        </p>
-      </div>
-      <button
-        type="button"
-        class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-elev)] disabled:opacity-50"
-        onclick={loadHistory}
-        disabled={historyBusy}
-      >{historyBusy ? 'Loading…' : 'Load'}</button>
-    </div>
-    {#if historyResult}
-      {#if historyResult.kind === 'found'}
-        <div class="mt-2 flex items-center gap-2 text-[10px] uppercase tracking-wider">
-          <span class:text-emerald-600={historyResult.status === 'tested_pass'}
-                class:text-rose-600={historyResult.status === 'tested_fail'}
-                class:text-[var(--text-muted)]={historyResult.status !== 'tested_pass' && historyResult.status !== 'tested_fail'}>
-            {historyResult.status}
-          </span>
-          <span class="text-[var(--text-faint)]">via {historyResult.method}</span>
-          <span class="text-[var(--text-faint)]">· {historyResult.count} {historyResult.count === 1 ? 'row' : 'rows'}</span>
-        </div>
-        {#if historyResult.ts}
-          <p class="mt-1 text-[10px] text-[var(--text-faint)]">{historyResult.ts}</p>
-        {/if}
-        {#if historyResult.notes}
-          <pre class="mt-1 whitespace-pre-wrap text-xs text-[var(--text-default)]">{historyResult.notes}</pre>
-        {/if}
-      {:else if historyResult.kind === 'empty'}
-        <p class="mt-2 text-xs italic text-[var(--text-faint)]">No verifications recorded.</p>
-      {:else}
-        <pre class="mt-2 whitespace-pre-wrap text-xs text-rose-600 dark:text-rose-400">{historyResult.message}</pre>
-      {/if}
-    {/if}
-  </section>
-
-  <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
-    <div class="flex items-center justify-between gap-2">
-      <div>
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Test step</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Run this step</div>
         <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
           {#if node.family === 'trigger'}
-            Triggers fire on FSR events — they can't be "tested" in isolation.
-            Clicking renders the step's args only; status will say
-            <em>rendered</em> with no execution attempted.
+            Triggers fire on FSR events. Click renders args only.
           {:else if node.family === 'connector_op'}
-            Render this step's args, then execute the connector op if it's
-            marked read-only. Pass/fail is logged to <em>Past test runs</em> above.
+            Renders args and executes the op if read-only. Output can be saved as a mock.
           {:else}
-            Render this step's args and mark the result pass/fail in the
-            verifications log. No record changes for non-connector steps.
+            Renders args and logs the result. No record changes for non-connector steps.
           {/if}
         </p>
       </div>
       <button
         type="button"
-        class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-elev)] disabled:opacity-50"
+        class="rounded border border-[var(--border-soft)] bg-[var(--brand)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
         onclick={() => testStep(false)}
         disabled={stepTestBusy}
-      >{stepTestBusy ? 'Testing…' : 'Test step'}</button>
+      >{stepTestBusy ? 'Running…' : '▶ Run this step'}</button>
     </div>
+
+    <!-- Inline history: single line replacing the old "Past test runs"
+         section. Shown only when there's a recorded run. -->
+    {#if historyResult && historyResult.kind === 'found'}
+      <details class="mt-2 text-[10px]">
+        <summary class="cursor-pointer text-[var(--text-faint)]">
+          last test:
+          <span class:text-emerald-600={historyResult.status === 'tested_pass'}
+                class:text-rose-600={historyResult.status === 'tested_fail'}
+                class:text-[var(--text-muted)]={historyResult.status !== 'tested_pass' && historyResult.status !== 'tested_fail'}
+                class="font-medium uppercase tracking-wider">{historyResult.status}</span>
+          <span>· via {historyResult.method}</span>
+          {#if historyResult.ts}<span>· {historyResult.ts}</span>{/if}
+        </summary>
+        {#if historyResult.notes}
+          <pre class="mt-1 whitespace-pre-wrap text-[10px] text-[var(--text-default)]">{historyResult.notes}</pre>
+        {/if}
+      </details>
+    {/if}
     {#if stepTestResult}
       {#if stepTestResult.kind === 'needs_confirm'}
         <div class="mt-2 rounded border border-amber-500/50 bg-amber-50 dark:bg-amber-900/20 p-2">
@@ -691,30 +639,31 @@
           >{stepTestBusy ? 'Running…' : 'Run anyway'}</button>
         </div>
       {:else if stepTestResult.kind === 'ok'}
+        {@const okResult = stepTestResult}
         <div class="mt-2 flex items-center gap-2">
-          <span class="rounded bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">{stepTestResult.status}</span>
+          <span class="rounded bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">{okResult.status}</span>
           <span class="text-[10px] text-[var(--text-faint)]">
-            {#if stepTestResult.status === 'rendered'}
+            {#if okResult.status === 'rendered'}
               args resolved cleanly — no live call was made
-            {:else if stepTestResult.status === 'executed'}
+            {:else if okResult.status === 'executed'}
               connector op ran successfully against the live FSR
             {/if}
           </span>
         </div>
-        {#if stepTestResult.note}
-          <p class="mt-1 text-xs text-[var(--text-muted)]">{stepTestResult.note}</p>
+        {#if okResult.note}
+          <p class="mt-1 text-xs text-[var(--text-muted)]">{okResult.note}</p>
         {/if}
-        {#if stepTestResult.output !== null && stepTestResult.output !== undefined}
+        {#if okResult.output !== null && okResult.output !== undefined}
           <details class="mt-1" open>
             <summary class="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-default)]">Show output</summary>
-            <pre class="mt-1 max-h-40 overflow-auto rounded bg-[var(--bg-canvas)] p-2 text-xs">{fmt(stepTestResult.output)}</pre>
+            <pre class="mt-1 max-h-40 overflow-auto rounded bg-[var(--bg-canvas)] p-2 text-xs">{fmt(okResult.output)}</pre>
           </details>
-          {#if stepTestResult.status === 'executed' && node.family === 'connector_op'}
+          {#if okResult.status === 'executed' && node.family === 'connector_op'}
             <div class="mt-2 flex items-center gap-2">
               <button
                 type="button"
                 class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-elev)] disabled:opacity-50"
-                onclick={() => saveAsMock(stepTestResult.kind === 'ok' ? stepTestResult.output : undefined)}
+                onclick={() => saveAsMock(okResult.output)}
                 disabled={mockSaveStatus === 'saving'}
                 title="Persist this output as `mock_result` on the step's YAML so downstream Verify/Render resolve Jinja against this shape without re-running"
               >{mockSaveStatus === 'saving'
@@ -735,6 +684,7 @@
         <pre class="mt-1 whitespace-pre-wrap text-xs text-rose-600 dark:text-rose-400">{stepTestResult.message}</pre>
       {/if}
     {/if}
+
   </section>
 
   {#if node.type === 'find_record'}
@@ -791,107 +741,4 @@
     </section>
   {/if}
 
-  {#if node.family === 'connector_op'}
-    <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
-      <div class="flex items-center justify-between gap-2">
-        <div>
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Run (safe)</div>
-          <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
-            {#if !connectorName || !opName}
-              Connector + operation must be set.
-            {:else if !opIsSafe}
-              Op name doesn't match a read-only prefix — locked to avoid side effects.
-            {:else}
-              Executes <code class="font-mono">{connectorName}.{opName}</code> with current params.
-            {/if}
-          </p>
-        </div>
-        <button
-          type="button"
-          class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-3 py-1 text-xs font-medium hover:bg-[var(--bg-elev)] disabled:cursor-not-allowed disabled:opacity-40"
-          onclick={runSafe}
-          disabled={!runEnabled || runBusy}
-          title={runEnabled ? 'Run live against FSR (read-only)' : 'Locked — destructive or unknown-risk op'}
-        >{runBusy ? 'Running…' : 'Run'}</button>
-      </div>
-      {#if runResult}
-        {#if runResult.kind === 'ok'}
-          <div class="mt-2 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">ok</div>
-          <pre class="mt-1 max-h-60 overflow-auto rounded bg-[var(--bg-canvas)] p-2 text-xs">{fmt(runResult.data)}</pre>
-        {:else if runResult.kind === 'needs_confirm'}
-          <div class="mt-2 text-[10px] uppercase tracking-wider text-amber-600 dark:text-amber-400">
-            requires confirmation · {runResult.risk}
-          </div>
-          <p class="mt-1 text-xs">{runResult.message}</p>
-        {:else}
-          <div class="mt-2 text-[10px] uppercase tracking-wider text-rose-600 dark:text-rose-400">error</div>
-          <pre class="mt-1 whitespace-pre-wrap text-xs text-rose-600 dark:text-rose-400">{runResult.message}</pre>
-        {/if}
-      {/if}
-    </section>
-  {/if}
-
-  {#if entries.length === 0}
-    <p class="italic text-[var(--text-faint)]">
-      Click <strong>Render</strong> above to resolve this step's args.
-      Output will appear here.
-    </p>
-  {:else}
-    <div>
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-        Rendered args
-      </div>
-      <p class="mt-0.5 mb-2 text-[11px] text-[var(--text-faint)]">
-        One row per arg path. Tag shows where the resolved value came from:
-        <span class="text-violet-600 dark:text-violet-400">mock</span> (saved <code class="font-mono">mock_result</code> on a connector step),
-        <span class="text-emerald-600 dark:text-emerald-400">sample</span> (saved manual_input answers),
-        <span class="text-amber-600 dark:text-amber-400">stub</span> (typed placeholder — nothing saved),
-        <span class="text-orange-600 dark:text-orange-400">mixed</span>, or
-        <span class="text-sky-600 dark:text-sky-400">context</span> (no step ref).
-        No tag = value was already a literal.
-      </p>
-      <ul class="space-y-2">
-        {#each entries as [path, r] (path)}
-          <li class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
-            <div class="font-mono text-[11px] text-[var(--text-muted)]">{path || '(root)'}</div>
-            {#if r.kind === 'pending'}
-              <div class="mt-1 text-xs italic text-[var(--text-faint)]">resolving…</div>
-            {:else if r.kind === 'literal'}
-              <pre class="mt-1 whitespace-pre-wrap text-xs text-[var(--text-default)]">{fmt(r.value)}</pre>
-            {:else if r.kind === 'rendered'}
-              <pre class="mt-1 whitespace-pre-wrap text-xs text-[var(--text-default)]">{fmt(r.value)}</pre>
-              <!-- Provenance chip: tells the author whether this value
-                   came from saved sample answers, a typed stub, a
-                   non-step context (e.g. vars.input.params.*), or a
-                   mix. Helps explain why a render looks right /
-                   wrong without staring at the YAML. -->
-              <div class="mt-0.5 flex items-center gap-1">
-                {#if r.source === 'mock'}
-                  <span class="rounded-full bg-violet-500/20 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-400"
-                        title={`Resolved from a saved mock_result on: ${r.refs.join(', ')}`}>mock</span>
-                {:else if r.source === 'sample'}
-                  <span class="rounded-full bg-emerald-500/20 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400"
-                        title={`Resolved from saved sample data on: ${r.refs.join(', ')}`}>sample</span>
-                {:else if r.source === 'stub'}
-                  <span class="rounded-full bg-amber-500/20 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400"
-                        title={`Resolved against typed stubs (no sample saved on: ${r.refs.join(', ')}). Save sample answers on those manual_input steps for accurate values.`}>stub</span>
-                {:else if r.source === 'mixed'}
-                  <span class="rounded-full bg-orange-500/20 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-orange-700 dark:text-orange-400"
-                        title={`Mixed: some refs hit saved samples, others fell back to stubs. Refs: ${r.refs.join(', ')}`}>mixed</span>
-                {:else}
-                  <span class="rounded-full bg-sky-500/20 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-sky-700 dark:text-sky-400"
-                        title="Resolved against the playbook input / non-step context — no vars.steps.* lookup">context</span>
-                {/if}
-                {#if r.refs.length > 0}
-                  <span class="font-mono text-[9px] text-[var(--text-faint)]">{r.refs.join(', ')}</span>
-                {/if}
-              </div>
-            {:else if r.kind === 'error'}
-              <pre class="mt-1 whitespace-pre-wrap text-xs text-rose-600 dark:text-rose-400">{r.message}</pre>
-            {/if}
-          </li>
-        {/each}
-      </ul>
-    </div>
-  {/if}
 </section>

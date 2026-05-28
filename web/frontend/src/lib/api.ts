@@ -283,6 +283,98 @@ export async function stepThroughPlaybook(
   };
 }
 
+// Stateful debug-session controls (VISUAL_EDITOR_PLAN.md 5.3-5.7).
+// Drives the new `*_debug_session` MCP tools so the Debug drawer
+// can ⏭ step / ⏯ continue-with-breakpoints / ⏹ stop instead of
+// scrubbing through a pre-rendered tape.
+export type DebugSessionStatus = {
+  session_id: string;
+  playbook?: string;
+  done: boolean;
+  paused_at: string | null;
+  steps_advanced: number;
+  trace_len: number;
+  first_error?: { step_id: string; message: string } | null;
+  breakpoints: string[];
+  last_step?: DebugStepFrame | null;
+  trace?: DebugStepFrame[];
+  vars_keys?: string[];
+};
+export type DebugSessionResponse = {
+  ok: boolean;
+  status?: DebugSessionStatus;
+  advanced?: boolean | number;
+  stop_reason?: 'done' | 'breakpoint' | 'until_step' | 'max_advance';
+  error?: string;
+};
+
+async function _sessionCall(tool: string, args: Record<string, unknown>): Promise<DebugSessionResponse> {
+  const r = await callMcpTool<Record<string, unknown>>(tool, args);
+  if (!r.ok || !r.result) return { ok: false, error: r.error ?? `${tool} failed` };
+  const res = r.result as Record<string, unknown>;
+  return {
+    ok: Boolean(res['ok']),
+    status: res['status'] as DebugSessionStatus | undefined,
+    advanced: res['advanced'] as boolean | number | undefined,
+    stop_reason: res['stop_reason'] as DebugSessionResponse['stop_reason'],
+    error: typeof res['error'] === 'string' ? res['error'] : undefined,
+  };
+}
+
+export function startDebugSession(
+  yamlText: string,
+  opts: {
+    playbook?: string;
+    input?: Record<string, unknown>;
+    branchChoices?: Record<string, string>;
+    manualChoices?: Record<string, string>;
+    breakpoints?: string[];
+    executeSafeOps?: boolean;
+    maxSteps?: number;
+  } = {}
+): Promise<DebugSessionResponse> {
+  return _sessionCall('start_debug_session', {
+    yaml_text: yamlText,
+    playbook: opts.playbook,
+    input: opts.input,
+    branch_choices: opts.branchChoices,
+    manual_choices: opts.manualChoices,
+    breakpoints: opts.breakpoints,
+    execute_safe_ops: opts.executeSafeOps ?? true,
+    max_steps: opts.maxSteps ?? 30,
+  });
+}
+
+export function stepDebugSession(
+  sessionId: string,
+  branchChoiceOverride?: Record<string, string>
+): Promise<DebugSessionResponse> {
+  return _sessionCall('step_debug_session', {
+    session_id: sessionId,
+    branch_choice_override: branchChoiceOverride,
+  });
+}
+
+export function continueDebugSession(
+  sessionId: string,
+  opts: { untilStepId?: string; addBreakpoints?: string[]; maxAdvance?: number } = {}
+): Promise<DebugSessionResponse> {
+  return _sessionCall('continue_debug_session', {
+    session_id: sessionId,
+    until_step_id: opts.untilStepId,
+    add_breakpoints: opts.addBreakpoints,
+    max_advance: opts.maxAdvance ?? 100,
+  });
+}
+
+export function stopDebugSession(sessionId: string): Promise<DebugSessionResponse> {
+  return _sessionCall('stop_debug_session', { session_id: sessionId });
+}
+
+export function getDebugSession(sessionId: string): Promise<DebugSessionResponse> {
+  return _sessionCall('get_debug_session', { session_id: sessionId });
+}
+
 
 export async function suggestFixForDiagnostic(d: Diagnostic): Promise<SuggestedFix> {
   const r = await callMcpTool<SuggestedFix>('suggest_fix_for_diagnostic', { diagnostic: d });

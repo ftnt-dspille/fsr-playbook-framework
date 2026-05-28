@@ -76,10 +76,18 @@
     : false);
   let showBranches = $derived(node?.type === 'decision' || node?.type === 'manual_input');
   let showVerify = $derived(node ? node.family !== 'terminal' : false);
-  // Simulate tab: only `manual_input` steps today. Surfaces a form
-  // that writes per-input answers into the `# fsrpb:samples` sidecar
-  // so downstream steps can render their Jinja against synthetic data.
-  let showSimulate = $derived(node?.type === 'manual_input');
+  // Samples tab: unified "what would this step return?" editor. Shows
+  // for any step type that supports either sidecar samples
+  // (manual_input) or `mock_result:` (connector / record_crud / fetch
+  // / ingest / utility). Deterministic step types (set_variable,
+  // decision, start/stop/end) skip it.
+  const NO_SAMPLE_TYPES = new Set([
+    'set_variable', 'decision', 'start', 'stop', 'end', 'terminate',
+    'start_on_create', 'start_on_update'
+  ]);
+  let showSimulate = $derived(
+    !!node && !NO_SAMPLE_TYPES.has(node.type) && node.family !== 'terminal'
+  );
 
   // Trigger nodes' "args" are tiny — fall back to Raw so the user
   // lands on something useful. Decision / manual_input now keep
@@ -89,7 +97,7 @@
   let TABS = $derived<{ key: Tab; label: string }[]>([
     ...(showArgs ? [{ key: 'args' as Tab, label: 'Args' }] : []),
     ...(showExamples ? [{ key: 'examples' as Tab, label: 'Examples' }] : []),
-    ...(showSimulate ? [{ key: 'simulate' as Tab, label: 'Simulate' }] : []),
+    ...(showSimulate ? [{ key: 'simulate' as Tab, label: 'Samples' }] : []),
     ...(showVerify ? [{ key: 'verify' as Tab, label: 'Verify' }] : []),
     { key: 'raw', label: 'Raw' }
   ]);
@@ -237,7 +245,7 @@
       {:else if activeTab === 'examples'}
         <StepInspectorExamplesTab {node} {playbook} {playbookIdx} />
       {:else if activeTab === 'simulate'}
-        <StepInspectorSimulateTab {node} {playbook} />
+        <StepInspectorSimulateTab {node} {playbook} {playbookIdx} />
       {:else if activeTab === 'verify'}
         <StepInspectorVerifyTab {node} {playbookIdx} />
       {:else}

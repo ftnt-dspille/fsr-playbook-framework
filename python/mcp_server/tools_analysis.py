@@ -94,6 +94,7 @@ def step_through_playbook(yaml_text: str,
     for s in steps:
         if isinstance(s, dict) and "id" not in s and s.get("name"):
             s["id"] = s["name"]
+    _normalize_friendly_steps(steps)
     by_id = {s["id"]: s for s in steps if isinstance(s, dict) and "id" in s}
     if not by_id:
         return {"ok": False, "error":
@@ -447,21 +448,28 @@ def step_through_playbook(yaml_text: str,
                 step_record["status"] = "simulated"
         elif stype == "manual_input":
             # FSR pauses for the user; we resolve from manual_choices,
-            # else first option as a deterministic default.
-            options = rendered.get("options") or []
+            # else first option as a deterministic default. Friendly
+            # YAML keeps `options:` at the step level — _normalize_
+            # friendly_steps mirrors them under arguments but we also
+            # fall back to the step dict directly for safety.
+            options = rendered.get("options") or cur.get("options") or []
             picked = (manual_choices or {}).get(sid)
             if isinstance(options, list) and options:
                 if picked is None or not any(
-                    isinstance(o, dict) and o.get("display") == picked
+                    isinstance(o, dict)
+                    and (o.get("display") or o.get("option")) == picked
                     for o in options
                 ):
                     first = next((o for o in options if isinstance(o, dict)), {})
-                    picked = first.get("display")
+                    picked = first.get("display") or first.get("option")
             sim_output = {"option": picked} if picked else {}
             step_record["status"] = "simulated"
             step_record["simulated_from"] = "computed"
             if picked:
                 step_record["note"] = f"option: {picked}"
+                # Route through the option's next: target by treating
+                # the picked label as the chosen branch.
+                chosen_branch = picked
         elif stype.startswith("start"):
             sim_output = {}
             step_record["status"] = "simulated"
@@ -1226,3 +1234,222 @@ def _decision_pick_branch(rendered_args: dict[str, Any],
         return step_branches[default_label], default_label
     first_key = sorted(step_branches.keys())[0]
     return step_branches[first_key], first_key
+
+
+def _normalize_friendly_steps(steps: list[dict]) -> None:
+    """Bridge from the visual editor's friendly YAML to the wire shape
+    the stepper helpers (`_decision_pick_branch`, `_next_step`,
+    manual_input simulator) expect. Mutates `steps` in-place.
+
+    Two friendly-form shortcuts the simulator otherwise misses:
+
+    * Decision: friendly form lists `conditions: [{display, when, next}]`
+      with no top-level `branches:` map. Helpers look up
+      `step.branches[label] -> step_id`; without it, every decision
+      step terminates the walk. Synthesize the map from each
+      condition's `next:` so authors don't have to maintain two forms.
+
+    * manual_input: friendly form puts `options: [...]` at the step
+      level. The simulator reads `rendered_args.options`; copy the
+      step-level list into `arguments.options` so it surfaces, and
+      mirror each option's `next:` into a `branches:` map so the
+      stepper advances past the prompt to the chosen target.
+    """
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        stype = (s.get("type") or "").lower()
+        if stype == "decision":
+            if not s.get("branches"):
+                conds = (s.get("conditions")
+                         or (s.get("arguments") or {}).get("conditions")
+                         or [])
+                branches: dict[str, str] = {}
+                for c in conds:
+                    if not isinstance(c, dict):
+                        continue
+                    label = c.get("display") or c.get("label")
+                    target = c.get("next")
+                    if label and isinstance(target, str) and target:
+                        branches[str(label)] = target
+                if branches:
+                    s["branches"] = branches
+            # Surface the conditions list under arguments so the
+            # rendered_args path the picker reads from finds it.
+            args = s.setdefault("arguments", {})
+            if isinstance(args, dict) and "conditions" not in args:
+                friendly = s.get("conditions")
+                if isinstance(friendly, list):
+                    args["conditions"] = friendly
+        elif stype == "manual_input":
+            opts = s.get("options")
+            if isinstance(opts, list) and opts:
+                args = s.setdefault("arguments", {})
+                if isinstance(args, dict):
+                    args.setdefault("options", opts)
+                # Mirror option targets into a branches map so the
+                # stepper can advance to the chosen next step.
+                if not s.get("branches"):
+                    branches = {}
+                    for o in opts:
+                        if not isinstance(o, dict):
+                            continue
+                        label = o.get("display") or o.get("option")
+                        target = o.get("next")
+                        if label and isinstance(target, str) and target:
+                            branches[str(label)] = target
+                    if branches:
+                        s["branches"] = branches
+
+# =====================================================================
+# Stateful debug-session tools (VISUAL_EDITOR_PLAN.md Phase 5.3-5.7).
+# Wrap `debug_session.DebugSession` for the visual editor's debug
+# drawer. The one-shot `step_through_playbook` above is kept as the
+# stable façade for analyzer / verify_playbook / agent-loop callers.
+# =====================================================================
+
+@mcp.tool()
+def start_debug_session(
+    yaml_text: str,
+    playbook: str | None = None,
+    input: dict[str, Any] | None = None,
+    branch_choices: dict[str, str] | None = None,
+    manual_choices: dict[str, str] | None = None,
+    breakpoints: list[str] | None = None,
+    execute_safe_ops: bool = True,
+    execute_unsafe_ops: bool = False,
+    max_steps: int = 30,
+) -> dict[str, Any]:
+    """Create a fresh debug session at the playbook's start step.
+
+    Returns `{ok, status}` where `status` includes `session_id`,
+    `paused_at` (next step id about to run), and `done`. Use the
+    `session_id` for subsequent `step_debug_session` /
+    `continue_debug_session` / `stop_debug_session` calls.
+    """
+    from .debug_session import build_session, get_store  # noqa: PLC0415
+    sess, err = build_session(
+        yaml_text=yaml_text,
+        playbook=playbook,
+        input=input,
+        branch_choices=branch_choices,
+        manual_choices=manual_choices,
+        breakpoints=breakpoints,
+        execute_safe_ops=execute_safe_ops,
+        execute_unsafe_ops=execute_unsafe_ops,
+        max_steps=max_steps,
+    )
+    if sess is None:
+        return {"ok": False, "error": err}
+    # SessionStore.create allocates the session_id.
+    store = get_store()
+    # We already built the DebugSession; re-create through the store
+    # so we get a fresh id and TTL bookkeeping.
+    import secrets as _secrets  # noqa: PLC0415
+    sess.session_id = _secrets.token_urlsafe(12)
+    with store._lock:  # noqa: SLF001
+        store._evict_expired_locked()  # noqa: SLF001
+        store._sessions[sess.session_id] = sess  # noqa: SLF001
+    return {"ok": True, "status": sess.as_status()}
+
+
+@mcp.tool()
+def step_debug_session(
+    session_id: str,
+    branch_choice_override: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Advance the session by exactly one step.
+
+    `branch_choice_override` lets the caller pin a decision branch
+    just for the upcoming step (merged into the session's persistent
+    `branch_choices`). Returns `{ok, status}` — when `done=True` no
+    further `advance` calls will produce records.
+    """
+    from .debug_session import get_store  # noqa: PLC0415
+    sess = get_store().get(session_id)
+    if sess is None:
+        return {"ok": False, "error": f"unknown session {session_id!r}"}
+    if branch_choice_override:
+        sess.branch_choices.update(branch_choice_override)
+    rec = sess.advance_one()
+    return {"ok": True, "status": sess.as_status(),
+            "advanced": rec is not None}
+
+
+@mcp.tool()
+def continue_debug_session(
+    session_id: str,
+    until_step_id: str | None = None,
+    add_breakpoints: list[str] | None = None,
+    max_advance: int = 100,
+) -> dict[str, Any]:
+    """Run steps until the session hits a breakpoint, the specified
+    `until_step_id`, the session's `max_steps` cap, or `max_advance`
+    (this-call cap to prevent UI hangs on infinite loops).
+
+    `add_breakpoints` is merged into the session's persistent
+    breakpoint set before continuing.
+    """
+    from .debug_session import get_store  # noqa: PLC0415
+    sess = get_store().get(session_id)
+    if sess is None:
+        return {"ok": False, "error": f"unknown session {session_id!r}"}
+    if add_breakpoints:
+        sess.breakpoints.update(add_breakpoints)
+    advanced = 0
+    stop_reason = "done"
+    for _ in range(max_advance):
+        # Check breakpoint / until before advancing — if we're paused
+        # AT this step, the caller wants control before it runs.
+        peek = sess.peek_next_id()
+        if peek is None:
+            stop_reason = "done"
+            break
+        if advanced > 0 and peek in sess.breakpoints:
+            stop_reason = "breakpoint"
+            break
+        if advanced > 0 and until_step_id and peek == until_step_id:
+            stop_reason = "until_step"
+            break
+        rec = sess.advance_one()
+        if rec is None:
+            stop_reason = "done"
+            break
+        advanced += 1
+    else:
+        stop_reason = "max_advance"
+    return {
+        "ok": True,
+        "status": sess.as_status(),
+        "advanced": advanced,
+        "stop_reason": stop_reason,
+    }
+
+
+@mcp.tool()
+def stop_debug_session(session_id: str) -> dict[str, Any]:
+    """Drop a debug session. Returns the final status snapshot."""
+    from .debug_session import get_store  # noqa: PLC0415
+    store = get_store()
+    sess = store.get(session_id)
+    if sess is None:
+        return {"ok": False, "error": f"unknown session {session_id!r}"}
+    snapshot = sess.as_status()
+    snapshot["trace"] = list(sess.trace)
+    store.drop(session_id)
+    return {"ok": True, "status": snapshot}
+
+
+@mcp.tool()
+def get_debug_session(session_id: str) -> dict[str, Any]:
+    """Return the current status snapshot + full trace so far.
+    Touches `last_touched` (so the session stays alive while the UI
+    is polling it)."""
+    from .debug_session import get_store  # noqa: PLC0415
+    sess = get_store().get(session_id)
+    if sess is None:
+        return {"ok": False, "error": f"unknown session {session_id!r}"}
+    status = sess.as_status()
+    status["trace"] = list(sess.trace)
+    status["vars_keys"] = sorted(sess.vars_ctx.get("steps", {}).keys())
+    return {"ok": True, "status": status}

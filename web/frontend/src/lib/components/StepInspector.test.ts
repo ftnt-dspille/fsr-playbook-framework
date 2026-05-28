@@ -188,19 +188,15 @@ describe('StepInspector', () => {
     expect(headings).toContain('Branches');
   });
 
-  it('renders the Verify tab and resolves args via render_jinja', async () => {
+  it('Verify tab renders the step via Run this step (rendered_args come back in the result)', async () => {
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
-    // Inject a templated arg so we exercise the rendered branch.
     (fetchNode.arguments.params as any).issue_key = '{{ vars.steps.set_x.x }}';
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Render' }));
-    // Rendered values appear as a <pre> sibling of the provenance chip.
-    // Wait on the actual value text (not the legend's word "stub",
-    // which is always present in the help paragraph).
-    await waitFor(() => expect(screen.getByText('JIR-1')).toBeTruthy());
-    // Non-template strings are shown as literals (no chip at all).
-    expect(screen.getByText('jira')).toBeTruthy();
+    // No standalone Render button anymore — rendered values come back
+    // as part of step_test's Run-this-step response.
+    await fireEvent.click(screen.getByRole('button', { name: /Run this step/ }));
+    await waitFor(() => expect(screen.getAllByText(/JIR-1/).length).toBeGreaterThan(0));
   });
 
   it('Args tab runs picklist precheck on blur and surfaces suggestions', async () => {
@@ -215,44 +211,35 @@ describe('StepInspector', () => {
     expect(screen.getByText(/Open, Closed/)).toBeTruthy();
   });
 
-  it('Verify tab "Past test runs" Load button shows verification_status results', async () => {
+  it('Verify tab auto-loads past test runs without a Load button click', async () => {
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-    // History button was renamed to "Load" so the action verb matches
-    // what the user is doing (loading past runs).
-    await fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+    // Auto-fires on tab open — no Load click required.
     await waitFor(() => screen.getByText('tested_pass'));
     expect(screen.getByText(/live_op_exec/)).toBeTruthy();
     expect(screen.getByText(/ran clean/)).toBeTruthy();
   });
 
-  it('Verify tab Test step button calls step_test and shows status', async () => {
+  it('Verify tab "Run this step" button calls step_test and shows status', async () => {
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Test step' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Run this step/ }));
     await waitFor(() => screen.getByText('executed'));
-    expect(screen.getByText(/JIR-1/)).toBeTruthy();
+    // Auto-render also surfaces JIR-1; just assert *something* did.
+    expect(screen.getAllByText(/JIR-1/).length).toBeGreaterThan(0);
   });
 
-  it('Verify tab Run (safe) button executes read-only run_op and shows output', async () => {
+  it('Verify tab no longer has a standalone Run (safe) button — step_test covers it', async () => {
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-    const runBtn = screen.getByRole('button', { name: 'Run' });
-    expect((runBtn as HTMLButtonElement).disabled).toBe(false);
-    await fireEvent.click(runBtn);
-    await waitFor(() => screen.getByText('ok'));
-    expect(screen.getByText(/JIR-1/)).toBeTruthy();
-  });
-
-  it('Verify tab Run button is locked for non-safe op names', async () => {
-    const branchNode = pb().nodes.find((n) => n.id === 'branch')!;
-    render(StepInspector, { props: { node: branchNode, playbook: pb(), playbookIdx: 0 } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-    // Decision node is not connector_op — Run section absent entirely.
-    expect(screen.queryByRole('button', { name: 'Run' })).toBeNull();
+    // The standalone "Run" button is gone. Only "Run this step" remains.
+    const runThis = screen.queryByRole('button', { name: /Run this step/ });
+    expect(runThis).not.toBeNull();
+    const standaloneRun = screen.queryByRole('button', { name: 'Run' });
+    expect(standaloneRun).toBeNull();
   });
 
   it('renames a branch label via the inline Branches section', async () => {
@@ -365,6 +352,88 @@ describe('StepInspector', () => {
     expect(screen.getByRole('button', { name: 'Examples' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Verify' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Branches' })).toBeNull();
+  });
+
+  it('Connector node now exposes a Samples tab with a mock_result editor', async () => {
+    const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
+    render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
+    // Samples tab is the unified replacement for the old manual_input-
+    // only Simulate tab. Connector ops show the mock_result JSON editor.
+    const samplesTab = screen.getByRole('button', { name: 'Samples' });
+    await fireEvent.click(samplesTab);
+    await waitFor(() => screen.getByText(/Mock output/));
+    const ta = screen.getByLabelText('Mock result JSON') as HTMLTextAreaElement;
+    expect(ta).toBeTruthy();
+    // Type valid JSON, click Save mock, assert it lands on the node args.
+    await fireEvent.input(ta, { target: { value: '{"status":"Success","result":{"x":1}}' } });
+    await fireEvent.click(screen.getByRole('button', { name: /Save mock/ }));
+    const after = visualStore.state.graph!.playbooks[0].nodes.find((n) => n.id === 'fetch')!;
+    expect(after.arguments.mock_result).toEqual({ status: 'Success', result: { x: 1 } });
+  });
+
+  it('set_variable does NOT show a Samples tab (deterministic output)', async () => {
+    const setNode = pb().nodes.find((n) => n.id === 'set_x')!;
+    render(StepInspector, { props: { node: setNode, playbook: pb(), playbookIdx: 0 } });
+    expect(screen.queryByRole('button', { name: 'Samples' })).toBeNull();
+  });
+
+  it('manual_input Samples prompt preview shows option buttons from arguments.options', async () => {
+    // Stamp a manual_input node onto the fixture graph. Options live
+    // at node.arguments.options (the canonical visual-store location)
+    // and on outgoing branch edges. Both should appear as buttons in
+    // the prompt wireframe.
+    const graph = visualStore.state.graph!;
+    const pbNode = graph.playbooks[0];
+    pbNode.nodes.push({
+      id: 'approve',
+      type: 'manual_input',
+      family: 'manual_input',
+      name: 'Approve action',
+      arguments: {
+        title: 'Approve the action?',
+        description: 'Click approve to proceed.',
+        options: [
+          { display: 'approve', primary: true, next: 'a' },
+          { display: 'reject', next: 'a' }
+        ]
+      },
+      for_each: null, comment: null, position: null
+    });
+    pbNode.edges.push(
+      { source: 'approve', target: 'a', label: 'approve', branch_kind: 'branch' },
+      { source: 'approve', target: 'a', label: 'reject', branch_kind: 'branch' }
+    );
+    const mi = pbNode.nodes.find((n) => n.id === 'approve')!;
+    render(StepInspector, { props: { node: mi, playbook: pbNode, playbookIdx: 0 } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
+    await waitFor(() => screen.getByText('Approve the action?'));
+    // The word "approve" appears in the description, the node id
+    // banner, AND the button — assert ≥1 of each.
+    expect(screen.getAllByText('approve').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('reject').length).toBeGreaterThan(0);
+  });
+
+  it('manual_input prompt preview falls back to edge labels when arguments.options is empty', async () => {
+    const graph = visualStore.state.graph!;
+    const pbNode = graph.playbooks[0];
+    pbNode.nodes.push({
+      id: 'edge_only',
+      type: 'manual_input',
+      family: 'manual_input',
+      name: 'Edge-only',
+      arguments: { title: 'Pick one' },  // no options array
+      for_each: null, comment: null, position: null
+    });
+    pbNode.edges.push(
+      { source: 'edge_only', target: 'a', label: 'yep', branch_kind: 'branch' },
+      { source: 'edge_only', target: 'a', label: 'nope', branch_kind: 'branch' }
+    );
+    const mi = pbNode.nodes.find((n) => n.id === 'edge_only')!;
+    render(StepInspector, { props: { node: mi, playbook: pbNode, playbookIdx: 0 } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
+    await waitFor(() => screen.getByText('Pick one'));
+    expect(screen.getByText('yep')).toBeTruthy();
+    expect(screen.getByText('nope')).toBeTruthy();
   });
 
   it('Examples tab "Use" button applies the snippet to the current step', async () => {
