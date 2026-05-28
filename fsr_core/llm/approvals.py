@@ -62,40 +62,63 @@ class SuspendedSession:
         return (now or time.time()) - self.created_at > _TTL_SECONDS
 
 
-_LOCK = threading.Lock()
-_STORE: dict[str, SuspendedSession] = {}
+class InMemoryApprovalGateway:
+    """In-process implementation of the ApprovalGateway protocol.
+    Single-process workers only; for multi-worker / connector use,
+    swap in a sqlite- or Redis-backed gateway."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._store: dict[str, SuspendedSession] = {}
+
+    def stash(self, s: SuspendedSession) -> None:
+        with self._lock:
+            self._gc_locked()
+            self._store[s.approval_id] = s
+
+    def peek(self, approval_id: str) -> SuspendedSession | None:
+        with self._lock:
+            self._gc_locked()
+            return self._store.get(approval_id)
+
+    def pop(self, approval_id: str) -> SuspendedSession | None:
+        """Single-use consume. Returns None if missing or expired."""
+        with self._lock:
+            self._gc_locked()
+            s = self._store.pop(approval_id, None)
+            if s and s.expired():
+                return None
+            return s
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
+    def _gc_locked(self) -> None:
+        now = time.time()
+        dead = [k for k, v in self._store.items() if v.expired(now)]
+        for k in dead:
+            self._store.pop(k, None)
+
+
+# Backwards-compat facade. Existing callers
+# (web/backend/routes/chat.py, tests) use the module-level functions
+# against a process-wide default gateway. The connector instantiates
+# its own PersistedApprovalGateway rather than touching this singleton.
+_DEFAULT = InMemoryApprovalGateway()
 
 
 def stash(s: SuspendedSession) -> None:
-    with _LOCK:
-        _gc_locked()
-        _STORE[s.approval_id] = s
+    _DEFAULT.stash(s)
 
 
 def peek(approval_id: str) -> SuspendedSession | None:
-    with _LOCK:
-        _gc_locked()
-        return _STORE.get(approval_id)
+    return _DEFAULT.peek(approval_id)
 
 
 def pop(approval_id: str) -> SuspendedSession | None:
-    """Single-use consume. Returns None if missing or expired."""
-    with _LOCK:
-        _gc_locked()
-        s = _STORE.pop(approval_id, None)
-        if s and s.expired():
-            return None
-        return s
+    return _DEFAULT.pop(approval_id)
 
 
 def clear() -> None:
-    """Test helper."""
-    with _LOCK:
-        _STORE.clear()
-
-
-def _gc_locked() -> None:
-    now = time.time()
-    dead = [k for k, v in _STORE.items() if v.expired(now)]
-    for k in dead:
-        _STORE.pop(k, None)
+    _DEFAULT.clear()
