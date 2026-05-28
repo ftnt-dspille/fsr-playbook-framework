@@ -140,7 +140,7 @@ def _execute_one_step(s: DebugSession) -> dict[str, Any] | None:
     }
 
     try:
-        from compiler.render_paths import (  # noqa: PLC0415
+        from fsr_core.compiler.render_paths import (  # noqa: PLC0415
             consumed_paths_dict, extract_picklist_refs)
         raw_args_for_extract = cur.get("arguments") or cur.get("args") or {}
         step_record["consumed_paths"] = consumed_paths_dict(
@@ -572,8 +572,8 @@ def build_session(
     # payload under every alias (raw id, slug, jkey) so downstream
     # `vars.steps.<X>` Jinja resolves regardless of which form the
     # template author picked.
-    from compiler.parser import _slugify  # noqa: PLC0415
-    from compiler.samples import extract_samples_block, overlay_into_vars  # noqa: PLC0415
+    from fsr_core.compiler.parser import _slugify  # noqa: PLC0415
+    from fsr_core.compiler.samples import extract_samples_block, overlay_into_vars  # noqa: PLC0415
     vars_ctx: dict[str, Any] = {"input": {"params": dict(input or {})},
                                  "steps": {}}
     samples_map, _ = extract_samples_block(yaml_text)

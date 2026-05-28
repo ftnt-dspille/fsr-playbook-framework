@@ -9,9 +9,9 @@ import asyncio
 
 import pytest
 
-from backend.llm.factory import register, reset_registry
-from backend.llm.fake_provider import FakeProvider
-from backend.llm.provider import TextEvent
+from fsr_core.llm.factory import register, reset_registry
+from fsr_core.llm.fake_provider import FakeProvider
+from fsr_core.llm.provider import TextEvent
 from backend.step_drafter import (
     build_system_prompt,
     draft_step_args,

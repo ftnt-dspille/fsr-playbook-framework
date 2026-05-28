@@ -22,10 +22,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import app
-from backend.llm import approvals as _approvals
-from backend.llm import factory
-from backend.llm.fake_provider import FakeProvider
-from backend.llm.provider import (
+from fsr_core.llm import approvals as _approvals
+from fsr_core.llm import factory
+from fsr_core.llm.fake_provider import FakeProvider
+from fsr_core.llm.provider import (
     DoneEvent,
     Event,
     Message,
@@ -33,7 +33,7 @@ from backend.llm.provider import (
     ToolResultEvent,
     UsageEvent,
 )
-from backend.llm.tools import AUDIT_LOG, dispatch
+from fsr_core.llm.tools import AUDIT_LOG, dispatch
 
 
 @pytest.fixture(autouse=True)

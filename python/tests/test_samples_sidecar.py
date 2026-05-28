@@ -6,13 +6,13 @@ import textwrap
 
 import pytest
 
-from compiler.samples import (
+from fsr_core.compiler.samples import (
     append_samples,
     emit_samples_block,
     extract_samples_block,
     overlay_into_vars,
 )
-from compiler.visual_model import to_visual, from_visual
+from fsr_core.compiler.visual_model import to_visual, from_visual
 
 
 YAML_PLAIN = textwrap.dedent(

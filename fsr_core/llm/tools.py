@@ -25,14 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, get_args, get_origin
 
-_PYTHON_DIR = Path(__file__).resolve().parents[2] / "python"
-# Repo layout: FSRPlaybookYaml/python/, web/backend/llm/tools.py
-# parents[2] = web/, so we need parents[3] for repo root, then /python.
-_PYTHON_DIR = Path(__file__).resolve().parents[3] / "python"
-if str(_PYTHON_DIR) not in sys.path:
-    sys.path.insert(0, str(_PYTHON_DIR))
-
-import mcp_server  # noqa: E402
+import fsr_core.mcp_server as mcp_server
 
 
 # Allow-list. Names match attribute names on `mcp_server`.
@@ -102,7 +95,7 @@ _SAFE_CATEGORIES = {"investigation", "query", "utilities", "enrichment", "verifi
 _SENSITIVE_KEY_RE = re.compile(r"(?i)(password|token|api[_-]?key|secret|authorization|bearer)")
 
 
-_DB_PATH = Path(__file__).resolve().parents[3] / "store" / "fsr_reference.db"
+_DB_PATH = Path(__file__).resolve().parents[2] / "store" / "fsr_reference.db"
 
 
 def _lookup_op_metadata(connector: str, op: str) -> tuple[str | None, str | None]:

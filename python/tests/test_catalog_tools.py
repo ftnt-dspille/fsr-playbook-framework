@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from probes.common import CATALOG_DB_PATH  # noqa: E402
-from mcp_server.tools_catalog import (  # noqa: E402
+from fsr_core.mcp_server.tools_catalog import (  # noqa: E402
     find_api_example,
     find_api_fixture,
     find_api_product,
@@ -238,7 +238,7 @@ def test_propose_http_fallback_prefers_intent_path_over_unrelated_high_conf():
 
 
 def test_intent_tokens_strips_stopwords_and_short_words():
-    from mcp_server.tools_catalog import _intent_tokens
+    from fsr_core.mcp_server.tools_catalog import _intent_tokens
     assert _intent_tokens("create a new incident") == ["create", "new", "incident"]
     assert _intent_tokens("on the endpoint") == []  # all stopwords/short
     # Plural stemming
@@ -246,7 +246,7 @@ def test_intent_tokens_strips_stopwords_and_short_words():
 
 
 def test_is_auth_prelude_catches_known_endpoints():
-    from mcp_server.tools_catalog import _is_auth_prelude
+    from fsr_core.mcp_server.tools_catalog import _is_auth_prelude
     assert _is_auth_prelude("https://api.example.com/oauth2/token")
     assert _is_auth_prelude("https://api.example.com/oauth/access_token")
     assert _is_auth_prelude("https://api.example.com/service_token")
@@ -255,7 +255,7 @@ def test_is_auth_prelude_catches_known_endpoints():
 
 
 def test_expected_method_for_intent():
-    from mcp_server.tools_catalog import (
+    from fsr_core.mcp_server.tools_catalog import (
         _intent_tokens, _expected_method_for_intent,
     )
     assert _expected_method_for_intent(_intent_tokens("create incident")) == "POST"

@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.llm.lmstudio_provider import LMStudioProvider, _to_openai_messages
-from backend.llm.provider import (
+from fsr_core.llm.lmstudio_provider import LMStudioProvider, _to_openai_messages
+from fsr_core.llm.provider import (
     DoneEvent,
     ErrorEvent,
     Message,
@@ -157,7 +157,7 @@ def test_accumulates_tool_call_args_across_deltas():
     turn2 = [_delta_chunk(content="done"),
              _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider_with_chunks([turn1, turn2])
-    with patch("backend.llm.lmstudio_provider.dispatch",
+    with patch("fsr_core.llm.lmstudio_provider.dispatch",
                return_value={"matches": []}) as mock_dispatch:
         events = asyncio.run(_drain(p, system="", messages=[], tools=[], tags={}))
     # The dispatch call must have received reassembled args
@@ -183,7 +183,7 @@ def test_malformed_tool_args_become_empty_dict_not_crash():
     turn2 = [_delta_chunk(content="ok"),
              _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider_with_chunks([turn1, turn2])
-    with patch("backend.llm.lmstudio_provider.dispatch",
+    with patch("fsr_core.llm.lmstudio_provider.dispatch",
                return_value={"matches": []}) as mock_dispatch:
         events = asyncio.run(_drain(p, system="", messages=[], tools=[], tags={}))
     mock_dispatch.assert_called_once()
@@ -204,7 +204,7 @@ def test_parallel_tool_calls_keyed_by_index():
     turn2 = [_delta_chunk(content="ok"),
              _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider_with_chunks([turn1, turn2])
-    with patch("backend.llm.lmstudio_provider.dispatch",
+    with patch("fsr_core.llm.lmstudio_provider.dispatch",
                return_value={}) as mock_dispatch:
         asyncio.run(_drain(p, system="", messages=[], tools=[], tags={}))
     assert mock_dispatch.call_count == 2

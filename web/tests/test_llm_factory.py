@@ -12,9 +12,9 @@ from typing import Any, AsyncIterator
 
 import pytest
 
-from backend.llm import factory
-from backend.llm.fake_provider import FakeProvider
-from backend.llm.provider import (
+from fsr_core.llm import factory
+from fsr_core.llm.fake_provider import FakeProvider
+from fsr_core.llm.provider import (
     DoneEvent,
     Event,
     LLMProvider,

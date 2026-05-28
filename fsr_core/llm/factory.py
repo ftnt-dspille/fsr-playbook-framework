@@ -2,17 +2,39 @@
 
 Routes ask for `get_provider()` (active per settings) or
 `get_provider("lmstudio")` (explicit). Either way we hydrate the provider
-from `backend.settings.load_provider(name)` so URL/key/model live in one
+from a consumer-supplied `ConfigProvider` so URL/key/model live in one
 place. Tests can register a `FakeProvider` to bypass settings entirely.
+
+The web backend installs its `backend.settings`-backed provider at app
+startup via `set_config_provider(...)`; the FortiSOAR connector installs
+one backed by the platform-decrypted `config` dict.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
+from fsr_core.protocols import ConfigProvider
 from .provider import LLMProvider
 
 
 _REGISTRY: dict[str, Callable[..., LLMProvider]] = {}
+_CONFIG_PROVIDER: Optional[ConfigProvider] = None
+
+
+def set_config_provider(provider: ConfigProvider) -> None:
+    """Consumer hook — call once at startup with the implementation that
+    knows how to resolve provider configs in this environment."""
+    global _CONFIG_PROVIDER
+    _CONFIG_PROVIDER = provider
+
+
+def _settings() -> ConfigProvider:
+    if _CONFIG_PROVIDER is None:
+        raise RuntimeError(
+            "fsr_core.llm.factory: no ConfigProvider installed. "
+            "Call set_config_provider(...) at app startup."
+        )
+    return _CONFIG_PROVIDER
 
 
 def register(name: str, factory: Callable[..., LLMProvider]) -> None:
@@ -25,15 +47,12 @@ def register(name: str, factory: Callable[..., LLMProvider]) -> None:
 def get_provider(name: str | None = None, **overrides: Any) -> LLMProvider:
     """Return a configured provider.
 
-    `name=None` → active per settings.
+    `name=None` → active per the installed ConfigProvider.
     `overrides` → override any ProviderConfig field for this call only
       (used in tests; the route handler passes nothing).
     """
-    # Imported here to avoid a circular import at module load: settings →
-    # secrets_store → keyring. Lazy is fine, this runs once per request.
-    from backend import settings as _settings
-
-    chosen = name or _settings.get_active_provider_name()
+    cfg_provider = _settings()
+    chosen = name or cfg_provider.get_active_provider_name()
     fac = _REGISTRY.get(chosen)
     if fac is None:
         raise KeyError(
@@ -41,7 +60,7 @@ def get_provider(name: str | None = None, **overrides: Any) -> LLMProvider:
             f"registered: {sorted(_REGISTRY)}"
         )
 
-    cfg = _settings.load_provider(chosen)
+    cfg = cfg_provider.load_provider(chosen)
     kwargs: dict[str, Any] = {
         "model": cfg.model or None,
         "api_key": cfg.api_key,

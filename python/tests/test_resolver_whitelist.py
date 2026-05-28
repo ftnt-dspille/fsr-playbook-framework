@@ -5,8 +5,8 @@ dropped at compile time, surface as missing wire shape at FSR runtime.
 Each normalizer now hard-errors on keys outside its friendly + canonical
 sets.
 """
-from compiler import compile_yaml
-from compiler.errors import ErrorCode
+from fsr_core.compiler import compile_yaml
+from fsr_core.compiler.errors import ErrorCode
 
 
 def _unknown_param(r):

@@ -8,9 +8,9 @@ gap. Doesn't hit live FSR.
 """
 from __future__ import annotations
 
-from compiler.decompiler import decompile
-from compiler.emitter import emit
-from compiler.roundtrip import diff, normalize_collection
+from fsr_core.compiler.decompiler import decompile
+from fsr_core.compiler.emitter import emit
+from fsr_core.compiler.roundtrip import diff, normalize_collection
 
 # Real step-type UUIDs from the live appliance — keep these stable so the
 # fixture matches what `?$relationships=true` would return.

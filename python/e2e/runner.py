@@ -53,7 +53,7 @@ import yaml
 
 # probes/_env.py is the canonical .env+client loader used everywhere.
 from probes import _env  # type: ignore
-from compiler import compile_yaml
+from fsr_core.compiler import compile_yaml
 
 
 TERMINAL = {"finished", "failed", "terminated", "skipped",

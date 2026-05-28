@@ -273,8 +273,8 @@ def verify_playbook(
     """
     sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
-        from compiler import compile_yaml as _compile, parse_yaml
-        from compiler.typed_walker import walk_playbook
+        from fsr_core.compiler import compile_yaml as _compile, parse_yaml
+        from fsr_core.compiler.typed_walker import walk_playbook
     except ImportError as exc:
         return _err("compiler_unavailable", str(exc))
 

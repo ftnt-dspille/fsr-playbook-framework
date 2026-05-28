@@ -5,8 +5,8 @@ Collection in Python and asserts on the walk result.
 """
 from __future__ import annotations
 
-from compiler.ir import Collection, Playbook, Step
-from compiler.typed_walker import (
+from fsr_core.compiler.ir import Collection, Playbook, Step
+from fsr_core.compiler.typed_walker import (
     BranchResult,
     walk_playbook,
 )

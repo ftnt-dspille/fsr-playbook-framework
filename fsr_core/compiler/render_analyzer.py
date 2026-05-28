@@ -30,7 +30,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from compiler.mi_output_catalog import (
+from fsr_core.compiler.mi_output_catalog import (
     MI_OUTPUT_KEYS,
     MI_SYSTEM_KEYS,
     APPROVAL_MI_STEP_TYPES,

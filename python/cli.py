@@ -18,6 +18,11 @@ import sys
 import warnings
 from pathlib import Path
 
+# Repo root on path so `fsr_core.*` resolves when cli.py is run as a script.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 try:
     from urllib3.exceptions import InsecureRequestWarning
     warnings.simplefilter("ignore", InsecureRequestWarning)
@@ -43,8 +48,8 @@ def cmd_refresh(_args: argparse.Namespace) -> int:
 
 
 def cmd_compile(args: argparse.Namespace) -> int:
-    from compiler import compile_yaml
-    from compiler.errors import ErrorCode
+    from fsr_core.compiler import compile_yaml
+    from fsr_core.compiler.errors import ErrorCode
     text = Path(args.input).read_text()
     lax_codes = None
     if getattr(args, "lax", False):
@@ -75,7 +80,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     raw = _yaml.safe_load(text) or {}
     if "collection" not in raw:
         raw = {"collection": "_analyze", **raw}
-    from compiler.parser import parse_yaml
+    from fsr_core.compiler.parser import parse_yaml
     coll, errs = parse_yaml(_yaml.safe_dump(raw, sort_keys=False))
     if coll is None:
         for e in errs:
@@ -106,7 +111,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
     # The MCP tool is the canonical entry point; reuse it so CLI and
     # MCP behavior never drift.
-    import mcp_server as _mcp
+    import fsr_core.mcp_server as _mcp
     result = _mcp.analyze_playbook(
         yaml_text=text,
         playbook=args.playbook,
@@ -161,7 +166,7 @@ def cmd_dump_step_params(args: argparse.Namespace) -> int:
     per step type combining resolver allowlists + corpus observations
     + flagged gaps.
     """
-    from compiler.step_param_audit import write_audit_dir
+    from fsr_core.compiler.step_param_audit import write_audit_dir
     out_dir = Path(args.out)
     db_path = Path(args.db)
     if not db_path.exists():
@@ -459,7 +464,7 @@ def cmd_push(args: argparse.Namespace) -> int:
                           orphan child rows). Gated on
                           FSR_ALLOW_HARD_DELETE.
     """
-    from compiler import compile_yaml
+    from fsr_core.compiler import compile_yaml
     from probes import _env  # type: ignore
 
     text = Path(args.input).read_text()
@@ -1078,7 +1083,7 @@ def _decompile_to_yaml(coll, db_path: Path) -> str:
     """Thin shim — kept for call-site stability; logic lives in
     `compiler.decompiler.decompile_to_yaml` so the MCP recipe tool and
     the CLI emit identical YAML."""
-    from compiler.decompiler import decompile_to_yaml as _impl
+    from fsr_core.compiler.decompiler import decompile_to_yaml as _impl
     return _impl(coll, db_path)
 
 
@@ -1462,8 +1467,8 @@ def cmd_canvas_check(args: argparse.Namespace) -> int:
 
 def cmd_diff(args: argparse.Namespace) -> int:
     """Compare local YAML against the live state of a collection."""
-    from compiler import compile_yaml
-    from compiler.roundtrip import normalize_collection, diff
+    from fsr_core.compiler import compile_yaml
+    from fsr_core.compiler.roundtrip import normalize_collection, diff
     from probes import _env  # type: ignore
 
     text = Path(args.input).read_text()
@@ -2672,7 +2677,7 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
     nothing on the FSR. Pairs with `fsrpb runs` to find the pb_execution
     id of a failure."""
     text = Path(args.yaml).read_text()
-    from mcp_server import diagnose_yaml_against_pb_execution
+    from fsr_core.mcp_server import diagnose_yaml_against_pb_execution
     out = diagnose_yaml_against_pb_execution(text, args.pb_execution)
     if args.json:
         print(json.dumps(out, indent=2, default=str))
@@ -2705,16 +2710,16 @@ def cmd_picklist(args: argparse.Namespace) -> int:
     """
     sub = args.picklist_cmd
     if sub == "list":
-        from mcp_server import list_picklists
+        from fsr_core.mcp_server import list_picklists
         out = list_picklists()
     elif sub == "show":
-        from mcp_server import get_picklist
+        from fsr_core.mcp_server import get_picklist
         out = get_picklist(args.name)
     elif sub == "for-field":
-        from mcp_server import picklist_for_field
+        from fsr_core.mcp_server import picklist_for_field
         out = picklist_for_field(args.module, args.field)
     elif sub == "resolve":
-        from mcp_server import resolve_picklist_value
+        from fsr_core.mcp_server import resolve_picklist_value
         out = resolve_picklist_value(
             value=args.value,
             picklist_name=args.name, module=args.module, field=args.field,
@@ -2729,7 +2734,7 @@ def cmd_picklist(args: argparse.Namespace) -> int:
 def cmd_jinja_filter(args: argparse.Namespace) -> int:
     """Search the jinja filter catalog and (optionally) show real
     corpus examples. Pure local DB read."""
-    from mcp_server import find_jinja_filter, get_filter_examples
+    from fsr_core.mcp_server import find_jinja_filter, get_filter_examples
     if args.examples:
         out = get_filter_examples(args.query, limit=args.limit)
     else:
@@ -2741,7 +2746,7 @@ def cmd_jinja_filter(args: argparse.Namespace) -> int:
 def cmd_search(args: argparse.Namespace) -> int:
     """FTS over the live playbook corpus. Same as `find` but a single
     one-positional shorthand for `search_playbooks(q)`."""
-    from mcp_server import search_playbooks
+    from fsr_core.mcp_server import search_playbooks
     out = search_playbooks(args.query, limit=args.limit)
     if args.json:
         print(json.dumps(out, indent=2, default=str))
@@ -2759,11 +2764,11 @@ def cmd_recipe(args: argparse.Namespace) -> int:
     """Recipe lookup. `fsrpb generate-recipe` mints; this reads back."""
     sub = args.recipe_cmd
     if sub == "find":
-        from mcp_server import find_recipe
+        from fsr_core.mcp_server import find_recipe
         out = find_recipe(query=args.query or "", kind=args.kind,
                           limit=args.limit)
     elif sub == "show":
-        from mcp_server import find_recipe
+        from fsr_core.mcp_server import find_recipe
         rs = find_recipe(query=args.name, limit=1)
         out = (rs["recipes"][0] if rs.get("recipes")
                else {"error": f"no recipe named {args.name!r}"})
@@ -2875,7 +2880,7 @@ def cmd_assert(args: argparse.Namespace) -> int:
         return 2
     if isinstance(assertions, dict):
         assertions = [assertions]
-    from mcp_server import assert_playbook_outcome
+    from fsr_core.mcp_server import assert_playbook_outcome
     result = assert_playbook_outcome(assertions)
     if args.json:
         print(json.dumps(result, indent=2))
@@ -2900,7 +2905,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     a pre-commit hook.
     """
     text = Path(args.input).read_text()
-    from mcp_server import resolve_yaml
+    from fsr_core.mcp_server import resolve_yaml
     result = resolve_yaml(text)
     if args.json:
         print(json.dumps(result, indent=2))
@@ -2934,7 +2939,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    from compiler import compile_yaml
+    from fsr_core.compiler import compile_yaml
     text = Path(args.input).read_text()
     result = compile_yaml(text, Path(args.db))
     if not result.ok:
@@ -2950,7 +2955,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     """Mirror of the verify_playbook MCP tool. Returns 0 iff
     ready_to_push=True; 1 otherwise. Prints a human-readable punch list
     by default, or `--json` for the raw envelope."""
-    from mcp_server import verify_playbook
+    from fsr_core.mcp_server import verify_playbook
     text = Path(args.input).read_text()
     result = verify_playbook(
         yaml_text=text,
@@ -2988,7 +2993,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     directly — no FSR calls. Phase 2.4 of STATIC_TYPE_VALIDATION_PLAN.
     """
     import sqlite3
-    from mcp_server._shared import DB_PATH
+    from fsr_core.mcp_server._shared import DB_PATH
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -3089,7 +3094,7 @@ def _doctor_coverage(rows: list[dict]) -> dict[str, Any]:
 def cmd_generate_recipe(args: argparse.Namespace) -> int:
     from recipes import generate_threat_feed_recipe, generate_data_ingest_recipe
     from recipes.prechecks import run_recipe_prechecks
-    from compiler import rulesets as rs
+    from fsr_core.compiler import rulesets as rs
 
     info = json.loads(Path(args.info_json).read_text())
 
@@ -3179,7 +3184,7 @@ def cmd_generate_recipe(args: argparse.Namespace) -> int:
 
 def cmd_validate_ingestion(args: argparse.Namespace) -> int:
     import os as _os
-    from compiler import rulesets as rs
+    from fsr_core.compiler import rulesets as rs
 
     in_path = Path(args.input)
     doc = json.loads(in_path.read_text())
@@ -3222,7 +3227,7 @@ def cmd_validate_ingestion(args: argparse.Namespace) -> int:
 def cmd_decompile(args: argparse.Namespace) -> int:
     """FSR JSON -> simplified YAML (one playbook, optionally filtered by name)."""
     import yaml
-    from compiler.decompiler import decompile
+    from fsr_core.compiler.decompiler import decompile
 
     src = json.loads(Path(args.input).read_text())
     coll = decompile(src, Path(args.db))
@@ -3277,7 +3282,7 @@ def cmd_decompile(args: argparse.Namespace) -> int:
 
 
 def cmd_roundtrip(args: argparse.Namespace) -> int:
-    from compiler.roundtrip import roundtrip
+    from fsr_core.compiler.roundtrip import roundtrip
     src = json.loads(Path(args.input).read_text())
     ok, diffs = roundtrip(src, Path(args.db))
     if ok:
@@ -3713,7 +3718,7 @@ def cmd_e2e(args: argparse.Namespace) -> int:
 
 
 def cmd_mcp(_args: argparse.Namespace) -> int:
-    from mcp_server import main as mcp_main
+    from fsr_core.mcp_server import main as mcp_main
     mcp_main()
     return 0
 

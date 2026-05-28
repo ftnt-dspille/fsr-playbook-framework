@@ -7,7 +7,7 @@ right way without burning Anthropic credits.
 
 Example::
 
-    from web.backend.llm.fake_provider import FakeProvider, scripted
+    from fsr_core.llm.fake_provider import FakeProvider, scripted
     fake = FakeProvider(scripted([
         [TextEvent(text="hello"),
          UsageEvent(session_id="s", turn=1, model="fake-1",

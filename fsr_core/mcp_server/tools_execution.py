@@ -224,7 +224,7 @@ def push_playbook(yaml_text: str) -> dict[str, Any]:
     """
     sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
-        from compiler import compile_yaml as _compile
+        from fsr_core.compiler import compile_yaml as _compile
         from probes._env import get_client, get_config
         from e2e.runner import _push, _PushError
     except Exception as e:  # noqa: BLE001

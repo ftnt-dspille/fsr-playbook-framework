@@ -1,4 +1,4 @@
-from compiler import compile_yaml
+from fsr_core.compiler import compile_yaml
 
 
 def _hello(repo_root):

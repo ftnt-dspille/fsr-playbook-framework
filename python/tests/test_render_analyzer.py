@@ -13,9 +13,9 @@ import pytest
 pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
-import mcp_server  # noqa: E402
-import mcp_server._shared  # noqa: E402, F401
-from compiler.render_analyzer import analyze, diagnostics_dict  # noqa: E402
+import fsr_core.mcp_server as mcp_server  # noqa: E402
+import fsr_core.mcp_server._shared  # noqa: E402, F401
+from fsr_core.compiler.render_analyzer import analyze, diagnostics_dict  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -400,7 +400,7 @@ def test_c4_picklist_drift_fires_with_validator():
                     "message": "value not in picklist"}
         return {"ok": True}
 
-    from compiler.render_analyzer import analyze
+    from fsr_core.compiler.render_analyzer import analyze
     diags = analyze(trace, picklist_validator=stub_validator)
     by = _by_kind(diags)
     assert "picklist_drift" in by
@@ -459,7 +459,7 @@ def test_c4_skips_when_validator_cannot_reach_fsr():
     def offline_validator(_pl, _val):
         return {"ok": False, "code": "no_live_fsr",
                 "message": "FSR not configured"}
-    from compiler.render_analyzer import analyze
+    from fsr_core.compiler.render_analyzer import analyze
     diags = analyze(_trace(yaml), picklist_validator=offline_validator)
     assert _by_kind(diags).get("picklist_drift", []) == []
 
@@ -501,7 +501,7 @@ def test_c4_caches_repeated_picklist_value_pairs():
         calls.append((pl, val))
         return {"ok": True}
 
-    from compiler.render_analyzer import analyze
+    from fsr_core.compiler.render_analyzer import analyze
     analyze(_trace(yaml), picklist_validator=counting_validator)
     assert calls == [("AlertStatus", "Open")]  # cached, called once
 

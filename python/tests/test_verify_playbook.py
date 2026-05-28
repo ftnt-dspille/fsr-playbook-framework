@@ -8,7 +8,7 @@ import textwrap
 
 import pytest
 
-from mcp_server import verify_playbook
+from fsr_core.mcp_server import verify_playbook
 
 
 def _yaml(body: str) -> str:

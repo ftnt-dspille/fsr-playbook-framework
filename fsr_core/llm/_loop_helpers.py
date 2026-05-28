@@ -179,11 +179,11 @@ def compile_errors(yaml_text: str) -> str | None:
     blocking errors or None if clean. Imported lazily so a missing
     compiler doesn't break test collection."""
     try:
-        from compiler import compile_yaml as _cy  # type: ignore
+        from fsr_core.compiler import compile_yaml as _cy  # type: ignore
     except Exception as e:
         return f"compiler import failed: {e}"
 
-    db = Path(__file__).resolve().parents[3] / "store" / "fsr_reference.db"
+    db = Path(__file__).resolve().parents[2] / "store" / "fsr_reference.db"
     res = _cy(yaml_text, db)
     if res.ok:
         return None

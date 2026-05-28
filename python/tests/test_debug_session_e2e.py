@@ -24,9 +24,9 @@ import pytest
 pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
-import mcp_server  # noqa: E402
-import mcp_server._shared  # noqa: E402, F401
-from mcp_server import debug_session as _ds  # noqa: E402
+import fsr_core.mcp_server as mcp_server  # noqa: E402
+import fsr_core.mcp_server._shared  # noqa: E402, F401
+from fsr_core.mcp_server import debug_session as _ds  # noqa: E402
 
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"

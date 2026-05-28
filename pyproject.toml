@@ -18,5 +18,12 @@ dependencies = [
 fsrpb = "cli:main"
 
 [tool.setuptools]
-package-dir = {"" = "python"}
-packages = ["probes", "compiler", "store", "e2e"]
+# fsr_core lives at the repo root; legacy packages still under python/.
+package-dir = {"" = ".", "probes" = "python/probes", "store" = "python/store", "e2e" = "python/e2e"}
+packages = [
+    "probes", "store", "e2e",
+    "fsr_core",
+    "fsr_core.compiler", "fsr_core.compiler.resolver", "fsr_core.compiler.rulesets",
+    "fsr_core.mcp_server",
+    "fsr_core.llm",
+]

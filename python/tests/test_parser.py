@@ -1,5 +1,5 @@
-from compiler.errors import ErrorCode
-from compiler.parser import parse_yaml
+from fsr_core.compiler.errors import ErrorCode
+from fsr_core.compiler.parser import parse_yaml
 
 
 def test_minimal_ok():

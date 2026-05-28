@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from compiler import compile_yaml
-from compiler.roundtrip import roundtrip
+from fsr_core.compiler import compile_yaml
+from fsr_core.compiler.roundtrip import roundtrip
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 

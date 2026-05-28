@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import textwrap
 
-from compiler.render_paths import (
+from fsr_core.compiler.render_paths import (
     ConsumedPath,
     consumed_paths_dict,
     extract_consumed_paths,
@@ -120,7 +120,7 @@ def test_malformed_template_does_not_raise():
 
 
 def test_extract_picklist_refs_simple():
-    from compiler.render_paths import extract_picklist_refs
+    from fsr_core.compiler.render_paths import extract_picklist_refs
     out = extract_picklist_refs(
         "{{ 'AlertStatus' | picklist('Open') }}"
     )
@@ -129,7 +129,7 @@ def test_extract_picklist_refs_simple():
 
 
 def test_extract_picklist_refs_nested_with_locations():
-    from compiler.render_paths import extract_picklist_refs
+    from fsr_core.compiler.render_paths import extract_picklist_refs
     args = {
         "fields": {
             "status":   "{{ 'AlertStatus' | picklist('Open') }}",
@@ -143,7 +143,7 @@ def test_extract_picklist_refs_nested_with_locations():
 
 
 def test_extract_picklist_refs_skips_literals_without_filter():
-    from compiler.render_paths import extract_picklist_refs
+    from fsr_core.compiler.render_paths import extract_picklist_refs
     assert extract_picklist_refs("just text") == []
     assert extract_picklist_refs("{{ vars.steps.x.y }}") == []
 
@@ -175,8 +175,8 @@ pytest.importorskip(
     "mcp.server.fastmcp",
     reason="mcp package not installed",
 )
-import mcp_server  # noqa: E402
-import mcp_server._shared  # noqa: E402, F401
+import fsr_core.mcp_server as mcp_server  # noqa: E402
+import fsr_core.mcp_server._shared  # noqa: E402, F401
 
 
 def test_consumed_paths_attached_to_trace(monkeypatch):

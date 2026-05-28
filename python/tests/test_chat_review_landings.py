@@ -7,7 +7,7 @@ top-of-TODO.md follow-up block for the change context.
 """
 from __future__ import annotations
 
-from compiler import compile_yaml
+from fsr_core.compiler import compile_yaml
 
 
 # ---- Trigger defaults (Issue 1) ----------------------------------

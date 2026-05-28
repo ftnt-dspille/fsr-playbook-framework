@@ -12,8 +12,8 @@ These tests pin the new behavior so the regression doesn't return.
 """
 from __future__ import annotations
 
-from compiler import compile_yaml
-from compiler.errors import ErrorCode
+from fsr_core.compiler import compile_yaml
+from fsr_core.compiler.errors import ErrorCode
 
 
 def _no_unknown_param_warnings(res) -> list:

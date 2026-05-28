@@ -15,9 +15,9 @@ from fastapi.testclient import TestClient
 
 from backend import app as app_module
 from backend import history as history_db
-from backend.llm import factory
-from backend.llm.fake_provider import FakeProvider
-from backend.llm.provider import (
+from fsr_core.llm import factory
+from fsr_core.llm.fake_provider import FakeProvider
+from fsr_core.llm.provider import (
     DoneEvent,
     Event,
     Message,
@@ -254,7 +254,7 @@ def test_chat_no_api_key_returns_error_event(monkeypatch):
 # Self-repair helpers now live in _loop_helpers, shared by both providers.
 
 def test_compile_errors_helper_flags_broken_yaml():
-    from backend.llm._loop_helpers import compile_errors
+    from fsr_core.llm._loop_helpers import compile_errors
     bad = "collection: T\nplaybooks: []\n"
     out = compile_errors(bad)
     assert out is not None
@@ -262,7 +262,7 @@ def test_compile_errors_helper_flags_broken_yaml():
 
 
 def test_compile_errors_helper_returns_none_on_clean_yaml():
-    from backend.llm._loop_helpers import compile_errors
+    from fsr_core.llm._loop_helpers import compile_errors
     good = (
         "collection: Hello\n"
         "playbooks:\n"
@@ -278,7 +278,7 @@ def test_compile_errors_helper_returns_none_on_clean_yaml():
 
 
 def test_extract_yaml_block_picks_last_fence():
-    from backend.llm._loop_helpers import extract_yaml_block
+    from fsr_core.llm._loop_helpers import extract_yaml_block
     txt = "intro\n```yaml\na: 1\n```\nthen\n```yaml\nb: 2\n```\n"
     assert extract_yaml_block(txt) == "b: 2\n"
     assert extract_yaml_block("nothing here") is None

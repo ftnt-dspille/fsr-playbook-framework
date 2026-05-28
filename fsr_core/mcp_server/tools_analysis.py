@@ -138,7 +138,7 @@ def step_through_playbook(yaml_text: str,
         # The analyzer (Phase 3) cross-references these against the
         # producer's output_shape.
         try:
-            from compiler.render_paths import (  # noqa: PLC0415
+            from fsr_core.compiler.render_paths import (  # noqa: PLC0415
                 consumed_paths_dict, extract_picklist_refs)
             raw_args_for_extract = (cur.get("arguments")
                                     or cur.get("args") or {})
@@ -563,7 +563,7 @@ def analyze_playbook(yaml_text: str,
         return {**sim, "diagnostics": [],
                 "error_count": 0, "warning_count": 0}
 
-    from compiler.render_analyzer import diagnostics_dict  # noqa: PLC0415
+    from fsr_core.compiler.render_analyzer import diagnostics_dict  # noqa: PLC0415
     # Pull the parsed playbook node so the analyzer can reach into
     # `arguments.required_fields` style metadata if it ever needs to;
     # current C3 doesn't, but P5 will.
@@ -763,7 +763,7 @@ def step_test(yaml_text: str,
     # Match the IR's id-synthesis: when a step omits `id:`, the parser
     # slugifies `name:` (lowercase, non-alphanum → `_`). The visual layer
     # sends that synthesized id, so we must apply the same algorithm here.
-    from compiler.parser import _slugify  # local import: avoid cold-start cost
+    from fsr_core.compiler.parser import _slugify  # local import: avoid cold-start cost
     target = None
     for s in steps:
         if not isinstance(s, dict):
@@ -791,7 +791,7 @@ def step_test(yaml_text: str,
     # `vars.steps.<key>` by `name.replace(" ", "_")` (see
     # `compiler.typed_walker._jinja_key`). Expose under both forms so a
     # template using either resolves correctly.
-    from compiler.samples import extract_samples_block, overlay_into_vars
+    from fsr_core.compiler.samples import extract_samples_block, overlay_into_vars
     samples_map, _stripped = extract_samples_block(yaml_text)
     pb_samples = samples_map.get(pb.get("name") or "", {}) or {}
     expanded: dict[str, Any] = {}

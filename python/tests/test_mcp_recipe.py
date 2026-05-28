@@ -15,8 +15,8 @@ import pytest
 pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
-import mcp_server  # noqa: E402
-import mcp_server._shared  # noqa: E402, F401
+import fsr_core.mcp_server as mcp_server  # noqa: E402
+import fsr_core.mcp_server._shared  # noqa: E402, F401
 
 # Minimum fields the generator inspects: name, version, label, operations.
 _FAKE_INFO = {
@@ -67,7 +67,7 @@ def stub_generators(monkeypatch):
         recipes, "generate_data_ingest_recipe", _fake_data_ingest,
     )
 
-    from compiler import decompiler
+    from fsr_core.compiler import decompiler
     monkeypatch.setattr(
         decompiler, "decompile_to_yaml",
         lambda fsr_json, db_path: "collection: Fake Recipe\nplaybooks: []\n",

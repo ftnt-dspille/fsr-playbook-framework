@@ -2,7 +2,7 @@
 
 POST /api/chat with {messages: [{role, content}], current_yaml?: str}.
 Streams Server-Sent Events with the normalized event shape from
-backend.llm.provider.
+fsr_core.llm.provider.
 """
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from backend import settings as _settings
-from backend.llm.factory import get_provider
-from backend.llm.provider import (
+from fsr_core.llm.factory import get_provider
+from fsr_core.llm.provider import (
     ApprovalRequestEvent,
     DoneEvent,
     ErrorEvent,
@@ -28,11 +28,11 @@ from backend.llm.provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from backend.llm import approvals as _approval_store
-from backend.llm import ladder as _ladder
+from fsr_core.llm import approvals as _approval_store
+from fsr_core.llm import ladder as _ladder
 from backend.system_prompt import build_system_prompt
 from backend import history as history_db
-from backend.llm.usage_log import est_tokens, log_turn
+from fsr_core.llm.usage_log import est_tokens, log_turn
 
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -394,7 +394,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                     assistant_buf.append(ev.text)
                     # Sniff out a fenced ```yaml block from the running
                     # buffer so a block split across deltas still scores.
-                    from backend.llm._loop_helpers import extract_yaml_block
+                    from fsr_core.llm._loop_helpers import extract_yaml_block
                     found = extract_yaml_block("".join(assistant_buf))
                     if found:
                         latest_assistant_yaml = found

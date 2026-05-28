@@ -31,7 +31,7 @@ def _parse(yaml_text: str):
     MCP entry point or from web tests interchangeably."""
     sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
-        from compiler import parse_yaml
+        from fsr_core.compiler import parse_yaml
     except ImportError as exc:
         return None, [{"code": "compiler_unavailable", "message": str(exc)}]
     coll, errs = parse_yaml(yaml_text)

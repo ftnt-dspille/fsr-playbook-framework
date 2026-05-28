@@ -123,7 +123,7 @@ def api_examples(q: str, product: str | None = None,
     _py = REPO_ROOT / "python"
     if str(_py) not in _sys.path:
         _sys.path.insert(0, str(_py))
-    from mcp_server import search_api_examples as _search  # type: ignore
+    from fsr_core.mcp_server import search_api_examples as _search  # type: ignore
     return _search(query=q, product=product, limit=limit)
 
 
@@ -139,7 +139,7 @@ def synthesize_http_step(entry_id: int, step_name: str = "Call API") -> dict[str
     _py = REPO_ROOT / "python"
     if str(_py) not in _sys.path:
         _sys.path.insert(0, str(_py))
-    from mcp_server import synthesize_http_step as _synth  # type: ignore
+    from fsr_core.mcp_server import synthesize_http_step as _synth  # type: ignore
     step = _synth(entry_id=entry_id, step_name=step_name)
     if step.get("error"):
         raise HTTPException(404, step["error"])

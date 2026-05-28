@@ -21,7 +21,7 @@ from typing import Any
 from .provider import LadderEvent, LadderRung
 
 
-_REPO = Path(__file__).resolve().parents[3]
+_REPO = Path(__file__).resolve().parents[2]
 _DB = _REPO / "store" / "fsr_reference.db"
 
 
@@ -36,7 +36,7 @@ def _has_var_reachability(errs: list[Any]) -> bool:
 def evaluate(yaml_text: str) -> LadderEvent:
     """Run a fast offline scoring pass against the current YAML."""
     try:
-        from compiler import compile_yaml as _cy  # type: ignore
+        from fsr_core.compiler import compile_yaml as _cy  # type: ignore
     except Exception as exc:  # noqa: BLE001
         return LadderEvent(
             rungs=[

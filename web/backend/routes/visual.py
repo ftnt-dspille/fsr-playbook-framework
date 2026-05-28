@@ -15,8 +15,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from compiler.visual_model import to_visual, from_visual
-from compiler.samples import (
+from fsr_core.compiler.visual_model import to_visual, from_visual
+from fsr_core.compiler.samples import (
     append_samples,
     extract_samples_block,
 )

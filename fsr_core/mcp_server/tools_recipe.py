@@ -174,7 +174,7 @@ def generate_recipe(
 
     # Decompile to YAML for the agent + (optional) persistence.
     try:
-        from compiler.decompiler import decompile_to_yaml  # noqa: PLC0415
+        from fsr_core.compiler.decompiler import decompile_to_yaml  # noqa: PLC0415
         yaml_text = decompile_to_yaml(fsr_json, _shared.DB_PATH)
     except Exception as exc:  # noqa: BLE001
         yaml_text = f"# decompile failed: {exc!r}\n"

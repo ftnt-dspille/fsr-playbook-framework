@@ -350,7 +350,7 @@ def _sniff_set_variable_steps(text: str) -> list[_SetVarStep]:
 def _reserved_keys() -> set[str]:
     """Lazy import of the authoritative reserved-keys set so we never
     drift from the validator/resolver."""
-    from compiler.validator import _RESERVED_VARS_KEYS
+    from fsr_core.compiler.validator import _RESERVED_VARS_KEYS
     return _RESERVED_VARS_KEYS
 
 

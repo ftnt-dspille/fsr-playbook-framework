@@ -385,7 +385,7 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
     """
     sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
-        from compiler import compile_yaml as _compile
+        from fsr_core.compiler import compile_yaml as _compile
     except ImportError as exc:
         return _err("compiler_unavailable", f"compiler not available: {exc}")
 
@@ -602,7 +602,7 @@ def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
     """
     sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
-        from compiler import compile_yaml as _compile
+        from fsr_core.compiler import compile_yaml as _compile
     except ImportError as exc:
         return _err("compiler_unavailable", f"compiler not available: {exc}")
 

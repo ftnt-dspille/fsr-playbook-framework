@@ -39,7 +39,7 @@ _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n", re.IGNORECASE)
 
 
 def _verify(yaml_text: str, *, live: bool) -> dict[str, Any]:
-    from mcp_server import verify_playbook
+    from fsr_core.mcp_server import verify_playbook
     return verify_playbook(yaml_text=yaml_text, live_probe=live)
 
 
@@ -104,7 +104,7 @@ def _first_playbook_name(yaml_text: str) -> str | None:
 
 
 def _compile_obj(yaml_text: str) -> dict[str, Any]:
-    from mcp_server import compile_yaml
+    from fsr_core.mcp_server import compile_yaml
     return compile_yaml(yaml_text, verbose=True)
 
 
@@ -320,7 +320,7 @@ def score(
             }
         else:
             try:
-                from mcp_server import dry_run_playbook  # noqa: PLC0415
+                from fsr_core.mcp_server import dry_run_playbook  # noqa: PLC0415
                 kw = dict(dry_run_kwargs or {})
                 # Infer playbook name from the YAML when the caller didn't
                 # pin one. Lets re-baseline runs exercise tier-3 without

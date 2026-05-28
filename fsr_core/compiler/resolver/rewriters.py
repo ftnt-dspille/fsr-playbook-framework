@@ -231,7 +231,7 @@ class RewriterMixin:
         and the user see what we did.
         """
         # Lazy import to avoid a circular dep with validator.py.
-        from compiler.validator import _RESERVED_VARS_KEYS
+        from fsr_core.compiler.validator import _RESERVED_VARS_KEYS
 
         renames: dict[str, str] = {}
         for si, step in enumerate(pb.steps):

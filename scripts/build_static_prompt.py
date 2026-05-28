@@ -30,7 +30,7 @@ if str(PYTHON_DIR) not in sys.path:
 
 # Friendly forms + canonical mapping live in tools_discovery.
 # Import only the data; do not pull in MCP server side effects.
-from mcp_server.tools_discovery import (  # noqa: E402
+from fsr_core.mcp_server.tools_discovery import (  # noqa: E402
     _SHORT_TO_CANONICAL,
     _FRIENDLY_FORMS,
 )

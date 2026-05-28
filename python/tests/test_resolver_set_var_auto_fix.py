@@ -8,7 +8,7 @@ Both must catch every Jinja access form (dotted, single-quoted bracket,
 double-quoted bracket, .get('...') / .get("...")) so the agent doesn't
 need a prompt rule about which access shape to use.
 """
-from compiler import compile_yaml
+from fsr_core.compiler import compile_yaml
 
 
 def _show_popup_description(fsr_json: dict) -> str:

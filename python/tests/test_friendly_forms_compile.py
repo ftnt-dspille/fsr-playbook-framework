@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import yaml
 
-from compiler import compile_yaml
+from fsr_core.compiler import compile_yaml
 
-from mcp_server import _FRIENDLY_FORMS
+from fsr_core.mcp_server import _FRIENDLY_FORMS
 
 
 # Friendly forms that document a non-trigger step type. We synthesize a

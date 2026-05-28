@@ -32,7 +32,7 @@ if os.environ.get("FSR_SUPPRESS_INSECURE_WARNING", "true").lower() != "false":
 
 # Smoke-import the compiler so we fail fast if the integration is broken.
 try:
-    import compiler  # noqa: F401
+    import fsr_core.compiler as compiler  # noqa: F401
     _compiler_ok = True
     _compiler_err: str | None = None
 except Exception as e:  # pragma: no cover
@@ -41,6 +41,28 @@ except Exception as e:  # pragma: no cover
 
 
 app = FastAPI(title="FSR Playbook Studio", version="0.0.1")
+
+# Install the backend-settings-backed ConfigProvider so fsr_core.llm
+# can resolve provider configs without importing the web backend.
+from fsr_core.llm import factory as _llm_factory  # noqa: E402
+from . import settings as _settings  # noqa: E402
+from fsr_core.protocols import ProviderConfig as _CoreProviderConfig  # noqa: E402
+
+
+class _BackendConfigProvider:
+    """Adapter from `backend.settings` to fsr_core's ConfigProvider."""
+    def get_active_provider_name(self) -> str:
+        return _settings.get_active_provider_name()
+
+    def load_provider(self, name: str):
+        cfg = _settings.load_provider(name)
+        return _CoreProviderConfig(
+            name=cfg.name, base_url=cfg.base_url,
+            api_key=cfg.api_key, model=cfg.model,
+        )
+
+
+_llm_factory.set_config_provider(_BackendConfigProvider())
 
 from .routes.yaml_routes import router as yaml_router  # noqa: E402
 from .routes.chat import router as chat_router  # noqa: E402

@@ -15,8 +15,8 @@ pytest.importorskip(
     reason="mcp package not installed (pip install mcp)",
 )
 
-import mcp_server  # noqa: E402
-import mcp_server._shared  # noqa: E402, F401
+import fsr_core.mcp_server as mcp_server  # noqa: E402
+import fsr_core.mcp_server._shared  # noqa: E402, F401
 
 
 @pytest.fixture(autouse=True)
