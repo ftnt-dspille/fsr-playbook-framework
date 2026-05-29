@@ -117,3 +117,155 @@ def emit_decision_step(
     lines.append("      default: true")
     lines.append(f"      next: {default_branch['next']}")
     return {"ok": True, "yaml": "\n".join(lines) + "\n"}
+
+
+# --- Widget card emitters --------------------------------------------------
+#
+# These are not playbook step emitters; they're conversation-flow events
+# the agent emits to drive the widget UI (per
+# `FSR_PLAYBOOK_BUILDER_CONNECTOR_CONTRACT.md`). Each tool validates its
+# input and echoes it back; the connector's `_wire_transcript`
+# post-processes the tool_use into a dedicated transcript event so the
+# widget sees a `choice_card` / `action_card` / `manual_input` and the
+# envelope's stop_reason becomes the matching `awaiting_*`.
+#
+# Behavior contract: when the agent calls one of these tools, the turn
+# ends after the call. The connector truncates any further transcript
+# events past the card so the widget always sees the card as the last
+# event of the turn.
+
+
+@mcp.tool()
+def emit_choice_card(
+    id: str,
+    prompt: str,
+    options: list[dict[str, Any]],
+    multi: bool = False,
+    min_select: int = 1,
+    max_select: int | None = None,
+) -> dict[str, Any]:
+    """Emit a `choice_card` so the widget renders pickable chips and
+    halts the turn until the user picks. Use this for branching
+    decisions ("immediate action vs build a playbook", "which
+    connector?", etc.) instead of asking in prose.
+
+    `options` is a list of `{label, value, hint?}`. `value` is what the
+    widget echoes back on resume — pick stable, machine-readable values."""
+    if not isinstance(id, str) or not id.strip():
+        return _err("missing_id", "id must be a non-empty string")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return _err("missing_prompt", "prompt must be a non-empty string")
+    if not isinstance(options, list) or len(options) < 2:
+        return _err("too_few_options",
+                    "options must be a list of at least 2 entries")
+    seen_values: set[str] = set()
+    for i, opt in enumerate(options):
+        if not isinstance(opt, dict):
+            return _err("bad_option", f"options[{i}] must be an object")
+        for k in ("label", "value"):
+            if not opt.get(k) or not isinstance(opt[k], str):
+                return _err("bad_option",
+                            f"options[{i}] missing string field {k!r}")
+        if opt["value"] in seen_values:
+            return _err("duplicate_value",
+                        f"options[{i}].value duplicates an earlier entry")
+        seen_values.add(opt["value"])
+    if not isinstance(multi, bool):
+        return _err("bad_multi", "multi must be boolean")
+    if not isinstance(min_select, int) or min_select < 0:
+        return _err("bad_min_select", "min_select must be a non-negative int")
+    if max_select is not None:
+        if not isinstance(max_select, int) or max_select < min_select:
+            return _err("bad_max_select",
+                        "max_select must be an int >= min_select")
+    return {
+        "ok": True,
+        "card": {
+            "type": "choice_card",
+            "id": id,
+            "prompt": prompt,
+            "multi": multi,
+            "min_select": min_select,
+            "max_select": max_select,
+            "options": options,
+        },
+    }
+
+
+@mcp.tool()
+def emit_action_card(
+    id: str,
+    connector: str,
+    operation: str,
+    summary: str,
+    args: dict[str, Any],
+    editable_fields: list[str],
+) -> dict[str, Any]:
+    """Emit an `action_card` so the widget renders an editable preview
+    of a connector operation and halts the turn until the user confirms
+    or cancels. On confirm, the widget calls chat_resume with the
+    (possibly-edited) args and the agent runs the operation in the
+    next turn."""
+    for label, val in (("id", id), ("connector", connector),
+                       ("operation", operation), ("summary", summary)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+    if not isinstance(args, dict):
+        return _err("bad_args", "args must be an object")
+    if not isinstance(editable_fields, list) or not all(
+            isinstance(f, str) for f in editable_fields):
+        return _err("bad_editable_fields",
+                    "editable_fields must be a list of strings")
+    bad = [f for f in editable_fields if f not in args]
+    if bad:
+        return _err("editable_fields_not_in_args",
+                    f"editable_fields not present in args: {bad}")
+    return {
+        "ok": True,
+        "card": {
+            "type": "action_card",
+            "id": id,
+            "connector": connector,
+            "operation": operation,
+            "summary": summary,
+            "args": args,
+            "editable_fields": editable_fields,
+        },
+    }
+
+
+@mcp.tool()
+def emit_manual_input(
+    id: str,
+    workflow_run_iri: str,
+    question: str,
+    fields: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Emit a `manual_input` event so the widget renders a form for a
+    paused playbook gate. `workflow_run_iri` ties the response back to
+    the FortiSOAR workflow runtime; the widget submits via the
+    connector's `respond_manual_input` operation, not `chat_resume`."""
+    for label, val in (("id", id), ("workflow_run_iri", workflow_run_iri),
+                       ("question", question)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+    if not isinstance(fields, list) or not fields:
+        return _err("no_fields",
+                    "fields must be a non-empty list of {name, label, default?}")
+    for i, f in enumerate(fields):
+        if not isinstance(f, dict):
+            return _err("bad_field", f"fields[{i}] must be an object")
+        for k in ("name", "label"):
+            if not f.get(k) or not isinstance(f[k], str):
+                return _err("bad_field",
+                            f"fields[{i}] missing string field {k!r}")
+    return {
+        "ok": True,
+        "card": {
+            "type": "manual_input",
+            "id": id,
+            "workflow_run_iri": workflow_run_iri,
+            "question": question,
+            "fields": fields,
+        },
+    }

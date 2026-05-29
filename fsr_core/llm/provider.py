@@ -6,7 +6,7 @@ event stream so the SSE route doesn't care which backend it's talking to.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Literal, Protocol
+from typing import Any, AsyncIterator, Literal, Protocol, Union
 
 
 Role = Literal["user", "assistant"]
@@ -103,41 +103,16 @@ class UsageEvent:
     kind: Literal["usage"] = "usage"
 
 
-@dataclass
-class LadderRung:
-    """One rung on the success ladder for the current YAML.
-
-    `id` is one of `compiles`, `runs`, `works`. `state` is `passed`,
-    `failed`, `skipped`, or `pending`. `summary` is a short human
-    string the UI renders verbatim.
-    """
-    id: str
-    label: str
-    state: Literal["passed", "failed", "skipped", "pending"]
-    summary: str = ""
-
-
-@dataclass
-class LadderEvent:
-    """Emitted at the end of each chat turn when there's a meaningful
-    YAML to score. Powers the in-chat ladder strip.
-
-    `error_count` is the count of blocking compile errors (used by the
-    UI to show the error trend ↘ → ↗ across turns).
-    """
-    rungs: list[LadderRung]
-    error_count: int
-    warning_count: int
-    achieved: int
-    """Highest rung index passed (1-based; 0 means even Compiles failed)."""
-    kind: Literal["ladder"] = "ladder"
-
-
-Event = (
-    TextEvent | ToolUseEvent | ToolResultEvent
-    | DoneEvent | ErrorEvent | UsageEvent | LadderEvent
-    | ApprovalRequestEvent
-)
+# NOTE: typing.Union, not PEP 604 `X | Y`. This is a runtime assignment
+# (a type alias), so the `|` operator would execute at import time and
+# raise TypeError on Python 3.9 — the FortiSOAR runtime baseline. The
+# `from __future__ import annotations` above only defers *annotations*,
+# not this expression. Keep it Union-form for 3.9 compatibility.
+Event = Union[
+    TextEvent, ToolUseEvent, ToolResultEvent,
+    DoneEvent, ErrorEvent, UsageEvent,
+    ApprovalRequestEvent,
+]
 
 
 @dataclass

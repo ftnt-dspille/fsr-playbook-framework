@@ -41,6 +41,14 @@ export async function patchProvider(
 
 export type ProbeResult = { ok: boolean; error?: string; latency_ms?: number; note?: string };
 
+export type LlmHealth = ProbeResult & { active: string | null };
+
+export async function getLlmHealth(): Promise<LlmHealth> {
+  const r = await fetch('/api/llm/health');
+  if (!r.ok) throw new Error(`llm/health ${r.status}`);
+  return r.json();
+}
+
 export async function testProvider(
   name: string,
   body: { base_url?: string; api_key?: string }
@@ -419,13 +427,6 @@ export async function compileYaml(text: string): Promise<CompileResult> {
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
-export type LadderRung = {
-  id: 'compiles' | 'runs' | 'works';
-  label: string;
-  state: 'passed' | 'failed' | 'skipped' | 'pending';
-  summary: string;
-};
-
 export type ChatEvent =
   | { kind: 'text'; text: string }
   | {
@@ -450,13 +451,6 @@ export type ChatEvent =
       cache_read?: number;
       cache_write?: number;
       tool_calls?: { name: string; args_chars: number; result_chars: number }[];
-    }
-  | {
-      kind: 'ladder';
-      rungs: LadderRung[];
-      error_count: number;
-      warning_count: number;
-      achieved: number;
     }
   | {
       kind: 'approval_request';
@@ -484,8 +478,6 @@ export function parseChatEvent(event: string, data: string): ChatEvent | null {
         return { kind: 'tool_result', ...obj };
       case 'usage':
         return { kind: 'usage', ...obj };
-      case 'ladder':
-        return { kind: 'ladder', ...obj };
       case 'approval_request':
         return { kind: 'approval_request', ...obj };
       case 'done':

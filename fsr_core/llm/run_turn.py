@@ -3,7 +3,7 @@
 `run_agent_turn` consumes the event stream from `provider.stream()` and
 performs the side effects that used to live inline in
 `web/backend/routes/chat.py`: assistant-text coalescing, tool_use /
-tool_result history rows, YAML sniffing for downstream ladder scoring,
+tool_result history rows, YAML sniffing for downstream consumers,
 mid-stream tag mutation when the assistant validates/compiles a YAML
 body, and first-UsageEvent retroactive user-message logging.
 
@@ -35,7 +35,6 @@ from .provider import (
     ErrorEvent,
     Event,
     LLMProvider,
-    LadderEvent,
     Message,
     TextEvent,
     ToolResultEvent,
@@ -68,8 +67,8 @@ class TurnResult:
     `resume_agent_turn`.
 
     `last_assistant_yaml` is the freshest fenced ```yaml block the
-    assistant emitted during this turn, surfaced so the caller can
-    score a ladder against it without re-parsing the transcript.
+    assistant emitted during this turn, surfaced so callers can use
+    it without re-parsing the transcript.
 
     `tags` is the same dict the caller passed in (or a fresh one if
     they passed None). Mutated mid-stream when the assistant uses
@@ -83,9 +82,9 @@ class TurnResult:
     error: Optional[str] = None
     final_seq: int = 0
     """Next available seq value in the current turn after the stream
-    completes. Consumers persisting post-stream rows (e.g. the web
-    app's ladder snapshot) use this to avoid colliding with the
-    transcript rows the function already wrote."""
+    completes. Consumers persisting post-stream rows use this to
+    avoid colliding with the transcript rows the function already
+    wrote."""
 
 
 class _TextCoalescer:
@@ -211,7 +210,7 @@ async def run_agent_turn(
 
     Returns: TurnResult with the full transcript, stop_reason, captured
     session_id (from the first UsageEvent), and last_assistant_yaml
-    (freshest fenced yaml block, for caller-side ladder scoring).
+    (freshest fenced yaml block, for caller use).
     """
     if tools is None:
         tools = []

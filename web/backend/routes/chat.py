@@ -21,7 +21,6 @@ from fsr_core.llm.provider import (
     DoneEvent,
     ErrorEvent,
     Event,
-    LadderEvent,
     Message,
     TextEvent,
     ToolResultEvent,
@@ -29,7 +28,6 @@ from fsr_core.llm.provider import (
     UsageEvent,
 )
 from fsr_core.llm import approvals as _approval_store
-from fsr_core.llm import ladder as _ladder
 from fsr_core.llm.run_turn import run_agent_turn, resume_agent_turn
 from backend.system_prompt import build_system_prompt
 from backend import history as history_db
@@ -104,20 +102,6 @@ def _serialize(event: Event) -> dict[str, Any]:
                      "result_chars": t.result_chars}
                     for t in event.tool_calls
                 ],
-            }),
-        }
-    if isinstance(event, LadderEvent):
-        return {
-            "event": "ladder",
-            "data": json.dumps({
-                "rungs": [
-                    {"id": r.id, "label": r.label,
-                     "state": r.state, "summary": r.summary}
-                    for r in event.rungs
-                ],
-                "error_count": event.error_count,
-                "warning_count": event.warning_count,
-                "achieved": event.achieved,
             }),
         }
     if isinstance(event, ApprovalRequestEvent):
@@ -327,8 +311,8 @@ async def chat(body: ChatIn) -> EventSourceResponse:
         # The producer task calls run_agent_turn with on_event=queue.put;
         # this generator pops events off the queue and yields SSE frames.
         # When the producer finishes it enqueues a sentinel carrying the
-        # final TurnResult so post-stream logic (active-session toggle,
-        # ladder eval) can run with the captured state.
+        # final TurnResult so post-stream logic (active-session toggle)
+        # can run with the captured state.
         active_session_written = False
         queue: asyncio.Queue = asyncio.Queue()
         _DONE = object()
@@ -387,39 +371,6 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                 yield _serialize(item)
 
             await producer  # surface any setup-time exception
-
-            # End-of-turn: score the ladder against the freshest YAML
-            # we have. Prefer the assistant's just-emitted block; fall
-            # back to the editor buffer the user sent in. Skip placeholder
-            # YAML so the rung doesn't fire with no real content.
-            if result is not None:
-                target = result.last_assistant_yaml or (
-                    body.current_yaml if _is_meaningful_yaml(body.current_yaml) else None
-                )
-                if target:
-                    try:
-                        ladder = _ladder.evaluate(target)
-                        if result.session_id:
-                            snapshot = {
-                                "rungs": [
-                                    {"id": r.id, "label": r.label,
-                                     "state": r.state, "summary": r.summary}
-                                    for r in ladder.rungs
-                                ],
-                                "error_count": ladder.error_count,
-                                "warning_count": ladder.warning_count,
-                                "achieved": ladder.achieved,
-                            }
-                            history_db.record_chat_message(
-                                result.session_id, _current_turn(messages),
-                                result.final_seq,
-                                kind="ladder",
-                                content=json.dumps(snapshot),
-                            )
-                        yield _serialize(ladder)
-                    except Exception as exc:  # noqa: BLE001
-                        # Never let scoring break a chat turn.
-                        print(f"[chat] ladder eval failed: {exc!r}", flush=True)
         finally:
             if active_session_written:
                 history_db.write_active_session(None)
@@ -516,9 +467,7 @@ async def resolve_approval(
     provider = get_provider(chosen)
 
     async def gen() -> AsyncIterator[dict[str, Any]]:
-        # Mirrors /api/chat's producer/consumer queue. No ladder eval on
-        # resume — resume is about whether a tool fired, not about fresh
-        # YAML emission.
+        # Mirrors /api/chat's producer/consumer queue.
         queue: asyncio.Queue = asyncio.Queue()
         _DONE = object()
         history_sink = BackendHistorySink()

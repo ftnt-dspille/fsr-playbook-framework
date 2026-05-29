@@ -43,10 +43,42 @@
         if (first) selected = first;
       }
       hydrateForm();
+      // Auto-probe the saved config so the user sees whether the
+      // stored key/URL is currently valid the moment they open the
+      // page. No button — explicit `Test` was misleading (the form
+      // value could pass while the saved key was rejected).
+      void runLiveCheck();
     } catch (e: any) {
       err = e?.message ?? String(e);
     } finally {
       loading = false;
+    }
+  }
+
+  async function runLiveCheck() {
+    if (!snapshot?.providers[selected]?.configured) {
+      testStatus = 'idle';
+      testMsg = '';
+      return;
+    }
+    testStatus = 'testing';
+    testMsg = '';
+    try {
+      // No form overrides — probe whatever is *actually* saved so the
+      // status reflects what `/api/chat` would use.
+      const result = await testProvider(selected, {});
+      if (result.ok) {
+        testStatus = 'ok';
+        testMsg = result.latency_ms != null
+          ? `Saved credentials reachable (${result.latency_ms} ms)${result.note ? ' — ' + result.note : ''}`
+          : (result.note ?? 'Saved credentials reachable.');
+      } else {
+        testStatus = 'fail';
+        testMsg = result.error ?? 'unknown error';
+      }
+    } catch (e: any) {
+      testStatus = 'fail';
+      testMsg = e?.message ?? String(e);
     }
   }
 
@@ -67,29 +99,7 @@
     models = [];
     modelsErr = null;
     hydrateForm();
-  }
-
-  async function runTest() {
-    testStatus = 'testing';
-    testMsg = '';
-    try {
-      const result = await testProvider(selected, {
-        base_url: formBase || undefined,
-        api_key: formKey || undefined
-      });
-      if (result.ok) {
-        testStatus = 'ok';
-        testMsg = result.latency_ms != null
-          ? `Reachable (${result.latency_ms} ms)${result.note ? ' — ' + result.note : ''}`
-          : (result.note ?? 'Reachable.');
-      } else {
-        testStatus = 'fail';
-        testMsg = result.error ?? 'unknown error';
-      }
-    } catch (e: any) {
-      testStatus = 'fail';
-      testMsg = e?.message ?? String(e);
-    }
+    void runLiveCheck();
   }
 
   async function save() {
@@ -272,21 +282,20 @@
         />
       </label>
 
-      <div class="flex items-center gap-3">
-        <button
-          type="button"
-          onclick={runTest}
-          class="rounded bg-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--text-faint)]"
-          disabled={testStatus === 'testing'}
-        >
-          {testStatus === 'testing' ? 'Testing…' : 'Test connection'}
-        </button>
-        {#if testStatus === 'ok'}
-          <span class="text-sm text-green-400">✓ {testMsg}</span>
-        {:else if testStatus === 'fail'}
-          <span class="text-sm text-red-400">✗ {testMsg}</span>
-        {/if}
-      </div>
+      <!-- Live status of the SAVED credentials. Runs automatically on
+           page load, provider change, and after Save. No button — what
+           the chat uses is the only thing worth showing. -->
+      {#if current.configured}
+        <div class="flex items-center gap-2 text-sm">
+          {#if testStatus === 'testing'}
+            <span class="text-[var(--text-muted)]">Checking saved credentials…</span>
+          {:else if testStatus === 'ok'}
+            <span class="text-green-400">✓ {testMsg}</span>
+          {:else if testStatus === 'fail'}
+            <span class="text-red-400">✗ {testMsg}</span>
+          {/if}
+        </div>
+      {/if}
 
       <div class="border-t border-[var(--border-soft)] pt-4">
         <div class="flex items-center gap-3">
@@ -314,9 +323,9 @@
             type="button"
             onclick={loadModels}
             class="mt-5 rounded border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--bg-panel)]"
-            disabled={selected === 'lmstudio' && testStatus !== 'ok' && !current.configured}
-            title={selected === 'lmstudio' && testStatus !== 'ok' && !current.configured
-              ? 'Test the connection first'
+            disabled={selected === 'lmstudio' && !current.configured}
+            title={selected === 'lmstudio' && !current.configured
+              ? 'Set base URL + Save first'
               : ''}
           >
             Load models
@@ -335,14 +344,19 @@
         >
           Save
         </button>
-        <button
-          type="button"
-          onclick={makeActive}
-          class="rounded border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-panel)]"
-          disabled={isActive}
-        >
-          {isActive ? 'Active' : 'Set as active'}
-        </button>
+        <!-- When this provider is already the one chat uses, the tab
+             pill above shows an "active" badge — duplicate it here as
+             a disabled button would just be confusing. Only show the
+             verb when switching is actually possible. -->
+        {#if !isActive}
+          <button
+            type="button"
+            onclick={makeActive}
+            class="rounded border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-panel)]"
+          >
+            Use this provider for chat
+          </button>
+        {/if}
         {#if saveMsg}
           <span class="text-sm text-[var(--text-muted)]">{saveMsg}</span>
         {/if}

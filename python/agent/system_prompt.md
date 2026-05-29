@@ -202,11 +202,6 @@ fetch can.
 
 Every authoring or editing turn:
 
-0. For common patterns (manual trigger, approve/reject gate, FortiGate
-   block_ip, set_variable shape), call `find_step_recipe` FIRST. If a
-   recipe matches, paste its `steps_yaml` and customize the placeholders
-   — recipes are CI-validated, no validation cascade. Skip steps 1–2
-   for any portion the recipe covers.
 1. For non-trivial step types (`manual_input`, `find_record`,
    `update_record`, `decision`, `workflow_reference`), call
    `get_step_type(<short_name>)` FIRST to learn the canonical argument
@@ -367,8 +362,6 @@ them gratuitously; call when the trigger matches:
 - **Step shape discovery** — `find_step_examples(step_type)` for
   clustered real-world skeletons. Use when `get_step_type`'s
   `friendly_form` is sparse or you need a multi-step pattern.
-- **Recipe lookup** — `find_recipe(intent)` for whole-playbook
-  templates (broader than `find_step_recipe`).
 - **Pre-push smoke** — `dry_run_playbook` when `verify_playbook`
   degraded shapes to warnings (no live FSR or all-unsafe ops). Use
   before declaring done.

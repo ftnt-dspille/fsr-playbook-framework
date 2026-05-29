@@ -45,11 +45,30 @@ SAFE_TOOLS: list[str] = [
     "list_picklists",
     "picklist_for_field",
     "resolve_picklist_value",
+    # Phase 0 — authoring loop tools the system prompt mandates.
+    "validate_yaml",
+    "compile_yaml",
+    "analyze_playbook",
+    # "find_step_recipe",  # hidden — recipes corpus not populated yet; revisit later
+    # Widget card emitters — drive the chat UI's awaiting_* halts.
+    "emit_choice_card",
+    "emit_action_card",
+    "emit_manual_input",
+    # Phase 1.1 — HTTP fallback authoring helper.
+    "propose_http_fallback",
+    # Phase 1.2 — live triage (read-only FSR).
+    "why_did_playbook_fail",
+    "get_run_env",
+    "list_playbook_runs",
+    "assert_playbook_outcome",
     # Tier 1+ — gated by the dispatch wrapper below. See `TOOL_TIERS`.
     "run_op",
     "step_through_playbook",
     "dry_run_playbook",
     "diagnose_yaml_against_pb_execution",
+    # Phase 1.3 — side-effecting execution (tier-dynamic).
+    "push_playbook",
+    "run_playbook",
 ]
 
 
@@ -79,10 +98,26 @@ TOOL_TIERS: dict[str, int] = {
     "emit_decision_step": 0,
     "list_configured_connectors": 1,
     "diagnose_yaml_against_pb_execution": 1,
+    # Phase 0 — pure local compute (no FSR I/O).
+    "validate_yaml": 0,
+    "compile_yaml": 0,
+    "analyze_playbook": 0,
+    # "find_step_recipe": 0,  # hidden — see SAFE_TOOLS
+    "emit_choice_card": 0,
+    "emit_action_card": 0,
+    "emit_manual_input": 0,
+    "propose_http_fallback": 0,
+    # Phase 1.2 — read-only FSR API.
+    "why_did_playbook_fail": 1,
+    "get_run_env": 1,
+    "list_playbook_runs": 1,
+    "assert_playbook_outcome": 1,
     # Tier-dynamic. Resolved per call.
     "run_op": -1,
     "step_through_playbook": -1,
     "dry_run_playbook": -1,
+    "push_playbook": -1,
+    "run_playbook": -1,
 }
 
 # Op-name / category classifiers used as fallback when op_safety has no
@@ -176,6 +211,10 @@ def _resolve_tier(name: str, args: dict[str, Any]) -> int:
         return _tier_for_run_op(args or {})
     if name in ("step_through_playbook", "dry_run_playbook"):
         return _tier_for_simulator(args or {})
+    if name == "push_playbook":
+        return 3  # writes to FSR — always require approval
+    if name == "run_playbook":
+        return 3  # triggers live execution — always require approval
     return 0
 
 
@@ -320,6 +359,80 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
 # sync with the runtime checks inside the tool itself — the override is
 # the wire contract; the runtime check covers non-LLM callers.
 TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
+    "emit_choice_card": {
+        "type": "object",
+        "required": ["id", "prompt", "options"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1,
+                   "description": "Stable choice id; echoed on resume."},
+            "prompt": {"type": "string", "minLength": 1},
+            "multi": {"type": "boolean", "default": False},
+            "min_select": {"type": "integer", "minimum": 0, "default": 1},
+            "max_select": {"type": ["integer", "null"], "default": None},
+            "options": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1},
+                        "value": {"type": "string", "minLength": 1,
+                                  "description": "Machine-readable; echoed back on resume."},
+                        "hint": {"type": "string"},
+                    },
+                },
+            },
+        },
+    },
+    "emit_action_card": {
+        "type": "object",
+        "required": ["id", "connector", "operation", "summary",
+                     "args", "editable_fields"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "connector": {"type": "string", "minLength": 1,
+                          "description": "Connector name (e.g. fortinet-fortigate)."},
+            "operation": {"type": "string", "minLength": 1},
+            "summary": {"type": "string", "minLength": 1,
+                        "description": "One-line plain-English summary of what will run."},
+            "args": {"type": "object",
+                     "description": "Operation arguments; widget shows them."},
+            "editable_fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Args keys the user is allowed to edit before confirm.",
+            },
+        },
+    },
+    "emit_manual_input": {
+        "type": "object",
+        "required": ["id", "workflow_run_iri", "question", "fields"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "workflow_run_iri": {"type": "string", "minLength": 1,
+                                 "description": "IRI of the paused workflow run."},
+            "question": {"type": "string", "minLength": 1},
+            "fields": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["name", "label"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "label": {"type": "string", "minLength": 1},
+                        "default": {"type": "string"},
+                    },
+                },
+            },
+        },
+    },
     "emit_decision_step": {
         "type": "object",
         "required": ["name", "conditions", "default_branch"],

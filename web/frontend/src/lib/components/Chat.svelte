@@ -1,12 +1,13 @@
 <script lang="ts">
   import {
     extractYamlBlock,
+    getLlmHealth,
     listExamplePrompts,
     parseChatEvent,
     type ChatEvent,
     type ChatMessage,
     type ExamplePrompt,
-    type LadderRung
+    type LlmHealth
   } from '$lib/api';
   import { postSse } from '$lib/sse';
   import { renderMarkdown } from '$lib/md';
@@ -32,7 +33,7 @@
   type PushState = {
     offer: PushOffer | null;
     busy: boolean;
-    mode: 'replace' | 'create' | 'update' | 'upsert';
+    mode: 'safe' | 'replace' | 'create' | 'update' | 'upsert';
     result: PushResult | null;
   };
 
@@ -101,6 +102,30 @@
   // yamlPrevMeaningful: read+written only inside the effect below.
   let lastSeededRef: Turn[] | null = null;
 
+  // Tools whose arguments carry the assistant's latest YAML draft.
+  // When any of these is invoked, the editor auto-updates from its
+  // `yaml_text` (or `after_yaml` for verify_enhancement). Mirrors the
+  // tools actually registered in fsr_core/llm/tools.py SAFE_TOOLS —
+  // the prompt now points the agent at verify_playbook rather than
+  // validate_yaml/compile_yaml.
+  const YAML_BEARING_TOOLS = new Set([
+    'verify_playbook',
+    'verify_enhancement',
+    'step_through_playbook',
+    'dry_run_playbook',
+    // Kept for forward-compat: if the registry ever exposes these
+    // again, the editor will still react.
+    'validate_yaml',
+    'compile_yaml'
+  ]);
+
+  function extractToolYaml(name: string, args: any): string | null {
+    if (!YAML_BEARING_TOOLS.has(name) || !args || typeof args !== 'object') return null;
+    if (typeof args.yaml_text === 'string') return args.yaml_text;
+    if (typeof args.after_yaml === 'string') return args.after_yaml;
+    return null;
+  }
+
   $effect(() => {
     if (initialTurns !== lastSeededRef) {
       turns = [...initialTurns];
@@ -134,27 +159,15 @@
 
   // ── Loop telemetry ────────────────────────────────────────────────
   // Tracks the per-session AI authoring loop so the user can see what
-  // the agent is doing in real time (validate count, error trend, ladder
-  // rung, tokens, elapsed). Reset alongside the conversation.
-  let ladderRungs = $state<LadderRung[]>([]);
-  let ladderAchieved = $state(0);
-  let ladderErrors = $state(0);
-  let ladderWarnings = $state(0);
-  let ladderHistory = $state<number[]>([]); // last few error counts for trend
+  // the agent is doing in real time (validate count, tokens, elapsed).
+  // Per-turn correctness is now reported inline by verify_playbook —
+  // its required_fixes / ready_to_push results land in the transcript,
+  // so there's no separate aggregate "ladder" score.
   let validateCount = $state(0);
   let inputTokens = $state(0);
   let outputTokens = $state(0);
   let sessionStart = $state<number | null>(null);
   let elapsedMs = $state(0);
-
-  const errorTrend = $derived.by<-1 | 0 | 1 | null>(() => {
-    if (ladderHistory.length < 2) return null;
-    const a = ladderHistory[ladderHistory.length - 2];
-    const b = ladderHistory[ladderHistory.length - 1];
-    if (b < a) return -1;
-    if (b > a) return 1;
-    return 0;
-  });
 
   $effect(() => {
     if (!sessionStart) return;
@@ -193,12 +206,36 @@
     'Explain what each step in the current playbook does.'
   ];
 
+  // Pre-flight: confirm the active LLM provider's saved credentials
+  // are good BEFORE the user can send a prompt. Without this, a
+  // revoked/expired key surfaced as an empty assistant bubble +
+  // misleading "no yaml fence" warning; the auth failure was buried
+  // mid-stream where the UI couldn't tell it apart from "agent
+  // forgot to emit YAML". A red banner up front is much clearer.
+  let llmHealth = $state<LlmHealth | null>(null);
+  let healthChecking = $state(false);
+  const llmReady = $derived(llmHealth?.ok === true);
+  const llmBlocked = $derived(llmHealth !== null && !llmHealth.ok);
+
+  async function refreshLlmHealth() {
+    healthChecking = true;
+    try {
+      llmHealth = await getLlmHealth();
+    } catch (e: any) {
+      llmHealth = { ok: false, active: null,
+                    error: e?.message ?? String(e) };
+    } finally {
+      healthChecking = false;
+    }
+  }
+
   onMount(async () => {
     try {
       examplePrompts = await listExamplePrompts();
     } catch (e) {
       console.warn('listExamplePrompts failed', e);
     }
+    void refreshLlmHealth();
   });
 
   function useStarter(s: string) {
@@ -209,6 +246,15 @@
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
+    // Belt-and-braces — the composer is already disabled when
+    // llmReady is false, but guard the function too so a bad-state
+    // race or keybinding can't fire a request that's guaranteed to 401.
+    if (!llmReady) {
+      err = llmHealth?.error
+        ? `LLM provider not reachable: ${llmHealth.error}. Fix in Settings.`
+        : 'LLM provider not configured. Fix in Settings.';
+      return;
+    }
     input = '';
     err = null;
     busy = true;
@@ -238,12 +284,9 @@
       })) {
         const ev = parseChatEvent(frame.event, frame.data);
         if (!ev) continue;
-        if (
-          ev.kind === 'tool_use' &&
-          (ev.name === 'validate_yaml' || ev.name === 'compile_yaml') &&
-          typeof ev.arguments?.yaml_text === 'string'
-        ) {
-          lastValidatedYaml = ev.arguments.yaml_text;
+        if (ev.kind === 'tool_use') {
+          const y = extractToolYaml(ev.name, ev.arguments);
+          if (y) lastValidatedYaml = y;
         }
         applyEvent(aIdx, ev);
       }
@@ -280,7 +323,16 @@
         // `no_editor_update`). Surface it inline so the user sees it
         // immediately instead of having to thumb-down + review later.
         const looksLikeAuthoring = /\b(build|create|make|draft|add|write|edit|fix|update)\b.*\b(playbook|yaml|step|workflow)\b/i.test(text);
-        if (looksLikeAuthoring) {
+        // Don't stomp a real backend error (network failure, provider
+        // error, etc.) with the misleading "didn't include yaml" copy.
+        // Also skip the warning if the assistant produced no text AND no
+        // tool calls — that's a different failure mode than "agent
+        // replied but forgot the fence".
+        const assistantTurn = turns[aIdx];
+        const hadAnyOutput =
+          (replyText && replyText.trim().length > 0) ||
+          (assistantTurn?.tools && assistantTurn.tools.length > 0);
+        if (looksLikeAuthoring && !err && hadAnyOutput) {
           // Likely cause: agent put YAML in a non-yaml fence (```yml is
           // accepted, ```YAML is, but plain ``` and other tags aren't).
           const wrongFence = /```(?!ya?ml\b)[A-Za-z0-9_+-]*\s*\n[\s\S]*?(collection:|playbooks:|type:\s+set_variable)[\s\S]*?```/i
@@ -333,27 +385,27 @@
         // a Push button inline. The push itself is user-initiated —
         // the AI doesn't have access to the push tool. Latest clean
         // validate wins; we want the most recent draft, not the first.
-        if (
-          tc &&
-          (tc.name === 'validate_yaml' || tc.name === 'compile_yaml') &&
-          typeof tc.arguments?.yaml_text === 'string'
-        ) {
-          try {
-            const parsed = JSON.parse(ev.result_preview ?? '');
-            if (parsed && parsed.ok === true) {
-              const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
-              a.push = {
-                offer: {
-                  yaml: tc.arguments.yaml_text as string,
-                  hasWarnings: warnings.length > 0
-                },
-                busy: false,
-                mode: a.push?.mode ?? 'replace',
-                result: null
-              };
+        if (tc) {
+          const yaml = extractToolYaml(tc.name, tc.arguments);
+          if (yaml) {
+            try {
+              const parsed = JSON.parse(ev.result_preview ?? '');
+              // Different tools signal success differently:
+              //   validate_yaml / compile_yaml → { ok: true }
+              //   verify_playbook / verify_enhancement → { ready_to_push: true }
+              const success = !!parsed && (parsed.ok === true || parsed.ready_to_push === true);
+              if (success) {
+                const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+                a.push = {
+                  offer: { yaml, hasWarnings: warnings.length > 0 },
+                  busy: false,
+                  mode: a.push?.mode ?? 'safe',
+                  result: null
+                };
+              }
+            } catch {
+              /* truncated/non-JSON preview — skip */
             }
-          } catch {
-            /* truncated/non-JSON preview — skip */
           }
         }
         break;
@@ -368,17 +420,10 @@
         outputTokens += ev.output_tokens ?? 0;
         // Count validate calls so the user sees the loop's effort.
         for (const tc of ev.tool_calls ?? []) {
-          if (tc.name === 'validate_yaml' || tc.name === 'compile_yaml') {
+          if (YAML_BEARING_TOOLS.has(tc.name)) {
             validateCount += 1;
           }
         }
-        break;
-      case 'ladder':
-        ladderRungs = ev.rungs;
-        ladderAchieved = ev.achieved;
-        ladderErrors = ev.error_count;
-        ladderWarnings = ev.warning_count;
-        ladderHistory = [...ladderHistory.slice(-5), ev.error_count];
         break;
       case 'approval_request': {
         // The provider has suspended on a tier-3+ tool call. Render an
@@ -512,11 +557,6 @@
   function reset() {
     turns = [];
     err = null;
-    ladderRungs = [];
-    ladderAchieved = 0;
-    ladderErrors = 0;
-    ladderWarnings = 0;
-    ladderHistory = [];
     validateCount = 0;
     inputTokens = 0;
     outputTokens = 0;
@@ -567,11 +607,6 @@
   </header>
 
   <LoopTelemetry
-    rungs={ladderRungs}
-    achieved={ladderAchieved}
-    errorCount={ladderErrors}
-    warningCount={ladderWarnings}
-    errorTrend={errorTrend}
     {validateCount}
     {inputTokens}
     {outputTokens}
@@ -820,12 +855,13 @@
                       bind:value={t.push.mode}
                       disabled={t.push.busy || !!t.push.result?.ok}
                       class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-1.5 py-0.5 text-[11px] text-[var(--text-muted)]"
-                      title="replace = overwrite by name; create = new only; update = existing only; upsert = either"
+                      title="safe = preflight + bulk-upsert, never hard-purges (default); create = new only; update = existing only; upsert = either; replace = overwrite by name (requires FSR_ALLOW_HARD_DELETE)"
                     >
-                      <option value="replace">replace</option>
+                      <option value="safe">safe</option>
                       <option value="create">create</option>
                       <option value="update">update</option>
                       <option value="upsert">upsert</option>
+                      <option value="replace">replace</option>
                     </select>
                     <button
                       class="rounded-md bg-emerald-700 px-2.5 py-1 text-[11px] font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)] disabled:text-[var(--text-faint)]"
@@ -952,15 +988,42 @@
         {/each}
       </div>
     {/if}
+    {#if llmBlocked}
+      <div class="mb-2 flex items-start justify-between gap-3 rounded-md border border-red-700/70 bg-red-900/30 px-3 py-2 text-xs text-red-100">
+        <div>
+          <strong class="font-semibold">LLM provider unreachable</strong> — chat is disabled until this clears.<br />
+          {#if llmHealth?.active}<span class="text-red-200">{llmHealth.active}:</span> {/if}
+          <span class="text-red-200/90">{llmHealth?.error ?? 'no active provider configured'}</span>
+        </div>
+        <div class="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            class="rounded border border-red-700/70 px-2 py-0.5 text-[11px] hover:bg-red-900/40 disabled:opacity-50"
+            onclick={refreshLlmHealth}
+            disabled={healthChecking}
+          >
+            {healthChecking ? 'Checking…' : 'Retry'}
+          </button>
+          <a
+            href="/settings"
+            class="rounded border border-red-700/70 px-2 py-0.5 text-[11px] hover:bg-red-900/40"
+          >
+            Open Settings
+          </a>
+        </div>
+      </div>
+    {/if}
     <div class="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)] focus-within:border-[var(--border)] focus-within:ring-1 focus-within:ring-zinc-700">
       <textarea
         bind:this={textareaEl}
         class="block w-full resize-none rounded-lg bg-transparent px-3 py-2 text-[15px] text-[var(--text-default)] placeholder:text-[var(--text-faint)] focus:outline-none"
-        placeholder="Ask the model to build or edit the YAML…"
+        placeholder={llmBlocked
+          ? 'LLM provider unreachable — fix credentials in Settings'
+          : 'Ask the model to build or edit the YAML…'}
         rows="3"
         bind:value={input}
         onkeydown={onKey}
-        disabled={busy}
+        disabled={busy || !llmReady}
       ></textarea>
       <div class="flex items-center justify-between border-t border-[var(--border-soft)] px-2.5 py-1.5">
         <label
@@ -991,7 +1054,8 @@ a scaffold biases the model into extending it rather than starting fresh."
           <button
             class="rounded-md bg-emerald-700 px-3 py-1 text-xs font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)] disabled:text-[var(--text-faint)]"
             onclick={send}
-            disabled={busy || !input.trim()}
+            disabled={busy || !input.trim() || !llmReady}
+            title={llmBlocked ? 'LLM provider not reachable — fix in Settings' : ''}
           >
             {busy ? '…' : 'Send'}
           </button>

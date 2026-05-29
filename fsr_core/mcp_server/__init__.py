@@ -147,7 +147,12 @@ from .tools_recipe import (
 # Verify
 from .tools_verify import verify_playbook
 from .tools_enhancement import verify_enhancement
-from .tools_emit import emit_decision_step
+from .tools_emit import (
+    emit_action_card,
+    emit_choice_card,
+    emit_decision_step,
+    emit_manual_input,
+)
 
 # Catalog (Phase 0 + 0.5 of CONNECTOR_INTEGRATION_PLAN)
 from .tools_catalog import (

@@ -74,9 +74,9 @@ async def test_provider(name: str, body: ProbeIn) -> dict[str, Any]:
     body fields are blank). Returns {ok, error?, latency_ms}.
 
     For OpenAI-compatible endpoints (lmstudio): hit /v1/models — 200 means
-    reachable + auth ok in one round-trip. For Anthropic: a no-tool zero-
-    token messages call would be billable; we just check key shape and
-    SDK construct."""
+    reachable + auth ok in one round-trip. For Anthropic: call
+    messages.count_tokens, which authenticates the key but is free
+    (no token billing)."""
     if name not in _settings.list_provider_names():
         raise HTTPException(404, f"unknown provider: {name}")
 
@@ -105,9 +105,38 @@ async def test_provider(name: str, body: ProbeIn) -> dict[str, Any]:
             return {"ok": False, "error": "api_key is required"}
         if not (api_key.startswith("sk-ant-") and len(api_key) > 20):
             return {"ok": False, "error": "doesn't look like an Anthropic key (expects sk-ant-…)"}
-        return {"ok": True, "note": "shape check only; first chat will confirm"}
+        try:
+            from anthropic import AsyncAnthropic
+            model = saved.model or "claude-haiku-4-5-20251001"
+            client = AsyncAnthropic(api_key=api_key, timeout=8.0)
+            # count_tokens authenticates the key against the live API but
+            # is not billed for token usage — the right read-only probe.
+            await client.messages.count_tokens(
+                model=model,
+                messages=[{"role": "user", "content": "ping"}],
+            )
+            return {"ok": True, "note": "auth verified via count_tokens",
+                    "latency_ms": int((time.monotonic() - start) * 1000)}
+        except Exception as e:
+            return {"ok": False, "error": _friendly(e),
+                    "latency_ms": int((time.monotonic() - start) * 1000)}
 
     return {"ok": False, "error": f"no test handler for provider {name!r}"}
+
+
+@router.get("/health")
+async def health() -> dict[str, Any]:
+    """Live auth check on the currently-active LLM provider. Called by
+    the chat surface on mount so a bad/expired key surfaces as a
+    banner BEFORE the user types a prompt, rather than as a mid-stream
+    401 with no chat content."""
+    active = _settings.get_active_provider_name()
+    if not active:
+        return {"ok": False, "active": None,
+                "error": "no active provider configured"}
+    # Delegate to the same probe used by the settings page.
+    result = await test_provider(active, ProbeIn())
+    return {**result, "active": active}
 
 
 @router.post("/providers/{name}/models")
