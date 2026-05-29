@@ -7,7 +7,31 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    # The connector runtime (FortiSOAR, Python 3.9) doesn't ship the `mcp`
+    # SDK (which needs 3.10+) and doesn't need the stdio server — it only
+    # calls the tool *functions*, which are plain callables. Provide a
+    # minimal stand-in whose `.tool()` decorator registers nothing and
+    # returns the function unchanged, so `fsr_core.mcp_server` imports
+    # cleanly and the agent tool registry still works. `.run()` (the stdio
+    # transport) is the only thing that genuinely needs the real SDK.
+    class FastMCP:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):
+            self._args, self._kwargs = args, kwargs
+
+        def tool(self, *args, **kwargs):
+            def _deco(fn):
+                return fn
+            return _deco
+
+        def run(self, *args, **kwargs):
+            raise RuntimeError(
+                "MCP stdio server is unavailable: the 'mcp' package is not "
+                "installed (it requires Python 3.10+). The tool functions are "
+                "still usable directly; only `python -m mcp_server` / `fsrpb "
+                "mcp` need the real SDK.")
 
 # ---------------------------------------------------------------------------
 # Paths
