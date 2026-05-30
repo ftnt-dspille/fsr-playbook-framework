@@ -420,6 +420,109 @@ def _prune_known_enrichment(cn: str, data: Any) -> Any | None:
     return None
 
 
+# --- Event/alert list digest (FortiSIEM / FortiAnalyzer hunting) -----------
+# A hunt op (search_events, get_associated_events, FAZ get_alerts /
+# get_events_for_incident / get_alert_event_logs, run_report, …) returns many
+# homogeneous rows, each carrying a raw log blob + dozens of parsed fields.
+# Dumping the first 5 raw rows is both lossy and bulky. For triage the agent
+# reasons over AGGREGATES — which IPs/users/hosts recur, what volume, what
+# time spread — so we collapse a long row list into a digest: count, time
+# window, top-N facets with counts, and a few pruned sample rows. Shape-gated
+# (>= this many uniform dict rows) so small/structured results pass through
+# untouched. The full observed schema is still stored for authoring, and the
+# agent can get_event_details / get_record a single row when it needs depth.
+_DIGEST_MIN_ROWS = 8
+_DIGEST_TOP_N = 8
+_DIGEST_SAMPLES = 3
+# Raw log / message payloads — never worth echoing into context.
+_RAW_BLOB_RE = re.compile(
+    r"raw|_raw|rawmsg|rawevent|eventlog|logmessage|payload|rawmessage", re.I)
+_TIME_HINT_RE = re.compile(r"time|date|timestamp|recv|epoch|seen", re.I)
+# Facet families: indicator category → key-name substrings (matched
+# case-insensitively against each row's keys). Covers FortiSIEM
+# (srcIpAddr/destIpAddr/user/action/eventType) and FortiAnalyzer
+# (srcip/dstip/user/devname/action/subtype) naming alike.
+_FACET_FAMILIES: dict[str, tuple[str, ...]] = {
+    "src_ip": ("srcipaddr", "srcip", "sourceip", "src_ip", "source_ip"),
+    "dst_ip": ("destipaddr", "dstip", "destip", "destinationip", "dst_ip"),
+    "user": ("username", "srcuser", "dstuser", "accountname", "user"),
+    "host": ("hostname", "devname", "devicename", "computer", "endpoint",
+             "host"),
+    "action": ("action", "disposition"),
+    "event": ("eventtype", "eventname", "event_type", "subtype", "rulename",
+              "rule", "signature"),
+    "severity": ("severity", "threatlevel", "priority", "level"),
+    "dst_port": ("destport", "dstport", "destinationport", "dport"),
+}
+
+
+def _pick_family_keys(keys: list[str]) -> dict[str, str]:
+    """Map each facet family to the best-matching key in `keys` (exact
+    match preferred over substring), so we tally a consistent column."""
+    low = {k: k.lower() for k in keys}
+    chosen: dict[str, str] = {}
+    for fam, subs in _FACET_FAMILIES.items():
+        hit = next((k for k in keys if low[k] in subs), None)  # exact-ish
+        if hit is None:
+            hit = next((k for k in keys
+                        if any(s in low[k] for s in subs)), None)
+        if hit is not None:
+            chosen[fam] = hit
+    return chosen
+
+
+def _prune_event(rec: dict[str, Any]) -> dict[str, Any]:
+    """A single sample row with raw blobs dropped + strings capped."""
+    out: dict[str, Any] = {}
+    for k, v in rec.items():
+        if _RAW_BLOB_RE.search(k) or v in (None, "", [], {}):
+            continue
+        out[k] = (v[:200] + "…") if isinstance(v, str) and len(v) > 200 else v
+    return out
+
+
+def _digest_record_list(data: Any) -> dict[str, Any] | None:
+    """Collapse a long list of homogeneous event/alert rows into an
+    aggregate digest. Returns None when `data` isn't a hunt-style row list."""
+    if not (isinstance(data, list) and len(data) >= _DIGEST_MIN_ROWS
+            and all(isinstance(x, dict) for x in data[:20])):
+        return None
+    keys = list(data[0].keys())
+    fam_keys = _pick_family_keys(keys)
+    from collections import Counter
+    facets: dict[str, Any] = {}
+    for fam, k in fam_keys.items():
+        c: Counter = Counter()
+        for rec in data:
+            v = rec.get(k)
+            if v not in (None, "", [], {}):
+                c[str(v)[:80]] += 1
+        if c:
+            facets[fam] = {
+                "field": k,
+                "distinct": len(c),
+                "top": [{"value": val, "count": ct}
+                        for val, ct in c.most_common(_DIGEST_TOP_N)],
+            }
+    window = None
+    time_key = next((k for k in keys if _TIME_HINT_RE.search(k)), None)
+    if time_key:
+        times = [rec.get(time_key) for rec in data if rec.get(time_key)]
+        if times:
+            window = {"field": time_key,
+                      "min": str(min(times))[:40], "max": str(max(times))[:40]}
+    return {
+        "_digest": "event_list",
+        "count": len(data),
+        "time_window": window,
+        "facets": facets,
+        "samples": [_prune_event(r) for r in data[:_DIGEST_SAMPLES]],
+        "note": (f"{len(data)} rows aggregated; {_DIGEST_SAMPLES} sample row(s) "
+                 "shown. Use get_event_details / get_record for a single row's "
+                 "full fields."),
+    }
+
+
 def _truncate_generic(obj: Any, depth: int = 0) -> Any:
     """Bound an arbitrary payload: cap string length, list length, dict
     breadth, and recursion depth so an unknown op can't flood context."""
@@ -446,6 +549,14 @@ def _summarize_op_output(connector: str, op: str,
     truncated = pruned is not None
     if pruned is not None:
         data = pruned
+    else:
+        # Hunt-style row lists (FortiSIEM/FAZ events & alerts, and any op
+        # returning many uniform records): collapse to an aggregate digest
+        # instead of dumping raw rows. Shape-gated, so small/structured
+        # results are untouched.
+        digest = _digest_record_list(data)
+        if digest is not None:
+            return digest, True
     try:
         size = len(json.dumps(data, default=str))
     except Exception:  # noqa: BLE001
