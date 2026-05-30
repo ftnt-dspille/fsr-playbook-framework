@@ -93,10 +93,18 @@ Ran the live investigation-eval calibration (`calibrate_investigation.py`, all
 not a pass:** the gate is too weak to be meaningful. Full write-up + ranked
 to-do in `AGENT_HARDENING_PLAN.md` §1.4 "Live calibration run" + §1.9.
 
-Open work to address (uncommitted changes in working tree):
-1. **Strengthen the 1.4 gate** (per the table in plan §1.4): tool-budget
-   ceiling, forbidden op-retry-flail, require the correlation pivot + a
-   concrete deliverable. The recall-only gate greenlights 20-call flailing.
+### 2026-05-30 (latest) — §1.4 gate strengthened. RESUME HERE.
+The recall-only investigation gate now has teeth (commit `2512a9a`).
+`scoring._score_investigation_quality` adds 3 deterministic per-fixture gates
+(`investigation_tool_budget` ≤12, `investigation_no_param_flail` >2 distinct
+arg-sets, `investigation_deliverable` — credits choice/capability-gap cards),
+threaded through `Task.investigation_quality` → `score()` → harness + calibrate.
+Golden-trace replay now **3/5 PASS** (was meaningless 5/5): mail_egress fails
+budget (19 calls), c2 fails deliverable. 9 new tests, 753 fast green. Studio-repo
+only — **no connector re-vendor needed**. Detail: plan §1.4 "Gate strengthening".
+
+Still open (was the working-tree list; #1 now DONE):
+1. ✅ **DONE** — strengthen the 1.4 gate (this commit).
 2. **Param-level live grounding** (deferred half of 1.6) — agent discovers op
    param names by trial-and-error live; validate args vs the live op-schema
    when the store is un-synced.
