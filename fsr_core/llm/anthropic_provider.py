@@ -115,6 +115,19 @@ class AnthropicProvider:
         provider loop (text deltas, further tool calls, UsageEvent,
         DoneEvent) flows as usual.
         """
+        # Phase 3.1: verify the HMAC binding before trusting the stored args.
+        # A mismatch means the session was tampered with (or minted before a
+        # secret rotation / restart without a stable FSR_APPROVAL_HMAC_KEY) —
+        # fail closed rather than re-dispatch a possibly-substituted call.
+        if not _approvals.verify(suspended):
+            yield ErrorEvent(
+                message="Approval binding check failed — the suspended action "
+                        "could not be verified and was not executed. Re-issue "
+                        "the request."
+            )
+            yield DoneEvent(stop_reason="approval_unverified")
+            return
+
         if decision == "approve":
             # Bypass the gate this one time — see tools.dispatch.
             resolved = dispatch(
@@ -451,6 +464,9 @@ class AnthropicProvider:
                         tags=dict(tags),
                         summary=result.get("summary"),
                     )
+                    # Phase 3.1: HMAC-bind the session to its args before
+                    # stashing, so store tampering is detected on resume.
+                    _approvals.bind(suspended_session)
                     if self._approval_gateway is not None:
                         self._approval_gateway.stash(suspended_session)
                     else:

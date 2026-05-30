@@ -17,6 +17,11 @@ that the migration is mechanical.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import os
+import secrets as _secrets
 import threading
 import time
 from dataclasses import dataclass, field
@@ -25,10 +30,66 @@ from typing import Any
 
 # 10 minutes. Long enough that a user can context-switch to read the
 # args; short enough that a stale approval doesn't sit around for hours
-# if someone walks away. The plan's HMAC variant used 60s; without HMAC
-# we get our binding from the in-memory record itself, which we can
-# afford to keep longer.
+# if someone walks away.
 _TTL_SECONDS = 600
+
+
+# --- HMAC binding (Phase 3.1) ---------------------------------------------
+#
+# The in-memory record already binds the decision to its args (resume
+# re-dispatches `suspended.args`, never request-supplied args). HMAC closes
+# the *store-tampering* gap: if the session store leaks or is writable
+# (e.g. the persisted/sqlite-backed gateway in 3.2), an attacker could swap
+# the stored args before the human approves and the server would re-dispatch
+# the substituted call. We bind `approval_id + tool + args_hash + created_at`
+# under a server-side secret at stash time; `verify()` recomputes the token
+# at resume and `compare_digest`s it. Tampered args change `args_hash`, so
+# the token no longer matches and resume fails closed.
+#
+# The secret comes from `FSR_APPROVAL_HMAC_KEY` when set; otherwise a
+# per-process random key. A persisted gateway that must survive worker
+# restarts (3.2) therefore REQUIRES the env key — with the random fallback,
+# tokens minted before a restart fail verification afterward (fail-closed:
+# the human just re-triggers the action).
+_SECRET_ENV = "FSR_APPROVAL_HMAC_KEY"
+_RUNTIME_SECRET = _secrets.token_bytes(32)
+
+
+def _secret() -> bytes:
+    env = os.environ.get(_SECRET_ENV)
+    return env.encode("utf-8") if env else _RUNTIME_SECRET
+
+
+def _canonical_args_hash(tool: str, args: dict[str, Any] | None) -> str:
+    # Same canonical serialization as tools._args_hash, kept local to avoid
+    # a tools→approvals import cycle. Full digest (not truncated) here since
+    # this is a tamper check, not a log key.
+    payload = json.dumps(
+        {"tool": tool, "args": args or {}}, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _bind_token(approval_id: str, tool: str,
+                args: dict[str, Any] | None, created_at: float) -> str:
+    msg = "|".join((
+        approval_id, tool, _canonical_args_hash(tool, args), repr(created_at),
+    )).encode("utf-8")
+    return hmac.new(_secret(), msg, hashlib.sha256).hexdigest()
+
+
+def bind(s: "SuspendedSession") -> None:
+    """Compute and attach the HMAC token. Call once, after construction,
+    before stashing."""
+    s.token = _bind_token(s.approval_id, s.tool, s.args, s.created_at)
+
+
+def verify(s: "SuspendedSession") -> bool:
+    """True iff the session's token matches a freshly computed HMAC over its
+    current fields. A missing token fails closed."""
+    if not s.token:
+        return False
+    expected = _bind_token(s.approval_id, s.tool, s.args, s.created_at)
+    return hmac.compare_digest(s.token, expected)
 
 
 @dataclass
@@ -57,6 +118,10 @@ class SuspendedSession:
     tags: dict[str, Any]
     summary: str | None = None
     created_at: float = field(default_factory=time.time)
+    # HMAC token binding (approval_id, tool, args_hash, created_at) under the
+    # server secret. Set by `bind()` before stash; checked by `verify()` on
+    # resume. Empty until bound (verify fails closed on empty).
+    token: str = ""
 
     def expired(self, now: float | None = None) -> bool:
         return (now or time.time()) - self.created_at > _TTL_SECONDS
