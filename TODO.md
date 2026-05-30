@@ -110,6 +110,22 @@ name + argument names (`_validate_op_params_live`: unknown/typo + missing-requir
 8 new tests (test_op_existence.py, 18 total); `make verify` green (41+111). Plan §1.6.
 **Offline-only until re-vendor + connector bump** — run `scripts/deploy.sh` to ship live.
 
+Then added **live op-definition warming** (the user's ask: warmup should grab as
+much live state as it can): sqlite `connector_op_defs` cache (version-keyed,
+restart-durable) read by `_live_ops_for`/`_fetch_live_op` so the un-synced
+grounding fallback stops re-POSTing the connector detail every pivot; new
+`populate_op_definitions` warmup pass (wired into the connector's bg health
+thread) pre-fetches live op-defs (operations + params in one detail POST) for
+all configured connectors, un-synced first. Commit 0e35fa6; re-vendored.
+
+**SHIPPED LIVE: connector 0.3.33 (id=112, active, Haiku, FortiCloud box)** via
+`deploy.sh` — warmup synced 42 connectors / 538 ops / 1782 params; live op-def
+pre-warm runs in the bg thread. Next: live-confirm the param-grounding fix on a
+real un-synced-connector hunt + re-run `calibrate_investigation.py` to validate
+the strengthened §1.4 gate against fresh Haiku (mail_egress flail should now
+collapse). Possible follow-on (user intent): warm CONFIGS + wire get_op_schema/
+find_operation to read connector_op_defs so live op-defs help those tools too.
+
 Still open (was the working-tree list; #1 + #2 now DONE):
 1. ✅ **DONE** — strengthen the 1.4 gate.
 2. ✅ **DONE** — param-level live grounding.
