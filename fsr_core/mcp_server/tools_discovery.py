@@ -629,7 +629,11 @@ def get_op_schema(connector: str, op: str,
         # (callable from both verbose and slim branches below). Param-name
         # → type / options / default lookups for groups.
         rules_for_groups: list[tuple[str, str | None, str | None]] = [
-            (p["param_name"], p.get("parent_param_name"), p.get("condition_value"))
+            (
+                p["param_name"],
+                p.get("parent_param_name") or None,
+                p.get("condition_value") or None,
+            )
             for p in params
         ]
         param_types: dict[str, str] = {}

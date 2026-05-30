@@ -31,7 +31,10 @@ def store(tmp_path, monkeypatch):
                parent_param_name TEXT, condition_value TEXT,
                param_name TEXT, title TEXT, type TEXT,
                required INTEGER DEFAULT 0, default_value TEXT,
-               options_json TEXT)"""
+               options_json TEXT,
+               tooltip TEXT, placeholder TEXT, description TEXT,
+               visible INTEGER DEFAULT 1, editable INTEGER DEFAULT 1,
+               ord INTEGER DEFAULT 0)"""
     )
     con.execute(
         "INSERT INTO operations (connector_name, op_name, category) VALUES "
@@ -40,14 +43,14 @@ def store(tmp_path, monkeypatch):
     con.executemany(
         "INSERT INTO operation_params (connector_name, op_name, "
         "parent_param_name, condition_value, param_name, title, type, "
-        "required, options_json) VALUES (?,?,?,?,?,?,?,?,?)",
+        "required, options_json, ord) VALUES (?,?,?,?,?,?,?,?,?,?)",
         [
-            ("virustotal", "get_ip_reputation", None, None, "ip", "IP", "text", 1, None),
-            ("virustotal", "get_ip_reputation", None, None, "limit", "Limit", "integer", 0, None),
+            ("virustotal", "get_ip_reputation", None, None, "ip", "IP", "text", 1, None, 0),
+            ("virustotal", "get_ip_reputation", None, None, "limit", "Limit", "integer", 0, None, 1),
             ("virustotal", "get_ip_reputation", None, None, "scope", "Scope", "select", 0,
-             '["public", "private"]'),
+             '["public", "private"]', 2),
             # A conditional sub-param: must NOT be flagged as a top-level unknown.
-            ("virustotal", "get_ip_reputation", "scope", "private", "vlan", "VLAN", "text", 1, None),
+            ("virustotal", "get_ip_reputation", "scope", "private", "vlan", "VLAN", "text", 1, None, 0),
         ],
     )
     con.commit()
@@ -138,3 +141,26 @@ def test_emit_action_card_allows_valid_args(store):
         summary="Look up", args={"ip": "1.2.3.4"}, editable_fields=["ip"],
     )
     assert out["ok"] is True
+
+
+def test_get_op_schema_groups_conditional_params_with_empty_parent_sentinels(
+        store, monkeypatch):
+    """Connector warmup writes top-level parent/condition as empty strings.
+    Treat those like NULL so onchange branches still render as select groups."""
+    from fsr_core.mcp_server import tools_discovery as td
+
+    monkeypatch.setattr(td._shared, "DB_PATH", store)
+    con = sqlite3.connect(store)
+    con.execute(
+        "UPDATE operation_params SET parent_param_name='', condition_value='' "
+        "WHERE parent_param_name IS NULL"
+    )
+    con.commit()
+    con.close()
+
+    out = td.get_op_schema("virustotal", "get_ip_reputation", verbose=True)
+
+    assert out["visibility"]["always"] == ["ip", "limit", "scope"]
+    assert out["visibility"]["when"]["scope=private"] == ["vlan"]
+    assert out["param_groups_by_select"]["scope"]["private"]["params"] == [
+        "ip", "limit", "vlan"]
