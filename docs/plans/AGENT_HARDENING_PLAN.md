@@ -181,13 +181,26 @@ model. Claude already emits multiple `tool_use` blocks per turn; the initial gat
 
 ## Phase 3 — Safety & auditability
 
-- **3.1 HMAC-bind approvals** (HIGH, medium) — bind `approval_id + tool + args_hash + ts` with an
-  HMAC token (HITL plan Phase 0); validate on resume via `secrets.compare_digest`. Closes argument
-  substitution if the session store leaks.
-- **3.2 Persist suspended sessions** (MEDIUM, large) — the in-memory gateway loses all pending
-  approvals on worker restart. Back it with the session store.
-- **3.3 LM Studio provider approvals** (MEDIUM, large) — it currently auto-executes tier-3+ tools;
-  route them through the same suspend/resume path as Anthropic, or refuse tier-3+ under it.
+- **3.1 HMAC-bind approvals** (HIGH, medium) · ✅ DONE (2026-05-30) — `approvals.bind()` binds
+  `(approval_id, tool, args_hash, created_at)` under a server secret (`FSR_APPROVAL_HMAC_KEY`, else
+  per-process random) at stash time; `AnthropicProvider.resume()` calls `approvals.verify()`
+  (`hmac.compare_digest`) before re-dispatching and fails closed (`ErrorEvent` + `DoneEvent`
+  `stop_reason=approval_unverified`) on mismatch. Closes store-tampering: swapped args change
+  `args_hash`, so the token no longer matches. Surfaced to the widget as the new
+  `approval_unverified` stop_reason (connector contract **2.2.0**). Tests: `test_approval_hmac.py` (7).
+- **3.2 Persist suspended sessions** (MEDIUM, large) · ✅ DONE (2026-05-30) — `SqliteApprovalGateway`
+  (sqlite + pickled `SuspendedSession`, TTL gc) in `fsr_core.llm.approvals`; module default gateway
+  made swappable (`set_default_gateway`). Web backend installs one at startup (deferred from import
+  so keyring isn't touched early) so both the provider stash side and the chat-route resolve side
+  share one persisted store across a restart. Pins a stable `FSR_APPROVAL_HMAC_KEY` in the keyring
+  secrets store so 3.1 tokens survive a restart (else fail closed). Tests:
+  `test_approval_persistence.py` (5).
+- **3.3 LM Studio provider approvals** (MEDIUM, large) · ⏸ DEFERRED post-MVP (2026-05-30) — per
+  product direction the connector/widget run on Anthropic (Haiku) and won't use LM Studio, so its
+  tier-3+ auto-execute gap is latent (only reachable from the Studio editor if an operator switches
+  providers). Core keeps the provider. When resumed: give `LMStudioProvider` the same suspend/resume
+  approval path as Anthropic in OpenAI message shape — **not** a refuse-guard (that would break
+  legitimate Studio-editor LM Studio use).
 - **3.4 Widen `args_hash` to full SHA-256** (LOW, small) and **mask + store args in `AUDIT_LOG`**
   (MEDIUM, small) for collision-resistance and readable forensics.
 - **3.5 Approval gateway atomicity + polling rate-limit** (LOW, small each) — replace peek-then-pop
