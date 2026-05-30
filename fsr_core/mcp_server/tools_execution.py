@@ -523,16 +523,39 @@ def populate_op_definitions(client, time_budget_s: float = 60.0,
 
 def _resolve_config_id(rows: list[dict[str, Any]], connector: str,
                        config_name: str) -> str:
-    """Map a run_op `config` NAME to its UUID using the configured rows; "" if
-    not resolvable (preflight then checks the connector-level verdict)."""
-    if not config_name:
-        return ""
+    """Map a run_op `config` name/id to its UUID using configured rows.
+
+    When `config_name` is empty, prefer the connector's default configuration
+    and fall back to the sole configuration. This matters for agent-proxied
+    connectors: the platform often has no local default, so execute must send
+    the agent configuration UUID explicitly.
+    """
     for row in rows:
         if row.get("name") != connector:
             continue
         for key in ("configs", "configurations", "config", "configuration"):
-            for c in (row.get(key) or []):
-                if isinstance(c, dict) and c.get("name") == config_name:
+            configs = row.get(key) or []
+            if config_name:
+                for c in configs:
+                    if isinstance(c, str) and c == config_name:
+                        return c
+                    if not isinstance(c, dict):
+                        continue
+                    cid = c.get("config_id") or c.get("id") or c.get("uuid")
+                    if config_name in (c.get("name"), cid):
+                        if cid:
+                            return str(cid)
+                continue
+            for c in configs:
+                if isinstance(c, dict) and c.get("default"):
+                    cid = c.get("config_id") or c.get("id") or c.get("uuid")
+                    if cid:
+                        return str(cid)
+            if len(configs) == 1:
+                c = configs[0]
+                if isinstance(c, str):
+                    return c
+                if isinstance(c, dict):
                     cid = c.get("config_id") or c.get("id") or c.get("uuid")
                     if cid:
                         return str(cid)
@@ -1212,6 +1235,13 @@ def run_op(
     preflight_err = _preflight_connector(client, connector, config)
     if preflight_err is not None:
         return preflight_err
+    try:
+        exec_config = (
+            _resolve_config_id(_configured_rows(client), connector, config)
+            or config
+        )
+    except Exception:  # noqa: BLE001
+        exec_config = config
 
     # Live op + param fallback. The offline checks above can only catch a
     # phantom op / bad args when the connector's ops are catalogued. When the
@@ -1255,7 +1285,7 @@ def run_op(
         "connector": connector,
         "operation": op,
         "version": version,
-        "config": config,
+        "config": exec_config,
         "params": params or {},
     }
 

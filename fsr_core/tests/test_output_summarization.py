@@ -275,6 +275,32 @@ def test_preflight_not_configured_carries_capability_gap_card(monkeypatch):
     assert tt_emit.emit_capability_gap_card(**card)["ok"] is True
 
 
+def test_resolve_config_id_uses_default_agent_config():
+    rows = [{
+        "name": "fortigate-firewall",
+        "configuration": [
+            {"config_id": "cfg-default", "name": "FortiGate", "default": True},
+            {"config_id": "cfg-test", "name": "test", "default": False},
+        ],
+    }]
+
+    assert te._resolve_config_id(rows, "fortigate-firewall", "") == "cfg-default"
+    assert te._resolve_config_id(rows, "fortigate-firewall", "test") == "cfg-test"
+    assert te._resolve_config_id(rows, "fortigate-firewall",
+                                 "cfg-test") == "cfg-test"
+
+
+def test_resolve_config_id_uses_sole_config_when_no_default():
+    rows = [{
+        "name": "fortigate-firewall",
+        "configuration": [
+            {"config_id": "cfg-only", "name": "FortiGate"},
+        ],
+    }]
+
+    assert te._resolve_config_id(rows, "fortigate-firewall", "") == "cfg-only"
+
+
 def test_preflight_unhealthy_carries_capability_gap_card(monkeypatch):
     monkeypatch.setattr(te, "_configured_rows",
                         lambda client, force=False: [
