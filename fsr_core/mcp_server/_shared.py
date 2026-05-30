@@ -80,6 +80,41 @@ def _err(code: str, message: str,
     return out
 
 
+def _capability_gap_suggestion(
+    *,
+    id: str,
+    missing: str,
+    why: str,
+    fix_steps: list[str],
+    resume_value: str,
+    resume_label: str = "Re-check & continue",
+    tips: list[dict[str, Any]] | None = None,
+    alternatives: list[dict[str, Any]] | None = None,
+    docs_url: str | None = None,
+) -> dict[str, Any]:
+    """Build a `suggested_card` payload (the kwargs for
+    `emit_capability_gap_card`) for a missing-capability dead end, so every
+    tool that hits one offers the analyst the SAME never-dead-end shape:
+    what's missing, why, concrete fix steps, a resume button, and optional
+    tips / manual fallbacks. The agent forwards this straight into
+    `emit_capability_gap_card` (see system_prompt_triage.md). Returns the
+    kwargs dict only — the emitter adds `type` and validates."""
+    card: dict[str, Any] = {
+        "id": id,
+        "missing": missing,
+        "why": why,
+        "fix_steps": list(fix_steps),
+        "resume": {"label": resume_label, "value": resume_value},
+    }
+    if tips:
+        card["tips"] = tips
+    if alternatives:
+        card["alternatives"] = alternatives
+    if docs_url:
+        card["docs_url"] = docs_url
+    return card
+
+
 def _serialize_compiler_error(e: Any) -> dict[str, Any]:
     """Compiler error → tool-result item with `suggestions: [...]` array.
 

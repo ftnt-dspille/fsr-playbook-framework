@@ -13,6 +13,7 @@ from typing import Any
 from ._shared import (
     mcp,
     _err,
+    _capability_gap_suggestion,
     _db,
     _rows,
     _verifications_for,
@@ -335,6 +336,44 @@ def _required_params(conn: sqlite3.Connection, connector: str,
     return [{"name": r[0], "type": r[1]} for r in rows if r[0]]
 
 
+def _connectors_that_could_contain(
+        keywords: tuple[str, ...] | None,
+        exclude: set[str],
+        limit: int = 4) -> list[dict[str, str]]:
+    """Across the WHOLE reference catalog (not just configured connectors),
+    find connectors that carry a containment/response op matching the target —
+    minus the ones already configured. This turns a dead end into a concrete
+    "configure connector X to enable this" recommendation. Best-effort: any DB
+    hiccup returns []."""
+    found: dict[str, str] = {}  # connector -> sample op that would do the job
+    try:
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                "SELECT connector_name, op_name, title, category FROM operations "
+                "WHERE (enabled IS NULL OR enabled NOT IN (0,'0'))"
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    for connector, op, title, category in rows:
+        if not connector or connector in exclude or connector in found:
+            continue
+        nm = (op or "").lower()
+        cat = (category or "").lower()
+        if nm.startswith(_NON_ACTION_PREFIXES):
+            continue
+        is_action = (cat in _CONTAINMENT_CATEGORIES
+                     or any(v in nm for v in _CONTAINMENT_VERBS))
+        if not is_action:
+            continue
+        if keywords and not any(
+                k in nm or k in (title or "").lower() for k in keywords):
+            continue
+        found[connector] = op or ""
+        if len(found) >= limit:
+            break
+    return [{"connector": c, "op": o} for c, o in found.items()]
+
+
 def _healthcheck_many(client, targets: list[tuple[str, str]]) -> dict[str, str]:
     """Healthcheck many (name, version) connectors CONCURRENTLY, returning
     {name: status}. Serial probing was the dominant latency in the live triage
@@ -467,7 +506,11 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
 
     # 3. Scoped healthcheck: probe ONLY the connectors that carry a candidate
     # action (a handful), not all configured ones. Drop actions whose connector
-    # isn't healthy so we never stage on a disconnected connector.
+    # we actively probed and found unhealthy — so we never stage on a known-
+    # disconnected connector. But FAIL OPEN: if a connector couldn't be probed
+    # (no version to scope the probe, or no live client), fall back to its
+    # listing status rather than silently dropping a valid containment action.
+    # A probe gap must never manufacture a dead end out of a configured op.
     if probe and actions:
         candidates = {a["connector"] for a in actions}
         client = _shared._live_client()
@@ -477,7 +520,9 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
         healthy_ok = {"available", "completed", "active"}
         kept = []
         for a in actions:
-            st = health.get(a["connector"], "")
+            # Probed result wins; otherwise trust the listing status we already
+            # have (probe gap → fail open, don't drop).
+            st = health.get(a["connector"], a.get("status") or "")
             if str(st).lower() not in healthy_ok:
                 continue
             a["status"] = st
@@ -491,17 +536,55 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                            "probed": probe}
     if not actions:
         # Connectors are configured, but none can contain this (the set is
-        # intel/utility only, or nothing matches the target type). Tell the
-        # agent so it reports the capability gap in its verdict instead of
-        # hunting connector-by-connector for ops that don't exist here.
+        # intel/utility only, or nothing matches the target type). Don't dead-
+        # end the analyst: build a ready-to-emit `capability_gap` card that
+        # names which connector to configure (looked up from the full catalog),
+        # how to resume, and manual fallbacks. The agent forwards `suggested_card`
+        # straight into emit_capability_gap_card; the prompt mandates it.
         scope = f" for target type {target!r}" if target else ""
+        miss = f"{target} containment" if target else "containment / response"
+        could = _connectors_that_could_contain(keywords, set(configured))
+        if could:
+            names = ", ".join(c["connector"] for c in could)
+            fix_steps = [
+                f"Configure one of these connectors under Settings → "
+                f"Connectors: {names} (each carries a matching containment op, "
+                f"e.g. {could[0]['connector']}.{could[0]['op']}).",
+                "Save the configuration and confirm it shows as Available.",
+            ]
+        else:
+            fix_steps = [
+                "Install + configure a response connector for this target "
+                "(e.g. fortigate-firewall for IP/host blocking) under "
+                "Settings → Connectors.",
+            ]
+        out["suggested_card"] = _capability_gap_suggestion(
+            id=f"capgap_{target or 'containment'}",
+            missing=miss,
+            why=(f"no tier-3 containment operation is available on any "
+                 f"configured, healthy connector{scope}"),
+            fix_steps=fix_steps,
+            resume_value="recheck_containment",
+            tips=[
+                {"text": "Keep at least one response connector configured + "
+                         "healthy so containment can be staged automatically.",
+                 "hint": "Intel-only instances can enrich but never contain."},
+                {"text": "Grant the connector probe access so I can confirm "
+                         "it's reachable before staging an action."},
+            ],
+            alternatives=[
+                {"label": "Escalate to T2", "value": "escalate_t2"},
+                {"label": "Create remediation ticket", "value": "ticket"},
+                {"label": "Acknowledge & document", "value": "document"},
+            ],
+        )
         out["message"] = (
             f"No containment/response action is configured on this FortiSOAR "
-            f"instance{scope}. Don't keep searching. Surface the gap with "
-            f"`emit_choice_card` — offer the analyst manual next steps (e.g. "
-            f"'Acknowledge & document', 'Escalate to T2', 'Create remediation "
-            f"ticket') — and note in your verdict that automated containment "
-            f"isn't available here.")
+            f"instance{scope}. Don't keep searching and don't dead-end the "
+            f"analyst: call `emit_capability_gap_card` with the `suggested_card` "
+            f"payload returned here (it names which connector to configure and "
+            f"includes a resume button), and note in your verdict that automated "
+            f"containment isn't available here yet.")
     return out
 
 

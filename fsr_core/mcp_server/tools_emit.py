@@ -251,6 +251,109 @@ def emit_action_card(
 
 
 @mcp.tool()
+def emit_capability_gap_card(
+    id: str,
+    missing: str,
+    why: str,
+    fix_steps: list[str],
+    resume: dict[str, Any],
+    tips: list[dict[str, Any]] | None = None,
+    alternatives: list[dict[str, Any]] | None = None,
+    docs_url: str | None = None,
+) -> dict[str, Any]:
+    """Emit a `capability_gap` card when the instance CAN'T do what the
+    investigation needs (e.g. no IP-containment connector is configured) —
+    so the analyst is never left at a dead end. The card states what's
+    missing, why, the concrete steps to enable it, optional automation
+    tips, and a RESUME button that re-runs the blocked step after the
+    analyst fixes the gap. Prefer this over a bare `emit_choice_card` for
+    any missing-capability / not-configured situation.
+
+    Args:
+      id: stable card id; echoed on resume.
+      missing: the capability the investigation needs, in plain English
+        (e.g. "IP containment / block").
+      why: one line on why it's unavailable here (e.g. "no tier-3 block_ip
+        operation on any configured connector").
+      fix_steps: ordered, concrete steps the analyst can take to enable it
+        (e.g. ["Configure the fortigate-firewall connector under Settings →
+        Connectors", "Grant it firewall-policy write access"]). At least one.
+      resume: the re-check button — {label, value}. On click the widget
+        resumes the turn echoing `value`; the agent re-runs the blocked
+        discovery (e.g. find_containment_actions) and continues. `value`
+        must be machine-readable and distinct from any alternative value.
+      tips: optional automation/UX recommendations — list of {text, hint?}.
+        Use for "how to make this work better next time" guidance (e.g.
+        keeping a response connector configured, granting probe access).
+      alternatives: optional manual fallbacks the analyst can pick instead
+        of fixing the gap now — list of {label, value, hint?} (e.g.
+        "Escalate to T2", "Document & close"). Same resume semantics as a
+        choice_card option. Values must be unique across resume+alternatives.
+      docs_url: optional link to setup/configuration docs.
+
+    Returns {ok: True, card:{type:"capability_gap", ...}} on success, else
+    {ok: False, code, message}."""
+    for label, val in (("id", id), ("missing", missing), ("why", why)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+    if not isinstance(fix_steps, list) or not fix_steps or not all(
+            isinstance(s, str) and s.strip() for s in fix_steps):
+        return _err("bad_fix_steps",
+                    "fix_steps must be a non-empty list of non-empty strings",
+                    suggestions=["give at least one concrete step, e.g. "
+                                 "'Configure the <name> connector'"])
+    if not isinstance(resume, dict):
+        return _err("bad_resume", "resume must be an object {label, value}")
+    seen_values: set[str] = set()
+    for k in ("label", "value"):
+        if not resume.get(k) or not isinstance(resume[k], str):
+            return _err("bad_resume", f"resume missing string field {k!r}")
+    seen_values.add(resume["value"])
+
+    if tips is not None:
+        if not isinstance(tips, list):
+            return _err("bad_tips", "tips must be a list of {text, hint?}")
+        for i, t in enumerate(tips):
+            if not isinstance(t, dict) or not t.get("text") or not isinstance(
+                    t["text"], str):
+                return _err("bad_tips", f"tips[{i}] needs a string 'text' field")
+
+    if alternatives is not None:
+        if not isinstance(alternatives, list):
+            return _err("bad_alternatives",
+                        "alternatives must be a list of {label, value, hint?}")
+        for i, a in enumerate(alternatives):
+            if not isinstance(a, dict):
+                return _err("bad_alternatives",
+                            f"alternatives[{i}] must be an object")
+            for k in ("label", "value"):
+                if not a.get(k) or not isinstance(a[k], str):
+                    return _err("bad_alternatives",
+                                f"alternatives[{i}] missing string field {k!r}")
+            if a["value"] in seen_values:
+                return _err("duplicate_value",
+                            f"alternatives[{i}].value duplicates resume or an "
+                            f"earlier alternative")
+            seen_values.add(a["value"])
+
+    card: dict[str, Any] = {
+        "type": "capability_gap",
+        "id": id,
+        "missing": missing,
+        "why": why,
+        "fix_steps": fix_steps,
+        "resume": {"label": resume["label"], "value": resume["value"]},
+    }
+    if tips:
+        card["tips"] = tips
+    if alternatives:
+        card["alternatives"] = alternatives
+    if docs_url:
+        card["docs_url"] = docs_url
+    return {"ok": True, "card": card}
+
+
+@mcp.tool()
 def emit_manual_input(
     id: str,
     workflow_run_iri: str,

@@ -13,6 +13,7 @@ from typing import Any
 from ._shared import (
     mcp,
     _err,
+    _capability_gap_suggestion,
     _db,
     _rows,
     _verifications_for,
@@ -330,6 +331,29 @@ def _preflight_connector(client, connector: str,
                 "and pick an available alternative.",
             ],
             connector=connector,
+            # Never dead-end the analyst: if this connector is the only way to
+            # do what they need (no equivalent configured alternative), forward
+            # this into emit_capability_gap_card. During a wide enrichment
+            # fan-out, prefer skip-and-mention instead (see system prompt).
+            suggested_card=_capability_gap_suggestion(
+                id=f"capgap_cfg_{connector}",
+                missing=f"the '{connector}' connector",
+                why=(f"'{connector}' has no active configuration on this "
+                     f"instance, so its operations can't run"),
+                fix_steps=[
+                    f"Add and activate a configuration for '{connector}' "
+                    f"under Settings → Connectors.",
+                    "Save it and confirm it shows as Available.",
+                ],
+                resume_value="recheck_connector",
+                tips=[
+                    {"text": f"Keep '{connector}' configured so I can use it "
+                             f"without an approval round-trip next time."},
+                ],
+                alternatives=[
+                    {"label": "Skip this & note the gap", "value": "skip_gap"},
+                ],
+            ),
         )
     version = cands[0].get("version") or ""
     config_id = _resolve_config_id(rows, connector, config_name)
@@ -363,6 +387,28 @@ def _preflight_connector(client, connector: str,
             connector=connector,
             version=version,
             health_status=health.get("status"),
+            suggested_card=_capability_gap_suggestion(
+                id=f"capgap_health_{connector}",
+                missing=f"a healthy '{connector}' connector",
+                why=(f"'{connector}' is configured but its healthcheck is "
+                     f"failing (status {health.get('status')!r})"
+                     + (f": {health.get('message')}" if health.get('message')
+                        else "")),
+                fix_steps=[
+                    f"Open the '{connector}' configuration and check "
+                    f"credentials, host, and network reachability.",
+                    "Re-run its health check until it returns Available.",
+                ],
+                resume_value="recheck_connector",
+                tips=[
+                    {"text": "A connector that fails its healthcheck is caught "
+                             "here in ~0.5s instead of timing out mid-op — fix "
+                             "the config and I'll pick it straight back up."},
+                ],
+                alternatives=[
+                    {"label": "Skip this & note the gap", "value": "skip_gap"},
+                ],
+            ),
         )
     return None
 

@@ -14,6 +14,7 @@ import sqlite3
 
 import pytest
 
+from fsr_core.mcp_server import tools_emit as tt_emit
 from fsr_core.mcp_server import tools_execution as te
 from fsr_core.mcp_server import tools_triage as tt
 from fsr_core.mcp_server.tools_triage import _summarize_record
@@ -175,11 +176,129 @@ def test_find_containment_actions_empty_when_no_response_connector(monkeypatch):
         "probed": k.get("probe"), "count": 2})
     out = tt.find_containment_actions(target_type="host", probe=True)
     assert out["ok"] is True and out["count"] == 0
-    # steers the agent to surface the gap via a choice card, not a dead end
-    assert "emit_choice_card" in out["message"]
+    # never dead-ends: steers the agent to emit a capability_gap card and
+    # hands it a ready-to-forward suggested_card payload.
+    assert "emit_capability_gap_card" in out["message"]
+    card = out.get("suggested_card")
+    assert card and card["missing"] and card["why"]
+    assert card["fix_steps"]  # at least one concrete step
+    # resume button so the analyst can fix the gap and continue
+    assert card["resume"]["value"] == "recheck_containment"
+    # manual fallbacks present, values distinct from the resume value
+    alt_values = {a["value"] for a in card["alternatives"]}
+    assert alt_values and card["resume"]["value"] not in alt_values
+    # the suggested payload must pass the emitter's own validation
+    emitted = tt_emit.emit_capability_gap_card(**card)
+    assert emitted["ok"] is True
+    assert emitted["card"]["type"] == "capability_gap"
     assert "no containment" in out["message"].lower()
 
 
 def test_find_containment_actions_rejects_bad_target():
     out = tt.find_containment_actions(target_type="banana")
     assert out["ok"] is False and out["code"] == "unknown_target_type"
+
+
+# --------------------------------------------------------------------------
+# emit_capability_gap_card — the never-dead-end card
+# --------------------------------------------------------------------------
+
+def _good_capgap_kwargs():
+    return dict(
+        id="capgap_ip",
+        missing="IP containment",
+        why="no tier-3 block_ip op on a configured connector",
+        fix_steps=["Configure the fortigate-firewall connector"],
+        resume={"label": "Re-check & continue", "value": "recheck"},
+        tips=[{"text": "Keep a response connector configured"}],
+        alternatives=[{"label": "Escalate to T2", "value": "escalate"}],
+        docs_url="https://docs/connectors",
+    )
+
+
+def test_emit_capability_gap_card_happy_path():
+    out = tt_emit.emit_capability_gap_card(**_good_capgap_kwargs())
+    assert out["ok"] is True
+    card = out["card"]
+    assert card["type"] == "capability_gap"
+    assert card["missing"] == "IP containment"
+    assert card["resume"] == {"label": "Re-check & continue", "value": "recheck"}
+    assert card["fix_steps"] and card["tips"] and card["alternatives"]
+    assert card["docs_url"] == "https://docs/connectors"
+
+
+def test_emit_capability_gap_card_requires_fix_steps():
+    kw = _good_capgap_kwargs()
+    kw["fix_steps"] = []
+    out = tt_emit.emit_capability_gap_card(**kw)
+    assert out["ok"] is False and out["code"] == "bad_fix_steps"
+
+
+def test_emit_capability_gap_card_resume_needs_label_and_value():
+    kw = _good_capgap_kwargs()
+    kw["resume"] = {"value": "recheck"}  # missing label
+    out = tt_emit.emit_capability_gap_card(**kw)
+    assert out["ok"] is False and out["code"] == "bad_resume"
+
+
+def test_emit_capability_gap_card_rejects_duplicate_resume_value():
+    kw = _good_capgap_kwargs()
+    kw["alternatives"] = [{"label": "Re-check", "value": "recheck"}]  # dup
+    out = tt_emit.emit_capability_gap_card(**kw)
+    assert out["ok"] is False and out["code"] == "duplicate_value"
+
+
+def test_capability_gap_suggestion_round_trips_through_emitter():
+    # The shared builder's output must be valid emit_capability_gap_card kwargs.
+    from fsr_core.mcp_server._shared import _capability_gap_suggestion
+    sug = _capability_gap_suggestion(
+        id="g", missing="X", why="because",
+        fix_steps=["do thing"], resume_value="retry",
+        tips=[{"text": "tip"}],
+        alternatives=[{"label": "Skip", "value": "skip"}])
+    assert sug["resume"] == {"label": "Re-check & continue", "value": "retry"}
+    assert "type" not in sug  # emitter adds type
+    out = tt_emit.emit_capability_gap_card(**sug)
+    assert out["ok"] is True and out["card"]["type"] == "capability_gap"
+
+
+def test_preflight_not_configured_carries_capability_gap_card(monkeypatch):
+    # A connector with no active configuration → error envelope must hand the
+    # agent a ready-to-forward capability_gap card, not just a dead-end.
+    monkeypatch.setattr(te, "_configured_rows",
+                        lambda client, force=False: [{"name": "other"}])
+    err = te._preflight_connector(client=object(), connector="virustotal")
+    assert err is not None and err["code"] == "connector_not_configured"
+    card = err["suggested_card"]
+    assert "virustotal" in card["missing"]
+    assert card["resume"]["value"] == "recheck_connector"
+    assert tt_emit.emit_capability_gap_card(**card)["ok"] is True
+
+
+def test_preflight_unhealthy_carries_capability_gap_card(monkeypatch):
+    monkeypatch.setattr(te, "_configured_rows",
+                        lambda client, force=False: [
+                            {"name": "fortisiem", "version": "1.0.0"}])
+    monkeypatch.setattr(te, "_resolve_config_id",
+                        lambda rows, c, n="": "cfg1")
+    monkeypatch.setattr(te, "_cached_health",
+                        lambda *a, **k: {"status": "Disconnected",
+                                         "message": "SIEM unreachable"})
+    err = te._preflight_connector(client=object(), connector="fortisiem")
+    assert err is not None and err["code"] == "connector_unhealthy"
+    card = err["suggested_card"]
+    assert "fortisiem" in card["missing"]
+    assert "Disconnected" in card["why"]
+    assert tt_emit.emit_capability_gap_card(**card)["ok"] is True
+
+
+def test_emit_capability_gap_card_minimal():
+    # tips/alternatives/docs_url are optional; minimal card still valid.
+    out = tt_emit.emit_capability_gap_card(
+        id="g1", missing="enrichment", why="virustotal not configured",
+        fix_steps=["Configure virustotal"],
+        resume={"label": "Retry", "value": "retry"})
+    assert out["ok"] is True
+    card = out["card"]
+    assert "tips" not in card and "alternatives" not in card
+    assert "docs_url" not in card

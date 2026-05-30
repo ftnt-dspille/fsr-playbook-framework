@@ -44,7 +44,40 @@ emit-time op grounding, self-healing resume, `get_record(full=True)` cap) +
 **lifecycle-hook & post-install warmup**. `make verify` 33+111 green. Plan:
 `docs/plans/AGENT_HARDENING_PLAN.md`.
 
-### 2026-05-30 (later) — 1.4 calibration + probe fix. RESUME HERE.
+### 2026-05-30 (latest) — never-dead-end `capability_gap` card. RESUME HERE.
+New: when the instance can't do what an investigation needs (e.g. no
+containment connector configured), the agent now surfaces a `capability_gap`
+card instead of a prose dead end — what's missing, **which connector to
+configure** (looked up across the catalog), automation tips, manual
+fallbacks, and a **resume button** to re-run the blocked step after the fix.
+- `emit_capability_gap_card` in `tools_emit.py` (+ SAFE_TOOLS / TOOL_TIERS /
+  TOOL_SCHEMA_OVERRIDES in `llm/tools.py`, export in `mcp_server/__init__.py`).
+- `find_containment_actions` returns a ready-to-forward `suggested_card`
+  (`_connectors_that_could_contain` helper) + a **fail-open probe fix**: a
+  probe gap (no version / no live client) now falls back to listing status
+  instead of silently dropping a valid containment action (this was the
+  pre-existing `test_..._filters_to_destructive` failure — now green).
+- System prompt §3: "never dead-end the analyst" directive.
+- Connector wiring: `operations.py` card maps + `CONTRACT_VERSION = 2.3.0`.
+- Contract spec updated (widget harness `..._CONNECTOR_CONTRACT.md` §3/4/5).
+- `make verify` green: 38 fsr_core + 111 connector. Tests in
+  `test_output_summarization.py` (emitter validation + suggested_card).
+- **Generalized** beyond containment: shared `_capability_gap_suggestion`
+  builder in `_shared.py`; `run_op`'s `_preflight_connector` now attaches a
+  `suggested_card` to BOTH `connector_not_configured` and `connector_unhealthy`
+  (the enrichment analog). Prompt Hard-rule updated: forward it when the gap
+  blocks the goal, but during wide enrichment fan-out skip-and-mention (don't
+  gate on one missing TI source).
+- **Deliberately NOT carded** (analysis in chat): dev/operator gaps the analyst
+  can't fix from the FSR UI (`catalog_unavailable`, `no_live_fsr`,
+  `probes_unavailable`) and runtime/logic errors (`not_found`, `no_match`,
+  `bad_response_shape`, `unknown_operation` self-heals). Candidate if desired
+  later: `run_playbook` "no playbook matching" (authoring, resume=create/import).
+- **Remaining:** (a) re-vendor fsr_core → connector + `scripts/deploy.sh` to
+  ship live; (b) Angular widget render of `capability_gap` (separate WebStorm
+  repo — contract documented, not yet implemented).
+
+### 2026-05-30 (later) — 1.4 calibration + probe fix.
 Ran the live investigation-eval calibration (`calibrate_investigation.py`, all
 5 fixtures, real Haiku on the box). **5/5 recall 1.0 — but that's the finding,
 not a pass:** the gate is too weak to be meaningful. Full write-up + ranked
