@@ -9,6 +9,7 @@ We do the agentic loop here so the route handler stays a dumb pipe:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any, AsyncIterator
@@ -36,6 +37,7 @@ from .provider import (
 )
 from . import approvals as _approvals
 from ._loop_helpers import (
+    MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     compile_errors as _compile_errors,
@@ -363,7 +365,64 @@ class AnthropicProvider:
             tool_result_blocks: list[dict[str, Any]] = []
             pending: ApprovalRequestEvent | None = None
             pending_remaining: list[tuple[str, str, dict[str, Any]]] = []
-            for i, (call_id, name, args) in enumerate(tool_calls):
+
+            def _record_result(name: str, args: dict[str, Any], result: Any) -> dict[str, Any]:
+                # Build the tool_result block + fold usage. Returns the block
+                # so callers can both append it and (for parallel calls) keep
+                # tool_use order intact.
+                content_str = _stringify(result)
+                block = {
+                    "type": "tool_result",
+                    "tool_use_id": "",  # filled by caller
+                    "content": content_str,
+                    "is_error": _is_error_result(result),
+                }
+                try:
+                    args_chars = len(json.dumps(args, default=str))
+                except Exception:
+                    args_chars = 0
+                tool_call_usage.append(ToolCallUsage(
+                    name=name, args_chars=args_chars,
+                    result_chars=len(content_str),
+                ))
+                return block
+
+            # §2.8 — Parallel read-only dispatch. The first tier-3+ call (if
+            # any) is the approval boundary; by construction every call before
+            # it is read-only (tier ≤ 2), so those are safe to fan out
+            # concurrently. The approval call itself + everything after it
+            # route through the sequential suspend path below, unchanged.
+            tiers = [_tier_for(name, args) for (_cid, name, args) in tool_calls]
+            approval_idx = next(
+                (idx for idx, t in enumerate(tiers) if t >= 3), len(tool_calls)
+            )
+            parallel_batch = tool_calls[:approval_idx]
+
+            # Emit ToolUseEvents up front so the stream preserves tool_use
+            # order even though execution is concurrent.
+            for (call_id, name, args), tier in zip(parallel_batch, tiers):
+                yield ToolUseEvent(
+                    name=name, arguments=args, call_id=call_id, tier=tier,
+                )
+            if parallel_batch:
+                _sem = asyncio.Semaphore(MAX_PARALLEL_TOOLS)
+
+                async def _run_one(nm: str, ar: dict[str, Any]) -> Any:
+                    async with _sem:
+                        return await asyncio.to_thread(dispatch, nm, ar)
+
+                batch_results = await asyncio.gather(
+                    *[_run_one(name, args) for (_cid, name, args) in parallel_batch]
+                )
+                # Emit results + build tool_result blocks in tool_use order.
+                for (call_id, name, args), result in zip(parallel_batch, batch_results):
+                    yield ToolResultEvent(call_id=call_id, result=result)
+                    block = _record_result(name, args, result)
+                    block["tool_use_id"] = call_id
+                    tool_result_blocks.append(block)
+
+            for i in range(approval_idx, len(tool_calls)):
+                call_id, name, args = tool_calls[i]
                 yield ToolUseEvent(
                     name=name, arguments=args, call_id=call_id,
                     tier=_tier_for(name, args),
@@ -408,26 +467,13 @@ class AnthropicProvider:
                     )
                     break
 
+                # Flag failures (via `_record_result` → `_is_error_result`)
+                # so the model's self-repair loop branches on a real error
+                # signal instead of guessing from prose.
                 yield ToolResultEvent(call_id=call_id, result=result)
-                content_str = _stringify(result)
-                # Flag failures so the model's self-repair loop branches on a
-                # real error signal instead of guessing from prose. Recognizes
-                # both the `{ok: false}` envelope (canonical, from `_err`) and
-                # a bare `{error: ...}` dict.
-                tool_result_blocks.append({
-                    "type": "tool_result",
-                    "tool_use_id": call_id,
-                    "content": content_str,
-                    "is_error": _is_error_result(result),
-                })
-                try:
-                    args_chars = len(json.dumps(args, default=str))
-                except Exception:
-                    args_chars = 0
-                tool_call_usage.append(ToolCallUsage(
-                    name=name, args_chars=args_chars,
-                    result_chars=len(content_str),
-                ))
+                block = _record_result(name, args, result)
+                block["tool_use_id"] = call_id
+                tool_result_blocks.append(block)
 
             if pending is not None:
                 # Suspend: emit the approval request + usage for the
