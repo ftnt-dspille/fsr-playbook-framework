@@ -629,9 +629,16 @@ def list_configured_connectors(probe: bool = False,
             + "/api/integration/connector_details/?format=json&configured=true&exclude=operation&active=true",
             json={}, verify=client.verify_ssl,
         )
-        rows = (r.json().get("data") or []) if r.status_code == 200 else []
+        rows = list((r.json().get("data") or []) if r.status_code == 200 else [])
     except Exception as e:  # noqa: BLE001
         return {"error": f"connector_details fetch failed: {e!r}"}
+
+    try:
+        from .tools_execution import _agent_configured_rows
+        already = {x.get("name") for x in rows}
+        rows += [x for x in _agent_configured_rows(client) if x.get("name") not in already]
+    except Exception:  # noqa: BLE001
+        pass
 
     out: list[dict] = []
     name_version: dict[str, str] = {}

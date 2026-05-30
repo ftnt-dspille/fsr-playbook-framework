@@ -173,13 +173,57 @@ _CONFIGURED_CACHE: dict[str, Any] = {"ts": 0.0, "rows": None}
 _CONFIGURED_TTL_S = 120.0
 
 
+def _agent_configured_rows(client) -> list[dict[str, Any]]:
+    """Return configured connector rows from agent-proxied installs.
+
+    Agent-proxied connectors show config_count=0 in connector_details?configured=true
+    and are invisible to preflight. Fix: list active agents via GET /api/3/agents,
+    then POST connector_details?agent={id}&active=true&exclude=operation per agent —
+    this returns real config_count. Only include rows with config_count > 0 and
+    status=Completed (installed-but-unconfigured agent connectors have config_count=0)."""
+    try:
+        ra = client.session.get(
+            client.base_url + "/api/3/agents",
+            verify=client.verify_ssl,
+        )
+        if ra.status_code != 200:
+            return []
+        members = ra.json().get("hydra:member") or []
+        agent_ids = [m["agentId"] for m in members
+                     if m.get("active") and m.get("agentId")]
+    except Exception:  # noqa: BLE001
+        return []
+
+    result = []
+    for agent_id in agent_ids:
+        try:
+            r = client.session.post(
+                client.base_url
+                + f"/api/integration/connector_details/?format=json"
+                f"&agent={agent_id}&active=true&exclude=operation",
+                json={}, verify=client.verify_ssl,
+            )
+            if r.status_code != 200:
+                continue
+            for row in (r.json().get("data") or []):
+                if (row.get("config_count", 0) > 0
+                        and row.get("status") == "Completed"):
+                    result.append(row)
+        except Exception:  # noqa: BLE001
+            continue
+    return result
+
+
 def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
     """Active, configured connectors on the live instance (by name+version).
 
     Cached in-process for a short TTL: preflight calls this on every `run_op`,
     and on a busy box the `connector_details` POST is non-trivial — re-fetching
     it per op during a multi-pivot hunt is pure overhead. The set rarely
-    changes within a session; a 2-minute TTL keeps it fresh enough."""
+    changes within a session; a 2-minute TTL keeps it fresh enough.
+
+    Also merges agent-proxied connectors (missed by the configured=true filter).
+    """
     import time
     if (not force and _CONFIGURED_CACHE["rows"] is not None
             and (time.time() - _CONFIGURED_CACHE["ts"]) < _CONFIGURED_TTL_S):
@@ -191,7 +235,9 @@ def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
     )
     if getattr(r, "status_code", 200) != 200:
         return _CONFIGURED_CACHE["rows"] or []
-    rows = (r.json().get("data") or [])
+    rows = list(r.json().get("data") or [])
+    already = {x.get("name") for x in rows}
+    rows += [x for x in _agent_configured_rows(client) if x.get("name") not in already]
     _CONFIGURED_CACHE["rows"] = rows
     _CONFIGURED_CACHE["ts"] = time.time()
     return rows
