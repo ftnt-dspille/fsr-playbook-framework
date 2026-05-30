@@ -60,7 +60,11 @@ def test_healthy_siem_passes_preflight_and_returns_context(sim_bridge):
 def test_search_events_returns_ordered_sequence(sim_bridge):
     if not _has_connector("fortinet-fortisiem"):
         pytest.skip("fortinet-fortisiem not in reference DB")
-    out = te.run_op("fortinet-fortisiem", "search_events", params={})
+    # `attribute` + `select_clause` are required (enforced by the 1.1
+    # param-validation guard); supply minimal valid values.
+    out = te.run_op("fortinet-fortisiem", "search_events",
+                    params={"attribute": "srcIpAddr = 185.220.101.47",
+                            "select_clause": "eventType, srcIpAddr"})
     assert out["ok"] is True, out
     assert out["output_is_list"] is True
     assert len(out["data"]) >= 2

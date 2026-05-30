@@ -623,6 +623,79 @@ def search_module_records(module: str, q: str = "",
     }
 
 
+@mcp.tool()
+def get_record(iri: str = "", module: str = "", uuid: str = "",
+               relationships: bool = True) -> dict[str, Any]:
+    """Fetch a single FSR record by IRI (or module+uuid), with relationships.
+
+    The read-only companion the triage prompt assumes when it tells the
+    agent to pull an event/alert/asset row by its ``iri``/``module``/``uuid``
+    to build an attack timeline or assess blast radius. Wraps
+    ``GET /api/3/<module>/<uuid>?$relationships=true`` so related records
+    (correlated alerts, linked assets, indicators) come back inline rather
+    than as bare IRIs the agent would have to chase one by one.
+
+    Args:
+      iri: full record IRI (e.g. ``/api/3/alerts/<uuid>``). Takes
+        precedence over module+uuid when both are supplied.
+      module: bare module name (e.g. ``alerts``) — required if no ``iri``.
+      uuid: record UUID — required if no ``iri``.
+      relationships: when true (default), append ``?$relationships=true``
+        so related entities are hydrated inline.
+
+    Returns:
+      ``{"ok": true, "iri": ..., "record": {...}, "url": ...}`` on a 200,
+      else ``{"ok": false, "code": ..., "message": ...}``.
+    """
+    path = ""
+    if iri and isinstance(iri, str):
+        # Normalise: accept a full IRI, with or without a leading slash,
+        # and strip any query string the caller pasted along.
+        path = "/" + iri.strip().lstrip("/").split("?", 1)[0]
+    elif module and uuid:
+        bare = module.split("?", 1)[0].strip()
+        if not bare:
+            return {"ok": False, "code": "missing_module",
+                    "message": f"module {module!r} is empty after stripping query string"}
+        path = f"/api/3/{bare}/{uuid.strip()}"
+    else:
+        return {"ok": False, "code": "missing_target",
+                "message": "get_record requires either `iri` or both `module` and `uuid`"}
+
+    client = _shared._live_client()
+    if client is None:
+        return {"ok": False, "code": "no_fsr_configured",
+                "message": "no FSR instance is configured — run `fsrpb env set` first"}
+
+    url = f"{client.base_url}{path}"
+    if relationships:
+        url += "?$relationships=true"
+    try:
+        r = client.session.get(url, verify=client.verify_ssl)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "code": "transport_error",
+                "message": f"GET {url} failed: {exc}", "url": url}
+    if r.status_code == 404:
+        return {"ok": False, "code": "not_found",
+                "message": f"no record at {path}", "url": url}
+    if r.status_code != 200:
+        return {"ok": False, "code": f"http_{r.status_code}",
+                "message": (r.text[:500] or f"HTTP {r.status_code}"),
+                "url": url}
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "code": "bad_json",
+                "message": "FSR returned 200 but body was not JSON", "url": url}
+
+    return {
+        "ok": True,
+        "iri": data.get("@id", path),
+        "record": data,
+        "url": url,
+    }
+
+
 def _assert_one(client: Any, a: dict[str, Any]) -> dict[str, Any]:
     kind = a.get("kind")
     module = a.get("module")

@@ -98,6 +98,7 @@ from .tools_corpus import (
 
 # Triage tools
 from .tools_triage import (
+    get_record,
     get_run_env,
     list_configured_connectors,
     list_playbook_runs,
@@ -214,6 +215,7 @@ __all__ = [
     "find_step_recipe",
     "search_api_examples",
     # Triage
+    "get_record",
     "get_run_env",
     "list_configured_connectors",
     "list_tags",

@@ -23,12 +23,45 @@ connector vendors it via `scripts/build.sh`; never edit the vendored copy under
   "never guess an op name." Tests: `python/tests/test_op_existence.py` (10). Returns
   `unknown_operation` with near-matches; agent self-corrects within the turn. This is the **template**
   for Phase 1.1 below.
+- **1.1 Argument validation against the op schema** — `_shared._validate_op_params(connector, op,
+  params)` loads top-level `operation_params` and flags unknown params (typo detector + near-match),
+  missing-required, out-of-set select values, and gross type errors. No-ops when no params are
+  catalogued; skips Jinja-templated values; ignores conditional sub-params; type checks are loose
+  (FSR coerces `"5"`→5). Wired into `run_op` (before the execute POST) and `emit_action_card` (before
+  rendering). Tests: `python/tests/test_op_params.py` (11).
+- **1.2 Tool errors marked `is_error`** — `anthropic_provider._is_error_result` recognizes both the
+  `{ok: false}` envelope and bare `{error: …}`; applied to all three `tool_result` build sites
+  (stream loop + the two resume-path blocks). Made the `anthropic` SDK import lazy so the module +
+  its pure helpers import without the SDK installed. Tests: `python/tests/test_tool_result_is_error.py`
+  (5).
+- **1.3 Mutating-op gate — resolved via existing tier gateway (MVP).** The human-approval guarantee
+  is already structural at the `dispatch` layer: a mutating `run_op` resolves to tier 3/4 and returns
+  a `pending_approval` envelope (no execution) unless `_approved=True`, which is set *only* by the
+  connector's `_resume_action_card_execute` after a human approves the card. The connector also
+  auto-cards a mutating `run_op` so the agent can't execute one silently. Per product direction
+  (2026-05-30): MVP with normal agents — dangerous mutations ask a person; an "allow once / always
+  allow per-tool" memory mechanism is explicitly out of scope for now. No `run_op` code change made.
+  Residual gap: the LM Studio provider auto-executes tier-3+ (bypassing this gate) — tracked as **3.3**.
+- **1.5 Widget contract version aligned** — widget `WIDGET_CONTRACT_VERSION` `2.0.0`→`2.1.0`
+  (`view.controller.js:34`) to match connector `CONTRACT_VERSION = "2.1.0"`; the
+  `incident_smtp_intrusion` fixture bumped to match. Contract-drift e2e tests pass.
+- **2.1 `get_record` tool** — `tools_triage.get_record(iri | module+uuid, relationships=True)`
+  wrapping `GET /api/3/<module>/<uuid>?$relationships=true`; tier-1 read-only, in `SAFE_TOOLS` +
+  `TOOL_TIERS`. Normalises pasted IRIs (leading slash / querystring), maps 404→`not_found`. Closes
+  the prompt↔tool gap behind the attack-timeline / blast-radius quick actions. Tests:
+  `python/tests/test_get_record.py` (6). Also fixed a pre-existing `make verify` failure: the 1.1
+  param guard had broken `test_sim_run_op_integration::test_search_events_returns_ordered_sequence`
+  (called `search_events` with empty params → now-required `attribute`/`select_clause` missing);
+  test updated to pass valid params. **Still needs re-vendor into the connector** (`scripts/build.sh`
+  + `info.json`/`install_to_fsr.py` bump) before the tool is live on the box.
+
+  **Still open in Phase 1: 1.4** (investigation-quality eval family — large).
 
 ---
 
 ## Phase 1 — Trust-critical (do first)
 
-### 1.1 Argument validation against the operation schema  ·  HIGH · medium
+### 1.1 Argument validation against the operation schema  ·  HIGH · medium  ·  ✅ DONE
 The op *name* is validated; its *arguments* are not. `run_op` posts params straight to FSR; required
 fields, types, and select-option membership are all checked only at execution → analysts approve
 invalid cards that fail post-approval.
@@ -41,14 +74,14 @@ invalid cards that fail post-approval.
 - **Test:** required-missing and bad-select cases → card not rendered, agent re-calls with complete
   args; analyst never sees the incomplete card.
 
-### 1.2 Tool errors marked `is_error`  ·  CRITICAL · small
+### 1.2 Tool errors marked `is_error`  ·  CRITICAL · small  ·  ✅ DONE
 `anthropic_provider.py:398-404` builds `tool_result` with content only. Add
 `"is_error": isinstance(result, dict) and "error" in result` (also recognize the `{ok: false}`
 envelope). Without it the self-repair loop is guessing.
 - **Test:** mock a transient connector 500 → next loop escalates/alternates instead of blindly
   retrying; error logged as `is_error`.
 
-### 1.3 Structural gate on mutating ops in `run_op`  ·  HIGH · medium
+### 1.3 Structural gate on mutating ops in `run_op`  ·  HIGH · medium  ·  ✅ DONE (via tier gateway — see above)
 Make the triage rule real: in `run_op`, if `confirm=True` and the op's category is
 containment/remediation/destructive, return `_err('confirm_not_allowed_in_triage', …,
 suggestions=['use emit_action_card'])` instead of executing. Reword the prompt from aspiration to
@@ -64,7 +97,7 @@ gap distinctly from "no threats"). Gate: `investigation_recall >= 0.8`.
 - **Test:** phishing task audit log shows the expected `get_record`/`run_op` pivots; computed recall
   meets gate.
 
-### 1.5 Align widget contract version  ·  CRITICAL · small
+### 1.5 Align widget contract version  ·  CRITICAL · small  ·  ✅ DONE
 Widget `WIDGET_CONTRACT_VERSION = '2.0.0'` vs connector `2.1.0` →
 `view.controller.js:34` → `'2.1.0'`. Removes negotiation noise. (Low real severity — non-strict mode
 only `console.warn`s — but trivial and noise-removing.)
@@ -73,12 +106,13 @@ only `console.warn`s — but trivial and noise-removing.)
 
 ## Phase 2 — Reliability & completeness
 
-### 2.1 `get_record` / `get_related` tool  ·  HIGH · small
+### 2.1 `get_record` / `get_related` tool  ·  HIGH · small  ·  ✅ DONE
 The triage prompt tells the agent to pull event-level rows via `iri`/`module`/`uuid`, but no such
 tool exists — it must construct blind `run_op` calls. Add `get_record(iri | module+uuid,
 relationships=True)` wrapping crudhub GET (`/api/3/<module>/<uuid>?$relationships=true`) to
 `SAFE_TOOLS` (tier 1, read-only). Closes the prompt↔tool gap behind the attack-timeline / blast-radius
-quick actions.
+quick actions. **Shipped** in `tools_triage.get_record`; tests `python/tests/test_get_record.py`.
+Re-vendor into the connector still pending.
 
 ### 2.2 Stream timeout in the provider protocol  ·  HIGH · medium
 `run_turn.py:230` `async for ev in provider.stream(...)` has no deadline → a hung API blocks the turn
@@ -147,6 +181,19 @@ so transcript reconstruction by `seq` doesn't misalign.
   (e.g. VirusTotal verdict range) so hallucinated/corrupted enrichment isn't treated as ground truth.
 
 ---
+
+## Post-MVP — deferred to 2.0.0 (not for MVP)
+
+- **Live tool-call streaming to the widget** (MEDIUM, large) — **2.0.0 feature, explicitly out of
+  MVP scope.** Today every tool call *is* surfaced: the providers yield a `ToolUseEvent` +
+  `ToolResultEvent` per call (`anthropic_provider.py:367/411`, `lmstudio_provider.py:254/256`),
+  `run_turn.py:400-422` persists them, and the connector's `_event_to_wire`/`_wire_transcript`
+  (`operations.py:537`) include every one in the response envelope the widget renders. The gap is
+  that delivery is **per-turn batched** — the widget gets the full transcript when `chat_turn`
+  returns, not a live "agent is calling X…" feed mid-turn. Real-time streaming (token/event push
+  while the turn runs) would need a streaming transport on the connector chat surface and an
+  incremental render path in the Angular widget. MVP ships the batched transcript; live streaming is
+  a 2.0.0 enhancement.
 
 ## Backlog (low, opportunistic)
 
