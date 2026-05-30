@@ -7,31 +7,36 @@ import sys
 from pathlib import Path
 from typing import Any
 
+class _FallbackFastMCP:
+    """No-op FastMCP shim for connector runtimes.
+
+    FortiSOAR's connector sandbox only calls these functions directly; it
+    doesn't run the stdio MCP server. Some sandbox builds expose import stubs
+    that satisfy `from mcp.server.fastmcp import FastMCP` but are not callable,
+    so we validate the imported object before using it.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self._args, self._kwargs = args, kwargs
+
+    def tool(self, *args, **kwargs):
+        def _deco(fn):
+            return fn
+        return _deco
+
+    def run(self, *args, **kwargs):
+        raise RuntimeError(
+            "MCP stdio server is unavailable: the real 'mcp' package is not "
+            "installed. The tool functions are still usable directly; only "
+            "`python -m mcp_server` / `fsrpb mcp` need the real SDK.")
+
+
 try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    # The connector runtime (FortiSOAR, Python 3.9) doesn't ship the `mcp`
-    # SDK (which needs 3.10+) and doesn't need the stdio server — it only
-    # calls the tool *functions*, which are plain callables. Provide a
-    # minimal stand-in whose `.tool()` decorator registers nothing and
-    # returns the function unchanged, so `fsr_core.mcp_server` imports
-    # cleanly and the agent tool registry still works. `.run()` (the stdio
-    # transport) is the only thing that genuinely needs the real SDK.
-    class FastMCP:  # type: ignore[no-redef]
-        def __init__(self, *args, **kwargs):
-            self._args, self._kwargs = args, kwargs
-
-        def tool(self, *args, **kwargs):
-            def _deco(fn):
-                return fn
-            return _deco
-
-        def run(self, *args, **kwargs):
-            raise RuntimeError(
-                "MCP stdio server is unavailable: the 'mcp' package is not "
-                "installed (it requires Python 3.10+). The tool functions are "
-                "still usable directly; only `python -m mcp_server` / `fsrpb "
-                "mcp` need the real SDK.")
+    from mcp.server.fastmcp import FastMCP as _ImportedFastMCP
+except Exception:  # noqa: BLE001
+    FastMCP = _FallbackFastMCP
+else:
+    FastMCP = _ImportedFastMCP if callable(_ImportedFastMCP) else _FallbackFastMCP
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -42,16 +47,28 @@ DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
 # ---------------------------------------------------------------------------
 # MCP server instance (shared across all tools)
 # ---------------------------------------------------------------------------
-mcp = FastMCP(
-    "fsrpb",
-    instructions=(
-        "FortiSOAR playbook authoring tools. "
-        "Use find_connector → find_operation → get_op_schema to build connector steps. "
-        "Use get_step_type for non-connector step schemas. "
-        "Use validate_yaml before compile_yaml to catch errors early. "
-        "All YAML must conform to the simplified IR documented in AUTHORING.md."
-    ),
-)
+def _make_mcp():
+    server = FastMCP(
+        "fsrpb",
+        instructions=(
+            "FortiSOAR playbook authoring tools. "
+            "Use find_connector → find_operation → get_op_schema to build connector steps. "
+            "Use get_step_type for non-connector step schemas. "
+            "Use validate_yaml before compile_yaml to catch errors early. "
+            "All YAML must conform to the simplified IR documented in AUTHORING.md."
+        ),
+    )
+    if not callable(getattr(server, "tool", None)):
+        raise TypeError("FastMCP.tool is not callable")
+    if not callable(server.tool()):
+        raise TypeError("FastMCP.tool() did not return a decorator")
+    return server
+
+
+try:
+    mcp = _make_mcp()
+except Exception:  # noqa: BLE001
+    mcp = _FallbackFastMCP("fsrpb")
 
 # ---------------------------------------------------------------------------
 # Structured error envelope (uniform tool I/O contract)

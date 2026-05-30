@@ -46,6 +46,8 @@ class _SlowSession:
         return _FakeResp({"data": self.listing_rows})
 
     def get(self, url, verify=True, timeout=None):
+        if url.endswith("/api/3/agents"):
+            return _FakeResp({"hydra:member": []})
         time.sleep(self.per_probe)
         # url: .../healthcheck/<name>/<version>/
         name = url.rstrip("/").split("/")[-2]
@@ -105,3 +107,26 @@ def test_no_probe_does_no_healthcheck(monkeypatch):
     out = tt.list_configured_connectors(probe=False)
     assert sess.probed == []                          # zero network probes
     assert out["probed"] is False
+
+
+def test_agent_connector_probe_passes_agent_id(monkeypatch):
+    row = {"name": "fortigate-firewall", "version": "1.0.0",
+           "status": "Completed", "label": "FortiGate", "config_count": 1,
+           "_agent_id": "agent-123"}
+    sess = _SlowSession([row], per_probe=0.01)
+    client = _FakeClient(sess)
+    _patch_live(monkeypatch, client)
+
+    import fsr_core.mcp_server.tools_execution as te
+    seen: list[tuple[str, str, str]] = []
+
+    def _fake_health(client_arg, name, version, config="", agent_id=""):
+        seen.append((name, version, agent_id))
+        return {"status": "Available" if agent_id else "Disconnected"}
+
+    monkeypatch.setattr(te, "_live_healthcheck", _fake_health)
+
+    out = tt.list_configured_connectors(probe=True)
+
+    assert seen == [("fortigate-firewall", "1.0.0", "agent-123")]
+    assert out["configured"][0]["status"] == "Available"

@@ -8,7 +8,7 @@ import re
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 from ._shared import (
     mcp,
@@ -374,7 +374,9 @@ def _connectors_that_could_contain(
     return [{"connector": c, "op": o} for c, o in found.items()]
 
 
-def _healthcheck_many(client, targets: list[tuple[str, str]]) -> dict[str, str]:
+def _healthcheck_many(
+        client,
+        targets: list[Union[tuple[str, str], tuple[str, str, str]]]) -> dict[str, str]:
     """Healthcheck many (name, version) connectors CONCURRENTLY, returning
     {name: status}. Serial probing was the dominant latency in the live triage
     loop (~45 configured connectors × a blocking GET each, some slow/hung
@@ -387,10 +389,12 @@ def _healthcheck_many(client, targets: list[tuple[str, str]]) -> dict[str, str]:
     from concurrent.futures import ThreadPoolExecutor
     from .tools_execution import _live_healthcheck
 
-    def _probe(target: tuple[str, str]) -> tuple[str, str]:
-        name, version = target
+    def _probe(
+            target: Union[tuple[str, str], tuple[str, str, str]]) -> tuple[str, str]:
+        name, version = target[0], target[1]
+        agent_id = target[2] if len(target) > 2 else ""
         try:
-            hr = _live_healthcheck(client, name, version)
+            hr = _live_healthcheck(client, name, version, agent_id=agent_id)
             return name, str(hr.get("status") or "error")
         except Exception as e:  # noqa: BLE001
             return name, f"error:{e!r}"
@@ -446,6 +450,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                 "message": listing["error"]}
     configured: dict[str, str] = {}  # name -> listing status
     version_of: dict[str, str] = {}  # name -> version (for the scoped probe)
+    agent_of: dict[str, str] = {}    # name -> FortiSOAR Agent id, if proxied
     for c in listing.get("configured", []):
         name = c.get("name")
         if not name:
@@ -453,6 +458,8 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
         configured[name] = str(c.get("status") or "")
         if c.get("version"):
             version_of[name] = c["version"]
+        if c.get("_agent_id"):
+            agent_of[name] = c["_agent_id"]
     if not configured:
         return {"ok": True, "target_type": target or None, "actions": [],
                 "count": 0, "probed": probe,
@@ -513,11 +520,12 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
     # A probe gap must never manufacture a dead end out of a configured op.
     if probe and actions:
         candidates = {a["connector"] for a in actions}
-        client = _shared._live_client()
-        health = _healthcheck_many(
-            client, [(c, version_of[c]) for c in candidates
-                     if c in version_of]) if client is not None else {}
-        healthy_ok = {"available", "completed", "active"}
+        targets = [(c, version_of[c], agent_of.get(c, ""))
+                   for c in candidates if c in version_of]
+        client = _shared._live_client() if targets else None
+        health = _healthcheck_many(client, targets) if client is not None else {}
+        healthy_ok = {"available", "completed", "active", "connected",
+                      "ok", "success"}
         kept = []
         for a in actions:
             # Probed result wins; otherwise trust the listing status we already
@@ -642,6 +650,7 @@ def list_configured_connectors(probe: bool = False,
 
     out: list[dict] = []
     name_version: dict[str, str] = {}
+    name_agent: dict[str, str] = {}
     for x in rows:
         item: dict[str, Any] = {
             "name": x.get("name"),
@@ -651,6 +660,9 @@ def list_configured_connectors(probe: bool = False,
         x_version = x.get("version")
         if x.get("name") and x_version:
             name_version[x["name"]] = x_version
+        if x.get("name") and x.get("_agent_id"):
+            name_agent[x["name"]] = x["_agent_id"]
+            item["_agent_id"] = x["_agent_id"]
         if verbose:
             item["version"] = x_version
             item["label"] = x.get("label")
@@ -661,7 +673,7 @@ def list_configured_connectors(probe: bool = False,
     # knows which connectors are relevant — e.g. find_containment_actions has
     # filtered to the few with a matching op). Otherwise probe all configured.
     if probe:
-        targets = [(n, v) for n, v in name_version.items()
+        targets = [(n, v, name_agent.get(n, "")) for n, v in name_version.items()
                    if only is None or n in only]
         health = _healthcheck_many(client, targets)
         for item in out:

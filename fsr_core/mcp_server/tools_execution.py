@@ -208,6 +208,7 @@ def _agent_configured_rows(client) -> list[dict[str, Any]]:
             for row in (r.json().get("data") or []):
                 if (row.get("config_count", 0) > 0
                         and row.get("status") == "Completed"):
+                    row["_agent_id"] = agent_id
                     result.append(row)
         except Exception:  # noqa: BLE001
             continue
@@ -263,9 +264,87 @@ def _row_config_ids(row: dict[str, Any]) -> list[str]:
     return []
 
 
+def _healthcheck_via_agents(client, connector: str,
+                             version: str,
+                             agent_id: str = "",
+                             config: str = "") -> dict[str, Any]:
+    """Return the real health status for an agent-proxied connector.
+
+    Two paths:
+    1. When `agent_id` is known: POST /api/integration/connectors/{name}/{version}/
+       ?agent={agent_id} — returns the connector detail with configuration[].health_status.
+       When `config` is also supplied, returns that specific config's health_status;
+       otherwise aggregates (any Available wins).
+    2. Fallback: POST /api/integration/connectors/agents/{name}/{version}/ — lists agent
+       install rows and reads remote_status. Works when agent_id is unknown.
+
+    Fails open on any error so a probe gap never silently drops a valid connector."""
+    if agent_id:
+        try:
+            url = (client.base_url
+                   + f"/api/integration/connectors/{connector}/{version}/"
+                   f"?format=json&agent={agent_id}")
+            r = client.session.post(url, json={}, verify=client.verify_ssl, timeout=10)
+            if getattr(r, "status_code", 200) == 200:
+                detail = r.json() if isinstance(r.json(), dict) else {}
+                configs = detail.get("configuration") or []
+                if config:
+                    # Return the specific config's health_status (not an aggregate).
+                    for cfg in configs:
+                        if cfg.get("config_id") == config:
+                            hs = cfg.get("health_status") or {}
+                            st = hs.get("status")
+                            if st:
+                                return {"status": st, "message": hs.get("message", ""),
+                                        "_via_agent_detail": True}
+                # No specific config or config not found → aggregate across all.
+                statuses = []
+                for cfg in configs:
+                    st = (cfg.get("health_status") or {}).get("status")
+                    if st:
+                        statuses.append(st)
+                if statuses:
+                    agg = next((s for s in statuses if _is_healthy_status(s)),
+                               statuses[0])
+                    return {"status": agg, "_via_agent_detail": True}
+        except Exception:  # noqa: BLE001
+            pass
+    # Fallback: /connectors/agents/ endpoint (no agent_id needed)
+    try:
+        url = (client.base_url
+               + f"/api/integration/connectors/agents/{connector}/{version}/"
+               "?format=json&active=true")
+        r = client.session.post(url, json={}, verify=client.verify_ssl, timeout=10)
+        rows = r.json() if getattr(r, "status_code", 200) == 200 else []
+        if not isinstance(rows, list):
+            rows = []
+        for row in rows:
+            rs = (row.get("remote_status") or {}).get("status", "")
+            if (row.get("status") == "Completed"
+                    and rs in ("finished", "success", "")):
+                return {"status": "Available", "_via_agents": True}
+        if rows:
+            return {"status": "Disconnected", "_via_agents": True}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"status": "Available", "_agents_unreachable": True}
+
+
 def _live_healthcheck(client, connector: str, version: str,
-                      config: str = "") -> dict[str, Any]:
-    """One live healthcheck call. `config` is an optional config UUID."""
+                      config: str = "", agent_id: str = "") -> dict[str, Any]:
+    """One live healthcheck call.
+
+    `config` is an optional config UUID. `agent_id` is the FortiSOAR Agent's
+    agentId — when provided we read the cached health from the agent-scoped
+    connector detail (the sync healthcheck endpoint dispatches an async job
+    when ?agent= is supplied, not a usable synchronous result).
+    """
+    # Agent-proxied connectors: the ?agent= param on the healthcheck URL
+    # triggers an async job (remote_status: in-progress), not a sync result.
+    # Read the last-known health from the agent-scoped connector detail instead.
+    if agent_id:
+        return _healthcheck_via_agents(client, connector, version,
+                                       agent_id=agent_id, config=config)
     url = f"/api/integration/connectors/healthcheck/{connector}/{version}/"
     if config:
         url += f"?config={config}"
@@ -276,11 +355,40 @@ def _live_healthcheck(client, connector: str, version: str,
         r = client.session.get(client.base_url + url, verify=client.verify_ssl,
                                timeout=8)
         if getattr(r, "status_code", 200) != 200:
-            return {"status": "error",
-                    "message": f"HTTP {getattr(r, 'status_code', '?')}"}
-        return r.json()
+            data = {}
+            try:
+                data = r.json()
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            data = r.json()
     except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "message": f"healthcheck request failed: {exc!r}"}
+        # On-box crudhub raises on non-2xx; extract the JSON body from the
+        # exception message if present so we can inspect the status field.
+        msg = str(exc)
+        data = {}
+        try:
+            # crudhub embeds the response JSON in the exception string after "::"
+            import re as _re
+            m = _re.search(r"\{.*\}", msg, _re.DOTALL)
+            if m:
+                data = json.loads(m.group())
+        except Exception:  # noqa: BLE001
+            pass
+        if not data:
+            return {"status": "error", "message": f"healthcheck request failed: {exc!r}"}
+
+    # When the healthcheck signals it couldn't find a local config (agent-
+    # proxied connector) or returns an async response, fall back to the agents
+    # endpoint for the real per-agent status.
+    _needs_agent_fallback = (
+        (not data.get("status") and data.get("remote_status"))
+        or (data.get("status") == "Disconnected"
+            and "configuration" in (data.get("message") or "").lower())
+    )
+    if _needs_agent_fallback:
+        return _healthcheck_via_agents(client, connector, version)
+    return data
 
 
 def populate_connector_health(client, time_budget_s: float = 60.0,
@@ -320,11 +428,12 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
         if (time.time() - start) > time_budget_s:
             skipped += 1
             continue
+        agent_id = row.get("_agent_id") or ""
         config_ids = _row_config_ids(row)
         verdicts: list[str] = []
         # Per-config healthchecks (when we can see individual config UUIDs).
         for cid in config_ids:
-            hc = _live_healthcheck(client, name, version, cid)
+            hc = _live_healthcheck(client, name, version, cid, agent_id=agent_id)
             status = hc.get("status")
             _store_health(name, version, status, hc.get("message") or "", config=cid)
             verdicts.append(status)
@@ -336,7 +445,7 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
                        verdicts[0] if verdicts else "unknown")
             _store_health(name, version, agg, "aggregate of per-config checks")
         else:
-            hc = _live_healthcheck(client, name, version)
+            hc = _live_healthcheck(client, name, version, agent_id=agent_id)
             agg = hc.get("status")
             _store_health(name, version, agg, hc.get("message") or "")
             checked += 1
@@ -637,6 +746,7 @@ def _preflight_connector(client, connector: str,
             ),
         )
     version = cands[0].get("version") or ""
+    agent_id = cands[0].get("_agent_id") or ""
     config_id = _resolve_config_id(rows, connector, config_name)
 
     # Healthcheck the connector BEFORE running an op. This is cheap — the
@@ -649,7 +759,8 @@ def _preflight_connector(client, connector: str,
     # a hunt are free; an 8s per-call timeout caps a pathologically slow check.
     health = _cached_health(connector, version, config_id)
     if health is None:
-        hc = _live_healthcheck(client, connector, version, config_id)
+        hc = _live_healthcheck(client, connector, version, config_id,
+                               agent_id=agent_id)
         status = hc.get("status")
         message = hc.get("message") or hc.get("error") or ""
         _store_health(connector, version, status, message, config=config_id)
