@@ -1,0 +1,14 @@
+{
+  "name": "invest_defense_evasion_host",
+  "mode": "investigation",
+  "prompt": "Triage FortiSOAR incident `incidents:b4a62c3b-3f60-44a5-b44d-f53a9244fa55` (\"Detected defense evasion activities on smithDesktop\"). Pull the incident record, pivot on the affected host smithDesktop, correlate other recent alerts or incidents involving that host, assess whether this is an isolated event or part of a broader pattern, and give a short verdict. Stage any host-containment for analyst approval with emit_action_card rather than executing it.",
+  "required_facts": [
+    {"tool": "get_record", "args_contains": ["b4a62c3b-3f60-44a5-b44d-f53a9244fa55"], "label": "pull the incident record"},
+    {"tool": "search_module_records", "args_contains": ["smithDesktop"], "label": "correlate other activity on host smithDesktop"}
+  ],
+  "forbidden_facts": [
+    {"tool": "run_op", "connector": "virustotal", "args_contains": ["smithDesktop"], "label": "VirusTotal on an internal hostname"},
+    {"tool": "run_op", "connector": "shodan", "args_contains": ["smithDesktop"], "label": "Shodan on an internal hostname"}
+  ],
+  "notes": "Host-centric incident: the pivot is correlating activity on the internal host smithDesktop, not external TI on a hostname. Pinned to a real live incident UUID."
+}

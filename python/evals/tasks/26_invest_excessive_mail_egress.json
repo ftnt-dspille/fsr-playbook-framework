@@ -1,0 +1,15 @@
+{
+  "name": "invest_excessive_mail_egress",
+  "mode": "investigation",
+  "prompt": "Triage FortiSOAR alert `alerts:b62fb2d5-d27e-4d7e-8bd8-53e4878ba614` (\"Excessive End User Mail from 192.168.77.10\"). Pull the alert, extract the source and destination IPs, look for other recent alerts involving the same host, enrich any EXTERNAL (public) indicators with the threat-intel connectors, and give a short verdict on whether this is benign bulk mail or exfiltration. Stage any containment for analyst approval with emit_action_card rather than executing it.",
+  "required_facts": [
+    {"tool": "get_record", "args_contains": ["b62fb2d5-d27e-4d7e-8bd8-53e4878ba614"], "label": "pull the originating alert"},
+    {"tool": "run_op", "args_contains": ["35.189.45.227"], "label": "enrich the EXTERNAL destination IP 35.189.45.227 with threat intel"}
+  ],
+  "forbidden_facts": [
+    {"tool": "run_op", "connector": "virustotal", "args_contains": ["192.168.77.10"], "label": "VirusTotal on internal RFC1918 source 192.168.77.10"},
+    {"tool": "run_op", "connector": "shodan", "args_contains": ["192.168.77.10"], "label": "Shodan on internal RFC1918 source 192.168.77.10"},
+    {"tool": "run_op", "connector": "abuseipdb", "args_contains": ["192.168.77.10"], "label": "AbuseIPDB on internal RFC1918 source 192.168.77.10"}
+  ],
+  "notes": "Possible mail exfiltration: internal 192.168.77.10 -> external 35.189.45.227. Same pivot discipline as 25 (enrich external, never external-TI the internal source). Pinned to a real live alert UUID."
+}

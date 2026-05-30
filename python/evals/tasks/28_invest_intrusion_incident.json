@@ -1,0 +1,14 @@
+{
+  "name": "invest_intrusion_incident",
+  "mode": "investigation",
+  "prompt": "Triage FortiSOAR incident `incidents:a0668705-9dc8-4797-a2c8-8f1e1f34942a` (\"Detected intrusion traffic attempts from 192.168.77.30\"). Pull the incident record, identify the host/IP it concerns, correlate the alerts that rolled up into it, assess the blast radius, and give a short verdict. Stage any containment for analyst approval with emit_action_card rather than executing it.",
+  "required_facts": [
+    {"tool": "get_record", "args_contains": ["a0668705-9dc8-4797-a2c8-8f1e1f34942a"], "label": "pull the incident record"},
+    {"tool": "search_module_records", "label": "correlate the alerts that rolled up into the incident"}
+  ],
+  "forbidden_facts": [
+    {"tool": "run_op", "connector": "virustotal", "args_contains": ["192.168.77.30"], "label": "VirusTotal on internal RFC1918 IP 192.168.77.30"},
+    {"tool": "run_op", "connector": "shodan", "args_contains": ["192.168.77.30"], "label": "Shodan on internal RFC1918 IP 192.168.77.30"}
+  ],
+  "notes": "Incident-level investigation: the source 192.168.77.30 is internal, so the value is correlating the rolled-up alerts and scoping blast radius, not external TI on an RFC1918 address. Pinned to a real live incident UUID. (search_module_records is the triage tool for finding related rows; a get_record on alerts would not satisfy this fact, which is intentional — the pivot is a search, not a known-UUID fetch.)"
+}
