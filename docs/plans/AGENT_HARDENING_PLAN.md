@@ -143,7 +143,15 @@ run on stale predecessor sets for cyclic graphs.
 Increment `seq_in_turn` after `coalescer.flush()` (at tool boundaries), not on the first text append,
 so transcript reconstruction by `seq` doesn't misalign.
 
-### 2.8 Parallel read-only tool dispatch (hunt latency)  ·  HIGH · medium
+### 2.8 Parallel read-only tool dispatch (hunt latency)  ·  HIGH · medium · ✅ DONE (2026-05-30)
+Shipped in `anthropic_provider.stream`: the first tier-3+ call is the approval
+boundary; every call before it (read-only, tier ≤ 2 by construction) fans out
+via `asyncio.gather(asyncio.to_thread(dispatch, …))` capped at
+`MAX_PARALLEL_TOOLS=8` (`_loop_helpers`), `tool_result` blocks emitted in
+`tool_use` order, tier-3+ still suspends one-at-a-time as before. Test:
+`fsr_core/tests/test_parallel_dispatch.py` (concurrency + order + mixed-tier
+suspend). Live on connector 0.3.26+.
+
 A live hunt's wall-clock is dominated by **sequential** tool round-trips: `anthropic_provider`'s tool
 loop (`for i, (call_id, name, args) in enumerate(tool_calls): result = dispatch(...)`,
 ~line 366) awaits each call before the next, and every `run_op`/`get_record` waits on a slow upstream
