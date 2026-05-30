@@ -42,6 +42,7 @@ SAFE_TOOLS: list[str] = [
     "verify_enhancement",
     "emit_decision_step",
     "list_configured_connectors",
+    "healthcheck_connector",
     "list_picklists",
     "picklist_for_field",
     "resolve_picklist_value",
@@ -97,6 +98,7 @@ TOOL_TIERS: dict[str, int] = {
     # Tier 0 — pure local YAML render from a structured payload.
     "emit_decision_step": 0,
     "list_configured_connectors": 1,
+    "healthcheck_connector": 1,
     "diagnose_yaml_against_pb_execution": 1,
     # Phase 0 — pure local compute (no FSR I/O).
     "validate_yaml": 0,

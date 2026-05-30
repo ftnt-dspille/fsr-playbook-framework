@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests clean help sync preflight kill-ports
+.PHONY: backend frontend dev e2e tests verify clean help sync preflight kill-ports
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -63,6 +63,22 @@ e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
 
 tests: ## fast pytest (excludes live + slow)
 	$(PY) -m pytest python/tests/ -q -m "not live and not slow"
+
+# The connector + Angular widget both consume fsr_core, so the green-check that
+# matters is fsr_core + the connector's offline suite — both run on THIS repo's
+# .venv, which carries the editable fsr_core install and its deps (yaml, anthropic).
+# (Do NOT use `uv run --extra test` in the connector: it builds an isolated env
+#  without fsr_core, so its whole suite errors on ModuleNotFound.)
+VENV_PY  := $(CURDIR)/.venv/bin/python
+CONNECTOR_DIR := /Users/dylanspille/PycharmProjects/ConnectorsV2/fsr-playbook-builder
+
+verify: ## green-check for the fsr_core + connector axis (offline)
+	@echo "→ [1/2] fsr_core tests"
+	$(VENV_PY) -m pytest fsr_core/tests/ -q
+	@echo "→ [2/2] connector suite (offline; live tests self-skip)"
+	cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q
+	@echo "✓ verify passed"
+	@echo "  (Angular widget has its own toolchain in WebStorm — not verifiable here.)"
 
 clean: ## remove pycache + node_modules build leftovers (NOT node_modules itself)
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

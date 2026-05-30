@@ -119,6 +119,60 @@ def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict]:
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
+def _validate_op_exists(connector: str, op: str) -> dict[str, Any] | None:
+    """Confirm `op` is a real operation on `connector` per the reference store.
+
+    Returns an `unknown_operation` error envelope (with near-match
+    suggestions) when the connector HAS operations catalogued but `op`
+    isn't among them — so a hallucinated/typo'd op name becomes an
+    actionable error the agent can self-correct against, instead of an
+    opaque `execution_failed` after the user has already approved it.
+
+    Returns None (caller proceeds) when:
+    - the op exists, OR
+    - the connector has zero operations in the store. We can't prove
+      non-existence against an empty/un-synced catalogue, so we don't
+      false-reject; the connector existence check + live execution still
+      guard that path.
+
+    Caller is responsible for validating the connector itself first
+    (`run_op` returns `unknown_connector`); this only covers the op.
+    """
+    import difflib
+
+    if not connector or not op:
+        return None
+    try:
+        with _db() as conn:
+            all_ops = [
+                r["op_name"] for r in _rows(
+                    conn,
+                    "SELECT op_name FROM operations WHERE connector_name = ?",
+                    (connector,),
+                )
+            ]
+    except sqlite3.Error:
+        return None  # store unreadable → don't block; live exec will guard
+    if not all_ops or op in all_ops:
+        return None
+    close = difflib.get_close_matches(op, all_ops, n=5, cutoff=0.4)
+    suggestions = [
+        f"Use find_operation(connector={connector!r}) to list the real ops",
+        "Then get_op_schema(connector, op) before run_op/emit_action_card",
+    ]
+    if close:
+        suggestions.insert(0, f"Did you mean one of: {close}?")
+    return _err(
+        "unknown_operation",
+        f"operation '{op}' not found on connector '{connector}' "
+        f"({len(all_ops)} ops catalogued)",
+        suggestions=suggestions,
+        connector=connector,
+        op=op,
+        near=close,
+    )
+
+
 # Status precedence: tested_pass and tested_fail beat 'seen'; among those,
 # the most recent ts wins. 'seen' is a weak signal (we catalogued the
 # row, never exercised it).
