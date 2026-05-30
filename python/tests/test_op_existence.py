@@ -16,6 +16,16 @@ import pytest
 import fsr_core.mcp_server._shared as _shared
 
 
+@pytest.fixture(autouse=True)
+def _isolate_op_def_cache(tmp_path, monkeypatch):
+    """The live op-def cache is sqlite-backed at `tools_execution.DB_PATH`;
+    isolate it per-test so ops cached by one test never leak into another (or
+    touch the real reference store). Tests that need a specific DB override
+    this with their own `monkeypatch.setattr(te, "DB_PATH", ...)` afterward."""
+    from fsr_core.mcp_server import tools_execution as te
+    monkeypatch.setattr(te, "DB_PATH", str(tmp_path / "op_def_cache.db"))
+
+
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     """Point the reference DB at a temp store with one connector + ops."""
@@ -210,8 +220,11 @@ def _stub_unsynced_live(monkeypatch, store, client):
     from fsr_core.mcp_server import tools_execution as te
     # the store fixture has NO ops for 'shodan' → store_ops_count == 0
     monkeypatch.setattr(te, "_db", lambda: sqlite3.connect(store))
+    # point the sqlite-backed op-def cache at the same temp store
+    monkeypatch.setattr(te, "DB_PATH", str(store))
     monkeypatch.setattr(te, "_configured_rows",
-                        lambda c, force=False: [{"name": "shodan", "id": "cid-9"}])
+                        lambda c, force=False: [
+                            {"name": "shodan", "id": "cid-9", "version": "1.0.0"}])
     monkeypatch.setattr(te, "_preflight_connector",
                         lambda c, conn, config="": None)
     return te
@@ -250,8 +263,10 @@ def test_emit_action_card_blocks_flailed_param_on_unsynced(monkeypatch, store):
     client = _FakeOpClient({"host": [
         {"name": "ip", "title": "IP", "type": "text", "required": True}]})
     monkeypatch.setattr(te, "_db", lambda: sqlite3.connect(store))
+    monkeypatch.setattr(te, "DB_PATH", str(store))
     monkeypatch.setattr(te, "_configured_rows",
-                        lambda c, force=False: [{"name": "shodan", "id": "cid-9"}])
+                        lambda c, force=False: [
+                            {"name": "shodan", "id": "cid-9", "version": "1.0.0"}])
     monkeypatch.setattr(te, "_preflight_connector",
                         lambda c, conn, config="": None)
     monkeypatch.setattr(te, "_live_client_for_grounding", lambda: client)
@@ -261,3 +276,80 @@ def test_emit_action_card_blocks_flailed_param_on_unsynced(monkeypatch, store):
         summary="Look up the host", args={"ip_address": "1.2.3.4"},
         editable_fields=["ip_address"])
     assert out["ok"] is False and out["code"] == "bad_params"
+
+
+# --- live op-def cache + warmup (don't re-fetch the connector detail per pivot)
+
+class _CountingClient:
+    """Client that counts how many detail POSTs it serves."""
+    def __init__(self, ops):
+        self._ops = ops
+        self.posts = 0
+
+    def post(self, path, body):
+        self.posts += 1
+        return {"operations": [
+            {"operation": n, "parameters": p} for n, p in self._ops.items()]}
+
+
+def test_op_def_cache_roundtrip_and_ttl(tmp_path, monkeypatch):
+    from fsr_core.mcp_server import tools_execution as te
+    monkeypatch.setattr(te, "DB_PATH", str(tmp_path / "s.db"))
+    assert te._cached_op_defs("shodan", "1.0.0") is None
+    te._store_op_defs("shodan", "1.0.0", [{"operation": "host"}])
+    assert te._cached_op_defs("shodan", "1.0.0") == [{"operation": "host"}]
+    # a different version misses (an upgrade re-fetches)
+    assert te._cached_op_defs("shodan", "2.0.0") is None
+    # expired rows are ignored
+    monkeypatch.setattr(te, "_OP_DEFS_TTL_S", -1)
+    assert te._cached_op_defs("shodan", "1.0.0") is None
+
+
+def test_live_ops_for_is_cached_after_first_fetch(tmp_path, monkeypatch):
+    from fsr_core.mcp_server import tools_execution as te
+    monkeypatch.setattr(te, "DB_PATH", str(tmp_path / "s.db"))
+    monkeypatch.setattr(te, "_configured_rows",
+                        lambda c, force=False: [
+                            {"name": "shodan", "id": "cid-9", "version": "1.0.0"}])
+    client = _CountingClient({"host": [{"name": "ip", "required": True}]})
+    a = te._live_ops_for(client, "shodan")
+    b = te._live_ops_for(client, "shodan")
+    assert a == b and client.posts == 1  # second call served from cache
+
+
+def test_populate_op_definitions_warms_all_configured(tmp_path, monkeypatch):
+    from fsr_core.mcp_server import tools_execution as te
+    db = tmp_path / "s.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE operations (connector_name TEXT, op_name TEXT)")
+    # 'virustotal' IS synced (has ops); 'shodan' is not — both get warmed.
+    con.execute("INSERT INTO operations VALUES ('virustotal','get_ip_reputation')")
+    con.commit()
+    con.close()
+    monkeypatch.setattr(te, "DB_PATH", str(db))
+    monkeypatch.setattr(te, "_db", lambda: sqlite3.connect(db))
+    monkeypatch.setattr(te, "_configured_rows",
+                        lambda c, force=False: [
+                            {"name": "virustotal", "id": "v", "version": "1.0.0"},
+                            {"name": "shodan", "id": "s", "version": "1.0.0"}])
+    client = _CountingClient({"host": [{"name": "ip", "required": True}]})
+    res = te.populate_op_definitions(client, time_budget_s=30.0)
+    assert res["ok"] is True
+    assert res["warmed"] == 2 and client.posts == 2
+    # both connectors' live op-defs (operations + params) are now cached
+    assert te._cached_op_defs("shodan", "1.0.0") is not None
+    assert te._cached_op_defs("virustotal", "1.0.0") is not None
+
+
+def test_populate_op_definitions_respects_budget_and_fresh_cache(tmp_path, monkeypatch):
+    from fsr_core.mcp_server import tools_execution as te
+    db = tmp_path / "s.db"
+    monkeypatch.setattr(te, "DB_PATH", str(db))
+    monkeypatch.setattr(te, "_db", lambda: sqlite3.connect(":memory:"))
+    monkeypatch.setattr(te, "_configured_rows",
+                        lambda c, force=False: [
+                            {"name": "shodan", "id": "s", "version": "1.0.0"}])
+    te._store_op_defs("shodan", "1.0.0", [{"operation": "host"}])  # already fresh
+    client = _CountingClient({"host": []})
+    res = te.populate_op_definitions(client, time_budget_s=30.0)
+    assert res["fresh_cached"] == 1 and res["warmed"] == 0 and client.posts == 0

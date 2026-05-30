@@ -105,6 +105,70 @@ def _store_health(connector: str, version: str, status: Any, message: str,
         pass
 
 
+# Live op-definition cache. The per-connector detail POST that enumerates a
+# connector's operations + their params is heavy, and op definitions change
+# only on a connector UPGRADE — so cache the parsed ops list in sqlite (like
+# health, this survives worker restarts and is visible across worker processes,
+# which an in-process cache would not be). Keyed by (connector, version) so an
+# upgrade naturally misses and re-fetches. Used by the un-synced grounding path
+# (`validate_op_grounded`) and pre-warmed for un-synced connectors by
+# `populate_op_definitions` — so the first grounding call in a hunt is a cache
+# hit instead of a multi-second live fetch repeated every pivot.
+_OP_DEFS_TTL_S = 24 * 3600
+
+
+def _op_defs_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS connector_op_defs (
+               connector  TEXT NOT NULL,
+               version    TEXT NOT NULL,
+               ops_json   TEXT,
+               checked_ts REAL,
+               PRIMARY KEY (connector, version)
+           )"""
+    )
+
+
+def _cached_op_defs(connector: str,
+                    version: str) -> list[dict[str, Any]] | None:
+    """Cached live op list for (connector, version) within TTL, else None."""
+    import time
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            _op_defs_table(conn)
+            row = conn.execute(
+                "SELECT ops_json, checked_ts FROM connector_op_defs "
+                "WHERE connector=? AND version=?",
+                (connector, version or ""),
+            ).fetchone()
+    except Exception:  # noqa: BLE001
+        return None
+    if not row or row[1] is None:
+        return None
+    if (time.time() - row[1]) > _OP_DEFS_TTL_S:
+        return None
+    try:
+        ops = json.loads(row[0]) if row[0] else []
+    except (ValueError, TypeError):
+        return None
+    return ops if isinstance(ops, list) else None
+
+
+def _store_op_defs(connector: str, version: str,
+                   ops: list[dict[str, Any]]) -> None:
+    import time
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            _op_defs_table(conn)
+            conn.execute(
+                "INSERT OR REPLACE INTO connector_op_defs "
+                "(connector, version, ops_json, checked_ts) VALUES (?,?,?,?)",
+                (connector, version or "", json.dumps(ops), time.time()),
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 _CONFIGURED_CACHE: dict[str, Any] = {"ts": 0.0, "rows": None}
 _CONFIGURED_TTL_S = 120.0
 
@@ -240,6 +304,68 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
             "connectors": summary}
 
 
+def populate_op_definitions(client, time_budget_s: float = 60.0,
+                            force: bool = False) -> dict[str, Any]:
+    """Pre-warm the live op-definition cache (operations + their parameters)
+    for the box's configured connectors, so the agent works off real,
+    instance-accurate op signatures at cache speed.
+
+    The per-connector detail POST returns each operation WITH its parameter
+    list, so one fetch captures operations + operation-params together. We warm
+    **un-synced connectors first** — those absent from the bundled catalog
+    (`store_ops_count == 0`, e.g. the sess-uq31go5p virustotal case) have no
+    offline fallback, so the grounding path would otherwise do a multi-second
+    live fetch on every pivot. Remaining budget then warms synced connectors
+    too (the bundle can lag the live box), newest-need first.
+
+    Bounded by `time_budget_s` (background pass — never blocks warmup);
+    connectors with a fresh cache are skipped unless `force`. Anything not
+    reached is filled lazily by `validate_op_grounded` on first use.
+    Best-effort: returns a summary, never raises."""
+    import time
+    start = time.time()
+    try:
+        rows = _configured_rows(client)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"configured list failed: {exc!r}"}
+
+    def _store_ops_count(name: str) -> int:
+        try:
+            with _db() as conn:
+                return conn.execute(
+                    "SELECT COUNT(*) FROM operations WHERE connector_name=?",
+                    (name,),
+                ).fetchone()[0]
+        except sqlite3.Error:
+            return 0
+
+    # Un-synced connectors first: they have no offline grounding fallback.
+    named = [r for r in rows if r.get("name")]
+    named.sort(key=lambda r: _store_ops_count(r["name"]) != 0)
+
+    warmed = skipped = fresh = budget_skipped = 0
+    for row in named:
+        name = row["name"]
+        version = row.get("version") or ""
+        if not force and _cached_op_defs(name, version) is not None:
+            fresh += 1
+            continue
+        if (time.time() - start) > time_budget_s:
+            budget_skipped += 1
+            continue
+        try:
+            ops = _live_ops_for(client, name, force=True)
+            if ops:
+                warmed += 1
+            else:
+                skipped += 1
+        except Exception:  # noqa: BLE001 — best-effort; grounding backfills
+            skipped += 1
+    return {"ok": True, "warmed": warmed, "empty_or_failed": skipped,
+            "fresh_cached": fresh, "budget_skipped": budget_skipped,
+            "elapsed_s": round(time.time() - start, 1)}
+
+
 def _resolve_config_id(rows: list[dict[str, Any]], connector: str,
                        config_name: str) -> str:
     """Map a run_op `config` NAME to its UUID using the configured rows; "" if
@@ -258,23 +384,46 @@ def _resolve_config_id(rows: list[dict[str, Any]], connector: str,
     return ""
 
 
+def _live_ops_for(client, connector: str,
+                  force: bool = False) -> list[dict[str, Any]]:
+    """Live operation objects for a connector — cache-first.
+
+    Reads the sqlite op-def cache (`connector_op_defs`, keyed by version), and
+    only on a miss does the heavy per-connector detail POST (then caches it).
+    The list endpoint omits operations, so the detail POST is the only way to
+    enumerate them (same path the catalogue sync uses). Returns `[]` on any
+    hiccup so callers fail open. `force=True` bypasses the cache (used by the
+    warmup pass)."""
+    rows = _configured_rows(client)
+    row = next((r for r in rows if r.get("name") == connector), None)
+    if not row:
+        return []
+    version = row.get("version") or ""
+    if not force:
+        cached = _cached_op_defs(connector, version)
+        if cached is not None:
+            return cached
+    cid = row.get("id") or row.get("uuid")
+    if not cid:
+        return []
+    detail = client.post(f"/api/integration/connectors/{cid}/", {}) or {}
+    ops = detail.get("operations") or []
+    if not isinstance(ops, list):
+        ops = []
+    _store_op_defs(connector, version, ops)
+    return ops
+
+
 def _fetch_live_op(client, connector: str,
                    op: str) -> tuple[dict[str, Any] | None, list[str]]:
     """Return `(op_def, op_names)` from the LIVE connector definition.
 
     `op_def` is the matching operation object (with its `parameters` list) or
-    None; `op_names` is every op name on the connector. The list endpoint omits
-    operations, so the per-connector detail POST is the only way to enumerate
-    them (same path the catalogue sync uses). One round-trip shared by op-
-    existence AND param grounding. Returns `(None, [])` on any hiccup so callers
-    fail open."""
-    rows = _configured_rows(client)
-    row = next((r for r in rows if r.get("name") == connector), None)
-    cid = row and (row.get("id") or row.get("uuid"))
-    if not cid:
-        return None, []
-    detail = client.post(f"/api/integration/connectors/{cid}/", {}) or {}
-    ops = detail.get("operations") or []
+    None; `op_names` is every op name on the connector. Backed by the cached
+    `_live_ops_for`, so repeat grounding calls in a hunt don't re-fetch. One
+    lookup shared by op-existence AND param grounding. Returns `(None, [])` on
+    any hiccup so callers fail open."""
+    ops = _live_ops_for(client, connector)
     op_names = [(o.get("operation") or o.get("name")) for o in ops]
     op_names = [n for n in op_names if n]
     op_def = next(
