@@ -98,6 +98,7 @@ from .tools_corpus import (
 
 # Triage tools
 from .tools_triage import (
+    find_containment_actions,
     get_record,
     get_run_env,
     list_configured_connectors,
@@ -215,6 +216,7 @@ __all__ = [
     "find_step_recipe",
     "search_api_examples",
     # Triage
+    "find_containment_actions",
     "get_record",
     "get_run_env",
     "list_configured_connectors",
