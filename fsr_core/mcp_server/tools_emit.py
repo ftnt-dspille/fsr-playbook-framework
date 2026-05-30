@@ -227,12 +227,20 @@ def emit_action_card(
     # phantom op can't slip through here just because the connector's ops aren't
     # catalogued yet (the sess-uq31go5p live-triage failure). Fails open on any
     # live-lookup hiccup, so a transient network problem never blocks a real op.
+    # Pass `args` so the SHARED grounding guarantee validates the argument
+    # names too — against the live connector definition when the store is
+    # un-synced — so a card with guessed/typo'd params can't reach the analyst
+    # for a connector whose params aren't catalogued yet (the live half of the
+    # sess-uq31go5p / mail_egress param-flail gap).
     from .tools_execution import validate_op_grounded
-    op_err = validate_op_grounded(connector, operation)
+    op_err = validate_op_grounded(connector, operation, params=args)
     if op_err is not None:
         return op_err
-    # Don't render a card whose args are incomplete/invalid — the analyst
-    # would approve it only for it to fail post-approval at execute.
+    # Offline param validation (decisive when params ARE catalogued — select
+    # options, types, required). The live fallback above covers the un-synced
+    # case; this covers the synced one. Don't render a card whose args are
+    # incomplete/invalid — the analyst would approve it only for it to fail
+    # post-approval at execute.
     param_err = _validate_op_params(connector, operation, args)
     if param_err is not None:
         return param_err

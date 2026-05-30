@@ -157,7 +157,7 @@ strengthened gates: 3/5 PASS** (down from the meaningless 5/5) — `invest_exces
 fails on budget (19 calls), `invest_outbound_cleartext_c2` fails deliverable (ended after `run_op`
 with nothing staged). The two failures are the genuinely-weak runs; the gate now has teeth.
 Tests: 9 new in `test_evals_investigation_recall.py` (17 total, all green; full fast suite 753 green).
-Remaining 1.4 follow-ups: param-level live grounding (deferred half of 1.6) + hand-curated golden
+Remaining 1.4 follow-ups: ✅ param-level live grounding now done (see §1.6) + hand-curated golden
 traces (the captured ones now correctly fail, so still not freezable as known-good).
 
 ### 1.9 Probe-latency fix — concurrent + scoped healthchecks  ·  HIGH · small  ·  ✅ DONE (2026-05-30)
@@ -225,7 +225,19 @@ model named the wrong op and the error tells it how to fix it."
 gated block and `emit_action_card` both call it; emit resolves a live client
 lazily via `_live_client_for_grounding`. Tests: `tests/test_op_existence.py`
 (live-fallback blocks phantom on un-synced connector, allows real, fails open
-when live unavailable / raises). Param-level live grounding deferred (roadmap).
+when live unavailable / raises).
+
+**Param-level live grounding — ✅ DONE (2026-05-30).** The deferred half. The offline
+`_validate_op_params` no-ops on an un-synced connector, so the agent discovered real param names by
+trial and error live (`ip`→`ip_address`→`indicator`, the `invest_excessive_mail_egress` flail that
+the strengthened §1.4 gate now catches). Closed at the source: `validate_op_grounded` gained a
+`params` arg and now, on the un-synced (`store_ops_count == 0`) path, fetches the live op definition
+**once** (`_fetch_live_op`) and grounds BOTH the op name (`_op_not_in_live`) and the argument names
+(`_validate_op_params_live` — unknown-param typo detector + missing-required, loose by design;
+select/type membership stays on the offline path). `run_op` passes `params=params`;
+`emit_action_card` passes `params=args` so a card with a guessed param can't reach the analyst for an
+un-synced connector. Fail-open throughout. 8 new tests in `test_op_existence.py` (18 total); `make
+verify` green (41 + 111). **Needs re-vendor + connector bump to ship live** (offline-only until then).
 Close gap **A**: make the emit-time grounding match `run_op`'s. In `emit_action_card`, after the
 offline `_validate_op_exists` returns None *because the store had 0 ops for the connector* (not
 because the op exists), fall back to the live connector definition before rendering the card.

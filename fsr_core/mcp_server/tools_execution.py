@@ -258,33 +258,34 @@ def _resolve_config_id(rows: list[dict[str, Any]], connector: str,
     return ""
 
 
-def _validate_op_live(client, connector: str, op: str) -> dict[str, Any] | None:
-    """Confirm `op` exists on the LIVE connector definition.
+def _fetch_live_op(client, connector: str,
+                   op: str) -> tuple[dict[str, Any] | None, list[str]]:
+    """Return `(op_def, op_names)` from the LIVE connector definition.
 
-    Used as the fallback when the offline reference store has no ops
-    catalogued for `connector` (so `_validate_op_exists` couldn't decide).
-    The list endpoint omits operations; the per-connector detail POST is the
-    only way to enumerate them (same path the catalogue sync uses).
+    `op_def` is the matching operation object (with its `parameters` list) or
+    None; `op_names` is every op name on the connector. The list endpoint omits
+    operations, so the per-connector detail POST is the only way to enumerate
+    them (same path the catalogue sync uses). One round-trip shared by op-
+    existence AND param grounding. Returns `(None, [])` on any hiccup so callers
+    fail open."""
+    rows = _configured_rows(client)
+    row = next((r for r in rows if r.get("name") == connector), None)
+    cid = row and (row.get("id") or row.get("uuid"))
+    if not cid:
+        return None, []
+    detail = client.post(f"/api/integration/connectors/{cid}/", {}) or {}
+    ops = detail.get("operations") or []
+    op_names = [(o.get("operation") or o.get("name")) for o in ops]
+    op_names = [n for n in op_names if n]
+    op_def = next(
+        (o for o in ops if (o.get("operation") or o.get("name")) == op), None)
+    return op_def, op_names
 
-    Returns an `unknown_operation` error (with near-matches) when the live
-    op list is non-empty and `op` isn't in it; None otherwise — including on
-    ANY lookup failure, so a transient hiccup never false-rejects a real op
-    (the execute call still reports genuine errors).
-    """
-    try:
-        rows = _configured_rows(client)
-        row = next((r for r in rows if r.get("name") == connector), None)
-        cid = row and (row.get("id") or row.get("uuid"))
-        if not cid:
-            return None
-        detail = client.post(f"/api/integration/connectors/{cid}/", {}) or {}
-        op_names = [
-            (o.get("operation") or o.get("name"))
-            for o in (detail.get("operations") or [])
-        ]
-        op_names = [n for n in op_names if n]
-    except Exception:  # noqa: BLE001
-        return None
+
+def _op_not_in_live(connector: str, op: str,
+                    op_names: list[str]) -> dict[str, Any] | None:
+    """`unknown_operation` envelope when `op` isn't in a non-empty live op list,
+    else None (an empty list can't prove non-existence)."""
     if not op_names or op in op_names:
         return None
     close = difflib.get_close_matches(op, op_names, n=5, cutoff=0.4)
@@ -302,6 +303,91 @@ def _validate_op_live(client, connector: str, op: str) -> dict[str, Any] | None:
         connector=connector,
         op=op,
         near=close,
+    )
+
+
+def _validate_op_live(client, connector: str, op: str) -> dict[str, Any] | None:
+    """Confirm `op` exists on the LIVE connector definition.
+
+    Used as the fallback when the offline reference store has no ops
+    catalogued for `connector` (so `_validate_op_exists` couldn't decide).
+
+    Returns an `unknown_operation` error (with near-matches) when the live
+    op list is non-empty and `op` isn't in it; None otherwise — including on
+    ANY lookup failure, so a transient hiccup never false-rejects a real op
+    (the execute call still reports genuine errors).
+    """
+    try:
+        _op_def, op_names = _fetch_live_op(client, connector, op)
+    except Exception:  # noqa: BLE001
+        return None
+    return _op_not_in_live(connector, op, op_names)
+
+
+def _validate_op_params_live(op_def: dict[str, Any] | None, connector: str,
+                             op: str,
+                             params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate `params` against a LIVE op definition's parameter list.
+
+    The offline-store analog (`_shared._validate_op_params`) no-ops when the op
+    has no params catalogued — exactly the un-synced case that lets the agent
+    burn turns guessing param names live (`ip`→`ip_address`→`indicator`, the
+    `invest_excessive_mail_egress` flail). This closes that gap: unknown-param
+    (typo detector) + missing-required, validated against the live connector
+    definition. Deliberately loose — select-option membership and type checks
+    stay on the offline path; here we only reject names that don't exist and
+    required names that are absent. Returns a `bad_params` envelope or None.
+
+    Fails open (None) when the live op has no parameter list (can't prove a
+    name is unknown), mirroring `_op_not_in_live`'s empty-list guard. Jinja
+    template values are left alone — only top-level membership is judged."""
+    params = params or {}
+    plist = (op_def or {}).get("parameters") or []
+    if not isinstance(plist, list) or not plist:
+        return None
+    known: dict[str, dict[str, Any]] = {}
+    for p in plist:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name") or p.get("title")
+        if name:
+            known[name] = p
+    if not known:
+        return None
+
+    issues: list[dict[str, Any]] = []
+    for key in params:
+        if key not in known:
+            close = difflib.get_close_matches(key, list(known), n=3, cutoff=0.5)
+            issues.append({
+                "param": key, "problem": "unknown", "near": close,
+                "detail": (f"'{key}' is not a parameter of {connector}/{op}"
+                           + (f"; did you mean {close}?" if close else "")),
+            })
+    for name, p in known.items():
+        if not p.get("required"):
+            continue
+        val = params.get(name)
+        if name not in params or val is None or val == "":
+            issues.append({
+                "param": name, "problem": "missing_required",
+                "detail": f"required parameter '{name}' "
+                          f"({p.get('title') or name}) is missing",
+            })
+    if not issues:
+        return None
+    return _err(
+        "bad_params",
+        f"operation '{op}' on '{connector}' called with {len(issues)} "
+        f"invalid argument(s) (validated against the live connector definition)",
+        suggestions=[
+            f"Call get_op_schema({connector!r}, {op!r}) to see the exact "
+            "parameter names, types, required flags, and select options",
+            "Re-issue the call with corrected args (fix the issues below)",
+        ],
+        connector=connector,
+        op=op,
+        issues=issues,
     )
 
 
@@ -434,27 +520,33 @@ def _live_client_for_grounding():
 
 
 def validate_op_grounded(connector: str, op: str,
+                         params: dict[str, Any] | None = None,
                          client=None) -> dict[str, Any] | None:
     """Grounding guarantee shared by `run_op` AND `emit_action_card`: a
-    hallucinated/typo'd op must NEVER reach the analyst (as an approval card)
-    or the live box (as an execute). Returns an `unknown_operation` error
-    envelope (with near-matches) or None to proceed.
+    hallucinated/typo'd op — or, when `params` is supplied, a call with
+    unknown/missing-required arguments — must NEVER reach the analyst (as an
+    approval card) or the live box (as an execute). Returns an
+    `unknown_operation` / `bad_params` error envelope or None to proceed.
 
     Two layers, matching the contract's "offline reference store, with a live
     connector-definition fallback":
 
     1. Offline store (`_validate_op_exists`) — decisive when the connector's
-       ops are catalogued.
-    2. Live connector definition (`_validate_op_live`) — used ONLY when the
-       store has 0 ops for the connector (un-synced reference DB), so a phantom
-       op is still caught against the live box. Requires a configured live
-       client; `run_op` passes its already-resolved+preflighted client,
-       `emit_action_card` lets us resolve one lazily.
+       ops are catalogued. Offline PARAM validation lives in the callers'
+       `_shared._validate_op_params`, which is likewise decisive when params
+       are catalogued.
+    2. Live connector definition — used ONLY when the store has 0 ops for the
+       connector (un-synced reference DB). A single detail fetch grounds BOTH
+       the op name and (when `params` is given) the argument names, so the
+       agent stops discovering param names by trial-and-error live (the
+       `invest_excessive_mail_egress` flail / the deferred half of 1.6).
+       Requires a configured live client; `run_op` passes its already-
+       resolved+preflighted client, `emit_action_card` lets us resolve lazily.
 
-    Fails OPEN (returns None) on any client/preflight/lookup hiccup — same
-    contract as `_validate_op_live` — so a transient problem never
-    false-rejects a real op. This is why the live half can be added to the
-    emit path without risking a false reject on a flaky network."""
+    Fails OPEN (returns None) on any client/preflight/lookup hiccup, so a
+    transient problem never false-rejects a real op. This is why the live half
+    can be added to the emit path without risking a false reject on a flaky
+    network."""
     off_err = _shared._validate_op_exists(connector, op)
     if off_err is not None:
         return off_err
@@ -470,7 +562,7 @@ def validate_op_grounded(connector: str, op: str,
     except sqlite3.Error:
         return None  # store unreadable → fail open
     if store_ops_count != 0:
-        return None  # op is catalogued and matched → done
+        return None  # op (and its params) are catalogued → offline is decisive
     # Un-synced connector → validate against the live definition.
     if client is None:
         client = _live_client_for_grounding()
@@ -487,9 +579,18 @@ def validate_op_grounded(connector: str, op: str,
         # card will fail at execute-time preflight, which is the right gate).
         return None
     try:
-        return _validate_op_live(client, connector, op)
+        op_def, op_names = _fetch_live_op(client, connector, op)
     except Exception:  # noqa: BLE001
         return None
+    op_err = _op_not_in_live(connector, op, op_names)
+    if op_err is not None:
+        return op_err
+    if params is not None:
+        try:
+            return _validate_op_params_live(op_def, connector, op, params)
+        except Exception:  # noqa: BLE001
+            return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -806,15 +907,18 @@ def run_op(
     if preflight_err is not None:
         return preflight_err
 
-    # Live op-existence fallback. The offline store check above can only catch
-    # a phantom op when the connector's ops are catalogued. When the store has
-    # NO ops for it (un-synced reference DB), validate against the LIVE
-    # connector definition now that preflight has confirmed it's configured —
-    # so a hallucinated op is still caught up front, before the confirm prompt
-    # and the execute. Shared with `emit_action_card` via validate_op_grounded
+    # Live op + param fallback. The offline checks above can only catch a
+    # phantom op / bad args when the connector's ops are catalogued. When the
+    # store has NO ops for it (un-synced reference DB), validate BOTH the op
+    # name and the argument names against the LIVE connector definition now
+    # that preflight has confirmed it's configured — so a hallucinated op or a
+    # guessed param name is caught up front, before the confirm prompt and the
+    # execute, instead of the agent discovering the real param names by trial
+    # and error live. Shared with `emit_action_card` via validate_op_grounded
     # (pass our already-resolved client). Infra hiccups never block (fail open).
     if store_ops_count == 0:
-        live_err = validate_op_grounded(connector, op, client=client)
+        live_err = validate_op_grounded(connector, op, params=params,
+                                        client=client)
         if live_err is not None:
             return live_err
 

@@ -103,8 +103,16 @@ Golden-trace replay now **3/5 PASS** (was meaningless 5/5): mail_egress fails
 budget (19 calls), c2 fails deliverable. 9 new tests, 753 fast green. Studio-repo
 only — **no connector re-vendor needed**. Detail: plan §1.4 "Gate strengthening".
 
-Still open (was the working-tree list; #1 now DONE):
-1. ✅ **DONE** — strengthen the 1.4 gate (this commit).
+Then shipped **param-level live grounding** (deferred half of 1.6) — `validate_op_grounded`
+gained a `params` arg; on the un-synced path it fetches the live op def once and grounds op
+name + argument names (`_validate_op_params_live`: unknown/typo + missing-required). `run_op`
++ `emit_action_card` both pass params. Catches the flail at the source, not just the gate.
+8 new tests (test_op_existence.py, 18 total); `make verify` green (41+111). Plan §1.6.
+**Offline-only until re-vendor + connector bump** — run `scripts/deploy.sh` to ship live.
+
+Still open (was the working-tree list; #1 + #2 now DONE):
+1. ✅ **DONE** — strengthen the 1.4 gate.
+2. ✅ **DONE** — param-level live grounding.
 2. **Param-level live grounding** (deferred half of 1.6) — agent discovers op
    param names by trial-and-error live; validate args vs the live op-schema
    when the store is un-synced.
