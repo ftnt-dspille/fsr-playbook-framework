@@ -256,13 +256,12 @@ def _validate_op_params(connector: str, op: str,
       is unknown; live execute will guard), OR
     - the store is unreadable.
 
-    Only TOP-LEVEL params are checked (`parent_param_name IS NULL`); FSR
-    sub-params are conditional on their parent's value, so flagging them
-    needs the parent value resolved — out of scope here. Values left as
-    Jinja templates are skipped for membership/type (we can't see their
-    runtime content). Type checks are deliberately loose — FSR coerces
-    `"5"`→5 and `"true"`→bool at execute, so we only reject values that
-    cannot coerce at all.
+    Conditional sub-params are resolved from submitted parent values, so
+    required checks only apply to the active branch. Values left as Jinja
+    templates are skipped for membership/type (we can't see their runtime
+    content). Type checks are deliberately loose — FSR coerces `"5"`→5 and
+    `"true"`→bool at execute, so we only reject values that cannot coerce at
+    all.
     """
     import difflib
     import json as _json
@@ -274,9 +273,9 @@ def _validate_op_params(connector: str, op: str,
         with _db() as conn:
             rows = _rows(
                 conn,
-                "SELECT param_name, title, type, required, options_json "
-                "FROM operation_params WHERE connector_name=? AND op_name=? "
-                "AND (parent_param_name IS NULL OR parent_param_name='')",
+                "SELECT param_name, title, type, required, options_json, "
+                "parent_param_name, condition_value "
+                "FROM operation_params WHERE connector_name=? AND op_name=?",
                 (connector, op),
             )
     except sqlite3.Error:
@@ -284,13 +283,49 @@ def _validate_op_params(connector: str, op: str,
     if not rows:
         return None  # no schema catalogued → can't validate
 
-    known = {r["param_name"]: r for r in rows}
+    def _clean(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value)
+        return text if text != "" else None
+
+    def _matches(value: Any, expected: str | None) -> bool:
+        if expected is None:
+            return False
+        if isinstance(value, list):
+            return any(str(item) == expected for item in value)
+        return str(value) == expected
+
+    rows_by_name: dict[str, list[dict[str, Any]]] = {}
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    top_level: list[dict[str, Any]] = []
+    for r in rows:
+        rows_by_name.setdefault(r["param_name"], []).append(r)
+        parent = _clean(r["parent_param_name"])
+        if parent is None:
+            top_level.append(r)
+        else:
+            children_by_parent.setdefault(parent, []).append(r)
+
+    known_names = set(rows_by_name)
+    active: dict[str, dict[str, Any]] = {}
+    stack = list(top_level)
+    while stack:
+        r = stack.pop(0)
+        name = r["param_name"]
+        active.setdefault(name, r)
+        if name not in params:
+            continue
+        for child in children_by_parent.get(name, []):
+            if _matches(params.get(name), _clean(child["condition_value"])):
+                stack.append(child)
+
     issues: list[dict[str, Any]] = []
 
     # 1. Unknown params (typo detector).
     for key in params:
-        if key not in known:
-            close = difflib.get_close_matches(key, list(known), n=3, cutoff=0.5)
+        if key not in known_names:
+            close = difflib.get_close_matches(key, list(known_names), n=3, cutoff=0.5)
             issues.append({
                 "param": key,
                 "problem": "unknown",
@@ -299,8 +334,8 @@ def _validate_op_params(connector: str, op: str,
                            + (f"; did you mean {close}?" if close else "")),
             })
 
-    # 2. Missing required params.
-    for name, r in known.items():
+    # 2. Missing required params on the active conditional branch only.
+    for name, r in active.items():
         if not r["required"]:
             continue
         val = params.get(name)
@@ -313,9 +348,10 @@ def _validate_op_params(connector: str, op: str,
             })
 
     # 3. Select-option membership + loose type checks.
-    for name, r in known.items():
+    for name, candidates in rows_by_name.items():
         if name not in params:
             continue
+        r = active.get(name) or candidates[0]
         val = params[name]
         if val is None or _is_jinja(val):
             continue
