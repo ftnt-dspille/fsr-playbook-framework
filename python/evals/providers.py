@@ -216,9 +216,16 @@ def _agentic_anthropic_provider() -> Callable:
                     result, default=str)
                 entry: dict[str, Any] = {
                     "name": name,
+                    "args": args,
                     "args_chars": len(_json.dumps(args, default=str)),
                     "result_chars": len(content),
                 }
+                # Result envelope flags so the investigation-recall scorer
+                # (and partial-failure assertions) can see what each pivot
+                # returned without re-running it.
+                if isinstance(result, dict):
+                    entry["ok"] = result.get("ok")
+                    entry["code"] = result.get("code")
                 # Capture the verify_playbook envelope (small, structured)
                 # so the scorer can compute verify-related metrics without
                 # re-running the tool.
@@ -288,9 +295,16 @@ def _agentic_lmstudio_provider() -> Callable:
                     result, default=str)
                 entry: dict[str, Any] = {
                     "name": name,
+                    "args": args,
                     "args_chars": len(_json.dumps(args, default=str)),
                     "result_chars": len(content),
                 }
+                # Result envelope flags so the investigation-recall scorer
+                # (and partial-failure assertions) can see what each pivot
+                # returned without re-running it.
+                if isinstance(result, dict):
+                    entry["ok"] = result.get("ok")
+                    entry["code"] = result.get("code")
                 if name == "verify_playbook" and isinstance(result, dict):
                     entry["verify"] = {
                         "ready_to_push": bool(result.get("ready_to_push")),

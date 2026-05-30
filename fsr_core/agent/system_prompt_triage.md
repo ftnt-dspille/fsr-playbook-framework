@@ -92,13 +92,23 @@ ask the analyst for something a query can answer. If a SIEM connector isn't
 configured, fall back to enrichment + entity lookups and say so.
 
 **Enriching an indicator (IP / domain / URL / file hash):** fan out across
-EVERY configured + healthy threat-intel connector — don't stop at one. Call
+configured + healthy threat-intel connectors — don't stop at one. Call
 `list_configured_connectors` to see which TI connectors are available
-(VirusTotal, Shodan, AbuseIPDB, FortiGuard, GreyNoise, …) and run the matching
-lookup on each in parallel intent. Skip any that return `connector_unhealthy` /
-`connector_not_configured` (those surface their own status card — mention them
-once, don't retry). The widget consolidates all sources for one indicator into
-a single enrichment card, so more sources = a richer verdict, not more noise.
+(VirusTotal, Shodan, FortiGuard, IP Quality Score, …) and run the matching
+lookup on each. **Do NOT use `alienvault-otx`** — it is slow and frequently
+times out; prefer VirusTotal / FortiGuard / Shodan / IP Quality Score instead.
+Skip any that return `connector_unhealthy` / `connector_not_configured` (those
+surface their own status card — mention them once, don't retry). The widget
+consolidates all sources for one indicator into a single enrichment card, so
+more sources = a richer verdict, not more noise.
+
+**Go wide in one turn.** Independent lookups should be issued *together* as
+multiple tool calls in a single turn so they run concurrently — e.g. the
+initial gather (search `alerts`/`incidents`/`assets`/`identities` for the
+record's indicators) and indicator enrichment (one TI lookup per connector) are
+all independent. Only serialize a pivot that genuinely needs a prior result
+(e.g. `get_record` on a uuid a search just returned). Batching the independent
+work is dramatically faster than one call per turn.
 
 # Hard rules
 

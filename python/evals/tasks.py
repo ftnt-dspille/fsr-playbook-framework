@@ -39,8 +39,16 @@ class Task:
     expected_approvals: Optional[dict[str, Any]] = None
     # Scoring mode. `None` = standard authoring task. `"refuse"` = the
     # agent is expected to decline (e.g. `unknown_connector`); authoring
-    # gates become informational and adherence inverts.
+    # gates become informational and adherence inverts. `"investigation"`
+    # = triage/hunt task scored on pivot recall (see `required_facts`).
     mode: Optional[str] = None
+    # Investigation-mode scoring inputs. Each entry is a tool-call matcher
+    # (see scoring._fact_matches). `required_facts` = pivots the agent
+    # SHOULD perform (recall numerator); `forbidden_facts` = pivots it must
+    # NOT perform (e.g. external TI on an internal RFC1918 IP — any hit
+    # hard-fails the gate).
+    required_facts: list[dict[str, Any]] = field(default_factory=list)
+    forbidden_facts: list[dict[str, Any]] = field(default_factory=list)
 
     def gold_yaml_text(self) -> Optional[str]:
         if not self.gold_yaml_path:
@@ -64,6 +72,8 @@ def load_tasks(filter_names: list[str] | None = None) -> list[Task]:
             approval_policy=data.get("approval_policy"),
             expected_approvals=data.get("expected_approvals"),
             mode=data.get("mode"),
+            required_facts=data.get("required_facts") or [],
+            forbidden_facts=data.get("forbidden_facts") or [],
         ))
     if filter_names:
         wanted = set(filter_names)

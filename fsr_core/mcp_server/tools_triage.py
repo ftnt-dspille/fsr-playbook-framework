@@ -535,12 +535,17 @@ def test_find_record(module: str, query: dict[str, Any] | None = None,
 @mcp.tool()
 def search_module_records(module: str, q: str = "",
                           limit: int = 10) -> dict[str, Any]:
-    """Live record search for the relation IRI picker.
+    """Search a FortiSOAR module for records matching a query — the core
+    triage PIVOT tool (and the relation IRI picker's backend).
+
+    Use this to find every record touching an indicator: search ``alerts``/
+    ``incidents``/``assets``/``identities``/``indicators`` for an IP, user, or
+    hostname pulled off the record you're triaging, then ``get_record`` the
+    hits to correlate the activity.
 
     Hits ``GET /api/3/<module>?$search=<q>&$limit=<limit>`` on the
-    configured FSR and returns a flat list of ``{iri, label}`` pairs
-    the inspector can drop into a "pick a record" dropdown. Empty
-    ``q`` returns the most-recent records (FSR's natural sort order).
+    configured FSR and returns a flat list of ``{iri, label, ...}`` pairs.
+    Empty ``q`` returns the most-recent records (FSR's natural sort order).
 
     Args:
       module: bare module name (e.g. ``alerts``); any ``?$limit=…``

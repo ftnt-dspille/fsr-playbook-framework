@@ -60,6 +60,7 @@ SAFE_TOOLS: list[str] = [
     # Phase 1.2 — live triage (read-only FSR).
     "why_did_playbook_fail",
     "get_record",
+    "search_module_records",
     "get_run_env",
     "list_playbook_runs",
     "assert_playbook_outcome",
@@ -112,6 +113,7 @@ TOOL_TIERS: dict[str, int] = {
     "propose_http_fallback": 0,
     # Phase 1.2 — read-only FSR API.
     "why_did_playbook_fail": 1,
+    "search_module_records": 1,
     "get_record": 1,
     "get_run_env": 1,
     "list_playbook_runs": 1,

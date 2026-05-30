@@ -143,6 +143,32 @@ run on stale predecessor sets for cyclic graphs.
 Increment `seq_in_turn` after `coalescer.flush()` (at tool boundaries), not on the first text append,
 so transcript reconstruction by `seq` doesn't misalign.
 
+### 2.8 Parallel read-only tool dispatch (hunt latency)  ·  HIGH · medium
+A live hunt's wall-clock is dominated by **sequential** tool round-trips: `anthropic_provider`'s tool
+loop (`for i, (call_id, name, args) in enumerate(tool_calls): result = dispatch(...)`,
+~line 366) awaits each call before the next, and every `run_op`/`get_record` waits on a slow upstream
+(SIEM/TI/healthcheck). On the C2-scenario demo this was minutes, almost all of it I/O wait — not the
+model. Claude already emits multiple `tool_use` blocks per turn; the initial gather (search
+`alerts`/`incidents`/`assets`/`identities` for the record's indicators) and indicator enrichment
+(one TI lookup per connector) are mutually independent.
+- **Do:** in the provider tool loop, dispatch the **auto-tier (read-only, tier ≤ 2)** calls in a turn
+  **concurrently** via `asyncio.gather(*[asyncio.to_thread(dispatch, name, args) …])`, preserving
+  `tool_result` order (Anthropic requires one `tool_result` per `tool_use`, order-matched). Any
+  **tier-3+** call still routes through the existing suspend/`pending_approval` path — those are
+  staged one at a time, so leave the sequential path for them (e.g. if a turn mixes tiers, run the
+  read-only ones in parallel first, then handle the first approval-needing call as today). Collapses
+  fan-out latency from *sum* → *max*.
+- **Caveat:** `dispatch`/`run_op` are sync and touch shared state (the connector `requests` session,
+  in-process health/config caches in `tools_execution`, sqlite). Scope concurrency to read-only tiers;
+  the caches are idempotent writes; keep a cap on max concurrent calls.
+- **Already landed (prompt side, 2026-05-30):** `system_prompt_triage.md` now tells the agent to issue
+  independent lookups together in one turn and to serialize only dependent pivots — so the model
+  produces the parallel `tool_use` batches this item then executes concurrently. Also excluded
+  `alienvault-otx` from enrichment (slow / frequent timeouts) in the same prompt edit.
+- **Test:** a fake provider emitting 3 independent read-only calls in one turn → assert they run
+  concurrently (wall-clock ≈ slowest, not sum) and `tool_result` blocks stay in `tool_use` order; a
+  mixed read-only + tier-3 turn → read-only resolve, tier-3 still suspends.
+
 ---
 
 ## Phase 3 — Safety & auditability

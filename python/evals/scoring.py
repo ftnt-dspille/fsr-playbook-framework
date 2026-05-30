@@ -125,6 +125,77 @@ def _strip_volatile(obj: Any) -> Any:
 TOOL_BUDGET_MAX = int(os.environ.get("EVAL_TOOL_BUDGET_MAX", "20"))
 NO_SPIRAL_MAX_CONSECUTIVE = int(
     os.environ.get("EVAL_NO_SPIRAL_MAX_CONSECUTIVE", "4"))
+# Phase 1.4: investigation-quality family. Recall = required pivots the
+# agent actually performed / required pivots. Gate at 0.8 per the plan.
+INVESTIGATION_RECALL_GATE = float(
+    os.environ.get("EVAL_INVESTIGATION_RECALL_GATE", "0.8"))
+
+
+def _fact_matches(fact: dict[str, Any], call: dict[str, Any]) -> bool:
+    """Does a single trace tool-call satisfy a required/forbidden fact?
+
+    A fact is a matcher, e.g.::
+
+        {"tool": "run_op", "connector": "virustotal",
+         "op": "get_ip_reputation", "args_contains": ["203.0.113.5"]}
+        {"tool": "get_record", "module": "alerts"}
+
+    `tool` matches the tool name; `connector`/`op`/`module` are matched
+    case-insensitively against the call's top-level args; `args_contains`
+    is a list of substrings that must ALL appear in the JSON-serialized
+    args (so an indicator buried in `params.ip` still matches without the
+    fixture needing to know the exact nesting)."""
+    if fact.get("tool") and call.get("name") != fact["tool"]:
+        return False
+    args = call.get("args") or call.get("input") or {}
+    if not isinstance(args, dict):
+        args = {}
+    for key in ("connector", "op", "module"):
+        if key in fact and str(args.get(key, "")).lower() != str(fact[key]).lower():
+            return False
+    needles = fact.get("args_contains") or []
+    if needles:
+        blob = json.dumps(args, default=str).lower()
+        if not all(str(n).lower() in blob for n in needles):
+            return False
+    return True
+
+
+def _fact_label(fact: dict[str, Any]) -> str:
+    return fact.get("label") or " ".join(
+        str(fact.get(k)) for k in ("tool", "connector", "op", "module")
+        if fact.get(k)) or json.dumps(fact, default=str)
+
+
+def _score_investigation(trace: list[dict[str, Any]],
+                         required_facts: list[dict[str, Any]] | None,
+                         forbidden_facts: list[dict[str, Any]] | None,
+                         ) -> dict[str, Any]:
+    """Recall over required investigation pivots, with a hard fail on any
+    forbidden pivot (e.g. external TI lookup on an internal RFC1918 IP)."""
+    required_facts = required_facts or []
+    matched, missing = [], []
+    for f in required_facts:
+        if any(_fact_matches(f, c) for c in trace):
+            matched.append(f)
+        else:
+            missing.append(f)
+    recall = (len(matched) / len(required_facts)) if required_facts else 0.0
+    forbidden_hit = [f for f in (forbidden_facts or [])
+                     if any(_fact_matches(f, c) for c in trace)]
+    passed = recall >= INVESTIGATION_RECALL_GATE and not forbidden_hit
+    detail = f"recall {recall:.2f} (>= {INVESTIGATION_RECALL_GATE})"
+    if forbidden_hit:
+        detail = (f"performed {len(forbidden_hit)} forbidden pivot(s): "
+                  + ", ".join(_fact_label(f) for f in forbidden_hit))
+    return {
+        "passed": passed, "skipped": False,
+        "recall": round(recall, 3), "gate": INVESTIGATION_RECALL_GATE,
+        "matched": len(matched), "required": len(required_facts),
+        "missing": [_fact_label(f) for f in missing],
+        "forbidden_hit": [_fact_label(f) for f in forbidden_hit],
+        "detail": detail,
+    }
 
 
 def _verify_metrics(trace: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -269,6 +340,8 @@ def score(
     audit: list[dict[str, Any]] | None = None,
     expected_approvals: dict[str, Any] | None = None,
     mode: str | None = None,
+    required_facts: list[dict[str, Any]] | None = None,
+    forbidden_facts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Score a candidate YAML across confidence tiers + agent gates.
 
@@ -276,9 +349,15 @@ def score(
     (e.g. `unknown_connector`): success = no YAML emitted, no verify call,
     zero tier-3+ approvals. All authoring-tier gates become informational
     so they neither help nor hurt the score.
+
+    `mode="investigation"` scores a triage/hunt task on **pivot recall**
+    (`required_facts` matched in the tool-use trace) instead of YAML shape.
+    All authoring tiers + adherence become informational; the single gate
+    is `investigation_recall` (>= 0.8, with a hard fail on `forbidden_facts`).
     """
     out: dict[str, Any] = {"levels": {}}
     refuse = (mode == "refuse")
+    investigation = (mode == "investigation")
 
     # ----------------- confidence tier 1: draft (compile clean) ------------
     comp = _compile_obj(yaml_text)
@@ -419,6 +498,24 @@ def score(
             adh["detail"] = ("correctly refused — no YAML emitted"
                              if not had_yaml
                              else "fabricated YAML for a refuse-mode task")
+
+    # Investigation-mode: grade on pivot recall, not YAML. Authoring tiers
+    # and adherence (a YAML block) are irrelevant to a triage/hunt task, so
+    # demote them to informational and add the single recall gate.
+    if investigation:
+        for k in ("draft", "verified", "live_tested", "matches_example",
+                  "adherence", "verify_called_before_submit",
+                  "final_verify_ready_to_push"):
+            lv = out["levels"].get(k, {})
+            if not lv.get("skipped"):
+                lv["informational"] = True
+        if trace is not None:
+            out["levels"]["investigation_recall"] = _score_investigation(
+                trace, required_facts, forbidden_facts)
+        else:
+            out["levels"]["investigation_recall"] = {
+                "passed": False, "skipped": True,
+                "detail": "no tool-use trace supplied"}
 
     counted = [v for k, v in out["levels"].items()
                if not v.get("skipped") and not v.get("informational")]
