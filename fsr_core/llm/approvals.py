@@ -166,11 +166,104 @@ class InMemoryApprovalGateway:
             self._store.pop(k, None)
 
 
-# Backwards-compat facade. Existing callers
-# (web/backend/routes/chat.py, tests) use the module-level functions
-# against a process-wide default gateway. The connector instantiates
-# its own PersistedApprovalGateway rather than touching this singleton.
-_DEFAULT = InMemoryApprovalGateway()
+class SqliteApprovalGateway:
+    """Phase 3.2 — sqlite-backed gateway so suspended HITL sessions survive a
+    worker restart. The web backend installs one at startup via
+    `set_default_gateway`; the connector has its own equivalent in
+    `storage.py`.
+
+    Each op opens a short-lived connection (sqlite handles its own locking),
+    so the gateway is cheap to construct and safe across threads. Sessions
+    are pickled — both writer and reader are this same process family, and an
+    attacker who can write our sqlite file already has code-exec; the HMAC
+    binding (3.1) is what guards against *content* tampering. For tokens to
+    survive a restart the process must run with a stable
+    `FSR_APPROVAL_HMAC_KEY` (else `verify()` fails closed afterward — safe,
+    the analyst just re-issues)."""
+
+    _SCHEMA = (
+        "CREATE TABLE IF NOT EXISTS suspended_sessions ("
+        " approval_id TEXT PRIMARY KEY,"
+        " created_at REAL NOT NULL,"
+        " payload BLOB NOT NULL)"
+    )
+
+    def __init__(self, db_path: str) -> None:
+        self.db_path = str(db_path)
+        self._lock = threading.Lock()
+        with self._conn() as c:
+            c.execute(self._SCHEMA)
+
+    def _conn(self):  # sqlite3.Connection
+        import sqlite3
+        c = sqlite3.connect(self.db_path, timeout=5.0)
+        return c
+
+    def _gc(self, c) -> None:
+        c.execute("DELETE FROM suspended_sessions WHERE created_at < ?",
+                  (time.time() - _TTL_SECONDS,))
+
+    def stash(self, s: SuspendedSession) -> None:
+        import pickle  # noqa: S403 — round-trips our own dataclass, same process family
+        blob = pickle.dumps(s, protocol=pickle.HIGHEST_PROTOCOL)
+        with self._lock, self._conn() as c:
+            self._gc(c)
+            c.execute(
+                "INSERT OR REPLACE INTO suspended_sessions"
+                " (approval_id, created_at, payload) VALUES (?, ?, ?)",
+                (s.approval_id, s.created_at, blob),
+            )
+
+    def _load(self, c, approval_id: str) -> SuspendedSession | None:
+        import pickle  # noqa: S403
+        row = c.execute(
+            "SELECT payload FROM suspended_sessions WHERE approval_id = ?",
+            (approval_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        s = pickle.loads(row[0])  # noqa: S301 — our own file, see class docstring
+        return None if s.expired() else s
+
+    def peek(self, approval_id: str) -> SuspendedSession | None:
+        with self._lock, self._conn() as c:
+            self._gc(c)
+            return self._load(c, approval_id)
+
+    def pop(self, approval_id: str) -> SuspendedSession | None:
+        with self._lock, self._conn() as c:
+            self._gc(c)
+            s = self._load(c, approval_id)
+            c.execute("DELETE FROM suspended_sessions WHERE approval_id = ?",
+                      (approval_id,))
+            return s
+
+    def clear(self) -> None:
+        with self._lock, self._conn() as c:
+            c.execute("DELETE FROM suspended_sessions")
+
+
+# Backwards-compat facade. Existing callers (web/backend/routes/chat.py,
+# tests, and the provider's fallback path) use the module-level functions
+# against a process-wide default gateway. `set_default_gateway` lets the web
+# backend swap in a SqliteApprovalGateway at startup so both the stash side
+# (provider) and the resolve side (chat route) share one persisted store
+# without any further wiring. The connector instantiates its own gateway and
+# passes it to the provider explicitly rather than touching this singleton.
+_DEFAULT: InMemoryApprovalGateway | SqliteApprovalGateway = (
+    InMemoryApprovalGateway()
+)
+
+
+def set_default_gateway(
+    gw: "InMemoryApprovalGateway | SqliteApprovalGateway",
+) -> None:
+    global _DEFAULT
+    _DEFAULT = gw
+
+
+def get_default_gateway() -> "InMemoryApprovalGateway | SqliteApprovalGateway":
+    return _DEFAULT
 
 
 def stash(s: SuspendedSession) -> None:
