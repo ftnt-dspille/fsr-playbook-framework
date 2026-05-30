@@ -173,6 +173,173 @@ def _validate_op_exists(connector: str, op: str) -> dict[str, Any] | None:
     )
 
 
+# Param types whose value is constrained to an options_json picklist.
+_SELECT_TYPES = {"select", "multiselect", "picklist", "radio"}
+# Param types we type-check (loosely — FSR coerces strings → ints/bools at
+# execute, so we only reject values that can't possibly coerce).
+_INT_TYPES = {"integer", "number"}
+_BOOL_TYPES = {"checkbox", "boolean", "bool"}
+
+
+def _is_jinja(val: Any) -> bool:
+    """A value the agent left as a template (`{{vars.x}}`) — we can't
+    validate its concrete content, so membership/type checks must skip it."""
+    return isinstance(val, str) and "{{" in val and "}}" in val
+
+
+def _validate_op_params(connector: str, op: str,
+                        params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate `params` against the operation's parameter schema.
+
+    Mirrors `_validate_op_exists`: catches typo'd/unknown params, missing
+    required params, and select values outside the option set BEFORE the op
+    runs — so a malformed call surfaces as an actionable `bad_params` error
+    the agent self-corrects against, instead of an opaque post-approval
+    `execution_failed` (or, worse, an approval card the analyst signs off on
+    that then fails).
+
+    Returns an error envelope with an `issues` list, or None when the call
+    is well-formed. Returns None (don't block) when:
+    - the op has no params catalogued (un-synced store → can't prove a param
+      is unknown; live execute will guard), OR
+    - the store is unreadable.
+
+    Only TOP-LEVEL params are checked (`parent_param_name IS NULL`); FSR
+    sub-params are conditional on their parent's value, so flagging them
+    needs the parent value resolved — out of scope here. Values left as
+    Jinja templates are skipped for membership/type (we can't see their
+    runtime content). Type checks are deliberately loose — FSR coerces
+    `"5"`→5 and `"true"`→bool at execute, so we only reject values that
+    cannot coerce at all.
+    """
+    import difflib
+    import json as _json
+
+    if not connector or not op:
+        return None
+    params = params or {}
+    try:
+        with _db() as conn:
+            rows = _rows(
+                conn,
+                "SELECT param_name, title, type, required, options_json "
+                "FROM operation_params WHERE connector_name=? AND op_name=? "
+                "AND (parent_param_name IS NULL OR parent_param_name='')",
+                (connector, op),
+            )
+    except sqlite3.Error:
+        return None  # store unreadable → don't block; live exec will guard
+    if not rows:
+        return None  # no schema catalogued → can't validate
+
+    known = {r["param_name"]: r for r in rows}
+    issues: list[dict[str, Any]] = []
+
+    # 1. Unknown params (typo detector).
+    for key in params:
+        if key not in known:
+            close = difflib.get_close_matches(key, list(known), n=3, cutoff=0.5)
+            issues.append({
+                "param": key,
+                "problem": "unknown",
+                "near": close,
+                "detail": (f"'{key}' is not a parameter of {connector}/{op}"
+                           + (f"; did you mean {close}?" if close else "")),
+            })
+
+    # 2. Missing required params.
+    for name, r in known.items():
+        if not r["required"]:
+            continue
+        val = params.get(name)
+        if name not in params or val is None or val == "":
+            issues.append({
+                "param": name,
+                "problem": "missing_required",
+                "detail": f"required parameter '{name}' "
+                          f"({r['title'] or name}) is missing",
+            })
+
+    # 3. Select-option membership + loose type checks.
+    for name, r in known.items():
+        if name not in params:
+            continue
+        val = params[name]
+        if val is None or _is_jinja(val):
+            continue
+        ptype = (r["type"] or "").lower()
+        opts = None
+        if r["options_json"]:
+            try:
+                parsed = _json.loads(r["options_json"])
+                if isinstance(parsed, list) and parsed:
+                    opts = [str(o) for o in parsed]
+            except (ValueError, TypeError):
+                opts = None
+        if opts is not None and ptype in _SELECT_TYPES:
+            vals = val if isinstance(val, list) else [val]
+            bad = [v for v in vals
+                   if not _is_jinja(v) and str(v) not in opts]
+            if bad:
+                issues.append({
+                    "param": name,
+                    "problem": "bad_select_value",
+                    "options": opts,
+                    "detail": f"{name}={bad!r} not in allowed options {opts}",
+                })
+            continue
+        if ptype in _INT_TYPES and not _coerces_to_int(val):
+            issues.append({
+                "param": name, "problem": "bad_type",
+                "detail": f"{name} expects an integer; got {val!r}",
+            })
+        elif ptype in _BOOL_TYPES and not _coerces_to_bool(val):
+            issues.append({
+                "param": name, "problem": "bad_type",
+                "detail": f"{name} expects a boolean; got {val!r}",
+            })
+
+    if not issues:
+        return None
+    return _err(
+        "bad_params",
+        f"operation '{op}' on '{connector}' called with {len(issues)} "
+        f"invalid argument(s)",
+        suggestions=[
+            f"Call get_op_schema({connector!r}, {op!r}) to see the exact "
+            "parameter names, types, required flags, and select options",
+            "Re-issue the call with corrected args (fix the issues below)",
+        ],
+        connector=connector,
+        op=op,
+        issues=issues,
+    )
+
+
+def _coerces_to_int(val: Any) -> bool:
+    if isinstance(val, bool):
+        return False
+    if isinstance(val, int):
+        return True
+    if isinstance(val, str):
+        try:
+            int(val.strip())
+            return True
+        except ValueError:
+            return False
+    return False
+
+
+def _coerces_to_bool(val: Any) -> bool:
+    if isinstance(val, bool):
+        return True
+    if isinstance(val, str):
+        return val.strip().lower() in {"true", "false", "0", "1", "yes", "no"}
+    if isinstance(val, int):
+        return val in (0, 1)
+    return False
+
+
 # Status precedence: tested_pass and tested_fail beat 'seen'; among those,
 # the most recent ts wins. 'seen' is a weak signal (we catalogued the
 # row, never exercised it).

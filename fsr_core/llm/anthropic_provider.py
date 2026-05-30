@@ -13,7 +13,14 @@ import json
 import os
 from typing import Any, AsyncIterator
 
-from anthropic import AsyncAnthropic
+try:
+    from anthropic import AsyncAnthropic
+except ImportError:
+    # The SDK isn't installed in every environment (e.g. the test/dev box
+    # that only exercises the pure helpers, or the FSR connector runtime).
+    # Defer the hard failure to AnthropicProvider.__init__ so the module —
+    # and its module-level helpers — import cleanly without it.
+    AsyncAnthropic = None  # type: ignore[assignment,misc]
 
 from .provider import (
     ApprovalRequestEvent,
@@ -69,6 +76,10 @@ class AnthropicProvider:
         # cost. The SDK already exponentially backs off between retries.
         if client is not None:
             self._client = client
+        elif AsyncAnthropic is None:
+            raise RuntimeError(
+                "the 'anthropic' SDK is not installed; AnthropicProvider "
+                "needs it unless you inject a `client=`")
         elif api_key:
             self._client = AsyncAnthropic(api_key=api_key, max_retries=5)
         else:
@@ -128,6 +139,7 @@ class AnthropicProvider:
             "type": "tool_result",
             "tool_use_id": suspended.tool_use_id,
             "content": _stringify(resolved),
+            "is_error": _is_error_result(resolved),
         })
         for pid, _pn, _pa in suspended.remaining_tool_calls:
             resumed_blocks.append({
@@ -135,6 +147,7 @@ class AnthropicProvider:
                 "tool_use_id": pid,
                 "content": "{\"ok\": false, \"code\": "
                             "\"superseded_by_approval\"}",
+                "is_error": True,
             })
 
         # Rehydrate Messages from the wire-form snapshot + the rebuilt
@@ -397,10 +410,15 @@ class AnthropicProvider:
 
                 yield ToolResultEvent(call_id=call_id, result=result)
                 content_str = _stringify(result)
+                # Flag failures so the model's self-repair loop branches on a
+                # real error signal instead of guessing from prose. Recognizes
+                # both the `{ok: false}` envelope (canonical, from `_err`) and
+                # a bare `{error: ...}` dict.
                 tool_result_blocks.append({
                     "type": "tool_result",
                     "tool_use_id": call_id,
                     "content": content_str,
+                    "is_error": _is_error_result(result),
                 })
                 try:
                     args_chars = len(json.dumps(args, default=str))
@@ -495,6 +513,14 @@ class AnthropicProvider:
             import logging
             logging.exception("max-tool-turns summary call failed")
         yield DoneEvent(stop_reason="max_tool_turns")
+
+
+def _is_error_result(result: Any) -> bool:
+    """True if a tool result represents a failure, for the wire
+    `is_error` flag. Recognizes the canonical `{ok: false}` envelope
+    (from `_err`) and a bare `{error: ...}` dict."""
+    return isinstance(result, dict) and (
+        result.get("ok") is False or "error" in result)
 
 
 def _stringify(result: Any) -> str:

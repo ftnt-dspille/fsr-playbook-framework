@@ -554,6 +554,14 @@ def run_op(
     if op_err is not None:
         return op_err
 
+    # Validate the arguments against the op's parameter schema (required
+    # fields, select-option membership, gross type errors) BEFORE we execute,
+    # so a malformed call self-corrects up front instead of failing opaquely
+    # at execute. No-op when the op has no params catalogued.
+    param_err = _shared._validate_op_params(connector, op, params)
+    if param_err is not None:
+        return param_err
+
     # Preflight: the connector must be configured + healthy on the live box.
     # A misconfigured/disconnected connector is a user-fixable problem, so we
     # surface it as a structured error instead of firing the op blind.

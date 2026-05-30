@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ._shared import mcp, _err, _validate_op_exists
+from ._shared import mcp, _err, _validate_op_exists, _validate_op_params
 
 
 # Step-name charset rule from system_prompt.md §"Hard rules" #2.
@@ -226,6 +226,11 @@ def emit_action_card(
     op_err = _validate_op_exists(connector, operation)
     if op_err is not None:
         return op_err
+    # Don't render a card whose args are incomplete/invalid — the analyst
+    # would approve it only for it to fail post-approval at execute.
+    param_err = _validate_op_params(connector, operation, args)
+    if param_err is not None:
+        return param_err
     return {
         "ok": True,
         "card": {
