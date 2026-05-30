@@ -97,6 +97,104 @@ def test_forbidden_pivot_hard_fails_even_at_full_recall():
 
 # --- score() integration ----------------------------------------------------
 
+# --- _score_investigation_quality (Phase 1.4 strengthening) -----------------
+
+def _good_invest_trace():
+    """A clean 4-call investigation that should clear every quality gate."""
+    return [
+        _call("get_record", module="alerts", uuid="x"),
+        _call("search_module_records", module="incidents", q="1.2.3.4"),
+        _call("run_op", connector="virustotal", op="get_ip_report",
+              params={"ip": "1.2.3.4"}),
+        _call("emit_action_card", connector="virustotal", op="block_ip"),
+    ]
+
+
+def test_quality_all_gates_pass_on_clean_trace():
+    q = scoring._score_investigation_quality(_good_invest_trace(), {})
+    assert q["investigation_tool_budget"]["passed"] is True
+    assert q["investigation_no_param_flail"]["passed"] is True
+    assert q["investigation_deliverable"]["passed"] is True
+
+
+def test_quality_tool_budget_fails_on_flailing_run():
+    trace = [_call("get_record", uuid="x") for _ in range(13)]
+    q = scoring._score_investigation_quality(trace, {"tool_budget_max": 12})
+    assert q["investigation_tool_budget"]["passed"] is False
+    assert q["investigation_tool_budget"]["calls"] == 13
+
+
+def test_quality_param_flail_detected():
+    # Same connector+op invoked with 3 distinct arg-sets = grounding flail.
+    trace = [
+        _call("run_op", connector="fortiguard", op="threat_intel_search",
+              params={"ip": "1.2.3.4"}),
+        _call("run_op", connector="fortiguard", op="threat_intel_search",
+              params={"ip_address": "1.2.3.4"}),
+        _call("run_op", connector="fortiguard", op="threat_intel_search",
+              params={"indicator": "1.2.3.4"}),
+    ]
+    q = scoring._score_investigation_quality(trace, {"max_param_retries": 2})
+    flail = q["investigation_no_param_flail"]
+    assert flail["passed"] is False
+    assert flail["worst_distinct_argsets"] == 3
+    assert flail["op"] == "fortiguard.threat_intel_search"
+
+
+def test_quality_param_flail_ignores_confirm_retry():
+    # A retry that only adds `confirm: true` is the designed confirm-gate
+    # path, NOT a param guess — must collapse to one distinct arg-set.
+    trace = [
+        _call("run_op", connector="vt", op="lookup", params={"ip": "1.2.3.4"}),
+        _call("run_op", connector="vt", op="lookup", params={"ip": "1.2.3.4"},
+              confirm=True),
+    ]
+    q = scoring._score_investigation_quality(trace, {"max_param_retries": 2})
+    assert q["investigation_no_param_flail"]["worst_distinct_argsets"] == 1
+
+
+def test_quality_deliverable_credits_choice_card():
+    # No containment op configured -> emit_choice_card is the correct ending.
+    trace = [
+        _call("get_record", uuid="x"),
+        _call("emit_choice_card", options=["monitor", "escalate"]),
+    ]
+    q = scoring._score_investigation_quality(trace, {"require_deliverable": True})
+    d = q["investigation_deliverable"]
+    assert d["passed"] is True and "emit_choice_card" in d["staged"]
+
+
+def test_quality_deliverable_fails_when_none_staged():
+    trace = [_call("get_record", uuid="x"), _call("run_op", connector="vt")]
+    q = scoring._score_investigation_quality(trace, {"require_deliverable": True})
+    assert q["investigation_deliverable"]["passed"] is False
+
+
+def test_quality_deliverable_skipped_when_not_required():
+    trace = [_call("get_record", uuid="x")]
+    q = scoring._score_investigation_quality(trace, {"require_deliverable": False})
+    assert q["investigation_deliverable"]["skipped"] is True
+
+
+def test_score_investigation_quality_gates_counted_and_can_fail():
+    # Full recall but 13 calls + no deliverable -> overall fraction < 1.0.
+    required = [{"tool": "get_record", "module": "alerts"}]
+    trace = [_call("get_record", module="alerts", uuid="x")]
+    trace += [_call("get_record", module="alerts", uuid="x") for _ in range(12)]
+    out = scoring.score(
+        "", trace=trace, final_text="verdict", mode="investigation",
+        required_facts=required,
+        investigation_quality={"tool_budget_max": 12, "require_deliverable": True},
+    )
+    lv = out["levels"]
+    assert lv["investigation_recall"]["passed"] is True
+    assert lv["investigation_tool_budget"]["passed"] is False
+    assert lv["investigation_deliverable"]["passed"] is False
+    # The loose authoring tool_budget must be demoted (not double-counted).
+    assert lv["tool_budget"].get("informational") is True
+    assert out["fraction"] < 1.0
+
+
 def test_score_investigation_mode_demotes_authoring_gates():
     trace = [
         _call("get_record", module="alerts", uuid="x"),
@@ -111,11 +209,16 @@ def test_score_investigation_mode_demotes_authoring_gates():
         "",  # no YAML — investigation tasks don't author
         trace=trace, final_text="Investigated the alert; IP is malicious.",
         mode="investigation", required_facts=required,
+        # Isolate the demotion check from the deliverable gate (tested above).
+        investigation_quality={"require_deliverable": False},
     )
     lv = out["levels"]
     assert lv["investigation_recall"]["passed"] is True
     # Authoring tiers must not drag/help the score.
     assert lv["draft"]["informational"] is True
     assert lv["adherence"]["informational"] is True
-    # The recall gate is the only counted gate -> perfect fraction.
+    # The loose authoring tool_budget is demoted in favor of the tighter
+    # investigation ceiling.
+    assert lv["tool_budget"].get("informational") is True
+    # Recall + the two active quality gates all pass -> perfect fraction.
     assert out["fraction"] == 1.0

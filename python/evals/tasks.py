@@ -49,6 +49,11 @@ class Task:
     # hard-fails the gate).
     required_facts: list[dict[str, Any]] = field(default_factory=list)
     forbidden_facts: list[dict[str, Any]] = field(default_factory=list)
+    # Phase 1.4 strengthening: per-fixture quality knobs that recall can't
+    # see (scoring._score_investigation_quality). Keys: `tool_budget_max`,
+    # `max_param_retries`, `require_deliverable` (bool or a list of accepted
+    # emit_* tool names). Absent knobs fall back to the module defaults.
+    investigation_quality: dict[str, Any] = field(default_factory=dict)
 
     def gold_yaml_text(self) -> Optional[str]:
         if not self.gold_yaml_path:
@@ -74,6 +79,7 @@ def load_tasks(filter_names: list[str] | None = None) -> list[Task]:
             mode=data.get("mode"),
             required_facts=data.get("required_facts") or [],
             forbidden_facts=data.get("forbidden_facts") or [],
+            investigation_quality=data.get("investigation_quality") or {},
         ))
     if filter_names:
         wanted = set(filter_names)

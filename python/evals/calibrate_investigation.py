@@ -119,7 +119,7 @@ def main() -> None:
     args = ap.parse_args()
 
     from evals.tasks import load_tasks
-    from evals.scoring import _score_investigation
+    from evals.scoring import _score_investigation, _score_investigation_quality
 
     tasks = [t for t in load_tasks() if t.mode == "investigation"]
     if args.only:
@@ -152,10 +152,25 @@ def main() -> None:
             continue
         dt = time.monotonic() - t0
         sc = _score_investigation(out["trace"], t.required_facts, t.forbidden_facts)
+        quality = _score_investigation_quality(out["trace"], t.investigation_quality)
+        # A fixture clears calibration only if recall AND every non-skipped
+        # quality gate pass — recall alone greenlit 20-call flailing (the
+        # finding that motivated this strengthening).
+        q_failed = [k for k, v in quality.items()
+                    if not v.get("skipped") and not v.get("passed")]
+        sc["quality"] = quality
+        sc["quality_failed"] = q_failed
+        sc["passed"] = sc["passed"] and not q_failed
         log.info("  stop_reason=%s  pivots=%s  elapsed=%.0fs",
                  out["stop_reason"], len(out["trace"]), dt)
-        log.info("  RECALL %s (gate %s)  matched %s/%s  PASS=%s",
-                 sc["recall"], sc["gate"], sc["matched"], sc["required"], sc["passed"])
+        log.info("  RECALL %s (gate %s)  matched %s/%s",
+                 sc["recall"], sc["gate"], sc["matched"], sc["required"])
+        for k, v in quality.items():
+            if v.get("skipped"):
+                continue
+            log.info("  %-30s %s  (%s)",
+                     k, "PASS" if v["passed"] else "FAIL", v.get("detail", ""))
+        log.info("  OVERALL PASS=%s", sc["passed"])
         if sc["missing"]:
             log.info("  MISSING required: %s", sc["missing"])
         if sc["forbidden_hit"]:
@@ -185,6 +200,8 @@ def main() -> None:
         extra = ""
         if sc["forbidden_hit"]:
             extra = f"  forbidden={len(sc['forbidden_hit'])}"
+        elif sc.get("quality_failed"):
+            extra = f"  quality_fail={','.join(sc['quality_failed'])}"
         elif sc["missing"]:
             extra = f"  missing={len(sc['missing'])}"
         log.info("  [%s] %-34s recall=%s%s", flag, name, sc["recall"], extra)

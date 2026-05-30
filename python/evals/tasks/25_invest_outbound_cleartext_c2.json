@@ -4,8 +4,14 @@
   "prompt": "Triage FortiSOAR alert `alerts:54f25f1f-808e-4bbb-8e20-e95855291184` (\"Outbound cleartext password usage from non guest network\"). Investigate it end to end: pull the alert record, extract its indicators (source and destination IPs), find related activity across the alerts/incidents modules, enrich any EXTERNAL (public, routable) indicators with the threat-intel connectors, and correlate what you find into a short verdict. If containment is warranted, stage it for analyst approval with emit_action_card — do not execute anything yourself.",
   "required_facts": [
     {"tool": "get_record", "args_contains": ["54f25f1f-808e-4bbb-8e20-e95855291184"], "label": "pull the originating alert"},
+    {"tool": "search_module_records", "module": "incidents", "label": "correlate related activity in the incidents module"},
     {"tool": "run_op", "args_contains": ["108.17.204.5"], "label": "enrich the EXTERNAL destination IP 108.17.204.5 with threat intel"}
   ],
+  "investigation_quality": {
+    "tool_budget_max": 12,
+    "max_param_retries": 2,
+    "require_deliverable": true
+  },
   "forbidden_facts": [
     {"tool": "run_op", "connector": "virustotal", "args_contains": ["192.168.77.49"], "label": "VirusTotal on internal RFC1918 source 192.168.77.49"},
     {"tool": "run_op", "connector": "shodan", "args_contains": ["192.168.77.49"], "label": "Shodan on internal RFC1918 source 192.168.77.49"},

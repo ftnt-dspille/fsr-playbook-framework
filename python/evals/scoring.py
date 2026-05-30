@@ -129,6 +129,23 @@ NO_SPIRAL_MAX_CONSECUTIVE = int(
 # agent actually performed / required pivots. Gate at 0.8 per the plan.
 INVESTIGATION_RECALL_GATE = float(
     os.environ.get("EVAL_INVESTIGATION_RECALL_GATE", "0.8"))
+# Recall alone greenlights a run that flails for 20 calls and never stages a
+# deliverable (live calibration 2026-05-30: 5/5 at recall 1.0 told us nothing).
+# These per-fixture quality knobs are the teeth. Defaults apply to every
+# investigation task; a fixture's `investigation_quality` block overrides them.
+INVESTIGATION_TOOL_BUDGET_MAX = int(
+    os.environ.get("EVAL_INVESTIGATION_TOOL_BUDGET_MAX", "12"))
+# >N distinct arg-sets for the SAME (connector, op) = the grounding-flail
+# signature (agent guessing param names live: ip -> ip_address -> indicator).
+INVESTIGATION_MAX_PARAM_RETRIES = int(
+    os.environ.get("EVAL_INVESTIGATION_MAX_PARAM_RETRIES", "2"))
+# Tools that count as "staged a concrete deliverable for the analyst". A
+# capability gap / choice card IS a valid ending when no containment op is
+# configured on the box — credit it, don't demand an action card that can't
+# exist here.
+_DELIVERABLE_TOOLS = (
+    "emit_action_card", "emit_choice_card", "emit_capability_gap_card",
+)
 
 
 def _fact_matches(fact: dict[str, Any], call: dict[str, Any]) -> bool:
@@ -196,6 +213,94 @@ def _score_investigation(trace: list[dict[str, Any]],
         "forbidden_hit": [_fact_label(f) for f in forbidden_hit],
         "detail": detail,
     }
+
+
+def _call_args(call: dict[str, Any]) -> dict[str, Any]:
+    args = call.get("args") or call.get("input") or {}
+    return args if isinstance(args, dict) else {}
+
+
+def _param_flail(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
+    """Worst-offender count of DISTINCT arg-sets for a single (connector, op).
+
+    The grounding-flail signature: the agent re-invokes the same op cycling
+    param names (`ip` -> `ip_address` -> `indicator`) because it's discovering
+    the real schema live by trial and error. One op called once with the right
+    params yields 1; a 3-way param guess yields 3. Returns (worst, label)."""
+    from collections import defaultdict
+    seen: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for c in trace:
+        if c.get("name") != "run_op":
+            continue
+        args = _call_args(c)
+        key = (
+            "run_op",
+            str(args.get("connector", "")).lower(),
+            str(args.get("op", "")).lower(),
+        )
+        params = args.get("params")
+        if not isinstance(params, dict):
+            params = {k: v for k, v in args.items()
+                      if k not in ("connector", "op", "confirm")}
+        seen[key].add(json.dumps(params, sort_keys=True, default=str))
+    if not seen:
+        return 0, None
+    worst_key = max(seen, key=lambda k: len(seen[k]))
+    worst = len(seen[worst_key])
+    label = f"{worst_key[1]}.{worst_key[2]}" if worst_key[1] else worst_key[2]
+    return worst, (label or None)
+
+
+def _score_investigation_quality(
+    trace: list[dict[str, Any]],
+    quality: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Quality gates that recall can't see (Phase 1.4 strengthening).
+
+    Each gate is opt-in per fixture via the `investigation_quality` block; an
+    absent knob falls back to the module default, and a knob set to a falsey
+    value (e.g. `"require_deliverable": false`) marks that gate `skipped` so a
+    fixture with no possible deliverable on this box isn't penalized."""
+    quality = quality or {}
+    gates: dict[str, dict[str, Any]] = {}
+
+    # --- tool-budget ceiling (tighter than the authoring TOOL_BUDGET_MAX) ----
+    budget = quality.get("tool_budget_max", INVESTIGATION_TOOL_BUDGET_MAX)
+    n = len(trace)
+    gates["investigation_tool_budget"] = {
+        "passed": n <= budget, "skipped": False,
+        "calls": n, "limit": budget,
+        "detail": f"{n} tool call(s) (limit {budget})",
+    }
+
+    # --- no param-grounding flail -------------------------------------------
+    max_retries = quality.get("max_param_retries", INVESTIGATION_MAX_PARAM_RETRIES)
+    worst, label = _param_flail(trace)
+    flail_ok = worst <= max_retries
+    gates["investigation_no_param_flail"] = {
+        "passed": flail_ok, "skipped": False,
+        "worst_distinct_argsets": worst, "limit": max_retries, "op": label,
+        "detail": (f"{label} called with {worst} distinct arg-sets "
+                   f"(limit {max_retries})" if not flail_ok
+                   else f"no op exceeded {max_retries} distinct arg-sets"),
+    }
+
+    # --- staged a concrete deliverable --------------------------------------
+    req = quality.get("require_deliverable", True)
+    if not req:
+        gates["investigation_deliverable"] = {"passed": True, "skipped": True}
+    else:
+        allowed = req if isinstance(req, (list, tuple)) else _DELIVERABLE_TOOLS
+        allowed = tuple(allowed)
+        hit = [c.get("name") for c in trace if c.get("name") in allowed]
+        gates["investigation_deliverable"] = {
+            "passed": bool(hit), "skipped": False,
+            "staged": sorted(set(hit)), "accepted": list(allowed),
+            "detail": (f"staged {', '.join(sorted(set(hit)))}" if hit
+                       else "no deliverable card staged for the analyst "
+                            f"(accepts: {', '.join(allowed)})"),
+        }
+    return gates
 
 
 def _verify_metrics(trace: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -342,6 +447,7 @@ def score(
     mode: str | None = None,
     required_facts: list[dict[str, Any]] | None = None,
     forbidden_facts: list[dict[str, Any]] | None = None,
+    investigation_quality: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Score a candidate YAML across confidence tiers + agent gates.
 
@@ -503,19 +609,27 @@ def score(
     # and adherence (a YAML block) are irrelevant to a triage/hunt task, so
     # demote them to informational and add the single recall gate.
     if investigation:
+        # The authoring tiers + the loose authoring `tool_budget` (20) are
+        # irrelevant or superseded here: investigation gets its own tighter
+        # ceiling (`investigation_tool_budget`). Demote, don't count twice.
         for k in ("draft", "verified", "live_tested", "matches_example",
                   "adherence", "verify_called_before_submit",
-                  "final_verify_ready_to_push"):
+                  "final_verify_ready_to_push", "tool_budget"):
             lv = out["levels"].get(k, {})
             if not lv.get("skipped"):
                 lv["informational"] = True
         if trace is not None:
             out["levels"]["investigation_recall"] = _score_investigation(
                 trace, required_facts, forbidden_facts)
+            out["levels"].update(
+                _score_investigation_quality(trace, investigation_quality))
         else:
-            out["levels"]["investigation_recall"] = {
-                "passed": False, "skipped": True,
-                "detail": "no tool-use trace supplied"}
+            for k in ("investigation_recall", "investigation_tool_budget",
+                      "investigation_no_param_flail",
+                      "investigation_deliverable"):
+                out["levels"][k] = {
+                    "passed": False, "skipped": True,
+                    "detail": "no tool-use trace supplied"}
 
     counted = [v for k, v in out["levels"].items()
                if not v.get("skipped") and not v.get("informational")]

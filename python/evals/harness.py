@@ -128,6 +128,7 @@ def run_matrix(
                 mode=t.mode,
                 required_facts=t.required_facts,
                 forbidden_facts=t.forbidden_facts,
+                investigation_quality=t.investigation_quality,
             )
             row = {
                 "model": model_name,

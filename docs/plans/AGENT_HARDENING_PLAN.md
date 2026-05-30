@@ -89,7 +89,7 @@ fact ("`run_op(confirm=True)` on a mutating op raises an error").
 - **Test:** triage task with a destructive op → `run_op(confirm=True)` errors; agent switches to
   `emit_action_card`.
 
-### 1.4 Investigation-quality eval family  ·  CRITICAL · large  ·  ⚠️ TASKS SHIPPED, GATE TOO WEAK
+### 1.4 Investigation-quality eval family  ·  CRITICAL · large  ·  ✅ GATE STRENGTHENED (2026-05-30)
 Add 4–5 investigation-scope tasks scored on **recall** (`facts_fetched / required_facts`), not YAML
 shape: phishing (email/URL/sender-IP pivots), lateral movement, data exfil, a **negative case**
 (internal RFC1918 IP → refuse external TI), and **graceful partial failure** (TI timeout → flag the
@@ -133,6 +133,32 @@ problem, not the win. Reading the captured traces (`python/evals/golden_traces/*
 when prompt/model/tools change) + everything else free & deterministic — scorer unit tests (exist),
 a golden-trace replay through `_score_investigation` (new, blocked on the caveat above), tool-shape
 tests via the connector contract harness. Keep the live loop OFF `make verify`.
+
+#### Gate strengthening shipped — 2026-05-30
+Recall is no longer the only gate. `scoring._score_investigation_quality(trace, quality)` adds three
+deterministic per-fixture gates, threaded through `Task.investigation_quality` → `score()` → harness +
+`calibrate_investigation.py`:
+- **`investigation_tool_budget`** — tighter ceiling than the authoring `tool_budget` (default 12;
+  env `EVAL_INVESTIGATION_TOOL_BUDGET_MAX`). The loose authoring `tool_budget` (20) is demoted to
+  informational in investigation mode so it isn't double-counted.
+- **`investigation_no_param_flail`** — fails when the same `(connector, op)` is invoked with > N
+  distinct arg-sets (default 2), the grounding-flail signature (`ip`→`ip_address`→`indicator`). A
+  retry that only adds `confirm:true` collapses to one arg-set (the designed confirm-gate path, not a
+  guess).
+- **`investigation_deliverable`** — requires staging a concrete deliverable for the analyst; **credits
+  `emit_choice_card` / `emit_capability_gap_card`**, not just `emit_action_card`, so a box with no
+  containment connector still passes. `require_deliverable:false` marks it skipped for restraint /
+  correlation-verdict fixtures (27, 28).
+
+Fixtures: 25/26 gained the correlation pivot (`search_module_records` on incidents) as a required
+fact + `require_deliverable:true`; 29 `require_deliverable:true`; 27 tighter budget (8) +
+`require_deliverable:false`; 28 `require_deliverable:false`. **Golden-trace replay through the
+strengthened gates: 3/5 PASS** (down from the meaningless 5/5) — `invest_excessive_mail_egress`
+fails on budget (19 calls), `invest_outbound_cleartext_c2` fails deliverable (ended after `run_op`
+with nothing staged). The two failures are the genuinely-weak runs; the gate now has teeth.
+Tests: 9 new in `test_evals_investigation_recall.py` (17 total, all green; full fast suite 753 green).
+Remaining 1.4 follow-ups: param-level live grounding (deferred half of 1.6) + hand-curated golden
+traces (the captured ones now correctly fail, so still not freezable as known-good).
 
 ### 1.9 Probe-latency fix — concurrent + scoped healthchecks  ·  HIGH · small  ·  ✅ DONE (2026-05-30)
 Surfaced by the calibration run: a single `list_configured_connectors(probe=True)` took **~5 minutes**

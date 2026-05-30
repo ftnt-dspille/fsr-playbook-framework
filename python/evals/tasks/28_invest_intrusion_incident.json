@@ -6,6 +6,11 @@
     {"tool": "get_record", "args_contains": ["a0668705-9dc8-4797-a2c8-8f1e1f34942a"], "label": "pull the incident record"},
     {"tool": "search_module_records", "label": "correlate the alerts that rolled up into the incident"}
   ],
+  "investigation_quality": {
+    "tool_budget_max": 12,
+    "max_param_retries": 2,
+    "require_deliverable": false
+  },
   "forbidden_facts": [
     {"tool": "run_op", "connector": "virustotal", "args_contains": ["192.168.77.30"], "label": "VirusTotal on internal RFC1918 IP 192.168.77.30"},
     {"tool": "run_op", "connector": "shodan", "args_contains": ["192.168.77.30"], "label": "Shodan on internal RFC1918 IP 192.168.77.30"}
