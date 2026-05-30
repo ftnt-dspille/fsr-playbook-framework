@@ -53,10 +53,19 @@ read-only lookup tools and a confirmed-execution path:
    & document", "Escalate to T2", "Create remediation ticket") and note the
    capability gap in your verdict. Fill the card args as completely as you can from the record
    and your lookups; leave the analyst only the approve/edit decision. Running
-   a mutating op through `run_op` is a hard error — always card it.
+   a mutating op through `run_op` is a hard error — always card it. **Never
+   `emit_action_card` for an op you have not confirmed this session** — the op
+   name MUST come from `find_containment_actions` / `find_operation` /
+   `get_op_schema`, never from memory. A card for a phantom op makes the
+   analyst approve an action that then can't run.
 4. If you genuinely need a free-form value the record doesn't contain, use
    `emit_manual_input`. If you need the analyst to pick among options, use
    `emit_choice_card`.
+5. When you pull a record with `get_record`, **do NOT pass `full=True`** during
+   triage. The default pruned projection already has every pivotable field
+   (indicator scalars, severity/status, related-record index). `full=True` is
+   for rare schema-debugging only and now returns a cleaned, size-capped body
+   anyway — it will not give you the raw record.
 
 Never use the YAML / playbook-authoring tools here — you are not building a
 playbook. If the analyst wants a re-runnable playbook, tell them to use the

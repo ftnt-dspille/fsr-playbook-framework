@@ -111,6 +111,63 @@ def _shrink_value(key: str, v: Any) -> Any:
     return v
 
 
+# Known-boilerplate top-level keys that carry no triage/pivot signal but bloat
+# a `full` body: multi-paragraph impact prose, SLA/escalation plumbing.
+_REC_FULL_DROP_KEYS = frozenset({
+    "impactAssessments", "escalationRules", "escalation_rules",
+    "responseProcedure", "recommendations",
+})
+# Hard ceiling on a `full=True` body so a single get_record can NEVER dump the
+# raw ~100KB hydrated incident into the per-turn context (it then rides in
+# messages[] and is re-sent every subsequent turn). The pruned default is ~5%
+# of this; the cap is the structural backstop for the rare full path.
+_REC_FULL_MAX_BYTES = 8192
+
+
+def _clean_full_record(rec: dict[str, Any]) -> dict[str, Any]:
+    """A `full=True` body with the dead weight stripped: null/empty fields,
+    hydra/audit noise, SLA plumbing, and known-boilerplate prose. Keeps every
+    populated field otherwise (this is the debug path — it must stay faithful),
+    just without the ~80 null fields and the impact-assessment wall that make
+    the raw body 100KB."""
+    if not isinstance(rec, dict):
+        return rec
+    out: dict[str, Any] = {}
+    for k, v in rec.items():
+        if k in ("@id", "uuid", "id", "name"):  # always keep identity
+            out[k] = v
+            continue
+        if k in _REC_NOISE_KEYS or k in _REC_FULL_DROP_KEYS:
+            continue
+        if "sla" in k.lower():  # *SLA* timers/dates — plumbing, not signal
+            continue
+        if _is_empty(v):
+            continue
+        out[k] = v
+    return out
+
+
+def _cap_json(obj: Any, max_bytes: int = _REC_FULL_MAX_BYTES):
+    """Bound a value's serialized size. Returns (value, truncated). When the
+    JSON exceeds `max_bytes`, replaces it with a head/tail-truncated marker so
+    a single tool result can't blow the token budget — the agent still sees the
+    shape + identity, and is told to fetch specific fields via the pruned
+    projection instead."""
+    s = json.dumps(obj, default=str)
+    if len(s) <= max_bytes:
+        return obj, False
+    half = max_bytes // 2
+    return {
+        "_truncated": True,
+        "_original_bytes": len(s),
+        "_head": s[:half],
+        "_tail": s[-half:],
+        "_note": ("full body exceeded the size cap and was head/tail "
+                  "truncated; re-fetch without full= for the pruned "
+                  "projection (every pivotable field, ~5% the size)"),
+    }, True
+
+
 def _summarize_record(rec: dict[str, Any]) -> dict[str, Any]:
     """Prune a hydrated FSR record to a compact triage projection.
 
@@ -278,6 +335,31 @@ def _required_params(conn: sqlite3.Connection, connector: str,
     return [{"name": r[0], "type": r[1]} for r in rows if r[0]]
 
 
+def _healthcheck_many(client, targets: list[tuple[str, str]]) -> dict[str, str]:
+    """Healthcheck many (name, version) connectors CONCURRENTLY, returning
+    {name: status}. Serial probing was the dominant latency in the live triage
+    loop (~45 configured connectors × a blocking GET each, some slow/hung
+    vendors = minutes per call, on both the eval and the analyst's screen).
+    `_live_healthcheck` caps each call at timeout=8; the pool collapses sum →
+    max. Read-only independent calls, so a thread pool is safe; workers capped
+    so we don't open dozens of sockets at once."""
+    if not targets:
+        return {}
+    from concurrent.futures import ThreadPoolExecutor
+    from .tools_execution import _live_healthcheck
+
+    def _probe(target: tuple[str, str]) -> tuple[str, str]:
+        name, version = target
+        try:
+            hr = _live_healthcheck(client, name, version)
+            return name, str(hr.get("status") or "error")
+        except Exception as e:  # noqa: BLE001
+            return name, f"error:{e!r}"
+
+    with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+        return dict(pool.map(_probe, targets))
+
+
 @mcp.tool()
 def find_containment_actions(target_type: str = "", probe: bool = True,
                              limit: int = 25) -> dict[str, Any]:
@@ -314,21 +396,24 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                 "message": f"target_type {target_type!r} not recognized",
                 "valid": sorted(_TARGET_KEYWORDS)}
 
-    # 1. Configured + active connectors on the live box (+ optional health).
-    listing = list_configured_connectors(probe=probe, verbose=True)
+    # 1. Configured + active connectors on the live box. NOTE: list WITHOUT
+    # probing — healthchecking all ~45 configured connectors here is the
+    # latency trap (minutes on the live box). We narrow to the few connectors
+    # that actually carry a matching containment op via the store first, then
+    # healthcheck ONLY those (step 3).
+    listing = list_configured_connectors(probe=False, verbose=True)
     if "error" in listing:
         return {"ok": False, "code": "no_fsr_configured",
                 "message": listing["error"]}
-    healthy_ok = {"available", "completed", "active"}
-    configured: dict[str, str] = {}  # name -> status
+    configured: dict[str, str] = {}  # name -> listing status
+    version_of: dict[str, str] = {}  # name -> version (for the scoped probe)
     for c in listing.get("configured", []):
         name = c.get("name")
         if not name:
             continue
-        status = str(c.get("status") or "")
-        if probe and status.lower() not in healthy_ok:
-            continue  # skip disconnected/unhealthy when we probed
-        configured[name] = status
+        configured[name] = str(c.get("status") or "")
+        if c.get("version"):
+            version_of[name] = c["version"]
     if not configured:
         return {"ok": True, "target_type": target or None, "actions": [],
                 "count": 0, "probed": probe,
@@ -380,6 +465,25 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                 "required_params": _required_params(conn, connector, op),
             })
 
+    # 3. Scoped healthcheck: probe ONLY the connectors that carry a candidate
+    # action (a handful), not all configured ones. Drop actions whose connector
+    # isn't healthy so we never stage on a disconnected connector.
+    if probe and actions:
+        candidates = {a["connector"] for a in actions}
+        client = _shared._live_client()
+        health = _healthcheck_many(
+            client, [(c, version_of[c]) for c in candidates
+                     if c in version_of]) if client is not None else {}
+        healthy_ok = {"available", "completed", "active"}
+        kept = []
+        for a in actions:
+            st = health.get(a["connector"], "")
+            if str(st).lower() not in healthy_ok:
+                continue
+            a["status"] = st
+            kept.append(a)
+        actions = kept
+
     # Non-deprecated first, then by connector/op for stable ordering.
     actions.sort(key=lambda a: (a["deprecated"], a["connector"], a["op"]))
     out: dict[str, Any] = {"ok": True, "target_type": target or None,
@@ -403,7 +507,8 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
 
 @mcp.tool()
 def list_configured_connectors(probe: bool = False,
-                               verbose: bool = False) -> dict[str, Any]:
+                               verbose: bool = False,
+                               only: set[str] | None = None) -> dict[str, Any]:
     """List connectors that are configured AND active on the live FSR instance.
 
     A connector with no configuration cannot be called — it'll fail at runtime
@@ -411,11 +516,15 @@ def list_configured_connectors(probe: bool = False,
     connector to put in a playbook.
 
     Args:
-        probe: when True, also healthcheck each one (one HTTP call per
-            connector — slower but gives live "Available"/"Disconnected"
-            status). When False (default), just lists the configured set.
+        probe: when True, also healthcheck each one (live HTTP per connector).
+            Healthchecks run CONCURRENTLY (thread pool, per-call timeout) so a
+            full probe is bounded by the slowest single vendor, not their sum.
         verbose: when True, include label, version, and config_count.
             Default returns only name + status to keep tool-result tokens low.
+        only: internal — when set, healthcheck just this subset of connector
+            names (the rest keep their listing status). Lets callers that have
+            already narrowed to a handful of relevant connectors avoid probing
+            all ~45 configured ones. Not exposed to the agent.
 
     Returns:
         {configured: [{name, status[, version, label, config_count]}], probed: bool}
@@ -442,6 +551,7 @@ def list_configured_connectors(probe: bool = False,
         return {"error": f"connector_details fetch failed: {e!r}"}
 
     out: list[dict] = []
+    name_version: dict[str, str] = {}
     for x in rows:
         item: dict[str, Any] = {
             "name": x.get("name"),
@@ -449,21 +559,24 @@ def list_configured_connectors(probe: bool = False,
         }
         # `version` is needed locally for the probe call regardless of verbose.
         x_version = x.get("version")
+        if x.get("name") and x_version:
+            name_version[x["name"]] = x_version
         if verbose:
             item["version"] = x_version
             item["label"] = x.get("label")
             item["config_count"] = x.get("config_count")
-        if probe and item["name"] and x_version:
-            try:
-                hr = client.session.get(
-                    client.base_url
-                    + f"/api/integration/connectors/healthcheck/{item['name']}/{x_version}/",
-                    verify=client.verify_ssl,
-                )
-                item["status"] = (hr.json().get("status") if hr.status_code == 200 else f"http_{hr.status_code}")
-            except Exception as e:  # noqa: BLE001
-                item["status"] = f"error:{e!r}"
         out.append(item)
+
+    # When `only` is given, healthcheck just that subset (the caller already
+    # knows which connectors are relevant — e.g. find_containment_actions has
+    # filtered to the few with a matching op). Otherwise probe all configured.
+    if probe:
+        targets = [(n, v) for n, v in name_version.items()
+                   if only is None or n in only]
+        health = _healthcheck_many(client, targets)
+        for item in out:
+            if item["name"] in health:
+                item["status"] = health[item["name"]]
     return {"configured": out, "probed": probe, "count": len(out)}
 
 @mcp.tool()
@@ -934,8 +1047,11 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
         contains every triage-relevant field — all indicator scalars
         (sourceIp/destinationIp/host/user/hashes), severity/status, and a
         capped {iri,label} index of related records — at ~5% the size.
-        ``full=True`` returns the raw ~100KB hydrated body and is only for
-        rare schema-debugging; do NOT set it during normal triage.
+        ``full=True`` does NOT return the raw ~100KB body: it returns a
+        cleaned (null/empty + SLA/boilerplate stripped), hard size-capped
+        body with ``coerced_full=true`` set. It exists only for rare
+        schema-debugging; do NOT set it during normal triage — the pruned
+        default has every pivotable field already.
 
     Returns:
       ``{"ok": true, "iri": ..., "record": {...}, "url": ...}`` on a 200,
@@ -997,7 +1113,23 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
         "url": url,
     }
     if full:
-        out["record"] = data
+        # `full=True` is discouraged during triage — the pruned projection
+        # already carries every pivotable field. We honour the request for a
+        # fuller body but NEVER return the raw ~100KB blob: strip the dead
+        # weight (null/empty, SLA/boilerplate) and hard-cap the size so one
+        # call can't blow the per-turn budget (the sess-uq31go5p waste). The
+        # flags tell the agent it didn't get the verbatim body.
+        cleaned = _clean_full_record(data)
+        capped, truncated = _cap_json(cleaned)
+        out["record"] = capped
+        out["coerced_full"] = True
+        out["note"] = (
+            "full=True returned a cleaned, size-capped body (null/empty + "
+            "SLA/boilerplate dropped), not the raw hydrated record. The "
+            "default pruned projection already has every pivotable field — "
+            "prefer get_record without full= during triage.")
+        if truncated:
+            out["truncated"] = True
     else:
         out["record"] = _summarize_record(data)
         out["summarized"] = True

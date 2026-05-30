@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ._shared import mcp, _err, _validate_op_exists, _validate_op_params
+from ._shared import mcp, _err, _validate_op_params
 
 
 # Step-name charset rule from system_prompt.md §"Hard rules" #2.
@@ -222,8 +222,13 @@ def emit_action_card(
                     f"editable_fields not present in args: {bad}")
     # Don't render an approval card for a connector/op that doesn't exist —
     # the analyst would approve a phantom action that then fails at execute.
-    # (No-op when the connector has no ops catalogued; see _validate_op_exists.)
-    op_err = _validate_op_exists(connector, operation)
+    # Use the SHARED grounding guarantee (offline store + live-definition
+    # fallback when the store is un-synced), the same check run_op runs — so a
+    # phantom op can't slip through here just because the connector's ops aren't
+    # catalogued yet (the sess-uq31go5p live-triage failure). Fails open on any
+    # live-lookup hiccup, so a transient network problem never blocks a real op.
+    from .tools_execution import validate_op_grounded
+    op_err = validate_op_grounded(connector, operation)
     if op_err is not None:
         return op_err
     # Don't render a card whose args are incomplete/invalid — the analyst

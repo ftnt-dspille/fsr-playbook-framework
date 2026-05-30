@@ -89,7 +89,7 @@ fact ("`run_op(confirm=True)` on a mutating op raises an error").
 - **Test:** triage task with a destructive op → `run_op(confirm=True)` errors; agent switches to
   `emit_action_card`.
 
-### 1.4 Investigation-quality eval family  ·  CRITICAL · large
+### 1.4 Investigation-quality eval family  ·  CRITICAL · large  ·  ⚠️ TASKS SHIPPED, GATE TOO WEAK
 Add 4–5 investigation-scope tasks scored on **recall** (`facts_fetched / required_facts`), not YAML
 shape: phishing (email/URL/sender-IP pivots), lateral movement, data exfil, a **negative case**
 (internal RFC1918 IP → refuse external TI), and **graceful partial failure** (TI timeout → flag the
@@ -97,10 +97,190 @@ gap distinctly from "no threats"). Gate: `investigation_recall >= 0.8`.
 - **Test:** phishing task audit log shows the expected `get_record`/`run_op` pivots; computed recall
   meets gate.
 
+#### Live calibration run — 2026-05-30 (`store/eval_runs/calibrate_20260530T192043Z.{log,summary.json}`)
+Drove all 5 investigation fixtures through the REAL Haiku triage loop on the forticloud box
+(`python/evals/calibrate_investigation.py --capture`). **Result: 5/5 at recall 1.0** — which is the
+problem, not the win. Reading the captured traces (`python/evals/golden_traces/*.json`) surfaced that
+**the gate is too weak to be meaningful** and a real grounding gap:
+
+- **GATE TOO WEAK (do first).** Each fixture requires only ~2 facts (`get_record` + one enrichment).
+  A run that flails for 20 calls, guesses param names five times, and never stages a deliverable still
+  scores 1.0. 5/5 passing tells us almost nothing. Strengthen per-fixture:
+  - **Tool-budget ceiling** (e.g. ≤ 10 calls) so flailing fails — mirror `tool_budget` gate.
+  - **Forbidden: same op retried >2× with different params** (the grounding-flail signature).
+  - **c2 / mail_egress:** require the correlation pivot (search `incidents`), not just one enrichment.
+  - **containment-capable cases:** require a concrete deliverable — `emit_action_card` OR
+    `emit_choice_card` + capability-gap noted. (On THIS box `find_containment_actions(ip/host)` returns
+    count=0 — no containment connector configured — so `emit_choice_card` IS the correct ending; the
+    gate must credit that, not demand a card that can't exist here.)
+- **PARAM-GROUNDING FLAIL (real, = deferred half of 1.6).** `invest_excessive_mail_egress` burned
+  6 `find_operation` + 2 `get_op_schema` + repeated `run_op` retries cycling `ip`→`ip_address`,
+  `indicator`±`indicator_type`. `_validate_op_params` only checks against the OFFLINE store; when the
+  op isn't catalogued it no-ops, so the agent discovers the real param names by trial-and-error live.
+  Extend grounding to validate args against the **live op-schema** when the store is un-synced
+  (the roadmap item flagged under 1.6 / TODO next-step #4).
+- **NON-issues (checked, withdrawn):** `emit_choice_card` instead of `emit_action_card` is correct
+  (no containment op configured). `confirm=true` clearing a failing read op is NOT a gate hole —
+  `_validate_op_params` runs (tools_execution.py:751) BEFORE the confirm gate (:778); `threat_intel_
+  search` is tier-2 but flagged not-auto-safe, so `requires_confirmation` → retry-with-confirm is the
+  designed path.
+- **Golden-trace caveat.** The 5 captured traces encode the flailing above, so they are NOT usable
+  as-is as "known-good" golden fixtures for the intended offline (no-AI) regression test. Either
+  hand-curate the minimal expected pivot sequence per fixture, or pair the snapshot with the
+  strengthened quality assertions above before freezing.
+
+**Offline-test goal (the cost lever):** one live-AI canary (`calibrate_investigation.py`, run by hand
+when prompt/model/tools change) + everything else free & deterministic — scorer unit tests (exist),
+a golden-trace replay through `_score_investigation` (new, blocked on the caveat above), tool-shape
+tests via the connector contract harness. Keep the live loop OFF `make verify`.
+
+### 1.9 Probe-latency fix — concurrent + scoped healthchecks  ·  HIGH · small  ·  ✅ DONE (2026-05-30)
+Surfaced by the calibration run: a single `list_configured_connectors(probe=True)` took **~5 minutes**
+— it healthchecked all ~45 configured connectors **serially**, with **no per-call timeout** on the
+inline GET. This hits the live ANALYST triage loop identically, not just the eval.
+- `list_configured_connectors` now fans healthchecks out **concurrently** (`_healthcheck_many` thread
+  pool, reuses `tools_execution._live_healthcheck`'s `timeout=8`); added an internal `only=<names>`
+  param to probe a subset.
+- `find_containment_actions` now lists **unprobed** (cheap), narrows to the few connectors that carry
+  a matching containment op via the store, then probes **only those** — not all 45.
+- Live-verified: `find_containment_actions(ip)` went **5 min → 1.2 s**. Tests:
+  `python/tests/test_probe_parallel_scoped.py` (concurrency + scoping + zero-probe). **Still needs
+  re-vendor into the connector** (`scripts/build.sh` + version bump) before it's live on the box.
+
 ### 1.5 Align widget contract version  ·  CRITICAL · small  ·  ✅ DONE
 Widget `WIDGET_CONTRACT_VERSION = '2.0.0'` vs connector `2.1.0` →
 `view.controller.js:34` → `'2.1.0'`. Removes negotiation noise. (Low real severity — non-strict mode
 only `console.warn`s — but trivial and noise-removing.)
+
+---
+
+### 🟢 Live-triage failure — `sess-uq31go5p` (2026-05-30, forticloud box, v0.3.28) — RESOLVED
+Gap **A** closed by 1.6 (shared `validate_op_grounded` on the emit path), gap
+**B** by 1.7 (self-healing resume), and the same-session token waste by 1.8
+(`full=True` cleaned + capped). `make verify` green; re-vendor + connector
+version bump still pending to ship live. Original analysis preserved below.
+
+
+Captured in a real triage hunt (export: `fsr_all_widgets/widgets-src/fsrPlaybookBuilder/exports/
+fsrpb-chat-sess-uq31go5p-…md`). Investigating the smithDesktop defense-evasion incident, the agent
+emitted an `action_card` for **`virustotal.lookup_hash`**, the analyst approved it, and on resume the
+execute returned `unknown_operation: operation 'lookup_hash' not found on connector 'virustotal'
+(18 ops catalogued)`. The turn then **ended** with a templated "⚠️ … did not complete … contain
+manually" message. Two independent defects, both trust-critical:
+
+**A. A phantom op reached the analyst as an approval card (grounding-guarantee gap).**
+The contract (`FSR_PLAYBOOK_BUILDER_CONNECTOR_CONTRACT.md` §"action_card / Grounding guarantee")
+promises a hallucinated/typo'd op *never* reaches the widget as a card, validated against the
+"offline reference store, **with a live connector-definition fallback**." Reality: `emit_action_card`
+(`tools_emit.py:226`) calls only `_validate_op_exists` (offline store). That function **no-ops when
+the connector has 0 ops catalogued** (`_shared.py:156`) — exactly the case for the un-synced
+`virustotal` entry on this box. The **live fallback `_validate_op_live`** that would have caught it
+is wired into `run_op` only (`tools_execution.py:690-693`, gated on `store_ops_count == 0`) and was
+never added to `emit_action_card`. So the offline check passed vacuously at emit time, the card was
+rendered, the human approved a phantom, and `run_op`'s live fallback only caught it post-approval.
+This is *why* "it shouldn't be possible" yet happened: the guarantee's offline half shipped into
+`emit_action_card`, its live half did not.
+
+**B. The self-heal loop never ran after approval (deterministic one-shot dead-ends).**
+`run_op` returned a well-formed `unknown_operation` envelope with `suggestions: [find_operation…,
+get_op_schema…]` — the exact breadcrumbs for self-correction. They went nowhere.
+`_resume_action_card_execute` (`operations.py:1528`) executes the approved op **once** via a direct
+`dispatch("run_op", …)`, runs the result through `_summarize_exec` (templated text, no LLM), and
+returns `stop_reason: end_turn`. It **never re-enters the provider loop**, so a *correctable* failure
+(`unknown_operation` / `bad_params`) is handled identically to a genuine infra failure: apologize,
+tell the human to "contain manually," stop. The deterministic path is deliberate (docstring: survive
+an Anthropic outage; human already approved) but it conflates "this action can't be fixed" with "the
+model named the wrong op and the error tells it how to fix it."
+
+### 1.6 `emit_action_card` live op-existence fallback  ·  CRITICAL · medium  ·  ✅ DONE
+**Shipped.** Factored `validate_op_grounded(connector, op, client=None)` into
+`tools_execution.py` (offline `_validate_op_exists` → store-count gate → live
+`_validate_op_live`, fail-open on any client/preflight/lookup hiccup). `run_op`'s
+gated block and `emit_action_card` both call it; emit resolves a live client
+lazily via `_live_client_for_grounding`. Tests: `tests/test_op_existence.py`
+(live-fallback blocks phantom on un-synced connector, allows real, fails open
+when live unavailable / raises). Param-level live grounding deferred (roadmap).
+Close gap **A**: make the emit-time grounding match `run_op`'s. In `emit_action_card`, after the
+offline `_validate_op_exists` returns None *because the store had 0 ops for the connector* (not
+because the op exists), fall back to the live connector definition before rendering the card.
+- **Impl:** factor `run_op`'s gated block (`store_ops_count == 0` → `_preflight_connector` →
+  `_validate_op_live`) into a shared helper (e.g. `_shared.validate_op_grounded(connector, op,
+  client_factory)`), call it from both `run_op` and `emit_action_card`. `emit_action_card` has no
+  client today → import `get_client` lazily (mirror `tools_execution`); on any client/preflight
+  hiccup, **fail open** (return None) so a transient lookup never false-rejects a real op — same
+  contract as `_validate_op_live`. Also extend `_validate_op_params` the same way once the live
+  op-schema is fetched (arg-level grounding, the roadmap item the contract note flags).
+- **Test:** `emit_action_card('virustotal','lookup_hash',…)` with an empty offline store but a live
+  def exposing the real 18 ops → returns `unknown_operation` with near-matches; **no card emitted**.
+  Real op (`virustotal`/`file_reputation` or whatever the live def lists) → card emitted. Live lookup
+  raising → card still emitted (fail-open).
+
+### 1.7 Self-healing resume on correctable execute failures  ·  CRITICAL · medium  ·  ✅ DONE
+**Shipped** in `operations.py`. `_try_self_heal_resume` re-enters the provider
+loop (via `_resume_conversation` with a `action_card_self_heal` resume tag) when
+the post-approval execute fails with a code in `{unknown_operation, bad_params,
+missing_required, bad_select_value}`; the agent self-corrects and emits a fresh,
+human-re-gated card. Bounded to `_MAX_SELF_HEAL_PASSES = 2` per session.
+**Review-gap closure:** the heal returns `None` (→ deterministic "contain
+manually" + `end_turn`) on a non-correctable code, a spent budget, no provider,
+**and on any provider error/outage during the heal** (the result carries an
+`error`) — so the outage-survivable property the deterministic path protects is
+preserved. Prompt reinforcement added (rule 3: never card an unconfirmed op).
+Tests: `tests/test_chat_operations.py` (correctable→`awaiting_action_card`;
+infra→deterministic `end_turn`).
+Close gap **B**: when the post-approval execute fails with a *correctable* code, re-enter the agent
+loop instead of dead-ending. In `_resume_action_card_execute`, after `dispatch("run_op", …)`:
+- If `exec_result.ok` → keep today's deterministic summary + `end_turn` (T6 unchanged).
+- Else if `exec_result.code in {"unknown_operation", "bad_params", "missing_required",
+  "bad_select_value"}` (the validator-emitted, agent-fixable codes) → splice the `tool_use` +
+  `is_error` `tool_result` (carrying `suggestions`/`near`) into the conversation and **resume the
+  provider loop** so the agent runs `find_operation`/`get_op_schema` and emits a corrected
+  `action_card` (a fresh `awaiting_action_card`, re-gated by the human). Bound it: at most 1–2
+  self-heal passes, then fall through to the templated message so it can't spin.
+- Else (transport/preflight/exec_dispatch_failed — genuine infra) → keep the deterministic "contain
+  manually" message + `end_turn` (preserves the Anthropic-outage-survivable property).
+- **Prompt reinforcement (secondary):** the triage prompt already says "never guess an op name";
+  add that `emit_action_card` MUST be preceded by `get_op_schema(connector, op)` for any op the agent
+  hasn't already confirmed this session. Structural fix 1.6 is the guarantee; this reduces the round-trips.
+- **Test:** approve a card whose op is phantom → resume produces a `tool_result(is_error)` then a
+  follow-up turn that calls `find_operation`/`get_op_schema` and emits a corrected card (not an
+  `end_turn` apology). Approve a card whose connector is genuinely down → still the deterministic
+  `end_turn` apology (no infinite resume).
+
+### 1.8 Stop `get_record(full=True)` dumping the raw body into context  ·  HIGH · small  ·  ✅ DONE
+**Shipped** in `tools_triage.py`. `full=True` no longer returns the raw body:
+`_clean_full_record` strips null/empty + hydra/audit noise + `*SLA*` plumbing +
+known boilerplate (`impactAssessments`, `escalation_rules`, …), then `_cap_json`
+hard-caps to `_REC_FULL_MAX_BYTES = 8192` (head/tail truncation marker), with
+`coerced_full=true` + a note flagged on the result. Docstring + triage prompt
+(new rule 5) reinforce that `full=True` is forbidden in triage.
+**Deviation from plan (a):** the intent-gated coercion isn't wired — there is no
+active-intent signal reachable from `get_record` (tools are sliced by intent but
+no contextvar is threaded). The structural half (clean + unconditional hard cap)
+is intent-agnostic and is the real guarantee, so `full=True` is capped on every
+path. Token-accounting under-count left as the separate audit the plan flags.
+Tests: `tests/test_get_record_full_cap.py`.
+Same session: the agent's very first tool call was `get_record(iri=…, full=True)`. `get_record`
+defaults to a pruned ~5% triage projection (`tools_triage.py:50-51` — `_REC_MAX_STR=600`,
+`_REC_MAX_REL=5`, indicator scalars + capped {iri,label} relationship index) **specifically** to
+keep the per-turn token budget bounded; its own docstring says "`full=True` returns the raw ~100KB
+hydrated body … do NOT set it during normal triage." The agent set it anyway. The raw incident body
+— mostly `null` fields, the multi-paragraph `impactAssessments` boilerplate, `escalation_rules`, and
+SLA plumbing, almost none of it useful for hunting/pivoting — then rides in `messages[]` and is
+**re-sent to the model on every subsequent turn** of the session (and on the resume). Cost is real,
+avoidable, and grows with session length. (Aside: the export's "1,143 input tokens" badly under-counts
+this turn — the usage accounting is worth a separate audit, but the structural waste stands regardless
+of the number.)
+- **Impl (defense-in-depth, structural beats prompt):** (a) in `get_record`, when the active intent
+  is `triage`, treat `full=True` as advisory — still return the pruned projection (or a "full-but-
+  cleaned" body that drops `null`/empty fields, known-boilerplate prose, and `*SLA*`/`*Date` plumbing)
+  and set a `coerced_full=false` flag + one-line note so the agent learns it didn't get the raw blob;
+  (b) hard-cap any `full` body (e.g. ≤ ~8KB) with head/tail truncation so a single call can never dump
+  100KB; (c) reinforce in the triage system prompt that `full=True` is forbidden and the pruned
+  projection already has every pivotable field.
+- **Test:** `get_record(full=True)` under `intent=triage` → returns pruned/cleaned body (no `null`
+  spam, no `impactAssessments` wall), `summarized`/`coerced_full` flagged, total size under the cap;
+  under a non-triage/debug path → raw body still available but size-capped.
 
 ---
 

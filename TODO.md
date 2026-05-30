@@ -36,6 +36,62 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 - [`Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`](../Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md) — original cross-project plan; referenced from global `~/.claude/CLAUDE.md`.
 
+## Next steps (resume state, 2026-05-30)
+
+Session shipped connector **0.3.31** (id=110, live, Haiku, FortiCloud SOAR).
+Landed: hardening **1.6/1.7/1.8** (the `sess-uq31go5p` live-triage fix —
+emit-time op grounding, self-healing resume, `get_record(full=True)` cap) +
+**lifecycle-hook & post-install warmup**. `make verify` 33+111 green. Plan:
+`docs/plans/AGENT_HARDENING_PLAN.md`.
+
+### 2026-05-30 (later) — 1.4 calibration + probe fix. RESUME HERE.
+Ran the live investigation-eval calibration (`calibrate_investigation.py`, all
+5 fixtures, real Haiku on the box). **5/5 recall 1.0 — but that's the finding,
+not a pass:** the gate is too weak to be meaningful. Full write-up + ranked
+to-do in `AGENT_HARDENING_PLAN.md` §1.4 "Live calibration run" + §1.9.
+
+Open work to address (uncommitted changes in working tree):
+1. **Strengthen the 1.4 gate** (per the table in plan §1.4): tool-budget
+   ceiling, forbidden op-retry-flail, require the correlation pivot + a
+   concrete deliverable. The recall-only gate greenlights 20-call flailing.
+2. **Param-level live grounding** (deferred half of 1.6) — agent discovers op
+   param names by trial-and-error live; validate args vs the live op-schema
+   when the store is un-synced.
+3. **Golden-trace offline test** — blocked: the captured traces encode the
+   flailing, so don't freeze as-is; hand-curate or pair with quality asserts.
+4. **DONE this session, needs commit + re-vendor:** §1.9 probe-latency fix
+   (`tools_triage.py` — concurrent + scoped healthchecks; live-verified
+   5 min → 1.2 s). New test `python/tests/test_probe_parallel_scoped.py`.
+   Instrumented `calibrate_investigation.py` (logging + `--capture` golden
+   banking + run summary). Run `make verify` before committing.
+
+Highest-leverage next steps:
+
+1. **Live-confirm the sess-uq31go5p fix** (do FIRST — only unit-tested offline).
+   Re-run the smithDesktop defense-evasion triage (or any containment hunt) on
+   0.3.31 and verify: (a) a phantom op no longer reaches the widget as a card
+   (1.6 live fallback), (b) a correctable post-approval failure self-heals into
+   a corrected card instead of "contain manually" (1.7), (c) `get_record` no
+   longer balloons context (1.8). Drive via `/api/integration/execute/` or the
+   widget; the contract harness (`tests/fsr_contract.py`, after a live
+   `probe_fsr.py` re-capture) is the offline replay.
+2. **Phase 2 hardening — remaining reliability items** (`AGENT_HARDENING_PLAN`):
+   2.3 surface skipped tools on partial-completion resume (CRITICAL-loop; note
+   it overlaps 1.7 — revisit together), 2.2 provider stream timeout (HIGH),
+   2.6 cycle detection before predecessor use (HIGH), 2.7 text-coalescer `seq`
+   alignment (HIGH), 2.4 max-turn summary failure (HIGH), 2.5 transient-vs-
+   permanent enrichment failure (MED).
+3. **1.4 Investigation-quality eval family** (CRITICAL, large) — tasks 25–29
+   shipped; needs a **live agentic run to calibrate** the `investigation_recall
+   >= 0.8` gate (`python/demo_hunt.py` / agentic provider).
+4. **Param-level live grounding** (deferred from 1.6 roadmap) — extend
+   `validate_op_grounded` to validate args against the live op-schema when the
+   store is un-synced, not just op existence.
+5. **3.3 LM Studio provider approvals** — ⏸ deferred post-MVP; don't surface
+   unless MVP scope changes.
+
+Older backlog (still valid) below.
+
 ## Next steps (resume state, 2026-05-26)
 
 Ordered roughly by leverage. Pick from this list when restarting; each

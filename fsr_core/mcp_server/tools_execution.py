@@ -367,6 +367,85 @@ def _preflight_connector(client, connector: str,
     return None
 
 
+def _live_client_for_grounding():
+    """Resolve a live FSR client for emit-time op grounding, or None when no
+    live target is configured / probes are unavailable.
+
+    Isolated so a caller without a client of its own (`emit_action_card`) shares
+    `run_op`'s resolution path, and so tests can stub the live half. Never
+    raises — any resolution problem yields None (fail open)."""
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "python"))
+        from probes._env import get_client, get_config
+    except ImportError:
+        return None
+    try:
+        if not get_config().is_live():
+            return None
+        return get_client()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def validate_op_grounded(connector: str, op: str,
+                         client=None) -> dict[str, Any] | None:
+    """Grounding guarantee shared by `run_op` AND `emit_action_card`: a
+    hallucinated/typo'd op must NEVER reach the analyst (as an approval card)
+    or the live box (as an execute). Returns an `unknown_operation` error
+    envelope (with near-matches) or None to proceed.
+
+    Two layers, matching the contract's "offline reference store, with a live
+    connector-definition fallback":
+
+    1. Offline store (`_validate_op_exists`) — decisive when the connector's
+       ops are catalogued.
+    2. Live connector definition (`_validate_op_live`) — used ONLY when the
+       store has 0 ops for the connector (un-synced reference DB), so a phantom
+       op is still caught against the live box. Requires a configured live
+       client; `run_op` passes its already-resolved+preflighted client,
+       `emit_action_card` lets us resolve one lazily.
+
+    Fails OPEN (returns None) on any client/preflight/lookup hiccup — same
+    contract as `_validate_op_live` — so a transient problem never
+    false-rejects a real op. This is why the live half can be added to the
+    emit path without risking a false reject on a flaky network."""
+    off_err = _shared._validate_op_exists(connector, op)
+    if off_err is not None:
+        return off_err
+    # Offline returned None: either the op genuinely exists, or the connector
+    # has 0 ops catalogued. Only the latter needs the live fallback — avoid a
+    # needless round-trip when the offline check was already decisive.
+    try:
+        with _db() as conn:
+            store_ops_count = conn.execute(
+                "SELECT COUNT(*) FROM operations WHERE connector_name=?",
+                (connector,),
+            ).fetchone()[0]
+    except sqlite3.Error:
+        return None  # store unreadable → fail open
+    if store_ops_count != 0:
+        return None  # op is catalogued and matched → done
+    # Un-synced connector → validate against the live definition.
+    if client is None:
+        client = _live_client_for_grounding()
+    if client is None:
+        return None  # no live target → can't prove non-existence → fail open
+    try:
+        preflight_err = _preflight_connector(client, connector)
+    except Exception:  # noqa: BLE001
+        return None
+    if preflight_err is not None:
+        # Connector itself isn't configured/healthy. We own only op-grounding
+        # here, so fail open and let the caller's own preflight / the execute
+        # surface the connector problem (run_op preflights separately; emit's
+        # card will fail at execute-time preflight, which is the right gate).
+        return None
+    try:
+        return _validate_op_live(client, connector, op)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Output summarization — keep enrichment blobs out of the LLM context
 # ---------------------------------------------------------------------------
@@ -686,9 +765,10 @@ def run_op(
     # NO ops for it (un-synced reference DB), validate against the LIVE
     # connector definition now that preflight has confirmed it's configured —
     # so a hallucinated op is still caught up front, before the confirm prompt
-    # and the execute. Infra hiccups never block (we let execute report those).
+    # and the execute. Shared with `emit_action_card` via validate_op_grounded
+    # (pass our already-resolved client). Infra hiccups never block (fail open).
     if store_ops_count == 0:
-        live_err = _validate_op_live(client, connector, op)
+        live_err = validate_op_grounded(connector, op, client=client)
         if live_err is not None:
             return live_err
 

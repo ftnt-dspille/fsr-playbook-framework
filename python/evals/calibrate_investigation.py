@@ -19,7 +19,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,6 +29,35 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 sys.path.insert(0, str(REPO_ROOT))
 
 DEMO_MODEL = "claude-haiku-4-5-20251001"
+
+GOLDEN_DIR = REPO_ROOT / "python" / "evals" / "golden_traces"
+RUN_DIR = REPO_ROOT / "store" / "eval_runs"
+
+log = logging.getLogger("calibrate")
+
+
+def _setup_logging(log_path: Path) -> None:
+    """File + stdout logging with timestamps. Also routes the Anthropic
+    SDK + httpx loggers to the file so rate-limit 429s / retry backoff
+    (the usual reason a tier-1 multi-turn run stalls) are captured —
+    'what went wrong' lands in the log instead of a buffered black box."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s",
+                            datefmt="%H:%M:%S")
+    fh = logging.FileHandler(log_path)
+    fh.setFormatter(fmt)
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(fh)
+    root.addHandler(sh)
+    # Surface SDK retry/backoff + each HTTP request (429s included).
+    # INFO (not DEBUG) keeps the "Retrying request … in Ns" backoff lines —
+    # the usual tier-1 stall cause — without dumping the multi-KB request
+    # body (system prompt + tool schemas) on every call.
+    logging.getLogger("anthropic").setLevel(logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.INFO)
 
 
 async def _run_one(prompt: str, model: str) -> dict:
@@ -57,13 +88,13 @@ async def _run_one(prompt: str, model: str) -> dict:
         if kind == "tool_use":
             args = dict(getattr(ev, "arguments", {}) or {})
             trace.append({"name": ev.name, "args": args})
-            print(f"    -> {ev.name}({json.dumps(args, default=str)[:110]})")
+            log.info("    -> %s(%s)", ev.name, json.dumps(args, default=str)[:110])
         elif kind == "tool_result":
             res = getattr(ev, "result", None)
             ok = res.get("ok") if isinstance(res, dict) else None
             if trace:
                 trace[-1]["ok"] = ok
-            print(f"       <- ok={ok}")
+            log.info("       <- ok=%s", ok)
         elif kind == "text":
             final_chunks.append(ev.text)
 
@@ -82,6 +113,9 @@ def main() -> None:
     ap.add_argument("--model", default=DEMO_MODEL)
     ap.add_argument("--pace", type=int, default=45,
                     help="seconds to wait between fixtures (rate-limit drain)")
+    ap.add_argument("--capture", action="store_true",
+                    help="bank each passing fixture's golden trace to "
+                         "python/evals/golden_traces/ for the offline test")
     args = ap.parse_args()
 
     from evals.tasks import load_tasks
@@ -93,31 +127,59 @@ def main() -> None:
     if not tasks:
         raise SystemExit("no investigation fixtures matched")
 
-    import time
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    _setup_logging(RUN_DIR / f"calibrate_{stamp}.log")
+    if args.capture:
+        GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
+
     results = []
     for i, t in enumerate(tasks):
         if i > 0:
             # Let the per-minute token window drain between fixtures so
             # the next run starts with a clean rate-limit budget.
-            print(f"\n... pacing {args.pace}s before next fixture ...")
+            log.info("... pacing %ss before next fixture ...", args.pace)
             time.sleep(args.pace)
-        print("=" * 72)
-        print(f"FIXTURE: {t.name}   (model {args.model})")
-        print("-" * 72)
-        out = asyncio.run(_run_one(t.prompt, args.model))
+        log.info("=" * 72)
+        log.info("FIXTURE: %s   (model %s)", t.name, args.model)
+        t0 = time.monotonic()
+        try:
+            out = asyncio.run(_run_one(t.prompt, args.model))
+        except Exception as exc:  # noqa: BLE001 — bank the failure, keep going
+            log.exception("FIXTURE %s RAISED: %r", t.name, exc)
+            results.append((t.name, {"recall": 0.0, "passed": False,
+                                     "missing": ["<run raised>"], "forbidden_hit": [],
+                                     "error": repr(exc)}))
+            continue
+        dt = time.monotonic() - t0
         sc = _score_investigation(out["trace"], t.required_facts, t.forbidden_facts)
-        print(f"  stop_reason={out['stop_reason']}  pivots={len(out['trace'])}")
-        print(f"  RECALL {sc['recall']} (gate {sc['gate']})  "
-              f"matched {sc['matched']}/{sc['required']}  "
-              f"PASS={sc['passed']}")
+        log.info("  stop_reason=%s  pivots=%s  elapsed=%.0fs",
+                 out["stop_reason"], len(out["trace"]), dt)
+        log.info("  RECALL %s (gate %s)  matched %s/%s  PASS=%s",
+                 sc["recall"], sc["gate"], sc["matched"], sc["required"], sc["passed"])
         if sc["missing"]:
-            print(f"  MISSING required: {sc['missing']}")
+            log.info("  MISSING required: %s", sc["missing"])
         if sc["forbidden_hit"]:
-            print(f"  !! FORBIDDEN fired: {sc['forbidden_hit']}")
+            log.info("  !! FORBIDDEN fired: %s", sc["forbidden_hit"])
+
+        # Bank the golden trace the moment the fixture completes, so a
+        # later stall/kill never loses an already-paid-for fixture. Only
+        # the tool-call layer (name+args+ok) is kept — not response bodies,
+        # which go stale; the fixture pins the indicators these match on.
+        if args.capture and sc["passed"]:
+            gp = GOLDEN_DIR / f"{t.name}.json"
+            gp.write_text(json.dumps({
+                "fixture": t.name, "captured": stamp, "model": args.model,
+                "stop_reason": out["stop_reason"], "recall": sc["recall"],
+                "trace": [{"name": c["name"], "args": c.get("args", {}),
+                           "ok": c.get("ok")} for c in out["trace"]],
+            }, indent=2))
+            log.info("  banked golden trace -> %s", gp.relative_to(REPO_ROOT))
+        elif args.capture:
+            log.warning("  NOT banking golden trace for %s (did not pass)", t.name)
         results.append((t.name, sc))
 
-    print("=" * 72)
-    print("SUMMARY")
+    log.info("=" * 72)
+    log.info("SUMMARY")
     for name, sc in results:
         flag = "PASS" if sc["passed"] else "FAIL"
         extra = ""
@@ -125,9 +187,17 @@ def main() -> None:
             extra = f"  forbidden={len(sc['forbidden_hit'])}"
         elif sc["missing"]:
             extra = f"  missing={len(sc['missing'])}"
-        print(f"  [{flag}] {name:<34} recall={sc['recall']}{extra}")
+        log.info("  [%s] %-34s recall=%s%s", flag, name, sc["recall"], extra)
     n_pass = sum(1 for _, sc in results if sc["passed"])
-    print(f"\n{n_pass}/{len(results)} fixtures clear the gate.")
+    log.info("%s/%s fixtures clear the gate.", n_pass, len(results))
+
+    summary_path = RUN_DIR / f"calibrate_{stamp}.summary.json"
+    summary_path.write_text(json.dumps(
+        {"stamp": stamp, "model": args.model,
+         "results": [{"fixture": n, **{k: sc.get(k) for k in
+                      ("recall", "passed", "missing", "forbidden_hit", "error")}}
+                     for n, sc in results]}, indent=2))
+    log.info("run summary -> %s", summary_path.relative_to(REPO_ROOT))
 
 
 if __name__ == "__main__":
