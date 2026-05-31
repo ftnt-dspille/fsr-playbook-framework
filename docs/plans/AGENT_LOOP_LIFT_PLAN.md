@@ -1,5 +1,7 @@
 # Agent loop lift — plan
 
+> **STATUS: PARKED — post-demo.** Prerequisite for chat streaming (CHAT_STREAMING_PLAN.md) but not needed for the SOC demo. Resume after demo milestone.
+
 Goal: extract the event-consumer side of `web/backend/routes/chat.py` into a reusable
 `fsr_core.llm.run_turn.run_agent_turn()` so the FortiSOAR connector can implement
 `chat_turn` / `chat_resume` without duplicating 200+ lines of streaming/persistence

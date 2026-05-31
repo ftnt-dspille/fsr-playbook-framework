@@ -16,6 +16,12 @@ connector vendors it via `scripts/build.sh`; never edit the vendored copy under
 
 ---
 
+## ✅ Phase 0 — Authoring loop SAFE_TOOLS (absorbed from AGENT_TOOL_REGISTRY_FIX_PLAN.md, verified 2026-05-30)
+
+All authoring tools are in `SAFE_TOOLS`, `TOOL_TIERS`, and the built `REGISTRY`. Verified by `python -c "from fsr_core.llm.tools import REGISTRY; print(sorted(REGISTRY))"`. Tiers correct: `validate_yaml`/`compile_yaml`/`analyze_playbook` at tier 0; `why_did_playbook_fail`/`get_run_env`/`list_playbook_runs`/`assert_playbook_outcome` at tier 1; `push_playbook`/`run_playbook`/`dry_run_playbook` at tier -1 (dynamic, HITL-gated). Only intentional omission: `find_step_recipe` (corpus not populated). `MAX_TOOL_TURNS = 16` (raised from 12); live calibration run did not hit the ceiling.
+
+---
+
 ## ✅ Done (2026-05-30)
 
 - **Op-name existence validation** — `_shared._validate_op_exists` (offline store) +
