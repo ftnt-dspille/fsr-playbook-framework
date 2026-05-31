@@ -40,6 +40,7 @@ from ._loop_helpers import (
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
+    STREAM_TIMEOUT_SECS,
     compile_errors as _compile_errors,
     extract_yaml_block as _extract_yaml_block,
     shrink_history as _shrink_history,
@@ -238,22 +239,43 @@ class AnthropicProvider:
                 ))
             except Exception:
                 history_chars = 0
-            try:
+            # §2.2 — wrap the LLM round-trip in a coroutine so we can
+            # apply asyncio.wait_for() (3.9-compatible). Text deltas are
+            # buffered and yielded after the stream completes; this means
+            # tokens aren't streamed incrementally, but the connector's
+            # per-turn batched transport makes that a non-issue there.
+            async def _run_stream() -> tuple[list[str], Any]:
+                text_out: list[str] = []
                 async with self._client.messages.stream(
                     model=self.model,
                     max_tokens=4096,
                     system=cached_system,
                     messages=_to_anthropic_messages(history),
                     tools=cached_tools,
-                ) as stream:
-                    async for event in stream:
-                        # Text deltas
-                        if event.type == "content_block_delta" and getattr(
-                            event.delta, "type", None
+                ) as _stream:
+                    async for _ev in _stream:
+                        if _ev.type == "content_block_delta" and getattr(
+                            _ev.delta, "type", None
                         ) == "text_delta":
-                            yield TextEvent(text=event.delta.text)
+                            text_out.append(_ev.delta.text)
+                    _final = await _stream.get_final_message()
+                return text_out, _final
 
-                    final = await stream.get_final_message()
+            try:
+                _text_deltas, final = await asyncio.wait_for(
+                    _run_stream(), timeout=STREAM_TIMEOUT_SECS
+                )
+            except asyncio.TimeoutError:
+                import logging
+                logging.warning(
+                    "anthropic stream timed out after %ss", STREAM_TIMEOUT_SECS
+                )
+                yield ErrorEvent(
+                    message=f"The request to Anthropic timed out after "
+                            f"{STREAM_TIMEOUT_SECS}s. The API may be slow "
+                            f"or unreachable — please try again."
+                )
+                return
             except Exception as e:
                 # Surface a clean, user-readable message; log the raw
                 # detail server-side. The SDK already auto-retried up to
@@ -299,6 +321,9 @@ class AnthropicProvider:
                     msg = "Something went wrong talking to Anthropic. Please try again."
                 yield ErrorEvent(message=msg)
                 return
+
+            for _t in _text_deltas:
+                yield TextEvent(text=_t)
 
             assistant_blocks: list[dict[str, Any]] = []
             tool_calls: list[tuple[str, str, dict[str, Any]]] = []

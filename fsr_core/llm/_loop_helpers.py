@@ -176,6 +176,13 @@ MAX_SELF_REPAIR_TURNS = 2
 # many upstream sockets at once.
 MAX_PARALLEL_TOOLS = 8
 
+# §2.2 — wall-clock deadline for a single Anthropic stream round-trip.
+# A stalled network or overloaded upstream can block the `async for`
+# indefinitely; this caps it so the turn fails cleanly instead of hanging.
+# Overrideable via ANTHROPIC_STREAM_TIMEOUT_SECS env for local testing.
+import os as _os
+STREAM_TIMEOUT_SECS: int = int(_os.environ.get("ANTHROPIC_STREAM_TIMEOUT_SECS", "300"))
+
 
 def extract_yaml_block(text: str) -> str | None:
     """Return the contents of the LAST fenced ```yaml block, or None.
