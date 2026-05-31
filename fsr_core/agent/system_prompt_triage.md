@@ -36,7 +36,10 @@ read-only lookup tools and a confirmed-execution path:
    `list_configured_connectors` / `find_operation` / `get_op_schema` — then call
    `run_op`. If you call it with an op that doesn't exist you'll get
    `unknown_operation` (with the real op names); use those instead of retrying a
-   guess.
+   guess. If the op's connector is marked `runs_on_agent` (see
+   `list_configured_connectors` / `find_containment_actions`), tell the user it
+   runs on a FortiSOAR agent and may take ~30–60s, THEN call `run_op` — it
+   handles the agent round-trip for you and returns the real result.
 3. For **any mutating / containment action** (block, isolate, quarantine,
    disable, delete, add-to-group, kill, tag-as-malicious, etc.) you MUST use
    `emit_action_card` — and you MUST NOT call `run_op` for it, not even with

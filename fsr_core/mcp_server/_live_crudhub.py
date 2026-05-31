@@ -78,6 +78,25 @@ class _CrudhubSession:
         except Exception as e:  # noqa: BLE001
             return _Response({"error": str(e)}, status_code=599)
 
+    def put(self, url: str, json: Any = None, **_kw: Any) -> _Response:
+        try:
+            return _Response(self._mr(url, "PUT", body=json or {}))
+        except Exception as e:  # noqa: BLE001
+            return _Response({"error": str(e)}, status_code=599)
+
+    def delete(self, url: str, json: Any = None, **_kw: Any) -> _Response:
+        # Single-row `/api/3/{entity}/{uuid}?$hardDelete=true` deletes carry NO
+        # body. Crucially, do NOT coerce a missing body to `{}` — passing an
+        # empty JSON body on a single-row DELETE makes make_request issue a
+        # no-op that leaves the row in place (the scratch-collection leak fixed
+        # in 0.3.64). Only forward a body when the caller actually supplies one.
+        try:
+            if json is None:
+                return _Response(self._mr(url, "DELETE"))
+            return _Response(self._mr(url, "DELETE", body=json))
+        except Exception as e:  # noqa: BLE001
+            return _Response({"error": str(e)}, status_code=599)
+
 
 class CrudhubLiveClient:
     """``pyfsr.FortiSOAR``-shaped client backed by crudhub make_request."""
@@ -92,8 +111,21 @@ class CrudhubLiveClient:
     def post(self, path: str, data: Any = None, **_kw: Any) -> Any:
         return self._mr(path, "POST", body=data or {})
 
+    def put(self, path: str, data: Any = None, **_kw: Any) -> Any:
+        # Parity with pyfsr's client.put — needed by e2e.runner._push's
+        # idempotent PUT-then-POST, which otherwise AttributeErrors here and
+        # makes push_playbook/dry_run_playbook fail on the agent box.
+        return self._mr(path, "PUT", body=data or {})
+
     def get(self, path: str, **_kw: Any) -> Any:
         return self._mr(path, "GET")
+
+    def delete(self, path: str, data: Any = None, **_kw: Any) -> Any:
+        # See _CrudhubSession.delete: never send an empty body on a single-row
+        # DELETE — it no-ops. Forward a body only when one is actually given.
+        if data is None:
+            return self._mr(path, "DELETE")
+        return self._mr(path, "DELETE", body=data)
 
 
 class CrudhubConfig:

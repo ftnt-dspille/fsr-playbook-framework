@@ -611,6 +611,15 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             ))
             params_raw = []
 
+        # Capture the priority NAME as-authored (normalized to Title case).
+        # Optional — defaults to "High" so authored playbooks run at high
+        # priority unless they opt down. Validation + IRI resolution happens in
+        # the resolver against the live-synced `picklists` table (no DB here).
+        priority_raw = pb_raw.get("priority")
+        priority: str = (
+            str(priority_raw).strip().title() if priority_raw not in (None, "") else "High"
+        )
+
         annotations: list[Annotation] = []
         ann_raw = pb_raw.get("annotations") or []
         if not isinstance(ann_raw, list):
@@ -680,6 +689,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             tag=pb_raw.get("tag", "") or "",
             is_active=bool(pb_raw.get("is_active", False)),
             debug=bool(pb_raw.get("debug", False)),
+            priority=priority,
             trigger=str(pb_raw.get("trigger", "start") or "start"),
             parameters=list(params_raw),
             steps=steps,

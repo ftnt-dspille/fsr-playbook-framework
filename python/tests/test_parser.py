@@ -299,3 +299,34 @@ playbooks:
     coll, errs = parse_yaml(text)
     assert coll is None
     assert any("playbook.uid is not allowed" in e.message for e in errs)
+
+
+def test_priority_high_parses():
+    coll, errs = parse_yaml(
+        "collection: A\nplaybooks:\n  - name: P\n    priority: High\n"
+        "    steps:\n      - name: s\n        type: start\n"
+    )
+    assert coll is not None
+    assert errs == []
+    assert coll.playbooks[0].priority == "High"
+
+
+def test_priority_case_insensitive():
+    coll, errs = parse_yaml(
+        "collection: A\nplaybooks:\n  - name: P\n    priority: high\n"
+        "    steps:\n      - name: s\n        type: start\n"
+    )
+    assert coll is not None
+    assert coll.playbooks[0].priority == "High"
+
+
+def test_priority_unknown_name_captured_at_parse():
+    # The parser just captures the name; validation/resolution is the
+    # resolver's job (it owns the DB). So an unknown name parses cleanly here.
+    coll, errs = parse_yaml(
+        "collection: A\nplaybooks:\n  - name: P\n    priority: Bogus\n"
+        "    steps:\n      - name: s\n        type: start\n"
+    )
+    assert coll is not None
+    assert coll.playbooks[0].priority == "Bogus"
+    assert errs == []

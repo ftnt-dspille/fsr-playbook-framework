@@ -509,6 +509,10 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                 "status": configured.get(connector),
                 "deprecated": "deprecat" in (title or "").lower(),
                 "required_params": _required_params(conn, connector, op),
+                # When true, run_op routes this op through the agent force-fail
+                # wrap (~30-60s). Tell the user it runs on a FortiSOAR agent and
+                # may take a moment, THEN call run_op.
+                "runs_on_agent": connector in agent_of,
             })
 
     # 3. Scoped healthcheck: probe ONLY the connectors that carry a candidate
@@ -663,6 +667,10 @@ def list_configured_connectors(probe: bool = False,
         if x.get("name") and x.get("_agent_id"):
             name_agent[x["name"]] = x["_agent_id"]
             item["_agent_id"] = x["_agent_id"]
+            # Heads-up for the agent: ops on this connector run on a FortiSOAR
+            # agent and take ~30-60s (run_op routes them through the force-fail
+            # playbook wrap). Narrate the delay to the user before calling.
+            item["runs_on_agent"] = True
         if verbose:
             item["version"] = x_version
             item["label"] = x.get("label")

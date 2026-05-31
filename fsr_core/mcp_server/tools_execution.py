@@ -1122,6 +1122,253 @@ def _summarize_op_output(connector: str, op: str,
 
 
 # ---------------------------------------------------------------------------
+# Agent-proxied run_op (force-fail playbook wrap)
+# ---------------------------------------------------------------------------
+# Agent-bound connector configs make POST /api/integration/execute/ fire-and-
+# forget: the sync response is always {remote_status:"in-progress", result:{}},
+# the op DOES run, but the real output is websocket-pushed and the transient
+# ExecuteAction row is deleted (not REST-pollable). To get the result we route
+# the op through a 2-step playbook [connector op] -> [set_variable {{ 1/0 }}].
+# FSR discards step results on a SUCCESSFUL run (even with debug:true) but
+# RETAINS them on a FAILED run, so the intentional Boom failure makes the
+# connector step's real output recoverable. See memory
+# fsr_agent_proxied_execute_async.md for the full live-verified recipe.
+
+_AGENT_CFG_CACHE: dict[str, Any] = {"ts": 0.0, "ids": None}
+
+
+def _agent_config_ids(client) -> set[str]:
+    """Cached set of agent-bound connector configuration UUIDs.
+
+    A config in this set is proxied through a FortiSOAR Agent, so a raw
+    /api/integration/execute/ against it is fire-and-forget — run_op must route
+    it through the force-fail playbook instead. Short TTL like _configured_rows
+    (the agent install set rarely changes within a session)."""
+    import time
+    if (_AGENT_CFG_CACHE["ids"] is not None
+            and (time.time() - _AGENT_CFG_CACHE["ts"]) < _CONFIGURED_TTL_S):
+        return _AGENT_CFG_CACHE["ids"]
+    ids: set[str] = set()
+    try:
+        for row in _agent_configured_rows(client):
+            for cid in _row_config_ids(row):
+                ids.add(str(cid))
+    except Exception:  # noqa: BLE001 — fail open: treat as non-agent
+        ids = set()
+    _AGENT_CFG_CACHE["ids"] = ids
+    _AGENT_CFG_CACHE["ts"] = time.time()
+    return ids
+
+
+def _run_op_via_agent_playbook(connector: str, op: str,
+                               params: dict[str, Any], config_id: str,
+                               version: str, agent_id: str,
+                               client, timeout_s: int = 120) -> dict[str, Any]:
+    """Execute an agent-bound op ONCE via a force-fail playbook and return its
+    real result. Builds [connector op] -> [set_variable boom={{ 1/0 }}],
+    pushes the UNWRAPPED collection, triggers it, polls to the (expected)
+    failed terminal, reads the connector step result, then hard-purges.
+
+    Returns the same envelope shape as run_op's execute path:
+      success → {ok:true, data, output_shape, ..., _via_agent:true, _agent_id}
+      connector op failed → {ok:false, status, message, _via_agent:true}
+      timeout → {ok:false, status:"agent_timeout", ...}
+    """
+    import time
+    import yaml as _yaml
+    # Relative import: works both in dev (fsr_core is top-level) and on the
+    # FortiSOAR box (fsr_core is a sub-package of the connector). The compiler
+    # is the only dependency — `_hard_purge` is inlined below so the wrap never
+    # needs the repo-only `e2e` test package, which isn't vendored.
+    try:
+        from ..compiler import compile_yaml as _compile
+    except Exception as e:  # noqa: BLE001
+        return _err("agent_wrap_import_failed", f"import failed: {e!r}")
+
+    # Filled by the finally-purge; attached to the success envelope by reference
+    # so a leaked-cleanup regression is observable without box-side logs.
+    _diag: dict[str, Any] = {}
+
+    # Unique, non-colliding collection name so concurrent wraps never clash.
+    suffix = str(int(time.time() * 1000))[-9:]
+    coll_name = f"00 - Agent Run {connector} {suffix}"
+    pb_name = f"AgentRun_{suffix}"
+    coll_doc = {
+        "collection": coll_name,
+        "visible": False,
+        "playbooks": [{
+            "name": pb_name,
+            "debug": True,
+            "priority": "High",
+            "steps": [
+                {"name": "Start", "type": "start", "next": "Run"},
+                {"name": "Run", "type": "connector", "next": "Boom",
+                 "arguments": {
+                     "connector": connector,
+                     "operation": op,
+                     "config": config_id,
+                     "params": params or {},
+                 }},
+                {"name": "Boom", "type": "set_variable",
+                 "vars": {"boom": "{{ 1/0 }}"}},
+            ],
+        }],
+    }
+    result = _compile(_yaml.safe_dump(coll_doc, sort_keys=False), DB_PATH)
+    if not result.ok:
+        return _err("agent_wrap_compile_failed",
+                    "; ".join(e.message for e in result.errors))
+    coll = result.fsr_json["data"][0]
+    coll_uuid = coll["uuid"]
+    wf = coll["workflows"][0]
+    wf_uuid = wf["uuid"]
+    # `priority` ("High") is already a live-synced picklist IRI stamped by the
+    # compiler's resolver, and `debug: true` is compiled in — both ride the POST.
+
+    try:
+        # 1) UNWRAPPED push: bare collection dict via the raw session (the
+        #    crudhub/pyfsr .post wrappers double-wrap → server-side TypeError).
+        pr = client.session.post(
+            client.base_url + "/api/3/workflow_collections",
+            json=coll, verify=client.verify_ssl)
+        if getattr(pr, "status_code", 500) >= 400:
+            return _err("agent_wrap_push_failed",
+                        f"HTTP {pr.status_code}: {pr.text[:300]}")
+
+        # 2) Belt-and-braces: ensure debug is on so step results persist even
+        #    if a future emitter change drops it (priority rides the POST).
+        try:
+            client.session.put(
+                client.base_url + f"/api/3/workflows/{wf_uuid}",
+                json={"debug": True}, verify=client.verify_ssl)
+        except Exception:  # noqa: BLE001 — compiled value already carries it
+            pass
+
+        # 3) Trigger (designer Run-button style).
+        tr = client.session.post(
+            client.base_url + f"/api/triggers/1/notrigger/{wf_uuid}",
+            json={"input": {}, "request": {"data": {}},
+                  "useMockOutput": False, "globalMock": False},
+            verify=client.verify_ssl)
+        if getattr(tr, "status_code", 500) >= 400:
+            return _err("agent_wrap_trigger_failed",
+                        f"HTTP {tr.status_code}: {tr.text[:300]}")
+        task_id = (tr.json() or {}).get("task_id") if isinstance(tr.json(), dict) else None
+        if not task_id:
+            return _err("agent_wrap_no_task", "trigger returned no task_id")
+
+        # 4) Poll to terminal (will be `failed` because of Boom).
+        terminal = {"finished", "failed", "terminated",
+                    "finished_with_error", "rejected"}
+        poll_url = (client.base_url + "/api/wf/api/workflows/?format=json"
+                    f"&limit=1&ordering=-modified&task_id={task_id}"
+                    "&parent_wf__isnull=True")
+        wf_pk = None
+        start = time.time()
+        while time.time() - start < timeout_s:
+            try:
+                pl = client.session.get(poll_url, verify=client.verify_ssl)
+                members = (pl.json() or {}).get("hydra:member") or []
+            except Exception:  # noqa: BLE001
+                members = []
+            if members and members[0].get("status") in terminal:
+                wf_pk = (members[0].get("@id") or "").rstrip("/").rsplit("/", 1)[-1]
+                break
+            time.sleep(2)
+        if not wf_pk:
+            return _err("agent_timeout",
+                        f"agent op did not complete within {timeout_s}s",
+                        status="agent_timeout")
+
+        # 5) Read the connector step result from the failed run.
+        dr = client.session.get(
+            client.base_url + f"/api/wf/api/workflows/{wf_pk}/?step_detail=true",
+            verify=client.verify_ssl)
+        detail = dr.json() if getattr(dr, "status_code", 500) == 200 else {}
+        run_step = next((s for s in (detail.get("steps") or [])
+                         if s.get("name") == "Run"), None)
+        if run_step is None:
+            return _err("agent_wrap_no_step",
+                        "connector step result not found in failed run")
+        step_res = run_step.get("result") or {}
+        step_status = run_step.get("status")
+
+        # 6) Disambiguate: Run finished + result.status Success ⇒ real success.
+        #    Ignore the intentional Boom failure entirely.
+        succeeded = (
+            step_status in ("finished", "finished_with_error")
+            and isinstance(step_res, dict)
+            and (str(step_res.get("status", "")).lower() == "success"
+                 or step_res.get("_status") is True)
+        )
+        if not succeeded:
+            msg = ""
+            if isinstance(step_res, dict):
+                msg = (step_res.get("message") or step_res.get("Error message")
+                       or json.dumps(step_res)[:600])
+            _record_verification(connector, op, "tested_fail", str(msg)[:2000])
+            return _err("execution_failed", str(msg) or "agent op failed",
+                        status=str(step_status), _via_agent=True,
+                        _agent_id=agent_id)
+
+        data = step_res.get("data", step_res) if isinstance(step_res, dict) else step_res
+        shape = _infer_shape(data)
+        _store_observed_schema(connector, op, data)
+        sample = data[0] if isinstance(data, list) and data else data
+        top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
+        summarized, truncated = _summarize_op_output(connector, op, data)
+        _record_verification(connector, op, "tested_pass",
+                             "via agent force-fail playbook")
+        out = {
+            "ok": True,
+            "data": summarized,
+            "output_shape": shape,
+            "output_top_keys": top_keys,
+            "output_is_list": isinstance(data, list),
+            "schema_cached": True,
+            "_via_agent": True,
+            "_agent_id": agent_id,
+            "_cleanup": _diag,
+        }
+        if truncated:
+            out["output_truncated"] = True
+            out["note"] = ("Output summarized to keep context lean — full shape "
+                           "is in the reference store via get_op_schema.")
+        return out
+    finally:
+        # Inline, ungated hard-purge of ONLY the UUIDs this wrap just created
+        # (the scratch collection + its single workflow). Scope is limited to
+        # locally-minted UUIDs — no server-side discovery, no name matching —
+        # so it's safe without the FSR_ALLOW_E2E gate the e2e harness uses.
+        #
+        # SINGLE-ROW deletes, not the bulk `/api/3/delete/{entity}` endpoint:
+        # on-platform `client.session.delete` routes through crudhub
+        # `make_request`, which does NOT forward a DELETE body, so the bulk
+        # endpoint's `{"ids":[...]}` would arrive empty and delete nothing (this
+        # silently leaked every scratch collection until 0.3.62). The single-row
+        # CRUD endpoint needs no body. `$hardDelete=true` (WITH the `$`) skips
+        # the recycle bin — without `$` it soft-deletes and the uuid lingers;
+        # `$showDeleted=true` also reaches a row already recycled by an older run.
+        q = "?$hardDelete=true&$showDeleted=true"
+        try:
+            rw = client.session.delete(
+                client.base_url + f"/api/3/workflows/{wf_uuid}{q}",
+                verify=client.verify_ssl)
+            _diag["wf"] = {"status": getattr(rw, "status_code", None),
+                           "body": str(getattr(rw, "_data", ""))[:200]}
+        except Exception as e:  # noqa: BLE001 — best-effort cleanup
+            _diag["wf"] = {"exc": repr(e)}
+        try:
+            rc = client.session.delete(
+                client.base_url + f"/api/3/workflow_collections/{coll_uuid}{q}",
+                verify=client.verify_ssl)
+            _diag["coll"] = {"status": getattr(rc, "status_code", None),
+                             "body": str(getattr(rc, "_data", ""))[:200]}
+        except Exception as e:  # noqa: BLE001 — best-effort cleanup
+            _diag["coll"] = {"exc": repr(e)}
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
@@ -1281,6 +1528,28 @@ def run_op(
             ],
         }
 
+    # Agent-proxied configs: /api/integration/execute/ is fire-and-forget and
+    # returns an empty in-progress stub (the op runs, but the result is
+    # websocket-pushed, not inline). Detect PROACTIVELY — before the execute —
+    # and route through the force-fail playbook wrap, which runs the op exactly
+    # once and recovers its real output. Never execute-then-detect: the raw
+    # execute would fire the action a second time.
+    try:
+        agent_ids = _agent_config_ids(client)
+    except Exception:  # noqa: BLE001 — fail open to the normal execute path
+        agent_ids = set()
+    if exec_config and exec_config in agent_ids:
+        agent_id = ""
+        try:
+            for row in _agent_configured_rows(client):
+                if row.get("name") == connector and exec_config in _row_config_ids(row):
+                    agent_id = row.get("_agent_id") or ""
+                    break
+        except Exception:  # noqa: BLE001
+            agent_id = ""
+        return _run_op_via_agent_playbook(
+            connector, op, params or {}, exec_config, version, agent_id, client)
+
     body = {
         "connector": connector,
         "operation": op,
@@ -1354,7 +1623,7 @@ def run_op(
 
 def _record_verification(connector: str, op: str, status: str, notes: str) -> None:
     import datetime
-    ts = datetime.datetime.utcnow().isoformat()
+    ts = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
     with sqlite3.connect(_shared.DB_PATH) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO verifications (kind, key, method, status, ts, notes)

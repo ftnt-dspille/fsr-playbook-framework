@@ -192,7 +192,7 @@ def _persist_precheck_verification(kind: str, key: str, method: str,
     else:
         return
     import datetime
-    ts = datetime.datetime.utcnow().isoformat()
+    ts = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
     notes = (result.get("message") or result.get("code") or "")[:500]
     try:
         with sqlite3.connect(_shared.DB_PATH) as conn:

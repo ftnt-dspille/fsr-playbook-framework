@@ -108,6 +108,27 @@ CREATE TABLE IF NOT EXISTS operation_examples (
 );
 CREATE INDEX IF NOT EXISTS idx_op_examples ON operation_examples(connector_name, op_name);
 
+-- Warmup telemetry. One row per `warmup` run (connector operations.py), so a
+-- slow catalog warm can be analyzed after the fact via query_store. Also
+-- created defensively at runtime by `_record_warmup_run` so it exists on
+-- reference DBs that predate this table.
+CREATE TABLE IF NOT EXISTS warmup_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT NOT NULL,          -- UTC ISO8601 of run completion
+    forced          INTEGER NOT NULL DEFAULT 0,
+    total_s         REAL,
+    list_fetch_s    REAL,
+    detail_loop_s   REAL,
+    detail_calls    INTEGER,
+    db_write_s      REAL,
+    connectors      INTEGER,
+    operations      INTEGER,
+    operation_params INTEGER,
+    op_safety       INTEGER,
+    slowest_details TEXT,                   -- JSON: [{connector, s}, ...]
+    timings_json    TEXT                    -- full timings dict, JSON
+);
+
 -- Tier 2.2 ledger. Each row is one (param, mutation) attempt against
 -- the live FSR. Promotion to operation_params.observed_type requires
 -- ≥3 corroborating rows (see probes.probe_param_types.promote). Kept

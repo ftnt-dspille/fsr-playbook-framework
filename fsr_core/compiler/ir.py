@@ -11,6 +11,14 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
+# FSR system picklist that backs a workflow's execution priority. The resolver
+# maps a playbook's `priority:` name (High/Medium/Low) to the live IRI by
+# querying the synced `picklists` table for this listName — so the emitted IRI
+# is always the running instance's own system value (probe_modules.py re-mines
+# the picklists table from /api/3/picklist_names), never a baked constant.
+PRIORITY_LIST_NAME = "WorkflowPriority"
+
+
 @dataclass
 class Step:
     id: str                          # short refname unique within a playbook
@@ -80,6 +88,13 @@ class Playbook:
     # production but on for new visual-editor drafts so authors see
     # their step output without flipping a knob.
     debug: bool = False
+    # Execution priority NAME as authored (e.g. "High"). None = engine default.
+    # The agent-routed run_op wrap sets this to "High" so containment ops jump
+    # the queue. Resolved to a picklist IRI by the resolver (see priority_iri).
+    priority: Optional[str] = None
+    # Resolver-filled: the picklist IRI for `priority`, looked up live-synced
+    # from the store's `picklists` table (listName WorkflowPriority).
+    priority_iri: Optional[str] = None
     trigger: str = "start"           # short-name short-cut for the trigger step type
     # Explicit trigger step id. If unset, emitter falls back to "first step
     # whose type is 'start'". Decompiled playbooks always set this — they

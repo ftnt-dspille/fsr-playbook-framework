@@ -503,7 +503,7 @@ def _store_observed_schema(connector: str, op: str, data: Any) -> None:
     shape = _infer_shape(data)
     shape_json = json.dumps(shape)
     import datetime
-    ts = datetime.datetime.utcnow().isoformat()
+    ts = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "UPDATE operations SET output_schema_observed=? WHERE connector_name=? AND op_name=?",

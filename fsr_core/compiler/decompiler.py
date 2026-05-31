@@ -14,7 +14,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .ir import Annotation, Collection, Playbook, Step
+from .ir import PRIORITY_LIST_NAME, Annotation, Collection, Playbook, Step
 from .resolver import SHORT_TYPE_TO_FSR
 
 _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
@@ -173,6 +173,13 @@ def decompile(fsr_json: dict[str, Any], db_path: Path) -> Collection:
                 "SELECT uuid, name FROM step_types"
             )
         }
+        # IRI → name for workflow priority (reverse of the resolver's lookup).
+        priority_by_iri = {
+            r["item_iri"]: r["item_value"] for r in conn.execute(
+                "SELECT item_iri, item_value FROM picklists WHERE list_name=?",
+                (PRIORITY_LIST_NAME,),
+            )
+        }
     finally:
         conn.close()
 
@@ -182,7 +189,7 @@ def decompile(fsr_json: dict[str, Any], db_path: Path) -> Collection:
 
     playbooks: list[Playbook] = []
     for wf in coll.get("workflows", []):
-        playbooks.append(_decompile_workflow(wf, type_by_uuid))
+        playbooks.append(_decompile_workflow(wf, type_by_uuid, priority_by_iri))
 
     return Collection(
         name=coll.get("name", "") or "",
@@ -192,7 +199,8 @@ def decompile(fsr_json: dict[str, Any], db_path: Path) -> Collection:
     )
 
 
-def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str]) -> Playbook:
+def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
+                        priority_by_iri: dict[str, str] | None = None) -> Playbook:
     raw_steps = wf.get("steps", []) or []
     raw_routes = wf.get("routes", []) or []
 
@@ -387,11 +395,17 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str]) -> Pla
     else:
         params = []
 
+    # priority IRI → name via the live-synced picklists map.
+    raw_priority = wf.get("priority")
+    priority = (priority_by_iri or {}).get(raw_priority) if isinstance(raw_priority, str) else None
+
     return Playbook(
         name=wf.get("name", "") or "",
         description=wf.get("description", "") or "",
         tag=wf.get("tag", "") or "",
         is_active=bool(wf.get("isActive", False)),
+        priority=priority,
+        priority_iri=raw_priority if isinstance(raw_priority, str) else None,
         trigger="start",
         trigger_step_id=trigger_id,
         parameters=params,

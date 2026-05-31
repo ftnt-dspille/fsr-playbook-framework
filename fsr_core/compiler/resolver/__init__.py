@@ -10,8 +10,10 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ..errors import CompileError
-from ..ir import Collection
+import difflib
+
+from ..errors import CompileError, ErrorCode
+from ..ir import Collection, PRIORITY_LIST_NAME, Playbook
 from ._constants import SHORT_TYPE_TO_FSR, _looks_like_uuid
 from .catalog import CatalogLookupMixin
 from .connector_args import ConnectorArgsMixin
@@ -38,11 +40,45 @@ class Resolver(
     def close(self) -> None:
         self.conn.close()
 
+    def _resolve_priority(self, pb: Playbook, path: str,
+                          errors: list[CompileError]) -> None:
+        """Map a playbook's `priority:` name to its live picklist IRI.
+
+        Reads the synced `picklists` table (listName WorkflowPriority) so the
+        emitted IRI is the running instance's own system value. Unknown name →
+        warning with a 'did you mean' suggestion, priority left unset."""
+        if not pb.priority:
+            return
+        row = self.conn.execute(
+            "SELECT item_iri FROM picklists WHERE list_name=? AND item_value=?",
+            (PRIORITY_LIST_NAME, pb.priority),
+        ).fetchone()
+        if row:
+            pb.priority_iri = row[0]
+            return
+        candidates = [r[0] for r in self.conn.execute(
+            "SELECT item_value FROM picklists WHERE list_name=?",
+            (PRIORITY_LIST_NAME,),
+        ).fetchall()]
+        sug = difflib.get_close_matches(pb.priority, candidates, n=1, cutoff=0.5)
+        valid = ", ".join(sorted(candidates)) or "(none synced — run the modules probe)"
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(f"unknown priority {pb.priority!r}; valid: {valid} — "
+                     "leaving priority unset"),
+            path=f"{path}.priority",
+            near=sug[0] if sug else None,
+            suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+            severity="warning",
+        ))
+        pb.priority = None
+
     def resolve(self, collection: Collection) -> list[CompileError]:
         errors: list[CompileError] = []
         # Build name→Playbook map for in-collection workflow_reference targets.
         pb_by_name = {pb.name: pb for pb in collection.playbooks}
         for pi, pb in enumerate(collection.playbooks):
+            self._resolve_priority(pb, f"playbooks[{pi}]", errors)
             # Order matters: rename reserved keys first, capture the
             # rename map, then the step-ref rewriter uses BOTH the new
             # and old names so legacy `vars.steps.<S>.<old>` references

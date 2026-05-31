@@ -408,7 +408,10 @@ def emit(collection: Collection) -> dict[str, Any]:
             "steps": steps_out,
             "routes": routes_out,
             "groups": groups_out,
-            "priority": None,
+            # Bare IRI string (hydra accepts IRI on POST, same as collection/
+            # triggerStep). Resolver-stamped from the live-synced picklists
+            # table; None when unset or the name didn't resolve.
+            "priority": pb.priority_iri,
             "playbookOrigin": None,
             "isEditable": True,
             "uuid": wf_uuid,

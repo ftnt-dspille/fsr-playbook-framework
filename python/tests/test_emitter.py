@@ -123,3 +123,80 @@ def test_debug_flag_defaults_to_false(db_path):
     assert r.ok, r.errors
     wf = r.fsr_json["data"][0]["workflows"][0]
     assert wf["debug"] is False
+
+
+def _priority_iri(db_path, value):
+    import sqlite3
+    from fsr_core.compiler.ir import PRIORITY_LIST_NAME
+    c = sqlite3.connect(db_path)
+    row = c.execute(
+        "SELECT item_iri FROM picklists WHERE list_name=? AND item_value=?",
+        (PRIORITY_LIST_NAME, value)).fetchone()
+    c.close()
+    return row[0] if row else None
+
+
+def test_priority_high_emits_synced_iri(db_path):
+    yaml_text = """
+collection: TestPriority
+playbooks:
+  - name: P
+    priority: High
+    steps:
+      - name: s
+        type: start
+"""
+    r = compile_yaml(yaml_text, db_path)
+    assert r.ok
+    wf = r.fsr_json["data"][0]["workflows"][0]
+    expected = _priority_iri(db_path, "High")
+    assert expected and expected.startswith("/api/3/picklists/")
+    assert wf["priority"] == expected
+
+
+def test_priority_medium_resolves_from_store(db_path):
+    yaml_text = """
+collection: TestPriorityMed
+playbooks:
+  - name: P
+    priority: Medium
+    steps:
+      - name: s
+        type: start
+"""
+    r = compile_yaml(yaml_text, db_path)
+    assert r.ok
+    assert r.fsr_json["data"][0]["workflows"][0]["priority"] == _priority_iri(db_path, "Medium")
+
+
+def test_priority_unset_defaults_to_high(db_path):
+    # Authoring default: no `priority:` → High (the field is optional).
+    yaml_text = """
+collection: TestPriorityNone
+playbooks:
+  - name: P
+    steps:
+      - name: s
+        type: start
+"""
+    r = compile_yaml(yaml_text, db_path)
+    assert r.ok
+    assert r.fsr_json["data"][0]["workflows"][0]["priority"] == _priority_iri(db_path, "High")
+
+
+def test_priority_unknown_warns_and_unsets(db_path):
+    from fsr_core.compiler.errors import ErrorCode
+    yaml_text = """
+collection: TestPriorityBad
+playbooks:
+  - name: P
+    priority: Bogus
+    steps:
+      - name: s
+        type: start
+"""
+    r = compile_yaml(yaml_text, db_path)
+    assert r.ok  # warning does not block
+    assert r.fsr_json["data"][0]["workflows"][0]["priority"] is None
+    assert any(e.code is ErrorCode.BAD_VALUE and "priority" in (e.path or "")
+               for e in r.warnings)
