@@ -158,11 +158,30 @@ def shrink_history(history: list[Any]) -> int:
     return saved
 
 
-MAX_TOOL_TURNS = 12
+# Per-turn tool-round ceiling. Raised 12 → 16 so a live hunt that fans out
+# across alerts/incidents/asset/identity lookups + multi-connector TI
+# enrichment still has rounds left to stage its containment action card.
+# §2.8 parallel dispatch collapses each independent fan-out into one round,
+# so the effective headroom is much larger than the raw count suggests.
+MAX_TOOL_TURNS = 16
 # Cap on extra "fix the YAML" turns auto-issued when the assistant's
 # final message contains a yaml block that fails to compile. Each repair
 # turn is roughly one extra LLM round-trip; 2 keeps cost bounded.
 MAX_SELF_REPAIR_TURNS = 2
+
+# §2.8 — cap on read-only (tier ≤ 2) tool calls dispatched concurrently
+# within a single turn. `dispatch`/`run_op` are sync and touch shared
+# state (the connector requests session, in-process health/config caches,
+# sqlite), so we bound fan-out rather than letting a turn open arbitrarily
+# many upstream sockets at once.
+MAX_PARALLEL_TOOLS = 8
+
+# §2.2 — wall-clock deadline for a single Anthropic stream round-trip.
+# A stalled network or overloaded upstream can block the `async for`
+# indefinitely; this caps it so the turn fails cleanly instead of hanging.
+# Overrideable via ANTHROPIC_STREAM_TIMEOUT_SECS env for local testing.
+import os as _os
+STREAM_TIMEOUT_SECS: int = int(_os.environ.get("ANTHROPIC_STREAM_TIMEOUT_SECS", "300"))
 
 
 def extract_yaml_block(text: str) -> str | None:

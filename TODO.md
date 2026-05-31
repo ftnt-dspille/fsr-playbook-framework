@@ -1,6 +1,6 @@
 # FSRPlaybookYaml — TODO / resume state
 
-**Last touched**: 2026-05-26. Live FSR target: `https://10.99.249.205` (label `dev`).
+**Last touched**: 2026-05-30. Live FSR target: `https://10.99.249.205` (label `dev`).
 
 This file is the master backlog + resume state. Deep multi-phase plans
 live under `docs/plans/`; frozen research/audit snapshots under
@@ -8,33 +8,176 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 ## Plan index
 
-**Active plans** (`docs/plans/`) — open these for phase-level detail; this file links to them rather than restating their content.
+### Connector + fsr_core (investigator / triage agent)
 
 | Plan | Scope | Status |
 |---|---|---|
-| [`VERIFY_PLAYBOOK_PLAN.md`](docs/archive/VERIFY_PLAYBOOK_PLAN.md) | Single `verify_playbook` forcing-function tool that gates "done" for the agent loop. Trust audit + tool consolidation. | ✅ complete (2026-05-25). Re-baseline `20260525T165836Z`: agentic_anthropic 36/40 (90%) on verify-relevant subset. `verify_runs` history table + `session_verify_stats` reader shipped. Follow-up: `live_tested`-gate `no_dry_run_target` bug — separate ticket. |
-| [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector wired to every MCP tool; debug runner. | Phases 1–4 + 4.5 shipped. **Phase 5 server-side pause/resume ✅** 2026-05-25 (5 new MCP tools + `mcp_server/debug_session.py` + DebugPanel rewire + 12 tests). **Debug + Inspector UX polish ✅** 2026-05-26: `_normalize_friendly_steps` fixes friendly-YAML decision branching + MI option routing in the simulator; `as_status()` now returns full trace (fixes "0 steps walked yet" bug); 3-button toolbar (▶ Run / ⏭ Step / ⏹ Stop) where Run creates + continues end-to-end; Stop → ↺ Restart label; Step auto-skips trigger entry. Inspector consolidation: Simulate → Samples (now applies to any mockable step — manual_input sidecar + connector mock_result); Verify tab collapsed from 5 sections to 1 (one ▶ Run this step button + auto-loaded issues banner + one-line history); MI Samples tab gets a prompt-wireframe preview (title + description + inputs + option buttons). 11 e2e tests against real `examples/*.yaml` (caught 3 latent bugs in the simulator). Remaining: 5.4 branch chooser UI / 5.5 watch panel UI / 5.7 trigger payload editor UI (all server-side ready); canvas breakpoint gutter; Phase 6 toolbar gaps (6.2 Resolve, 6.3 Dry-run, 6.4 Assert, 6.6 Recipe export); Phase 6.5 Variable picker side panel (G27/G28); G11 pane-click create-step popover; **manual browser smoke of the new debug + inspector UX (never verified end-to-end live)**. |
-| [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Local render-path trace + heuristic checks → red badges on failing steps before push. Powers editor preview. | Phases 1–3 + Phase 6.1 shipped. **Phase 5 complete ✅** 2026-05-25 (C6 index-into-non-list / C7 decision-references-unset-path / C8 MI mode/output mismatch / C9 for-each loop-var leak / C10 dead step; C5 superseded by Tier 3). Remaining: 6.2/6.3 fix-apply + bulk-fix, 4.1-4.7 visual-editor surfacing pass, 7.3 agent fail-fast on skipped authoring tools. |
-| [`AGENT_QUALITY_PLAN.md`](docs/plans/AGENT_QUALITY_PLAN.md) | Evidence base for agent tuning: what the agent actually looks up, data-store gaps, prompt-adherence baseline. | Phase 1A/B/C shipped (`fsrpb agent-stats`); Phase 2/3 pending |
-| [`CONNECTOR_INTEGRATION_PLAN.md`](docs/plans/CONNECTOR_INTEGRATION_PLAN.md) | Catalog-grounded HTTP-shaped authoring: `find_api_*` + `propose_http_fallback` so the agent can ground "do X with vendor Y" requests in real OpenAPI fixtures (36k fixtures, 6.9k products). Supersedes TODO D3 + HTTP-virtual-connector items. | **Phases 0 / 0.5 / 0.6 done** (2026-05-18). Path fix to `fortisoar/corpus_builder/catalog.sqlite` + `FSRPB_API_CATALOG` env + intent-aware fixture ranking (auth-prelude demotion + intent-token overlap + verb-method tie-break). Phases 1-3 **descoped** — validator/replay are connector-author tools, different audience; toolkit stays where it lives. Phase 4 (editor "use http fallback" affordance) + Phase 5 (connector-lifecycle mining) still viable as separate follow-ups. |
-| [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Three orthogonal refinements: (A) static reference data into the prompt cache, (B) constrained generation for hot shapes via `emit_*` tools, (C) separate "enhance" path from "build" path with `verify_enhancement` + intent-tagged metrics. | **Refinement A done** (commit `18adb53` — 14.9 KB cached prefix). B + C pending. |
-| [`HITL_GUARDRAILS_PLAN.md`](docs/plans/HITL_GUARDRAILS_PLAN.md) | Tier-based human-in-the-loop approvals for every tier-3+ tool call (FSR writes, third-party side effects). Approval cards with rendered preview + masked secrets; conversation transcript as audit log; eval-harness policy + `appropriate_approval_requests` gate. | **✅ Complete** (2026-05-18). All 5 phases shipped: tier-aware dispatch, loop suspend + `/api/approvals/{id}` resume, frontend approval card, audit pane, eval policy + gate, server-side step-up, `step_through_playbook` unsafe placeholder. `run_op` / `step_through_playbook` / `dry_run_playbook` / `diagnose_yaml_against_pb_execution` surfaced into `SAFE_TOOLS` behind the gate. |
-| [`STATIC_TYPE_VALIDATION_PLAN.md`](docs/archive/STATIC_TYPE_VALIDATION_PLAN.md) | Static value-level type checking for connector params + Jinja flow typing. Tier 1 ships compile-time enum / int / decimal / bool / picklist diagnostics via the resolver. Tier 2 adds probe-derived `observed_type` (ipv4 / url / iri / epoch) for `text`-typed params. Tier 3 propagates types forward through Jinja filter chains so `{{ x \| int }}` satisfies an integer-typed param statically. | **✅ complete** (2026-05-25). All tiers landed; 12,317 / 26,093 connector params typed (47%); Tier 3 chain validation across resolver + walker with re-baseline showing agents self-correct via `bad_jinja_filter_chain` in the verify loop (3-iteration recovery on `jinja_chain_json_payload`). `fsrpb doctor` CLI for connector authors. |
+| [`AGENT_HARDENING_PLAN.md`](docs/plans/AGENT_HARDENING_PLAN.md) | **Primary connector/fsr_core plan.** SOC-deployable agent: op grounding, HITL, self-heal, investigation quality, stream reliability, authoring-loop SAFE_TOOLS (absorbed from AGENT_TOOL_REGISTRY_FIX_PLAN). | Phase 0 (authoring SAFE_TOOLS) + Phase 2–4 open. Phase 1 ✅ complete (1.1–1.9, 2.8 all done). |
+| [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Prompt-cache prefix (A) + constrained emit_* generation (B) + enhance vs build separation (C). | **A ✅ done** (commit `18adb53`). B + C **parked** (low priority per 2026-05-30 decision). |
+| [`AGENT_LOOP_LIFT_PLAN.md`](docs/plans/AGENT_LOOP_LIFT_PLAN.md) | Extract event-consumer loop from `chat.py` into `fsr_core.llm.run_turn` so connector can reuse it without 200-line duplication. | **Not started — post-demo.** Prereq for CHAT_STREAMING_PLAN. |
+| [`CHAT_STREAMING_PLAN.md`](docs/plans/CHAT_STREAMING_PLAN.md) | Incremental agent activity (tokens, tool cards, status) pushed to SOAR widget — Option A polling or Option B SSE. | **Not started — post-demo.** Depends on AGENT_LOOP_LIFT_PLAN. |
+
+### Studio + compiler (playbook authoring / visual editor)
+
+| Plan | Scope | Status |
+|---|---|---|
+| [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector; debug runner. | Phases 1–5 ✅. Remaining: 5.4/5.5/5.7 UI, Phase 6 toolbar gaps, variable picker, **browser smoke-test never done**. |
+| [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Render-path trace + heuristic checks → red badges before push. | Phases 1–3 + 5 + 6.1 ✅. Remaining: 6.2/6.3 fix-apply, 4.1–4.7 editor surfacing, 7.3 agent fail-fast. |
+
+### Archived / complete
+
+| Plan | Notes |
+|---|---|
+| [`HITL_GUARDRAILS_PLAN.md`](docs/archive/HITL_GUARDRAILS_PLAN.md) | ✅ All 5 phases shipped (2026-05-18). Tier-aware dispatch, approval cards, HMAC binding, sqlite persistence. |
+| [`STATIC_TYPE_VALIDATION_PLAN.md`](docs/archive/STATIC_TYPE_VALIDATION_PLAN.md) | ✅ All tiers shipped (2026-05-25). 12,317/26,093 params typed; Tier 3 chain validation; `fsrpb doctor`. |
+| [`VERIFY_PLAYBOOK_PLAN.md`](docs/archive/VERIFY_PLAYBOOK_PLAN.md) | ✅ Complete (2026-05-25). `verify_runs` history + `session_verify_stats`. |
+| [`FSR_CORE_EXTRACTION_AUDIT.md`](docs/archive/FSR_CORE_EXTRACTION_AUDIT.md) | ✅ Audit done — zero framework coupling found; 3 coupling points + refactor strategy documented. |
+| [`CONNECTOR_INTEGRATION_PLAN.md`](docs/archive/CONNECTOR_INTEGRATION_PLAN.md) | Phases 0/0.5/0.6 ✅. Phases 1–3 descoped (connector-author tools, wrong audience). Phases 4–5 viable follow-ups if needed. |
+| [`AGENT_QUALITY_PLAN.md`](docs/archive/AGENT_QUALITY_PLAN.md) | Phase 1 ✅ (`fsrpb agent-stats`). Phases 2–3 absorbed into AGENT_HARDENING_PLAN §1.4C (golden-trace curation). |
+| [`AGENT_TOOL_REGISTRY_FIX_PLAN.md`](docs/archive/AGENT_TOOL_REGISTRY_FIX_PLAN.md) | Absorbed into AGENT_HARDENING_PLAN §Phase 0. |
+| [`CHAT_APP_PLAN.md`](docs/archive/CHAT_APP_PLAN.md) | UI/shipping superseded by `web/PLAN.md`. LLM-context strategy inherited. |
 
 **Frozen research / audits** (`docs/research/`) — snapshots, not updated:
 
-- [`GAPS.md`](docs/research/GAPS.md) — live-instance information gaps (endpoints we still need to confirm).
-- [`SURFACE_AUDIT.md`](docs/research/SURFACE_AUDIT.md) — Phase 0 feeder for `VERIFY_PLAYBOOK_PLAN`: every MCP tool / route / prompt directive / CLI verb tagged keep|wire|delete.
-- [`MI_DECISION_VALIDATION_AUDIT.md`](docs/research/MI_DECISION_VALIDATION_AUDIT.md) — 2026-05-06 audit of ManualInput + Decision rules against the corpus.
-- [`RECIPE_EXPANSION_RESEARCH.md`](docs/research/RECIPE_EXPANSION_RESEARCH.md) — 2026-05-06 archetype assessment beyond threat-feed / data-ingest recipes.
-
-**Archived / superseded** (`docs/archive/`):
-
-- [`CHAT_APP_PLAN.md`](docs/archive/CHAT_APP_PLAN.md) — Phase 2 LLM-agnostic chat shim. UI/shipping superseded by `web/PLAN.md` (SvelteKit + FastAPI); LLM-context strategy still inherited from this doc.
+- [`GAPS.md`](docs/research/GAPS.md) — live-instance information gaps.
+- [`SURFACE_AUDIT.md`](docs/research/SURFACE_AUDIT.md) — MCP tool / route / prompt directive audit (keep|wire|delete).
+- [`MI_DECISION_VALIDATION_AUDIT.md`](docs/research/MI_DECISION_VALIDATION_AUDIT.md) — ManualInput + Decision rules vs corpus.
+- [`RECIPE_EXPANSION_RESEARCH.md`](docs/research/RECIPE_EXPANSION_RESEARCH.md) — archetype assessment beyond threat-feed / data-ingest.
 
 **Cross-project**:
 
 - [`Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`](../Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md) — original cross-project plan; referenced from global `~/.claude/CLAUDE.md`.
+
+## Next steps (resume state, 2026-05-30)
+
+Session shipped connector **0.3.31** (id=110, live, Haiku, FortiCloud SOAR).
+Landed: hardening **1.6/1.7/1.8** (the `sess-uq31go5p` live-triage fix —
+emit-time op grounding, self-healing resume, `get_record(full=True)` cap) +
+**lifecycle-hook & post-install warmup**. `make verify` 33+111 green. Plan:
+`docs/plans/AGENT_HARDENING_PLAN.md`.
+
+### 2026-05-30 (latest) — never-dead-end `capability_gap` card. RESUME HERE.
+When the instance can't do what an investigation needs, the agent now surfaces
+a `capability_gap` card instead of a prose dead end — what's missing, **which
+connector to configure** (looked up across the catalog), automation tips,
+manual fallbacks, and a **resume button** to re-run the blocked step after the
+fix. **Committed `7b14055`; deployed live as connector 0.3.32 (id=111).**
+
+Complete:
+- [x] `emit_capability_gap_card` in `tools_emit.py` (+ SAFE_TOOLS / TOOL_TIERS /
+  TOOL_SCHEMA_OVERRIDES in `llm/tools.py`, export in `mcp_server/__init__.py`).
+- [x] `find_containment_actions` returns a ready-to-forward `suggested_card`
+  (`_connectors_that_could_contain` helper) + a **fail-open probe fix**: a
+  probe gap (no version / no live client) now falls back to listing status
+  instead of silently dropping a valid containment action (this was the
+  pre-existing `test_..._filters_to_destructive` failure — now green).
+- [x] System prompt §3 + Hard-rule: "never dead-end the analyst" directive.
+- [x] Generalized beyond containment: shared `_capability_gap_suggestion`
+  builder in `_shared.py`; `run_op`'s `_preflight_connector` attaches a
+  `suggested_card` to BOTH `connector_not_configured` and `connector_unhealthy`
+  (the enrichment analog). Fan-out exception documented (skip-and-mention).
+- [x] Connector wiring: `operations.py` card maps + `CONTRACT_VERSION = 2.3.0`;
+  persisted + summarized like other cards.
+- [x] Contract spec updated (widget harness `..._CONNECTOR_CONTRACT.md` §3/4/5).
+- [x] `make verify` green (41 fsr_core + 111 connector); 16 tests in
+  `test_output_summarization.py` (emitter, suggested_card, both preflight cards).
+- [x] Committed (`7b14055`) + redeployed live (`deploy.sh` → 0.3.32, warmup ok).
+
+Deliberately NOT carded (decision, not a TODO): dev/operator gaps the analyst
+can't fix from the FSR UI (`catalog_unavailable`, `no_live_fsr`,
+`probes_unavailable`) and runtime/logic errors (`not_found`, `no_match`,
+`bad_response_shape`, `unknown_operation` self-heals).
+
+Incomplete:
+- [ ] **Angular widget render of `capability_gap`** (separate WebStorm repo —
+  contract documented at 2.3.0, code NOT written). This is the only piece
+  needed for the card to actually display + resume in the widget. **Live triage
+  on 0.3.32 will emit the card event but a pre-2.3.0 widget renders it in its
+  generic card block.** ← top resume point.
+- [ ] (optional) `run_playbook` "no playbook matching" `capability_gap`
+  (authoring-side; resume = create/import the playbook). Lower fit.
+- [ ] (optional) "no TI connector configured at all" enrichment gap — emergent
+  from `list_configured_connectors`, no single tool returns it; prompt-only.
+
+### 2026-05-30 (later) — 1.4 calibration + probe fix.
+Ran the live investigation-eval calibration (`calibrate_investigation.py`, all
+5 fixtures, real Haiku on the box). **5/5 recall 1.0 — but that's the finding,
+not a pass:** the gate is too weak to be meaningful. Full write-up + ranked
+to-do in `AGENT_HARDENING_PLAN.md` §1.4 "Live calibration run" + §1.9.
+
+### 2026-05-30 (latest) — §1.4 gate strengthened. RESUME HERE.
+The recall-only investigation gate now has teeth (commit `2512a9a`).
+`scoring._score_investigation_quality` adds 3 deterministic per-fixture gates
+(`investigation_tool_budget` ≤12, `investigation_no_param_flail` >2 distinct
+arg-sets, `investigation_deliverable` — credits choice/capability-gap cards),
+threaded through `Task.investigation_quality` → `score()` → harness + calibrate.
+Golden-trace replay now **3/5 PASS** (was meaningless 5/5): mail_egress fails
+budget (19 calls), c2 fails deliverable. 9 new tests, 753 fast green. Studio-repo
+only — **no connector re-vendor needed**. Detail: plan §1.4 "Gate strengthening".
+
+Then shipped **param-level live grounding** (deferred half of 1.6) — `validate_op_grounded`
+gained a `params` arg; on the un-synced path it fetches the live op def once and grounds op
+name + argument names (`_validate_op_params_live`: unknown/typo + missing-required). `run_op`
++ `emit_action_card` both pass params. Catches the flail at the source, not just the gate.
+8 new tests (test_op_existence.py, 18 total); `make verify` green (41+111). Plan §1.6.
+**Offline-only until re-vendor + connector bump** — run `scripts/deploy.sh` to ship live.
+
+Then added **live op-definition warming** (the user's ask: warmup should grab as
+much live state as it can): sqlite `connector_op_defs` cache (version-keyed,
+restart-durable) read by `_live_ops_for`/`_fetch_live_op` so the un-synced
+grounding fallback stops re-POSTing the connector detail every pivot; new
+`populate_op_definitions` warmup pass (wired into the connector's bg health
+thread) pre-fetches live op-defs (operations + params in one detail POST) for
+all configured connectors, un-synced first. Commit 0e35fa6; re-vendored.
+
+**SHIPPED LIVE: connector 0.3.33 (id=112, active, Haiku, FortiCloud box)** via
+`deploy.sh` — warmup synced 42 connectors / 538 ops / 1782 params; live op-def
+pre-warm runs in the bg thread. Next: live-confirm the param-grounding fix on a
+real un-synced-connector hunt + re-run `calibrate_investigation.py` to validate
+the strengthened §1.4 gate against fresh Haiku (mail_egress flail should now
+collapse). Possible follow-on (user intent): warm CONFIGS + wire get_op_schema/
+find_operation to read connector_op_defs so live op-defs help those tools too.
+
+Still open (was the working-tree list; #1 + #2 now DONE):
+1. ✅ **DONE** — strengthen the 1.4 gate.
+2. ✅ **DONE** — param-level live grounding.
+2. **Param-level live grounding** (deferred half of 1.6) — agent discovers op
+   param names by trial-and-error live; validate args vs the live op-schema
+   when the store is un-synced.
+3. **Golden-trace offline test** — blocked: the captured traces encode the
+   flailing, so don't freeze as-is; hand-curate or pair with quality asserts.
+4. **DONE this session, needs commit + re-vendor:** §1.9 probe-latency fix
+   (`tools_triage.py` — concurrent + scoped healthchecks; live-verified
+   5 min → 1.2 s). New test `python/tests/test_probe_parallel_scoped.py`.
+   Instrumented `calibrate_investigation.py` (logging + `--capture` golden
+   banking + run summary). Run `make verify` before committing.
+
+Highest-leverage next steps:
+
+1. **Live-confirm the sess-uq31go5p fix** (do FIRST — only unit-tested offline).
+   Re-run the smithDesktop defense-evasion triage (or any containment hunt) on
+   0.3.31 and verify: (a) a phantom op no longer reaches the widget as a card
+   (1.6 live fallback), (b) a correctable post-approval failure self-heals into
+   a corrected card instead of "contain manually" (1.7), (c) `get_record` no
+   longer balloons context (1.8). Drive via `/api/integration/execute/` or the
+   widget; the contract harness (`tests/fsr_contract.py`, after a live
+   `probe_fsr.py` re-capture) is the offline replay.
+2. **Phase 2 hardening — remaining reliability items** (`AGENT_HARDENING_PLAN`):
+   2.3 surface skipped tools on partial-completion resume (CRITICAL-loop; note
+   it overlaps 1.7 — revisit together), 2.2 provider stream timeout (HIGH),
+   2.6 cycle detection before predecessor use (HIGH), 2.7 text-coalescer `seq`
+   alignment (HIGH), 2.4 max-turn summary failure (HIGH), 2.5 transient-vs-
+   permanent enrichment failure (MED).
+3. **1.4 Investigation-quality eval family** (CRITICAL, large) — tasks 25–29
+   shipped; needs a **live agentic run to calibrate** the `investigation_recall
+   >= 0.8` gate (`python/demo_hunt.py` / agentic provider).
+4. **Param-level live grounding** (deferred from 1.6 roadmap) — extend
+   `validate_op_grounded` to validate args against the live op-schema when the
+   store is un-synced, not just op existence.
+5. **3.3 LM Studio provider approvals** — ⏸ deferred post-MVP; don't surface
+   unless MVP scope changes.
+
+Older backlog (still valid) below.
 
 ## Next steps (resume state, 2026-05-26)
 

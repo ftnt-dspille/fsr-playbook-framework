@@ -13,6 +13,7 @@ from typing import Any
 from ._shared import (
     mcp,
     _err,
+    _capability_gap_suggestion,
     _db,
     _rows,
     _verifications_for,
@@ -104,8 +105,114 @@ def _store_health(connector: str, version: str, status: Any, message: str,
         pass
 
 
+# Live op-definition cache. The per-connector detail POST that enumerates a
+# connector's operations + their params is heavy, and op definitions change
+# only on a connector UPGRADE — so cache the parsed ops list in sqlite (like
+# health, this survives worker restarts and is visible across worker processes,
+# which an in-process cache would not be). Keyed by (connector, version) so an
+# upgrade naturally misses and re-fetches. Used by the un-synced grounding path
+# (`validate_op_grounded`) and pre-warmed for un-synced connectors by
+# `populate_op_definitions` — so the first grounding call in a hunt is a cache
+# hit instead of a multi-second live fetch repeated every pivot.
+_OP_DEFS_TTL_S = 24 * 3600
+
+
+def _op_defs_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS connector_op_defs (
+               connector  TEXT NOT NULL,
+               version    TEXT NOT NULL,
+               ops_json   TEXT,
+               checked_ts REAL,
+               PRIMARY KEY (connector, version)
+           )"""
+    )
+
+
+def _cached_op_defs(connector: str,
+                    version: str) -> list[dict[str, Any]] | None:
+    """Cached live op list for (connector, version) within TTL, else None."""
+    import time
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            _op_defs_table(conn)
+            row = conn.execute(
+                "SELECT ops_json, checked_ts FROM connector_op_defs "
+                "WHERE connector=? AND version=?",
+                (connector, version or ""),
+            ).fetchone()
+    except Exception:  # noqa: BLE001
+        return None
+    if not row or row[1] is None:
+        return None
+    if (time.time() - row[1]) > _OP_DEFS_TTL_S:
+        return None
+    try:
+        ops = json.loads(row[0]) if row[0] else []
+    except (ValueError, TypeError):
+        return None
+    return ops if isinstance(ops, list) else None
+
+
+def _store_op_defs(connector: str, version: str,
+                   ops: list[dict[str, Any]]) -> None:
+    import time
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            _op_defs_table(conn)
+            conn.execute(
+                "INSERT OR REPLACE INTO connector_op_defs "
+                "(connector, version, ops_json, checked_ts) VALUES (?,?,?,?)",
+                (connector, version or "", json.dumps(ops), time.time()),
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 _CONFIGURED_CACHE: dict[str, Any] = {"ts": 0.0, "rows": None}
 _CONFIGURED_TTL_S = 120.0
+
+
+def _agent_configured_rows(client) -> list[dict[str, Any]]:
+    """Return configured connector rows from agent-proxied installs.
+
+    Agent-proxied connectors show config_count=0 in connector_details?configured=true
+    and are invisible to preflight. Fix: list active agents via GET /api/3/agents,
+    then POST connector_details?agent={id}&active=true&exclude=operation per agent —
+    this returns real config_count. Only include rows with config_count > 0 and
+    status=Completed (installed-but-unconfigured agent connectors have config_count=0)."""
+    try:
+        ra = client.session.get(
+            client.base_url + "/api/3/agents",
+            verify=client.verify_ssl,
+        )
+        if ra.status_code != 200:
+            return []
+        members = ra.json().get("hydra:member") or []
+        agent_ids = [m["agentId"] for m in members
+                     if m.get("active") and m.get("agentId")]
+    except Exception:  # noqa: BLE001
+        return []
+
+    result = []
+    for agent_id in agent_ids:
+        try:
+            r = client.session.post(
+                client.base_url
+                + f"/api/integration/connector_details/?format=json"
+                f"&agent={agent_id}&active=true&exclude=operation",
+                json={}, verify=client.verify_ssl,
+            )
+            if r.status_code != 200:
+                continue
+            for row in (r.json().get("data") or []):
+                if (row.get("config_count", 0) > 0
+                        and row.get("status") == "Completed"):
+                    row["_agent_id"] = agent_id
+                    result.append(row)
+        except Exception:  # noqa: BLE001
+            continue
+    return result
 
 
 def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
@@ -114,7 +221,10 @@ def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
     Cached in-process for a short TTL: preflight calls this on every `run_op`,
     and on a busy box the `connector_details` POST is non-trivial — re-fetching
     it per op during a multi-pivot hunt is pure overhead. The set rarely
-    changes within a session; a 2-minute TTL keeps it fresh enough."""
+    changes within a session; a 2-minute TTL keeps it fresh enough.
+
+    Also merges agent-proxied connectors (missed by the configured=true filter).
+    """
     import time
     if (not force and _CONFIGURED_CACHE["rows"] is not None
             and (time.time() - _CONFIGURED_CACHE["ts"]) < _CONFIGURED_TTL_S):
@@ -126,7 +236,9 @@ def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
     )
     if getattr(r, "status_code", 200) != 200:
         return _CONFIGURED_CACHE["rows"] or []
-    rows = (r.json().get("data") or [])
+    rows = list(r.json().get("data") or [])
+    already = {x.get("name") for x in rows}
+    rows += [x for x in _agent_configured_rows(client) if x.get("name") not in already]
     _CONFIGURED_CACHE["rows"] = rows
     _CONFIGURED_CACHE["ts"] = time.time()
     return rows
@@ -152,9 +264,87 @@ def _row_config_ids(row: dict[str, Any]) -> list[str]:
     return []
 
 
+def _healthcheck_via_agents(client, connector: str,
+                             version: str,
+                             agent_id: str = "",
+                             config: str = "") -> dict[str, Any]:
+    """Return the real health status for an agent-proxied connector.
+
+    Two paths:
+    1. When `agent_id` is known: POST /api/integration/connectors/{name}/{version}/
+       ?agent={agent_id} — returns the connector detail with configuration[].health_status.
+       When `config` is also supplied, returns that specific config's health_status;
+       otherwise aggregates (any Available wins).
+    2. Fallback: POST /api/integration/connectors/agents/{name}/{version}/ — lists agent
+       install rows and reads remote_status. Works when agent_id is unknown.
+
+    Fails open on any error so a probe gap never silently drops a valid connector."""
+    if agent_id:
+        try:
+            url = (client.base_url
+                   + f"/api/integration/connectors/{connector}/{version}/"
+                   f"?format=json&agent={agent_id}")
+            r = client.session.post(url, json={}, verify=client.verify_ssl, timeout=10)
+            if getattr(r, "status_code", 200) == 200:
+                detail = r.json() if isinstance(r.json(), dict) else {}
+                configs = detail.get("configuration") or []
+                if config:
+                    # Return the specific config's health_status (not an aggregate).
+                    for cfg in configs:
+                        if cfg.get("config_id") == config:
+                            hs = cfg.get("health_status") or {}
+                            st = hs.get("status")
+                            if st:
+                                return {"status": st, "message": hs.get("message", ""),
+                                        "_via_agent_detail": True}
+                # No specific config or config not found → aggregate across all.
+                statuses = []
+                for cfg in configs:
+                    st = (cfg.get("health_status") or {}).get("status")
+                    if st:
+                        statuses.append(st)
+                if statuses:
+                    agg = next((s for s in statuses if _is_healthy_status(s)),
+                               statuses[0])
+                    return {"status": agg, "_via_agent_detail": True}
+        except Exception:  # noqa: BLE001
+            pass
+    # Fallback: /connectors/agents/ endpoint (no agent_id needed)
+    try:
+        url = (client.base_url
+               + f"/api/integration/connectors/agents/{connector}/{version}/"
+               "?format=json&active=true")
+        r = client.session.post(url, json={}, verify=client.verify_ssl, timeout=10)
+        rows = r.json() if getattr(r, "status_code", 200) == 200 else []
+        if not isinstance(rows, list):
+            rows = []
+        for row in rows:
+            rs = (row.get("remote_status") or {}).get("status", "")
+            if (row.get("status") == "Completed"
+                    and rs in ("finished", "success", "")):
+                return {"status": "Available", "_via_agents": True}
+        if rows:
+            return {"status": "Disconnected", "_via_agents": True}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"status": "Available", "_agents_unreachable": True}
+
+
 def _live_healthcheck(client, connector: str, version: str,
-                      config: str = "") -> dict[str, Any]:
-    """One live healthcheck call. `config` is an optional config UUID."""
+                      config: str = "", agent_id: str = "") -> dict[str, Any]:
+    """One live healthcheck call.
+
+    `config` is an optional config UUID. `agent_id` is the FortiSOAR Agent's
+    agentId — when provided we read the cached health from the agent-scoped
+    connector detail (the sync healthcheck endpoint dispatches an async job
+    when ?agent= is supplied, not a usable synchronous result).
+    """
+    # Agent-proxied connectors: the ?agent= param on the healthcheck URL
+    # triggers an async job (remote_status: in-progress), not a sync result.
+    # Read the last-known health from the agent-scoped connector detail instead.
+    if agent_id:
+        return _healthcheck_via_agents(client, connector, version,
+                                       agent_id=agent_id, config=config)
     url = f"/api/integration/connectors/healthcheck/{connector}/{version}/"
     if config:
         url += f"?config={config}"
@@ -165,11 +355,40 @@ def _live_healthcheck(client, connector: str, version: str,
         r = client.session.get(client.base_url + url, verify=client.verify_ssl,
                                timeout=8)
         if getattr(r, "status_code", 200) != 200:
-            return {"status": "error",
-                    "message": f"HTTP {getattr(r, 'status_code', '?')}"}
-        return r.json()
+            data = {}
+            try:
+                data = r.json()
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            data = r.json()
     except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "message": f"healthcheck request failed: {exc!r}"}
+        # On-box crudhub raises on non-2xx; extract the JSON body from the
+        # exception message if present so we can inspect the status field.
+        msg = str(exc)
+        data = {}
+        try:
+            # crudhub embeds the response JSON in the exception string after "::"
+            import re as _re
+            m = _re.search(r"\{.*\}", msg, _re.DOTALL)
+            if m:
+                data = json.loads(m.group())
+        except Exception:  # noqa: BLE001
+            pass
+        if not data:
+            return {"status": "error", "message": f"healthcheck request failed: {exc!r}"}
+
+    # When the healthcheck signals it couldn't find a local config (agent-
+    # proxied connector) or returns an async response, fall back to the agents
+    # endpoint for the real per-agent status.
+    _needs_agent_fallback = (
+        (not data.get("status") and data.get("remote_status"))
+        or (data.get("status") == "Disconnected"
+            and "configuration" in (data.get("message") or "").lower())
+    )
+    if _needs_agent_fallback:
+        return _healthcheck_via_agents(client, connector, version)
+    return data
 
 
 def populate_connector_health(client, time_budget_s: float = 60.0,
@@ -209,11 +428,12 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
         if (time.time() - start) > time_budget_s:
             skipped += 1
             continue
+        agent_id = row.get("_agent_id") or ""
         config_ids = _row_config_ids(row)
         verdicts: list[str] = []
         # Per-config healthchecks (when we can see individual config UUIDs).
         for cid in config_ids:
-            hc = _live_healthcheck(client, name, version, cid)
+            hc = _live_healthcheck(client, name, version, cid, agent_id=agent_id)
             status = hc.get("status")
             _store_health(name, version, status, hc.get("message") or "", config=cid)
             verdicts.append(status)
@@ -225,7 +445,7 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
                        verdicts[0] if verdicts else "unknown")
             _store_health(name, version, agg, "aggregate of per-config checks")
         else:
-            hc = _live_healthcheck(client, name, version)
+            hc = _live_healthcheck(client, name, version, agent_id=agent_id)
             agg = hc.get("status")
             _store_health(name, version, agg, hc.get("message") or "")
             checked += 1
@@ -239,51 +459,160 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
             "connectors": summary}
 
 
+def populate_op_definitions(client, time_budget_s: float = 60.0,
+                            force: bool = False) -> dict[str, Any]:
+    """Pre-warm the live op-definition cache (operations + their parameters)
+    for the box's configured connectors, so the agent works off real,
+    instance-accurate op signatures at cache speed.
+
+    The per-connector detail POST returns each operation WITH its parameter
+    list, so one fetch captures operations + operation-params together. We warm
+    **un-synced connectors first** — those absent from the bundled catalog
+    (`store_ops_count == 0`, e.g. the sess-uq31go5p virustotal case) have no
+    offline fallback, so the grounding path would otherwise do a multi-second
+    live fetch on every pivot. Remaining budget then warms synced connectors
+    too (the bundle can lag the live box), newest-need first.
+
+    Bounded by `time_budget_s` (background pass — never blocks warmup);
+    connectors with a fresh cache are skipped unless `force`. Anything not
+    reached is filled lazily by `validate_op_grounded` on first use.
+    Best-effort: returns a summary, never raises."""
+    import time
+    start = time.time()
+    try:
+        rows = _configured_rows(client)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"configured list failed: {exc!r}"}
+
+    def _store_ops_count(name: str) -> int:
+        try:
+            with _db() as conn:
+                return conn.execute(
+                    "SELECT COUNT(*) FROM operations WHERE connector_name=?",
+                    (name,),
+                ).fetchone()[0]
+        except sqlite3.Error:
+            return 0
+
+    # Un-synced connectors first: they have no offline grounding fallback.
+    named = [r for r in rows if r.get("name")]
+    named.sort(key=lambda r: _store_ops_count(r["name"]) != 0)
+
+    warmed = skipped = fresh = budget_skipped = 0
+    for row in named:
+        name = row["name"]
+        version = row.get("version") or ""
+        if not force and _cached_op_defs(name, version) is not None:
+            fresh += 1
+            continue
+        if (time.time() - start) > time_budget_s:
+            budget_skipped += 1
+            continue
+        try:
+            ops = _live_ops_for(client, name, force=True)
+            if ops:
+                warmed += 1
+            else:
+                skipped += 1
+        except Exception:  # noqa: BLE001 — best-effort; grounding backfills
+            skipped += 1
+    return {"ok": True, "warmed": warmed, "empty_or_failed": skipped,
+            "fresh_cached": fresh, "budget_skipped": budget_skipped,
+            "elapsed_s": round(time.time() - start, 1)}
+
+
 def _resolve_config_id(rows: list[dict[str, Any]], connector: str,
                        config_name: str) -> str:
-    """Map a run_op `config` NAME to its UUID using the configured rows; "" if
-    not resolvable (preflight then checks the connector-level verdict)."""
-    if not config_name:
-        return ""
+    """Map a run_op `config` name/id to its UUID using configured rows.
+
+    When `config_name` is empty, prefer the connector's default configuration
+    and fall back to the sole configuration. This matters for agent-proxied
+    connectors: the platform often has no local default, so execute must send
+    the agent configuration UUID explicitly.
+    """
     for row in rows:
         if row.get("name") != connector:
             continue
         for key in ("configs", "configurations", "config", "configuration"):
-            for c in (row.get(key) or []):
-                if isinstance(c, dict) and c.get("name") == config_name:
+            configs = row.get(key) or []
+            if config_name:
+                for c in configs:
+                    if isinstance(c, str) and c == config_name:
+                        return c
+                    if not isinstance(c, dict):
+                        continue
+                    cid = c.get("config_id") or c.get("id") or c.get("uuid")
+                    if config_name in (c.get("name"), cid):
+                        if cid:
+                            return str(cid)
+                continue
+            for c in configs:
+                if isinstance(c, dict) and c.get("default"):
+                    cid = c.get("config_id") or c.get("id") or c.get("uuid")
+                    if cid:
+                        return str(cid)
+            if len(configs) == 1:
+                c = configs[0]
+                if isinstance(c, str):
+                    return c
+                if isinstance(c, dict):
                     cid = c.get("config_id") or c.get("id") or c.get("uuid")
                     if cid:
                         return str(cid)
     return ""
 
 
-def _validate_op_live(client, connector: str, op: str) -> dict[str, Any] | None:
-    """Confirm `op` exists on the LIVE connector definition.
+def _live_ops_for(client, connector: str,
+                  force: bool = False) -> list[dict[str, Any]]:
+    """Live operation objects for a connector — cache-first.
 
-    Used as the fallback when the offline reference store has no ops
-    catalogued for `connector` (so `_validate_op_exists` couldn't decide).
-    The list endpoint omits operations; the per-connector detail POST is the
-    only way to enumerate them (same path the catalogue sync uses).
+    Reads the sqlite op-def cache (`connector_op_defs`, keyed by version), and
+    only on a miss does the heavy per-connector detail POST (then caches it).
+    The list endpoint omits operations, so the detail POST is the only way to
+    enumerate them (same path the catalogue sync uses). Returns `[]` on any
+    hiccup so callers fail open. `force=True` bypasses the cache (used by the
+    warmup pass)."""
+    rows = _configured_rows(client)
+    row = next((r for r in rows if r.get("name") == connector), None)
+    if not row:
+        return []
+    version = row.get("version") or ""
+    if not force:
+        cached = _cached_op_defs(connector, version)
+        if cached is not None:
+            return cached
+    cid = row.get("id") or row.get("uuid")
+    if not cid:
+        return []
+    detail = client.post(f"/api/integration/connectors/{cid}/", {}) or {}
+    ops = detail.get("operations") or []
+    if not isinstance(ops, list):
+        ops = []
+    _store_op_defs(connector, version, ops)
+    return ops
 
-    Returns an `unknown_operation` error (with near-matches) when the live
-    op list is non-empty and `op` isn't in it; None otherwise — including on
-    ANY lookup failure, so a transient hiccup never false-rejects a real op
-    (the execute call still reports genuine errors).
-    """
-    try:
-        rows = _configured_rows(client)
-        row = next((r for r in rows if r.get("name") == connector), None)
-        cid = row and (row.get("id") or row.get("uuid"))
-        if not cid:
-            return None
-        detail = client.post(f"/api/integration/connectors/{cid}/", {}) or {}
-        op_names = [
-            (o.get("operation") or o.get("name"))
-            for o in (detail.get("operations") or [])
-        ]
-        op_names = [n for n in op_names if n]
-    except Exception:  # noqa: BLE001
-        return None
+
+def _fetch_live_op(client, connector: str,
+                   op: str) -> tuple[dict[str, Any] | None, list[str]]:
+    """Return `(op_def, op_names)` from the LIVE connector definition.
+
+    `op_def` is the matching operation object (with its `parameters` list) or
+    None; `op_names` is every op name on the connector. Backed by the cached
+    `_live_ops_for`, so repeat grounding calls in a hunt don't re-fetch. One
+    lookup shared by op-existence AND param grounding. Returns `(None, [])` on
+    any hiccup so callers fail open."""
+    ops = _live_ops_for(client, connector)
+    op_names = [(o.get("operation") or o.get("name")) for o in ops]
+    op_names = [n for n in op_names if n]
+    op_def = next(
+        (o for o in ops if (o.get("operation") or o.get("name")) == op), None)
+    return op_def, op_names
+
+
+def _op_not_in_live(connector: str, op: str,
+                    op_names: list[str]) -> dict[str, Any] | None:
+    """`unknown_operation` envelope when `op` isn't in a non-empty live op list,
+    else None (an empty list can't prove non-existence)."""
     if not op_names or op in op_names:
         return None
     close = difflib.get_close_matches(op, op_names, n=5, cutoff=0.4)
@@ -301,6 +630,91 @@ def _validate_op_live(client, connector: str, op: str) -> dict[str, Any] | None:
         connector=connector,
         op=op,
         near=close,
+    )
+
+
+def _validate_op_live(client, connector: str, op: str) -> dict[str, Any] | None:
+    """Confirm `op` exists on the LIVE connector definition.
+
+    Used as the fallback when the offline reference store has no ops
+    catalogued for `connector` (so `_validate_op_exists` couldn't decide).
+
+    Returns an `unknown_operation` error (with near-matches) when the live
+    op list is non-empty and `op` isn't in it; None otherwise — including on
+    ANY lookup failure, so a transient hiccup never false-rejects a real op
+    (the execute call still reports genuine errors).
+    """
+    try:
+        _op_def, op_names = _fetch_live_op(client, connector, op)
+    except Exception:  # noqa: BLE001
+        return None
+    return _op_not_in_live(connector, op, op_names)
+
+
+def _validate_op_params_live(op_def: dict[str, Any] | None, connector: str,
+                             op: str,
+                             params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate `params` against a LIVE op definition's parameter list.
+
+    The offline-store analog (`_shared._validate_op_params`) no-ops when the op
+    has no params catalogued — exactly the un-synced case that lets the agent
+    burn turns guessing param names live (`ip`→`ip_address`→`indicator`, the
+    `invest_excessive_mail_egress` flail). This closes that gap: unknown-param
+    (typo detector) + missing-required, validated against the live connector
+    definition. Deliberately loose — select-option membership and type checks
+    stay on the offline path; here we only reject names that don't exist and
+    required names that are absent. Returns a `bad_params` envelope or None.
+
+    Fails open (None) when the live op has no parameter list (can't prove a
+    name is unknown), mirroring `_op_not_in_live`'s empty-list guard. Jinja
+    template values are left alone — only top-level membership is judged."""
+    params = params or {}
+    plist = (op_def or {}).get("parameters") or []
+    if not isinstance(plist, list) or not plist:
+        return None
+    known: dict[str, dict[str, Any]] = {}
+    for p in plist:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name") or p.get("title")
+        if name:
+            known[name] = p
+    if not known:
+        return None
+
+    issues: list[dict[str, Any]] = []
+    for key in params:
+        if key not in known:
+            close = difflib.get_close_matches(key, list(known), n=3, cutoff=0.5)
+            issues.append({
+                "param": key, "problem": "unknown", "near": close,
+                "detail": (f"'{key}' is not a parameter of {connector}/{op}"
+                           + (f"; did you mean {close}?" if close else "")),
+            })
+    for name, p in known.items():
+        if not p.get("required"):
+            continue
+        val = params.get(name)
+        if name not in params or val is None or val == "":
+            issues.append({
+                "param": name, "problem": "missing_required",
+                "detail": f"required parameter '{name}' "
+                          f"({p.get('title') or name}) is missing",
+            })
+    if not issues:
+        return None
+    return _err(
+        "bad_params",
+        f"operation '{op}' on '{connector}' called with {len(issues)} "
+        f"invalid argument(s) (validated against the live connector definition)",
+        suggestions=[
+            f"Call get_op_schema({connector!r}, {op!r}) to see the exact "
+            "parameter names, types, required flags, and select options",
+            "Re-issue the call with corrected args (fix the issues below)",
+        ],
+        connector=connector,
+        op=op,
+        issues=issues,
     )
 
 
@@ -330,8 +744,32 @@ def _preflight_connector(client, connector: str,
                 "and pick an available alternative.",
             ],
             connector=connector,
+            # Never dead-end the analyst: if this connector is the only way to
+            # do what they need (no equivalent configured alternative), forward
+            # this into emit_capability_gap_card. During a wide enrichment
+            # fan-out, prefer skip-and-mention instead (see system prompt).
+            suggested_card=_capability_gap_suggestion(
+                id=f"capgap_cfg_{connector}",
+                missing=f"the '{connector}' connector",
+                why=(f"'{connector}' has no active configuration on this "
+                     f"instance, so its operations can't run"),
+                fix_steps=[
+                    f"Add and activate a configuration for '{connector}' "
+                    f"under Settings → Connectors.",
+                    "Save it and confirm it shows as Available.",
+                ],
+                resume_value="recheck_connector",
+                tips=[
+                    {"text": f"Keep '{connector}' configured so I can use it "
+                             f"without an approval round-trip next time."},
+                ],
+                alternatives=[
+                    {"label": "Skip this & note the gap", "value": "skip_gap"},
+                ],
+            ),
         )
     version = cands[0].get("version") or ""
+    agent_id = cands[0].get("_agent_id") or ""
     config_id = _resolve_config_id(rows, connector, config_name)
 
     # Healthcheck the connector BEFORE running an op. This is cheap — the
@@ -344,7 +782,8 @@ def _preflight_connector(client, connector: str,
     # a hunt are free; an 8s per-call timeout caps a pathologically slow check.
     health = _cached_health(connector, version, config_id)
     if health is None:
-        hc = _live_healthcheck(client, connector, version, config_id)
+        hc = _live_healthcheck(client, connector, version, config_id,
+                               agent_id=agent_id)
         status = hc.get("status")
         message = hc.get("message") or hc.get("error") or ""
         _store_health(connector, version, status, message, config=config_id)
@@ -363,7 +802,123 @@ def _preflight_connector(client, connector: str,
             connector=connector,
             version=version,
             health_status=health.get("status"),
+            suggested_card=_capability_gap_suggestion(
+                id=f"capgap_health_{connector}",
+                missing=f"a healthy '{connector}' connector",
+                why=(f"'{connector}' is configured but its healthcheck is "
+                     f"failing (status {health.get('status')!r})"
+                     + (f": {health.get('message')}" if health.get('message')
+                        else "")),
+                fix_steps=[
+                    f"Open the '{connector}' configuration and check "
+                    f"credentials, host, and network reachability.",
+                    "Re-run its health check until it returns Available.",
+                ],
+                resume_value="recheck_connector",
+                tips=[
+                    {"text": "A connector that fails its healthcheck is caught "
+                             "here in ~0.5s instead of timing out mid-op — fix "
+                             "the config and I'll pick it straight back up."},
+                ],
+                alternatives=[
+                    {"label": "Skip this & note the gap", "value": "skip_gap"},
+                ],
+            ),
         )
+    return None
+
+
+def _live_client_for_grounding():
+    """Resolve a live FSR client for emit-time op grounding, or None when no
+    live target is configured / probes are unavailable.
+
+    Isolated so a caller without a client of its own (`emit_action_card`) shares
+    `run_op`'s resolution path, and so tests can stub the live half. Never
+    raises — any resolution problem yields None (fail open)."""
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "python"))
+        from probes._env import get_client, get_config
+    except ImportError:
+        return None
+    try:
+        if not get_config().is_live():
+            return None
+        return get_client()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def validate_op_grounded(connector: str, op: str,
+                         params: dict[str, Any] | None = None,
+                         client=None) -> dict[str, Any] | None:
+    """Grounding guarantee shared by `run_op` AND `emit_action_card`: a
+    hallucinated/typo'd op — or, when `params` is supplied, a call with
+    unknown/missing-required arguments — must NEVER reach the analyst (as an
+    approval card) or the live box (as an execute). Returns an
+    `unknown_operation` / `bad_params` error envelope or None to proceed.
+
+    Two layers, matching the contract's "offline reference store, with a live
+    connector-definition fallback":
+
+    1. Offline store (`_validate_op_exists`) — decisive when the connector's
+       ops are catalogued. Offline PARAM validation lives in the callers'
+       `_shared._validate_op_params`, which is likewise decisive when params
+       are catalogued.
+    2. Live connector definition — used ONLY when the store has 0 ops for the
+       connector (un-synced reference DB). A single detail fetch grounds BOTH
+       the op name and (when `params` is given) the argument names, so the
+       agent stops discovering param names by trial-and-error live (the
+       `invest_excessive_mail_egress` flail / the deferred half of 1.6).
+       Requires a configured live client; `run_op` passes its already-
+       resolved+preflighted client, `emit_action_card` lets us resolve lazily.
+
+    Fails OPEN (returns None) on any client/preflight/lookup hiccup, so a
+    transient problem never false-rejects a real op. This is why the live half
+    can be added to the emit path without risking a false reject on a flaky
+    network."""
+    off_err = _shared._validate_op_exists(connector, op)
+    if off_err is not None:
+        return off_err
+    # Offline returned None: either the op genuinely exists, or the connector
+    # has 0 ops catalogued. Only the latter needs the live fallback — avoid a
+    # needless round-trip when the offline check was already decisive.
+    try:
+        with _db() as conn:
+            store_ops_count = conn.execute(
+                "SELECT COUNT(*) FROM operations WHERE connector_name=?",
+                (connector,),
+            ).fetchone()[0]
+    except sqlite3.Error:
+        return None  # store unreadable → fail open
+    if store_ops_count != 0:
+        return None  # op (and its params) are catalogued → offline is decisive
+    # Un-synced connector → validate against the live definition.
+    if client is None:
+        client = _live_client_for_grounding()
+    if client is None:
+        return None  # no live target → can't prove non-existence → fail open
+    try:
+        preflight_err = _preflight_connector(client, connector)
+    except Exception:  # noqa: BLE001
+        return None
+    if preflight_err is not None:
+        # Connector itself isn't configured/healthy. We own only op-grounding
+        # here, so fail open and let the caller's own preflight / the execute
+        # surface the connector problem (run_op preflights separately; emit's
+        # card will fail at execute-time preflight, which is the right gate).
+        return None
+    try:
+        op_def, op_names = _fetch_live_op(client, connector, op)
+    except Exception:  # noqa: BLE001
+        return None
+    op_err = _op_not_in_live(connector, op, op_names)
+    if op_err is not None:
+        return op_err
+    if params is not None:
+        try:
+            return _validate_op_params_live(op_def, connector, op, params)
+        except Exception:  # noqa: BLE001
+            return None
     return None
 
 
@@ -420,6 +975,109 @@ def _prune_known_enrichment(cn: str, data: Any) -> Any | None:
     return None
 
 
+# --- Event/alert list digest (FortiSIEM / FortiAnalyzer hunting) -----------
+# A hunt op (search_events, get_associated_events, FAZ get_alerts /
+# get_events_for_incident / get_alert_event_logs, run_report, …) returns many
+# homogeneous rows, each carrying a raw log blob + dozens of parsed fields.
+# Dumping the first 5 raw rows is both lossy and bulky. For triage the agent
+# reasons over AGGREGATES — which IPs/users/hosts recur, what volume, what
+# time spread — so we collapse a long row list into a digest: count, time
+# window, top-N facets with counts, and a few pruned sample rows. Shape-gated
+# (>= this many uniform dict rows) so small/structured results pass through
+# untouched. The full observed schema is still stored for authoring, and the
+# agent can get_event_details / get_record a single row when it needs depth.
+_DIGEST_MIN_ROWS = 8
+_DIGEST_TOP_N = 8
+_DIGEST_SAMPLES = 3
+# Raw log / message payloads — never worth echoing into context.
+_RAW_BLOB_RE = re.compile(
+    r"raw|_raw|rawmsg|rawevent|eventlog|logmessage|payload|rawmessage", re.I)
+_TIME_HINT_RE = re.compile(r"time|date|timestamp|recv|epoch|seen", re.I)
+# Facet families: indicator category → key-name substrings (matched
+# case-insensitively against each row's keys). Covers FortiSIEM
+# (srcIpAddr/destIpAddr/user/action/eventType) and FortiAnalyzer
+# (srcip/dstip/user/devname/action/subtype) naming alike.
+_FACET_FAMILIES: dict[str, tuple[str, ...]] = {
+    "src_ip": ("srcipaddr", "srcip", "sourceip", "src_ip", "source_ip"),
+    "dst_ip": ("destipaddr", "dstip", "destip", "destinationip", "dst_ip"),
+    "user": ("username", "srcuser", "dstuser", "accountname", "user"),
+    "host": ("hostname", "devname", "devicename", "computer", "endpoint",
+             "host"),
+    "action": ("action", "disposition"),
+    "event": ("eventtype", "eventname", "event_type", "subtype", "rulename",
+              "rule", "signature"),
+    "severity": ("severity", "threatlevel", "priority", "level"),
+    "dst_port": ("destport", "dstport", "destinationport", "dport"),
+}
+
+
+def _pick_family_keys(keys: list[str]) -> dict[str, str]:
+    """Map each facet family to the best-matching key in `keys` (exact
+    match preferred over substring), so we tally a consistent column."""
+    low = {k: k.lower() for k in keys}
+    chosen: dict[str, str] = {}
+    for fam, subs in _FACET_FAMILIES.items():
+        hit = next((k for k in keys if low[k] in subs), None)  # exact-ish
+        if hit is None:
+            hit = next((k for k in keys
+                        if any(s in low[k] for s in subs)), None)
+        if hit is not None:
+            chosen[fam] = hit
+    return chosen
+
+
+def _prune_event(rec: dict[str, Any]) -> dict[str, Any]:
+    """A single sample row with raw blobs dropped + strings capped."""
+    out: dict[str, Any] = {}
+    for k, v in rec.items():
+        if _RAW_BLOB_RE.search(k) or v in (None, "", [], {}):
+            continue
+        out[k] = (v[:200] + "…") if isinstance(v, str) and len(v) > 200 else v
+    return out
+
+
+def _digest_record_list(data: Any) -> dict[str, Any] | None:
+    """Collapse a long list of homogeneous event/alert rows into an
+    aggregate digest. Returns None when `data` isn't a hunt-style row list."""
+    if not (isinstance(data, list) and len(data) >= _DIGEST_MIN_ROWS
+            and all(isinstance(x, dict) for x in data[:20])):
+        return None
+    keys = list(data[0].keys())
+    fam_keys = _pick_family_keys(keys)
+    from collections import Counter
+    facets: dict[str, Any] = {}
+    for fam, k in fam_keys.items():
+        c: Counter = Counter()
+        for rec in data:
+            v = rec.get(k)
+            if v not in (None, "", [], {}):
+                c[str(v)[:80]] += 1
+        if c:
+            facets[fam] = {
+                "field": k,
+                "distinct": len(c),
+                "top": [{"value": val, "count": ct}
+                        for val, ct in c.most_common(_DIGEST_TOP_N)],
+            }
+    window = None
+    time_key = next((k for k in keys if _TIME_HINT_RE.search(k)), None)
+    if time_key:
+        times = [rec.get(time_key) for rec in data if rec.get(time_key)]
+        if times:
+            window = {"field": time_key,
+                      "min": str(min(times))[:40], "max": str(max(times))[:40]}
+    return {
+        "_digest": "event_list",
+        "count": len(data),
+        "time_window": window,
+        "facets": facets,
+        "samples": [_prune_event(r) for r in data[:_DIGEST_SAMPLES]],
+        "note": (f"{len(data)} rows aggregated; {_DIGEST_SAMPLES} sample row(s) "
+                 "shown. Use get_event_details / get_record for a single row's "
+                 "full fields."),
+    }
+
+
 def _truncate_generic(obj: Any, depth: int = 0) -> Any:
     """Bound an arbitrary payload: cap string length, list length, dict
     breadth, and recursion depth so an unknown op can't flood context."""
@@ -446,6 +1104,14 @@ def _summarize_op_output(connector: str, op: str,
     truncated = pruned is not None
     if pruned is not None:
         data = pruned
+    else:
+        # Hunt-style row lists (FortiSIEM/FAZ events & alerts, and any op
+        # returning many uniform records): collapse to an aggregate digest
+        # instead of dumping raw rows. Shape-gated, so small/structured
+        # results are untouched.
+        digest = _digest_record_list(data)
+        if digest is not None:
+            return digest, True
     try:
         size = len(json.dumps(data, default=str))
     except Exception:  # noqa: BLE001
@@ -569,15 +1235,26 @@ def run_op(
     preflight_err = _preflight_connector(client, connector, config)
     if preflight_err is not None:
         return preflight_err
+    try:
+        exec_config = (
+            _resolve_config_id(_configured_rows(client), connector, config)
+            or config
+        )
+    except Exception:  # noqa: BLE001
+        exec_config = config
 
-    # Live op-existence fallback. The offline store check above can only catch
-    # a phantom op when the connector's ops are catalogued. When the store has
-    # NO ops for it (un-synced reference DB), validate against the LIVE
-    # connector definition now that preflight has confirmed it's configured —
-    # so a hallucinated op is still caught up front, before the confirm prompt
-    # and the execute. Infra hiccups never block (we let execute report those).
+    # Live op + param fallback. The offline checks above can only catch a
+    # phantom op / bad args when the connector's ops are catalogued. When the
+    # store has NO ops for it (un-synced reference DB), validate BOTH the op
+    # name and the argument names against the LIVE connector definition now
+    # that preflight has confirmed it's configured — so a hallucinated op or a
+    # guessed param name is caught up front, before the confirm prompt and the
+    # execute, instead of the agent discovering the real param names by trial
+    # and error live. Shared with `emit_action_card` via validate_op_grounded
+    # (pass our already-resolved client). Infra hiccups never block (fail open).
     if store_ops_count == 0:
-        live_err = _validate_op_live(client, connector, op)
+        live_err = validate_op_grounded(connector, op, params=params,
+                                        client=client)
         if live_err is not None:
             return live_err
 
@@ -608,7 +1285,7 @@ def run_op(
         "connector": connector,
         "operation": op,
         "version": version,
-        "config": config,
+        "config": exec_config,
         "params": params or {},
     }
 

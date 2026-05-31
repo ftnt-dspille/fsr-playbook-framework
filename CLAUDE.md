@@ -15,7 +15,7 @@ an MCP server, and an in-platform connector (lives in a sibling repo, see below)
 
 ## Repo layout
 - `python/` — compiler, resolver, typed walker, MCP server (`python/mcp_server.py`), tests.
-- `fsr_core/` — vendored core shared with the connector. Fix source here, then re-vendor into the connector.
+- `fsr_core/` — vendored core shared with the connector. **ALWAYS edit here (FSRPlaybookYaml/fsr_core/), NEVER edit the connector's copy directly** (`ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/fsr_core/`). `deploy.sh` runs `rsync` which blows away any direct edits to the connector's copy. Edit source → commit → deploy.
 - `web/backend` (FastAPI :47821), `web/frontend` — the **Playbook Studio** editor, **Svelte 5**/Vite (:47822). This is the only frontend in this repo.
 - Connector (in-platform MCP + chat): **`/Users/dylanspille/PycharmProjects/ConnectorsV2/fsr-playbook-builder`** — has `scripts/install_to_fsr.py`, `scripts/probe_fsr.py`, `tests/fsr_contract.py`. The contract harness runs **there**, after a live `probe_fsr.py` re-capture — not in this repo's `make verify`.
 - **Angular widget** (the surface that renders inside FortiSOAR) is a separate WebStorm project with its own toolchain — not in this repo or the connector repo.

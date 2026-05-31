@@ -1,0 +1,54 @@
+{
+  "fixture": "invest_outbound_cleartext_c2",
+  "captured": "20260530T192043Z",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "pending_approval",
+  "recall": 1.0,
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "module": "alerts",
+        "uuid": "54f25f1f-808e-4bbb-8e20-e95855291184",
+        "relationships": true
+      },
+      "ok": true
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "192.168.77.49 OR 108.17.204.5",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "incidents",
+        "q": "192.168.77.49 OR 108.17.204.5",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "list_configured_connectors",
+      "args": {
+        "probe": true
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "get_ip_report",
+        "params": {
+          "ip": "108.17.204.5"
+        }
+      },
+      "ok": null
+    }
+  ]
+}

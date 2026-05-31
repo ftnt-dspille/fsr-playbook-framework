@@ -64,6 +64,44 @@ class _BackendConfigProvider:
 
 _llm_factory.set_config_provider(_BackendConfigProvider())
 
+
+def _install_approval_persistence() -> None:
+    """Phase 3.2 — back the HITL approval gateway with sqlite so suspended
+    tier-3+ sessions survive a backend restart. Installs as the process-wide
+    default so both the provider (stash side) and the chat route (resolve
+    side) share one persisted store. Also pins a stable HMAC key (3.1) in the
+    secrets store so persisted tokens still verify after a restart; without a
+    stable key the binding check fails closed and the analyst re-issues."""
+    import secrets as _secrets
+    from fsr_core.llm import approvals as _approvals
+
+    if not os.environ.get("FSR_APPROVAL_HMAC_KEY"):
+        try:
+            from .secrets_store import get_secrets
+            sb = get_secrets()
+            ok, _why = sb.available()
+            if ok:
+                key = sb.get("approval_hmac_key")
+                if not key:
+                    key = _secrets.token_hex(32)
+                    sb.set("approval_hmac_key", key)
+                os.environ["FSR_APPROVAL_HMAC_KEY"] = key
+            # else: keyring unavailable → fall through to approvals' per-process
+            # random secret (persisted sessions won't verify across a restart).
+        except Exception:
+            pass
+
+    try:
+        db_path = Path(__file__).resolve().parent / "approvals.db"
+        _approvals.set_default_gateway(
+            _approvals.SqliteApprovalGateway(str(db_path))
+        )
+    except Exception:
+        # Never block startup on persistence — fall back to the in-memory
+        # default gateway already installed at import.
+        pass
+
+
 from .routes.yaml_routes import router as yaml_router  # noqa: E402
 from .routes.chat import router as chat_router  # noqa: E402
 from .routes.playbook import router as playbook_router  # noqa: E402
@@ -93,6 +131,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _on_startup() -> None:
+    # Defer to startup (not import) so we don't touch keyring at import time —
+    # mirrors the keyring-deferral the /api/health handler relies on.
+    _install_approval_persistence()
 
 
 _FSR_PROBE_CACHE: dict = {"ts": 0.0, "result": None}

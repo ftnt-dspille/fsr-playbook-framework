@@ -8,11 +8,12 @@ import re
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 from ._shared import (
     mcp,
     _err,
+    _capability_gap_suggestion,
     _db,
     _rows,
     _verifications_for,
@@ -23,6 +24,173 @@ from ._shared import (
 )
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
+
+# ---------------------------------------------------------------------------
+# Record summarization — keep get_record cheap for the agent loop
+# ---------------------------------------------------------------------------
+# A hydrated FSR alert/incident with $relationships=true is ~100KB of JSON:
+# ~80 null/empty fields, picklist objects wrapped in hydra metadata, and big
+# hydrated reference lists (MITRE mitigations/software/groups, indicators).
+# The triage agent only needs the populated scalar fields (indicators are
+# already top-level: sourceIp/destinationIp/hostName/userName/...) plus a
+# thin index of related records to pivot on. Echoing the full blob back into
+# history every turn is what blows the per-minute token budget. This prunes
+# it to a triage projection; pass `full=True` to get_record for the raw body.
+
+# Hydra/audit/owner noise that carries no triage signal.
+_REC_NOISE_KEYS = frozenset({
+    "@context", "@type", "createUser", "modifyUser", "tenant", "owners",
+    "ownersList", "__self", "__replace", "peKpiData",
+})
+# Hydrated reference lists where the useful signal is already a top-level
+# scalar (mitreattackid / mitreTechnique). Collapse to names only.
+_REC_REFERENCE_LISTS = frozenset({
+    "mitremitigations", "mitresoftware", "mitregroups", "mitretactics",
+    "mitre_techniques", "mitre_sub_techniques",
+})
+_REC_MAX_REL = 5          # cap hydrated relationship members per list
+_REC_MAX_STR = 600        # truncate long strings (e.g. HTML description)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _is_empty(v: Any) -> bool:
+    return v is None or v == "" or v == [] or v == {}
+
+
+def _ref_label(d: dict[str, Any]) -> str:
+    return str(d.get("name") or d.get("title") or d.get("value")
+               or d.get("displayName") or d.get("hostname")
+               or d.get("itemValue") or d.get("@id", ""))[:120]
+
+
+def _shrink_value(key: str, v: Any) -> Any:
+    """Prune a single record field to its triage-relevant core."""
+    # Picklist / state object: {"@id":..., "itemValue": "Open", ...} -> scalar.
+    if isinstance(v, dict) and "itemValue" in v:
+        return v.get("itemValue")
+    # Other hydrated single reference: keep iri + label.
+    if isinstance(v, dict) and "@id" in v:
+        lbl = _ref_label(v)
+        return {"iri": v["@id"], "label": lbl} if lbl else {"iri": v["@id"]}
+    if isinstance(v, dict):
+        inner = {k: _shrink_value(k, x) for k, x in v.items()
+                 if k not in _REC_NOISE_KEYS and not _is_empty(x)}
+        return inner
+    if isinstance(v, list):
+        members = [m for m in v if not _is_empty(m)]
+        if not members:
+            return None
+        # Reference-data lists: names only.
+        if key in _REC_REFERENCE_LISTS:
+            names = [_ref_label(m) if isinstance(m, dict) else str(m)
+                     for m in members]
+            return names[:_REC_MAX_REL] + (
+                [f"...+{len(names) - _REC_MAX_REL} more"]
+                if len(names) > _REC_MAX_REL else [])
+        # Hydrated relationship members: thin index of {iri, label, type, ...}.
+        out = []
+        for m in members[:_REC_MAX_REL]:
+            if isinstance(m, dict) and "@id" in m:
+                ref = {"iri": m["@id"]}
+                lbl = _ref_label(m)
+                if lbl:
+                    ref["label"] = lbl
+                for k in ("type", "value", "indicatorType", "reputation",
+                          "severity"):
+                    if not _is_empty(m.get(k)):
+                        ref[k] = _shrink_value(k, m[k])
+                out.append(ref)
+            else:
+                out.append(_shrink_value(key, m))
+        if len(members) > _REC_MAX_REL:
+            out.append(f"...+{len(members) - _REC_MAX_REL} more")
+        return out
+    if isinstance(v, str):
+        s = _TAG_RE.sub(" ", v).strip() if "<" in v and ">" in v else v
+        s = re.sub(r"\s+", " ", s) if s != v else s
+        return s[:_REC_MAX_STR] + "…" if len(s) > _REC_MAX_STR else s
+    return v
+
+
+# Known-boilerplate top-level keys that carry no triage/pivot signal but bloat
+# a `full` body: multi-paragraph impact prose, SLA/escalation plumbing.
+_REC_FULL_DROP_KEYS = frozenset({
+    "impactAssessments", "escalationRules", "escalation_rules",
+    "responseProcedure", "recommendations",
+})
+# Hard ceiling on a `full=True` body so a single get_record can NEVER dump the
+# raw ~100KB hydrated incident into the per-turn context (it then rides in
+# messages[] and is re-sent every subsequent turn). The pruned default is ~5%
+# of this; the cap is the structural backstop for the rare full path.
+_REC_FULL_MAX_BYTES = 8192
+
+
+def _clean_full_record(rec: dict[str, Any]) -> dict[str, Any]:
+    """A `full=True` body with the dead weight stripped: null/empty fields,
+    hydra/audit noise, SLA plumbing, and known-boilerplate prose. Keeps every
+    populated field otherwise (this is the debug path — it must stay faithful),
+    just without the ~80 null fields and the impact-assessment wall that make
+    the raw body 100KB."""
+    if not isinstance(rec, dict):
+        return rec
+    out: dict[str, Any] = {}
+    for k, v in rec.items():
+        if k in ("@id", "uuid", "id", "name"):  # always keep identity
+            out[k] = v
+            continue
+        if k in _REC_NOISE_KEYS or k in _REC_FULL_DROP_KEYS:
+            continue
+        if "sla" in k.lower():  # *SLA* timers/dates — plumbing, not signal
+            continue
+        if _is_empty(v):
+            continue
+        out[k] = v
+    return out
+
+
+def _cap_json(obj: Any, max_bytes: int = _REC_FULL_MAX_BYTES):
+    """Bound a value's serialized size. Returns (value, truncated). When the
+    JSON exceeds `max_bytes`, replaces it with a head/tail-truncated marker so
+    a single tool result can't blow the token budget — the agent still sees the
+    shape + identity, and is told to fetch specific fields via the pruned
+    projection instead."""
+    s = json.dumps(obj, default=str)
+    if len(s) <= max_bytes:
+        return obj, False
+    half = max_bytes // 2
+    return {
+        "_truncated": True,
+        "_original_bytes": len(s),
+        "_head": s[:half],
+        "_tail": s[-half:],
+        "_note": ("full body exceeded the size cap and was head/tail "
+                  "truncated; re-fetch without full= for the pruned "
+                  "projection (every pivotable field, ~5% the size)"),
+    }, True
+
+
+def _summarize_record(rec: dict[str, Any]) -> dict[str, Any]:
+    """Prune a hydrated FSR record to a compact triage projection.
+
+    Drops null/empty fields, hydra/audit noise, and collapses picklist
+    objects + hydrated reference lists. Always preserves the record's
+    identity (@id/uuid/name) and every populated scalar field — which is
+    where the indicators the agent enriches (sourceIp/destinationIp/host/
+    user/hashes) live. Module-agnostic; safe for alerts/incidents/assets.
+    """
+    if not isinstance(rec, dict):
+        return rec
+    out: dict[str, Any] = {}
+    for k, v in rec.items():
+        if k in ("@id", "uuid", "id", "name"):  # always keep identity
+            out[k] = v
+            continue
+        if k in _REC_NOISE_KEYS or _is_empty(v):
+            continue
+        sv = _shrink_value(k, v)
+        if not _is_empty(sv):
+            out[k] = sv
+    return out
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -118,9 +286,320 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
         "vars": dict(env_obj, steps=steps_map),
     }
 
+# ---------------------------------------------------------------------------
+# Containment-action discovery — one call, no connector-by-connector hunting
+# ---------------------------------------------------------------------------
+# Containment verbs that mark an op as a response action (not a read/reversal).
+_CONTAINMENT_VERBS: tuple[str, ...] = (
+    "block", "quarantine", "isolate", "disable", "revoke", "ban", "suspend",
+    "kill", "terminate", "contain", "deactivate", "shutdown",
+)
+# Op-name prefixes that are reads or the UNDO of a containment action — never
+# what "stage containment" wants.
+_NON_ACTION_PREFIXES: tuple[str, ...] = (
+    "get_", "list_", "search_", "fetch_", "check_", "describe_", "count_",
+    "enable_", "allow_", "unblock", "unquarantine", "unisolate", "unban",
+    "unsuspend", "unrevoke", "undisable",
+)
+# Indicator type -> op-name/title keywords. The agent passes the type of the
+# thing it wants to contain; we match it to the right family of ops.
+_TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "ip": ("ip", "address", "blacklist"),
+    "host": ("host", "endpoint", "device", "machine", "asset", "agent"),
+    "endpoint": ("endpoint", "host", "device", "agent", "machine"),
+    "user": ("user", "account", "identity", "credential", "password", "login"),
+    "url": ("url", "link", "uri"),
+    "domain": ("domain", "fqdn", "dns"),
+    "hash": ("hash", "file", "sample", "md5", "sha"),
+    "file": ("file", "hash", "sample"),
+    "email": ("email", "mail", "message"),
+    "process": ("process", "task", "service"),
+}
+_CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
+
+
+def _required_params(conn: sqlite3.Connection, connector: str,
+                     op: str) -> list[dict[str, Any]]:
+    """The visible required input params for an op, so the agent can stage
+    emit_action_card without a follow-up get_op_schema round-trip."""
+    try:
+        rows = conn.execute(
+            "SELECT param_name, type, title FROM operation_params "
+            "WHERE connector_name=? AND op_name=? "
+            "AND required IN (1,'1','true','True') "
+            "AND (visible IS NULL OR visible NOT IN (0,'0','false','False')) "
+            "ORDER BY ord",
+            (connector, op),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [{"name": r[0], "type": r[1]} for r in rows if r[0]]
+
+
+def _connectors_that_could_contain(
+        keywords: tuple[str, ...] | None,
+        exclude: set[str],
+        limit: int = 4) -> list[dict[str, str]]:
+    """Across the WHOLE reference catalog (not just configured connectors),
+    find connectors that carry a containment/response op matching the target —
+    minus the ones already configured. This turns a dead end into a concrete
+    "configure connector X to enable this" recommendation. Best-effort: any DB
+    hiccup returns []."""
+    found: dict[str, str] = {}  # connector -> sample op that would do the job
+    try:
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                "SELECT connector_name, op_name, title, category FROM operations "
+                "WHERE (enabled IS NULL OR enabled NOT IN (0,'0'))"
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    for connector, op, title, category in rows:
+        if not connector or connector in exclude or connector in found:
+            continue
+        nm = (op or "").lower()
+        cat = (category or "").lower()
+        if nm.startswith(_NON_ACTION_PREFIXES):
+            continue
+        is_action = (cat in _CONTAINMENT_CATEGORIES
+                     or any(v in nm for v in _CONTAINMENT_VERBS))
+        if not is_action:
+            continue
+        if keywords and not any(
+                k in nm or k in (title or "").lower() for k in keywords):
+            continue
+        found[connector] = op or ""
+        if len(found) >= limit:
+            break
+    return [{"connector": c, "op": o} for c, o in found.items()]
+
+
+def _healthcheck_many(
+        client,
+        targets: list[Union[tuple[str, str], tuple[str, str, str]]]) -> dict[str, str]:
+    """Healthcheck many (name, version) connectors CONCURRENTLY, returning
+    {name: status}. Serial probing was the dominant latency in the live triage
+    loop (~45 configured connectors × a blocking GET each, some slow/hung
+    vendors = minutes per call, on both the eval and the analyst's screen).
+    `_live_healthcheck` caps each call at timeout=8; the pool collapses sum →
+    max. Read-only independent calls, so a thread pool is safe; workers capped
+    so we don't open dozens of sockets at once."""
+    if not targets:
+        return {}
+    from concurrent.futures import ThreadPoolExecutor
+    from .tools_execution import _live_healthcheck
+
+    def _probe(
+            target: Union[tuple[str, str], tuple[str, str, str]]) -> tuple[str, str]:
+        name, version = target[0], target[1]
+        agent_id = target[2] if len(target) > 2 else ""
+        try:
+            hr = _live_healthcheck(client, name, version, agent_id=agent_id)
+            return name, str(hr.get("status") or "error")
+        except Exception as e:  # noqa: BLE001
+            return name, f"error:{e!r}"
+
+    with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+        return dict(pool.map(_probe, targets))
+
+
+@mcp.tool()
+def find_containment_actions(target_type: str = "", probe: bool = True,
+                             limit: int = 25) -> dict[str, Any]:
+    """List the containment/response actions that are CONFIGURED (and, with
+    probe, healthy) on this FortiSOAR instance — optionally for one indicator
+    type. Use this to STAGE containment instead of hunting connector-by-
+    connector with find_connector/find_operation.
+
+    Given a host to isolate, an IP to block, or a user to disable, one call
+    returns the destructive ops you can actually run here — with the connector,
+    op, category, the approval tier, and the required params — so you can go
+    straight to emit_action_card. Read-only: it discovers actions, it does not
+    run them. Every action it returns is tier 3+ and MUST be staged via
+    emit_action_card for analyst approval, never run silently.
+
+    Args:
+        target_type: indicator to contain — one of ip/host/endpoint/user/url/
+            domain/hash/file/email/process. Empty returns every containment
+            action across configured connectors.
+        probe: healthcheck each configured connector (default True) and drop
+            the ones that aren't Available, so you don't stage an action on a
+            disconnected connector.
+        limit: max actions to return (default 25).
+
+    Returns:
+        {"target_type", "actions": [{connector, op, title, category, tier,
+         requires_approval, status, required_params:[{name,type}]}],
+         "count", "probed"}. Deprecated ops sort last.
+    """
+    target = (target_type or "").strip().lower()
+    keywords = _TARGET_KEYWORDS.get(target)
+    if target and keywords is None:
+        return {"ok": False, "code": "unknown_target_type",
+                "message": f"target_type {target_type!r} not recognized",
+                "valid": sorted(_TARGET_KEYWORDS)}
+
+    # 1. Configured + active connectors on the live box. NOTE: list WITHOUT
+    # probing — healthchecking all ~45 configured connectors here is the
+    # latency trap (minutes on the live box). We narrow to the few connectors
+    # that actually carry a matching containment op via the store first, then
+    # healthcheck ONLY those (step 3).
+    listing = list_configured_connectors(probe=False, verbose=True)
+    if "error" in listing:
+        return {"ok": False, "code": "no_fsr_configured",
+                "message": listing["error"]}
+    configured: dict[str, str] = {}  # name -> listing status
+    version_of: dict[str, str] = {}  # name -> version (for the scoped probe)
+    agent_of: dict[str, str] = {}    # name -> FortiSOAR Agent id, if proxied
+    for c in listing.get("configured", []):
+        name = c.get("name")
+        if not name:
+            continue
+        configured[name] = str(c.get("status") or "")
+        if c.get("version"):
+            version_of[name] = c["version"]
+        if c.get("_agent_id"):
+            agent_of[name] = c["_agent_id"]
+    if not configured:
+        return {"ok": True, "target_type": target or None, "actions": [],
+                "count": 0, "probed": probe,
+                "message": "no configured/healthy connectors to contain with"}
+
+    # 2. Pull each connector's destructive ops from the store, classify, filter.
+    actions: list[dict[str, Any]] = []
+    try:
+        from fsr_core.llm.tools import _tier_for_run_op as _tier  # type: ignore
+    except Exception:  # noqa: BLE001
+        _tier = None  # tier becomes best-effort
+    placeholders = ",".join("?" * len(configured))
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+        rows = conn.execute(
+            f"SELECT connector_name, op_name, title, category FROM operations "
+            f"WHERE connector_name IN ({placeholders}) "
+            f"AND (enabled IS NULL OR enabled NOT IN (0,'0')) ",
+            tuple(configured),
+        ).fetchall()
+        for connector, op, title, category in rows:
+            nm = (op or "").lower()
+            cat = (category or "").lower()
+            if nm.startswith(_NON_ACTION_PREFIXES):
+                continue
+            is_action = (cat in _CONTAINMENT_CATEGORIES
+                         or any(v in nm for v in _CONTAINMENT_VERBS))
+            if not is_action:
+                continue
+            if keywords and not any(
+                    k in nm or k in (title or "").lower() for k in keywords):
+                continue
+            # The decisive guard: a real response action is one the dispatch
+            # gate would force through approval (tier >= 3). This drops
+            # query/investigation-category false positives that merely share a
+            # verb (e.g. delete_device, get_blocked_ip) without re-listing
+            # every safe op.
+            tier = _tier({"connector": connector, "op": op}) if _tier else 4
+            if tier < 3:
+                continue
+            actions.append({
+                "connector": connector,
+                "op": op,
+                "title": title or op,
+                "category": category or "unknown",
+                "tier": tier,
+                "requires_approval": True,
+                "status": configured.get(connector),
+                "deprecated": "deprecat" in (title or "").lower(),
+                "required_params": _required_params(conn, connector, op),
+            })
+
+    # 3. Scoped healthcheck: probe ONLY the connectors that carry a candidate
+    # action (a handful), not all configured ones. Drop actions whose connector
+    # we actively probed and found unhealthy — so we never stage on a known-
+    # disconnected connector. But FAIL OPEN: if a connector couldn't be probed
+    # (no version to scope the probe, or no live client), fall back to its
+    # listing status rather than silently dropping a valid containment action.
+    # A probe gap must never manufacture a dead end out of a configured op.
+    if probe and actions:
+        candidates = {a["connector"] for a in actions}
+        targets = [(c, version_of[c], agent_of.get(c, ""))
+                   for c in candidates if c in version_of]
+        client = _shared._live_client() if targets else None
+        health = _healthcheck_many(client, targets) if client is not None else {}
+        healthy_ok = {"available", "completed", "active", "connected",
+                      "ok", "success"}
+        kept = []
+        for a in actions:
+            # Probed result wins; otherwise trust the listing status we already
+            # have (probe gap → fail open, don't drop).
+            st = health.get(a["connector"], a.get("status") or "")
+            if str(st).lower() not in healthy_ok:
+                continue
+            a["status"] = st
+            kept.append(a)
+        actions = kept
+
+    # Non-deprecated first, then by connector/op for stable ordering.
+    actions.sort(key=lambda a: (a["deprecated"], a["connector"], a["op"]))
+    out: dict[str, Any] = {"ok": True, "target_type": target or None,
+                           "actions": actions[:limit], "count": len(actions),
+                           "probed": probe}
+    if not actions:
+        # Connectors are configured, but none can contain this (the set is
+        # intel/utility only, or nothing matches the target type). Don't dead-
+        # end the analyst: build a ready-to-emit `capability_gap` card that
+        # names which connector to configure (looked up from the full catalog),
+        # how to resume, and manual fallbacks. The agent forwards `suggested_card`
+        # straight into emit_capability_gap_card; the prompt mandates it.
+        scope = f" for target type {target!r}" if target else ""
+        miss = f"{target} containment" if target else "containment / response"
+        could = _connectors_that_could_contain(keywords, set(configured))
+        if could:
+            names = ", ".join(c["connector"] for c in could)
+            fix_steps = [
+                f"Configure one of these connectors under Settings → "
+                f"Connectors: {names} (each carries a matching containment op, "
+                f"e.g. {could[0]['connector']}.{could[0]['op']}).",
+                "Save the configuration and confirm it shows as Available.",
+            ]
+        else:
+            fix_steps = [
+                "Install + configure a response connector for this target "
+                "(e.g. fortigate-firewall for IP/host blocking) under "
+                "Settings → Connectors.",
+            ]
+        out["suggested_card"] = _capability_gap_suggestion(
+            id=f"capgap_{target or 'containment'}",
+            missing=miss,
+            why=(f"no tier-3 containment operation is available on any "
+                 f"configured, healthy connector{scope}"),
+            fix_steps=fix_steps,
+            resume_value="recheck_containment",
+            tips=[
+                {"text": "Keep at least one response connector configured + "
+                         "healthy so containment can be staged automatically.",
+                 "hint": "Intel-only instances can enrich but never contain."},
+                {"text": "Grant the connector probe access so I can confirm "
+                         "it's reachable before staging an action."},
+            ],
+            alternatives=[
+                {"label": "Escalate to T2", "value": "escalate_t2"},
+                {"label": "Create remediation ticket", "value": "ticket"},
+                {"label": "Acknowledge & document", "value": "document"},
+            ],
+        )
+        out["message"] = (
+            f"No containment/response action is configured on this FortiSOAR "
+            f"instance{scope}. Don't keep searching and don't dead-end the "
+            f"analyst: call `emit_capability_gap_card` with the `suggested_card` "
+            f"payload returned here (it names which connector to configure and "
+            f"includes a resume button), and note in your verdict that automated "
+            f"containment isn't available here yet.")
+    return out
+
+
 @mcp.tool()
 def list_configured_connectors(probe: bool = False,
-                               verbose: bool = False) -> dict[str, Any]:
+                               verbose: bool = False,
+                               only: set[str] | None = None) -> dict[str, Any]:
     """List connectors that are configured AND active on the live FSR instance.
 
     A connector with no configuration cannot be called — it'll fail at runtime
@@ -128,11 +607,15 @@ def list_configured_connectors(probe: bool = False,
     connector to put in a playbook.
 
     Args:
-        probe: when True, also healthcheck each one (one HTTP call per
-            connector — slower but gives live "Available"/"Disconnected"
-            status). When False (default), just lists the configured set.
+        probe: when True, also healthcheck each one (live HTTP per connector).
+            Healthchecks run CONCURRENTLY (thread pool, per-call timeout) so a
+            full probe is bounded by the slowest single vendor, not their sum.
         verbose: when True, include label, version, and config_count.
             Default returns only name + status to keep tool-result tokens low.
+        only: internal — when set, healthcheck just this subset of connector
+            names (the rest keep their listing status). Lets callers that have
+            already narrowed to a handful of relevant connectors avoid probing
+            all ~45 configured ones. Not exposed to the agent.
 
     Returns:
         {configured: [{name, status[, version, label, config_count]}], probed: bool}
@@ -154,11 +637,20 @@ def list_configured_connectors(probe: bool = False,
             + "/api/integration/connector_details/?format=json&configured=true&exclude=operation&active=true",
             json={}, verify=client.verify_ssl,
         )
-        rows = (r.json().get("data") or []) if r.status_code == 200 else []
+        rows = list((r.json().get("data") or []) if r.status_code == 200 else [])
     except Exception as e:  # noqa: BLE001
         return {"error": f"connector_details fetch failed: {e!r}"}
 
+    try:
+        from .tools_execution import _agent_configured_rows
+        already = {x.get("name") for x in rows}
+        rows += [x for x in _agent_configured_rows(client) if x.get("name") not in already]
+    except Exception:  # noqa: BLE001
+        pass
+
     out: list[dict] = []
+    name_version: dict[str, str] = {}
+    name_agent: dict[str, str] = {}
     for x in rows:
         item: dict[str, Any] = {
             "name": x.get("name"),
@@ -166,21 +658,27 @@ def list_configured_connectors(probe: bool = False,
         }
         # `version` is needed locally for the probe call regardless of verbose.
         x_version = x.get("version")
+        if x.get("name") and x_version:
+            name_version[x["name"]] = x_version
+        if x.get("name") and x.get("_agent_id"):
+            name_agent[x["name"]] = x["_agent_id"]
+            item["_agent_id"] = x["_agent_id"]
         if verbose:
             item["version"] = x_version
             item["label"] = x.get("label")
             item["config_count"] = x.get("config_count")
-        if probe and item["name"] and x_version:
-            try:
-                hr = client.session.get(
-                    client.base_url
-                    + f"/api/integration/connectors/healthcheck/{item['name']}/{x_version}/",
-                    verify=client.verify_ssl,
-                )
-                item["status"] = (hr.json().get("status") if hr.status_code == 200 else f"http_{hr.status_code}")
-            except Exception as e:  # noqa: BLE001
-                item["status"] = f"error:{e!r}"
         out.append(item)
+
+    # When `only` is given, healthcheck just that subset (the caller already
+    # knows which connectors are relevant — e.g. find_containment_actions has
+    # filtered to the few with a matching op). Otherwise probe all configured.
+    if probe:
+        targets = [(n, v, name_agent.get(n, "")) for n, v in name_version.items()
+                   if only is None or n in only]
+        health = _healthcheck_many(client, targets)
+        for item in out:
+            if item["name"] in health:
+                item["status"] = health[item["name"]]
     return {"configured": out, "probed": probe, "count": len(out)}
 
 @mcp.tool()
@@ -630,7 +1128,7 @@ def search_module_records(module: str, q: str = "",
 
 @mcp.tool()
 def get_record(iri: str = "", module: str = "", uuid: str = "",
-               relationships: bool = True) -> dict[str, Any]:
+               relationships: bool = True, full: bool = False) -> dict[str, Any]:
     """Fetch a single FSR record by IRI (or module+uuid), with relationships.
 
     The read-only companion the triage prompt assumes when it tells the
@@ -647,16 +1145,34 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
       uuid: record UUID — required if no ``iri``.
       relationships: when true (default), append ``?$relationships=true``
         so related entities are hydrated inline.
+      full: leave this false. The default pruned projection already
+        contains every triage-relevant field — all indicator scalars
+        (sourceIp/destinationIp/host/user/hashes), severity/status, and a
+        capped {iri,label} index of related records — at ~5% the size.
+        ``full=True`` does NOT return the raw ~100KB body: it returns a
+        cleaned (null/empty + SLA/boilerplate stripped), hard size-capped
+        body with ``coerced_full=true`` set. It exists only for rare
+        schema-debugging; do NOT set it during normal triage — the pruned
+        default has every pivotable field already.
 
     Returns:
       ``{"ok": true, "iri": ..., "record": {...}, "url": ...}`` on a 200,
-      else ``{"ok": false, "code": ..., "message": ...}``.
+      else ``{"ok": false, "code": ..., "message": ...}``. When pruned,
+      ``"summarized": true`` is set so callers know it isn't the raw body.
     """
     path = ""
     if iri and isinstance(iri, str):
-        # Normalise: accept a full IRI, with or without a leading slash,
-        # and strip any query string the caller pasted along.
-        path = "/" + iri.strip().lstrip("/").split("?", 1)[0]
+        s = iri.strip().split("?", 1)[0]
+        head = s.split(":", 1)[0]
+        if ":" in s and "/" not in head:
+            # `module:uuid` shorthand (the colon form the triage prompt
+            # uses, e.g. `alerts:54f2…`) — the agent often pastes it
+            # straight into `iri`. Expand to a real IRI instead of 404ing.
+            mod, _, rest = s.partition(":")
+            path = f"/api/3/{mod.strip()}/{rest.strip()}"
+        else:
+            # Full IRI, with or without a leading slash.
+            path = "/" + s.lstrip("/")
     elif module and uuid:
         bare = module.split("?", 1)[0].strip()
         if not bare:
@@ -693,12 +1209,33 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
         return {"ok": False, "code": "bad_json",
                 "message": "FSR returned 200 but body was not JSON", "url": url}
 
-    return {
+    out: dict[str, Any] = {
         "ok": True,
         "iri": data.get("@id", path),
-        "record": data,
         "url": url,
     }
+    if full:
+        # `full=True` is discouraged during triage — the pruned projection
+        # already carries every pivotable field. We honour the request for a
+        # fuller body but NEVER return the raw ~100KB blob: strip the dead
+        # weight (null/empty, SLA/boilerplate) and hard-cap the size so one
+        # call can't blow the per-turn budget (the sess-uq31go5p waste). The
+        # flags tell the agent it didn't get the verbatim body.
+        cleaned = _clean_full_record(data)
+        capped, truncated = _cap_json(cleaned)
+        out["record"] = capped
+        out["coerced_full"] = True
+        out["note"] = (
+            "full=True returned a cleaned, size-capped body (null/empty + "
+            "SLA/boilerplate dropped), not the raw hydrated record. The "
+            "default pruned projection already has every pivotable field — "
+            "prefer get_record without full= during triage.")
+        if truncated:
+            out["truncated"] = True
+    else:
+        out["record"] = _summarize_record(data)
+        out["summarized"] = True
+    return out
 
 
 def _assert_one(client: Any, a: dict[str, Any]) -> dict[str, Any]:

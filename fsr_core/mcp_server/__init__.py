@@ -98,6 +98,7 @@ from .tools_corpus import (
 
 # Triage tools
 from .tools_triage import (
+    find_containment_actions,
     get_record,
     get_run_env,
     list_configured_connectors,
@@ -150,6 +151,7 @@ from .tools_verify import verify_playbook
 from .tools_enhancement import verify_enhancement
 from .tools_emit import (
     emit_action_card,
+    emit_capability_gap_card,
     emit_choice_card,
     emit_decision_step,
     emit_manual_input,
@@ -215,6 +217,7 @@ __all__ = [
     "find_step_recipe",
     "search_api_examples",
     # Triage
+    "find_containment_actions",
     "get_record",
     "get_run_env",
     "list_configured_connectors",

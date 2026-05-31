@@ -42,6 +42,7 @@ SAFE_TOOLS: list[str] = [
     "verify_enhancement",
     "emit_decision_step",
     "list_configured_connectors",
+    "find_containment_actions",
     "healthcheck_connector",
     "list_picklists",
     "picklist_for_field",
@@ -55,6 +56,7 @@ SAFE_TOOLS: list[str] = [
     "emit_choice_card",
     "emit_action_card",
     "emit_manual_input",
+    "emit_capability_gap_card",
     # Phase 1.1 — HTTP fallback authoring helper.
     "propose_http_fallback",
     # Phase 1.2 — live triage (read-only FSR).
@@ -100,6 +102,7 @@ TOOL_TIERS: dict[str, int] = {
     # Tier 0 — pure local YAML render from a structured payload.
     "emit_decision_step": 0,
     "list_configured_connectors": 1,
+    "find_containment_actions": 1,
     "healthcheck_connector": 1,
     "diagnose_yaml_against_pb_execution": 1,
     # Phase 0 — pure local compute (no FSR I/O).
@@ -110,6 +113,7 @@ TOOL_TIERS: dict[str, int] = {
     "emit_choice_card": 0,
     "emit_action_card": 0,
     "emit_manual_input": 0,
+    "emit_capability_gap_card": 0,
     "propose_http_fallback": 0,
     # Phase 1.2 — read-only FSR API.
     "why_did_playbook_fail": 1,
@@ -391,6 +395,68 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                     },
                 },
             },
+        },
+    },
+    "emit_capability_gap_card": {
+        "type": "object",
+        "required": ["id", "missing", "why", "fix_steps", "resume"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1,
+                   "description": "Stable card id; echoed on resume."},
+            "missing": {"type": "string", "minLength": 1,
+                        "description": "Capability the investigation needs, "
+                                       "in plain English (e.g. 'IP containment')."},
+            "why": {"type": "string", "minLength": 1,
+                    "description": "One line on why it's unavailable here."},
+            "fix_steps": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Ordered concrete steps to enable the capability.",
+                "items": {"type": "string", "minLength": 1},
+            },
+            "resume": {
+                "type": "object",
+                "required": ["label", "value"],
+                "additionalProperties": False,
+                "description": "Re-check button. On click the widget resumes "
+                               "the turn echoing `value`; the agent re-runs the "
+                               "blocked discovery and continues.",
+                "properties": {
+                    "label": {"type": "string", "minLength": 1},
+                    "value": {"type": "string", "minLength": 1,
+                              "description": "Machine-readable; echoed on resume."},
+                },
+            },
+            "tips": {
+                "type": "array",
+                "description": "Automation/UX recommendations.",
+                "items": {
+                    "type": "object",
+                    "required": ["text"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string", "minLength": 1},
+                        "hint": {"type": "string"},
+                    },
+                },
+            },
+            "alternatives": {
+                "type": "array",
+                "description": "Manual fallbacks (resume semantics like a "
+                               "choice_card option).",
+                "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1},
+                        "value": {"type": "string", "minLength": 1},
+                        "hint": {"type": "string"},
+                    },
+                },
+            },
+            "docs_url": {"type": "string"},
         },
     },
     "emit_action_card": {

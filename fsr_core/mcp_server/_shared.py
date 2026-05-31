@@ -7,31 +7,36 @@ import sys
 from pathlib import Path
 from typing import Any
 
+class _FallbackFastMCP:
+    """No-op FastMCP shim for connector runtimes.
+
+    FortiSOAR's connector sandbox only calls these functions directly; it
+    doesn't run the stdio MCP server. Some sandbox builds expose import stubs
+    that satisfy `from mcp.server.fastmcp import FastMCP` but are not callable,
+    so we validate the imported object before using it.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self._args, self._kwargs = args, kwargs
+
+    def tool(self, *args, **kwargs):
+        def _deco(fn):
+            return fn
+        return _deco
+
+    def run(self, *args, **kwargs):
+        raise RuntimeError(
+            "MCP stdio server is unavailable: the real 'mcp' package is not "
+            "installed. The tool functions are still usable directly; only "
+            "`python -m mcp_server` / `fsrpb mcp` need the real SDK.")
+
+
 try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    # The connector runtime (FortiSOAR, Python 3.9) doesn't ship the `mcp`
-    # SDK (which needs 3.10+) and doesn't need the stdio server — it only
-    # calls the tool *functions*, which are plain callables. Provide a
-    # minimal stand-in whose `.tool()` decorator registers nothing and
-    # returns the function unchanged, so `fsr_core.mcp_server` imports
-    # cleanly and the agent tool registry still works. `.run()` (the stdio
-    # transport) is the only thing that genuinely needs the real SDK.
-    class FastMCP:  # type: ignore[no-redef]
-        def __init__(self, *args, **kwargs):
-            self._args, self._kwargs = args, kwargs
-
-        def tool(self, *args, **kwargs):
-            def _deco(fn):
-                return fn
-            return _deco
-
-        def run(self, *args, **kwargs):
-            raise RuntimeError(
-                "MCP stdio server is unavailable: the 'mcp' package is not "
-                "installed (it requires Python 3.10+). The tool functions are "
-                "still usable directly; only `python -m mcp_server` / `fsrpb "
-                "mcp` need the real SDK.")
+    from mcp.server.fastmcp import FastMCP as _ImportedFastMCP
+except Exception:  # noqa: BLE001
+    FastMCP = _FallbackFastMCP
+else:
+    FastMCP = _ImportedFastMCP if callable(_ImportedFastMCP) else _FallbackFastMCP
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -42,16 +47,28 @@ DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
 # ---------------------------------------------------------------------------
 # MCP server instance (shared across all tools)
 # ---------------------------------------------------------------------------
-mcp = FastMCP(
-    "fsrpb",
-    instructions=(
-        "FortiSOAR playbook authoring tools. "
-        "Use find_connector → find_operation → get_op_schema to build connector steps. "
-        "Use get_step_type for non-connector step schemas. "
-        "Use validate_yaml before compile_yaml to catch errors early. "
-        "All YAML must conform to the simplified IR documented in AUTHORING.md."
-    ),
-)
+def _make_mcp():
+    server = FastMCP(
+        "fsrpb",
+        instructions=(
+            "FortiSOAR playbook authoring tools. "
+            "Use find_connector → find_operation → get_op_schema to build connector steps. "
+            "Use get_step_type for non-connector step schemas. "
+            "Use validate_yaml before compile_yaml to catch errors early. "
+            "All YAML must conform to the simplified IR documented in AUTHORING.md."
+        ),
+    )
+    if not callable(getattr(server, "tool", None)):
+        raise TypeError("FastMCP.tool is not callable")
+    if not callable(server.tool()):
+        raise TypeError("FastMCP.tool() did not return a decorator")
+    return server
+
+
+try:
+    mcp = _make_mcp()
+except Exception:  # noqa: BLE001
+    mcp = _FallbackFastMCP("fsrpb")
 
 # ---------------------------------------------------------------------------
 # Structured error envelope (uniform tool I/O contract)
@@ -78,6 +95,41 @@ def _err(code: str, message: str,
     }
     out.update(extra)
     return out
+
+
+def _capability_gap_suggestion(
+    *,
+    id: str,
+    missing: str,
+    why: str,
+    fix_steps: list[str],
+    resume_value: str,
+    resume_label: str = "Re-check & continue",
+    tips: list[dict[str, Any]] | None = None,
+    alternatives: list[dict[str, Any]] | None = None,
+    docs_url: str | None = None,
+) -> dict[str, Any]:
+    """Build a `suggested_card` payload (the kwargs for
+    `emit_capability_gap_card`) for a missing-capability dead end, so every
+    tool that hits one offers the analyst the SAME never-dead-end shape:
+    what's missing, why, concrete fix steps, a resume button, and optional
+    tips / manual fallbacks. The agent forwards this straight into
+    `emit_capability_gap_card` (see system_prompt_triage.md). Returns the
+    kwargs dict only — the emitter adds `type` and validates."""
+    card: dict[str, Any] = {
+        "id": id,
+        "missing": missing,
+        "why": why,
+        "fix_steps": list(fix_steps),
+        "resume": {"label": resume_label, "value": resume_value},
+    }
+    if tips:
+        card["tips"] = tips
+    if alternatives:
+        card["alternatives"] = alternatives
+    if docs_url:
+        card["docs_url"] = docs_url
+    return card
 
 
 def _serialize_compiler_error(e: Any) -> dict[str, Any]:
@@ -204,13 +256,12 @@ def _validate_op_params(connector: str, op: str,
       is unknown; live execute will guard), OR
     - the store is unreadable.
 
-    Only TOP-LEVEL params are checked (`parent_param_name IS NULL`); FSR
-    sub-params are conditional on their parent's value, so flagging them
-    needs the parent value resolved — out of scope here. Values left as
-    Jinja templates are skipped for membership/type (we can't see their
-    runtime content). Type checks are deliberately loose — FSR coerces
-    `"5"`→5 and `"true"`→bool at execute, so we only reject values that
-    cannot coerce at all.
+    Conditional sub-params are resolved from submitted parent values, so
+    required checks only apply to the active branch. Values left as Jinja
+    templates are skipped for membership/type (we can't see their runtime
+    content). Type checks are deliberately loose — FSR coerces `"5"`→5 and
+    `"true"`→bool at execute, so we only reject values that cannot coerce at
+    all.
     """
     import difflib
     import json as _json
@@ -222,9 +273,9 @@ def _validate_op_params(connector: str, op: str,
         with _db() as conn:
             rows = _rows(
                 conn,
-                "SELECT param_name, title, type, required, options_json "
-                "FROM operation_params WHERE connector_name=? AND op_name=? "
-                "AND (parent_param_name IS NULL OR parent_param_name='')",
+                "SELECT param_name, title, type, required, options_json, "
+                "parent_param_name, condition_value "
+                "FROM operation_params WHERE connector_name=? AND op_name=?",
                 (connector, op),
             )
     except sqlite3.Error:
@@ -232,13 +283,49 @@ def _validate_op_params(connector: str, op: str,
     if not rows:
         return None  # no schema catalogued → can't validate
 
-    known = {r["param_name"]: r for r in rows}
+    def _clean(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value)
+        return text if text != "" else None
+
+    def _matches(value: Any, expected: str | None) -> bool:
+        if expected is None:
+            return False
+        if isinstance(value, list):
+            return any(str(item) == expected for item in value)
+        return str(value) == expected
+
+    rows_by_name: dict[str, list[dict[str, Any]]] = {}
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    top_level: list[dict[str, Any]] = []
+    for r in rows:
+        rows_by_name.setdefault(r["param_name"], []).append(r)
+        parent = _clean(r["parent_param_name"])
+        if parent is None:
+            top_level.append(r)
+        else:
+            children_by_parent.setdefault(parent, []).append(r)
+
+    known_names = set(rows_by_name)
+    active: dict[str, dict[str, Any]] = {}
+    stack = list(top_level)
+    while stack:
+        r = stack.pop(0)
+        name = r["param_name"]
+        active.setdefault(name, r)
+        if name not in params:
+            continue
+        for child in children_by_parent.get(name, []):
+            if _matches(params.get(name), _clean(child["condition_value"])):
+                stack.append(child)
+
     issues: list[dict[str, Any]] = []
 
     # 1. Unknown params (typo detector).
     for key in params:
-        if key not in known:
-            close = difflib.get_close_matches(key, list(known), n=3, cutoff=0.5)
+        if key not in known_names:
+            close = difflib.get_close_matches(key, list(known_names), n=3, cutoff=0.5)
             issues.append({
                 "param": key,
                 "problem": "unknown",
@@ -247,8 +334,8 @@ def _validate_op_params(connector: str, op: str,
                            + (f"; did you mean {close}?" if close else "")),
             })
 
-    # 2. Missing required params.
-    for name, r in known.items():
+    # 2. Missing required params on the active conditional branch only.
+    for name, r in active.items():
         if not r["required"]:
             continue
         val = params.get(name)
@@ -261,9 +348,10 @@ def _validate_op_params(connector: str, op: str,
             })
 
     # 3. Select-option membership + loose type checks.
-    for name, r in known.items():
+    for name, candidates in rows_by_name.items():
         if name not in params:
             continue
+        r = active.get(name) or candidates[0]
         val = params[name]
         if val is None or _is_jinja(val):
             continue

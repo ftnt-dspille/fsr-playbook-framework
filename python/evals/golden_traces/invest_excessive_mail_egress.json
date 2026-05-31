@@ -1,0 +1,207 @@
+{
+  "fixture": "invest_excessive_mail_egress",
+  "captured": "20260530T192043Z",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "end_turn",
+  "recall": 1.0,
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "module": "alerts",
+        "uuid": "b62fb2d5-d27e-4d7e-8bd8-53e4878ba614",
+        "relationships": true
+      },
+      "ok": true
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "sourceIp:192.168.77.10",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "list_configured_connectors",
+      "args": {
+        "verbose": false
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "virustotal",
+        "q": "ip"
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "shodan",
+        "q": "ip"
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "fortinet-fortiguard-threat-intelligence",
+        "q": "ip"
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "ip-quality-score",
+        "q": "ip"
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "fortinet-fortiguard-threat-intelligence",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "query_ip",
+        "params": {
+          "ip": "35.189.45.227"
+        }
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "ip-quality-score",
+        "op": "get_ip_reputation",
+        "params": {
+          "ip": "35.189.45.227"
+        }
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-threat-intelligence",
+        "op": "threat_intel_search",
+        "params": {
+          "indicator": "35.189.45.227",
+          "indicator_type": "ip"
+        }
+      },
+      "ok": false
+    },
+    {
+      "name": "get_op_schema",
+      "args": {
+        "connector": "ip-quality-score",
+        "op": "get_ip_reputation"
+      },
+      "ok": null
+    },
+    {
+      "name": "get_op_schema",
+      "args": {
+        "connector": "fortinet-fortiguard-threat-intelligence",
+        "op": "threat_intel_search"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "ip-quality-score",
+        "op": "get_ip_reputation",
+        "params": {
+          "ip_address": "35.189.45.227"
+        }
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-threat-intelligence",
+        "op": "threat_intel_search",
+        "params": {
+          "indicator": "35.189.45.227"
+        }
+      },
+      "ok": false
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-threat-intelligence",
+        "op": "threat_intel_search",
+        "params": {
+          "indicator": "35.189.45.227"
+        },
+        "confirm": true
+      },
+      "ok": true
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "incidents",
+        "q": "192.168.77.10",
+        "limit": 10
+      },
+      "ok": true
+    },
+    {
+      "name": "find_containment_actions",
+      "args": {
+        "target_type": "ip",
+        "probe": true,
+        "limit": 25
+      },
+      "ok": true
+    },
+    {
+      "name": "emit_choice_card",
+      "args": {
+        "id": "exfil_next_steps",
+        "prompt": "Email exfiltration detected from 192.168.77.10 to Google cloud IP 35.189.45.227. How would you like to proceed?",
+        "options": [
+          {
+            "label": "\ud83d\udd12 Isolate host & investigate",
+            "value": "investigate",
+            "hint": "Quarantine 192.168.77.10, capture memory, review mail access logs, check for credential compromise"
+          },
+          {
+            "label": "\ud83d\udccb Escalate to T2/incident response",
+            "value": "escalate",
+            "hint": "Hand off to dedicated incident response team for forensics & containment"
+          },
+          {
+            "label": "\ud83d\udea8 Block egress & notify user",
+            "value": "block_notify",
+            "hint": "Block outbound traffic from 192.168.77.10 to 35.189.45.227, notify user of suspicious activity"
+          },
+          {
+            "label": "\ud83d\udcdd Document & monitor",
+            "value": "monitor",
+            "hint": "Acknowledge alert, document findings, add network monitoring, defer manual action pending further activity"
+          }
+        ],
+        "max_select": 1
+      },
+      "ok": true
+    }
+  ]
+}

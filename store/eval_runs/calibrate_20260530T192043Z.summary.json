@@ -1,0 +1,46 @@
+{
+  "stamp": "20260530T192043Z",
+  "model": "claude-haiku-4-5-20251001",
+  "results": [
+    {
+      "fixture": "invest_outbound_cleartext_c2",
+      "recall": 1.0,
+      "passed": true,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null
+    },
+    {
+      "fixture": "invest_excessive_mail_egress",
+      "recall": 1.0,
+      "passed": true,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null
+    },
+    {
+      "fixture": "invest_disk_latency_no_ti",
+      "recall": 1.0,
+      "passed": true,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null
+    },
+    {
+      "fixture": "invest_intrusion_incident",
+      "recall": 1.0,
+      "passed": true,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null
+    },
+    {
+      "fixture": "invest_defense_evasion_host",
+      "recall": 1.0,
+      "passed": true,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null
+    }
+  ]
+}
