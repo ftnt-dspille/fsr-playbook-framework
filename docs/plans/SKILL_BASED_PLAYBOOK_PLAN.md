@@ -35,6 +35,62 @@ output is still FSRPB YAML pushed via the existing `chat_resume accept` path (co
 
 ---
 
+## SESSION RESUME (2026-06-01) — read this first after a clear
+
+**Status: Phases 1–5 shipped & green** (`make verify` = 99 fsr_core + 126 connector, ruff clean).
+Branch `feat/skill-based-playbook` in FSRPlaybookYaml; connector changes on
+`feat/action-based-streaming` (commit `62762cf`). Neither merged to main yet.
+
+**Commits (FSRPlaybookYaml):** `89dda67` P1 · `31c3712` P2 · `b108ae8` P3 · `7e690d0` P4 ·
+`352b2fb` P5 tool+eval · `79c590a` P5 active-trace+prompt · `fdd3b3f` plan update.
+
+**Files that exist now (all in `fsr_core`, source — connector symlinks it, no re-vendor needed in dev):**
+- `compiler/skills.py` — 4 demo-core skill descriptors + registry (P1).
+- `agent/skill_trace.py` — `SkillCall`/`SkillTrace`, `record_run_op`, process-local active trace (P2).
+- `compiler/skill_compiler.py` — `compile_trace`, `wire_inputs` (value-match), `render_context`,
+  `assemble_playbook`, `to_yaml` (P3).
+- `compiler/skill_verify.py` — `compile_and_verify`, `verify_wire` (StrictUndefined Jinja2 or injected
+  live `render_jinja`), reuses `validator._check_jinja_paths` (P4).
+- `mcp_server/tools_compile.py::build_playbook_from_trace` — entry point; **defaults `trace_json=""`
+  → reads the active session trace** (P5). Build-only (in `intents.py::BUILD_ONLY_TOOLS` + connector's
+  `_BUILD_ONLY_TOOLS`). Build agent advertises it via `tools=[]` full-registry expansion.
+- `agent/system_prompt_build.md` — steers build agent: call `build_playbook_from_trace` FIRST,
+  hand-author only on `empty_trace`.
+- `python/evals/scoring.py::score_wiring_resolution` + `score(skill_trace_json=...)` → informational
+  `wiring_resolves` level (P5).
+- Connector: `storage.py` `session_trace` table + `set/get_session_trace`; `operations.py`
+  `_session_trace_scope` installed across chat_turn / Model-A resume / suspended resume / approved
+  action_card execute. `tests/test_storage.py` covers it.
+
+**Key facts / gotchas to not relearn:**
+- FSR keys `vars.steps.<Name_with_spaces→underscores>`. Connector payloads nest under `.data`
+  sometimes (VirusTotal) and directly other times (AbuseIPDB, crudhub `hydra:member`) — handled by
+  `SkillCall.ref_prefix`, set in `run_op` from whether the raw resp had a `data` key.
+- `build_playbook_from_session` (in the original plan prose) **does not exist as a function** — the
+  session→YAML compile is the build-intent agent loop in `fsr_core/llm/run_turn.py`; the trace path is
+  the new `build_playbook_from_trace` tool.
+- Active trace is process-local module state; `_session_trace_scope` clears it in `finally` (concurrency
+  caveat noted — fine for one-op-per-worker, revisit with contextvars if needed).
+
+**NEXT STEP — trace fixtures for the parity campaign (decided, not yet built):**
+- **Best method = replay a coherent investigation through `run_op` in SIM mode with the recorder on,
+  then dump `SkillTrace.to_json()`.** Do NOT hand-author trace JSON (reintroduces the guess-the-output
+  failure mode). Sim fixtures in `fsr_core/mcp_server/_sim_fixtures.py` already encode a C2 investigation
+  with **cross-referenced values** (`_C2_IP` in `search_events.destIpAddr` → `block_ip_new` input;
+  `_HOST_IP` from `get_ip_context` → `get_host_context` input; owner/user link) — exactly what
+  value-match must recover. Deterministic + offline → CI-safe.
+- Sim-covered ops (`_EXECUTE` map): fortisiem get_ip_context/get_host_context/get_user_context/
+  search_events/get_incidents, virustotal query_ip, shodan host_information/query_ip, abuseipdb check_ip,
+  fortigate-firewall block_ip_new/block_ip.
+- **TODO:** write `python/evals/build_trace_fixture.py` — force sim mode, replay 1–2 scenarios
+  (C2 containment; enrich-then-block), assert the cross-step value coincidence is present, write
+  `store/trace_fixtures/<scenario>.json`. Then point `wiring_resolves` at them vs the hand-author
+  baseline to produce the evidence the **default-flip** (remove hand-author fallback) gates on.
+- Highest-fidelity validation (separate, needs live FSR): one real triage→build session, read
+  `session_trace` from the connector DB → live smoke test (deploy via `scripts/deploy.sh`).
+
+---
+
 ## Design
 
 ### 1. Skill descriptor schema — *small*
