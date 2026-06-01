@@ -67,10 +67,16 @@ Outstanding:
   `get_session_trace` + `_import_fsr_core()` fix), `info.json`, `scripts/live_integration.py`,
   `scripts/fsr_live.py`, `release_notes.md`. ⚠️ that tree has UNRELATED pre-existing dirty
   files — commit only mine, don't bundle. (FSRPlaybookYaml side already committed `078d9c4`.)
-- [ ] **Restore FortiCloud connector** (mfz9…forticloud.com) — left DEGRADED after the
-  uninstall/reinstall experiment (config wiped, install_to_fsr `--with-config` 500s). Redeploy
-  0.3.78 + recreate `fsrpb-live`. The publish step lands the version but the config-create
-  path needs a look (see next item).
+- [x] **FortiCloud connector RESTORED** (2026-06-01, mfz9…forticloud.com). Deployed
+  **0.3.79** (id=180, active), recreated `fsrpb-live` config (config_count=1); live
+  `health_check` returns `ok:true`, `anthropic_reachable:true`, fsr_core importable.
+  Root cause of the `--with-config` 500 found + fixed (connector `f3fdc03`): the
+  **publish-recycle step registers a fresh connector version row**, so the
+  connector_id captured at install was stale by the config-create step → POST
+  against the dead id 500s (and the idempotency re-fetch of the dead id shows no
+  config). install_to_fsr now **re-resolves the live id by (name,version) after
+  publish-recycle**. Manual POST against the live id (180) created the config 201
+  cleanly, confirming the diagnosis.
 - [x] **install_to_fsr `--with-config` idempotent** (2026-06-01, connector
   `95cf40e`). The config write no longer fails the run on a 500/400: the
   post-write `on_add_config` warmup hook can raise after the row is persisted,
