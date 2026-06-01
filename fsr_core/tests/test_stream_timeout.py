@@ -6,7 +6,6 @@ and surfaces a clean ErrorEvent instead of blocking forever.
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 from fsr_core.llm import anthropic_provider as ap
 from fsr_core.llm.anthropic_provider import AnthropicProvider
@@ -64,7 +63,7 @@ def test_stream_timeout_yields_error_event(monkeypatch):
     )
 
     error_events = [e for e in events if isinstance(e, ErrorEvent)]
-    done_events = [e for e in events if isinstance(e, DoneEvent)]
+    [e for e in events if isinstance(e, DoneEvent)]
     assert error_events, "expected an ErrorEvent on stream timeout"
     assert "timed out" in error_events[0].message.lower()
     # Stream exits via return after ErrorEvent — no DoneEvent, consistent with

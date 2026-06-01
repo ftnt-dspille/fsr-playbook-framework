@@ -1,27 +1,21 @@
 """MCP tools: Tools Analysis"""
 from __future__ import annotations
 
-import difflib
 import json
-import re
 import sqlite3
-import sys
-from pathlib import Path
 from typing import Any
 
 from . import _shared
 from . import tools_execution
 from . import tools_discovery
+from .tools_picklists import (
+    precheck_picklist_value,
+    _persist_precheck_verification,
+    _map_http_auth,
+)
 from ._shared import (
     mcp,
-    _err,
     _db,
-    _rows,
-    _verifications_for,
-    _serialize_compiler_error,
-    _infer_shape,
-    _store_observed_schema,
-    REPO_ROOT,
 )
 # Import DB_PATH for type hints/direct use (non-patchable usage)
 DB_PATH = _shared.DB_PATH
@@ -247,9 +241,7 @@ def step_through_playbook(yaml_text: str,
         # analyzer downgrades missing_key severity on skipped
         # producers, since they might not have run at runtime either.
         skip_condition = rendered.get("condition")
-        conditionally_executed = False
         if skip_condition not in (None, "") and not _truthy(skip_condition):
-            conditionally_executed = True
             step_record["conditionally_executed"] = True
             step_record["status"] = "skipped"
             step_record["simulated_from"] = "computed"

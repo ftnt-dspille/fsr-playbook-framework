@@ -17,7 +17,6 @@ import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
 
 import chat_review  # type: ignore
 

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import textwrap
 
-import pytest
 
 from fsr_core.mcp_server import verify_playbook
 

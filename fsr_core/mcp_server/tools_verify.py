@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 from typing import Any
 
 from ._shared import mcp, REPO_ROOT, DB_PATH, _err, _db

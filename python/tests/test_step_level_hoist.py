@@ -5,7 +5,6 @@ the step level (siblings of `arguments:`) instead of buried under
 `arguments:`. The parser folds them in so the resolver/emitter see the
 canonical wire shape.
 """
-import json
 
 from fsr_core.compiler import compile_yaml
 from fsr_core.compiler.errors import ErrorCode

@@ -11,7 +11,6 @@ confirmed live + tested; everything else is `seen`-only and may drift.
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 from typing import Any
 
 from probes.common import open_db

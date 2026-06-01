@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import re as _re
 import sqlite3
-from typing import Any
 
 from ..errors import CompileError, ErrorCode
-from ..ir import Step
 
 
 class RewriterMixin:
@@ -52,7 +50,6 @@ class RewriterMixin:
         if not sv_keys:
             return
 
-        import re as _re
         # vars.steps.<jkey>.<key> or vars.steps.<jkey>['<key>'] / ["<key>"]
         # Tracks (jkey, key) → set of step indices where the rewrite fired,
         # so the warning can point at the offending step instead of the
@@ -155,7 +152,6 @@ class RewriterMixin:
         if not params:
             return
 
-        import re as _re
         rewrites_done: dict[str, set[int]] = {}
         _current_si = [-1]
 
@@ -286,7 +282,6 @@ class RewriterMixin:
         # Walk every string in every step's args and rewrite top-level
         # `vars.<old>` references. NOT `vars.steps.<X>.<old>` — those
         # are step-output reads in a different namespace.
-        import re as _re
         for step in pb.steps:
             self._rewrite_vars_refs(step.arguments, renames, _re)
         return renames

@@ -2,23 +2,14 @@
 from __future__ import annotations
 from . import _shared
 
-import difflib
 import json
 import re
-import sqlite3
-import sys
-from pathlib import Path
 from typing import Any
 
 from ._shared import (
     mcp,
     _err,
-    _rows,
-    _verifications_for,
     _serialize_compiler_error,
-    _infer_shape,
-    _store_observed_schema,
-    REPO_ROOT,
 )
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH

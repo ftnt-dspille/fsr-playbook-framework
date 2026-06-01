@@ -2,26 +2,19 @@
 from __future__ import annotations
 from . import _shared
 
-import difflib
 import json
 import re
 import sqlite3
-import sys
-from pathlib import Path
 from typing import Any, Union
 
 from ._shared import (
     mcp,
-    _err,
     _capability_gap_suggestion,
     _db,
     _rows,
-    _verifications_for,
-    _serialize_compiler_error,
-    _infer_shape,
-    _store_observed_schema,
-    REPO_ROOT,
+    _VERIF_RANK,
 )
+from .tools_execution import _fetch_runs_both, _shape_run
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
 
@@ -237,7 +230,6 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
     # task_id (UUID) → workflow PK. Try live, then historical (purged after ~30-60 min).
     is_uuid = "-" in pb_execution and not pb_execution.isdigit()
     pk_url = None
-    base_path = None
     if is_uuid:
         for path in ("/api/wf/api/workflows/", "/api/wf/api/historical-workflows/"):
             try:
@@ -251,7 +243,6 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
                 continue
             if members:
                 pk_url = members[0].get("@id") or ""
-                base_path = path
                 break
         if not pk_url:
             return {"error": f"no workflow run found for task_id {pb_execution!r} (checked live + historical)"}

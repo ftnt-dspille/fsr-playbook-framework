@@ -68,7 +68,6 @@ def test_likely_required_key_missing_warns(db_path):
     # inject it (it's user-supplied semantic content), so the absence
     # surfaces as a likely-required-key warning.
     from fsr_core.compiler.parser import parse_yaml
-    from fsr_core.compiler.ir import Step
     from fsr_core.compiler.corpus_validator import CorpusValidator
     import sqlite3
     coll, _ = parse_yaml("""

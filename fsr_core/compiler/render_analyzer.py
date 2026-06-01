@@ -873,7 +873,7 @@ def _c9_loop_var_leak(trace: list[dict[str, Any]],
                 step_id=sid,
                 path=ref["path"],
                 location=ref.get("location", ""),
-                message=(f"references `vars.item` outside a for_each "
+                message=("references `vars.item` outside a for_each "
                          "body — undefined at runtime"),
                 suggestion=("either move this step inside the for_each, "
                             "or refer to the for_each step's output "
@@ -935,7 +935,7 @@ def _c10_dead_step(trace: list[dict[str, Any]],
             step_id=sid,
             path="",
             location="",
-            message=(f"step output is never consumed by a downstream "
+            message=("step output is never consumed by a downstream "
                      "step — confirm this is intentional (logging / "
                      "side effect) or remove the step"),
             suggestion=("delete the step if you don't need its output; "

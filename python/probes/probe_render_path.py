@@ -95,7 +95,7 @@ def _wrap_ref(parent_name: str, child_name: str,
         f'    description: "child for {parent_name}"\n'
         f'    is_active: true\n'
         + params_line
-        + f'    steps:\n'
+        + '    steps:\n'
         + textwrap.indent(child_steps, "      ")
     )
     parent_block = (

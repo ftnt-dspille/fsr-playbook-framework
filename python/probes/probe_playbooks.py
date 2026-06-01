@@ -36,7 +36,6 @@ from . import _env
 from .common import (
     probe_session,
     record_verification,
-    wipe_probe_tables,
 )
 
 PROBE_NAME = "probe_playbooks"
@@ -176,7 +175,6 @@ def _load_playbooks(
     total = None
     trigger_counts: dict[str, int] = defaultdict(int)
     # Map of triggerStep IRI -> stepType.name; built lazily on demand.
-    trigger_to_type: dict[str, str] = {}
 
     while page <= 50:  # 50*200 = 10k playbook ceiling
         try:

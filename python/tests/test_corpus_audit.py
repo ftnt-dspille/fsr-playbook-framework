@@ -74,7 +74,7 @@ def test_audit_covers_canonical_text_kinds(db_path: Path):
 
 
 def test_run_writes_report(tmp_path: Path, db_path: Path):
-    result = audit.run(db_path, tmp_path)
+    audit.run(db_path, tmp_path)
     assert (tmp_path / "corpus_audit.md").exists()
     payload = json.loads((tmp_path / "corpus_audit.json").read_text())
     assert "step_keys" in payload

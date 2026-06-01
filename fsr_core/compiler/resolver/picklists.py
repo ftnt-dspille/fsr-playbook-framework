@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import difflib
 import sqlite3
-from typing import Any, Optional
+from typing import Any
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Step
-from ._constants import _looks_like_uuid
 
 
 class PicklistMixin:

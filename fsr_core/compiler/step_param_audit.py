@@ -22,7 +22,6 @@ import sqlite3
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 
 # Maps the FSR canonical step_type_name (column in `playbook_steps`)

@@ -7,7 +7,6 @@ Use `fsrpb explain connector <name>` for full per-op detail.
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 from collections import defaultdict
 from pathlib import Path

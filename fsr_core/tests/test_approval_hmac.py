@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 
 from fsr_core.llm import approvals as A
-from fsr_core.llm import anthropic_provider as ap
 from fsr_core.llm.anthropic_provider import AnthropicProvider
 from fsr_core.llm.provider import DoneEvent, ErrorEvent, ToolResultEvent
 

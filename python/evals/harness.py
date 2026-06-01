@@ -12,7 +12,6 @@ two runs cell-by-cell so a CI hook can red-flag regressions.
 from __future__ import annotations
 
 import json
-import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path

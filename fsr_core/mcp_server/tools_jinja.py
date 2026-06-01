@@ -2,23 +2,14 @@
 from __future__ import annotations
 from . import _shared
 
-import difflib
 import json
-import re
-import sqlite3
 import sys
-from pathlib import Path
 from typing import Any
 
 from ._shared import (
     mcp,
-    _err,
     _db,
     _rows,
-    _verifications_for,
-    _serialize_compiler_error,
-    _infer_shape,
-    _store_observed_schema,
     REPO_ROOT,
 )
 # Import DB_PATH for local use
@@ -189,6 +180,7 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
 
     values: dict[str, Any] = {}
     if from_pb_execution:
+        from .tools_triage import get_run_env
         run_env = get_run_env(from_pb_execution)  # reuse the same transform
         if "error" in run_env:
             return {"error": f"from_pb_execution lookup failed: {run_env['error']}"}

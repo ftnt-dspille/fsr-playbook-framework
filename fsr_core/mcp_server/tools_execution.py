@@ -15,9 +15,6 @@ from ._shared import (
     _err,
     _capability_gap_suggestion,
     _db,
-    _rows,
-    _verifications_for,
-    _serialize_compiler_error,
     _infer_shape,
     _store_observed_schema,
     REPO_ROOT,
@@ -1557,8 +1554,8 @@ def run_op(
                 "user has approved, or confirm this is a safe read-only probe."
             ),
             "suggestions": [
-                f"If you're certain this is safe, retry with confirm=True",
-                f"Otherwise ask the user before mutating state on the live FSR",
+                "If you're certain this is safe, retry with confirm=True",
+                "Otherwise ask the user before mutating state on the live FSR",
             ],
         }
 

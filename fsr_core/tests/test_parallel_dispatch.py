@@ -17,7 +17,6 @@ import asyncio
 import time
 from types import SimpleNamespace
 
-import pytest
 
 from fsr_core.llm import anthropic_provider as ap
 from fsr_core.llm.anthropic_provider import AnthropicProvider

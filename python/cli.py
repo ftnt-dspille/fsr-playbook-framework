@@ -17,6 +17,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
+from typing import Any
 
 # Repo root on path so `fsr_core.*` resolves when cli.py is run as a script.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -307,7 +308,7 @@ def _resolve_or_create_collection(client, name: str) -> tuple[str | None, str]:
     try:
         cr = client.session.post(
             f"{client.base_url}/api/3/workflow_collections",
-            json={"name": name, "description": f"Auto-created by fsrpb"},
+            json={"name": name, "description": "Auto-created by fsrpb"},
             verify=client.verify_ssl, timeout=30,
         )
     except Exception as e:  # noqa: BLE001
@@ -2506,7 +2507,6 @@ def cmd_inputs_respond(args: argparse.Namespace) -> int:
     options = rmap.get("options") or []
     schema = (rec.get("input") or {}).get("schema") or {}
     ivars = schema.get("inputVariables") or []
-    type_ = "Approval" if rec.get("is_approval") else (rec.get("type") or "InputBased")
 
     # Resolve the chosen option (must match one of response_mapping.options).
     chosen_option = None
@@ -3843,7 +3843,7 @@ def cmd_chat_stats(args: argparse.Namespace) -> int:
 
     # ---- 3. tool ranking ----
     print()
-    print(f"=== tool-result cost ranking ===")
+    print("=== tool-result cost ranking ===")
     print(f"{'tool':30} {'calls':>6} {'total_chars':>12} "
           f"{'avg_chars':>10} {'max_chars':>10}")
     by_tool: dict[str, list[int]] = collections.defaultdict(list)

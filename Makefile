@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify clean help sync preflight kill-ports
+.PHONY: backend frontend dev e2e tests verify lint clean help sync preflight kill-ports
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -27,7 +27,7 @@ help:
 sync: ## create .venv (if missing) and install all editable deps via uv
 	@command -v uv >/dev/null || { echo "uv not on PATH; install via: brew install uv"; exit 1; }
 	@[ -d .venv ] || uv venv --python 3.13
-	uv pip install -e ../pyfsr -e . -e ./web pytest requests-mock anyio
+	uv pip install -e ../pyfsr -e . -e ./web pytest requests-mock anyio ruff
 
 preflight: ## check dev ports are free; print holders if not
 	@for p in $(PORT_BACKEND) $(PORT_FRONTEND); do \
@@ -63,6 +63,9 @@ e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
 
 tests: ## fast pytest (excludes live + slow)
 	$(PY) -m pytest python/tests/ -q -m "not live and not slow"
+
+lint: ## ruff lint (pyflakes F-rules) over fsr_core + python
+	uv run ruff check fsr_core/ python/
 
 # The connector + Angular widget both consume fsr_core, so the green-check that
 # matters is fsr_core + the connector's offline suite — both run on THIS repo's

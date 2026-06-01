@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 import warnings
 from pathlib import Path
 

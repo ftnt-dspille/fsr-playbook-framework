@@ -573,7 +573,6 @@ def _poll_by_template(client, wf_uuid: str, started_unix: float,
                 f"&template_iri={template_iri}")
     start = time.time()
     last = ""
-    seen_pk: str | None = None
     while time.time() - start < timeout_s:
         r = client.session.get(poll_url, verify=client.verify_ssl)
         if r.status_code != 200:

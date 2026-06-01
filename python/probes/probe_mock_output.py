@@ -58,7 +58,6 @@ def main() -> int:
     if not r.ok:
         _log(f"compile failed: {[e.to_dict() for e in r.errors]}")
         return 1
-    fsr_json = r.fsr_json
 
     _log("pushing to FSR (mode=replace)")
     import subprocess

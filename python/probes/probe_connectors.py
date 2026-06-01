@@ -24,18 +24,15 @@ import subprocess
 import tarfile
 import urllib.request
 import warnings
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from . import _env
 from .common import (
-    PROBE_TABLES,
     RPM_EXTRACTED_DIR,
     STORE_DIR,
     probe_session,
     record_verification,
-    wipe_probe_tables,
 )
 
 # Public Fortinet repo — provides RPMs for every published connector,
@@ -426,14 +423,6 @@ def _live_catalog(conn: sqlite3.Connection) -> tuple[int, list[str]]:
     )
     print(f"  catalog: {items_seen}/{total} items, {upserts} upserts, {skipped_installed} skipped (installed)")
     return upserts, errors
-
-    record_verification(
-        conn, kind="api_endpoint",
-        key="POST /api/query/solutionpacks",
-        method="live_api_get", status="tested_pass",
-        notes=f"page_size={limit}, totalItems={total}",
-    )
-    return seen_count, errors
 
 
 # ----------------------- repo RPM tier -----------------------

@@ -21,7 +21,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import textwrap
 from pathlib import Path
@@ -64,7 +63,7 @@ def _push_yaml(yaml_text: str) -> tuple[bool, str]:
             _push(client, coll, Path(td))
         except _PushError as e:
             return False, f"push: {e}"
-    return True, f"pushed"
+    return True, "pushed"
 
 
 def _pull_collection(client, name: str) -> dict | None:
@@ -521,7 +520,6 @@ def _fire_and_check(client, coll_name: str, marker: str,
         return "workflow has no @id"
 
     # 3. Create a record that matches the trigger filter.
-    fire_t0 = time.time()
     create_url = f"{client.base_url}/api/3/alerts"
     body = {"name": marker, "description": "fsrpb round-trip probe"}
     cr = client.session.post(create_url, json=body, verify=client.verify_ssl,
@@ -551,10 +549,6 @@ def _fire_and_check(client, coll_name: str, marker: str,
                     rec = members[0]
                     status = rec.get("status", "unknown")
                     seen_status = status
-                    # Confirm this run actually started after we
-                    # posted the record — otherwise an old run from
-                    # a previous probe could short-circuit the check.
-                    started = rec.get("started") or rec.get("created") or 0
                     if status in {"finished", "failed", "terminated", "skipped",
                                   "finished_with_error", "rejected"}:
                         if status == "finished":

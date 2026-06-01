@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import sqlite3
 
-import pytest
 
 from probes import probe_op_safety as ps
 

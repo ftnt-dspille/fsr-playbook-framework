@@ -27,3 +27,21 @@ packages = [
     "fsr_core.mcp_server",
     "fsr_core.llm",
 ]
+
+[tool.ruff]
+# fsr_core ships into the SOAR 3.9 runtime, so lint at the lowest baseline we
+# support — this is what catches module-level PEP 604 unions before they reach
+# the connector. The Studio backend/CLI run on 3.11+, but py39 is the safe floor.
+target-version = "py39"
+extend-exclude = ["web/frontend", "store", ".venv"]
+
+[tool.ruff.lint]
+# Start with pyflakes (F): unused imports/vars, redefinitions, undefined names,
+# f-strings without placeholders. Broaden (E/I/UP/B) in a follow-up sweep.
+select = ["F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ files re-export submodule symbols (and, in mcp_server,
+# import tool modules purely to register their @mcp.tool decorators). The
+# "unused import" is the intended public surface / registration side effect.
+"**/__init__.py" = ["F401"]

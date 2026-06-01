@@ -11,7 +11,7 @@ Pure offline — no live FSR, no jinja rendering, just AST walk.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterator
 
 from jinja2 import Environment, nodes

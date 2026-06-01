@@ -7,10 +7,9 @@ import json as _json
 import re
 import sqlite3
 from datetime import datetime
-from typing import Optional
 
 from ..errors import CompileError, ErrorCode
-from ..ir import Step
+from ..ir import Playbook, Step
 
 
 # Observed-type validators (Tier 2.3). Each returns True iff the value

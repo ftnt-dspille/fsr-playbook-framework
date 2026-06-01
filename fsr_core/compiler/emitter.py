@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from .ir import Annotation, Collection, Playbook, Step
+from .ir import Annotation, Collection, Step
 
 _NS = uuid.UUID("00000000-0000-0000-0000-000000000fc1")  # FSR-compiler namespace
 

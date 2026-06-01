@@ -51,15 +51,25 @@ live under `docs/plans/`; frozen research/audit snapshots under
 ## Next steps (resume state, 2026-05-30)
 
 ### Housekeeping — ruff sweep (added 2026-06-01)
-- [ ] Run `ruff` across `fsr_core/`, `python/`, and the connector
-  (`ConnectorsV2/fsr-playbook-builder/`) to surface unused code + lint issues:
-  `ruff check --select F` first (F401 unused imports, F811 redefinitions,
-  F841 unused locals, F-dead code), then a broader `ruff check`. ruff isn't yet
-  wired into the repo (not in `pyproject.toml`/`Makefile`) — add it as a dev dep
-  + a `make lint` target while here. Watch for false positives from the
-  function-local re-imports in `operations.py` (e.g. duplicate `import os` at
-  module + function scope) and the Python-3.9 baseline (don't let an autofix
-  introduce module-level PEP 604 unions in `fsr_core`).
+- [x] **F-rule sweep done.** ruff wired in: `[tool.ruff]` in `pyproject.toml`
+  (target `py39`, `select = ["F"]`, `__init__.py` F401 ignored for re-exports),
+  `ruff` added to `make sync` deps, new `make lint` target. `make lint` is green
+  across `fsr_core/` + `python/`; connector tree (own code) also clean.
+  Fixed 13 real **F821 undefined-name bugs** that would NameError at runtime:
+  `tools_triage` (`_fetch_runs_both`/`_shape_run`/`_VERIF_RANK` unimported →
+  broke `list_recent_failed_runs`/`list_playbook_runs`/`verification_status`),
+  `tools_analysis` (3 names from `tools_picklists`), `tools_jinja.get_run_env`,
+  `Playbook` forward-refs in resolver, `Any` in `cli.py`. Also removed dead code
+  (unreachable block in `probe_connectors.py`, ~12 unused locals, a half-built
+  "run started after post" check in `probe_round_trip.py`). 142 safe autofixes
+  applied (F401/F541/F811/F841). `make verify` 68 + 123 green.
+- [ ] **Broader sweep deferred.** `ruff check --select E,W,I,UP,B,C4,SIM` surfaces
+  ~885 (503 E501 line-length, 120 I001 import-order, plenty of B/SIM). ⚠️ Do NOT
+  blanket-enable `UP` — UP045/UP006/UP007 (~65) rewrite `Optional[X]`→`X | None`,
+  which breaks the `fsr_core` Python-3.9 baseline. Tackle per-family, exclude UP
+  for `fsr_core`. Latent gaps found but not "fixed" (no behavior change):
+  `probe_modules._resolve_default` result was computed but never stored (no
+  `default` column on `module_fields`); `cli.py` `type_` computed unused.
 
 Session shipped connector **0.3.31** (id=110, live, Haiku, FortiCloud SOAR).
 Landed: hardening **1.6/1.7/1.8** (the `sess-uq31go5p` live-triage fix —

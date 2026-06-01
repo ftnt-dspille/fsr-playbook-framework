@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any
 
-import pytest
 
 from fsr_core.llm.fake_provider import FakeProvider
 from fsr_core.llm.approvals import SuspendedSession
@@ -29,7 +28,6 @@ from fsr_core.llm.run_turn import (
     KIND_TOOL_RESULT,
     KIND_TOOL_USE,
     KIND_USER,
-    TurnResult,
     resume_agent_turn,
     run_agent_turn,
 )

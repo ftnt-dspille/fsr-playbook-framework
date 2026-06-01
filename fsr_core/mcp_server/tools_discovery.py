@@ -4,10 +4,8 @@ from . import _shared
 
 import difflib
 import json
-import re
 import sqlite3
 import sys
-from pathlib import Path
 from typing import Any
 
 from ._shared import (
@@ -16,9 +14,6 @@ from ._shared import (
     _db,
     _rows,
     _verifications_for,
-    _serialize_compiler_error,
-    _infer_shape,
-    _store_observed_schema,
     REPO_ROOT,
 )
 # Import DB_PATH for local use
@@ -317,7 +312,7 @@ def _build_param_groups_by_select(
         if parent is not None:
             children_of[(parent, str(cond))].append(name)
     # Top-level params (no parent rule).
-    parents_with_rule = {n for n, p, _ in rules if p is not None}
+    {n for n, p, _ in rules if p is not None}
     top_level = [n for n, p, _ in rules if p is None]
     # Top-level params that are NOT themselves conditioned by anyone are
     # the candidate gating selects. Among them, pick the ones of type
@@ -567,11 +562,11 @@ def _render_op_schema_md(
     skeleton = [
         "## skeleton",
         "```yaml",
-        f"- type: connector",
+        "- type: connector",
         f"  name: {name}",
         f"  connector: {connector}",
         f"  operation: {name}",
-        f"  params:",
+        "  params:",
         *required_lines,
         "```",
     ]

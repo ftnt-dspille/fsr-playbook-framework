@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from fsr_core.compiler.ir import Collection, Playbook, Step
 from fsr_core.compiler.typed_walker import (
-    BranchResult,
     walk_playbook,
 )
 

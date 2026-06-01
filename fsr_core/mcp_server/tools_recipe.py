@@ -2,7 +2,6 @@
 from __future__ import annotations
 from . import _shared, tools_triage, tools_jinja
 
-import difflib
 import json
 import re
 import sqlite3
@@ -15,10 +14,6 @@ from ._shared import (
     _err,
     _db,
     _rows,
-    _verifications_for,
-    _serialize_compiler_error,
-    _infer_shape,
-    _store_observed_schema,
     REPO_ROOT,
 )
 # Import DB_PATH for local use

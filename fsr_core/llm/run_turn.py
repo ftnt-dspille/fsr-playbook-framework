@@ -30,7 +30,6 @@ from typing import Any, Awaitable, Callable, Optional
 from .approvals import SuspendedSession
 from ._loop_helpers import extract_yaml_block
 from .provider import (
-    ApprovalRequestEvent,
     DoneEvent,
     ErrorEvent,
     Event,

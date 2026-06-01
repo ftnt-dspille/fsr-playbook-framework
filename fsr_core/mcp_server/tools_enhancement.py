@@ -18,10 +18,9 @@ tell us where to loosen.
 """
 from __future__ import annotations
 
-import sys
 from typing import Any
 
-from ._shared import mcp, REPO_ROOT, _err
+from ._shared import mcp
 from .tools_verify import verify_playbook
 
 

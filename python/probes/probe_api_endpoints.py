@@ -25,7 +25,6 @@ from pathlib import Path
 
 from . import _env
 from .common import (
-    PROBE_TABLES,
     probe_session,
     record_verification,
     wipe_probe_tables,
@@ -124,7 +123,7 @@ def _live_hydra(conn: sqlite3.Connection) -> tuple[int, list[str]]:
 
     for coll_path in sorted(seen_collections):
         for m in HYDRA_METHODS_COLLECTION:
-            ep_id = _upsert_endpoint(
+            _upsert_endpoint(
                 conn,
                 path_pattern=coll_path,
                 http_method=m,

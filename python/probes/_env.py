@@ -7,7 +7,6 @@ fall back to local-only mode and stamp `seen` rows.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Optional
 
 from .common import REPO_ROOT

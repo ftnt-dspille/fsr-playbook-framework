@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import textwrap
 
-import pytest
 
 from fsr_core.compiler.samples import (
     append_samples,
-    emit_samples_block,
     extract_samples_block,
     overlay_into_vars,
 )

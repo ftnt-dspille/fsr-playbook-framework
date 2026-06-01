@@ -119,7 +119,6 @@ def _insert_field(
         return
     options = _picklist_options_for(attr, picklist_lists)
     list_name = _picklist_list_name(attr)
-    default = _resolve_default(attr.get("defaultValue"), picklist_items)
     conn.execute(
         """INSERT OR REPLACE INTO module_fields
            (module_name, field_name, title, type, required,

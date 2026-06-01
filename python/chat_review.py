@@ -345,10 +345,10 @@ def _detect_uuid_step_ids(s: dict) -> Iterator[Finding]:
                 f"(turn {first_turn}, {len(first_uuids)} step(s))"
             ),
             detail=(
-                f"Step ids should be short slugs ('prompt_for_ip', "
-                f"'set_severity'), not UUIDs. The compiler generates "
-                f"the real UUIDs at emit time. Putting UUIDs into "
-                f"`id:` breaks every cross-reference. Examples:\n"
+                "Step ids should be short slugs ('prompt_for_ip', "
+                "'set_severity'), not UUIDs. The compiler generates "
+                "the real UUIDs at emit time. Putting UUIDs into "
+                "`id:` breaks every cross-reference. Examples:\n"
                 + "\n".join(f"  - {u}" for u in first_uuids[:5])
             ),
             turn=first_turn,
