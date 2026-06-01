@@ -33,6 +33,77 @@ DEMO_MODEL = "claude-haiku-4-5-20251001"
 GOLDEN_DIR = REPO_ROOT / "python" / "evals" / "golden_traces"
 RUN_DIR = REPO_ROOT / "store" / "eval_runs"
 
+# Each quality/recall failure points at the lever most likely to fix it, so a
+# failed run is self-documenting: failure -> file/knob to change, no grep.
+LEVER_MAP = {
+    "investigation_recall": "fixture required_facts vs. system_prompt_triage.md "
+                            "pivot guidance (agent didn't reach the required op)",
+    "investigation_tool_budget": "system_prompt_triage.md §pivot-discipline + "
+                                 "2.8 parallel dispatch (too many calls)",
+    "investigation_no_param_flail": "fsr_core validate_op_grounded + connector_op_defs "
+                                    "op-def cache (guessed param names)",
+    "investigation_blind_param_retry": "run_op bad_params inline valid_params + "
+                                       "system_prompt_triage.md 'call get_op_schema "
+                                       "before run_op' (hammered without lookup)",
+    "investigation_deliverable": "system_prompt_triage.md emit_action_card staging rule "
+                                 "(hunt ended without a card)",
+    "<forbidden>": "system_prompt_triage.md forbidden-pivot rule "
+                   "(fired an internal-source TI lookup)",
+}
+
+
+def _lever_for(key: str) -> str:
+    return LEVER_MAP.get(key, "unmapped — inspect trace")
+
+
+def _load_baseline(stamp: str | None) -> dict | None:
+    """Load a prior calibrate summary by stamp for delta comparison."""
+    if not stamp:
+        return None
+    p = RUN_DIR / f"calibrate_{stamp}.summary.json"
+    if not p.exists():
+        log.warning("baseline %s not found at %s — skipping delta", stamp, p)
+        return None
+    try:
+        return json.loads(p.read_text())
+    except Exception as exc:  # noqa: BLE001
+        log.warning("baseline %s unreadable (%r) — skipping delta", stamp, exc)
+        return None
+
+
+def _gate_states(entry: dict) -> dict[str, bool]:
+    """Map gate-name -> passed for a summary entry's quality block (if present)."""
+    q = entry.get("quality") or {}
+    return {k: bool(v.get("passed")) for k, v in q.items()
+            if isinstance(v, dict) and not v.get("skipped")}
+
+
+def _compute_delta(baseline: dict, results: list[tuple[str, dict]]) -> dict:
+    """Per-fixture recall change + gate PASS<->FAIL flips vs. baseline."""
+    base_by_name = {e["fixture"]: e for e in baseline.get("results", [])}
+    delta = {}
+    for name, sc in results:
+        b = base_by_name.get(name)
+        if not b:
+            delta[name] = {"new": True}
+            continue
+        d: dict = {}
+        if b.get("recall") != sc.get("recall"):
+            d["recall"] = {"from": b.get("recall"), "to": sc.get("recall")}
+        if bool(b.get("passed")) != bool(sc.get("passed")):
+            d["passed"] = {"from": bool(b.get("passed")), "to": bool(sc.get("passed"))}
+        now_gates = {k: bool(v.get("passed")) for k, v in (sc.get("quality") or {}).items()
+                     if isinstance(v, dict) and not v.get("skipped")}
+        base_gates = _gate_states(b)
+        flips = {g: {"from": base_gates[g], "to": now_gates[g]}
+                 for g in now_gates if g in base_gates and base_gates[g] != now_gates[g]}
+        if flips:
+            d["gate_flips"] = flips
+        if d:
+            delta[name] = d
+    return delta
+
+
 log = logging.getLogger("calibrate")
 
 
@@ -116,6 +187,9 @@ def main() -> None:
     ap.add_argument("--capture", action="store_true",
                     help="bank each passing fixture's golden trace to "
                          "python/evals/golden_traces/ for the offline test")
+    ap.add_argument("--baseline", default=None, metavar="STAMP",
+                    help="prior calibrate run stamp to diff against (recall + "
+                         "gate PASS<->FAIL flips); e.g. 20260530T120000Z")
     args = ap.parse_args()
 
     from evals.tasks import load_tasks
@@ -189,8 +263,35 @@ def main() -> None:
                            "ok": c.get("ok")} for c in out["trace"]],
             }, indent=2))
             log.info("  banked golden trace -> %s", gp.relative_to(REPO_ROOT))
-        elif args.capture:
-            log.warning("  NOT banking golden trace for %s (did not pass)", t.name)
+        # Always bank FAILURE traces (the signal for the next fix) — unlike
+        # golden passes, these are unconditional, since a thrown-away failing
+        # trace is exactly what forces an expensive re-run to diagnose. Records
+        # the full arg-by-arg trace + the gates that tripped + their implicated
+        # lever, so failure -> file-to-change is a field, not a log-grep.
+        if not sc["passed"]:
+            fdir = RUN_DIR / f"calibrate_{stamp}_failures"
+            fdir.mkdir(parents=True, exist_ok=True)
+            failed_keys = list(sc.get("quality_failed") or [])
+            if sc.get("missing"):
+                failed_keys.append("investigation_recall")
+            if sc.get("forbidden_hit"):
+                failed_keys.append("<forbidden>")
+            (fdir / f"{t.name}.json").write_text(json.dumps({
+                "fixture": t.name, "captured": stamp, "model": args.model,
+                "stop_reason": out["stop_reason"], "recall": sc["recall"],
+                "gate": sc["gate"], "matched": sc["matched"], "required": sc["required"],
+                "missing": sc["missing"], "forbidden_hit": sc["forbidden_hit"],
+                "quality": sc.get("quality", {}),
+                "failed_gates": [{"gate": k, "lever": _lever_for(k),
+                                  "detail": (sc.get("quality", {}).get(k, {}) or {}).get("detail", "")}
+                                 for k in failed_keys],
+                "trace": [{"name": c["name"], "args": c.get("args", {}),
+                           "ok": c.get("ok")} for c in out["trace"]],
+            }, indent=2))
+            log.info("  banked FAILURE trace -> %s",
+                     (fdir / f"{t.name}.json").relative_to(REPO_ROOT))
+            for k in failed_keys:
+                log.info("    lever[%s]: %s", k, _lever_for(k))
         results.append((t.name, sc))
 
     log.info("=" * 72)
@@ -208,12 +309,42 @@ def main() -> None:
     n_pass = sum(1 for _, sc in results if sc["passed"])
     log.info("%s/%s fixtures clear the gate.", n_pass, len(results))
 
+    # Baseline delta — turns "3/5 PASS" into "mail_egress budget 19->11, now
+    # clears": a verdict an agent can act on, vs. a snapshot to eyeball.
+    baseline = _load_baseline(args.baseline)
+    delta = _compute_delta(baseline, results) if baseline else {}
+    if baseline:
+        log.info("-" * 72)
+        log.info("DELTA vs %s", args.baseline)
+        if not delta:
+            log.info("  no change in recall, pass/fail, or gates.")
+        for name, d in delta.items():
+            if d.get("new"):
+                log.info("  [NEW] %s (not in baseline)", name)
+                continue
+            bits = []
+            if "recall" in d:
+                bits.append(f"recall {d['recall']['from']}->{d['recall']['to']}")
+            if "passed" in d:
+                arrow = "FIXED" if d["passed"]["to"] else "REGRESSED"
+                bits.append(f"{arrow} (pass {d['passed']['from']}->{d['passed']['to']})")
+            for g, gv in d.get("gate_flips", {}).items():
+                arrow = "PASS" if gv["to"] else "FAIL"
+                bits.append(f"{g}->{arrow} [{_lever_for(g)}]")
+            log.info("  %-34s %s", name, "; ".join(bits))
+
     summary_path = RUN_DIR / f"calibrate_{stamp}.summary.json"
     summary_path.write_text(json.dumps(
-        {"stamp": stamp, "model": args.model,
-         "results": [{"fixture": n, **{k: sc.get(k) for k in
-                      ("recall", "passed", "missing", "forbidden_hit", "error")}}
-                     for n, sc in results]}, indent=2))
+        {"stamp": stamp, "model": args.model, "baseline": args.baseline,
+         "results": [{"fixture": n,
+                      **{k: sc.get(k) for k in
+                         ("recall", "passed", "missing", "forbidden_hit", "error")},
+                      "quality": sc.get("quality", {}),
+                      "quality_failed": sc.get("quality_failed", []),
+                      "failed_levers": {k: _lever_for(k)
+                                        for k in (sc.get("quality_failed") or [])}}
+                     for n, sc in results],
+         "delta": delta}, indent=2))
     log.info("run summary -> %s", summary_path.relative_to(REPO_ROOT))
 
 

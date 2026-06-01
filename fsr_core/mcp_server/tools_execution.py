@@ -703,19 +703,53 @@ def _validate_op_params_live(op_def: dict[str, Any] | None, connector: str,
             })
     if not issues:
         return None
+    # The live op-def is already in hand (`known`), so embed a COMPACT param
+    # signature inline rather than telling the agent to spend another round-trip
+    # on get_op_schema (~6KB). One line per param: name, required flag, type, and
+    # a select-option count (not the options themselves — those stay in the full
+    # schema). This turns the flail loop (fail -> discover -> retry, 3 turns +
+    # heavy schema) into fail-with-the-answer -> retry (2 turns, tiny payload).
+    valid_params = _compact_param_sig(plist)
     return _err(
         "bad_params",
         f"operation '{op}' on '{connector}' called with {len(issues)} "
         f"invalid argument(s) (validated against the live connector definition)",
         suggestions=[
-            f"Call get_op_schema({connector!r}, {op!r}) to see the exact "
-            "parameter names, types, required flags, and select options",
-            "Re-issue the call with corrected args (fix the issues below)",
+            "Re-issue the call with corrected args using `valid_params` below "
+            "(no need to call get_op_schema — the full param list is inline).",
+            f"For select options / types in detail, call "
+            f"get_op_schema({connector!r}, {op!r}).",
         ],
         connector=connector,
         op=op,
         issues=issues,
+        valid_params=valid_params,
     )
+
+
+def _compact_param_sig(plist: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A minimal, low-token parameter signature from a live op param list:
+    name + required + type, plus an option *count* when the param is a select
+    (the option values themselves live in the full get_op_schema). Built so an
+    agent that guessed a param name can correct it from the error alone."""
+    sig: list[dict[str, Any]] = []
+    for p in plist:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name") or p.get("title")
+        if not name:
+            continue
+        entry: dict[str, Any] = {"name": name}
+        if p.get("required"):
+            entry["required"] = True
+        ptype = p.get("type") or p.get("fieldType")
+        if ptype:
+            entry["type"] = ptype
+        opts = p.get("options") or p.get("choices")
+        if isinstance(opts, list) and opts:
+            entry["options_count"] = len(opts)
+        sig.append(entry)
+    return sig
 
 
 def _preflight_connector(client, connector: str,

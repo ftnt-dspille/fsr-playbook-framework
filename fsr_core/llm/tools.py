@@ -43,6 +43,7 @@ SAFE_TOOLS: list[str] = [
     "emit_decision_step",
     "list_configured_connectors",
     "find_containment_actions",
+    "find_enrichment_actions",
     "healthcheck_connector",
     "list_picklists",
     "picklist_for_field",
@@ -103,6 +104,7 @@ TOOL_TIERS: dict[str, int] = {
     "emit_decision_step": 0,
     "list_configured_connectors": 1,
     "find_containment_actions": 1,
+    "find_enrichment_actions": 1,
     "healthcheck_connector": 1,
     "diagnose_yaml_against_pb_execution": 1,
     # Phase 0 — pure local compute (no FSR I/O).
@@ -177,6 +179,39 @@ def _lookup_op_metadata(connector: str, op: str) -> tuple[str | None, str | None
         return None, None
 
 
+def _op_presence(connector: str, op: str) -> tuple[bool, bool]:
+    """Return (op_exists, connector_known) from the reference catalog.
+
+    op_exists       — there is an `operations` row for (connector, op).
+    connector_known — the catalog has at least one op for `connector`.
+
+    A guessed / mistyped op on a connector we *do* have a catalog for is
+    ``(False, True)``: it cannot execute (it doesn't exist), so the tier gate
+    should let it dispatch to a self-correcting ``unknown_operation`` error
+    rather than escalate it to human approval. Best-effort: any DB problem
+    returns ``(False, False)`` so the caller stays conservative (escalates).
+    """
+    if not connector or not op or not _DB_PATH.exists():
+        return False, False
+    try:
+        con = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        try:
+            cur = con.cursor()
+            op_row = cur.execute(
+                "SELECT 1 FROM operations WHERE connector_name=? AND op_name=? LIMIT 1",
+                (connector, op),
+            ).fetchone()
+            conn_row = cur.execute(
+                "SELECT 1 FROM operations WHERE connector_name=? LIMIT 1",
+                (connector,),
+            ).fetchone()
+            return bool(op_row), bool(conn_row)
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False, False
+
+
 def _tier_for_run_op(args: dict[str, Any]) -> int:
     """Resolve effective tier for a `run_op` call from op_safety + category.
 
@@ -200,6 +235,17 @@ def _tier_for_run_op(args: dict[str, Any]) -> int:
         return 2
     if safety == "unsafe":
         return 4  # unknown category but classifier flagged destructive
+    # Unknown / unclassified. Before escalating to approval, separate a
+    # guessed/mistyped op from a real-but-unclassified one. If the connector's
+    # catalog is known to us but this op isn't in it, the op cannot run — it
+    # doesn't exist. Gating a non-existent op for human approval just halts the
+    # hunt and hides the `unknown_operation` error (with the real op names) that
+    # lets the agent self-correct. Let it dispatch (tier 1) so run_op bounces
+    # back the correction. A connector we have NO catalog for stays conservative
+    # (tier 3) — it could carry a real mutating op we simply haven't probed.
+    op_exists, connector_known = _op_presence(connector, op)
+    if connector_known and not op_exists:
+        return 1
     return 3  # unknown / unclassified → require approval
 
 

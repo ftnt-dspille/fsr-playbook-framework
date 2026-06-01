@@ -204,6 +204,36 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                 )
                 if close:
                     out["near"] = close
+        # Multi-match: attach a TINY required-param hint per op so the agent
+        # sees each op's shape before picking one — pre-empting the "choose an
+        # op, then guess its params" flail — without the cost of a full schema
+        # per row. One batched query, top-level required params only (sub-params
+        # and optional args stay in get_op_schema). Single-match skips this; it
+        # gets the full slim schema below.
+        if len(rows) > 1:
+            names = [r["op_name"] for r in rows if r.get("op_name")]
+            if names:
+                ph = ",".join("?" * len(names))
+                preq = _rows(
+                    conn,
+                    f"""SELECT op_name, param_name
+                       FROM operation_params
+                       WHERE connector_name = ?
+                         AND op_name IN ({ph})
+                         AND (parent_param_name IS NULL OR parent_param_name = '')
+                         AND required = 1
+                       ORDER BY ord""",
+                    (connector, *names),
+                )
+                req_by_op: dict[str, list[str]] = {}
+                for pr in preq:
+                    req_by_op.setdefault(pr["op_name"], []).append(pr["param_name"])
+                for r in rows:
+                    # Only when known; absence stays silent (un-probed op) rather
+                    # than asserting "no required params" we can't prove.
+                    if r.get("op_name") in req_by_op:
+                        r["required_params"] = req_by_op[r["op_name"]]
+
         # When the search narrows to a single op, fold the slim schema
         # into the response so the agent can skip the follow-up
         # get_op_schema round-trip (saves ~1 LLM turn + ~6KB of cache).

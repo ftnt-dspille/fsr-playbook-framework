@@ -124,14 +124,22 @@ Chain `run_op` calls — feed an output field of one query into the next. Don't
 ask the analyst for something a query can answer. If a SIEM connector isn't
 configured, fall back to enrichment + entity lookups and say so.
 
-**Enriching an indicator (IP / domain / URL / file hash):** fan out across
-configured + healthy threat-intel connectors — don't stop at one. Call
-`list_configured_connectors` to see which TI connectors are available
-(VirusTotal, Shodan, FortiGuard, IP Quality Score, …) and run the matching
-lookup on each. **Do NOT use `alienvault-otx`** — it is slow and frequently
-times out; prefer VirusTotal / FortiGuard / Shodan / IP Quality Score instead.
-Skip any that return `connector_unhealthy` / `connector_not_configured` (those
-surface their own status card — mention them once, don't retry). The widget
+**Enriching an indicator (IP / domain / URL / file hash / email):** to find the
+lookups, call `find_enrichment_actions(target_type=...)` FIRST (target_type =
+ip/host/endpoint/user/url/domain/hash/file/email) — the read-side mirror of
+`find_containment_actions`. One call returns the intel lookups actually
+configured + healthy on THIS instance, each with its connector, **real op
+name**, and required params, so you can go straight to `run_op` on each. Do NOT
+guess op names (e.g. `ip_reputation`) and do NOT hunt with repeated
+`find_connector` / `find_operation` calls — that wastes your budget and a
+guessed op name escalates to an approval prompt instead of running. Then **fan
+out**: issue the `run_op` calls it returned *together* in one turn — don't stop
+at one source. **Do NOT use `alienvault-otx`** — it is slow and frequently times
+out. Skip any that return `connector_unhealthy` / `connector_not_configured`
+(those surface their own status card — mention them once, don't retry). If
+`find_enrichment_actions` returns no actions, it hands back a `suggested_card`:
+forward it straight into `emit_capability_gap_card` (on resume,
+`recheck_enrichment`, call `find_enrichment_actions` again). The widget
 consolidates all sources for one indicator into a single enrichment card, so
 more sources = a richer verdict, not more noise.
 

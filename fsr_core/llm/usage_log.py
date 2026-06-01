@@ -39,12 +39,19 @@ from pathlib import Path
 from typing import Any
 
 
-def default_log_path() -> Path:
+def default_log_path(override: "str | Path | None" = None) -> Path:
+    """Resolve the usage-log path. An explicit `override` (e.g. a path the
+    connector derived from its own configuration) wins; otherwise the Studio
+    backend's STUDIO_USAGE_LOG env var; otherwise the repo-root default.
+
+    In-platform connectors can't set process env vars — they pass `override`
+    (see operations._usage_log_path), so the env branch is Studio-only."""
+    if override:
+        return Path(override).expanduser()
     env = os.environ.get("STUDIO_USAGE_LOG")
     if env:
         return Path(env).expanduser()
     # Historical default: web/backend/usage.jsonl at the repo root.
-    # Connectors should override via STUDIO_USAGE_LOG.
     return Path(__file__).resolve().parents[2] / "web" / "backend" / "usage.jsonl"
 
 
@@ -54,11 +61,12 @@ def est_tokens(chars: int) -> int:
     return chars // 4
 
 
-def log_turn(record: dict[str, Any]) -> None:
+def log_turn(record: dict[str, Any], path: "str | Path | None" = None) -> None:
     """Append one JSON line. Failures are swallowed — telemetry must
-    never break the chat path."""
+    never break the chat path. `path` overrides the default resolution (the
+    connector passes a config-derived path; it has no env to read)."""
     try:
-        path = default_log_path()
+        path = default_log_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": _dt.datetime.now(_dt.timezone.utc)

@@ -1,0 +1,297 @@
+{
+  "fixture": "invest_excessive_mail_egress",
+  "captured": "20260601T052945Z",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "end_turn",
+  "recall": 0.667,
+  "gate": 0.8,
+  "matched": 2,
+  "required": 3,
+  "missing": [
+    "correlate related activity in the incidents module"
+  ],
+  "forbidden_hit": [],
+  "quality": {
+    "investigation_tool_budget": {
+      "passed": false,
+      "skipped": false,
+      "calls": 20,
+      "limit": 12,
+      "detail": "20 tool call(s) (limit 12)"
+    },
+    "investigation_no_param_flail": {
+      "passed": true,
+      "skipped": false,
+      "worst_distinct_argsets": 1,
+      "limit": 2,
+      "op": "ip-quality-score.get_ip_reputation",
+      "detail": "no op exceeded 2 distinct arg-sets"
+    },
+    "investigation_blind_param_retry": {
+      "passed": true,
+      "skipped": false,
+      "worst_blind_argsets": 0,
+      "limit": 2,
+      "op": null,
+      "detail": "no op was blind-retried without a schema lookup"
+    },
+    "investigation_deliverable": {
+      "passed": true,
+      "skipped": false,
+      "staged": [
+        "emit_action_card"
+      ],
+      "accepted": [
+        "emit_action_card",
+        "emit_choice_card",
+        "emit_capability_gap_card"
+      ],
+      "detail": "staged emit_action_card"
+    }
+  },
+  "failed_gates": [
+    {
+      "gate": "investigation_tool_budget",
+      "lever": "system_prompt_triage.md \u00a7pivot-discipline + 2.8 parallel dispatch (too many calls)",
+      "detail": "20 tool call(s) (limit 12)"
+    },
+    {
+      "gate": "investigation_recall",
+      "lever": "fixture required_facts vs. system_prompt_triage.md pivot guidance (agent didn't reach the required op)",
+      "detail": ""
+    }
+  ],
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "alerts:b62fb2d5-d27e-4d7e-8bd8-53e4878ba614",
+        "relationships": true
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "192.168.77.10",
+        "limit": 10
+      },
+      "ok": true
+    },
+    {
+      "name": "list_configured_connectors",
+      "args": {
+        "verbose": false
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "virustotal",
+        "q": "ip",
+        "limit": 5
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "shodan",
+        "q": "ip",
+        "limit": 5
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "ip-quality-score",
+        "q": "ip",
+        "limit": 5
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "fortinet-fortiguard-ioc",
+        "q": "ip",
+        "limit": 5
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "fortinet-fortiguard-ioc",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "ip-quality-score",
+        "op": "get_ip_reputation",
+        "params": {
+          "ip_address": "35.189.45.227"
+        }
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "ip_re_analyze",
+        "params": {
+          "id": "35.189.45.227"
+        }
+      },
+      "ok": false
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-ioc",
+        "op": "ioc_search",
+        "params": {
+          "indicator": "35.189.45.227"
+        }
+      },
+      "ok": null
+    },
+    {
+      "name": "find_operation",
+      "args": {
+        "connector": "virustotal",
+        "q": "reputation",
+        "limit": 5
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-ioc",
+        "op": "ioc_search",
+        "params": {
+          "indicator": "35.189.45.227"
+        },
+        "confirm": true
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "ip_re_analyze",
+        "params": {
+          "id": "35.189.45.227"
+        },
+        "confirm": true
+      },
+      "ok": true
+    },
+    {
+      "name": "find_containment_actions",
+      "args": {
+        "target_type": "ip",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "find_containment_actions",
+      "args": {
+        "target_type": "host",
+        "limit": 10
+      },
+      "ok": true
+    },
+    {
+      "name": "emit_action_card",
+      "args": {
+        "id": "quarantine_192_168_77_10",
+        "connector": "fortigate-firewall",
+        "operation": "quarantine_host",
+        "summary": "Quarantine host 192.168.77.10 due to suspected credential compromise and exfiltration via cleartext password usage",
+        "args": {
+          "macs": ""
+        },
+        "editable_fields": [
+          "macs"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "assets",
+        "q": "192.168.77.10",
+        "limit": 5
+      },
+      "ok": true
+    },
+    {
+      "name": "emit_action_card",
+      "args": {
+        "id": "block_dest_ip_35_189_45_227",
+        "connector": "fortigate-firewall",
+        "operation": "block_ip_new",
+        "summary": "Block destination IP 35.189.45.227 to prevent further exfiltration attempts from 192.168.77.10",
+        "args": {
+          "ip": "35.189.45.227",
+          "ip_type": "IPv4",
+          "method": "Firewall Policy",
+          "ip_block_policy": "Drop",
+          "ip_group_name": "Compromised_Host_Targets",
+          "duration": 7,
+          "time_to_live": "7 days"
+        },
+        "editable_fields": [
+          "ip",
+          "ip_type",
+          "method",
+          "ip_block_policy",
+          "ip_group_name",
+          "duration",
+          "time_to_live"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "emit_action_card",
+      "args": {
+        "id": "block_dest_ip_35_189_45_227",
+        "connector": "fortigate-firewall",
+        "operation": "block_ip_new",
+        "summary": "Block destination IP 35.189.45.227 to prevent further exfiltration attempts from 192.168.77.10",
+        "args": {
+          "ip": "35.189.45.227",
+          "ip_type": "IPv4",
+          "method": "Policy Based",
+          "ip_block_policy": "Drop",
+          "ip_group_name": "Compromised_Host_Targets",
+          "duration": 1,
+          "time_to_live": "1 Day"
+        },
+        "editable_fields": [
+          "ip",
+          "ip_type",
+          "method",
+          "ip_block_policy",
+          "ip_group_name",
+          "duration",
+          "time_to_live"
+        ]
+      },
+      "ok": true
+    }
+  ]
+}

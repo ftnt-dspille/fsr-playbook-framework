@@ -50,6 +50,17 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 ## Next steps (resume state, 2026-05-30)
 
+### Housekeeping — ruff sweep (added 2026-06-01)
+- [ ] Run `ruff` across `fsr_core/`, `python/`, and the connector
+  (`ConnectorsV2/fsr-playbook-builder/`) to surface unused code + lint issues:
+  `ruff check --select F` first (F401 unused imports, F811 redefinitions,
+  F841 unused locals, F-dead code), then a broader `ruff check`. ruff isn't yet
+  wired into the repo (not in `pyproject.toml`/`Makefile`) — add it as a dev dep
+  + a `make lint` target while here. Watch for false positives from the
+  function-local re-imports in `operations.py` (e.g. duplicate `import os` at
+  module + function scope) and the Python-3.9 baseline (don't let an autofix
+  introduce module-level PEP 604 unions in `fsr_core`).
+
 Session shipped connector **0.3.31** (id=110, live, Haiku, FortiCloud SOAR).
 Landed: hardening **1.6/1.7/1.8** (the `sess-uq31go5p` live-triage fix —
 emit-time op grounding, self-healing resume, `get_record(full=True)` cap) +
@@ -88,12 +99,16 @@ can't fix from the FSR UI (`catalog_unavailable`, `no_live_fsr`,
 `probes_unavailable`) and runtime/logic errors (`not_found`, `no_match`,
 `bad_response_shape`, `unknown_operation` self-heals).
 
-Incomplete:
-- [ ] **Angular widget render of `capability_gap`** (separate WebStorm repo —
-  contract documented at 2.3.0, code NOT written). This is the only piece
-  needed for the card to actually display + resume in the widget. **Live triage
-  on 0.3.32 will emit the card event but a pre-2.3.0 widget renders it in its
-  generic card block.** ← top resume point.
+Complete (widget side):
+- [x] **Angular widget render of `capability_gap`** — DONE in the WebStorm repo
+  (`widgets-src/fsrPlaybookBuilder/widget/`): normalizer branch
+  `fsrPbRender.js:520-536` (missing/why/fixSteps/resume default label
+  "Re-check & continue"/tips/alternatives/docsUrl), dedicated `capability-gap-card`
+  template `view.html:1347-1390` (⚠ header, ordered fix steps, tips, docs link,
+  `capgap-resume-…` button, alternative chips, resolution line), ~60 lines CSS
+  `view.html:821-881`, and the generic fallback explicitly excludes the type at
+  `view.html:1392`. Card renders + resumes natively; the earlier "code NOT
+  written / pre-2.3.0 generic block" note was stale.
 - [ ] (optional) `run_playbook` "no playbook matching" `capability_gap`
   (authoring-side; resume = create/import the playbook). Lower fit.
 - [ ] (optional) "no TI connector configured at all" enrichment gap — emergent
@@ -898,6 +913,43 @@ assume the patterns established in 2026-05-03/04 are followed.
      to a Raise Exception failure branch report `finished` under
      `--mock` even though the failure path was taken. Lint should warn.
    - Updated `AUTHORING.md` + `fsrpb lint <file>` subcommand surface.
+
+10. **[v2 cleanup — LOW] Close the `probes_unavailable` cold-start race.**
+    Transient `probes_unavailable` on the first run_op call(s) immediately
+    after a `$replace` push (or add/update-config / activate) while the
+    catalog is cold. Root cause: the background warmup thread
+    (`_trigger_background_warmup` → `fsrpb-warmup-hook`) and the inbound
+    request thread mutate `sys.modules` against each other. Two windows:
+    (A) `_import_fsr_core` evicts `fsr_core.*` (incl. `_live_crudhub`) at
+    `operations.py:104-109` during re-import, so a concurrent
+    `_ensure_probes_bridge`'s `from fsr_core.mcp_server import _live_crudhub`
+    hits its `except: return` → no bridge; (B) `_set_simulation_mode`
+    pop→rebuild at `operations.py:231-243` leaves `probes._env` briefly
+    absent. Either makes `run_op`'s `from probes._env import …`
+    (`tools_execution.py:1416`) raise → `probes_unavailable`.
+    **Blast radius: small.** Fail-loud (clean `_err`, op never runs — no
+    data/integrity/leak impact), self-heals once warm, per-worker, bounded
+    to ~1-2s after the push (the cold `fsr_core` re-import burst — NOT the
+    full catalog walk; `warmup()` body never touches `sys.modules`). A
+    stable warm install never sees it; only the push→immediately-exercise
+    dev loop does.
+    **Fix (option 1):** wrap the mutation regions in a module-global
+    `threading.RLock` **in `operations.py`** (must live in the non-evicted
+    module so the lock object survives the `fsr_core` eviction). Scope the
+    lock to the eviction+reassign critical sections only — NOT the slow
+    `import fsr_core` (CPython's own import lock serializes that); keep the
+    `_set_simulation_mode` early-return (`on == _SIM_MODE["on"]`) OUTSIDE
+    the lock so steady-state ops take zero acquisitions. Reassign
+    `sys.modules["probes._env"]` in place (drop the bare `pop`) so it's
+    never transiently absent. Caveat: the `pop` is load-bearing ONLY for the
+    off-platform dev sim→live flip (evicts the synthetic sim module so the
+    real on-disk `probes._env` re-imports past `_probes_real_available()`'s
+    sys.modules cache hit) — preserve that by tagging synthetic modules with
+    a sentinel attr and doing a targeted eviction inside
+    `_ensure_probes_bridge`, not an unconditional pop. Optional belt-and-
+    suspenders: lazy-retry `_ensure_probes_bridge()` once in `run_op` before
+    returning `probes_unavailable`. Edit `fsr_core` SOURCE + connector
+    `operations.py`, then re-vendor. ~1-2 hr. (Investigated 2026-05-31.)
 
 
 ## Where we are

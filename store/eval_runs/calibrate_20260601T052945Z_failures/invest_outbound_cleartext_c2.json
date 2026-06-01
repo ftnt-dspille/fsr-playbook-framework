@@ -1,0 +1,109 @@
+{
+  "fixture": "invest_outbound_cleartext_c2",
+  "captured": "20260601T052945Z",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "pending_approval",
+  "recall": 1.0,
+  "gate": 0.8,
+  "matched": 3,
+  "required": 3,
+  "missing": [],
+  "forbidden_hit": [],
+  "quality": {
+    "investigation_tool_budget": {
+      "passed": true,
+      "skipped": false,
+      "calls": 6,
+      "limit": 12,
+      "detail": "6 tool call(s) (limit 12)"
+    },
+    "investigation_no_param_flail": {
+      "passed": true,
+      "skipped": false,
+      "worst_distinct_argsets": 1,
+      "limit": 2,
+      "op": "virustotal.ip_reputation",
+      "detail": "no op exceeded 2 distinct arg-sets"
+    },
+    "investigation_blind_param_retry": {
+      "passed": true,
+      "skipped": false,
+      "worst_blind_argsets": 1,
+      "limit": 2,
+      "op": "virustotal.ip_reputation",
+      "detail": "no op was blind-retried without a schema lookup"
+    },
+    "investigation_deliverable": {
+      "passed": false,
+      "skipped": false,
+      "staged": [],
+      "accepted": [
+        "emit_action_card",
+        "emit_choice_card",
+        "emit_capability_gap_card"
+      ],
+      "detail": "no deliverable card staged for the analyst (accepts: emit_action_card, emit_choice_card, emit_capability_gap_card)"
+    }
+  },
+  "failed_gates": [
+    {
+      "gate": "investigation_deliverable",
+      "lever": "system_prompt_triage.md emit_action_card staging rule (hunt ended without a card)",
+      "detail": "no deliverable card staged for the analyst (accepts: emit_action_card, emit_choice_card, emit_capability_gap_card)"
+    }
+  ],
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "alerts:54f25f1f-808e-4bbb-8e20-e95855291184"
+      },
+      "ok": true
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "sourceIp:192.168.77.49",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "incidents",
+        "q": "sourceIp:192.168.77.49",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "destinationIp:108.17.204.5",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "list_configured_connectors",
+      "args": {
+        "verbose": false
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "ip_reputation",
+        "params": {
+          "ip": "108.17.204.5"
+        }
+      },
+      "ok": null
+    }
+  ]
+}

@@ -251,6 +251,51 @@ def _param_flail(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
     return worst, (label or None)
 
 
+# Discovery tools that reveal an op's real param schema. A run_op retry that
+# follows any of these for the same op is "informed"; one that doesn't is blind.
+_SCHEMA_DISCOVERY_TOOLS = ("get_op_schema", "find_operation", "find_operation_example")
+
+
+def _blind_param_retry(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
+    """Worst case of run_op retried with corrected params for an op the agent
+    NEVER pulled a schema for — the avoidable flail (vs. _param_flail, which
+    counts retries regardless of whether discovery happened).
+
+    Walks the trace in order: a `get_op_schema`/`find_operation*` call for a
+    connector/op marks it 'discovered' from that point on. A run_op with a new
+    distinct arg-set for an op that has NOT been discovered yet is a blind
+    retry. Returns (worst_blind_argsets, label). 1 blind arg-set is fine (first
+    attempt); ≥2 means the agent hammered corrections without ever looking up
+    the schema — the signal that get_op_schema is too costly/undiscoverable, or
+    that the inline `valid_params` on the first bad_params error isn't landing."""
+    from collections import defaultdict
+    discovered: set[tuple[str, str]] = set()
+    blind: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for c in trace:
+        name = c.get("name")
+        args = _call_args(c)
+        conn = str(args.get("connector", "")).lower()
+        op = str(args.get("op", "")).lower()
+        if name in _SCHEMA_DISCOVERY_TOOLS and conn:
+            # find_operation may not carry an op (list mode) — mark all-of-connector
+            discovered.add((conn, op))
+            if not op:
+                discovered.add((conn, ""))
+        elif name == "run_op" and conn and op:
+            if (conn, op) in discovered or (conn, "") in discovered:
+                continue
+            params = args.get("params")
+            if not isinstance(params, dict):
+                params = {k: v for k, v in args.items()
+                          if k not in ("connector", "op", "confirm")}
+            blind[(conn, op)].add(json.dumps(params, sort_keys=True, default=str))
+    if not blind:
+        return 0, None
+    worst_key = max(blind, key=lambda k: len(blind[k]))
+    worst = len(blind[worst_key])
+    return worst, f"{worst_key[0]}.{worst_key[1]}"
+
+
 def _score_investigation_quality(
     trace: list[dict[str, Any]],
     quality: dict[str, Any] | None,
@@ -283,6 +328,22 @@ def _score_investigation_quality(
         "detail": (f"{label} called with {worst} distinct arg-sets "
                    f"(limit {max_retries})" if not flail_ok
                    else f"no op exceeded {max_retries} distinct arg-sets"),
+    }
+
+    # --- no BLIND param retry (hammered run_op without ever pulling a schema) -
+    # Distinct from no_param_flail: this only counts retries the agent made
+    # WITHOUT calling get_op_schema/find_operation for that op first. ≥2 blind
+    # arg-sets = the agent guessed, failed, and guessed again instead of looking
+    # it up — the avoidable flail. Shares the max_param_retries knob.
+    blind_worst, blind_label = _blind_param_retry(trace)
+    blind_ok = blind_worst <= max_retries
+    gates["investigation_blind_param_retry"] = {
+        "passed": blind_ok, "skipped": False,
+        "worst_blind_argsets": blind_worst, "limit": max_retries, "op": blind_label,
+        "detail": (f"{blind_label} retried with {blind_worst} distinct arg-sets "
+                   f"and NO get_op_schema/find_operation for it (limit {max_retries})"
+                   if not blind_ok
+                   else "no op was blind-retried without a schema lookup"),
     }
 
     # --- staged a concrete deliverable --------------------------------------

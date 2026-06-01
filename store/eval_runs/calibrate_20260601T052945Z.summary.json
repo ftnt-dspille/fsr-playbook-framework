@@ -1,0 +1,238 @@
+{
+  "stamp": "20260601T052945Z",
+  "model": "claude-haiku-4-5-20251001",
+  "baseline": null,
+  "results": [
+    {
+      "fixture": "invest_outbound_cleartext_c2",
+      "recall": 1.0,
+      "passed": false,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null,
+      "quality": {
+        "investigation_tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 6,
+          "limit": 12,
+          "detail": "6 tool call(s) (limit 12)"
+        },
+        "investigation_no_param_flail": {
+          "passed": true,
+          "skipped": false,
+          "worst_distinct_argsets": 1,
+          "limit": 2,
+          "op": "virustotal.ip_reputation",
+          "detail": "no op exceeded 2 distinct arg-sets"
+        },
+        "investigation_blind_param_retry": {
+          "passed": true,
+          "skipped": false,
+          "worst_blind_argsets": 1,
+          "limit": 2,
+          "op": "virustotal.ip_reputation",
+          "detail": "no op was blind-retried without a schema lookup"
+        },
+        "investigation_deliverable": {
+          "passed": false,
+          "skipped": false,
+          "staged": [],
+          "accepted": [
+            "emit_action_card",
+            "emit_choice_card",
+            "emit_capability_gap_card"
+          ],
+          "detail": "no deliverable card staged for the analyst (accepts: emit_action_card, emit_choice_card, emit_capability_gap_card)"
+        }
+      },
+      "quality_failed": [
+        "investigation_deliverable"
+      ],
+      "failed_levers": {
+        "investigation_deliverable": "system_prompt_triage.md emit_action_card staging rule (hunt ended without a card)"
+      }
+    },
+    {
+      "fixture": "invest_excessive_mail_egress",
+      "recall": 0.667,
+      "passed": false,
+      "missing": [
+        "correlate related activity in the incidents module"
+      ],
+      "forbidden_hit": [],
+      "error": null,
+      "quality": {
+        "investigation_tool_budget": {
+          "passed": false,
+          "skipped": false,
+          "calls": 20,
+          "limit": 12,
+          "detail": "20 tool call(s) (limit 12)"
+        },
+        "investigation_no_param_flail": {
+          "passed": true,
+          "skipped": false,
+          "worst_distinct_argsets": 1,
+          "limit": 2,
+          "op": "ip-quality-score.get_ip_reputation",
+          "detail": "no op exceeded 2 distinct arg-sets"
+        },
+        "investigation_blind_param_retry": {
+          "passed": true,
+          "skipped": false,
+          "worst_blind_argsets": 0,
+          "limit": 2,
+          "op": null,
+          "detail": "no op was blind-retried without a schema lookup"
+        },
+        "investigation_deliverable": {
+          "passed": true,
+          "skipped": false,
+          "staged": [
+            "emit_action_card"
+          ],
+          "accepted": [
+            "emit_action_card",
+            "emit_choice_card",
+            "emit_capability_gap_card"
+          ],
+          "detail": "staged emit_action_card"
+        }
+      },
+      "quality_failed": [
+        "investigation_tool_budget"
+      ],
+      "failed_levers": {
+        "investigation_tool_budget": "system_prompt_triage.md \u00a7pivot-discipline + 2.8 parallel dispatch (too many calls)"
+      }
+    },
+    {
+      "fixture": "invest_disk_latency_no_ti",
+      "recall": 1.0,
+      "passed": true,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null,
+      "quality": {
+        "investigation_tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 2,
+          "limit": 8,
+          "detail": "2 tool call(s) (limit 8)"
+        },
+        "investigation_no_param_flail": {
+          "passed": true,
+          "skipped": false,
+          "worst_distinct_argsets": 0,
+          "limit": 2,
+          "op": null,
+          "detail": "no op exceeded 2 distinct arg-sets"
+        },
+        "investigation_blind_param_retry": {
+          "passed": true,
+          "skipped": false,
+          "worst_blind_argsets": 0,
+          "limit": 2,
+          "op": null,
+          "detail": "no op was blind-retried without a schema lookup"
+        },
+        "investigation_deliverable": {
+          "passed": true,
+          "skipped": true
+        }
+      },
+      "quality_failed": [],
+      "failed_levers": {}
+    },
+    {
+      "fixture": "invest_intrusion_incident",
+      "recall": 1.0,
+      "passed": true,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null,
+      "quality": {
+        "investigation_tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 11,
+          "limit": 12,
+          "detail": "11 tool call(s) (limit 12)"
+        },
+        "investigation_no_param_flail": {
+          "passed": true,
+          "skipped": false,
+          "worst_distinct_argsets": 0,
+          "limit": 2,
+          "op": null,
+          "detail": "no op exceeded 2 distinct arg-sets"
+        },
+        "investigation_blind_param_retry": {
+          "passed": true,
+          "skipped": false,
+          "worst_blind_argsets": 0,
+          "limit": 2,
+          "op": null,
+          "detail": "no op was blind-retried without a schema lookup"
+        },
+        "investigation_deliverable": {
+          "passed": true,
+          "skipped": true
+        }
+      },
+      "quality_failed": [],
+      "failed_levers": {}
+    },
+    {
+      "fixture": "invest_defense_evasion_host",
+      "recall": 1.0,
+      "passed": true,
+      "missing": [],
+      "forbidden_hit": [],
+      "error": null,
+      "quality": {
+        "investigation_tool_budget": {
+          "passed": true,
+          "skipped": false,
+          "calls": 9,
+          "limit": 12,
+          "detail": "9 tool call(s) (limit 12)"
+        },
+        "investigation_no_param_flail": {
+          "passed": true,
+          "skipped": false,
+          "worst_distinct_argsets": 0,
+          "limit": 2,
+          "op": null,
+          "detail": "no op exceeded 2 distinct arg-sets"
+        },
+        "investigation_blind_param_retry": {
+          "passed": true,
+          "skipped": false,
+          "worst_blind_argsets": 0,
+          "limit": 2,
+          "op": null,
+          "detail": "no op was blind-retried without a schema lookup"
+        },
+        "investigation_deliverable": {
+          "passed": true,
+          "skipped": false,
+          "staged": [
+            "emit_action_card"
+          ],
+          "accepted": [
+            "emit_action_card",
+            "emit_choice_card",
+            "emit_capability_gap_card"
+          ],
+          "detail": "staged emit_action_card"
+        }
+      },
+      "quality_failed": [],
+      "failed_levers": {}
+    }
+  ],
+  "delta": {}
+}

@@ -1,0 +1,221 @@
+22:29:45 INFO calibrate: ========================================================================
+22:29:45 INFO calibrate: FIXTURE: invest_outbound_cleartext_c2   (model claude-haiku-4-5-20251001)
+22:29:47 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:29:48 INFO calibrate:     -> get_record({"iri": "alerts:54f25f1f-808e-4bbb-8e20-e95855291184"})
+22:29:50 INFO calibrate:        <- ok=True
+22:29:50 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:29:53 INFO calibrate:     -> search_module_records({"module": "alerts", "q": "sourceIp:192.168.77.49", "limit": 10})
+22:29:53 INFO calibrate:     -> search_module_records({"module": "incidents", "q": "sourceIp:192.168.77.49", "limit": 10})
+22:29:53 INFO calibrate:     -> search_module_records({"module": "alerts", "q": "destinationIp:108.17.204.5", "limit": 10})
+22:29:53 INFO calibrate:     -> list_configured_connectors({"verbose": false})
+22:29:55 INFO calibrate:        <- ok=True
+22:29:55 INFO calibrate:        <- ok=True
+22:29:55 INFO calibrate:        <- ok=True
+22:29:55 INFO calibrate:        <- ok=None
+22:29:56 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:29:59 INFO calibrate:     -> run_op({"connector": "virustotal", "op": "ip_reputation", "params": {"ip": "108.17.204.5"}})
+22:29:59 INFO calibrate:   stop_reason=pending_approval  pivots=6  elapsed=13s
+22:29:59 INFO calibrate:   RECALL 1.0 (gate 0.8)  matched 3/3
+22:29:59 INFO calibrate:   investigation_tool_budget      PASS  (6 tool call(s) (limit 12))
+22:29:59 INFO calibrate:   investigation_no_param_flail   PASS  (no op exceeded 2 distinct arg-sets)
+22:29:59 INFO calibrate:   investigation_blind_param_retry PASS  (no op was blind-retried without a schema lookup)
+22:29:59 INFO calibrate:   investigation_deliverable      FAIL  (no deliverable card staged for the analyst (accepts: emit_action_card, emit_choice_card, emit_capability_gap_card))
+22:29:59 INFO calibrate:   OVERALL PASS=False
+22:29:59 INFO calibrate:   banked FAILURE trace -> store/eval_runs/calibrate_20260601T052945Z_failures/invest_outbound_cleartext_c2.json
+22:29:59 INFO calibrate:     lever[investigation_deliverable]: system_prompt_triage.md emit_action_card staging rule (hunt ended without a card)
+22:29:59 INFO calibrate: ... pacing 45s before next fixture ...
+22:30:44 INFO calibrate: ========================================================================
+22:30:44 INFO calibrate: FIXTURE: invest_excessive_mail_egress   (model claude-haiku-4-5-20251001)
+22:30:44 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:30:46 INFO calibrate:     -> get_record({"iri": "alerts:b62fb2d5-d27e-4d7e-8bd8-53e4878ba614", "relationships": true})
+22:30:46 INFO calibrate:     -> search_module_records({"module": "alerts", "q": "192.168.77.10", "limit": 10})
+22:30:47 INFO calibrate:        <- ok=True
+22:30:47 INFO calibrate:        <- ok=True
+22:30:48 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:30:50 INFO calibrate:     -> list_configured_connectors({"verbose": false})
+22:30:52 INFO calibrate:        <- ok=None
+22:30:53 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:30:54 INFO calibrate:     -> find_operation({"connector": "virustotal", "q": "ip", "limit": 5})
+22:30:54 INFO calibrate:     -> find_operation({"connector": "shodan", "q": "ip", "limit": 5})
+22:30:54 INFO calibrate:     -> find_operation({"connector": "ip-quality-score", "q": "ip", "limit": 5})
+22:30:54 INFO calibrate:     -> find_operation({"connector": "fortinet-fortiguard-ioc", "q": "ip", "limit": 5})
+22:30:54 INFO calibrate:        <- ok=None
+22:30:54 INFO calibrate:        <- ok=None
+22:30:54 INFO calibrate:        <- ok=None
+22:30:54 INFO calibrate:        <- ok=None
+22:30:55 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:30:57 INFO calibrate:     -> find_operation({"connector": "fortinet-fortiguard-ioc", "limit": 10})
+22:30:57 INFO calibrate:     -> run_op({"connector": "ip-quality-score", "op": "get_ip_reputation", "params": {"ip_address": "35.189.45.227"}})
+22:30:57 INFO calibrate:     -> run_op({"connector": "virustotal", "op": "ip_re_analyze", "params": {"id": "35.189.45.227"}})
+22:31:00 INFO calibrate:        <- ok=None
+22:31:00 INFO calibrate:        <- ok=True
+22:31:00 INFO calibrate:        <- ok=False
+22:31:01 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:31:03 INFO calibrate:     -> run_op({"connector": "fortinet-fortiguard-ioc", "op": "ioc_search", "params": {"indicator": "35.189.45.227"}})
+22:31:03 INFO calibrate:     -> find_operation({"connector": "virustotal", "q": "reputation", "limit": 5})
+22:31:04 INFO calibrate:        <- ok=False
+22:31:04 INFO calibrate:        <- ok=None
+22:31:05 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:31:06 INFO calibrate:     -> run_op({"connector": "fortinet-fortiguard-ioc", "op": "ioc_search", "params": {"indicator": "35.189.45.227"}, "confir)
+22:31:06 INFO calibrate:     -> run_op({"connector": "virustotal", "op": "ip_re_analyze", "params": {"id": "35.189.45.227"}, "confirm": true})
+22:31:08 INFO calibrate:        <- ok=True
+22:31:08 INFO calibrate:        <- ok=True
+22:31:09 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:31:13 INFO calibrate:     -> find_containment_actions({"target_type": "ip", "limit": 10})
+22:31:13 INFO calibrate:     -> find_containment_actions({"target_type": "host", "limit": 10})
+22:31:15 INFO calibrate:        <- ok=True
+22:31:15 INFO calibrate:        <- ok=True
+22:31:16 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:31:25 INFO calibrate:     -> emit_action_card({"id": "quarantine_192_168_77_10", "connector": "fortigate-firewall", "operation": "quarantine_host", "summary)
+22:31:25 INFO calibrate:        <- ok=False
+22:31:25 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:31:26 INFO calibrate:     -> search_module_records({"module": "assets", "q": "192.168.77.10", "limit": 5})
+22:31:26 INFO calibrate:        <- ok=True
+22:31:27 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:31:29 INFO calibrate:     -> emit_action_card({"id": "block_dest_ip_35_189_45_227", "connector": "fortigate-firewall", "operation": "block_ip_new", "summary)
+22:31:29 INFO calibrate:        <- ok=False
+22:31:30 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:31:32 INFO calibrate:     -> emit_action_card({"id": "block_dest_ip_35_189_45_227", "connector": "fortigate-firewall", "operation": "block_ip_new", "summary)
+22:31:32 INFO calibrate:        <- ok=True
+22:31:32 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:31:41 INFO calibrate:   stop_reason=end_turn  pivots=20  elapsed=57s
+22:31:41 INFO calibrate:   RECALL 0.667 (gate 0.8)  matched 2/3
+22:31:41 INFO calibrate:   investigation_tool_budget      FAIL  (20 tool call(s) (limit 12))
+22:31:41 INFO calibrate:   investigation_no_param_flail   PASS  (no op exceeded 2 distinct arg-sets)
+22:31:41 INFO calibrate:   investigation_blind_param_retry PASS  (no op was blind-retried without a schema lookup)
+22:31:41 INFO calibrate:   investigation_deliverable      PASS  (staged emit_action_card)
+22:31:41 INFO calibrate:   OVERALL PASS=False
+22:31:41 INFO calibrate:   MISSING required: ['correlate related activity in the incidents module']
+22:31:41 INFO calibrate:   banked FAILURE trace -> store/eval_runs/calibrate_20260601T052945Z_failures/invest_excessive_mail_egress.json
+22:31:41 INFO calibrate:     lever[investigation_tool_budget]: system_prompt_triage.md §pivot-discipline + 2.8 parallel dispatch (too many calls)
+22:31:41 INFO calibrate:     lever[investigation_recall]: fixture required_facts vs. system_prompt_triage.md pivot guidance (agent didn't reach the required op)
+22:31:41 INFO calibrate: ... pacing 45s before next fixture ...
+22:32:26 INFO calibrate: ========================================================================
+22:32:26 INFO calibrate: FIXTURE: invest_disk_latency_no_ti   (model claude-haiku-4-5-20251001)
+22:32:27 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:32:28 INFO calibrate:     -> get_record({"module": "alerts", "uuid": "8d74ff80-3b63-406b-b748-6aca1f1f30ff"})
+22:32:28 INFO calibrate:     -> search_module_records({"module": "alerts", "q": "ORDERS-ERP", "limit": 20})
+22:32:29 INFO calibrate:        <- ok=True
+22:32:29 INFO calibrate:        <- ok=True
+22:32:30 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:32:38 INFO calibrate:   stop_reason=end_turn  pivots=2  elapsed=12s
+22:32:38 INFO calibrate:   RECALL 1.0 (gate 0.8)  matched 1/1
+22:32:38 INFO calibrate:   investigation_tool_budget      PASS  (2 tool call(s) (limit 8))
+22:32:38 INFO calibrate:   investigation_no_param_flail   PASS  (no op exceeded 2 distinct arg-sets)
+22:32:38 INFO calibrate:   investigation_blind_param_retry PASS  (no op was blind-retried without a schema lookup)
+22:32:38 INFO calibrate:   OVERALL PASS=True
+22:32:38 INFO calibrate: ... pacing 45s before next fixture ...
+22:33:23 INFO calibrate: ========================================================================
+22:33:23 INFO calibrate: FIXTURE: invest_intrusion_incident   (model claude-haiku-4-5-20251001)
+22:33:24 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:33:25 INFO calibrate:     -> get_record({"module": "incidents", "uuid": "a0668705-9dc8-4797-a2c8-8f1e1f34942a", "relationships": true})
+22:33:25 INFO calibrate:        <- ok=True
+22:33:25 ERROR asyncio: Task exception was never retrieved
+future: <Task finished name='Task-59' coro=<AsyncClient.aclose() done, defined at /Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/httpx/_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/httpx/_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/httpcore/_async/connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/httpcore/_async/connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/httpcore/_async/connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/httpcore/_async/http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/httpcore/_backends/anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/anyio/streams/tls.py", line 236, in aclose
+    await self.transport_stream.aclose()
+  File "/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 1344, in aclose
+    self._transport.close()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/dylanspille/.local/share/uv/python/cpython-3.13.3-macos-aarch64-none/lib/python3.13/asyncio/selector_events.py", line 1205, in close
+    super().close()
+    ~~~~~~~~~~~~~^^
+  File "/Users/dylanspille/.local/share/uv/python/cpython-3.13.3-macos-aarch64-none/lib/python3.13/asyncio/selector_events.py", line 865, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dylanspille/.local/share/uv/python/cpython-3.13.3-macos-aarch64-none/lib/python3.13/asyncio/base_events.py", line 827, in call_soon
+    self._check_closed()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "/Users/dylanspille/.local/share/uv/python/cpython-3.13.3-macos-aarch64-none/lib/python3.13/asyncio/base_events.py", line 550, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+22:33:26 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:33:28 INFO calibrate:     -> get_record({"module": "alerts", "iri": "/api/3/alerts/9d6c91ab-86b2-4918-a7bf-5936f5e78720", "relationships": true})
+22:33:28 INFO calibrate:     -> search_module_records({"module": "incidents", "q": "sourceIP:192.168.77.30", "limit": 10})
+22:33:28 INFO calibrate:     -> search_module_records({"module": "indicators", "q": "value:12.62.213.134", "limit": 5})
+22:33:28 INFO calibrate:     -> search_module_records({"module": "assets", "q": "192.168.77.30", "limit": 5})
+22:33:29 INFO calibrate:        <- ok=True
+22:33:29 INFO calibrate:        <- ok=True
+22:33:29 INFO calibrate:        <- ok=True
+22:33:29 INFO calibrate:        <- ok=True
+22:33:30 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:33:31 INFO calibrate:     -> find_containment_actions({"target_type": "ip", "probe": true})
+22:33:32 INFO calibrate:        <- ok=True
+22:33:33 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:33:48 INFO calibrate:     -> emit_action_card({"id": "block_dest_ip", "connector": "fortigate-firewall", "operation": "block_ip_new", "summary": "Block dest)
+22:33:48 INFO calibrate:     -> emit_action_card({"id": "block_src_ip", "connector": "fortigate-firewall", "operation": "block_ip_new", "summary": "Block sourc)
+22:33:48 INFO calibrate:        <- ok=False
+22:33:48 INFO calibrate:        <- ok=False
+22:33:48 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:33:49 INFO calibrate:     -> get_op_schema({"connector": "fortigate-firewall", "op": "block_ip_new", "verbose": true})
+22:33:49 INFO calibrate:        <- ok=None
+22:33:51 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:33:54 INFO calibrate:     -> emit_action_card({"id": "block_dest_ip", "connector": "fortigate-firewall", "operation": "block_ip_new", "summary": "Block dest)
+22:33:54 INFO calibrate:     -> emit_action_card({"id": "block_src_ip", "connector": "fortigate-firewall", "operation": "block_ip_new", "summary": "Block sourc)
+22:33:54 INFO calibrate:        <- ok=True
+22:33:54 INFO calibrate:        <- ok=True
+22:33:55 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:34:00 INFO calibrate:   stop_reason=end_turn  pivots=11  elapsed=37s
+22:34:00 INFO calibrate:   RECALL 1.0 (gate 0.8)  matched 2/2
+22:34:00 INFO calibrate:   investigation_tool_budget      PASS  (11 tool call(s) (limit 12))
+22:34:00 INFO calibrate:   investigation_no_param_flail   PASS  (no op exceeded 2 distinct arg-sets)
+22:34:00 INFO calibrate:   investigation_blind_param_retry PASS  (no op was blind-retried without a schema lookup)
+22:34:00 INFO calibrate:   OVERALL PASS=True
+22:34:00 INFO calibrate: ... pacing 45s before next fixture ...
+22:34:45 INFO calibrate: ========================================================================
+22:34:45 INFO calibrate: FIXTURE: invest_defense_evasion_host   (model claude-haiku-4-5-20251001)
+22:34:46 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:34:47 INFO calibrate:     -> get_record({"iri": "incidents:b4a62c3b-3f60-44a5-b44d-f53a9244fa55", "relationships": true})
+22:34:47 INFO calibrate:     -> search_module_records({"module": "assets", "q": "smithDesktop"})
+22:34:47 INFO calibrate:        <- ok=True
+22:34:47 INFO calibrate:        <- ok=True
+22:34:48 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:34:50 INFO calibrate:     -> search_module_records({"module": "alerts", "q": "smithDesktop", "limit": 20})
+22:34:50 INFO calibrate:     -> search_module_records({"module": "incidents", "q": "smithDesktop", "limit": 20})
+22:34:50 INFO calibrate:     -> search_module_records({"module": "alerts", "q": "10.50.60.70", "limit": 20})
+22:34:50 INFO calibrate:     -> search_module_records({"module": "incidents", "q": "wendy.smith", "limit": 20})
+22:34:52 INFO calibrate:        <- ok=True
+22:34:52 INFO calibrate:        <- ok=True
+22:34:52 INFO calibrate:        <- ok=True
+22:34:52 INFO calibrate:        <- ok=True
+22:34:52 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:34:53 INFO calibrate:     -> get_record({"iri": "incidents:4a7697e3-05d9-49e0-87b3-ad5f71596982", "relationships": true})
+22:34:54 INFO calibrate:        <- ok=True
+22:34:54 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:34:55 INFO calibrate:     -> find_containment_actions({"target_type": "host", "probe": true})
+22:34:57 INFO calibrate:        <- ok=True
+22:34:57 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:35:06 INFO calibrate:     -> emit_action_card({"id": "quarantine_smithdesktop", "connector": "fortigate-firewall", "operation": "quarantine_host", "summary")
+22:35:06 INFO calibrate:        <- ok=True
+22:35:07 INFO httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+22:35:08 INFO calibrate:   stop_reason=end_turn  pivots=9  elapsed=23s
+22:35:08 INFO calibrate:   RECALL 1.0 (gate 0.8)  matched 2/2
+22:35:08 INFO calibrate:   investigation_tool_budget      PASS  (9 tool call(s) (limit 12))
+22:35:08 INFO calibrate:   investigation_no_param_flail   PASS  (no op exceeded 2 distinct arg-sets)
+22:35:08 INFO calibrate:   investigation_blind_param_retry PASS  (no op was blind-retried without a schema lookup)
+22:35:08 INFO calibrate:   investigation_deliverable      PASS  (staged emit_action_card)
+22:35:08 INFO calibrate:   OVERALL PASS=True
+22:35:08 INFO calibrate: ========================================================================
+22:35:08 INFO calibrate: SUMMARY
+22:35:08 INFO calibrate:   [FAIL] invest_outbound_cleartext_c2       recall=1.0  quality_fail=investigation_deliverable
+22:35:08 INFO calibrate:   [FAIL] invest_excessive_mail_egress       recall=0.667  quality_fail=investigation_tool_budget
+22:35:08 INFO calibrate:   [PASS] invest_disk_latency_no_ti          recall=1.0
+22:35:08 INFO calibrate:   [PASS] invest_intrusion_incident          recall=1.0
+22:35:08 INFO calibrate:   [PASS] invest_defense_evasion_host        recall=1.0
+22:35:08 INFO calibrate: 3/5 fixtures clear the gate.
+22:35:08 INFO calibrate: run summary -> store/eval_runs/calibrate_20260601T052945Z.summary.json

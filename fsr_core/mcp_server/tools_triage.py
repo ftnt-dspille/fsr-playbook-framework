@@ -317,6 +317,77 @@ _TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 _CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
 
+# --- Read/enrichment discovery (mirror of the containment side) -------------
+# An enrichment op takes an indicator (IP / domain / URL / hash / email / host)
+# and returns intel about it — reputation, context, IOC lookup, geo/whois. It's
+# read-only: the agent runs it directly via run_op and summarizes, never cards
+# it. Most read ops carry the catch-all `investigation` category, so category
+# alone can't select them; we match indicator/intel tokens in the op name+title
+# and use a tier<=2 read guard, the inverse of the containment tier>=3 guard.
+_INTEL_TOKENS: tuple[str, ...] = (
+    "reputation", "ioc", "indicator", "intel", "threat", "enrich", "context",
+    "score", "lookup", "geo", "whois", "passive", "detection", "verdict",
+)
+# Write-ish / plumbing ops that share the `investigation` category but aren't an
+# indicator lookup — re-scans, submissions, detonations, raw API passthroughs.
+_ENRICHMENT_EXCLUDE_VERBS: tuple[str, ...] = (
+    "re_analyze", "reanalyze", "re_scan", "rescan", "re-scan", "upload",
+    "submit", "detonate", "create", "add_", "delete_", "remove_", "update_",
+    "set_", "post_", "put_", "scan_", "_scan",
+)
+_ENRICHMENT_NOISE: frozenset = frozenset({
+    "execute_an_api_request", "custom_endpoint",
+})
+_ENRICHMENT_EXCLUDE_PREFIXES: tuple[str, ...] = (
+    "get_output_schema", "get_widget", "get_feed",
+)
+
+
+def _is_enrichment_op(nm: str, title_l: str,
+                      keywords: tuple[str, ...] | None) -> bool:
+    """Name/title heuristic for "indicator enrichment lookup" ops, pre-tier.
+
+    An op qualifies when it isn't a write-ish/plumbing op AND it either names
+    the indicator type asked for (keyword match) or carries a generic intel
+    token (so connector-agnostic ops like `ioc_search` / `get_reputation`
+    qualify for any indicator). With no target type, we require the intel token
+    so the result stays bounded to clearly-intel ops instead of every read.
+    """
+    if nm in _ENRICHMENT_NOISE or nm.startswith(_ENRICHMENT_EXCLUDE_PREFIXES):
+        return False
+    if any(v in nm for v in _ENRICHMENT_EXCLUDE_VERBS):
+        return False
+    generic = any(tok in nm or tok in title_l for tok in _INTEL_TOKENS)
+    if keywords:
+        return generic or any(k in nm or k in title_l for k in keywords)
+    return generic
+
+
+def _connectors_that_could_enrich(
+        keywords: tuple[str, ...] | None,
+        exclude: set[str],
+        limit: int = 4) -> list[dict[str, str]]:
+    """Across the WHOLE catalog, connectors carrying an enrichment op matching
+    the target — minus the ones already configured. Turns an intel dead end
+    into a concrete "configure connector X" recommendation. Best-effort: []."""
+    found: dict[str, str] = {}
+    try:
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                "SELECT connector_name, op_name, title FROM operations "
+                "WHERE (enabled IS NULL OR enabled NOT IN (0,'0'))"
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    for connector, op, title in rows:
+        if not connector or connector in exclude or connector in found:
+            continue
+        if _is_enrichment_op((op or "").lower(), (title or "").lower(), keywords):
+            found[connector] = op or ""
+        if len(found) >= limit:
+            break
+    return [{"connector": c, "op": o} for c, o in found.items()]
+
 
 def _required_params(conn: sqlite3.Connection, connector: str,
                      op: str) -> list[dict[str, Any]]:
@@ -597,6 +668,182 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
             f"payload returned here (it names which connector to configure and "
             f"includes a resume button), and note in your verdict that automated "
             f"containment isn't available here yet.")
+    return out
+
+
+@mcp.tool()
+def find_enrichment_actions(target_type: str = "", probe: bool = True,
+                            limit: int = 25) -> dict[str, Any]:
+    """List the read-only ENRICHMENT/intel lookups that are CONFIGURED (and,
+    with probe, healthy) on this FortiSOAR instance — optionally for one
+    indicator type. Use this to enrich an indicator instead of guessing op
+    names or hunting connector-by-connector with find_connector/find_operation.
+
+    Given an IP, domain, URL, hash, or email to enrich, ONE call returns the
+    reputation/context/IOC ops you can actually run here — with the connector,
+    the real op name, category, and the required params — so you can go straight
+    to run_op on each. This is the read-side mirror of find_containment_actions:
+    every action it returns is tier <= 2 (read-only) and is meant to be RUN
+    directly via run_op and summarized, NOT staged via emit_action_card.
+
+    Fan out: the returned ops are independent, so issue their run_op calls
+    together in one turn (the widget consolidates all sources for one indicator
+    into a single enrichment card — more sources = a richer verdict).
+
+    Args:
+        target_type: indicator to enrich — one of ip/host/endpoint/user/url/
+            domain/hash/file/email. Empty returns every intel lookup across
+            configured connectors.
+        probe: healthcheck each candidate connector (default True) and drop the
+            ones that aren't Available, so you don't run on a dead connector.
+        limit: max actions to return (default 25).
+
+    Returns:
+        {"target_type", "actions": [{connector, op, title, category, tier,
+         requires_approval: false, status, required_params:[{name,type}],
+         runs_on_agent}], "count", "probed"}. When nothing is configured to
+        enrich this, returns a `suggested_card` for emit_capability_gap_card.
+    """
+    target = (target_type or "").strip().lower()
+    keywords = _TARGET_KEYWORDS.get(target)
+    if target and keywords is None:
+        return {"ok": False, "code": "unknown_target_type",
+                "message": f"target_type {target_type!r} not recognized",
+                "valid": sorted(_TARGET_KEYWORDS)}
+
+    # 1. Configured + active connectors (no probe yet — narrow via the store
+    # first, healthcheck only the handful that carry a matching op in step 3).
+    listing = list_configured_connectors(probe=False, verbose=True)
+    if "error" in listing:
+        return {"ok": False, "code": "no_fsr_configured",
+                "message": listing["error"]}
+    configured: dict[str, str] = {}
+    version_of: dict[str, str] = {}
+    agent_of: dict[str, str] = {}
+    for c in listing.get("configured", []):
+        name = c.get("name")
+        if not name:
+            continue
+        configured[name] = str(c.get("status") or "")
+        if c.get("version"):
+            version_of[name] = c["version"]
+        if c.get("_agent_id"):
+            agent_of[name] = c["_agent_id"]
+    if not configured:
+        return {"ok": True, "target_type": target or None, "actions": [],
+                "count": 0, "probed": probe,
+                "message": "no configured connectors to enrich with"}
+
+    # 2. Pull each connector's read ops from the store, classify, filter.
+    actions: list[dict[str, Any]] = []
+    try:
+        from fsr_core.llm.tools import _tier_for_run_op as _tier  # type: ignore
+    except Exception:  # noqa: BLE001
+        _tier = None
+    placeholders = ",".join("?" * len(configured))
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+        rows = conn.execute(
+            f"SELECT connector_name, op_name, title, category FROM operations "
+            f"WHERE connector_name IN ({placeholders}) "
+            f"AND (enabled IS NULL OR enabled NOT IN (0,'0')) ",
+            tuple(configured),
+        ).fetchall()
+        for connector, op, title, category in rows:
+            nm = (op or "").lower()
+            if not _is_enrichment_op(nm, (title or "").lower(), keywords):
+                continue
+            # Decisive read guard (inverse of containment's tier>=3): only
+            # surface ops the dispatch gate treats as read-only (tier <= 2).
+            # Drops anything that would force approval — we never present a
+            # mutating op as enrichment.
+            tier = _tier({"connector": connector, "op": op}) if _tier else 2
+            if tier > 2:
+                continue
+            actions.append({
+                "connector": connector,
+                "op": op,
+                "title": title or op,
+                "category": category or "unknown",
+                "tier": tier,
+                "requires_approval": False,
+                "status": configured.get(connector),
+                "deprecated": "deprecat" in (title or "").lower(),
+                "required_params": _required_params(conn, connector, op),
+                "runs_on_agent": connector in agent_of,
+            })
+
+    # 3. Scoped healthcheck: probe ONLY the connectors carrying a candidate op.
+    # Drop actions whose connector we actively probed and found unhealthy, but
+    # FAIL OPEN on a probe gap (no version / no live client) — never manufacture
+    # a dead end out of a configured op.
+    if probe and actions:
+        candidates = {a["connector"] for a in actions}
+        targets = [(c, version_of[c], agent_of.get(c, ""))
+                   for c in candidates if c in version_of]
+        client = _shared._live_client() if targets else None
+        health = _healthcheck_many(client, targets) if client is not None else {}
+        healthy_ok = {"available", "completed", "active", "connected",
+                      "ok", "success"}
+        kept = []
+        for a in actions:
+            st = health.get(a["connector"], a.get("status") or "")
+            if str(st).lower() not in healthy_ok:
+                continue
+            a["status"] = st
+            kept.append(a)
+        actions = kept
+
+    actions.sort(key=lambda a: (a["deprecated"], a["connector"], a["op"]))
+    out: dict[str, Any] = {"ok": True, "target_type": target or None,
+                           "actions": actions[:limit], "count": len(actions),
+                           "probed": probe}
+    if not actions:
+        # No intel lookup is configured for this. Don't dead-end the analyst:
+        # build a ready-to-emit capability_gap card naming a TI connector to
+        # configure (from the full catalog), with a resume button.
+        scope = f" for target type {target!r}" if target else ""
+        miss = f"{target} enrichment" if target else "indicator enrichment"
+        could = _connectors_that_could_enrich(keywords, set(configured))
+        if could:
+            names = ", ".join(c["connector"] for c in could)
+            fix_steps = [
+                f"Configure one of these threat-intel connectors under "
+                f"Settings → Connectors: {names} (each carries a matching "
+                f"lookup, e.g. {could[0]['connector']}.{could[0]['op']}).",
+                "Save the configuration and confirm it shows as Available.",
+            ]
+        else:
+            fix_steps = [
+                "Install + configure a threat-intel connector for this "
+                "indicator (e.g. virustotal for IP/domain/URL/file reputation) "
+                "under Settings → Connectors.",
+            ]
+        out["suggested_card"] = _capability_gap_suggestion(
+            id=f"capgap_{target or 'enrichment'}",
+            missing=miss,
+            why=(f"no read-only enrichment operation is available on any "
+                 f"configured, healthy connector{scope}"),
+            fix_steps=fix_steps,
+            resume_value="recheck_enrichment",
+            tips=[
+                {"text": "Keep at least one threat-intel connector configured "
+                         "+ healthy so indicators can be enriched automatically.",
+                 "hint": "VirusTotal / Shodan / IP Quality Score / FortiGuard "
+                         "all cover common indicator types."},
+                {"text": "Grant the connector probe access so I can confirm "
+                         "it's reachable before running a lookup."},
+            ],
+            alternatives=[
+                {"label": "Skip enrichment", "value": "skip_enrichment"},
+                {"label": "Document & continue", "value": "document"},
+            ],
+        )
+        out["message"] = (
+            f"No read-only enrichment lookup is configured on this FortiSOAR "
+            f"instance{scope}. Don't keep searching and don't dead-end the "
+            f"analyst: call `emit_capability_gap_card` with the `suggested_card` "
+            f"payload returned here (it names which TI connector to configure "
+            f"and includes a resume button).")
     return out
 
 

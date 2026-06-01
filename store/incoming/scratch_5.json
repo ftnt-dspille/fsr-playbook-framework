@@ -1,0 +1,2108 @@
+{
+    "@context": "\/api\/3\/contexts\/SystemSettings",
+    "@id": "\/api\/3\/system_settings",
+    "@type": "hydra:Collection",
+    "hydra:member": [
+        {
+            "@id": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+            "@type": "SystemSettings",
+            "name": null,
+            "privateValues": {
+                "user": {
+                    "global": {
+                        "timezone": {
+                            "timezone_type": 3
+                        }
+                    }
+                },
+                "authentication": {
+                    "sitekey": "6Lc75kcUAAAAAHg7-4xLEcTfzryh64REbPr_CRqo",
+                    "branding": {
+                        "dark": {
+                            "largeLogo": "data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAAH8AAAAXCAYAAAAiGpAkAAAACXBIWXMAAA7DAAAOwwHHb6hkAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAACANJREFUaIHtmnuM1cUVxz\/3sqwsXeWxKoSsbrFVBFLRPnwg4gtNarWolaqRGB810FopNUgfdAutJjTxVZ8hKrFFrNQaaLTFVLfg2ygYtCgW2i618qgV1C2yLrsL3\/5xZrxzf3fu\/f3WvaIlfJPJnd+ZMzPnN3PmzDnnd3OSqIA+wB3A\/sBUYEsl5r34\/0I+QqsBTgD6Y5ueB14BLnFte7GHIBc5+c3A34CxwDRgPFCHWYGzgTeApZhC7Nptku4+5IFhwCb2zPf7EDlJ+wC3AF3Yyw4CtgIbgRsifZqA04EjgJwrc4C3I7xDgIUZZVkI\/LoHsn8cqAOeAI4GVgAnAe1Bew6YCFyMvX9\/4C3geUz2FyqM3QBcCHwV+Cy2zu8ArcAfgUVAW0Y5vwRMwiz0UGAf4D\/Ai8BvgeUB7yRgFrAa299HgBbgFSQNlvQjSQRlQOK5UpksaUyZtiZlx896MGdvygRJP5B0VKTttIRMZwZttZIWp7zDAscXjpmTNENSW0rfLZKmpMg+TNIjKeNIUovj9f0WSjpI0iJJD0iaI2l1uTs81MAJwHmYJfgN8I+M2hnDcmBnmbbWXozbE1wPHAlsA1Yl2tYA7wP1wHbstHj8AjjH1buBp4F3gVHA4Y4+CrOgHnnMIkwOaLuAv7q+DcAIzKI0APOA0dh1m8RI7MQOC2jtbqydwHDMRwM4FZgNTImM8wBwFrAGSQdKao5o2dmS7pS0TNIISY2SrnW8+YCvJye\/f4pmf9ylVtIOJ8t3yvCMlDTN\/XrafpI6XL\/tko5M9DlJdiLHJujNwbvvknSrpKEJnkZJ8xPrlJRtP0nrgvZ3JF0hqS4ix\/OSWiUNCujHuLU\/VmaJkHQsku6SdLekLztiH0k3SzrHMU6Vbb4f6BRJc4PnT\/Pm90s8j6mwwJXK8UG\/P2Xs0yjpg6DfNSn8cwPe91S8eXOCtm2SvpAyVk0WGfOY49GKOS8AM4FfAUuAWBJgGXYFjHPmahzmeFQT9cCPgZeBDsxU\/gu4Czg0wj8Pu45ucc8XYVHJB8BzwMHATa6\/x1XA465MDeivurFWBrTQ6\/8c8JkM7\/BtoJ+rryLuPIdoBta7+gDgclevcbJ6\/JTi6yiG7gzygaQhKpzcAZJ+ntCQ5MlHUl9Jt0k6WmZ+fimpPqJdTSpGlpPfJGmtyqNddiWFfZa4tq2SLpOZWI\/HJY2rMJ4k3RSM9b6jvR3QBkjqDPjXSDpfpc5dWFYF\/NMyvDeytfdocbRQ9k5J+2YcK7XUYKHKW04XxgN\/zqAzXU671mIavgFzlNJwMrAjQl\/tZMgDvwMOc\/QHgQWYc3Yi8BMsHLsfGAP8PTHOYOBWoBML1WoxJ+kFLET7JmYVAO4BHnP1dSlyt2GZzunueSQWmr2HWci7sXDPI4c5fx4rUsaP8Y1K\/IJZpW0Zx0pF0ts\/kFKv+3XgGoq99EMxM9wGXNqD+f5Qhn4htphnAF9xtJXABRSunqewRNNs7IqaQbG59tiKebtJxXgY2zSPVZiiZcVMTHFnODkABmLvfymwGPOutwD7YooXypQFIZ\/33BsCWlXT63ngWuyEHQ68SeHUeTwJfAt7MV9eBK6opiAOXwvq8yn1OeYH9TPKjDGd0o2vBrqAH2Lrcx0WFoY4F\/g9durbKfYT6jLO0T+ob3e\/7WXae408Fh8+iJ2Kp4Cvp\/SpxTS\/K4UvhjOB0yLFZ6SGB7yxfMIGCtdGI9A3wvPPjyBXT9CKOWejsatncdB2POb8dgObA\/qIjGOHfG+6300B7TBMuaqCPHZHTsa0tgPz5r9bhj+HeZt3uOcvYnfnKRnnW47dwcnifY7wGor5BqKgdDkK5veTwl+wBNjSgDba\/S4LaBMzjhcePN\/\/2YB2AFWMrPKYCX+DwsLfh5ms2yloYh44Dtv0JRRO18XAlRQyX73FxqDeGGkfiIWBYPdjR5Xm7Q2EOb4eXqYFAW0Slo+vhJMxK+jHvM\/VN1GsAHOp0tdV\/0n3YWwjPe50k5zl6tdjJvn7wEsB30rsg8y91RCG4g8S50XavxHUn6jSnFkwGHNWr6L0M3gthU2Dwvq0UIic+mJrPLbM+BMw59Ob9IcoXufrgvpYTDHqKUU\/7IDOi8hZiiDuu03SIT2IEwfK0r\/5CjxNiXg6Lc6vk7TB8e6UNF2W6aqVfZDZ7Np2ybJuyThfin+w8eXygG+RpP0lTVRxRiwW588L+r0maaYs13CZpGeDtmcS8w0N3sfL3SJL+06RNFvSk4k1Wqfi7J4vtyf4NssysVNduVnSxqB9VoV1QFLR5tdLuleW5j1Clsgp1\/EgSfdIakiZoCkhcJYkz3gVNsCjM\/Gc\/AKYdfNHSupWKa4OeGKb\/z1JXZF+If4t6fOROQ+W9FJKX49nZEm3mOx9ZMm0LFghU+zMm4\/sBDwq6UoVZ73C9imSblA8o1eNzUeWu35UpRu1VtIFEf6sm4\/MmnQE\/G2yT66VNh9JoyTdL+m\/CZl2OHpjhTlrZFZnhcyiheiW9Jyki1TZivoyTtLSxDt4vCrLJmbK7cf+yTPL3Rdyd81xmKNVi8Xh86n8p4UQNVhe3WM98e8F5TAIyz\/0xcK8cp99h1DIt28kHimEGIx55e9i2b3OoG04dvfuxBzhJGqxkGsIltV8jWzZTY8GN8dA7M8c650cPUU9cAiWmNuGJd02V+yRQGzzc27Q9U7AZjf4Fiws3Is9BLGQQRQSLO1YyLUduHF3CbUXuwf\/A0ZhsQkW6ll8AAAAAElFTkSuQmCC",
+                            "smallLogo": "data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFoAAABICAYAAAB2tuKSAAAABmJLR0QA\/wD\/AP+gvaeTAAAIyklEQVR4nO2cf5CVZRXHv8+yK8KiFbnA+ANtGZeAQEvRXECHaCCVIZJGNH8NKTONEzOUjfbLLFNxckYosyZjQFOaGiexLJsBI6UyLAF3IhFICVnBVH65wrLLsp\/+OGdn31nv3Xvfu\/e+7707+53Zufs+7znPOffcc5\/nvOec50oDGEB\/QkhbgbgARktqlHRY0voQwqGUVep\/ABYBbXRjDzA1bb36FYDJQAfwOFAPXARsBZqBoWnr128A3Am0A7WRsUvdsy9JU7d8UJW2AjFQJalT0vHIWEfk3gDyATAFWAxcBZyc4f5FwHHgMeAs4DxgC3AMeBGYA1Tc5p4YgAD8wpeAY\/76OjApA+2tERqAd4B7fa0GeAm4BjgxjfdS1gBuciMtBqqBicBO4KUs9A3AQvf8U3ysCpgPNPlcB4AHgfOTfTdlDOBpYEuPsS+5wU4rYL5GYDnwrs+xFbgPmA6cUDzNyxTurWcCs4DbgF8CO9wYzUB1hPY2Hx\/RB3m1wA3Ab4H3fL5WYD2wBLgSmADUFOcd9o6SbR7AxZIWSxohabSkUyUNipDslrRZ0kFJ10taJekBSeMkLZPUFEIoStjma\/Ylki6WNE3S+ZKG+O0OSXslvS5pj\/\/dHUJ4uxiyu1BKQ6+QNF\/S85LelNQsM+52SZtDCPsitEsk3aruMK1J0udCCDtLpFu1pAZJH5M0XtJHZM4wWlK9pGtDCKtKIbvoAFYA22PQ1\/uGNi2pr3MGHc7wJea6Ys9dnZskGYQQXpP0Wtp6lAoDT1QJoWw8Og6wVGm7pP0hhPa09ckHFefRwJWSdskihcMeIj7qodwHUlYvKyrO0JLq\/PV2SQ\/KophZkh6WtNc34bEp6ZYVZb90AMMkTZc0RdJYSRP91iMhhN1OM0jSDElX+d91wI8lfSeE0JK81gkibniXgX8M8DBwmG68Bezz\/8\/Nwjfanzo7ge3Z6LLwliy8KwmAsVjqcj\/wqZi8w4EfYSWro8BvgLnAcL\/\/694MHZlnOvA20ALMylN25RgauMJzCmD5Y4ClefJOAF51b1wJjMpAk5ehnbYey1m35WPsijE0lsjZB\/wDOB0Y4t4JOcpNwEzgEFZwndILXd6GdvrhwDYsm\/fRHLQVY+ipruhlkbEa4AjwvV74xruR\/w2cmUNGLEM7T4MvY03A4F7oSmboYod37\/nrSZGxobLo5nAmBiwV+rSkFkkzQgi7iqyTQgjbJS2QNEnSLcWeP3FgOeeXgf9ieedPYIn9o2SJbbEyVjt59mcU4tER3jVYbvqUDPcuAF7w\/aEZuCnu\/IkCK0VtoxuHgKuz0E7yDXNJjPn7YuiJWG\/InT3Gx2Eb+G7gJ25wgJvjykgUwIm+Xn8GD8uy0D0FHOyNJgNPwYZ2\/mfcYwdFxpa7HqP8ugpYB7xRiIyyAnCae9d9Mfn6auiFzt8YGXsOeK4H3dedrvb9s8RHmrmOy2WlrdUJy31C1oQzIzK2VdI5UY+WNFPSrhBCxk28YuCb4DvRr3CefH3yaJ9jJ7A6cj3GN8ndWJvCBpdRtDAvTY8eJ2l7COF4TsriY4esZihJCiG8KumTsmLxXJnHzwshPFosgWlm70ZK+mcf+G8AZhbAt03SMUkfjg6GELZImtMHfXpFmoYeIulAAXz7\/XVxH+UXIrtgpGnoVnUn8eNgkaR1krI+SmdBlaSVkn4l6X5ZP0liKImhsXzFHEnDJK0LIbyQgWyvrKkmFkIIHZIeL0CnepmxN4UQNsblLzsAl2E54C50At\/PQLcCy6jF9cxC9epqWr80CXklBTAU+B\/WPjsW+BDwczd2Yw\/aBUm+cWAp1vL7vt7rigPWyQkwOzI22PMId\/SgrcOSScsT0KsKeANYU2pZ2VDsOLrNX6PLQY3LaYsSehPhk5KuBc4qsh49MVu2HzxUYjnJADgB67PYgfXQNQBPuOdOyEDf4PceK7FO27CqT\/85eoGdLdkV2QxbgRt7of+pr+FXlEifb7ke0\/Og\/WApdCgZgGHAV\/0NLshBezJWQD0CnFdkPS7HMoTLctDdCOx1ffcCC4upR0mBFWbbgXvyoD0bq+ntASYXSf6nsZ6QNUROE2Sg+7wb+K\/At4E\/+fX8YuiRCICNwN\/ypG3EGmSOkKUik+c8ATu91QH8Oddy4Ab+V9eH4RHKJuDvheqQOHx97MSeyvKhP90\/HLBKSKxUKHZW8Vnn\/xl5NLRjqdGVPcaWA3viyE4V2OGgTuD2GDy1wHexp8vjbvCbgTOy0E9wD37eDbwV+GwMeU9hpa06v67DYu4\/5DtHWQCvvRHzYDwwCrjfl5MutGKdTBvdOO2Re5uxMlWs\/A1wLlalPwD8Hmsja437bcqFkseVwDRJ6yV9I4RwbwH81ZIukDRV1k1aJ0uxHpQdQNoi6VlP3heq418kTZb0is93Twjh5ULnSw1Yb8d+MvTSpQ2s\/wTgy2nr0mdgLV9HgLVY4bMsAIzwZa0pn42zIkD3me87clOXHlhP4FrfdHttfqw4AI94FPKVlPUYDDzpuhQcs5ctgEHAKvfsb6akw2DsfDjA19LQIRFgjZBdvRlLSfAXB4BTsUP3nUBfi7vlDzf2D93YG7Ay0zNYaWsbcAsxG2vykDmb7qMWlZPHKAaAeW7cDqx7aAmw2j+Au4okoxZY5l68CWjIzdUPgR3GbAFGRsYews6dFFy4xZJLV2O5jE7ggb7MV\/EA\/gi82GPsevfqswuc8+O+FoM9rg\/8CCH2MzxHgXP8usaN\/y7x8xZjPao5DrwJfLGcHpBSBTASa1E47Ab+j3viogy0NVjl5nfYoc25Pj7GY\/QOX4bupozPhacGLA+9AitprQXmZaAZhGUCOz1SeSWyNBzD2m5\/QIbzKQOIAeALbthr\/Dpgyf1O3zxH5ppjAHkAy023EGkZAC5048\/ujbccUEkbRbOsaXJ8ZOxCf92dvDr9FL5pvuXRxF1YP0gb9kTZfxpjygFY2WmDh29HPfIY2PxKBeAk+kuifgADqEj8Hy1V8OsP2InTAAAAAElFTkSuQmCC"
+                        },
+                        "light": {
+                            "largeLogo": "data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAAH8AAAAXCAYAAAAiGpAkAAAACXBIWXMAAA7DAAAOwwHHb6hkAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAACANJREFUaIHtmnuM1cUVxz\/3sqwsXeWxKoSsbrFVBFLRPnwg4gtNarWolaqRGB810FopNUgfdAutJjTxVZ8hKrFFrNQaaLTFVLfg2ygYtCgW2i618qgV1C2yLrsL3\/5xZrxzf3fu\/f3WvaIlfJPJnd+ZMzPnN3PmzDnnd3OSqIA+wB3A\/sBUYEsl5r34\/0I+QqsBTgD6Y5ueB14BLnFte7GHIBc5+c3A34CxwDRgPFCHWYGzgTeApZhC7Nptku4+5IFhwCb2zPf7EDlJ+wC3AF3Yyw4CtgIbgRsifZqA04EjgJwrc4C3I7xDgIUZZVkI\/LoHsn8cqAOeAI4GVgAnAe1Bew6YCFyMvX9\/4C3geUz2FyqM3QBcCHwV+Cy2zu8ArcAfgUVAW0Y5vwRMwiz0UGAf4D\/Ai8BvgeUB7yRgFrAa299HgBbgFSQNlvQjSQRlQOK5UpksaUyZtiZlx896MGdvygRJP5B0VKTttIRMZwZttZIWp7zDAscXjpmTNENSW0rfLZKmpMg+TNIjKeNIUovj9f0WSjpI0iJJD0iaI2l1uTs81MAJwHmYJfgN8I+M2hnDcmBnmbbWXozbE1wPHAlsA1Yl2tYA7wP1wHbstHj8AjjH1buBp4F3gVHA4Y4+CrOgHnnMIkwOaLuAv7q+DcAIzKI0APOA0dh1m8RI7MQOC2jtbqydwHDMRwM4FZgNTImM8wBwFrAGSQdKao5o2dmS7pS0TNIISY2SrnW8+YCvJye\/f4pmf9ylVtIOJ8t3yvCMlDTN\/XrafpI6XL\/tko5M9DlJdiLHJujNwbvvknSrpKEJnkZJ8xPrlJRtP0nrgvZ3JF0hqS4ix\/OSWiUNCujHuLU\/VmaJkHQsku6SdLekLztiH0k3SzrHMU6Vbb4f6BRJc4PnT\/Pm90s8j6mwwJXK8UG\/P2Xs0yjpg6DfNSn8cwPe91S8eXOCtm2SvpAyVk0WGfOY49GKOS8AM4FfAUuAWBJgGXYFjHPmahzmeFQT9cCPgZeBDsxU\/gu4Czg0wj8Pu45ucc8XYVHJB8BzwMHATa6\/x1XA465MDeivurFWBrTQ6\/8c8JkM7\/BtoJ+rryLuPIdoBta7+gDgclevcbJ6\/JTi6yiG7gzygaQhKpzcAZJ+ntCQ5MlHUl9Jt0k6WmZ+fimpPqJdTSpGlpPfJGmtyqNddiWFfZa4tq2SLpOZWI\/HJY2rMJ4k3RSM9b6jvR3QBkjqDPjXSDpfpc5dWFYF\/NMyvDeytfdocbRQ9k5J+2YcK7XUYKHKW04XxgN\/zqAzXU671mIavgFzlNJwMrAjQl\/tZMgDvwMOc\/QHgQWYc3Yi8BMsHLsfGAP8PTHOYOBWoBML1WoxJ+kFLET7JmYVAO4BHnP1dSlyt2GZzunueSQWmr2HWci7sXDPI4c5fx4rUsaP8Y1K\/IJZpW0Zx0pF0ts\/kFKv+3XgGoq99EMxM9wGXNqD+f5Qhn4htphnAF9xtJXABRSunqewRNNs7IqaQbG59tiKebtJxXgY2zSPVZiiZcVMTHFnODkABmLvfymwGPOutwD7YooXypQFIZ\/33BsCWlXT63ngWuyEHQ68SeHUeTwJfAt7MV9eBK6opiAOXwvq8yn1OeYH9TPKjDGd0o2vBrqAH2Lrcx0WFoY4F\/g9durbKfYT6jLO0T+ob3e\/7WXae408Fh8+iJ2Kp4Cvp\/SpxTS\/K4UvhjOB0yLFZ6SGB7yxfMIGCtdGI9A3wvPPjyBXT9CKOWejsatncdB2POb8dgObA\/qIjGOHfG+6300B7TBMuaqCPHZHTsa0tgPz5r9bhj+HeZt3uOcvYnfnKRnnW47dwcnifY7wGor5BqKgdDkK5veTwl+wBNjSgDba\/S4LaBMzjhcePN\/\/2YB2AFWMrPKYCX+DwsLfh5ms2yloYh44Dtv0JRRO18XAlRQyX73FxqDeGGkfiIWBYPdjR5Xm7Q2EOb4eXqYFAW0Slo+vhJMxK+jHvM\/VN1GsAHOp0tdV\/0n3YWwjPe50k5zl6tdjJvn7wEsB30rsg8y91RCG4g8S50XavxHUn6jSnFkwGHNWr6L0M3gthU2Dwvq0UIic+mJrPLbM+BMw59Ob9IcoXufrgvpYTDHqKUU\/7IDOi8hZiiDuu03SIT2IEwfK0r\/5CjxNiXg6Lc6vk7TB8e6UNF2W6aqVfZDZ7Np2ybJuyThfin+w8eXygG+RpP0lTVRxRiwW588L+r0maaYs13CZpGeDtmcS8w0N3sfL3SJL+06RNFvSk4k1Wqfi7J4vtyf4NssysVNduVnSxqB9VoV1QFLR5tdLuleW5j1Clsgp1\/EgSfdIakiZoCkhcJYkz3gVNsCjM\/Gc\/AKYdfNHSupWKa4OeGKb\/z1JXZF+If4t6fOROQ+W9FJKX49nZEm3mOx9ZMm0LFghU+zMm4\/sBDwq6UoVZ73C9imSblA8o1eNzUeWu35UpRu1VtIFEf6sm4\/MmnQE\/G2yT66VNh9JoyTdL+m\/CZl2OHpjhTlrZFZnhcyiheiW9Jyki1TZivoyTtLSxDt4vCrLJmbK7cf+yTPL3Rdyd81xmKNVi8Xh86n8p4UQNVhe3WM98e8F5TAIyz\/0xcK8cp99h1DIt28kHimEGIx55e9i2b3OoG04dvfuxBzhJGqxkGsIltV8jWzZTY8GN8dA7M8c650cPUU9cAiWmNuGJd02V+yRQGzzc27Q9U7AZjf4Fiws3Is9BLGQQRQSLO1YyLUduHF3CbUXuwf\/A0ZhsQkW6ll8AAAAAElFTkSuQmCC",
+                            "smallLogo": "data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFoAAABICAYAAAB2tuKSAAAABmJLR0QA\/wD\/AP+gvaeTAAAIyklEQVR4nO2cf5CVZRXHv8+yK8KiFbnA+ANtGZeAQEvRXECHaCCVIZJGNH8NKTONEzOUjfbLLFNxckYosyZjQFOaGiexLJsBI6UyLAF3IhFICVnBVH65wrLLsp\/+OGdn31nv3Xvfu\/e+7707+53Zufs+7znPOffcc5\/nvOec50oDGEB\/QkhbgbgARktqlHRY0voQwqGUVep\/ABYBbXRjDzA1bb36FYDJQAfwOFAPXARsBZqBoWnr128A3Am0A7WRsUvdsy9JU7d8UJW2AjFQJalT0vHIWEfk3gDyATAFWAxcBZyc4f5FwHHgMeAs4DxgC3AMeBGYA1Tc5p4YgAD8wpeAY\/76OjApA+2tERqAd4B7fa0GeAm4BjgxjfdS1gBuciMtBqqBicBO4KUs9A3AQvf8U3ysCpgPNPlcB4AHgfOTfTdlDOBpYEuPsS+5wU4rYL5GYDnwrs+xFbgPmA6cUDzNyxTurWcCs4DbgF8CO9wYzUB1hPY2Hx\/RB3m1wA3Ab4H3fL5WYD2wBLgSmADUFOcd9o6SbR7AxZIWSxohabSkUyUNipDslrRZ0kFJ10taJekBSeMkLZPUFEIoStjma\/Ylki6WNE3S+ZKG+O0OSXslvS5pj\/\/dHUJ4uxiyu1BKQ6+QNF\/S85LelNQsM+52SZtDCPsitEsk3aruMK1J0udCCDtLpFu1pAZJH5M0XtJHZM4wWlK9pGtDCKtKIbvoAFYA22PQ1\/uGNi2pr3MGHc7wJea6Ys9dnZskGYQQXpP0Wtp6lAoDT1QJoWw8Og6wVGm7pP0hhPa09ckHFefRwJWSdskihcMeIj7qodwHUlYvKyrO0JLq\/PV2SQ\/KophZkh6WtNc34bEp6ZYVZb90AMMkTZc0RdJYSRP91iMhhN1OM0jSDElX+d91wI8lfSeE0JK81gkibniXgX8M8DBwmG68Bezz\/8\/Nwjfanzo7ge3Z6LLwliy8KwmAsVjqcj\/wqZi8w4EfYSWro8BvgLnAcL\/\/694MHZlnOvA20ALMylN25RgauMJzCmD5Y4ClefJOAF51b1wJjMpAk5ehnbYey1m35WPsijE0lsjZB\/wDOB0Y4t4JOcpNwEzgEFZwndILXd6GdvrhwDYsm\/fRHLQVY+ipruhlkbEa4AjwvV74xruR\/w2cmUNGLEM7T4MvY03A4F7oSmboYod37\/nrSZGxobLo5nAmBiwV+rSkFkkzQgi7iqyTQgjbJS2QNEnSLcWeP3FgOeeXgf9ieedPYIn9o2SJbbEyVjt59mcU4tER3jVYbvqUDPcuAF7w\/aEZuCnu\/IkCK0VtoxuHgKuz0E7yDXNJjPn7YuiJWG\/InT3Gx2Eb+G7gJ25wgJvjykgUwIm+Xn8GD8uy0D0FHOyNJgNPwYZ2\/mfcYwdFxpa7HqP8ugpYB7xRiIyyAnCae9d9Mfn6auiFzt8YGXsOeK4H3dedrvb9s8RHmrmOy2WlrdUJy31C1oQzIzK2VdI5UY+WNFPSrhBCxk28YuCb4DvRr3CefH3yaJ9jJ7A6cj3GN8ndWJvCBpdRtDAvTY8eJ2l7COF4TsriY4esZihJCiG8KumTsmLxXJnHzwshPFosgWlm70ZK+mcf+G8AZhbAt03SMUkfjg6GELZImtMHfXpFmoYeIulAAXz7\/XVxH+UXIrtgpGnoVnUn8eNgkaR1krI+SmdBlaSVkn4l6X5ZP0liKImhsXzFHEnDJK0LIbyQgWyvrKkmFkIIHZIeL0CnepmxN4UQNsblLzsAl2E54C50At\/PQLcCy6jF9cxC9epqWr80CXklBTAU+B\/WPjsW+BDwczd2Yw\/aBUm+cWAp1vL7vt7rigPWyQkwOzI22PMId\/SgrcOSScsT0KsKeANYU2pZ2VDsOLrNX6PLQY3LaYsSehPhk5KuBc4qsh49MVu2HzxUYjnJADgB67PYgfXQNQBPuOdOyEDf4PceK7FO27CqT\/85eoGdLdkV2QxbgRt7of+pr+FXlEifb7ke0\/Og\/WApdCgZgGHAV\/0NLshBezJWQD0CnFdkPS7HMoTLctDdCOx1ffcCC4upR0mBFWbbgXvyoD0bq+ntASYXSf6nsZ6QNUROE2Sg+7wb+K\/At4E\/+fX8YuiRCICNwN\/ypG3EGmSOkKUik+c8ATu91QH8Oddy4Ab+V9eH4RHKJuDvheqQOHx97MSeyvKhP90\/HLBKSKxUKHZW8Vnn\/xl5NLRjqdGVPcaWA3viyE4V2OGgTuD2GDy1wHexp8vjbvCbgTOy0E9wD37eDbwV+GwMeU9hpa06v67DYu4\/5DtHWQCvvRHzYDwwCrjfl5MutGKdTBvdOO2Re5uxMlWs\/A1wLlalPwD8Hmsja437bcqFkseVwDRJ6yV9I4RwbwH81ZIukDRV1k1aJ0uxHpQdQNoi6VlP3heq418kTZb0is93Twjh5ULnSw1Yb8d+MvTSpQ2s\/wTgy2nr0mdgLV9HgLVY4bMsAIzwZa0pn42zIkD3me87clOXHlhP4FrfdHttfqw4AI94FPKVlPUYDDzpuhQcs5ctgEHAKvfsb6akw2DsfDjA19LQIRFgjZBdvRlLSfAXB4BTsUP3nUBfi7vlDzf2D93YG7Ay0zNYaWsbcAsxG2vykDmb7qMWlZPHKAaAeW7cDqx7aAmw2j+Au4okoxZY5l68CWjIzdUPgR3GbAFGRsYews6dFFy4xZJLV2O5jE7ggb7MV\/EA\/gi82GPsevfqswuc8+O+FoM9rg\/8CCH2MzxHgXP8usaN\/y7x8xZjPao5DrwJfLGcHpBSBTASa1E47Ab+j3viogy0NVjl5nfYoc25Pj7GY\/QOX4bupozPhacGLA+9AitprQXmZaAZhGUCOz1SeSWyNBzD2m5\/QIbzKQOIAeALbthr\/Dpgyf1O3zxH5ppjAHkAy023EGkZAC5048\/ujbccUEkbRbOsaXJ8ZOxCf92dvDr9FL5pvuXRxF1YP0gb9kTZfxpjygFY2WmDh29HPfIY2PxKBeAk+kuifgADqEj8Hy1V8OsP2InTAAAAAElFTkSuQmCC"
+                        },
+                        "favicon": "data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8\/9hAAAABmJLR0QA\/wD\/AP+gvaeTAAACdklEQVQ4jX2SXUhTYRjH\/+\/OPG7OswVleVFhCEWSX\/gR29RO7vi6RTdWp5tCCZqIEOFF9GFqUAlde9NFt3lzwgsH1tE5dmExqYRCJGUZQjQvamBrG+fsfHS1WG3tuXre\/\/\/P73le3hcoU71DQ\/XdozculcswpUQ+GGypa2qyaTWHrplO182GKlssHo9\/K5UlhT2l1A\/Amek4fdeEuf768aOroiiyyWSyjmGYDkJIlWmaKavVGl1YWNj9ixQIBCr9fv8FABAEweV2u+2lJoqiyPb19Yn5s6XQNAwjBwDhcHiP47gDlNLhrvuTX73TT17ywWALAEiSpBJCzCLAr+bWqUx75z0AoJT2GIbRoOt6LNvQuG+PnvOnvfy8MDzc+O9GfwBMOjVvKupTnuerARwMh8OyrutG3s+eajqSOXpsuntsbCTb3jmR1635JjozEwMQo5T2WK3WFQDgOE5Ttj9rFk1LAgCTSp1kNe22qqq2IsDZW3cu5oillXx4P5fL5TgAu6FQ6FNvOt3scDgshBBWUZQ2WZY3AGwUXSFnsRyGrnkURfkI4Exej0QiO6FQ6Es2mz0B4JVvYGB\/tyjW5P3CfwBK6ZXFxcXnPp\/vOMMwPCFk1TCMDCGkjRCyJcvyWtf4xBIsjLLy8MH5omcE8DMQCNQvLy9veTyeZ7quqwAcqqq+kGV5DQAq194t2Xa2R0tuAAD9\/f2DutP5w6ioWI\/Mzu7kdZ7nbSzLDqqqOheNRr\/\/FwAAXeOTb4lhbNbGN4cSiYTTbrd3EEJqXC6XJEmSWpgtCRAEwZVOp9UKt3fKqOYuO1bfeGVZTpTKli1eFGt7ro\/0lsv8Blcv7+AXLrYcAAAAAElFTkSuQmCC",
+                        "product": {
+                            "companyName": "Fortinet",
+                            "productName": "FortiSOC\u003Csup\u003ETM\u003C\/sup\u003E",
+                            "poweredByName": "Fortinet",
+                            "poweredByText": "POWERED BY",
+                            "allowCompanyBranding": true
+                        },
+                        "loginMessage": "\u003Cp\u003EAll material beyond this point is to be viewed only by users authorized by Fortinet\u003C\/p\u003E",
+                        "loginPageSlides": [
+                            {
+                                "heading": "Welcome to the #1 Security Orchestration, Automation \u0026 Incident Response Solution",
+                                "buttonLink": "https:\/\/www.fortinet.com\/",
+                                "buttonText": "Learn More About FortiSOC\u003Csup\u003ETM\u003C\/sup\u003E",
+                                "subHeading": "Integrate your team, processes, and security tools on a single platform."
+                            },
+                            {
+                                "heading": "Browse FortiSOC Content Hub and discover wide variety of curated out-of-the-box content to meet your needs",
+                                "buttonLink": "https:\/\/www.fortinet.com\/",
+                                "buttonText": "Browse FortiSOC Content Hub",
+                                "subHeading": "A cauldron of Solution Packs, integrations, use cases, widgets and lot more of such community powered helpful content"
+                            }
+                        ]
+                    },
+                    "loginMessage": "All material beyond this point is to be viewed only by users authorized by FortiSOAR."
+                }
+            },
+            "globalValues": null,
+            "restriction": null,
+            "sections": [
+                {
+                    "@id": "\/api\/3\/system_settings\/18f3043e-c1e4-4041-bba3-d481ea86d1b5",
+                    "@type": "SystemSettings",
+                    "name": "TAXII Server Details",
+                    "privateValues": null,
+                    "globalValues": null,
+                    "restriction": null,
+                    "sections": [],
+                    "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+                    "uuid": "18f3043e-c1e4-4041-bba3-d481ea86d1b5",
+                    "publicValues": {
+                        "status": {
+                            "enabled": false
+                        }
+                    }
+                },
+                {
+                    "@id": "\/api\/3\/system_settings\/6494eed7-e4e1-475a-bdeb-ac53cae6b63b",
+                    "@type": "SystemSettings",
+                    "name": "Restricted File Mime-types",
+                    "privateValues": null,
+                    "globalValues": null,
+                    "restriction": null,
+                    "sections": [],
+                    "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+                    "uuid": "6494eed7-e4e1-475a-bdeb-ac53cae6b63b",
+                    "publicValues": {
+                        "values": [
+                            "image\/svg",
+                            "image\/svg+xml"
+                        ]
+                    }
+                },
+                {
+                    "@id": "\/api\/3\/system_settings\/cdf8628b-fe4e-4d8f-bfef-fca405888f29",
+                    "@type": "SystemSettings",
+                    "name": "Launch On Boot",
+                    "privateValues": null,
+                    "globalValues": null,
+                    "restriction": null,
+                    "sections": [],
+                    "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+                    "uuid": "cdf8628b-fe4e-4d8f-bfef-fca405888f29",
+                    "publicValues": {
+                        "values": {
+                            "value": true
+                        }
+                    }
+                },
+                {
+                    "@id": "\/api\/3\/system_settings\/5b806589-7fee-49a7-8ab4-2d7276a9a816",
+                    "@type": "SystemSettings",
+                    "name": "Iframe Settings",
+                    "privateValues": null,
+                    "globalValues": null,
+                    "restriction": null,
+                    "sections": [],
+                    "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+                    "uuid": "5b806589-7fee-49a7-8ab4-2d7276a9a816",
+                    "publicValues": {
+                        "values": {
+                            "sandbox": false,
+                            "allowedList": []
+                        }
+                    }
+                },
+                {
+                    "@id": "\/api\/3\/system_settings\/23641a39-c72d-473c-9467-2e6572594bd2",
+                    "@type": "SystemSettings",
+                    "name": "Permission Role Map",
+                    "privateValues": null,
+                    "globalValues": null,
+                    "restriction": null,
+                    "sections": [],
+                    "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+                    "uuid": "23641a39-c72d-473c-9467-2e6572594bd2",
+                    "publicValues": {
+                        "values": {
+                            "R": [
+                                "7b56d139-7ee6-455e-8658-35727e202b8b"
+                            ],
+                            "CRU": [
+                                "09346f6b-c52e-49c0-9ea5-eb5df2b0fa88"
+                            ],
+                            "CRUD": [
+                                "21d7a7c6-9d68-438f-b732-e8950c5f745b"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "@id": "\/api\/3\/system_settings\/99e8a9b9-c17a-4ef9-875d-1d8127489279",
+                    "@type": "SystemSettings",
+                    "name": "Advanced Development Settings",
+                    "privateValues": {
+                        "values": [
+                            {
+                                "lastModifiedBy": {
+                                    "id": 25,
+                                    "@id": "\/api\/3\/people\/fbdd4ef5-481e-4d11-98f2-17bbe191f25f",
+                                    "type": null,
+                                    "uuid": "fbdd4ef5-481e-4d11-98f2-17bbe191f25f",
+                                    "@type": "Person",
+                                    "email": "dspille@fortinet.com",
+                                    "roles": [
+                                        "\/api\/3\/roles\/21d7a7c6-9d68-438f-b732-e8950c5f745b"
+                                    ],
+                                    "tasks": [],
+                                    "teams": [
+                                        "\/api\/3\/teams\/6e569c09-3bd4-40f1-98b0-cc994464c3c5"
+                                    ],
+                                    "title": null,
+                                    "alerts": [],
+                                    "avatar": null,
+                                    "shifts": [],
+                                    "userId": "e876a1f9-c06f-42ba-a99d-10137701694e",
+                                    "@context": "\/api\/3\/contexts\/Person",
+                                    "comments": [],
+                                    "csActive": true,
+                                    "lastname": "",
+                                    "phoneFax": null,
+                                    "userType": "SAML",
+                                    "@settings": {
+                                        "user": {
+                                            "view": {
+                                                "theme": "steel",
+                                                "details": {
+                                                    "hunt": {
+                                                        "subtabs": {
+                                                            "Correlations": "alerts"
+                                                        }
+                                                    },
+                                                    "tasks": {
+                                                        "subtabs": {
+                                                            "Correlations": "alerts"
+                                                        }
+                                                    },
+                                                    "agents": {
+                                                        "subtabs": {
+                                                            "Tenants": "tenants"
+                                                        },
+                                                        "selectedTab": "Audit Log"
+                                                    },
+                                                    "alerts": {
+                                                        "subtabs": {
+                                                            "Indicators": "indicators",
+                                                            "Correlations": "campaigns"
+                                                        },
+                                                        "openCollab": false,
+                                                        "selectedTab": "Indicators",
+                                                        "expandCollab": true
+                                                    },
+                                                    "assets": {
+                                                        "subtabs": {
+                                                            "Correlations": "identities"
+                                                        },
+                                                        "openCollab": false
+                                                    },
+                                                    "incidents": {
+                                                        "subtabs": {
+                                                            "Tasks": "tasks",
+                                                            "Indicators": "indicators",
+                                                            "Correlations": "warrooms"
+                                                        },
+                                                        "selectedTab": "Case Details"
+                                                    },
+                                                    "undefined": {
+                                                        "selectedTab": "Critical Alerts"
+                                                    },
+                                                    "identities": {
+                                                        "subtabs": {
+                                                            "Related Records": "assets"
+                                                        },
+                                                        "selectedTab": "Identity Details"
+                                                    },
+                                                    "indicators": {
+                                                        "subtabs": {
+                                                            "Sightings": "incidents"
+                                                        },
+                                                        "selectedTab": "Sightings"
+                                                    },
+                                                    "mitre_groups": {
+                                                        "selectedTab": "Mitigations"
+                                                    },
+                                                    "threat_actors": {
+                                                        "subtabs": {
+                                                            "Correlations": "mitre_techniques"
+                                                        }
+                                                    },
+                                                    "threat_intel_feeds": {
+                                                        "selectedTab": "Threat Feeds"
+                                                    }
+                                                },
+                                                "language": "en",
+                                                "modules-alerts-list": {
+                                                    "chart": {
+                                                        "f9eb224f-b6bb-4480-a5df-f43dc0ab6d5d": "collapsed"
+                                                    }
+                                                }
+                                            },
+                                            "phone": {
+                                                "countryId": "US"
+                                            },
+                                            "global": {
+                                                "timezone": {
+                                                    "timezone_type": 3
+                                                }
+                                            },
+                                            "notifications": {
+                                                "sms": false,
+                                                "web": false,
+                                                "email": true,
+                                                "upgradeNotificationRead": "26.2 B4061 Beta 3",
+                                                "commentMentionEmailNotifications": true,
+                                                "enableCommentMentionNotifications": true
+                                            }
+                                        },
+                                        "playbook": {
+                                            "logs": {
+                                                "tags": [
+                                                    {
+                                                        "uuid": "system"
+                                                    }
+                                                ],
+                                                "filterOpration": "exclude"
+                                            },
+                                            "autosave": false,
+                                            "autosaveTime": 15,
+                                            "enableJinjaToTag": true
+                                        },
+                                        "dateFormat": {
+                                            "formatValue": "MM\/dd\/yyyy"
+                                        },
+                                        "navigation": {
+                                            "collapsed": true
+                                        },
+                                        "globalFilters": {
+                                            "people": {
+                                                "showActiveUsers": true
+                                            }
+                                        },
+                                        "bin_ttl_config": {
+                                            "ttl": 15,
+                                            "enabled": false,
+                                            "restrictHardDelete": false
+                                        },
+                                        "datetimeFormat": {
+                                            "formatValue": "MM\/dd\/yyyy hh:mm a"
+                                        },
+                                        "recommendation": {
+                                            "strategy": "falconBased"
+                                        },
+                                        "onboarding_guide": {
+                                            "enabled": true
+                                        },
+                                        "auditlog_ttl_config": {
+                                            "ttl": 30,
+                                            "enabled": true,
+                                            "scheduleId": "gAAAAABp89te4bbY2Ud9LhayY_-n4sJ6JfwhEh7jkUQTOljlaPPivx5YSu4aJ_r_Oe-KysfXEdXfga3i4D4-eSofUNTEVTIrzg=="
+                                        },
+                                        "commentModification": {
+                                            "enabled": true,
+                                            "softDelete": true,
+                                            "timeWindow": 300
+                                        },
+                                        "workflow_log_config": {
+                                            "debug": false,
+                                            "failed_workflow": true,
+                                            "allow_pb_to_override": true
+                                        },
+                                        "workflow_ttl_config": {
+                                            "ttl": 3,
+                                            "enabled": true,
+                                            "scheduleId": "gAAAAABp89te-8YdUTCub6ZGrT6BvsaZje6obPeSZvIOn6D06Rfqm5NH7AbOAxS6s0CPCBj-GQPJoJ1f1jHexzD3ATV_STyjyA=="
+                                        },
+                                        "workflow_vacuum_config": {
+                                            "ttl": "0",
+                                            "enabled": true,
+                                            "scheduleId": "gAAAAABozFbwAGiNeMIo2TUlWqis0BmkHwxiVgkfdjddBaSy7MSgQweLivkYjuo5gb03B_ectrK-yEeYbJzlu-YKlKkE9eEZ_g=="
+                                        },
+                                        "historical_workflow_config": {
+                                            "failed_wf_transfer_interval": 60,
+                                            "completed_wf_transfer_interval": 15
+                                        }
+                                    },
+                                    "companyId": null,
+                                    "firstname": "dspille",
+                                    "fsrQueues": [],
+                                    "incidents": [],
+                                    "phoneHome": null,
+                                    "phoneWork": null,
+                                    "accessType": "Concurrent",
+                                    "createDate": 1773361538.548044,
+                                    "createUser": null,
+                                    "department": null,
+                                    "indicators": [],
+                                    "modifyDate": 1773361538.548044,
+                                    "modifyUser": null,
+                                    "attachments": [],
+                                    "defaultRole": "admin",
+                                    "description": null,
+                                    "displayName": "",
+                                    "phoneMobile": null,
+                                    "@permissions": {
+                                        "cmdb": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "hunt": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "keys": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "files": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "roles": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "rules": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "scans": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "tasks": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "teams": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "actors": {
+                                            "read": true,
+                                            "clone": false,
+                                            "create": false,
+                                            "delete": false,
+                                            "update": false,
+                                            "execute": false
+                                        },
+                                        "agents": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "alerts": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "assets": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "c_v_es": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "events": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "people": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "shifts": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "queries": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "routers": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "tenants": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "widgets": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "analyzer": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "api_keys": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "comments": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "scenario": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "security": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "settings": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "warrooms": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "analytics": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "approvals": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "campaigns": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "companies": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "dashboard": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "incidents": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "picklists": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "reporting": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "schedules": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "workflows": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "activities": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": false,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "appliances": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "connectors": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "contentHub": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "fsr_queues": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "identities": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "indicators": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "workspaces": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "application": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "attachments": {
+                                            "read": true,
+                                            "clone": false,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "export_jobs": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "import_jobs": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "mitre_groups": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "sla_template": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "announcements": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "communication": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "data_archival": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "f_a_z_reports": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "mitre_tactics": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "saved_reports": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "solutionpacks": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "threat_actors": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "mitre_software": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "email_templates": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "leave_schedules": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "vulnerabilities": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "escalation_rules": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "mitre_techniques": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "rule_collections": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": false
+                                        },
+                                        "mitre_mitigations": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "threat_intel_feeds": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "preprocessing_rules": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "mitre_sub_techniques": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "threat_intel_reports": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        },
+                                        "workflow_collections": {
+                                            "read": true,
+                                            "clone": true,
+                                            "create": true,
+                                            "delete": true,
+                                            "fields": [],
+                                            "update": true,
+                                            "execute": true
+                                        }
+                                    },
+                                    "displayTemplate": "",
+                                    "isRoleModifiable": false
+                                },
+                                "lastModifiedDate": "05\/14\/2026",
+                                "allowCustomWidget": true,
+                                "allowCustomConnector": true
+                            }
+                        ]
+                    },
+                    "globalValues": null,
+                    "restriction": null,
+                    "sections": [],
+                    "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+                    "uuid": "99e8a9b9-c17a-4ef9-875d-1d8127489279",
+                    "publicValues": {
+                        "values": []
+                    }
+                }
+            ],
+            "parent": null,
+            "uuid": "845c05cc-05b3-450e-9afb-df6b6e436321",
+            "publicValues": {
+                "user": {
+                    "view": {
+                        "theme": "steel",
+                        "language": "en"
+                    },
+                    "phone": {
+                        "countryId": "US"
+                    },
+                    "notifications": {
+                        "sms": false,
+                        "web": false,
+                        "email": true,
+                        "commentMentionEmailNotifications": true,
+                        "enableCommentMentionNotifications": true
+                    }
+                },
+                "playbook": {
+                    "logs": {
+                        "tags": [
+                            {
+                                "uuid": "system"
+                            }
+                        ],
+                        "filterOpration": "exclude"
+                    },
+                    "autosave": false,
+                    "autosaveTime": 15,
+                    "enableJinjaToTag": true
+                },
+                "dateFormat": {
+                    "formatValue": "MM\/dd\/yyyy"
+                },
+                "navigation": {
+                    "collapsed": true
+                },
+                "globalFilters": {
+                    "people": {
+                        "showActiveUsers": true
+                    }
+                },
+                "bin_ttl_config": {
+                    "ttl": 15,
+                    "enabled": false,
+                    "restrictHardDelete": false
+                },
+                "datetimeFormat": {
+                    "formatValue": "MM\/dd\/yyyy hh:mm a"
+                },
+                "recommendation": {
+                    "strategy": "falconBased"
+                },
+                "onboarding_guide": {
+                    "enabled": true
+                },
+                "auditlog_ttl_config": {
+                    "ttl": 30,
+                    "enabled": true,
+                    "scheduleId": "gAAAAABqF76GOoHdlc0uWhC8Ap98PjECcdqrGqEXIESxxFNIZRMnfeiU0ZivIKKCEzAFLR8FWTJFrTDg_XQBxoDsUEqjWegpxw=="
+                },
+                "commentModification": {
+                    "enabled": true,
+                    "softDelete": true,
+                    "timeWindow": 300
+                },
+                "workflow_log_config": {
+                    "debug": false,
+                    "failed_workflow": true,
+                    "allow_pb_to_override": true
+                },
+                "workflow_ttl_config": {
+                    "ttl": 3,
+                    "enabled": true,
+                    "scheduleId": "gAAAAABqF76GVafqpIkJQzVJJK2HCPSLeNEObOzmwKC3hM4IXOPtbGl_S8iZKahY0df0ro3Az3U-k1eVyhDzANt6oWyT8RJ00Q=="
+                },
+                "workflow_vacuum_config": {
+                    "ttl": "0",
+                    "enabled": true,
+                    "scheduleId": "gAAAAABozFbwAGiNeMIo2TUlWqis0BmkHwxiVgkfdjddBaSy7MSgQweLivkYjuo5gb03B_ectrK-yEeYbJzlu-YKlKkE9eEZ_g=="
+                },
+                "historical_workflow_config": {
+                    "failed_wf_transfer_interval": 60,
+                    "completed_wf_transfer_interval": 15
+                }
+            }
+        },
+        {
+            "@id": "\/api\/3\/system_settings\/cdf8628b-fe4e-4d8f-bfef-fca405888f29",
+            "@type": "SystemSettings",
+            "name": "Launch On Boot",
+            "privateValues": null,
+            "globalValues": null,
+            "restriction": null,
+            "sections": [],
+            "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+            "uuid": "cdf8628b-fe4e-4d8f-bfef-fca405888f29",
+            "publicValues": {
+                "values": {
+                    "value": true
+                }
+            }
+        },
+        {
+            "@id": "\/api\/3\/system_settings\/18f3043e-c1e4-4041-bba3-d481ea86d1b5",
+            "@type": "SystemSettings",
+            "name": "TAXII Server Details",
+            "privateValues": null,
+            "globalValues": null,
+            "restriction": null,
+            "sections": [],
+            "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+            "uuid": "18f3043e-c1e4-4041-bba3-d481ea86d1b5",
+            "publicValues": {
+                "status": {
+                    "enabled": false
+                }
+            }
+        },
+        {
+            "@id": "\/api\/3\/system_settings\/6494eed7-e4e1-475a-bdeb-ac53cae6b63b",
+            "@type": "SystemSettings",
+            "name": "Restricted File Mime-types",
+            "privateValues": null,
+            "globalValues": null,
+            "restriction": null,
+            "sections": [],
+            "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+            "uuid": "6494eed7-e4e1-475a-bdeb-ac53cae6b63b",
+            "publicValues": {
+                "values": [
+                    "image\/svg",
+                    "image\/svg+xml"
+                ]
+            }
+        },
+        {
+            "@id": "\/api\/3\/system_settings\/23641a39-c72d-473c-9467-2e6572594bd2",
+            "@type": "SystemSettings",
+            "name": "Permission Role Map",
+            "privateValues": null,
+            "globalValues": null,
+            "restriction": null,
+            "sections": [],
+            "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+            "uuid": "23641a39-c72d-473c-9467-2e6572594bd2",
+            "publicValues": {
+                "values": {
+                    "R": [
+                        "7b56d139-7ee6-455e-8658-35727e202b8b"
+                    ],
+                    "CRU": [
+                        "09346f6b-c52e-49c0-9ea5-eb5df2b0fa88"
+                    ],
+                    "CRUD": [
+                        "21d7a7c6-9d68-438f-b732-e8950c5f745b"
+                    ]
+                }
+            }
+        },
+        {
+            "@id": "\/api\/3\/system_settings\/99e8a9b9-c17a-4ef9-875d-1d8127489279",
+            "@type": "SystemSettings",
+            "name": "Advanced Development Settings",
+            "privateValues": {
+                "values": [
+                    {
+                        "lastModifiedBy": {
+                            "id": 25,
+                            "@id": "\/api\/3\/people\/fbdd4ef5-481e-4d11-98f2-17bbe191f25f",
+                            "type": null,
+                            "uuid": "fbdd4ef5-481e-4d11-98f2-17bbe191f25f",
+                            "@type": "Person",
+                            "email": "dspille@fortinet.com",
+                            "roles": [
+                                "\/api\/3\/roles\/21d7a7c6-9d68-438f-b732-e8950c5f745b"
+                            ],
+                            "tasks": [],
+                            "teams": [
+                                "\/api\/3\/teams\/6e569c09-3bd4-40f1-98b0-cc994464c3c5"
+                            ],
+                            "title": null,
+                            "alerts": [],
+                            "avatar": null,
+                            "shifts": [],
+                            "userId": "e876a1f9-c06f-42ba-a99d-10137701694e",
+                            "@context": "\/api\/3\/contexts\/Person",
+                            "comments": [],
+                            "csActive": true,
+                            "lastname": "",
+                            "phoneFax": null,
+                            "userType": "SAML",
+                            "@settings": {
+                                "user": {
+                                    "view": {
+                                        "theme": "steel",
+                                        "details": {
+                                            "hunt": {
+                                                "subtabs": {
+                                                    "Correlations": "alerts"
+                                                }
+                                            },
+                                            "tasks": {
+                                                "subtabs": {
+                                                    "Correlations": "alerts"
+                                                }
+                                            },
+                                            "agents": {
+                                                "subtabs": {
+                                                    "Tenants": "tenants"
+                                                },
+                                                "selectedTab": "Audit Log"
+                                            },
+                                            "alerts": {
+                                                "subtabs": {
+                                                    "Indicators": "indicators",
+                                                    "Correlations": "campaigns"
+                                                },
+                                                "openCollab": false,
+                                                "selectedTab": "Indicators",
+                                                "expandCollab": true
+                                            },
+                                            "assets": {
+                                                "subtabs": {
+                                                    "Correlations": "identities"
+                                                },
+                                                "openCollab": false
+                                            },
+                                            "incidents": {
+                                                "subtabs": {
+                                                    "Tasks": "tasks",
+                                                    "Indicators": "indicators",
+                                                    "Correlations": "warrooms"
+                                                },
+                                                "selectedTab": "Case Details"
+                                            },
+                                            "undefined": {
+                                                "selectedTab": "Critical Alerts"
+                                            },
+                                            "identities": {
+                                                "subtabs": {
+                                                    "Related Records": "assets"
+                                                },
+                                                "selectedTab": "Identity Details"
+                                            },
+                                            "indicators": {
+                                                "subtabs": {
+                                                    "Sightings": "incidents"
+                                                },
+                                                "selectedTab": "Sightings"
+                                            },
+                                            "mitre_groups": {
+                                                "selectedTab": "Mitigations"
+                                            },
+                                            "threat_actors": {
+                                                "subtabs": {
+                                                    "Correlations": "mitre_techniques"
+                                                }
+                                            },
+                                            "threat_intel_feeds": {
+                                                "selectedTab": "Threat Feeds"
+                                            }
+                                        },
+                                        "language": "en",
+                                        "modules-alerts-list": {
+                                            "chart": {
+                                                "f9eb224f-b6bb-4480-a5df-f43dc0ab6d5d": "collapsed"
+                                            }
+                                        }
+                                    },
+                                    "phone": {
+                                        "countryId": "US"
+                                    },
+                                    "global": {
+                                        "timezone": {
+                                            "timezone_type": 3
+                                        }
+                                    },
+                                    "notifications": {
+                                        "sms": false,
+                                        "web": false,
+                                        "email": true,
+                                        "upgradeNotificationRead": "26.2 B4061 Beta 3",
+                                        "commentMentionEmailNotifications": true,
+                                        "enableCommentMentionNotifications": true
+                                    }
+                                },
+                                "playbook": {
+                                    "logs": {
+                                        "tags": [
+                                            {
+                                                "uuid": "system"
+                                            }
+                                        ],
+                                        "filterOpration": "exclude"
+                                    },
+                                    "autosave": false,
+                                    "autosaveTime": 15,
+                                    "enableJinjaToTag": true
+                                },
+                                "dateFormat": {
+                                    "formatValue": "MM\/dd\/yyyy"
+                                },
+                                "navigation": {
+                                    "collapsed": true
+                                },
+                                "globalFilters": {
+                                    "people": {
+                                        "showActiveUsers": true
+                                    }
+                                },
+                                "bin_ttl_config": {
+                                    "ttl": 15,
+                                    "enabled": false,
+                                    "restrictHardDelete": false
+                                },
+                                "datetimeFormat": {
+                                    "formatValue": "MM\/dd\/yyyy hh:mm a"
+                                },
+                                "recommendation": {
+                                    "strategy": "falconBased"
+                                },
+                                "onboarding_guide": {
+                                    "enabled": true
+                                },
+                                "auditlog_ttl_config": {
+                                    "ttl": 30,
+                                    "enabled": true,
+                                    "scheduleId": "gAAAAABp89te4bbY2Ud9LhayY_-n4sJ6JfwhEh7jkUQTOljlaPPivx5YSu4aJ_r_Oe-KysfXEdXfga3i4D4-eSofUNTEVTIrzg=="
+                                },
+                                "commentModification": {
+                                    "enabled": true,
+                                    "softDelete": true,
+                                    "timeWindow": 300
+                                },
+                                "workflow_log_config": {
+                                    "debug": false,
+                                    "failed_workflow": true,
+                                    "allow_pb_to_override": true
+                                },
+                                "workflow_ttl_config": {
+                                    "ttl": 3,
+                                    "enabled": true,
+                                    "scheduleId": "gAAAAABp89te-8YdUTCub6ZGrT6BvsaZje6obPeSZvIOn6D06Rfqm5NH7AbOAxS6s0CPCBj-GQPJoJ1f1jHexzD3ATV_STyjyA=="
+                                },
+                                "workflow_vacuum_config": {
+                                    "ttl": "0",
+                                    "enabled": true,
+                                    "scheduleId": "gAAAAABozFbwAGiNeMIo2TUlWqis0BmkHwxiVgkfdjddBaSy7MSgQweLivkYjuo5gb03B_ectrK-yEeYbJzlu-YKlKkE9eEZ_g=="
+                                },
+                                "historical_workflow_config": {
+                                    "failed_wf_transfer_interval": 60,
+                                    "completed_wf_transfer_interval": 15
+                                }
+                            },
+                            "companyId": null,
+                            "firstname": "dspille",
+                            "fsrQueues": [],
+                            "incidents": [],
+                            "phoneHome": null,
+                            "phoneWork": null,
+                            "accessType": "Concurrent",
+                            "createDate": 1773361538.548044,
+                            "createUser": null,
+                            "department": null,
+                            "indicators": [],
+                            "modifyDate": 1773361538.548044,
+                            "modifyUser": null,
+                            "attachments": [],
+                            "defaultRole": "admin",
+                            "description": null,
+                            "displayName": "",
+                            "phoneMobile": null,
+                            "@permissions": {
+                                "cmdb": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "hunt": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "keys": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "files": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "roles": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "rules": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "scans": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "tasks": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "teams": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "actors": {
+                                    "read": true,
+                                    "clone": false,
+                                    "create": false,
+                                    "delete": false,
+                                    "update": false,
+                                    "execute": false
+                                },
+                                "agents": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "alerts": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "assets": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "c_v_es": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "events": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "people": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "shifts": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "queries": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "routers": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "tenants": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "widgets": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "analyzer": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "api_keys": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "comments": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "scenario": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "security": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "settings": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "warrooms": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "analytics": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "approvals": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "campaigns": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "companies": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "dashboard": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "incidents": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "picklists": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "reporting": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "schedules": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "workflows": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "activities": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": false,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "appliances": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "connectors": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "contentHub": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "fsr_queues": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "identities": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "indicators": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "workspaces": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "application": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "attachments": {
+                                    "read": true,
+                                    "clone": false,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "export_jobs": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "import_jobs": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "mitre_groups": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "sla_template": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "announcements": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "communication": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "data_archival": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "f_a_z_reports": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "mitre_tactics": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "saved_reports": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "solutionpacks": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "threat_actors": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "mitre_software": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "email_templates": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "leave_schedules": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "vulnerabilities": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "escalation_rules": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "mitre_techniques": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "rule_collections": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": false
+                                },
+                                "mitre_mitigations": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "threat_intel_feeds": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "preprocessing_rules": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "mitre_sub_techniques": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "threat_intel_reports": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                },
+                                "workflow_collections": {
+                                    "read": true,
+                                    "clone": true,
+                                    "create": true,
+                                    "delete": true,
+                                    "fields": [],
+                                    "update": true,
+                                    "execute": true
+                                }
+                            },
+                            "displayTemplate": "",
+                            "isRoleModifiable": false
+                        },
+                        "lastModifiedDate": "05\/14\/2026",
+                        "allowCustomWidget": true,
+                        "allowCustomConnector": true
+                    }
+                ]
+            },
+            "globalValues": null,
+            "restriction": null,
+            "sections": [],
+            "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+            "uuid": "99e8a9b9-c17a-4ef9-875d-1d8127489279",
+            "publicValues": {
+                "values": []
+            }
+        },
+        {
+            "@id": "\/api\/3\/system_settings\/5b806589-7fee-49a7-8ab4-2d7276a9a816",
+            "@type": "SystemSettings",
+            "name": "Iframe Settings",
+            "privateValues": null,
+            "globalValues": null,
+            "restriction": null,
+            "sections": [],
+            "parent": "\/api\/3\/system_settings\/845c05cc-05b3-450e-9afb-df6b6e436321",
+            "uuid": "5b806589-7fee-49a7-8ab4-2d7276a9a816",
+            "publicValues": {
+                "values": {
+                    "sandbox": false,
+                    "allowedList": []
+                }
+            }
+        }
+    ],
+    "hydra:totalItems": 7
+}

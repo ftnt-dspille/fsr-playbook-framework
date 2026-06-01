@@ -99,6 +99,7 @@ from .tools_corpus import (
 # Triage tools
 from .tools_triage import (
     find_containment_actions,
+    find_enrichment_actions,
     get_record,
     get_run_env,
     list_configured_connectors,
@@ -218,6 +219,7 @@ __all__ = [
     "search_api_examples",
     # Triage
     "find_containment_actions",
+    "find_enrichment_actions",
     "get_record",
     "get_run_env",
     "list_configured_connectors",
