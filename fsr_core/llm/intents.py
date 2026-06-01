@@ -27,7 +27,8 @@ DEFAULT_INTENT = "build"
 # (read-only intel), get_record/search (pivoting), the HITL emit_* cards,
 # and run-history diagnostics.
 BUILD_ONLY_TOOLS = frozenset({
-    "validate_yaml", "compile_yaml", "analyze_playbook",
+    "validate_yaml", "compile_yaml", "build_playbook_from_trace",
+    "analyze_playbook",
     "verify_playbook", "verify_enhancement", "emit_decision_step",
     "search_playbooks", "get_step_type",
     "find_jinja_filter", "find_jinja_pattern", "get_filter_examples",

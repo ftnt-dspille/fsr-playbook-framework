@@ -495,6 +495,54 @@ def _score_agentic(*, trace: list[dict[str, Any]],
     return out_gates
 
 
+def score_wiring_resolution(trace_json: str, *, live: bool = False) -> dict[str, Any]:
+    """Eval dimension (SKILL_BASED_PLAYBOOK_PLAN §4, risk #4): does the
+    trace-compiled playbook have **all paths resolve** under the verify
+    loop (render against captured outputs + static `_check_jinja_paths`)?
+
+    Selection/ordering stays model-driven, but wiring is now deterministic
+    — this dimension guards that the deterministic part actually holds:
+    every value-matched wire verifies and no undefined/unreachable ref
+    survives. Returns a level dict ({passed, skipped, detail, ...}).
+    """
+    try:
+        from fsr_core.agent.skill_trace import SkillTrace
+        from fsr_core.compiler import skill_verify as sv
+    except ImportError as exc:  # pragma: no cover
+        return {"passed": False, "skipped": True, "detail": f"unavailable: {exc}"}
+
+    trace = SkillTrace.from_json(trace_json or "")
+    if len(trace) == 0:
+        return {"passed": False, "skipped": True, "detail": "empty trace"}
+
+    render_fn = None
+    if live:
+        try:
+            from fsr_core.mcp_server import render_jinja as render_fn  # noqa: PLC0415
+        except Exception:  # noqa: BLE001
+            render_fn = None
+
+    compiled = sv.compile_and_verify(trace, render_fn=render_fn)
+    # Every recorded wire must have verified True; repairs and static
+    # errors both count as a failure to fully resolve.
+    bad_wires = [
+        f"{step}.{param}"
+        for step, params in compiled.get("verified", {}).items()
+        for param, ok in params.items() if not ok
+    ]
+    static_errors = compiled.get("static_errors", [])
+    passed = not bad_wires and not static_errors
+    return {
+        "passed": passed,
+        "skipped": False,
+        "detail": ("all wires resolve" if passed
+                   else f"{len(bad_wires)} unresolved wire(s), "
+                        f"{len(static_errors)} static error(s)"),
+        "unresolved_wires": bad_wires,
+        "static_errors": static_errors,
+    }
+
+
 def score(
     yaml_text: str,
     *,
@@ -509,6 +557,7 @@ def score(
     required_facts: list[dict[str, Any]] | None = None,
     forbidden_facts: list[dict[str, Any]] | None = None,
     investigation_quality: dict[str, Any] | None = None,
+    skill_trace_json: str | None = None,
 ) -> dict[str, Any]:
     """Score a candidate YAML across confidence tiers + agent gates.
 
@@ -592,6 +641,17 @@ def score(
                 }
     else:
         out["levels"]["live_tested"] = {"passed": False, "skipped": True}
+
+    # ----------------- wiring resolution (trace-compiler path) -------------
+    # Only meaningful when a skill trace was recorded; informational so it
+    # neither helps nor hurts the hand-author baseline during the parity
+    # campaign (Phase 5).
+    if skill_trace_json:
+        wr = score_wiring_resolution(skill_trace_json, live=live)
+        wr["informational"] = True
+        out["levels"]["wiring_resolves"] = wr
+    else:
+        out["levels"]["wiring_resolves"] = {"passed": False, "skipped": True}
 
     # ----------------- example check (orthogonal) --------------------------
     if gold_json is not None:

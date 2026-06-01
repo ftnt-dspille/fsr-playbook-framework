@@ -617,6 +617,96 @@ def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
     return out
 
 
+@mcp.tool()
+def build_playbook_from_trace(
+    trace_json: str,
+    name: str = "Triage Playbook",
+    live: bool = False,
+) -> dict[str, Any]:
+    """Compile a playbook from the session's typed action trace instead of
+    hand-authoring YAML (SKILL_BASED_PLAYBOOK_PLAN §3–5).
+
+    This is the flag-gated trace-compiler entry point: the agent already
+    ran the connector ops during triage, so their real outputs were
+    captured as a `SkillTrace`. This tool replays that trace into candidate
+    steps, wires each step's inputs to prior steps' captured outputs by
+    deterministic value-match (no guessed jinja paths), verifies every wire
+    resolves (and repairs the ones that don't back to a literal + a gap),
+    then compiles the result to confirm it imports clean.
+
+    Args:
+      trace_json: the serialized `SkillTrace` (`SkillTrace.to_json()`),
+        as persisted next to the session transcript.
+      name: the playbook display name.
+      live: when True, verify wires against the live FSR Jinja engine
+        (`render_jinja`) for runtime-identical evidence; offline (default)
+        uses a strict local Jinja render.
+
+    Returns on success: `{ok, yaml, compile_summary, verified, gaps,
+    repaired, static_errors}`. `gaps`/`repaired`/`static_errors` are the
+    analyst-facing trust signals (a value that couldn't be auto-wired
+    surfaces as a gap, never a dangling reference). Returns
+    `{ok: false, ...}` with `empty_trace` when the trace has no recorded
+    actions (caller should fall back to the hand-author path).
+    """
+    from fsr_core.agent.skill_trace import SkillTrace
+    from fsr_core.compiler import skill_compiler as sc
+    from fsr_core.compiler import skill_verify as sv
+
+    try:
+        trace = SkillTrace.from_json(trace_json or "")
+    except Exception as exc:  # noqa: BLE001
+        return _err("bad_trace_json", f"could not parse trace_json: {exc}")
+    if len(trace) == 0:
+        return _err(
+            "empty_trace",
+            "no recorded actions in the trace — nothing to compile",
+            suggestions=["fall back to the hand-author build path"],
+        )
+
+    render_fn = None
+    if live:
+        try:
+            from fsr_core.mcp_server import render_jinja as _render
+            render_fn = _render
+        except Exception:  # noqa: BLE001
+            render_fn = None  # offline fallback
+
+    compiled = sv.compile_and_verify(trace, render_fn=render_fn)
+    doc = sc.assemble_playbook(compiled, name=name)
+    yaml_text = sc.to_yaml(doc)
+
+    # Confirm the trace-built playbook imports clean (draft tier).
+    try:
+        from fsr_core.compiler import compile_yaml as _compile
+        result = _compile(yaml_text, _shared.DB_PATH)
+        if result.ok:
+            coll = (result.fsr_json.get("data") or [{}])[0]
+            workflows = coll.get("workflows") or []
+            compile_summary: dict[str, Any] = {
+                "ok": True,
+                "workflows": len(workflows),
+                "steps": sum(len(w.get("steps") or []) for w in workflows),
+            }
+        else:
+            compile_summary = {
+                "ok": False,
+                "errors": [_serialize_compiler_error(e) for e in result.errors],
+            }
+    except ImportError as exc:
+        compile_summary = {"ok": False, "errors": [str(exc)]}
+
+    return {
+        "ok": True,
+        "yaml": yaml_text,
+        "compile_summary": compile_summary,
+        "verified": compiled.get("verified", {}),
+        "gaps": compiled.get("gaps", {}),
+        "repaired": compiled.get("repaired", {}),
+        "static_errors": compiled.get("static_errors", []),
+    }
+
+
 # ---------------------------------------------------------------------------
 # push / run / dry-run — closes the agent's authoring loop without dropping
 # out to the CLI. All three mutate state on the live FSR instance.

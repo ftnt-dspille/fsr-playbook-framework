@@ -163,6 +163,37 @@ def compile_trace(
     }
 
 
+def assemble_playbook(
+    compiled: Dict[str, Any],
+    *,
+    name: str = "Triage Playbook",
+    collection: str = "00 - FSR Studio",
+    trigger: str = "start",
+) -> Dict[str, Any]:
+    """Wrap the compiled steps into a full playbook doc (a `start` trigger
+    that points at the first real step, then the value-matched steps)."""
+    start = compiled.get("start_step", "Start")
+    first = compiled.get("first_step")
+    steps: List[Dict[str, Any]] = []
+    if first:
+        steps.append({"type": "start", "name": start, "next": first})
+    steps.extend(compiled.get("steps", []))
+    return {
+        "collection": collection,
+        "playbooks": [{
+            "name": name,
+            "trigger": trigger,
+            "steps": steps,
+        }],
+    }
+
+
+def to_yaml(doc: Dict[str, Any]) -> str:
+    """Canonical YAML emission (matches the decompiler's dumper)."""
+    import yaml
+    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+
+
 def render_context(trace: SkillTrace, upto: Optional[int] = None) -> Dict[str, Any]:
     """Build a `vars.steps.*` render context from captured outputs, keyed
     exactly as runtime (honoring `ref_prefix`), for the §4 verify loop.

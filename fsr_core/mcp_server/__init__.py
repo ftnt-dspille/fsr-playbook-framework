@@ -62,6 +62,7 @@ from .tools_discovery import (
 # Compilation tools
 from .tools_compile import (
     _FRIENDLY_FORMS,
+    build_playbook_from_trace,
     compile_yaml,
     resolve_yaml,
     validate_yaml,
@@ -197,6 +198,7 @@ __all__ = [
     "validate_yaml",
     "resolve_yaml",
     "compile_yaml",
+    "build_playbook_from_trace",
     "_FRIENDLY_FORMS",
     # Execution
     "run_op",
