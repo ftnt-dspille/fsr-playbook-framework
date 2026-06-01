@@ -1348,7 +1348,8 @@ def _run_op_via_agent_playbook(connector: str, op: str,
         # Trace recorder (§2) — full agent-routed output is the wiring source too.
         try:
             from fsr_core.agent.skill_trace import record_run_op as _record_skill_call
-            _record_skill_call(connector, op, params, data)
+            _prefix = "data" if (isinstance(step_res, dict) and "data" in step_res) else ""
+            _record_skill_call(connector, op, params, data, ref_prefix=_prefix)
         except Exception:
             pass
         sample = data[0] if isinstance(data, list) and data else data
@@ -1645,7 +1646,8 @@ def run_op(
     # active trace, so studio/tests stay on raw run_op untouched.
     try:
         from fsr_core.agent.skill_trace import record_run_op as _record_skill_call
-        _record_skill_call(connector, op, params, data)
+        _prefix = "data" if (isinstance(resp, dict) and "data" in resp) else ""
+        _record_skill_call(connector, op, params, data, ref_prefix=_prefix)
     except Exception:
         pass  # recorder is best-effort; never break a live op over it
     # top_keys reflect the FULL shape so authoring references stay accurate.

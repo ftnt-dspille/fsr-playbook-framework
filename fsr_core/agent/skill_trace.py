@@ -47,7 +47,15 @@ class SkillCall:
     skill_id: str
     step_name: str                          # stable; becomes the YAML step name
     resolved_inputs: Dict[str, Any] = field(default_factory=dict)
-    observed_output: Any = None             # the real (full) run_op result
+    observed_output: Any = None             # the real (full) run_op result (the data payload)
+    # How the captured `observed_output` nests under the FSR runtime step
+    # record. run_op captures `resp.get("data", resp)`: when the raw op
+    # response carried a `data` key, the runtime reference is
+    # `vars.steps.<name>.data.<path>` (ref_prefix="data"); otherwise the
+    # payload sits directly at `vars.steps.<name>.<path>` (ref_prefix="").
+    # The wiring compiler (§3) uses this so generated paths match runtime,
+    # and the verify loop (§4) keys its render context the same way.
+    ref_prefix: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -55,6 +63,7 @@ class SkillCall:
             "step_name": self.step_name,
             "resolved_inputs": self.resolved_inputs,
             "observed_output": self.observed_output,
+            "ref_prefix": self.ref_prefix,
         }
 
     @classmethod
@@ -64,6 +73,7 @@ class SkillCall:
             step_name=d["step_name"],
             resolved_inputs=d.get("resolved_inputs") or {},
             observed_output=d.get("observed_output"),
+            ref_prefix=d.get("ref_prefix") or "",
         )
 
 
@@ -99,12 +109,15 @@ class SkillTrace:
         params: Optional[Dict[str, Any]],
         observed_output: Any,
         step_name: Optional[str] = None,
+        ref_prefix: str = "",
     ) -> SkillCall:
         """Record one `run_op` execution as a `run_connector_action`
         SkillCall. `params` are the resolved inputs the agent passed;
         `observed_output` MUST be the FULL op output (not the summarized
         payload returned to the LLM) so value-match wiring has the real
-        shape to match against."""
+        shape to match against. `ref_prefix` is "data" when the raw op
+        response wrapped its payload in a `data` key (so runtime refs are
+        `vars.steps.<name>.data.*`), else "" (refs sit directly)."""
         name = step_name or self._unique_name(_titleize_op(op))
         resolved = dict(params or {})
         resolved["connector"] = connector
@@ -114,6 +127,7 @@ class SkillTrace:
             step_name=name,
             resolved_inputs=resolved,
             observed_output=observed_output,
+            ref_prefix=ref_prefix,
         ))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -164,10 +178,13 @@ def record_run_op(
     params: Optional[Dict[str, Any]],
     observed_output: Any,
     step_name: Optional[str] = None,
+    ref_prefix: str = "",
 ) -> Optional[SkillCall]:
     """Module-level convenience: record into the active trace if one is
     installed, else no-op. This is what `run_op` calls — so studio/tests
     (no active trace) stay on raw run_op, untouched."""
     if _active is None:
         return None
-    return _active.record_run_op(connector, op, params, observed_output, step_name)
+    return _active.record_run_op(
+        connector, op, params, observed_output, step_name, ref_prefix
+    )
