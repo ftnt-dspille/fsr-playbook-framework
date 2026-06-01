@@ -206,3 +206,81 @@ def render_context(trace: SkillTrace, upto: Optional[int] = None) -> Dict[str, A
             payload = {call.ref_prefix: payload}
         steps_ctx[_jkey(call.step_name)] = payload
     return {"vars": {"steps": steps_ctx}}
+
+
+def _source_step_of(ref: str, jkey_to_name: Dict[str, str]) -> Optional[str]:
+    """Recover the human step name a wire reads from (e.g.
+    `{{ vars.steps.Enrich_Indicator.data.x }}` -> `Enrich Indicator`).
+    Matches the `vars.steps.<jkey>` segment against actual trace step
+    names so underscores inside a real name don't get clobbered."""
+    import re
+    m = re.search(r"vars\.steps\.([A-Za-z0-9_]+)", ref or "")
+    if not m:
+        return None
+    return jkey_to_name.get(m.group(1))
+
+
+def _wiring_label(wired: Dict[str, str], gaps: List[str],
+                  jkey_to_name: Dict[str, str]) -> str:
+    """Plain-English wiring summary for the reviewable-draft card (contract
+    §5, 2.6.0) — never raw jinja. Surfaces gaps as an explicit confirm-me."""
+    parts: List[str] = []
+    for param, ref in wired.items():
+        src = _source_step_of(ref, jkey_to_name)
+        parts.append(f"{param} from {src}" if src else param)
+    if parts:
+        label = "uses " + "; ".join(parts)
+        if gaps:
+            label += f" — {', '.join(gaps)} needs confirming"
+        return label
+    if gaps:
+        return f"{', '.join(gaps)} could not be auto-wired — confirm before run"
+    return "uses fixed values"
+
+
+def summarize_for_offer(
+    trace: SkillTrace, compiled: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Build the contract v2.6.0 reviewable-draft fields (`ops_summary` +
+    `draft_steps`) from a compiled trace. Pure, no MCP/IO — the
+    `emit_playbook_offer` tool calls this so per-step wiring labels and
+    verify badges are derived from the SAME deterministic compile the push
+    uses, never hand-written by the model.
+
+    `verified` is true for a step with no remaining gaps (every input was
+    auto-wired or is a fixed literal and survived the §4 verify loop);
+    false flags a step whose value fell back to a manual gap.
+    """
+    wiring = compiled.get("wiring", {})
+    gaps = compiled.get("gaps", {})
+    jkey_to_name = {_jkey(c.step_name): c.step_name for c in trace.calls}
+
+    ops_summary: List[Dict[str, Any]] = []
+    draft_steps: List[Dict[str, Any]] = []
+    for call in trace.calls:
+        skill = get_skill(call.skill_id)
+        if skill is None:
+            continue
+        name = call.step_name
+        step_gaps = gaps.get(name, [])
+        verified = not step_gaps
+        ri = call.resolved_inputs or {}
+        entry: Dict[str, Any] = {
+            "skill_id": call.skill_id,
+            "step_type": skill.step_type,
+            "label": name,
+            "wiring_label": _wiring_label(
+                wiring.get(name, {}), step_gaps, jkey_to_name),
+            "verified": verified,
+        }
+        connector = ri.get("connector") or skill.needs.get("connector")
+        operation = ri.get("operation") or skill.needs.get("op")
+        if connector:
+            entry["connector"] = connector
+        if operation:
+            entry["operation"] = operation
+        ops_summary.append(entry)
+        draft_steps.append(
+            {"node": name, "step_type": skill.step_type, "verified": verified})
+
+    return {"ops_summary": ops_summary, "draft_steps": draft_steps}

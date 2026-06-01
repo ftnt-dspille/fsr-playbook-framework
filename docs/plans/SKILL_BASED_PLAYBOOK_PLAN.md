@@ -254,6 +254,22 @@ fallback still renders when the new fields are absent.
   `_session_trace_scope` installed across chat_turn / resume / suspended-resume / approved-execute;
   build prompt steers to the trace compiler first. **Remaining for the default-flip:** run the parity
   eval campaign (wiring_resolves vs hand-author baseline) before removing the hand-author fallback.
-- **Phase 6 (medium) — TODO (out-of-repo):** extend `playbook_offer` (additive ~2.6.0), enrich the
-  widget card into the reviewable draft (branch view + verify badges + safe inline edits), add the
-  mock fixture + `playbookDraft` e2e spec. Lands in the WebStorm widget repo; ship via `scripts/ship.sh`.
+- **Phase 6 (medium) — contract + connector ◑ DONE; widget rendering TODO (out-of-repo):**
+  Decision: surfacing model **(B) offer card** (not the manual Build-action handoff) — accept rides
+  the existing `chat_resume` path on the SAME `session_id`, so the trace-handoff (#1 linchpin) is
+  solved by construction, no fresh-session orphaning.
+  - **Contract `2.6.0` shipped** in `FSR_PLAYBOOK_BUILDER_CONNECTOR_CONTRACT.md` (widget repo):
+    `playbook_offer` enriched with per-entry `{skill_id, step_type, wiring_label, verified, branch?}`
+    + optional `draft_steps` tree + safe inline `edits` on accept; §4/§5/§6/§9 (T17/T18) updated.
+  - **fsr_core:** `emit_playbook_offer` tool (`tools_emit.py`) — model-triggered, but the card body is
+    compiled HERE from the active trace via `skill_compiler.summarize_for_offer` (never hand-written
+    wiring). Registered in `mcp_server/__init__` + `llm/tools.py` (SAFE_TOOLS, tier 0); triage prompt
+    steers the offer. Tests: `fsr_core/tests/test_playbook_offer.py` (5).
+  - **connector:** `_CARD_*` maps + `awaiting_playbook_offer`; decision whitelist `accept|decline`;
+    `_resume_playbook_offer_accept` (compile trace → `compile_yaml` → `push_playbook` → `playbook_pushed`
+    info_card; never dead-ends on empty/compile/push failure); direct `decline` end_turn; `CONTRACT_VERSION
+    = "2.6.0"`. Tests: 3 in `test_chat_operations.py` + 1 replay in `test_mock_replay.py`; fixture
+    `playbook_draft_branching.json`. `make verify` green (104 fsr_core + 130 connector).
+  - **Still TODO (WebStorm widget repo):** render the reviewable draft (compact → "Review steps"
+    expand, verify badges, `draft_steps` branch view, safe inline edits folding into the accept
+    payload) + `fsrPlaybookBuilder.playbookDraft.spec.js` e2e. Ship via `scripts/ship.sh`.

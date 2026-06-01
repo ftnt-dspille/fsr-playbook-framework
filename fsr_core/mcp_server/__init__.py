@@ -157,6 +157,7 @@ from .tools_emit import (
     emit_choice_card,
     emit_decision_step,
     emit_manual_input,
+    emit_playbook_offer,
 )
 
 # Catalog (Phase 0 + 0.5 of CONNECTOR_INTEGRATION_PLAN)

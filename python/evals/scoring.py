@@ -543,6 +543,82 @@ def score_wiring_resolution(trace_json: str, *, live: bool = False) -> dict[str,
     }
 
 
+def score_offer_timing(trace: list[dict[str, Any]]) -> dict[str, Any]:
+    """Eval dimension (SKILL_BASED_PLAYBOOK_PLAN §6 / TODO Track A4): did the
+    agent call `emit_playbook_offer` at the RIGHT time?
+
+    The offer is model-triggered — the tool plumbing is unit-tested, but
+    *when* the model offers is prompt-driven and the thing that regresses.
+    This reads the tool-use trace and grades the timing deterministically:
+
+    - offered exactly once, after ≥1 executed containment (destructive) op
+      → pass (the intended path).
+    - never offered, and no containment happened → pass (correctly silent on
+      a read-only triage).
+    - never offered despite containment → fail (missed save opportunity).
+    - offered ≥2 times → fail (the never-offer-twice bar).
+    - offered before any op ran → fail (premature / empty offer).
+    - offered once after only read-only ops → pass-but-noted: permitted under
+      the analyst-decides design (the card carries an advisory), yet the
+      prompt-preferred behavior is to stay silent, so we flag it for review.
+
+    `_op_risk` classifies destructive ops by name prefix; an `unknown` op is
+    not counted as containment here (same conservative stance as the card's
+    advisory). Returns a level dict.
+    """
+    try:
+        from fsr_core.mcp_server.tools_discovery import _op_risk
+    except ImportError as exc:  # pragma: no cover
+        return {"passed": False, "skipped": True, "detail": f"unavailable: {exc}"}
+
+    offers = [i for i, c in enumerate(trace)
+              if c.get("name") == "emit_playbook_offer"]
+    mut_before: list[int] = []
+    any_op: list[int] = []
+    for i, c in enumerate(trace):
+        if c.get("name") != "run_op":
+            continue
+        any_op.append(i)
+        args = _call_args(c)
+        op = str(args.get("op") or args.get("operation") or "")
+        if _op_risk(op, None) == "destructive":
+            mut_before.append(i)
+
+    n = len(offers)
+    if n == 0:
+        contained = bool(mut_before)
+        return {
+            "passed": not contained, "skipped": False,
+            "offers": 0,
+            "detail": ("containment ran but the save was never offered"
+                       if contained else "no containment; correctly silent"),
+        }
+    if n >= 2:
+        return {
+            "passed": False, "skipped": False, "offers": n,
+            "detail": f"offered {n} times (bar: at most once per session)",
+        }
+
+    off = offers[0]
+    contained_before = any(i < off for i in mut_before)
+    if contained_before:
+        return {
+            "passed": True, "skipped": False, "offers": 1,
+            "detail": "offered once after a containment action",
+        }
+    if not any(i < off for i in any_op):
+        return {
+            "passed": False, "skipped": False, "offers": 1,
+            "detail": "offered before executing any action (premature)",
+        }
+    return {
+        "passed": True, "skipped": False, "offers": 1,
+        "needs_review": True,
+        "detail": ("offered after read-only ops only — permitted "
+                   "(analyst-decides + advisory) but prompt-preferred is silence"),
+    }
+
+
 def score(
     yaml_text: str,
     *,
@@ -652,6 +728,17 @@ def score(
         out["levels"]["wiring_resolves"] = wr
     else:
         out["levels"]["wiring_resolves"] = {"passed": False, "skipped": True}
+
+    # ----------------- offer timing (model-triggered, A4) ------------------
+    # Did the agent offer to save the playbook at the right moment? Graded
+    # from the tool-use trace; informational so it tracks prompt regressions
+    # without skewing the YAML-authoring score.
+    if trace:
+        ot = score_offer_timing(trace)
+        ot["informational"] = True
+        out["levels"]["offer_timing"] = ot
+    else:
+        out["levels"]["offer_timing"] = {"passed": False, "skipped": True}
 
     # ----------------- example check (orthogonal) --------------------------
     if gold_json is not None:

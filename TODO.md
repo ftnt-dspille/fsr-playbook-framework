@@ -48,7 +48,71 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 - [`Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`](../Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md) — original cross-project plan; referenced from global `~/.claude/CLAUDE.md`.
 
-## Next steps (resume state, 2026-05-30)
+## Next steps (resume state, 2026-06-01)
+
+### Skill-based playbook — Phase 6 follow-through (offer card, direction B)
+
+Contract `2.6.0` + connector emit/accept **shipped & green** (`make verify` = 104 fsr_core
++ 130 connector). See `docs/plans/SKILL_BASED_PLAYBOOK_PLAN.md` Phase 6 + memory
+`skill_based_playbook_progress`. Two tracks remain — **do Track A before Track B**
+(don't burn a live deploy on a prompt that never emits the offer).
+
+**Track A — triage-prompt behavior (offline, do FIRST).** The offer is model-triggered;
+unit tests prove the tool works, not that the agent calls it at the right time.
+- [ ] **A1 positive:** `test_triage_intent`-style test — triage → `emit_action_card` →
+  approve (records trace) → next turn terminates with `playbook_offer` /
+  `awaiting_playbook_offer` whose `ops_summary` reflects the executed op. FakeProvider
+  for determinism + a real-LLM variant gated `-m live`.
+- [ ] **A2 negative (where prompts fail):** read-only triage → must NOT offer;
+  mid-investigation (more pivoting due) → not yet; never offer twice in one session.
+  Bar: offer appears exactly once, only after ≥1 executed mutating op.
+  - **DECISION (2026-06-01): analyst decides, never refused.** `emit_playbook_offer`
+    is NOT a gate — refusing a read-only trace would dead-end an analyst whose
+    legitimate containment ran via an op our name heuristic doesn't recognize
+    (`_op_risk` is name-prefix based; ~86% of ops have no category). Instead the card
+    now carries `has_mutating_action` (bool) always, plus an `advisory` note when the
+    trace is *confidently* all-`safe` (every op classifies `safe`; an `unknown` op
+    suppresses the advisory rather than firing a false "looks read-only" warning).
+    The analyst chooses. **Done + tested** (`tools_emit.emit_playbook_offer`;
+    `test_playbook_offer.py` read-only-advisory + mutating-no-advisory cases; 6 green).
+    ⚠️ **Additive contract fields** `has_mutating_action` + `advisory` — document in
+    widget-repo `FSR_PLAYBOOK_BUILDER_CONNECTOR_CONTRACT.md` §5 (backward-compat: a
+    pre-2.6.x widget ignores them; connector forwards the card verbatim, no change).
+  - Still open: the *model's* offer **timing** (once, only after mutating, not
+    read-only) remains prompt-gated → needs the `-m live` behavioral test below + A4.
+- [ ] **A3** tune `system_prompt_triage.md` offer guidance if A2 fails; add failing
+  transcripts as eval fixtures. (Directive added; tune after live A2 runs.)
+- [x] **A4 DONE (2026-06-01)** — `score_offer_timing(trace)` in `python/evals/scoring.py`
+  (alongside `wiring_resolves`, wired into `score()` as an informational level
+  `offer_timing`). Grades from the tool-use trace: offered-once-after-containment →
+  pass; silent-with-no-containment → pass; containment-but-never-offered → fail;
+  offered-≥2× → fail; offered-before-any-action → fail; offered-after-read-only-only →
+  pass + `needs_review` flag (permitted under analyst-decides, but prompt-preferred is
+  silence). Tests: `python/tests/test_evals_offer_timing.py` (8 green).
+
+**Track B — live end-to-end (on-platform, AFTER A green).** Real `compile_yaml` +
+`push_playbook` are unexercised offline.
+- [ ] **B1 deploy:** bump `info.json` (advertise `2.6.0`), `$replace`,
+  `scripts/deploy.sh` (bump→vendor→build→install) incl. **publish-recycle** (uwsgi
+  ghost-version bug — see `fsr_connector_deploy_publish_recycle` memory).
+- [ ] **B2 trace records live:** confirm `_session_trace_scope` fires for
+  **agent-routed** `run_op`; read back `storage.get_session_trace(sid)` — correct
+  `connector`/`operation`/`ref_prefix` (watch the `.data`-nesting split: VirusTotal
+  nests, AbuseIPDB/crudhub don't → wrong `ref_prefix` = broken wires).
+- [ ] **B3 full flow:** `/api/integration/execute/` → `chat_turn` → approve action_card
+  → `chat_resume{decision:"accept"}`. **Bar:** playbook lands in FSR, imports clean,
+  **runs without a wiring fix.** Use a THROWAWAY collection name — `push_playbook` is
+  replace-on-conflict + hard-deletes on uuid5 collision (see delete/recycle hazards memory).
+- [ ] **B4 gaps surface honestly:** a non-auto-wirable value shows `verified:false` in
+  the live card, not a silent dangling ref.
+- [ ] **B5 failure paths live:** decline → clean `end_turn`; force compile/push failure →
+  graceful message, no crash.
+
+**Cross-cutting:** widget still renders the offer FLAT (enriched draft rendering +
+`fsrPlaybookBuilder.playbookDraft.spec.js` e2e is the open **WebStorm widget-repo** task —
+backward-compatible, so B can be driven via API/contract harness without it). The live
+traces from B2/B3 are exactly the coherent fixtures the **parity eval** (default-flip
+blocker) needs — fold them in.
 
 ### Housekeeping — ruff sweep (added 2026-06-01)
 - [x] **F-rule sweep done.** ruff wired in: `[tool.ruff]` in `pyproject.toml`

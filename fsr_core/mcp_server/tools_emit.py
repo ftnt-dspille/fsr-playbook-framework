@@ -362,6 +362,105 @@ def emit_capability_gap_card(
 
 
 @mcp.tool()
+def emit_playbook_offer(
+    id: str,
+    summary: str,
+    title_suggestion: str | None = None,
+    editable_title: bool = True,
+) -> dict[str, Any]:
+    """Emit a `playbook_offer` card at the CLOSE of a triage session, after
+    you have approved & executed at least one containment action — offering
+    the analyst a one-click "Save as Playbook" CTA (contract §5,
+    `awaiting_playbook_offer`). Only call this when the triage is
+    substantially complete; do NOT offer after every single action.
+
+    You supply only the conversational framing (`summary`, optional
+    `title_suggestion`). The card's reviewable-draft body — the per-step
+    `ops_summary` with plain-English wiring labels, verify badges, and the
+    `draft_steps` tree — is built HERE from the recorded session trace via
+    the deterministic skill compiler. You do NOT hand-write step wiring;
+    that is exactly the guess-the-jinja failure mode this flow removes.
+
+    Args:
+      id: stable card id; echoed back on accept/decline.
+      summary: the body text the analyst reads (e.g. "I've blocked the C2 IP
+        and quarantined the host. Save this as a re-runnable playbook?").
+      title_suggestion: optional pre-filled playbook name the analyst may
+        edit before accepting.
+      editable_title: whether the widget shows an editable title field
+        (default True).
+
+    Returns {ok: True, card:{type:"playbook_offer", ...}} on success, or
+    {ok: False, code, message} — notably `empty_trace` when no action was
+    recorded (there is nothing to offer; do not call it then). The card always
+    carries `has_mutating_action` (bool); when the trace is purely read-only it
+    also carries an `advisory` note so the analyst can decide — the offer is
+    never refused for lacking a containment step."""
+    for label, val in (("id", id), ("summary", summary)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+
+    from fsr_core.agent import skill_trace as _skill_trace
+    from fsr_core.agent.skill_trace import SkillTrace
+    from fsr_core.compiler import skill_compiler as _sc
+    from fsr_core.compiler import skill_verify as _sv
+
+    trace = _skill_trace.get_active_trace() or SkillTrace()
+    if len(trace) == 0:
+        return _err(
+            "empty_trace",
+            "no recorded actions to offer as a playbook",
+            suggestions=["offer only after >=1 action was approved & executed"],
+        )
+
+    compiled = _sv.compile_and_verify(trace)
+    draft = _sc.summarize_for_offer(trace, compiled)
+    if not draft["ops_summary"]:
+        return _err(
+            "empty_trace",
+            "the recorded actions did not map to any known skill — nothing to "
+            "offer",
+        )
+
+    # A2 advisory (NOT a gate): the offer is most useful after a containment /
+    # remediation action. We never refuse a read-only trace — that would
+    # dead-end an analyst who did legitimate work via an op our name heuristic
+    # doesn't recognize. Instead we let the ANALYST decide and only add a
+    # gentle advisory when we are CONFIDENT the trace is purely read-only, i.e.
+    # every recorded op classifies as `safe`. `_op_risk` is name-prefix based
+    # and ~86% of ops carry no category, so an `unknown` op (which could well
+    # be a custom containment action) suppresses the advisory rather than
+    # firing a false "looks read-only" warning.
+    from .tools_discovery import _op_risk
+    risks = [
+        _op_risk(str(c.resolved_inputs.get("operation") or ""), None)
+        for c in trace.calls
+    ]
+    has_mutating = any(r == "destructive" for r in risks)
+    all_read_only = bool(risks) and all(r == "safe" for r in risks)
+
+    card: dict[str, Any] = {
+        "type": "playbook_offer",
+        "id": id,
+        "summary": summary,
+        "ops_summary": draft["ops_summary"],
+        "editable_title": bool(editable_title),
+        "has_mutating_action": has_mutating,
+    }
+    if all_read_only:
+        card["advisory"] = (
+            "This triage recorded only read-only lookups — saving it produces "
+            "an enrichment playbook with no containment step. Save it if that "
+            "is what you want."
+        )
+    if title_suggestion and title_suggestion.strip():
+        card["title_suggestion"] = title_suggestion.strip()
+    if draft.get("draft_steps"):
+        card["draft_steps"] = draft["draft_steps"]
+    return {"ok": True, "card": card}
+
+
+@mcp.tool()
 def emit_manual_input(
     id: str,
     workflow_run_iri: str,

@@ -57,6 +57,7 @@ SAFE_TOOLS: list[str] = [
     "emit_action_card",
     "emit_manual_input",
     "emit_capability_gap_card",
+    "emit_playbook_offer",
     # Phase 1.1 — HTTP fallback authoring helper.
     "propose_http_fallback",
     # Phase 1.2 — live triage (read-only FSR).
@@ -115,6 +116,7 @@ TOOL_TIERS: dict[str, int] = {
     "emit_action_card": 0,
     "emit_manual_input": 0,
     "emit_capability_gap_card": 0,
+    "emit_playbook_offer": 0,
     "propose_http_fallback": 0,
     # Phase 1.2 — read-only FSR API.
     "why_did_playbook_fail": 1,
