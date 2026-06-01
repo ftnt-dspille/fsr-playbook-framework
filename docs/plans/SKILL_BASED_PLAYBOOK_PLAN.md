@@ -180,17 +180,24 @@ fallback still renders when the new fields are absent.
 
 ## Phased rollout
 
-- **Phase 1 (small):** Skill descriptor schema + the 4 demo-core descriptors (§1). No behavior
-  change; pure registry.
-- **Phase 2 (small):** `SkillCall` trace recorder (§2) — capture `resolved_inputs` + `observed_output`
-  from the existing loop into the session store next to the transcript. No new provenance machinery.
-- **Phase 3 (large):** `build_playbook_from_session` compiles from the trace (§3): candidate steps +
-  value-match wiring + branch preservation, behind a flag; hand-author path as fallback.
-- **Phase 4 (medium):** Wire the verify/repair loop (§4) around the **existing** tools
-  (`render_jinja` with captured outputs, `_check_jinja_paths`, `step_through_playbook`). Add the
-  "all paths resolve under render + step-through" eval dimension. Shares the validator with
-  `RENDER_PATH_VALIDATOR_PLAN.md`.
-- **Phase 5 (small):** Flip the trace-compiler to default once eval parity is shown; keep fallback.
-- **Phase 6 (medium) — UI (§5):** extend `playbook_offer` (additive ~2.6.0), enrich the widget card
-  into the reviewable draft (branch view + verify badges + safe inline edits), add the mock fixture +
-  `playbookDraft` e2e spec. Lands in the WebStorm widget repo; ship via `scripts/ship.sh`.
+- **Phase 1 (small) — ✅ DONE (`89dda67`):** Skill descriptor schema + the 4 demo-core descriptors
+  (§1) in `fsr_core/compiler/skills.py`. Pure registry; 1:1 step-type rule enforced.
+- **Phase 2 (small) — ✅ DONE (`31c3712`):** `SkillCall` trace recorder (§2) in
+  `fsr_core/agent/skill_trace.py`. `record_run_op` hooked into both `run_op` success paths (direct +
+  agent-routed), capturing the FULL output + a `ref_prefix` flag; no-op without an active trace.
+- **Phase 3 (large) — ✅ DONE (`b108ae8`):** `fsr_core/compiler/skill_compiler.py` — candidate steps
+  + value-match wiring (trivial-value rejection, bracket-quoting, `ref_prefix`-aware paths) + render
+  context that mirrors runtime nesting. (The plan's `build_playbook_from_session` name resolved to the
+  build-intent agent loop, which lives in `fsr_core`; entry point shipped in Phase 5.)
+- **Phase 4 (medium) — ✅ DONE (`7e690d0`):** `fsr_core/compiler/skill_verify.py` — verify/repair via
+  StrictUndefined local Jinja (or injected live `render_jinja`) + reused `parser`/`validator`
+  `_check_jinja_paths`; bad wires repaired to literal + recorded as a gap.
+- **Phase 5 (small) — ✅ DONE (`352b2fb`, `79c590a`; connector `62762cf`):** `build_playbook_from_trace`
+  MCP tool (reads the active session trace; flag-gated, build-only) + `assemble_playbook`/`to_yaml`;
+  `wiring_resolves` eval dimension (`evals.scoring`). Connector enablement: `session_trace` storage +
+  `_session_trace_scope` installed across chat_turn / resume / suspended-resume / approved-execute;
+  build prompt steers to the trace compiler first. **Remaining for the default-flip:** run the parity
+  eval campaign (wiring_resolves vs hand-author baseline) before removing the hand-author fallback.
+- **Phase 6 (medium) — TODO (out-of-repo):** extend `playbook_offer` (additive ~2.6.0), enrich the
+  widget card into the reviewable draft (branch view + verify badges + safe inline edits), add the
+  mock fixture + `playbookDraft` e2e spec. Lands in the WebStorm widget repo; ship via `scripts/ship.sh`.
