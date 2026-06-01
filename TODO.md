@@ -50,6 +50,39 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 ## Next steps (resume state, 2026-06-01)
 
+### ★ Outstanding after the live-proof session (2026-06-01 PM) — RESUME HERE
+
+**Done this session (proven):** Full triage→playbook pipeline GREEN 5/5 live on
+**10.99.249.205** (connector 0.3.78, Haiku, config `fsrpb-live`): triage → action_card
+→ approve → trace recorded → compiled → **playbook created in FSR + ran→finished + purged**.
+New: `get_session_trace` debug op; conflict-safe `push_playbook` (mint-fresh-uuid +
+name-uniquify on 409, incl. recycle-bin/cross-team-owned clashes); 3 new harness checks
+(`trace_recorded`/`offer_accept_pushes`/`offer_playbook_runs`) + `LiveFSR.collection_exists`.
+Fixed the `No module named 'fsr_core'` flake (my bug: `get_session_trace` skipped the
+`_import_fsr_core()` bootstrap). See memory `connector_state`.
+
+Outstanding:
+- [ ] **Commit the connector changes** — UNCOMMITTED on branch `feat/action-based-streaming`
+  in `ConnectorsV2/fsr-playbook-builder`: `operations.py` (conflict-safe push +
+  `get_session_trace` + `_import_fsr_core()` fix), `info.json`, `scripts/live_integration.py`,
+  `scripts/fsr_live.py`, `release_notes.md`. ⚠️ that tree has UNRELATED pre-existing dirty
+  files — commit only mine, don't bundle. (FSRPlaybookYaml side already committed `078d9c4`.)
+- [ ] **Restore FortiCloud connector** (mfz9…forticloud.com) — left DEGRADED after the
+  uninstall/reinstall experiment (config wiped, install_to_fsr `--with-config` 500s). Redeploy
+  0.3.78 + recreate `fsrpb-live`. The publish step lands the version but the config-create
+  path needs a look (see next item).
+- [ ] **install_to_fsr `--with-config` returns 500 but the config DOES get created** (dupes:
+  saw `fsrpb-live` + `claude` on .205). The POST `/api/integration/configuration/` 500s
+  (likely post-create on_add_config warmup hook), then a re-run 400s "name,connector,agent
+  must be unique". Make config-create idempotent + not error on the hook.
+- [ ] **Pre-existing connector test fails** (NOT mine — confirmed with my edits stashed):
+  `tests/test_mock_replay.py::test_mock_playbook_draft_branching_fixture` — the bundled
+  `playbook_draft_branching.json` fixture (re-vendored by build.sh from the widget harness)
+  no longer yields a `playbook_pushed` card on accept. Re-vendor/refresh the fixture.
+- [ ] **Optional connector hardening:** `_RUN`-suffixed throwaway names in the harness avoid
+  the 409, but consider having the offer-save use a per-playbook collection name (compiler
+  hardcodes `00 - FSR Studio`) instead of always `00 - FSR Studio (N)`.
+
 ### Skill-based playbook — Phase 6 follow-through (offer card, direction B)
 
 Contract `2.6.0` + connector emit/accept **shipped & green** (`make verify` = 104 fsr_core
