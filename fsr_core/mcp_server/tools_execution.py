@@ -1345,6 +1345,12 @@ def _run_op_via_agent_playbook(connector: str, op: str,
         data = step_res.get("data", step_res) if isinstance(step_res, dict) else step_res
         shape = _infer_shape(data)
         _store_observed_schema(connector, op, data)
+        # Trace recorder (§2) — full agent-routed output is the wiring source too.
+        try:
+            from fsr_core.agent.skill_trace import record_run_op as _record_skill_call
+            _record_skill_call(connector, op, params, data)
+        except Exception:
+            pass
         sample = data[0] if isinstance(data, list) and data else data
         top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
         summarized, truncated = _summarize_op_output(connector, op, data)
@@ -1633,6 +1639,15 @@ def run_op(
     # the fields that actually drive a verdict, and generically cap anything
     # still oversized. The widget's ioc_card reads this same summarized shape.
     _store_observed_schema(connector, op, data)
+    # Record the typed action trace (SKILL_BASED_PLAYBOOK_PLAN §2): the FULL
+    # output `data` — not the summarized payload below — is the wiring source
+    # for the session→YAML compile. No-op unless a session wrapper installed an
+    # active trace, so studio/tests stay on raw run_op untouched.
+    try:
+        from fsr_core.agent.skill_trace import record_run_op as _record_skill_call
+        _record_skill_call(connector, op, params, data)
+    except Exception:
+        pass  # recorder is best-effort; never break a live op over it
     # top_keys reflect the FULL shape so authoring references stay accurate.
     sample = data[0] if isinstance(data, list) and data else data
     top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
