@@ -71,14 +71,20 @@ Outstanding:
   uninstall/reinstall experiment (config wiped, install_to_fsr `--with-config` 500s). Redeploy
   0.3.78 + recreate `fsrpb-live`. The publish step lands the version but the config-create
   path needs a look (see next item).
-- [ ] **install_to_fsr `--with-config` returns 500 but the config DOES get created** (dupes:
-  saw `fsrpb-live` + `claude` on .205). The POST `/api/integration/configuration/` 500s
-  (likely post-create on_add_config warmup hook), then a re-run 400s "name,connector,agent
-  must be unique". Make config-create idempotent + not error on the hook.
-- [ ] **Pre-existing connector test fails** (NOT mine — confirmed with my edits stashed):
-  `tests/test_mock_replay.py::test_mock_playbook_draft_branching_fixture` — the bundled
-  `playbook_draft_branching.json` fixture (re-vendored by build.sh from the widget harness)
-  no longer yields a `playbook_pushed` card on accept. Re-vendor/refresh the fixture.
+- [x] **install_to_fsr `--with-config` idempotent** (2026-06-01, connector
+  `95cf40e`). The config write no longer fails the run on a 500/400: the
+  post-write `on_add_config` warmup hook can raise after the row is persisted,
+  so the script now verifies by re-fetching the connector detail record and
+  treats a present config as success (was: report FAILED → re-run 400s
+  "name,connector,agent must be unique"). ⚠️ offline-only fix — not yet
+  exercised against live; confirm on the next deploy to .205/FortiCloud.
+- [x] **Draft fixture test fixed** (2026-06-01, connector `95cf40e`).
+  `test_mock_playbook_draft_branching_fixture` was failing because the vendored
+  `playbook_draft_branching.json` accept-path info_card used variant `generic`;
+  real connector emits `playbook_pushed` (`operations.py:2311`). Fixed the
+  **widget-harness source** fixture (variant + the already-present
+  decline/accept `match` keys) and re-vendored. `make verify` green
+  (105 fsr_core + 130 connector).
 - [ ] **Optional connector hardening:** `_RUN`-suffixed throwaway names in the harness avoid
   the 409, but consider having the offer-save use a per-playbook collection name (compiler
   hardcodes `00 - FSR Studio`) instead of always `00 - FSR Studio (N)`.
