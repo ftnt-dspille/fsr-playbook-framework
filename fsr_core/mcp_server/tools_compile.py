@@ -619,7 +619,7 @@ def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
 
 @mcp.tool()
 def build_playbook_from_trace(
-    trace_json: str,
+    trace_json: str = "",
     name: str = "Triage Playbook",
     live: bool = False,
 ) -> dict[str, Any]:
@@ -635,8 +635,10 @@ def build_playbook_from_trace(
     then compiles the result to confirm it imports clean.
 
     Args:
-      trace_json: the serialized `SkillTrace` (`SkillTrace.to_json()`),
-        as persisted next to the session transcript.
+      trace_json: the serialized `SkillTrace` (`SkillTrace.to_json()`).
+        **Leave empty** in normal agent use — the session's recorded trace
+        is read from the active recorder automatically. Pass a value only
+        to compile an externally-supplied trace (tests, batch tooling).
       name: the playbook display name.
       live: when True, verify wires against the live FSR Jinja engine
         (`render_jinja`) for runtime-identical evidence; offline (default)
@@ -649,14 +651,20 @@ def build_playbook_from_trace(
     `{ok: false, ...}` with `empty_trace` when the trace has no recorded
     actions (caller should fall back to the hand-author path).
     """
+    from fsr_core.agent import skill_trace as _skill_trace
     from fsr_core.agent.skill_trace import SkillTrace
     from fsr_core.compiler import skill_compiler as sc
     from fsr_core.compiler import skill_verify as sv
 
-    try:
-        trace = SkillTrace.from_json(trace_json or "")
-    except Exception as exc:  # noqa: BLE001
-        return _err("bad_trace_json", f"could not parse trace_json: {exc}")
+    if trace_json:
+        try:
+            trace = SkillTrace.from_json(trace_json)
+        except Exception as exc:  # noqa: BLE001
+            return _err("bad_trace_json", f"could not parse trace_json: {exc}")
+    else:
+        # Normal agent path: use the session's active recorder, installed by
+        # the connector's per-turn trace scope.
+        trace = _skill_trace.get_active_trace() or SkillTrace()
     if len(trace) == 0:
         return _err(
             "empty_trace",

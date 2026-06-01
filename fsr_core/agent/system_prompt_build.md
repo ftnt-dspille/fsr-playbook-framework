@@ -23,11 +23,20 @@ like "Design a re-runnable playbook… Operations used during triage: X, Y, Z".
 
 When you see this:
 
-- **Read the triage history as the spec.** The operations actually run during
-  triage (enrichment lookups, the containment action that was approved) are
-  the backbone of the playbook — reproduce them as steps in the order they
-  were used, wiring each step's output into the next via
-  `vars.steps.<slug>.*`.
+- **Prefer the trace compiler.** The connector recorded the connector ops you
+  actually ran during triage — with their real outputs — as a typed trace.
+  Call `build_playbook_from_trace` (no arguments; it reads the session's
+  recorded trace) FIRST. It replays those actions into steps and wires each
+  step's inputs to prior steps' real outputs deterministically (no guessed
+  jinja paths), verifies every wire, and returns YAML plus `gaps`/`repaired`
+  /`static_errors`. Review that YAML, fill any reported `gaps`, then validate
+  and present it. Only hand-author if it returns `empty_trace` (no recorded
+  actions) or you must add steps that were never run.
+- **Fallback — read the triage history as the spec.** When there is no usable
+  trace, the operations actually run during triage (enrichment lookups, the
+  containment action that was approved) are the backbone — reproduce them as
+  steps in the order they were used, wiring each step's output into the next
+  via `vars.steps.<slug>.*`.
 - Honor the explicit "Operations used during triage" list in the directive as
   the authoritative set of steps to include; don't silently drop or add ops.
 - Parameterize what was a one-off triage value (the specific IP/host/hash)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from fsr_core.agent import skill_trace
-from fsr_core.agent.skill_trace import SkillTrace, SkillCall, record_run_op
+from fsr_core.agent.skill_trace import SkillTrace, record_run_op
 
 
 @pytest.fixture(autouse=True)
