@@ -130,6 +130,58 @@ The widget already renders other rich cards — reuse those patterns:
   the accept payload; the **flat fallback** still renders when the new fields are
   absent.
 
+## ✅ Widget side implemented (2026-06-01) — built to the **contract** (§5), not this sketch
+
+Implemented against `FSR_PLAYBOOK_BUILDER_CONNECTOR_CONTRACT.md` §5 (the
+authoritative shapes), which differ from the JSON sketches earlier in this doc.
+Where they conflict, **the contract wins** — the field names below are what the
+connector must actually emit/consume. Widget bumped to `1.0.43`,
+`WIDGET_CONTRACT_VERSION = 2.6.0`. All jest + e2e green in the harness.
+
+**Wire shapes the widget now speaks (contract-exact):**
+
+- `draft_steps[]` nodes use **`node`** (the step name), `step_type`, `verified`,
+  and — for a fork — **`branches`** as a *map* `{"<branch label>": ["<op
+  label>", …]}`. (Not `name`/`{if,else}`.)
+- Each `ops_summary[]` entry may carry `skill_id`, `step_type`, `wiring_label`,
+  `verified` (bool), and **`branch`** (the fork label it belongs to). The widget
+  JOINs ops↔draft by **label**, so wiring/verify/gap render once, by reference.
+- A `verified:false` op (or a `manual_input` step) renders an **amber inline
+  field**; what the analyst types there becomes `manual_input_prompts[label]`.
+
+**The `edits` object the connector must consume** (contract §5 / T18; rides on
+the unchanged `chat_resume({decision:"accept", offer_id, title, edits?})`;
+omitted entirely when nothing changed, so pre-2.6.0 behavior is byte-identical):
+
+```json
+{ "edits": {
+  "manual_input_prompts": { "<op label>": "<analyst-supplied prompt/value>" },
+  "branch_labels":        { "<decision node>": { "<branch key>": "<new label>" } }
+} }
+```
+
+Only changed keys appear. Wiring/DAG are never touched (structural edits are
+out of scope for 2.6.0). `manual_input_prompts[label]` seeds the
+`set_variable`/`manual_input` for the value that couldn't be auto-wired.
+
+**Files:** `widgetAssets/js/fsrPbRender.js` (normalizer: `_draftRow`,
+`_buildDraftSteps`, enriched `playbook_offer`), `widget/view.html` (rich draft
+template + CSS; flat 2.5.0 list still renders when the new fields are absent),
+`widget/view.controller.js` (`_collectOfferEdits` → resume payload).
+
+**Tests:** jest `render.pipeline.test.js` (enriched ops, verified:false gap,
+ops↔draft join + shared-ref) + e2e `fsrPlaybookBuilder.playbookDraft.spec.js`
+(branch view, verify badge vs amber gap, branch-label + gap edits → contract
+`edits`, flat fallback). Fixture: `playbook_draft_branching.json` (mirrors the
+contract §5 example; registered in the contract fixtures table).
+
+**Still the unblock:** the connector offer-builder must emit `draft_steps` +
+the enriched `ops_summary` fields from the compiler dict (§"Where the data comes
+from") and apply `edits` on accept. Until it does, real sessions render the flat
+fallback. (Dev note: the widget now declares contract 2.6.0; against a 2.5.0
+connector it logs a soft minor-version warning — expected until the connector
+bumps.)
+
 ## Definition of done
 
 A saved playbook from a clean triage session, reviewed in the enriched card,
