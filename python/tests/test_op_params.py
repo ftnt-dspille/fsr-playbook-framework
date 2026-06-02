@@ -216,3 +216,71 @@ def test_get_op_schema_groups_conditional_params_with_empty_parent_sentinels(
     assert out["visibility"]["when"]["scope=private"] == ["vlan"]
     assert out["param_groups_by_select"]["scope"]["private"]["params"] == [
         "ip", "limit", "vlan"]
+
+
+def _add_schema_columns(store, *, static=None, observed=None):
+    """Extend the fixture's operations row with the two output-schema columns."""
+    con = sqlite3.connect(store)
+    for col in ("output_schema_json", "conditional_output_schema_json",
+                "output_schema_observed"):
+        try:
+            con.execute(f"ALTER TABLE operations ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass  # already added
+    con.execute(
+        "UPDATE operations SET output_schema_json=?, output_schema_observed=? "
+        "WHERE connector_name='virustotal' AND op_name='get_ip_reputation'",
+        (static, observed),
+    )
+    con.commit()
+    con.close()
+
+
+def test_get_op_schema_excludes_untyped_static_output_schema(store, monkeypatch):
+    """E3: the static FortiSOAR output schema is untyped scaffolding and must
+    never be surfaced — only the run-derived observed schema is trustworthy."""
+    from fsr_core.mcp_server import tools_discovery as td
+
+    monkeypatch.setattr(td._shared, "DB_PATH", store)
+    # Static = 1000-line empty-string scaffold (simulated); observed = real shape.
+    _add_schema_columns(
+        store,
+        static='{"general": {"reputation": "", "pulse_info": {"count": ""}}}',
+        observed='{"reputation": 5, "country": "US"}',
+    )
+
+    out = td.get_op_schema("virustotal", "get_ip_reputation", verbose=True)
+    # The untyped static scaffold is gone; the observed shape stays (parsed).
+    assert "output_schema_json" not in out
+    assert "conditional_output_schema_json" not in out
+    assert out["output_schema_observed"] == {"reputation": 5, "country": "US"}
+
+
+def test_get_op_schema_slim_hint_steers_to_run_op_for_safe_ops(store, monkeypatch):
+    """E3: with no observed schema, a read-only (safe) op's slim hint points the
+    agent at run_op to observe the real output rather than the excluded scaffold."""
+    from fsr_core.mcp_server import tools_discovery as td
+
+    monkeypatch.setattr(td._shared, "DB_PATH", store)
+    _add_schema_columns(
+        store,
+        static='{"general": {"reputation": ""}}',  # present but ignored
+        observed=None,                              # nothing observed yet
+    )
+
+    out = td.get_op_schema("virustotal", "get_ip_reputation")  # slim
+    # get_ip_reputation starts with get_ -> safe; hint must mention run_op,
+    # and must NOT claim a schema is "available" off the static scaffold.
+    assert "run_op" in out["output_schema"]
+    assert "available" not in out["output_schema"]
+
+
+def test_get_op_schema_slim_hint_reports_observed_when_present(store, monkeypatch):
+    from fsr_core.mcp_server import tools_discovery as td
+
+    monkeypatch.setattr(td._shared, "DB_PATH", store)
+    _add_schema_columns(store, static=None, observed='{"reputation": 5}')
+
+    out = td.get_op_schema("virustotal", "get_ip_reputation")  # slim
+    assert "observed" in out["output_schema"]
+    assert "verbose=True" in out["output_schema"]

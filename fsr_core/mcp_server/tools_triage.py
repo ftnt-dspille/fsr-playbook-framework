@@ -317,7 +317,26 @@ _CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
 # and use a tier<=2 read guard, the inverse of the containment tier>=3 guard.
 _INTEL_TOKENS: tuple[str, ...] = (
     "reputation", "ioc", "indicator", "intel", "threat", "enrich", "context",
-    "score", "lookup", "geo", "whois", "passive", "detection", "verdict",
+    "lookup", "geo", "whois", "passive", "detection", "verdict",
+)
+# Tokens that NAME a specific indicator type. Used to (a) confirm a candidate
+# op is about the requested indicator and (b) reject ops that name only a
+# *different* indicator (e.g. get_domain_reputation when enriching an IP).
+# Note: "address" is deliberately NOT an ip token — it matches firewall
+# address-objects (`get_addresses`), MAC/email addresses, etc.
+_INDICATOR_TOKENS: dict[str, tuple[str, ...]] = {
+    "ip": ("ip",),
+    "host": ("host", "endpoint", "device", "machine", "asset"),
+    "endpoint": ("endpoint", "host", "device", "machine", "agent"),
+    "user": ("user", "account", "identity", "credential", "login"),
+    "url": ("url", "uri"),
+    "domain": ("domain", "fqdn", "dns"),
+    "hash": ("hash", "md5", "sha", "sample"),
+    "file": ("file", "hash", "sample", "md5", "sha"),
+    "email": ("email",),
+}
+_ALL_INDICATOR_TOKENS: frozenset = frozenset(
+    t for toks in _INDICATOR_TOKENS.values() for t in toks
 )
 # Write-ish / plumbing ops that share the `investigation` category but aren't an
 # indicator lookup — re-scans, submissions, detonations, raw API passthroughs.
@@ -332,30 +351,62 @@ _ENRICHMENT_NOISE: frozenset = frozenset({
 _ENRICHMENT_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "get_output_schema", "get_widget", "get_feed",
 )
+# Connector preference for enrichment ranking. High-signal TI connectors first
+# so they survive the `limit` cut; AlienVault OTX is de-prioritized (slow,
+# noisy, frequently times out — see memory `agent_no_alienvault_otx`). Lower
+# rank value = preferred. Substring match against the connector name; anything
+# unlisted lands in the middle band so a chatty deprioritized connector can't
+# bury an unknown-but-neutral one.
+_ENRICH_CONNECTOR_RANK: tuple[tuple[str, int], ...] = (
+    ("virustotal", 0), ("fortiguard", 0), ("fortinet-fortiguard", 0),
+    ("shodan", 1), ("ipqualityscore", 1), ("ip_quality", 1), ("ipqs", 1),
+    ("greynoise", 1), ("abuseipdb", 1), ("urlscan", 1),
+    ("alienvault", 9), ("otx", 9),
+)
+_ENRICH_RANK_DEFAULT = 5
+# Cap per connector so one chatty connector can't crowd the slate.
+_ENRICH_PER_CONNECTOR_CAP = 3
 
 
-def _is_enrichment_op(nm: str, title_l: str,
-                      keywords: tuple[str, ...] | None) -> bool:
+def _enrich_connector_rank(connector: str) -> int:
+    c = (connector or "").lower()
+    for frag, rank in _ENRICH_CONNECTOR_RANK:
+        if frag in c:
+            return rank
+    return _ENRICH_RANK_DEFAULT
+
+
+def _is_enrichment_op(nm: str, title_l: str, target: str | None) -> bool:
     """Name/title heuristic for "indicator enrichment lookup" ops, pre-tier.
 
-    An op qualifies when it isn't a write-ish/plumbing op AND it either names
-    the indicator type asked for (keyword match) or carries a generic intel
-    token (so connector-agnostic ops like `ioc_search` / `get_reputation`
-    qualify for any indicator). With no target type, we require the intel token
-    so the result stays bounded to clearly-intel ops instead of every read.
+    An op qualifies when it isn't a write-ish/plumbing op AND either carries a
+    generic intel token (reputation/ioc/context/...) or names the requested
+    indicator. With no target type we require the intel token, so the result
+    stays bounded to clearly-intel ops. With a target type we ALSO reject ops
+    that name only a *different* indicator — `get_domain_reputation`,
+    `get_url_reputation`, `get_file_reputation` while enriching an IP — even
+    though they carry an intel token, because they can't take this indicator.
+    (`score` was dropped from the intel tokens and `address` from the ip
+    tokens, so EPSS scoring and firewall `get_addresses` no longer slip in.)
     """
     if nm in _ENRICHMENT_NOISE or nm.startswith(_ENRICHMENT_EXCLUDE_PREFIXES):
         return False
     if any(v in nm for v in _ENRICHMENT_EXCLUDE_VERBS):
         return False
-    generic = any(tok in nm or tok in title_l for tok in _INTEL_TOKENS)
-    if keywords:
-        return generic or any(k in nm or k in title_l for k in keywords)
-    return generic
+    hay = nm + " " + title_l
+    generic = any(tok in hay for tok in _INTEL_TOKENS)
+    if not target:
+        return generic
+    desired = _INDICATOR_TOKENS.get(target, ())
+    names_desired = any(k in hay for k in desired)
+    other = _ALL_INDICATOR_TOKENS - set(desired)
+    if any(k in hay for k in other) and not names_desired:
+        return False  # names only a different indicator — can't take this one
+    return generic or names_desired
 
 
 def _connectors_that_could_enrich(
-        keywords: tuple[str, ...] | None,
+        target: str | None,
         exclude: set[str],
         limit: int = 4) -> list[dict[str, str]]:
     """Across the WHOLE catalog, connectors carrying an enrichment op matching
@@ -373,7 +424,7 @@ def _connectors_that_could_enrich(
     for connector, op, title in rows:
         if not connector or connector in exclude or connector in found:
             continue
-        if _is_enrichment_op((op or "").lower(), (title or "").lower(), keywords):
+        if _is_enrichment_op((op or "").lower(), (title or "").lower(), target):
             found[connector] = op or ""
         if len(found) >= limit:
             break
@@ -395,7 +446,18 @@ def _required_params(conn: sqlite3.Connection, connector: str,
         ).fetchall()
     except sqlite3.OperationalError:
         return []
-    return [{"name": r[0], "type": r[1]} for r in rows if r[0]]
+    # Dedupe by name: an op with conditional param groups (parent-gated
+    # param-sets, e.g. block_ip_new's ip / ip_group_name) lists the same
+    # required param once per group, which would otherwise read as a noisy
+    # duplicated schema hint. First occurrence wins (preserves `ord`).
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in rows:
+        if not r[0] or r[0] in seen:
+            continue
+        seen.add(r[0])
+        out.append({"name": r[0], "type": r[1]})
+    return out
 
 
 def _connectors_that_could_contain(
@@ -741,7 +803,7 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
         ).fetchall()
         for connector, op, title, category in rows:
             nm = (op or "").lower()
-            if not _is_enrichment_op(nm, (title or "").lower(), keywords):
+            if not _is_enrichment_op(nm, (title or "").lower(), target):
                 continue
             # Decisive read guard (inverse of containment's tier>=3): only
             # surface ops the dispatch gate treats as read-only (tier <= 2).
@@ -784,7 +846,22 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
             kept.append(a)
         actions = kept
 
-    actions.sort(key=lambda a: (a["deprecated"], a["connector"], a["op"]))
+    # Rank by connector preference (high-signal TI first, AlienVault last),
+    # then name — so the preferred sources survive the `limit` cut instead of
+    # losing to alphabetical order. Then cap per connector so one chatty
+    # connector can't crowd the slate out of the budget.
+    actions.sort(key=lambda a: (a["deprecated"],
+                                _enrich_connector_rank(a["connector"]),
+                                a["connector"], a["op"]))
+    per_connector: dict[str, int] = {}
+    capped: list[dict[str, Any]] = []
+    for a in actions:
+        n = per_connector.get(a["connector"], 0)
+        if n >= _ENRICH_PER_CONNECTOR_CAP:
+            continue
+        per_connector[a["connector"]] = n + 1
+        capped.append(a)
+    actions = capped
     out: dict[str, Any] = {"ok": True, "target_type": target or None,
                            "actions": actions[:limit], "count": len(actions),
                            "probed": probe}
@@ -794,7 +871,7 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
         # configure (from the full catalog), with a resume button.
         scope = f" for target type {target!r}" if target else ""
         miss = f"{target} enrichment" if target else "indicator enrichment"
-        could = _connectors_that_could_enrich(keywords, set(configured))
+        could = _connectors_that_could_enrich(target, set(configured))
         if could:
             names = ", ".join(c["connector"] for c in could)
             fix_steps = [
@@ -925,7 +1002,10 @@ def list_configured_connectors(probe: bool = False,
         for item in out:
             if item["name"] in health:
                 item["status"] = health[item["name"]]
-    return {"configured": out, "probed": probe, "count": len(out)}
+    # `ok: True` so the connector's result classifier doesn't read a
+    # successful payload that happens to omit `ok` as a failure (it was
+    # mislabeling this tool `(error)` despite returning valid data).
+    return {"ok": True, "configured": out, "probed": probe, "count": len(out)}
 
 @mcp.tool()
 def list_tags(prefix: str | None = None, limit: int = 50) -> dict[str, Any]:

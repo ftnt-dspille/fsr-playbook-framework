@@ -8,6 +8,8 @@ manual_input/decision that the parser hard-errors on.
 """
 from __future__ import annotations
 
+import re
+
 import yaml
 
 from fsr_core.compiler import compile_yaml
@@ -35,12 +37,21 @@ def _scaffold(example: dict) -> str:
     if stype not in {"decision", "manual_input"}:
         middle.setdefault("next", "End")
 
+    # Declare any vars.input.params.<name> the example references, so the
+    # undeclared-param compile rule (the trigger must materialize each
+    # referenced input) doesn't flag the example's illustrative refs.
+    params = sorted(set(
+        re.findall(r"vars\.input\.params\.([A-Za-z_][A-Za-z0-9_]*)",
+                   yaml.safe_dump(middle))
+    ))
+
     pb = {
         "collection": "T",
         "playbooks": [
             {
                 "name": "P",
                 "is_active": False,
+                "parameters": params,
                 "steps": [
                     {"type": "start", "name": "Start", "next": middle_name},
                     middle,

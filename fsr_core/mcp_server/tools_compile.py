@@ -622,6 +622,7 @@ def build_playbook_from_trace(
     trace_json: str = "",
     name: str = "Triage Playbook",
     live: bool = False,
+    module: str = "",
 ) -> dict[str, Any]:
     """Compile a playbook from the session's typed action trace instead of
     hand-authoring YAML (SKILL_BASED_PLAYBOOK_PLAN §3–5).
@@ -643,6 +644,12 @@ def build_playbook_from_trace(
       live: when True, verify wires against the live FSR Jinja engine
         (`render_jinja`) for runtime-identical evidence; offline (default)
         uses a strict local Jinja render.
+      module: friendly module name (alerts, incidents, …) to bind the
+        playbook's start trigger to, so it runs as a manual Execute-menu
+        trigger on that module's record listing. **Leave empty** in normal
+        agent use — it's read from the trace's recorded triage module
+        (stamped by the connector when it opened the session). Pass a value
+        only to override or to compile an externally-supplied trace.
 
     Returns on success: `{ok, yaml, compile_summary, verified, gaps,
     repaired, static_errors}`. `gaps`/`repaired`/`static_errors` are the
@@ -681,7 +688,11 @@ def build_playbook_from_trace(
             render_fn = None  # offline fallback
 
     compiled = sv.compile_and_verify(trace, render_fn=render_fn)
-    doc = sc.assemble_playbook(compiled, name=name)
+    # Explicit arg overrides; otherwise bind to the module recorded on the
+    # trace (the triaged record's module, stamped by the connector). None →
+    # bare `start` (a designer-only Referenced trigger).
+    trigger_module = module or getattr(trace, "module", None) or None
+    doc = sc.assemble_playbook(compiled, name=name, module=trigger_module)
     yaml_text = sc.to_yaml(doc)
 
     # Confirm the trace-built playbook imports clean (draft tier).

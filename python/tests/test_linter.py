@@ -22,6 +22,7 @@ NORWAY_BAD = """
 collection: Norway
 playbooks:
   - name: pb
+    parameters: [go]
     steps:
       - name: trigger
         type: start

@@ -80,3 +80,27 @@ def test_run_op_records_into_active_trace(monkeypatch):
 
     assert len(t) == 1
     assert t.calls[0].observed_output == full     # full blob retained for wiring
+
+
+def test_module_survives_json_round_trip():
+    t = SkillTrace(module="alerts")
+    t.record_run_op("fortiedr", "isolate_host", {"host": "h1"}, {"status": "ok"})
+    rt = SkillTrace.from_json(t.to_json())
+    assert rt.module == "alerts"
+
+
+def test_module_absent_keeps_legacy_shape():
+    # No module → key omitted, so legacy readers/fixtures see no drift.
+    assert "module" not in SkillTrace().to_dict()
+
+
+def test_set_active_trace_module_normalizes_iri():
+    t = SkillTrace()
+    skill_trace.set_active_trace(t)
+    skill_trace.set_active_trace_module("/api/3/alerts/abc-123")
+    assert t.module == "alerts"
+
+
+def test_set_active_trace_module_noop_without_active():
+    skill_trace.clear_active_trace()
+    skill_trace.set_active_trace_module("incidents")  # must not raise

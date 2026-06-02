@@ -196,6 +196,79 @@ class RewriterMixin:
                     path=f"playbooks[{pi}].steps[{si}].arguments",
                 ))
 
+    # Reserved trigger inputs that exist at runtime WITHOUT a declared
+    # `parameters:` entry: `vars.input.records` / `vars.input.record` are
+    # the selected record(s) the trigger fired on; `vars.input.params` is
+    # the params bag itself. Everything else under `vars.input.params.*`
+    # MUST correspond to a declared playbook parameter, or the trigger has
+    # no such input variable and the jinja evaluates empty at runtime.
+    _PARAM_REF_RE = _re.compile(
+        r"\bvars\.input\.params"
+        r"(?:\.([A-Za-z_][A-Za-z0-9_]*)"          # .name
+        r"|\[\s*['\"]([^'\"]+)['\"]\s*\])"          # ['name'] / ["name"]
+    )
+
+    def _validate_input_param_refs(
+        self, pb, pi: int, errors: list[CompileError],
+    ) -> None:
+        """Error on `vars.input.params.<name>` references whose `<name>` is
+        not a declared playbook parameter.
+
+        FSR only materializes `vars.input.params.<name>` for parameters
+        declared on the trigger step. A reference to an undeclared name
+        silently evaluates to empty at runtime — the classic "set_variable
+        assumed vars.input.params.X but no parameter X was defined" bug.
+        Run AFTER `_auto_rewrite_input_param_refs` so bare `vars.input.X`
+        forms have already been promoted to their `.params.` shape.
+        """
+        declared = {p for p in (pb.parameters or [])
+                    if isinstance(p, str) and p}
+        seen: dict[str, set[int]] = {}
+
+        def scan(text: str, si: int) -> None:
+            for m in self._PARAM_REF_RE.finditer(text):
+                name = m.group(1) or m.group(2)
+                if name and name not in declared:
+                    seen.setdefault(name, set()).add(si)
+
+        for si, step in enumerate(pb.steps):
+            self._walk_strings_inplace_ro(step.arguments, lambda t, _si=si: scan(t, _si))
+
+        for name in sorted(seen):
+            for si in sorted(seen[name]):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        f"`vars.input.params.{name}` references playbook "
+                        f"parameter {name!r}, which is not declared. Add "
+                        f"{name!r} to the playbook's `parameters:` list so the "
+                        f"trigger materializes it as an input variable — "
+                        f"otherwise the reference evaluates to empty at runtime."
+                    ),
+                    path=f"playbooks[{pi}].steps[{si}].arguments",
+                    suggestion=(
+                        f"add `parameters: [..., {name}]` to "
+                        f"playbooks[{pi}] (the trigger step's inputs)"
+                    ),
+                ))
+
+    @classmethod
+    def _walk_strings_inplace_ro(cls, value, fn) -> None:
+        """Read-only string walk: call `fn(str)` for every string leaf
+        without mutating. Mirrors `_walk_strings_inplace`'s traversal."""
+        if isinstance(value, dict):
+            for v in value.values():
+                if isinstance(v, str):
+                    fn(v)
+                else:
+                    cls._walk_strings_inplace_ro(v, fn)
+        elif isinstance(value, list):
+            for v in value:
+                if isinstance(v, str):
+                    fn(v)
+                else:
+                    cls._walk_strings_inplace_ro(v, fn)
+
     @classmethod
     def _walk_strings_inplace(cls, value, fn) -> None:
         if isinstance(value, dict):

@@ -7,6 +7,14 @@ errors verbatim and explain the fix.
 - Use the discovery tools (`find_connector`, `find_operation`,
   `get_op_schema`, `list_configured_connectors`) and the step/Jinja helpers
   to build correct YAML.
+- **Look up before you write — hard rule.** Before you write any step or
+  operation you have not already confirmed this session, resolve it first:
+  call `get_step_type` for the step kind and `find_operation` /
+  `get_op_schema` for the exact connector op + its parameters. **Never guess
+  an operation name, step `type`, or parameter name** — a guessed op (e.g.
+  `get_api_response`) doesn't exist and a guessed key (`stepType:` instead of
+  `type:`, `templates:` instead of `playbooks:`) just burns a `validate_yaml`
+  round-trip. Confirm the shape, then write it once, correctly.
 - Iterate with `validate_yaml` / `compile_yaml`; run `verify_playbook` before
   you present a playbook as ready. Don't show YAML you haven't validated.
 - When the user wants to persist or test, use `push_playbook` /
@@ -48,3 +56,46 @@ When you see this:
 
 If there is no triage history, treat the request as a normal authoring task
 from scratch.
+
+# Canonical skeleton (start from this, don't invent structure)
+
+When you begin authoring with no existing YAML, start from this exact shape and
+edit it — don't guess the top-level keys or step grammar. The collection key is
+`playbooks:` (NOT `templates:`); every step uses `type:` with a snake_case step
+type (e.g. `set_variable`, NOT `stepType:`/`SetVariables`):
+
+```yaml
+playbooks:
+  - name: <playbook name>
+    # `parameters:` is ONLY for inputs that do NOT live on the triaged record
+    # (see the record-vs-params rule below). Declare EVERY trigger input you
+    # reference as vars.input.params.<name> here — an undeclared
+    # vars.input.params.<name> is a COMPILE ERROR (the trigger never
+    # materializes it → the jinja evaluates empty at runtime).
+    parameters: [<param_name>, ...]   # often EMPTY for a record-bound trigger
+    steps:
+      - id: start
+        type: start
+        # Bind the trigger to the module the playbook is created from (the
+        # module triaged — e.g. alerts / incidents). A bare `start` with no
+        # module compiles to a Referenced trigger (designer-Run-button only);
+        # binding the module makes it a manual Execute-menu trigger on that
+        # module's record listing, which is what a triage-derived playbook
+        # should be. Runs per_record → the selected record is vars.input.records[0].
+        module: <source module, e.g. alerts>
+      - id: set_inputs
+        type: set_variable
+        # Pull one-off triage values FROM THE RECORD, not invented params:
+        #   {{ vars.input.records[0].<field> }}   (e.g. .sourceIp, .name)
+        # Use vars.input.params.<name> ONLY for a value not on the record;
+        # every such <name> MUST appear in `parameters:` above.
+      - id: <connector_step>
+        type: connector
+        # connector/operation/params resolved via find_operation + get_op_schema
+      - id: decide
+        type: decision
+```
+
+Resolve each `type:` with `get_step_type` and each connector op with
+`find_operation` / `get_op_schema` before filling it in — see the look-up rule
+above.

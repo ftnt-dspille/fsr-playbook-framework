@@ -21,7 +21,10 @@ import sqlite3
 import pytest
 
 from fsr_core.llm.tools import _DB_PATH, _op_presence, _tier_for_run_op
-from fsr_core.mcp_server.tools_triage import _is_enrichment_op, _TARGET_KEYWORDS
+from fsr_core.mcp_server.tools_triage import (
+    _enrich_connector_rank,
+    _is_enrichment_op,
+)
 
 
 # --- Fix #1: tier resolution for guessed vs. real ops -----------------------
@@ -54,17 +57,15 @@ def test_unknown_connector_stays_conservative():
         {"connector": "totally-unknown-conn-xyz", "op": "foo"}) == 3
 
 
-# --- Fix #2: enrichment-op classifier ---------------------------------------
-
-IP_KW = _TARGET_KEYWORDS["ip"]
+# --- Fix #2: enrichment-op classifier (target = indicator type string) ------
 
 
 @pytest.mark.parametrize("op", [
     "query_ip", "get_ip_reputation", "search_ip", "ioc_search",
-    "file_reputation",
+    "get_ip_context", "get_reputation",
 ])
 def test_keeps_real_intel_lookups(op):
-    assert _is_enrichment_op(op, "", IP_KW)
+    assert _is_enrichment_op(op, "", "ip")
 
 
 @pytest.mark.parametrize("op", [
@@ -77,7 +78,23 @@ def test_keeps_real_intel_lookups(op):
     "custom_endpoint",
 ])
 def test_drops_writeish_and_plumbing_ops(op):
-    assert not _is_enrichment_op(op, "", IP_KW)
+    assert not _is_enrichment_op(op, "", "ip")
+
+
+@pytest.mark.parametrize("op", [
+    "get_domain_reputation",   # TRIAGE_BUILD_AUDIT B1: wrong indicator for ip
+    "get_url_reputation",
+    "get_file_reputation",
+    "get_addresses",           # firewall address-objects, not IP intel
+])
+def test_drops_wrong_indicator_and_config_reads_for_ip(op):
+    assert not _is_enrichment_op(op, "", "ip")
+
+
+def test_epss_score_dropped_after_score_token_removed():
+    # `score` is no longer an intel token, so EPSS scoring isn't enrichment.
+    assert not _is_enrichment_op(
+        "exploit_prediction", "epss score for a cve", "ip")
 
 
 def test_no_target_requires_intel_token():
@@ -85,6 +102,18 @@ def test_no_target_requires_intel_token():
     bounded instead of returning every read op)."""
     assert _is_enrichment_op("get_ip_reputation", "", None)   # has 'reputation'
     assert not _is_enrichment_op("search_ip", "", None)       # type-only match
+
+
+# --- B2: connector preference ranking ---------------------------------------
+
+def test_preferred_connectors_rank_above_alienvault():
+    for c in ("virustotal", "fortiguard", "shodan", "ipqualityscore"):
+        assert _enrich_connector_rank(c) < _enrich_connector_rank("alienvault-otx")
+
+
+def test_unknown_connector_lands_mid_band():
+    r = _enrich_connector_rank("some-unknown-connector")
+    assert _enrich_connector_rank("virustotal") < r < _enrich_connector_rank("alienvault-otx")
 
 
 @requires_db
@@ -98,7 +127,7 @@ def test_classifier_matches_db_shape():
     finally:
         con.close()
     if "query_ip" in ops:
-        assert _is_enrichment_op("query_ip", (ops["query_ip"] or "").lower(), IP_KW)
+        assert _is_enrichment_op("query_ip", (ops["query_ip"] or "").lower(), "ip")
     if "ip_re_analyze" in ops:
         assert not _is_enrichment_op(
-            "ip_re_analyze", (ops["ip_re_analyze"] or "").lower(), IP_KW)
+            "ip_re_analyze", (ops["ip_re_analyze"] or "").lower(), "ip")

@@ -169,14 +169,25 @@ def assemble_playbook(
     name: str = "Triage Playbook",
     collection: str = "00 - FSR Studio",
     trigger: str = "start",
+    module: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Wrap the compiled steps into a full playbook doc (a `start` trigger
-    that points at the first real step, then the value-matched steps)."""
+    that points at the first real step, then the value-matched steps).
+
+    When `module` is given (the module the investigation ran on — e.g.
+    ``alerts`` / ``incidents``), the start trigger is bound to that module
+    so it resolves to a manual Execute-menu trigger (``cybersponse.action``)
+    on the module's record listing, NOT a designer-only Referenced trigger
+    (``cybersponse.abstract_trigger``, the bare-`start` default). Playbooks
+    authored from a triage session should run from the record they triage."""
     start = compiled.get("start_step", "Start")
     first = compiled.get("first_step")
     steps: List[Dict[str, Any]] = []
     if first:
-        steps.append({"type": "start", "name": start, "next": first})
+        start_step: Dict[str, Any] = {"type": "start", "name": start, "next": first}
+        if module:
+            start_step["module"] = module
+        steps.append(start_step)
     steps.extend(compiled.get("steps", []))
     return {
         "collection": collection,

@@ -680,13 +680,20 @@ def get_op_schema(connector: str, op: str,
 
         if verbose:
             result = dict(op_row[0])
-            for col in ("output_schema_json", "conditional_output_schema_json",
-                        "output_schema_observed"):
-                if result.get(col):
-                    try:
-                        result[col] = json.loads(result[col])
-                    except (json.JSONDecodeError, TypeError):
-                        pass
+            # FortiSOAR's static operation output schema is an untyped scaffold
+            # (every leaf is an empty string) and runs ~1000 lines for chatty
+            # connectors — pure context/export bloat with no usable type info.
+            # Drop it entirely; only the run-derived `output_schema_observed`
+            # carries a trustworthy shape. To learn an op's output, run it (if
+            # safe) and read the observed schema. (TRIAGE_BUILD_AUDIT_PLAN E3)
+            for col in ("output_schema_json", "conditional_output_schema_json"):
+                result.pop(col, None)
+            if result.get("output_schema_observed"):
+                try:
+                    result["output_schema_observed"] = json.loads(
+                        result["output_schema_observed"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
             result["params"] = _dedupe_params(params)
             if param_groups:
                 result["param_groups_by_select"] = param_groups
@@ -704,11 +711,19 @@ def get_op_schema(connector: str, op: str,
             "connector_name": op_row[0].get("connector_name"),
             "markdown": md,
         }
-        if not op_row[0].get("output_schema_json") and \
-                not op_row[0].get("output_schema_observed"):
-            out["output_schema"] = "none — call verbose=True or run_op to observe"
+        # Only the run-derived observed schema is trustworthy; the static
+        # FortiSOAR output schema is excluded as untyped scaffolding (E3).
+        if op_row[0].get("output_schema_observed"):
+            out["output_schema"] = "observed — pass verbose=True for the run-derived shape"
+        elif _op_risk(op, op_row[0].get("category")) == "safe":
+            out["output_schema"] = (
+                "none yet — this op is read-only; run_op to observe its real output shape"
+            )
         else:
-            out["output_schema"] = "available — pass verbose=True for full shape"
+            out["output_schema"] = (
+                "none — static schema is untyped and excluded; run_op in a safe "
+                "context to observe the real shape"
+            )
         return out
 
 

@@ -125,6 +125,7 @@ def test_decision_with_default_branch_is_valid(db_path):
 collection: T
 playbooks:
   - name: P
+    parameters: [go]
     steps:
       - name: trigger
         type: start

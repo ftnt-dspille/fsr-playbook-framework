@@ -5,14 +5,29 @@ def _hello(repo_root):
     return (repo_root / "examples" / "hello_connector.yaml").read_text()
 
 
+def _strip_volatile(obj):
+    """Recursively drop wall-clock fields so determinism checks don't flake
+    when two compiles straddle a second boundary. `lastModifyDate` is stamped
+    with the real time on purpose (wf-engine staleness diagnostics); it is not
+    part of what "deterministic" means here — UUIDs and structure are."""
+    if isinstance(obj, dict):
+        return {k: _strip_volatile(v) for k, v in obj.items()
+                if k not in ("lastModifyDate", "createDate", "modifyDate")}
+    if isinstance(obj, list):
+        return [_strip_volatile(v) for v in obj]
+    return obj
+
+
 def test_deterministic_uuids(db_path, repo_root):
     text = _hello(repo_root)
     a = compile_yaml(text, db_path)
     b = compile_yaml(text, db_path)
     assert a.ok and b.ok
-    # Two compiles of identical input produce byte-equal JSON.
+    # Two compiles of identical input produce byte-equal JSON, modulo the
+    # intentionally wall-clock `lastModifyDate` stamp.
     import json
-    assert json.dumps(a.fsr_json, sort_keys=True) == json.dumps(b.fsr_json, sort_keys=True)
+    assert (json.dumps(_strip_volatile(a.fsr_json), sort_keys=True)
+            == json.dumps(_strip_volatile(b.fsr_json), sort_keys=True))
 
 
 def test_routes_synthesized(db_path, repo_root):

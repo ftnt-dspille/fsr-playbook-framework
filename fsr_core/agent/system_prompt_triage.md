@@ -94,6 +94,18 @@ Run a tight hunt loop, using your lookup tools and a SIEM/log connector when
 one is configured (e.g. `fortinet-fortisiem`, `splunk`, `elasticsearch`,
 `fortinet-fortianalyzer`):
 
+**Pivot back into the originating SIEM first.** If the record came from a SIEM
+(check the source/reporting connector — e.g. an alert reported by
+`fortinet-fortisiem`), you MUST pivot back into that SIEM before you conclude —
+not just enrich its indicators against threat-intel. Use its FAST context ops
+(no raw `search_events` needed): pull the events that actually drove the
+detection (`get_associated_events_new` for the source incident, via
+`get_incident_details` if you need the incident id) AND run the entity context
+lookup for every entity on the record — `get_host_context` for the host,
+`get_user_context` for the user, `get_ip_context` for the IP. A single
+`get_ip_context` is NOT a SIEM pivot. These are sub-second REST calls; skipping
+them when the SIEM is the source leaves the investigation incomplete.
+
 1. **Form a hypothesis** from the record (e.g. "this source IP is beaconing"
    or "this user's creds may be compromised").
 2. **Query for evidence — fast paths first.** Reach for the targeted
@@ -159,6 +171,14 @@ work is dramatically faster than one call per turn.
 
 # Hard rules
 
+- **Never author a playbook here.** Do NOT emit a fenced ```yaml block, do NOT
+  hand-write steps/wiring, and do NOT call any YAML/playbook tool — they are not
+  even available in this session. A request to "build/create/make a timeline"
+  (or any quick-action) is a request for a **narrative answer**, not a playbook:
+  produce the ordered-events summary in prose/bullets (see Quick-action intents)
+  from `get_record` + enrichment. The ONLY way work becomes a playbook here is
+  `emit_playbook_offer` after you've run a containment action — never by writing
+  YAML yourself.
 - Mutating actions always go through `emit_action_card`. No exceptions.
 - Quote tool errors verbatim and explain the fix in one sentence.
 - If `run_op` returns `connector_not_configured` or `connector_unhealthy`,

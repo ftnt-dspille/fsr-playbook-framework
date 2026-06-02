@@ -84,8 +84,21 @@ class SkillTrace:
     needed them), which §3 relies on for value-match wiring.
     """
 
-    def __init__(self, calls: Optional[List[SkillCall]] = None) -> None:
+    def __init__(
+        self,
+        calls: Optional[List[SkillCall]] = None,
+        module: Optional[str] = None,
+    ) -> None:
         self.calls: List[SkillCall] = list(calls or [])
+        # Friendly module name of the record the triage session ran on
+        # (e.g. "alerts", "incidents") — set by the connector when it opens
+        # the per-turn trace scope from the triaged record. NOT derivable
+        # from the recorded ops; it's the investigation's subject. The
+        # trace-build path binds the playbook's start trigger to it so the
+        # playbook runs from that module's record listing (a manual
+        # cybersponse.action trigger) instead of a designer-only Referenced
+        # trigger. None → bare `start` (legacy behavior).
+        self.module: Optional[str] = module
         # Tracks how many times each base step name has been used so
         # repeated ops get stable, unique names (`Get Record`, `Get Record 2`).
         self._name_counts: Dict[str, int] = {}
@@ -131,14 +144,22 @@ class SkillTrace:
         ))
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"calls": [c.to_dict() for c in self.calls]}
+        d: Dict[str, Any] = {"calls": [c.to_dict() for c in self.calls]}
+        # Emit `module` only when set so a legacy reader (and golden
+        # fixtures) see the same shape they always did.
+        if self.module:
+            d["module"] = self.module
+        return d
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), default=str)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SkillTrace":
-        return cls([SkillCall.from_dict(c) for c in (d.get("calls") or [])])
+        return cls(
+            [SkillCall.from_dict(c) for c in (d.get("calls") or [])],
+            module=d.get("module"),
+        )
 
     @classmethod
     def from_json(cls, text: str) -> "SkillTrace":
@@ -165,6 +186,24 @@ def set_active_trace(trace: Optional[SkillTrace]) -> None:
 
 def get_active_trace() -> Optional[SkillTrace]:
     return _active
+
+
+def set_active_trace_module(module: Optional[str]) -> None:
+    """Stamp the triaged module on the active trace (no-op if none active).
+
+    Lets the connector record the investigation's subject module once it
+    knows the triaged record's type, without rebuilding the trace. The
+    trace-build path reads it to bind the playbook's start trigger.
+    `module` is normalized to the friendly short name (an IRI like
+    `/api/3/alerts/<uuid>` collapses to `alerts`)."""
+    if _active is None or not module:
+        return
+    m = module
+    if "/api/3/" in m:
+        m = m.split("/api/3/", 1)[1]
+    m = m.split("/", 1)[0].split("?", 1)[0].strip()
+    if m:
+        _active.module = m
 
 
 def clear_active_trace() -> None:

@@ -104,3 +104,20 @@ def test_gaps_lists_unwired_wirable_params():
     t.record_run_op("c", "only", {"ticket": "INC-0001-unmatched"}, {})
     out = sc.compile_trace(t)
     assert out["gaps"].get("Only") == ["ticket"]
+
+
+def test_assemble_binds_module_to_start_trigger():
+    t = _trace_enrich_then_block()
+    out = sc.compile_trace(t)
+    doc = sc.assemble_playbook(out, name="Triage PB", module="alerts")
+    start = doc["playbooks"][0]["steps"][0]
+    assert start["type"] == "start"
+    assert start["module"] == "alerts"  # → cybersponse.action, not Referenced
+
+
+def test_assemble_without_module_leaves_bare_start():
+    t = _trace_enrich_then_block()
+    out = sc.compile_trace(t)
+    doc = sc.assemble_playbook(out, name="Triage PB")
+    start = doc["playbooks"][0]["steps"][0]
+    assert "module" not in start

@@ -204,6 +204,27 @@ class AnthropicProvider:
         if not tools:
             tools = anthropic_tools()
 
+        # Defense-in-depth for the intent tool-slice (see llm/intents.py).
+        # The caller advertises an intent-filtered tool list (triage drops
+        # the build-only authoring/mutation surface), but `dispatch` will
+        # happily execute ANY tool name. If a build-only tool name reaches
+        # us in a triage session — model confusion, a stale widget, a
+        # replayed transcript — refuse to run it instead of silently
+        # authoring/mutating. The model only ever sees `allowed_names`, so
+        # in the normal path this never triggers; it's a backstop.
+        allowed_names = {t["name"] for t in tools}
+
+        def _guarded_dispatch(nm: str, ar: dict[str, Any]) -> Any:
+            if nm not in allowed_names:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Tool '{nm}' is not available in this session: the "
+                        f"current task intent does not permit it. Not executed."
+                    ),
+                }
+            return dispatch(nm, ar)
+
         # Prompt caching: mark the last tool with `cache_control` so the
         # entire (system + tools) prefix is cached for 5 min. Cached reads
         # cost 90% less ($0.30/M vs $3/M for Sonnet 4.5). Within a back-to-
@@ -447,7 +468,7 @@ class AnthropicProvider:
 
                 async def _run_one(nm: str, ar: dict[str, Any]) -> Any:
                     async with _sem:
-                        return await asyncio.to_thread(dispatch, nm, ar)
+                        return await asyncio.to_thread(_guarded_dispatch, nm, ar)
 
                 batch_results = await asyncio.gather(
                     *[_run_one(name, args) for (_cid, name, args) in parallel_batch]
@@ -465,7 +486,7 @@ class AnthropicProvider:
                     name=name, arguments=args, call_id=call_id,
                     tier=_tier_for(name, args),
                 )
-                result = dispatch(name, args)
+                result = _guarded_dispatch(name, args)
                 if isinstance(result, dict) and result.get("pending_approval"):
                     # The assistant turn (with this tool_use) is already
                     # appended to history above. Stash everything resume

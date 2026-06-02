@@ -60,6 +60,14 @@ class Resolver(
             "SELECT item_value FROM picklists WHERE list_name=?",
             (PRIORITY_LIST_NAME,),
         ).fetchall()]
+        if not candidates:
+            # The WorkflowPriority picklist was never synced into this
+            # reference DB (zero rows) — we have nothing to validate against.
+            # An unsynced reference table is a setup gap, not an authoring
+            # bug: leave priority unset SILENTLY rather than emit a spurious
+            # bad_value warning the author can't act on.
+            pb.priority = None
+            return
         sug = difflib.get_close_matches(pb.priority, candidates, n=1, cutoff=0.5)
         valid = ", ".join(sorted(candidates)) or "(none synced — run the modules probe)"
         errors.append(CompileError(
@@ -86,6 +94,7 @@ class Resolver(
             renames = self._auto_rename_reserved_set_var_keys(pb, pi, errors)
             self._auto_rewrite_set_var_step_refs(pb, pi, errors, renames)
             self._auto_rewrite_input_param_refs(pb, pi, errors)
+            self._validate_input_param_refs(pb, pi, errors)
             seen_ids = {s.id for s in pb.steps}
             for si, step in enumerate(pb.steps):
                 path = f"playbooks[{pi}].steps[{si}]"
