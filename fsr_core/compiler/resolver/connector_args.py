@@ -291,6 +291,11 @@ class ConnectorArgsMixin:
         # canonical keys are left where they are.
         _CONNECTOR_RESERVED = {
             "connector", "operation", "operationTitle", "version", "config",
+            # `agent` binds the step to a FortiSOAR Agent for agent-routed
+            # connectors (fortigate, edge gear). Reserved so a hand-authored
+            # `arguments.agent` passes through to the wire step verbatim
+            # instead of being auto-lifted into params or flagged unknown.
+            "agent",
             "params", "step_variables", "pickFromTenant", "name",
             "mock_result", "useMockOutput",
             # Generic step-level skip gate. FSR evaluates it at runtime;
@@ -372,6 +377,11 @@ class ConnectorArgsMixin:
             # invalid in the current arg set (e.g. block_ip_new's
             # ip_block_policy is only valid when method='Policy Based').
             self._check_param_visibility(
+                connector, operation, provided, path, errors,
+            )
+            # Conditional-required completeness: the chosen (or defaulted)
+            # branch may activate required children the author omitted.
+            self._check_conditional_required(
                 connector, operation, provided, path, errors,
             )
             # Picklist enum validation. Only fires on literal string
@@ -587,6 +597,16 @@ class ConnectorArgsMixin:
         # multi-tenant config.
         if "pickFromTenant" not in a:
             a["pickFromTenant"] = False
+        # FSR connector steps MUST carry a `config` key. Absent it, the
+        # runtime fails the step with `INTEGRATION-12: Could not find a
+        # connector configuration matching the given configuration id or name
+        # None`. Trace-built steps carry the config id run_op resolved at
+        # execution time (set in skills._compile_run_connector_action from the
+        # recorded trace), which is what agent-bound connectors require. For
+        # hand-authored steps that omit it, default to the `""` sentinel ("use
+        # the connector's default config"), matching every example playbook.
+        if "config" not in a:
+            a["config"] = ""
 
     def _resolve_workflow_reference_args(
         self, step: Step, path: str, errors: list[CompileError],

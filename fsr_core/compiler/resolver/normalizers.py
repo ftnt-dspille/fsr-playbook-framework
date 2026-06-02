@@ -1321,3 +1321,105 @@ class NormalizerMixin:
                 severity="warning",
             ))
 
+    def _check_conditional_required(
+        self, connector: str, operation: str,
+        provided: dict, path: str, errors: list[CompileError],
+    ) -> None:
+        """Flag conditionally-required params that the chosen branch activates
+        but the author omitted.
+
+        The inverse of `_check_param_visibility`: there we reject a provided
+        param whose gate is unsatisfied; here we reject a *missing* param that
+        the chosen (or defaulted) parent value makes required. Visibility
+        cascades, so this walks the chain — e.g. block_ip_new(method='Policy
+        Based') requires `ip_type` + `ip_block_policy`; ip_type='IPv4' then
+        requires `ip`. A param with its own default_value is satisfied by the
+        default (FSR pre-fills it) and is not flagged.
+        """
+        rules = self.operation_param_required_rules(connector, operation)
+        if not rules:
+            return
+        # Per-param: default value, and the (parent, condition, required) rows.
+        from collections import defaultdict
+        rows_by_name: dict[str, list[tuple[str | None, str | None, bool]]] = defaultdict(list)
+        default_of: dict[str, str | None] = {}
+        for name, parent, cond, required, default in rules:
+            # Warmup writes top-level parent/condition as empty strings (not
+            # NULL); normalize so '' reads as "no parent / no condition".
+            parent = parent or None
+            cond = cond if cond not in (None, "") else None
+            rows_by_name[name].append((parent, cond, required))
+            if default not in (None, "") and name not in default_of:
+                default_of[name] = default
+
+        def effective(param: str):
+            """Provided value if set & non-empty, else the param's default."""
+            v = provided.get(param)
+            if v not in (None, ""):
+                return v
+            return default_of.get(param)
+
+        # A param is "active" (FSR would render + enforce it) iff it has a row
+        # whose parent is None, or whose parent is active AND the parent's
+        # effective value matches the condition. Memoized; cycle-guarded.
+        active_cache: dict[str, bool] = {}
+
+        def active(param: str, stack: frozenset) -> bool:
+            if param in active_cache:
+                return active_cache[param]
+            if param in stack:  # defensive: a malformed cyclic schema
+                return False
+            result = False
+            for parent, cond, _req in rows_by_name.get(param, []):
+                if parent is None:
+                    result = True
+                    break
+                if active(parent, stack | {param}) and \
+                        str(effective(parent)) == str(cond):
+                    result = True
+                    break
+            active_cache[param] = result
+            return result
+
+        for name, entries in rows_by_name.items():
+            # Scope to conditionally-gated params (at least one parented row).
+            # Pure top-level required params are the run_op preflight's job
+            # (_validate_op_params); the resolver historically passes them
+            # through, so we don't widen that here.
+            if all(parent is None for parent, _cond, _req in entries):
+                continue
+            # Already supplied (non-empty literal/ref) → nothing to require.
+            if provided.get(name) not in (None, ""):
+                continue
+            # A default satisfies the requirement (FSR ships the default).
+            if default_of.get(name) not in (None, ""):
+                continue
+            if not active(name, frozenset()):
+                continue
+            # Required under the *active* branch? A param can be required in
+            # one branch and optional in another; only the active row counts.
+            req_here = False
+            gate_desc = ""
+            for parent, cond, required in entries:
+                if not required:
+                    continue
+                if parent is None or (
+                        active(parent, frozenset()) and
+                        str(effective(parent)) == str(cond)):
+                    req_here = True
+                    gate_desc = (f" (required when {parent}={cond!r})"
+                                 if parent is not None else " (required)")
+                    break
+            if not req_here:
+                continue
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message=(
+                    f"required param {name!r} on {connector}.{operation} is "
+                    f"missing{gate_desc}; FSR will reject the call at runtime"
+                ),
+                path=f"{path}.arguments.params.{name}",
+                suggestion=f"add {name!r} to arguments.params",
+                severity="warning",
+            ))
+

@@ -215,3 +215,25 @@ class CatalogLookupMixin:
         ).fetchall()
         return [(r["param_name"], r["parent_param_name"], r["condition_value"])
                 for r in rows]
+
+    def operation_param_required_rules(
+        self, connector: str, op: str,
+    ) -> list[tuple[str, str | None, str | None, bool, str | None]]:
+        """Return (param_name, parent_param_name, condition_value, required,
+        default_value) rows.
+
+        Like `operation_param_rules` but also carries the `required` flag and
+        the param's `default_value`. Used for conditional-required completeness:
+        when a parent's (provided-or-default) value activates a child param that
+        is marked required, the child must be present or FSR rejects the call at
+        runtime (e.g. block_ip_new(method='Policy Based') requires ip_type +
+        ip_block_policy; ip_type='IPv4' then requires ip)."""
+        rows = self.conn.execute(
+            "SELECT param_name, parent_param_name, condition_value, "
+            "required, default_value FROM operation_params "
+            "WHERE connector_name = ? AND op_name = ?",
+            (connector, op),
+        ).fetchall()
+        return [(r["param_name"], r["parent_param_name"], r["condition_value"],
+                 bool(r["required"]), r["default_value"])
+                for r in rows]

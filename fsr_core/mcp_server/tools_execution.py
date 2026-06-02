@@ -1349,7 +1349,8 @@ def _run_op_via_agent_playbook(connector: str, op: str,
         try:
             from fsr_core.agent.skill_trace import record_run_op as _record_skill_call
             _prefix = "data" if (isinstance(step_res, dict) and "data" in step_res) else ""
-            _record_skill_call(connector, op, params, data, ref_prefix=_prefix)
+            _record_skill_call(connector, op, params, data, ref_prefix=_prefix,
+                               config=config_id or "", agent=agent_id or "")
         except Exception:
             pass
         sample = data[0] if isinstance(data, list) and data else data
@@ -1647,7 +1648,8 @@ def run_op(
     try:
         from fsr_core.agent.skill_trace import record_run_op as _record_skill_call
         _prefix = "data" if (isinstance(resp, dict) and "data" in resp) else ""
-        _record_skill_call(connector, op, params, data, ref_prefix=_prefix)
+        _record_skill_call(connector, op, params, data, ref_prefix=_prefix,
+                           config=exec_config or "")
     except Exception:
         pass  # recorder is best-effort; never break a live op over it
     # top_keys reflect the FULL shape so authoring references stay accurate.

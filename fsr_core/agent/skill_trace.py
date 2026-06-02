@@ -123,6 +123,8 @@ class SkillTrace:
         observed_output: Any,
         step_name: Optional[str] = None,
         ref_prefix: str = "",
+        config: str = "",
+        agent: str = "",
     ) -> SkillCall:
         """Record one `run_op` execution as a `run_connector_action`
         SkillCall. `params` are the resolved inputs the agent passed;
@@ -130,11 +132,28 @@ class SkillTrace:
         payload returned to the LLM) so value-match wiring has the real
         shape to match against. `ref_prefix` is "data" when the raw op
         response wrapped its payload in a `data` key (so runtime refs are
-        `vars.steps.<name>.data.*`), else "" (refs sit directly)."""
+        `vars.steps.<name>.data.*`), else "" (refs sit directly).
+
+        `config` is the configuration id run_op resolved for this execution
+        (incl. an agent-bound connector's per-agent config). The compiled
+        connector step carries it as `arguments.config` so a trace-built
+        playbook runs against the SAME config the agent used — agent-bound
+        connectors have no `""`-resolvable default, so without this the
+        runtime fails with INTEGRATION-12 (no matching configuration).
+
+        `agent` is the FortiSOAR Agent id when run_op routed the op through an
+        agent (agent-bound connectors like fortigate-firewall). The compiled
+        step carries it as `arguments.agent` — a playbook connector step for an
+        agent-routed connector needs the agent binding too, not just the
+        config id, or the workflow engine can't reach the connector."""
         name = step_name or self._unique_name(_titleize_op(op))
         resolved = dict(params or {})
         resolved["connector"] = connector
         resolved["operation"] = op
+        if config:
+            resolved["config"] = config
+        if agent:
+            resolved["agent"] = agent
         return self.record(SkillCall(
             skill_id="run_connector_action",
             step_name=name,
@@ -218,6 +237,8 @@ def record_run_op(
     observed_output: Any,
     step_name: Optional[str] = None,
     ref_prefix: str = "",
+    config: str = "",
+    agent: str = "",
 ) -> Optional[SkillCall]:
     """Module-level convenience: record into the active trace if one is
     installed, else no-op. This is what `run_op` calls — so studio/tests
@@ -225,5 +246,6 @@ def record_run_op(
     if _active is None:
         return None
     return _active.record_run_op(
-        connector, op, params, observed_output, step_name, ref_prefix
+        connector, op, params, observed_output, step_name, ref_prefix,
+        config, agent,
     )

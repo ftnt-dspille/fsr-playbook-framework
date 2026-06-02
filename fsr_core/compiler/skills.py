@@ -95,11 +95,23 @@ def _compile_run_connector_action(
     merged = _apply_wires(inputs, wired_refs)
     connector = merged.pop("connector", None)
     operation = merged.pop("operation", None)
+    # The config id run_op resolved at execution time (recorded on the trace),
+    # so the step runs against the same configuration the agent used. Carried
+    # at the step level, not as an op param.
+    config = merged.pop("config", None)
+    # The FortiSOAR Agent id when run_op routed the op through an agent
+    # (agent-bound connectors). The step needs the agent binding alongside the
+    # config id or the workflow engine can't reach the connector.
+    agent = merged.pop("agent", None)
     arguments: Dict[str, Any] = {}
     if connector is not None:
         arguments["connector"] = connector
     if operation is not None:
         arguments["operation"] = operation
+    if config is not None:
+        arguments["config"] = config
+    if agent:
+        arguments["agent"] = agent
     # Remaining keys are the op params.
     for k, v in merged.items():
         arguments[k] = v
