@@ -39,7 +39,11 @@ read-only lookup tools and a confirmed-execution path:
    guess. If the op's connector is marked `runs_on_agent` (see
    `list_configured_connectors` / `find_containment_actions`), tell the user it
    runs on a FortiSOAR agent and may take ~30–60s, THEN call `run_op` — it
-   handles the agent round-trip for you and returns the real result.
+   handles the agent round-trip for you and returns the real result. When the op is
+   a generic passthrough (`execute_api_request`, `generic_rest_api_call`,
+   `make_rest_call`), pass a short descriptive Title-Case `step_name` to `run_op`
+   (e.g. "Lookup IP Geolocation") so the playbook compiled from this session reads
+   well instead of "Execute Api Request 2"; the recorder de-dupes names for you.
 3. For **any mutating / containment action** (block, isolate, quarantine,
    disable, delete, add-to-group, kill, tag-as-malicious, etc.) you MUST use
    `emit_action_card` — and you MUST NOT call `run_op` for it, not even with

@@ -1349,7 +1349,8 @@ def _run_op_via_agent_playbook(connector: str, op: str,
         try:
             from fsr_core.agent.skill_trace import record_run_op as _record_skill_call
             _prefix = "data" if (isinstance(step_res, dict) and "data" in step_res) else ""
-            _record_skill_call(connector, op, params, data, ref_prefix=_prefix,
+            _record_skill_call(connector, op, params, data,
+                               step_name=step_name or None, ref_prefix=_prefix,
                                config=config_id or "", agent=agent_id or "")
         except Exception:
             pass
@@ -1467,6 +1468,7 @@ def run_op(
     params: dict[str, Any] | None = None,
     config: str = "",
     confirm: bool = False,
+    step_name: str = "",
 ) -> dict[str, Any]:
     """Execute a single connector operation on the live FSR instance and return
     its real output.
@@ -1497,6 +1499,14 @@ def run_op(
     `params` — dict of input parameter values for the operation.
     `config` — optional connector config name (leave empty for the default config).
     `confirm` — set True to execute operations that are not auto-safe.
+    `step_name` — optional short, descriptive Title-Case label for this step in a
+        playbook compiled from the session (e.g. "Lookup IP Geolocation"). STRONGLY
+        preferred for generic passthrough ops (`execute_api_request`,
+        `generic_rest_api_call`, `make_rest_call`) whose op name titleizes to a
+        meaningless "Execute Api Request"; describe what the call DOES instead.
+        Leave empty for ops whose name already reads well. The recorder sanitizes
+        it to the step-name charset and guarantees uniqueness, so collisions are
+        de-duplicated automatically — you don't need to number them.
     """
     sys.path.insert(0, str(REPO_ROOT / "python"))
     try:
@@ -1706,7 +1716,8 @@ def run_op(
     try:
         from fsr_core.agent.skill_trace import record_run_op as _record_skill_call
         _prefix = "data" if (isinstance(resp, dict) and "data" in resp) else ""
-        _record_skill_call(connector, op, params, data, ref_prefix=_prefix,
+        _record_skill_call(connector, op, params, data,
+                           step_name=step_name or None, ref_prefix=_prefix,
                            config=exec_config or "")
     except Exception:
         pass  # recorder is best-effort; never break a live op over it

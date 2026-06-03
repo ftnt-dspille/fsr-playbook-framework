@@ -286,6 +286,11 @@ def assemble_playbook(
         "playbooks": [{
             "name": name,
             "trigger": trigger,
+            # Ship enabled: a playbook compiled from a triage session is meant to
+            # run the next time the pattern shows up, so it imports as Active
+            # (isActive=true) rather than a disabled draft the analyst has to
+            # remember to toggle on.
+            "is_active": True,
             "steps": steps,
         }],
     }

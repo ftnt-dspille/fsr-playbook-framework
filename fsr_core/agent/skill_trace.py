@@ -42,6 +42,15 @@ def _titleize_op(op: str) -> str:
     return _NAME_OK.sub("", pretty).strip() or "Step"
 
 
+def _sanitize_step_name(s: str) -> str:
+    """Coerce an AI-supplied step label to the YAML step-name charset
+    (letters/digits/spaces/underscores), collapse whitespace, and bound the
+    length. Uniqueness is handled separately by `SkillTrace._unique_name`."""
+    pretty = _NAME_OK.sub("", (s or "").strip())
+    pretty = re.sub(r"\s+", " ", pretty).strip()
+    return pretty[:80].strip() or "Step"
+
+
 @dataclass
 class SkillCall:
     skill_id: str
@@ -155,7 +164,12 @@ class SkillTrace:
         step carries it as `arguments.agent` — a playbook connector step for an
         agent-routed connector needs the agent binding too, not just the
         config id, or the workflow engine can't reach the connector."""
-        name = step_name or self._unique_name(_titleize_op(op))
+        # An AI-supplied step_name is sanitized to the charset; the op-derived
+        # title is the fallback. EITHER way the base goes through _unique_name so
+        # repeats get a stable numeric suffix — an AI label can't break the
+        # one-name-per-step invariant the wiring compiler relies on.
+        base = _sanitize_step_name(step_name) if step_name else _titleize_op(op)
+        name = self._unique_name(base)
         resolved = dict(params or {})
         resolved["connector"] = connector
         resolved["operation"] = op

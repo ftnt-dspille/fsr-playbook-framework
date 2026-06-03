@@ -121,3 +121,12 @@ def test_assemble_without_module_leaves_bare_start():
     doc = sc.assemble_playbook(out, name="Triage PB")
     start = doc["playbooks"][0]["steps"][0]
     assert "module" not in start
+
+
+def test_assembled_playbook_ships_active():
+    """A playbook compiled from a triage session imports enabled (is_active →
+    isActive=true), so the analyst doesn't have to toggle it on before it runs."""
+    t = _trace_enrich_then_block()
+    out = sc.compile_trace(t)
+    doc = sc.assemble_playbook(out, name="Triage PB", module="alerts")
+    assert doc["playbooks"][0]["is_active"] is True

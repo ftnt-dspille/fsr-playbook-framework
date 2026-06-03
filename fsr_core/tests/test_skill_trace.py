@@ -33,6 +33,28 @@ def test_repeated_op_gets_stable_unique_names():
     assert [c.step_name for c in t.calls] == ["Get Record", "Get Record 2"]
 
 
+def test_ai_supplied_step_name_is_sanitized_and_deduped():
+    """An AI-supplied step_name (preferred for generic passthrough ops whose op
+    name titleizes to a meaningless 'Execute Api Request') is coerced to the
+    step-name charset and still routed through the uniqueness counter, so a
+    repeated label can't break the one-name-per-step invariant."""
+    t = SkillTrace()
+    c1 = t.record_run_op("cyops_utilities", "execute_api_request",
+                         {"method": "GET"}, {"d": 1},
+                         step_name="Lookup IP Geolocation!!")
+    c2 = t.record_run_op("cyops_utilities", "execute_api_request",
+                         {"method": "GET"}, {"d": 2},
+                         step_name="Lookup IP Geolocation")
+    assert c1.step_name == "Lookup IP Geolocation"   # `!!` stripped to charset
+    assert c2.step_name == "Lookup IP Geolocation 2"  # identical label de-duped
+
+
+def test_no_step_name_falls_back_to_titleized_op():
+    t = SkillTrace()
+    call = t.record_run_op("virustotal", "generic_rest_api_call", {}, {"x": 1})
+    assert call.step_name == "Generic Rest Api Call"
+
+
 def test_json_round_trip():
     t = SkillTrace()
     t.record_run_op("fortiedr", "isolate_host", {"host": "h1"}, {"status": "ok"})
