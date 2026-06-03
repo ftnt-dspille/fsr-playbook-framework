@@ -68,6 +68,13 @@ def _patch_live(monkeypatch, client):
                         lambda: type("C", (), {"is_live": lambda self: True})())
     monkeypatch.setattr(env, "get_client", lambda: client)
     monkeypatch.setattr(tt._shared, "_live_client", lambda: client)
+    # `_probe` reuses the persistent sqlite health cache (run_op's warm cache),
+    # which survives across runs on disk — so a prior probe of the same connector
+    # name short-circuits the live healthcheck and the session is never hit. Force
+    # a miss so these tests deterministically exercise the live probe path.
+    from fsr_core.mcp_server import tools_execution as te
+    monkeypatch.setattr(te, "_cached_health", lambda *a, **k: None)
+    monkeypatch.setattr(te, "_store_health", lambda *a, **k: None)
 
 
 def _rows(n):
