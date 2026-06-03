@@ -92,3 +92,37 @@ def test_jinja_ref_counts_as_provided():
                      "ip_block_policy": "{{ vars.policy }}",
                      "ip": "{{ vars.ip }}"})
     assert miss == set()
+
+
+def _resolver_with_query_ip() -> Resolver:
+    """virustotal.query_ip: two unconditional params, but warmup wrote the
+    top-level parent/condition as empty strings (the live-store encoding that
+    caused the spurious 'only valid when =' warnings in session yq8nhcix)."""
+    r = Resolver(":memory:")
+    r.conn.execute(
+        "CREATE TABLE operation_params ("
+        "connector_name TEXT, op_name TEXT, parent_param_name TEXT, "
+        "condition_value TEXT, param_name TEXT, type TEXT, required INTEGER, "
+        "default_value TEXT, options_json TEXT)"
+    )
+    rows = [
+        ("virustotal", "query_ip", "", "", "ip", "text", 1, None, None),
+        ("virustotal", "query_ip", "", "", "relationships", "select", 0,
+         None, None),
+    ]
+    r.conn.executemany(
+        "INSERT INTO operation_params VALUES (?,?,?,?,?,?,?,?,?)", rows)
+    return r
+
+
+def test_empty_string_parent_param_is_not_flagged_as_conditional():
+    # Regression: an always-visible param whose parent is stored as '' (not
+    # NULL) must NOT be reported as "only valid when =''" / param-set conflict.
+    r = _resolver_with_query_ip()
+    errs: list[CompileError] = []
+    try:
+        r._check_param_visibility(
+            "virustotal", "query_ip", {"ip": "1.2.3.4"}, "p", errs)
+    finally:
+        r.close()
+    assert errs == []

@@ -213,7 +213,14 @@ class CatalogLookupMixin:
             "WHERE connector_name = ? AND op_name = ?",
             (connector, op),
         ).fetchall()
-        return [(r["param_name"], r["parent_param_name"], r["condition_value"])
+        # Some ingestion paths store a top-level (always-visible) param with an
+        # empty-string parent/condition instead of NULL. Coerce '' → None so the
+        # visibility checker treats them as unconditional — otherwise a plain
+        # required param like virustotal.query_ip(ip) is mis-flagged as "only
+        # valid when =''" and a spurious param-set conflict is raised.
+        return [(r["param_name"],
+                 (r["parent_param_name"] or None),
+                 (r["condition_value"] or None))
                 for r in rows]
 
     def operation_param_required_rules(
@@ -234,6 +241,10 @@ class CatalogLookupMixin:
             "WHERE connector_name = ? AND op_name = ?",
             (connector, op),
         ).fetchall()
-        return [(r["param_name"], r["parent_param_name"], r["condition_value"],
+        # See operation_param_rules: coerce empty-string parent/condition → None
+        # so always-visible params aren't treated as conditionally gated.
+        return [(r["param_name"],
+                 (r["parent_param_name"] or None),
+                 (r["condition_value"] or None),
                  bool(r["required"]), r["default_value"])
                 for r in rows]

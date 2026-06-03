@@ -1407,6 +1407,54 @@ def _run_op_via_agent_playbook(connector: str, op: str,
             _diag["coll"] = {"exc": repr(e)}
 
 
+def _classify_execute_error(connector: str, op: str,
+                            status: Any, msg: str) -> dict[str, Any]:
+    """Shape an `/api/integration/execute/` failure into the right error code.
+
+    A status-bearing HTTP error means the request REACHED the connector and it
+    rejected the call — that is NOT a transport/connectivity failure (the
+    connector is up; its healthcheck passes). Mislabeling it `transport_failed`
+    with "check connectivity" suggestions sent triage down a dead end on a
+    perfectly healthy FortiSIEM (session yq8nhcix: the real error was "Invalid
+    Incident Id" — a wrong param, not a down connector). Classify by status and
+    surface the connector's own message so the caller can self-repair.
+    """
+    if isinstance(status, int) and 400 <= status < 500:
+        return _err(
+            "op_request_rejected",
+            f"{connector}.{op} rejected the request (HTTP {status}): {msg}",
+            suggestions=[
+                "Re-check `params` against `get_op_schema` — esp. that any ID "
+                "is the value THIS connector expects (e.g. FortiSIEM's own "
+                "incidentId, not the FortiSOAR record id).",
+                "Fix the offending param and retry — the connector is up; this "
+                "is a bad-request, not a connectivity problem.",
+            ],
+            status=str(status),
+        )
+    if isinstance(status, int) and status >= 500:
+        return _err(
+            "upstream_error",
+            f"{connector}.{op} failed upstream (HTTP {status}): {msg}",
+            suggestions=[
+                "The connector reached its backend but it errored — inspect the "
+                "message; often a malformed param or an unsupported query.",
+                "Try a narrower/alternate op or simpler params; the connector "
+                "itself is configured + healthy.",
+            ],
+            status=str(status),
+        )
+    # No HTTP response object → a genuine transport/connectivity failure.
+    return _err(
+        "transport_failed", msg,
+        suggestions=[
+            "Check FSR connectivity and `fsrpb health`",
+            "Confirm the connector config is configured + active",
+        ],
+        status=str(status) if status is not None else "?",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -1510,9 +1558,20 @@ def run_op(
     # fields, select-option membership, gross type errors) BEFORE we execute,
     # so a malformed call self-corrects up front instead of failing opaquely
     # at execute. No-op when the op has no params catalogued.
+    _remap_note = None
     param_err = _shared._validate_op_params(connector, op, params)
     if param_err is not None:
-        return param_err
+        # Auto-recover the unambiguous single semantic-alias miss (ip→value,
+        # host→hostName) instead of bouncing it back as bad_params — but only if
+        # the remapped params actually pass validation. Otherwise return the
+        # (now actionable) error.
+        remap = _shared._auto_remap_params(params, param_err.get("issues"))
+        if remap and _shared._validate_op_params(
+                connector, op, remap["params"]) is None:
+            params = remap["params"]
+            _remap_note = remap
+        else:
+            return param_err
 
     # Preflight: the connector must be configured + healthy on the live box.
     # A misconfigured/disconnected connector is a user-fixable problem, so we
@@ -1542,11 +1601,17 @@ def run_op(
         live_err = validate_op_grounded(connector, op, params=params,
                                         client=client)
         if live_err is not None:
-            return live_err
+            remap = _shared._auto_remap_params(params, live_err.get("issues"))
+            if remap and validate_op_grounded(
+                    connector, op, params=remap["params"], client=client) is None:
+                params = remap["params"]
+                _remap_note = remap
+            else:
+                return live_err
 
     category = op_row["category"] if op_row else None
     from .tools_discovery import _op_risk
-    risk = _op_risk(op, category)
+    risk = _op_risk(op, category, params)
     if risk != "safe" and not confirm:
         return {
             "ok": False,
@@ -1601,17 +1666,10 @@ def run_op(
         resp = client.post("/api/integration/execute/", body)
     except Exception as exc:  # noqa: BLE001
         r = getattr(exc, "response", None)
-        status = getattr(r, "status_code", "?")
+        status = getattr(r, "status_code", None)
         msg = (r.text if r is not None else str(exc))[:600]
         _record_verification(connector, op, "tested_fail", msg[:2000])
-        return _err(
-            "transport_failed", msg,
-            suggestions=[
-                "Check FSR connectivity and `fsrpb health`",
-                "Confirm the connector config is configured + active",
-            ],
-            status=str(status),
-        )
+        return _classify_execute_error(connector, op, status, msg)
 
     if not isinstance(resp, dict):
         return _err(
@@ -1668,6 +1726,12 @@ def run_op(
         out["output_truncated"] = True
         out["note"] = ("Output summarized to keep context lean — full shape is "
                        "in the reference store via get_op_schema.")
+    if _remap_note:
+        # Tell the agent the correct name so its NEXT call uses it directly.
+        out["_param_autocorrected"] = (
+            f"param {_remap_note['from']!r} was not valid for {connector}/{op}; "
+            f"auto-mapped its value to the required param "
+            f"{_remap_note['to']!r}. Use {_remap_note['to']!r} next time.")
     return out
 
 
@@ -1799,6 +1863,13 @@ def run_playbook(playbook: str,
     except Exception:  # noqa: BLE001
         resp = {}
     task_id = resp.get("task_id") if isinstance(resp, dict) else None
+    # The record-action route (/api/triggers/1/action/...) returns the plural
+    # `task_ids` list, not `task_id` — without this a cybersponse.action run
+    # always reports "triggered" and never follows to terminal.
+    if not task_id and isinstance(resp, dict):
+        tids = resp.get("task_ids")
+        if isinstance(tids, list) and tids:
+            task_id = tids[0]
     if not follow or not task_id:
         return {"ok": True, "status": "triggered", "task_id": task_id,
                 "wf_uuid": wf_uuid}

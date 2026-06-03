@@ -60,6 +60,97 @@ _FALLBACK_TRIAGE_PROMPT = (
 _PROMPT_CACHE: dict[str, str] = {}
 
 
+# --- P3: low-signal input gate --------------------------------------------
+#
+# A one-word `test` or a bare `hi` should not launch a 9-tool autonomous hunt.
+# Classify the user's message so the live caller can short-circuit the
+# auto-investigation: orient on the case + offer choices (trivial) or
+# summarize state + propose the next step (continue), instead of re-running a
+# full investigation. A real directive ("build the attack timeline") is the
+# only class that should auto-investigate.
+
+# Greetings / acks / smoke-test pings — no investigative direction.
+_TRIVIAL_TOKENS = frozenset({
+    "hi", "hello", "hey", "yo", "sup", "hiya", "howdy",
+    "test", "testing", "ping", "pong", "ok", "okay", "k",
+    "thanks", "thank you", "ty", "thx", "cool", "nice", "great",
+    "yes", "no", "yep", "nope", "y", "n",
+})
+
+# Phrases that mean "advance from where we are" rather than start fresh.
+_CONTINUE_PHRASES = (
+    "what's next", "whats next", "what next", "what now", "what else",
+    "continue", "go on", "go ahead", "proceed", "keep going", "next step",
+    "next", "and then", "then what", "more",
+)
+
+TRIVIAL = "trivial"
+CONTINUE = "continue"
+DIRECTIVE = "directive"
+
+
+def classify_message(text: Any) -> str:
+    """Classify a user message into ``trivial`` / ``continue`` / ``directive``.
+
+    - ``trivial``   — empty, a greeting, an ack, or a smoke-test ping. The
+      caller should orient on the case and offer choices, NOT auto-investigate.
+    - ``continue``  — "what's next" / "keep going". Summarize established state
+      and propose the next logical step (ties into the no-repeat fix).
+    - ``directive`` — a real investigative instruction. Auto-investigate.
+
+    Heuristic + cheap on purpose: this gates an expensive tool loop, so a false
+    ``directive`` (auto-investigate) is the safe failure — we only suppress on
+    high-confidence trivial/continue matches.
+    """
+    if not isinstance(text, str):
+        return DIRECTIVE
+    norm = " ".join(text.strip().lower().split())
+    norm = norm.strip(" .!?,")
+    if not norm:
+        return TRIVIAL
+    if norm in _TRIVIAL_TOKENS:
+        return TRIVIAL
+    # Single very-short token that isn't a real word → treat as trivial.
+    if len(norm) <= 2 and " " not in norm:
+        return TRIVIAL
+    if norm in _CONTINUE_PHRASES:
+        return CONTINUE
+    # A short message that is *exactly* a continue phrase plus filler
+    # ("ok what's next") still reads as continue.
+    if len(norm) <= 24 and any(p in norm for p in _CONTINUE_PHRASES):
+        return CONTINUE
+    return DIRECTIVE
+
+
+def gate_directive(label: str, scenario_title: str | None = None) -> str:
+    """The system-prompt addendum for a low-signal message.
+
+    Empty string for ``directive`` (no gate — let the agent investigate).
+    """
+    case = f" ({scenario_title})" if scenario_title else ""
+    if label == TRIVIAL:
+        return (
+            "\n\n## Low-signal input\n"
+            f"The analyst's message carries no investigative direction. Do NOT "
+            f"launch an autonomous investigation or call enrichment tools. "
+            f"Briefly orient them on the case in front of you{case} — what it "
+            f"is and the few most useful next steps they could ask for — then "
+            f"ask which they'd like, or invite a specific question. One short "
+            f"paragraph."
+        )
+    if label == CONTINUE:
+        return (
+            "\n\n## Continue\n"
+            "The analyst wants to advance, not restart. Do NOT re-run "
+            "enrichment or pivots you already completed earlier in this "
+            "conversation. Briefly restate what is already established, then "
+            "take or propose the next logical step (correlation, containment, "
+            "or response). If nothing remains, say so and recommend a "
+            "disposition."
+        )
+    return ""
+
+
 def resolve_intent(value: Any) -> str:
     """Map a raw intent value to a known task intent.
 
@@ -105,4 +196,6 @@ def tools_for_intent(intent: str) -> list[dict[str, Any]]:
 __all__ = [
     "INTENTS", "DEFAULT_INTENT", "BUILD_ONLY_TOOLS",
     "resolve_intent", "load_intent_prompt", "tools_for_intent",
+    "classify_message", "gate_directive",
+    "TRIVIAL", "CONTINUE", "DIRECTIVE",
 ]

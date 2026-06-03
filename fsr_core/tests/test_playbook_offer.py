@@ -103,6 +103,50 @@ def test_read_only_trace_offers_with_advisory_not_refused():
     assert len(card["ops_summary"]) == 2
 
 
+def _mixed_method_trace() -> SkillTrace:
+    """A read lookup, a GET passthrough (read-only), and a POST passthrough
+    (can't prove read-only → must be flagged for the human)."""
+    t = SkillTrace()
+    t.record_run_op("fortinet-fortiguard-ioc", "ioc_search",
+                    {"indicator": "203.0.113.77"}, {"risk_score": 51})
+    t.record_run_op("acme", "execute_api_request",
+                    {"endpoint": "/things/1", "method": "GET"}, {"ok": True})
+    t.record_run_op("acme", "execute_api_request",
+                    {"endpoint": "/things", "method": "POST"}, {"id": 9})
+    return t
+
+
+def test_get_passthrough_and_lookup_are_read_only_post_is_flagged():
+    set_active_trace(_mixed_method_trace())
+    try:
+        out = emit_playbook_offer(id="mix-1", summary="save?")
+    finally:
+        clear_active_trace()
+    card = out["card"]
+    assert card["has_mutating_action"] is False          # no destructive op
+    # The POST passthrough is surfaced for human review; ioc_search + GET are not.
+    assert card.get("needs_review_ops") == ["execute_api_request"]
+    assert "execute_api_request" in card["advisory"]
+    assert "confirm" in card["advisory"].lower()
+
+
+def test_all_read_only_when_passthrough_is_get_only():
+    t = SkillTrace()
+    t.record_run_op("fortinet-fortiguard-ioc", "ioc_search",
+                    {"indicator": "1.2.3.4"}, {"risk_score": 10})
+    t.record_run_op("acme", "execute_api_request",
+                    {"endpoint": "/x", "method": "GET"}, {"ok": True})
+    set_active_trace(t)
+    try:
+        out = emit_playbook_offer(id="ro-get", summary="save?")
+    finally:
+        clear_active_trace()
+    card = out["card"]
+    assert card["has_mutating_action"] is False
+    assert "needs_review_ops" not in card
+    assert "read-only lookups" in card["advisory"]
+
+
 def test_emit_playbook_offer_empty_trace_is_refused():
     set_active_trace(SkillTrace())
     try:

@@ -99,6 +99,9 @@ from .tools_corpus import (
 
 # Triage tools
 from .tools_triage import (
+    faz_get_alerts,
+    faz_raw_query,
+    faz_search_ip,
     find_containment_actions,
     find_enrichment_actions,
     get_record,
@@ -108,6 +111,11 @@ from .tools_triage import (
     list_recent_failed_runs,
     list_tags,
     search_module_records,
+    siem_events_for_incident,
+    siem_raw_query,
+    siem_search_host,
+    siem_search_ip,
+    siem_search_user,
     test_find_record,
     verification_status,
 )
@@ -232,6 +240,14 @@ __all__ = [
     "verification_status",
     "test_find_record",
     "search_module_records",
+    "siem_search_ip",
+    "siem_search_host",
+    "siem_search_user",
+    "siem_events_for_incident",
+    "siem_raw_query",
+    "faz_get_alerts",
+    "faz_search_ip",
+    "faz_raw_query",
     # Picklists
     "list_picklists",
     "get_picklist",

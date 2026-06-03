@@ -422,22 +422,30 @@ def emit_playbook_offer(
             "offer",
         )
 
-    # A2 advisory (NOT a gate): the offer is most useful after a containment /
-    # remediation action. We never refuse a read-only trace — that would
-    # dead-end an analyst who did legitimate work via an op our name heuristic
-    # doesn't recognize. Instead we let the ANALYST decide and only add a
-    # gentle advisory when we are CONFIDENT the trace is purely read-only, i.e.
-    # every recorded op classifies as `safe`. `_op_risk` is name-prefix based
-    # and ~86% of ops carry no category, so an `unknown` op (which could well
-    # be a custom containment action) suppresses the advisory rather than
-    # firing a false "looks read-only" warning.
+    # A2 advisory (NOT a gate): the offer is never refused for a read-only
+    # trace. We classify each recorded op (method-aware — a GET
+    # `execute_api_request` is read-only, a POST is not) and add an advisory
+    # that keeps a human in the loop:
+    #   • all ops provably safe → "only read-only lookups" note.
+    #   • some op `unknown` (can't prove read-only, not clearly destructive) →
+    #     name them so the analyst reviews before saving, rather than silently
+    #     baking a possible state-change into the playbook.
+    # A destructive op sets has_mutating_action (the load-bearing flag).
     from .tools_discovery import _op_risk
-    risks = [
-        _op_risk(str(c.resolved_inputs.get("operation") or ""), None)
+    risked = [
+        (str(c.resolved_inputs.get("operation") or ""),
+         _op_risk(str(c.resolved_inputs.get("operation") or ""), None,
+                  c.resolved_inputs))
         for c in trace.calls
     ]
+    risks = [r for _, r in risked]
     has_mutating = any(r == "destructive" for r in risks)
     all_read_only = bool(risks) and all(r == "safe" for r in risks)
+    # Dedupe unknown op names, preserve first-seen order.
+    unknown_ops: list[str] = []
+    for name, r in risked:
+        if r == "unknown" and name and name not in unknown_ops:
+            unknown_ops.append(name)
 
     card: dict[str, Any] = {
         "type": "playbook_offer",
@@ -453,6 +461,14 @@ def emit_playbook_offer(
             "an enrichment playbook with no containment step. Save it if that "
             "is what you want."
         )
+    elif unknown_ops and not has_mutating:
+        names = ", ".join(unknown_ops)
+        card["advisory"] = (
+            "Before saving, confirm these step(s) are safe to re-run "
+            f"automatically: {names}. They aren't recognized as read-only "
+            "lookups, so they may change state — review them in the draft below."
+        )
+        card["needs_review_ops"] = unknown_ops
     if title_suggestion and title_suggestion.strip():
         card["title_suggestion"] = title_suggestion.strip()
     if draft.get("draft_steps"):

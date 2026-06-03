@@ -159,9 +159,20 @@ def compile_and_verify(
             if p not in gap:
                 gap.append(p)
 
+    # Parameterize one-off triage IOCs to the trigger record. Only when the
+    # playbook is module-bound (a per-record manual trigger) does
+    # vars.input.records[0] resolve at runtime, so gate on trace.module.
+    # Runs after repair so it can rescue values that fell back to literals too.
+    record_vars: Dict[str, str] = {}
+    if getattr(trace, "module", None) and getattr(trace, "record_fields", None):
+        record_vars, compiled["steps"], compiled["first_step"] = \
+            sc.wire_record_inputs(compiled["steps"], compiled["gaps"],
+                                  trace.record_fields, compiled.get("first_step"))
+    compiled["record_vars"] = record_vars
+
     compiled["verified"] = verified
     compiled["repaired"] = repaired
     compiled["static_errors"] = _static_path_errors(
-        new_steps, compiled.get("first_step"), start_step
+        compiled["steps"], compiled.get("first_step"), start_step
     )
     return compiled

@@ -297,10 +297,18 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             #   step.when           → arguments.when (start_on_* only — the
             #                         resolver pops it back out)
             #   step.step_variables → arguments.step_variables
+            #   step.module(s)      → arguments.module(s) (start: binds the
+            #                         trigger to a module so it resolves to a
+            #                         cybersponse.action manual Execute-menu
+            #                         trigger; the normalizer reads it off
+            #                         arguments). Without this hoist a
+            #                         top-level `module:` is silently dropped
+            #                         and the start stays a Referenced trigger.
             #   step.set            → arguments.step_variables (sugar — same
             #                         spelling whether you're on set_variable
             #                         (`vars:`) or a connector/create step)
-            for hoist_key in ("mock_result", "when", "step_variables", "message"):
+            for hoist_key in ("mock_result", "when", "step_variables", "message",
+                              "module", "modules"):
                 if hoist_key in s_raw:
                     if hoist_key in args:
                         errors.append(CompileError(

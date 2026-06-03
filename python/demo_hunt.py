@@ -46,7 +46,8 @@ def _default_prompt(record: str) -> str:
     )
 
 
-async def _run(prompt: str, model: str = DEMO_MODEL) -> dict:
+async def _run(prompt: str, model: str = DEMO_MODEL,
+               record: str | None = None) -> dict:
     # Trigger .env load (FSR creds + ANTHROPIC_API_KEY) before constructing
     # the provider/client.
     from probes._env import get_config
@@ -55,13 +56,28 @@ async def _run(prompt: str, model: str = DEMO_MODEL) -> dict:
     from fsr_core.llm.anthropic_provider import AnthropicProvider
     from fsr_core.llm.run_turn import run_agent_turn
     from fsr_core.llm.provider import Message
-    # Single source of truth for the triage prompt + tool slice — same
-    # helpers the connector uses (fsr_core.llm.intents).
+    # Single source of truth for the tool slice (same helper the connector
+    # uses); the triage *prompt* now comes from the dynamic pre-flight below.
     from fsr_core.llm.intents import load_intent_prompt, tools_for_intent
+    from fsr_core.llm.triage_preflight import triage_preflight
 
     provider = AnthropicProvider(model=model)
-    system = load_intent_prompt("triage")
     tools = tools_for_intent("triage")
+
+    # Pre-flight: land the record once, normalize + classify it, and build the
+    # scenario-aware system prompt. Activity events are printed inline so the
+    # demo shows what the backend grounded on before the model ran.
+    def _emit_activity(ev: dict) -> None:
+        print(f"  [pre-flight] {ev.get('phase'):>9}: {ev.get('message')}")
+
+    system = load_intent_prompt("triage")
+    scenario_id = None
+    if record:
+        bundle = triage_preflight(target=record, user_message=prompt,
+                                  emit=_emit_activity)
+        system = bundle["system"]
+        scenario_id = bundle.get("scenario_id")
+        print()
 
     trace: list[dict] = []
     final_chunks: list[str] = []
@@ -115,6 +131,7 @@ async def _run(prompt: str, model: str = DEMO_MODEL) -> dict:
         "final_text": "".join(final_chunks).strip(),
         "cards": cards,
         "stop_reason": getattr(result, "stop_reason", None),
+        "scenario_id": scenario_id,
         "total_s": round(total_s, 1),
         "tool_s": round(tool_s, 1),
         "model_s": round(total_s - tool_s, 1),
@@ -138,9 +155,11 @@ def main() -> None:
     print("LIVE HUNT — triage agent")
     print("=" * 72)
     print(f"model:  {args.model}")
-    print(f"prompt: {prompt}\n\nPIVOTS:")
-    out = asyncio.run(_run(prompt, model=args.model))
+    print(f"prompt: {prompt}\n\nPRE-FLIGHT + PIVOTS:")
+    out = asyncio.run(_run(prompt, model=args.model, record=args.record))
 
+    if out.get("scenario_id"):
+        print(f"\nscenario: {out['scenario_id']}")
     print(f"\nstop_reason: {out['stop_reason']}  ·  {len(out['trace'])} tool call(s)")
     print(f"TIMING: total {out['total_s']}s  =  tools {out['tool_s']}s  +  "
           f"model/other {out['model_s']}s")

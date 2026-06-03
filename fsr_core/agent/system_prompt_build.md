@@ -74,7 +74,12 @@ playbooks:
     # materializes it → the jinja evaluates empty at runtime).
     parameters: [<param_name>, ...]   # often EMPTY for a record-bound trigger
     steps:
-      - id: start
+      # Steps are identified by `name:` ONLY — there is NO `id:` field
+      # (`id:` is a hard validation error). Wire flow with `next:` on each
+      # step, referencing the target step's `name:` verbatim; every step
+      # except terminals must be reachable from the trigger via a `next:`
+      # chain or an unreachable-step error fires.
+      - name: Start
         type: start
         # Bind the trigger to the module the playbook is created from (the
         # module triaged — e.g. alerts / incidents). A bare `start` with no
@@ -83,17 +88,22 @@ playbooks:
         # module's record listing, which is what a triage-derived playbook
         # should be. Runs per_record → the selected record is vars.input.records[0].
         module: <source module, e.g. alerts>
-      - id: set_inputs
+        next: Set Inputs
+      - name: Set Inputs
         type: set_variable
         # Pull one-off triage values FROM THE RECORD, not invented params:
         #   {{ vars.input.records[0].<field> }}   (e.g. .sourceIp, .name)
         # Use vars.input.params.<name> ONLY for a value not on the record;
         # every such <name> MUST appear in `parameters:` above.
-      - id: <connector_step>
+        next: <Connector Step>
+      - name: <Connector Step>
         type: connector
         # connector/operation/params resolved via find_operation + get_op_schema
-      - id: decide
+        next: Decide
+      - name: Decide
         type: decision
+        # decision branches carry their own `next:` per conditions[] entry
+        # (see get_step_type decision) — not a step-level `next:`.
 ```
 
 Resolve each `type:` with `get_step_type` and each connector op with

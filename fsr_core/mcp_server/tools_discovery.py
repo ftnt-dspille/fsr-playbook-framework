@@ -199,35 +199,45 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                 )
                 if close:
                     out["near"] = close
-        # Multi-match: attach a TINY required-param hint per op so the agent
-        # sees each op's shape before picking one — pre-empting the "choose an
-        # op, then guess its params" flail — without the cost of a full schema
-        # per row. One batched query, top-level required params only (sub-params
-        # and optional args stay in get_op_schema). Single-match skips this; it
-        # gets the full slim schema below.
+        # Multi-match: attach a compact param SIGNATURE per op so the agent sees
+        # each op's real param names BEFORE it picks one and calls run_op —
+        # pre-empting the "choose an op, then guess its params" flail that wasted
+        # ~8 calls in export sess-vtd15c5v (the agent guessed `ip`/`srcIP`/`host`
+        # when the real param was `value (IP Address)`). One batched query,
+        # top-level params only (sub-params stay in get_op_schema). Each entry is
+        # {name, required, type, label} — the `label` (the param's human title,
+        # e.g. "IP Address") is the disambiguator that stops the model from
+        # substituting its own guessed name for an unintuitive one like `value`.
+        # Single-match skips this; it gets the full slim schema below.
         if len(rows) > 1:
             names = [r["op_name"] for r in rows if r.get("op_name")]
             if names:
                 ph = ",".join("?" * len(names))
-                preq = _rows(
+                prows = _rows(
                     conn,
-                    f"""SELECT op_name, param_name
+                    f"""SELECT op_name, param_name, title, type, required
                        FROM operation_params
                        WHERE connector_name = ?
                          AND op_name IN ({ph})
                          AND (parent_param_name IS NULL OR parent_param_name = '')
-                         AND required = 1
-                       ORDER BY ord""",
+                       ORDER BY required DESC, ord""",
                     (connector, *names),
                 )
-                req_by_op: dict[str, list[str]] = {}
-                for pr in preq:
-                    req_by_op.setdefault(pr["op_name"], []).append(pr["param_name"])
+                sig_by_op: dict[str, list[dict[str, Any]]] = {}
+                for pr in prows:
+                    entry: dict[str, Any] = {"name": pr["param_name"]}
+                    if pr["required"]:
+                        entry["required"] = True
+                    if pr["type"]:
+                        entry["type"] = pr["type"]
+                    if pr["title"] and pr["title"] != pr["param_name"]:
+                        entry["label"] = pr["title"]
+                    sig_by_op.setdefault(pr["op_name"], []).append(entry)
                 for r in rows:
                     # Only when known; absence stays silent (un-probed op) rather
-                    # than asserting "no required params" we can't prove.
-                    if r.get("op_name") in req_by_op:
-                        r["required_params"] = req_by_op[r["op_name"]]
+                    # than asserting "no params" we can't prove.
+                    if r.get("op_name") in sig_by_op:
+                        r["params"] = sig_by_op[r["op_name"]]
 
         # When the search narrows to a single op, fold the slim schema
         # into the response so the agent can skip the follow-up
@@ -743,21 +753,77 @@ _DESTRUCTIVE_NAME_PARTS: tuple[str, ...] = (
 _DESTRUCTIVE_CATEGORIES: frozenset[str] = frozenset(
     {"remediation", "Remediation", "containment", "management"}
 )
+# Category strings that signal a read-only / investigative op. Mirrors
+# `fsr_core.llm.tools._SAFE_CATEGORIES` so run_op's own confirm gate agrees
+# with the dispatch tier gate (and with what find_enrichment_actions surfaces
+# as a tier<=2, run-it-directly action). Without this, an op whose name lacks
+# a safe prefix (e.g. `ioc_search`) but whose category is `investigation` fell
+# through to 'unknown' and was needlessly gated as requires_confirmation —
+# blocking enrichment the finder had just told the agent to run.
+_SAFE_CATEGORIES: frozenset[str] = frozenset(
+    {"investigation", "query", "utilities", "enrichment", "verification"}
+)
+# Read-only name substrings (not just prefixes) — a lookup is a lookup wherever
+# the verb sits. `ioc_search` / `domain_lookup` / `ip_reputation` are reads even
+# though the safe verb isn't the prefix. Destructive name/category checks run
+# first, so a `block_ioc` still resolves destructive.
+_SAFE_NAME_SUBSTRINGS: tuple[str, ...] = (
+    "search", "lookup", "reputation", "enrich", "_ioc", "ioc_",
+    "geoip", "whois", "_context", "context_",
+)
+# Generic raw-HTTP passthrough ops — classified by their HTTP method, not name.
+_HTTP_PASSTHROUGH_OPS: frozenset[str] = frozenset(
+    {"execute_api_request", "execute_api", "api_request", "make_rest_call",
+     "generic_api_call", "invoke_api", "rest_api"}
+)
+# HTTP methods with no server-side side effect → safe to run / present without a
+# confirm prompt. Everything else (POST/PUT/PATCH, or no method given) stays
+# `unknown` so the human-in-the-loop confirm gate fires.
+_SAFE_HTTP_METHODS: frozenset[str] = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def _op_risk(op_name: str, category: str | None) -> str:
+def _op_risk(op_name: str, category: str | None,
+             params: dict[str, Any] | None = None) -> str:
     """Return 'safe', 'destructive', or 'unknown'.
 
-    Uses op name patterns first (most reliable — 86% of ops have no category),
-    then falls back to category, then defaults to 'unknown'.
+    Order (most reliable first): safe name prefix → safe; destructive name part
+    → destructive; destructive category → destructive; raw-HTTP passthrough →
+    classify by HTTP method (GET/HEAD/OPTIONS safe, DELETE destructive, else
+    unknown); read-only name substring → safe; safe category → safe; else
+    unknown. `unknown` is deliberate — run_op's confirm gate prompts the human
+    on it, so an op we can't prove read-only keeps a human in the loop.
+
+    `params` (the resolved op inputs) is consulted only for HTTP passthrough
+    ops, where the side-effect is the method, not the op name.
     """
     name_lower = op_name.lower()
+    # A `get_`/`list_`/`search_`… prefix is the strongest read signal — it wins
+    # over an incidental destructive substring (e.g. `get_close_events`).
     if any(name_lower.startswith(p) for p in _SAFE_NAME_PREFIXES):
         return "safe"
     if any(p in name_lower for p in _DESTRUCTIVE_NAME_PARTS):
         return "destructive"
-    if category and category.lower() in {c.lower() for c in _DESTRUCTIVE_CATEGORIES}:
+    cat_lower = category.lower() if category else ""
+    if cat_lower in {c.lower() for c in _DESTRUCTIVE_CATEGORIES}:
         return "destructive"
+    # Generic HTTP escape hatch: a GET is read-only by HTTP semantics; a POST/
+    # PUT/PATCH (or unspecified) could mutate, so keep it gated. DELETE is a
+    # mutation regardless.
+    if name_lower in _HTTP_PASSTHROUGH_OPS or "api_request" in name_lower \
+            or "rest_call" in name_lower:
+        method = ""
+        if isinstance(params, dict):
+            method = str(params.get("method") or params.get("http_method")
+                         or params.get("request_method") or "").strip().upper()
+        if method in _SAFE_HTTP_METHODS:
+            return "safe"
+        if method == "DELETE":
+            return "destructive"
+        return "unknown"
+    if any(s in name_lower for s in _SAFE_NAME_SUBSTRINGS):
+        return "safe"
+    if cat_lower in _SAFE_CATEGORIES:
+        return "safe"
     return "unknown"
 
 

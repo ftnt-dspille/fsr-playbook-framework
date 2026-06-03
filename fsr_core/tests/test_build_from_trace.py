@@ -99,3 +99,61 @@ def test_recorded_agent_is_emitted_on_connector_step():
         "efe5dafd28b5e41cd4c37e5829ccc638"
     assert steps["Get Addresses"]["arguments"]["config"] == "cfg-uuid-123"
     assert steps["Query Ip"]["arguments"].get("agent") in (None, "")
+
+
+def _conn_steps(out):
+    import yaml as _y
+    doc = _y.safe_load(out["yaml"])
+    return doc, {s["name"]: s for s in doc["playbooks"][0]["steps"]}
+
+
+def test_record_ioc_parameterized_to_records0_via_set_inputs():
+    """A one-off IOC that matches a triaged-record field is parameterized to
+    vars.input.records[0].<field> on a Set Inputs step (module-bound trigger),
+    instead of baking the literal — so the playbook re-runs per record."""
+    t = SkillTrace(module="incidents",
+                   record_fields={"sourceIp": "102.220.160.21",
+                                  "name": "C2 beacon"})
+    t.record_run_op("virustotal", "query_ip", {"ip": "102.220.160.21"},
+                    {"attributes": {}}, ref_prefix="data")
+    out = build_playbook_from_trace(t.to_json(), name="Enrich From Record")
+    assert out["ok"] is True
+    doc, steps = _conn_steps(out)
+    # manual per-record trigger
+    assert steps["Start"]["module"] == "incidents"
+    assert steps["Start"]["next"] == "Set Inputs"
+    # the IOC is staged off the record, not a literal
+    assert steps["Set Inputs"]["type"] == "set_variable"
+    assert steps["Set Inputs"]["vars"]["ip"] == \
+        "{{ vars.input.records[0].sourceIp }}"
+    # the connector step consumes the staged var, no literal IP
+    assert steps["Query Ip"]["arguments"]["ip"] == \
+        "{{ vars.steps.Set_Inputs.ip }}"
+    assert "102.220.160.21" not in out["yaml"]
+    # the gap is resolved (parameterized), not surfaced as unwired
+    assert "Query Ip" not in (out.get("gaps") or {})
+
+
+def test_no_module_leaves_ioc_literal_no_set_inputs():
+    """Without a module the trigger is a designer-only Referenced start where
+    vars.input.records[0] does not resolve — so the IOC stays literal and no
+    Set Inputs step is injected (records[0] would be a dangling reference)."""
+    t = SkillTrace(record_fields={"sourceIp": "102.220.160.21"})  # no module
+    t.record_run_op("virustotal", "query_ip", {"ip": "102.220.160.21"},
+                    {"attributes": {}}, ref_prefix="data")
+    out = build_playbook_from_trace(t.to_json(), name="No Module")
+    assert out["ok"] is True
+    doc, steps = _conn_steps(out)
+    assert "Set Inputs" not in steps
+    assert steps["Query Ip"]["arguments"]["ip"] == "102.220.160.21"
+
+
+def test_record_fields_round_trip_json():
+    t = SkillTrace(module="alerts", record_fields={"sourceIp": "1.2.3.4"})
+    back = SkillTrace.from_json(t.to_json())
+    assert back.module == "alerts"
+    assert back.record_fields == {"sourceIp": "1.2.3.4"}
+    # legacy trace (no record_fields) round-trips without the key
+    legacy = SkillTrace()
+    assert "record_fields" not in legacy.to_dict()
+    assert SkillTrace.from_json(legacy.to_json()).record_fields is None

@@ -64,6 +64,14 @@ SAFE_TOOLS: list[str] = [
     "why_did_playbook_fail",
     "get_record",
     "search_module_records",
+    "siem_search_ip",
+    "siem_search_host",
+    "siem_search_user",
+    "siem_events_for_incident",
+    "siem_raw_query",
+    "faz_get_alerts",
+    "faz_search_ip",
+    "faz_raw_query",
     "get_run_env",
     "list_playbook_runs",
     "assert_playbook_outcome",
@@ -122,6 +130,14 @@ TOOL_TIERS: dict[str, int] = {
     "why_did_playbook_fail": 1,
     "search_module_records": 1,
     "get_record": 1,
+    "siem_search_ip": 1,
+    "siem_search_host": 1,
+    "siem_search_user": 1,
+    "siem_events_for_incident": 1,
+    "siem_raw_query": 1,
+    "faz_get_alerts": 1,
+    "faz_search_ip": 1,
+    "faz_raw_query": 1,
     "get_run_env": 1,
     "list_playbook_runs": 1,
     "assert_playbook_outcome": 1,
@@ -229,13 +245,20 @@ def _tier_for_run_op(args: dict[str, Any]) -> int:
         return 4
     if category in _MANAGEMENT_CATEGORIES:
         return 3
+    if safety == "unsafe":
+        # A probe-flagged destructive op MUST win over the catch-all
+        # `investigation` category below. FortiEDR's `isolate_collector` /
+        # `set_collector_state` are categorized `investigation` in the catalog
+        # but are real host-containment actions (op_safety='unsafe'). Without
+        # this ordering they auto-allow at tier 2 (no approval card) AND get
+        # dropped from find_containment_actions' tier>=3 guard — so "isolate
+        # this host" would execute ungated and the proper op wouldn't surface.
+        return 4
     if safety == "safe" or category in _SAFE_CATEGORIES:
         # Third-party query → tier 2; FSR-internal query → tier 1.
         # We don't have a reliable "is FSR-internal" flag; treat all
         # external reads as tier 2 (auto-allow + log).
         return 2
-    if safety == "unsafe":
-        return 4  # unknown category but classifier flagged destructive
     # Unknown / unclassified. Before escalating to approval, separate a
     # guessed/mistyped op from a real-but-unclassified one. If the connector's
     # catalog is known to us but this op isn't in it, the op cannot run — it

@@ -296,8 +296,8 @@ _NON_ACTION_PREFIXES: tuple[str, ...] = (
 # thing it wants to contain; we match it to the right family of ops.
 _TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
     "ip": ("ip", "address", "blacklist"),
-    "host": ("host", "endpoint", "device", "machine", "asset", "agent"),
-    "endpoint": ("endpoint", "host", "device", "agent", "machine"),
+    "host": ("host", "endpoint", "device", "machine", "asset", "agent", "collector"),
+    "endpoint": ("endpoint", "host", "device", "agent", "machine", "collector"),
     "user": ("user", "account", "identity", "credential", "password", "login"),
     "url": ("url", "link", "uri"),
     "domain": ("domain", "fqdn", "dns"),
@@ -460,6 +460,49 @@ def _required_params(conn: sqlite3.Connection, connector: str,
     return out
 
 
+def _param_sig(conn: sqlite3.Connection, connector: str,
+               op: str) -> list[dict[str, Any]]:
+    """Full visible param signature WITH select options + labels — so the agent
+    picks valid param NAMES and valid select VALUES straight from the action
+    finder, instead of guessing and bouncing off bad_params. Loop loop-998b86c1
+    showed both failure modes the store could have prevented: the agent guessed
+    `ioc` (the param is `indicator`) and `method='firewall'` (the select options
+    were 'Quarantine Based'/'Policy Based'). Dedupes conditional param groups by
+    name (first occurrence wins, preserving `ord`)."""
+    try:
+        rows = conn.execute(
+            "SELECT param_name, type, title, required, options_json "
+            "FROM operation_params WHERE connector_name=? AND op_name=? "
+            "AND (visible IS NULL OR visible NOT IN (0,'0','false','False')) "
+            "ORDER BY required DESC, ord",
+            (connector, op),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for name, typ, title, required, options_json in rows:
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        entry: dict[str, Any] = {"name": name}
+        if required in (1, "1", "true", "True"):
+            entry["required"] = True
+        if typ:
+            entry["type"] = typ
+        if title and title != name:
+            entry["label"] = title
+        if options_json:
+            try:
+                opts = json.loads(options_json)
+                if isinstance(opts, list) and opts:
+                    entry["options"] = [str(o) for o in opts]
+            except (ValueError, TypeError):
+                pass
+        out.append(entry)
+    return out
+
+
 def _connectors_that_could_contain(
         keywords: tuple[str, ...] | None,
         exclude: set[str],
@@ -500,31 +543,105 @@ def _connectors_that_could_contain(
 
 def _healthcheck_many(
         client,
-        targets: list[Union[tuple[str, str], tuple[str, str, str]]]) -> dict[str, str]:
+        targets: list[Union[tuple[str, str], tuple[str, str, str]]],
+        deadline_s: float = 20.0,
+        timing: dict[str, Any] | None = None) -> dict[str, str]:
     """Healthcheck many (name, version) connectors CONCURRENTLY, returning
     {name: status}. Serial probing was the dominant latency in the live triage
     loop (~45 configured connectors × a blocking GET each, some slow/hung
     vendors = minutes per call, on both the eval and the analyst's screen).
-    `_live_healthcheck` caps each call at timeout=8; the pool collapses sum →
-    max. Read-only independent calls, so a thread pool is safe; workers capped
-    so we don't open dozens of sockets at once."""
+
+    Two bounds keep a hung vendor from blowing the turn:
+      • `_live_healthcheck` passes timeout=8 — but the ON-BOX crudhub session
+        SILENTLY IGNORES that kwarg, so an unresponsive vendor healthcheck runs
+        unbounded on the box (this is what made find_enrichment_actions take
+        ~2 min in export sess-ei6esw96: ~13 candidate connectors, cold cache).
+      • So we ALSO bound the whole fan-out by `deadline_s` wall-clock: we wait on
+        the pool with a deadline and abandon any straggler probe (its worker
+        thread is left to finish/die in the background). A connector we couldn't
+        verify in time is simply omitted from the result → the caller FAILS OPEN
+        on its listing status rather than dead-ending or hanging.
+
+    When `timing` is provided it's populated with a per-probe breakdown
+    (cache hits, live probes, timed-out connectors, slowest calls) so a slow
+    finder is self-diagnosing from its own tool result — there was no per-op
+    timing anywhere before, so a hang like the 2-min one above was un-triageable
+    from the export alone.
+
+    Read-only independent calls, so a thread pool is safe."""
     if not targets:
+        if timing is not None:
+            timing.update({"n": 0, "live": 0, "cached": 0, "timed_out": [],
+                           "probe_ms": 0, "slowest": []})
         return {}
-    from concurrent.futures import ThreadPoolExecutor
-    from .tools_execution import _live_healthcheck
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from .tools_execution import (_live_healthcheck, _cached_health,
+                                  _store_health)
+
+    per_probe: dict[str, dict[str, Any]] = {}
 
     def _probe(
             target: Union[tuple[str, str], tuple[str, str, str]]) -> tuple[str, str]:
         name, version = target[0], target[1]
         agent_id = target[2] if len(target) > 2 else ""
+        t0 = _time.perf_counter()
+        # Reuse the same warm health cache run_op's preflight uses (4h healthy /
+        # 5min unhealthy, pre-populated by warmup). A cache hit collapses the
+        # probe to a sqlite read; on a miss we probe once and store the verdict
+        # so the next finder/turn is free.
+        cached = _cached_health(name, version, "")
+        if cached is not None:
+            per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                               "src": "cache"}
+            return name, str(cached.get("status") or "error")
         try:
             hr = _live_healthcheck(client, name, version, agent_id=agent_id)
-            return name, str(hr.get("status") or "error")
+            status = str(hr.get("status") or "error")
+            _store_health(name, version, status,
+                          hr.get("message") or hr.get("error") or "", config="")
+            per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                               "src": "live"}
+            return name, status
         except Exception as e:  # noqa: BLE001
+            per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                               "src": "error"}
             return name, f"error:{e!r}"
 
-    with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
-        return dict(pool.map(_probe, targets))
+    out: dict[str, str] = {}
+    timed_out: list[str] = []
+    t_start = _time.perf_counter()
+    # Don't leave the pool's __exit__ to join stragglers (that would re-impose the
+    # unbounded wait we're trying to escape). Wait on futures with a shrinking
+    # deadline and walk away from whatever hasn't landed.
+    pool = ThreadPoolExecutor(max_workers=min(16, len(targets)))
+    fut_to_name = {pool.submit(_probe, t): t[0] for t in targets}
+    try:
+        for fut in as_completed(list(fut_to_name), timeout=deadline_s):
+            name, status = fut.result()
+            out[name] = status
+    except Exception:  # noqa: BLE001 — concurrent.futures.TimeoutError and friends
+        pass
+    finally:
+        for fut, name in fut_to_name.items():
+            if not fut.done():
+                timed_out.append(name)
+        # Threads with in-flight on-box probes can't be cancelled; let them drain
+        # in the background instead of blocking this turn on shutdown(wait=True).
+        pool.shutdown(wait=False)
+
+    if timing is not None:
+        slowest = sorted(per_probe.items(), key=lambda kv: kv[1]["ms"],
+                         reverse=True)[:5]
+        timing.update({
+            "n": len(targets),
+            "live": sum(1 for p in per_probe.values() if p["src"] == "live"),
+            "cached": sum(1 for p in per_probe.values() if p["src"] == "cache"),
+            "timed_out": timed_out,
+            "probe_ms": round((_time.perf_counter() - t_start) * 1000, 1),
+            "slowest": [[n, p["ms"], p["src"]] for n, p in slowest],
+        })
+    return out
 
 
 @mcp.tool()
@@ -633,6 +750,10 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                 "status": configured.get(connector),
                 "deprecated": "deprecat" in (title or "").lower(),
                 "required_params": _required_params(conn, connector, op),
+                # Full param signature WITH select options so the agent calls
+                # run_op / emit_action_card with valid names AND valid select
+                # values directly — no guess, no bad_params round-trip.
+                "params": _param_sig(conn, connector, op),
                 # When true, run_op routes this op through the agent force-fail
                 # wrap (~30-60s). Tell the user it runs on a FortiSOAR agent and
                 # may take a moment, THEN call run_op.
@@ -646,12 +767,14 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
     # (no version to scope the probe, or no live client), fall back to its
     # listing status rather than silently dropping a valid containment action.
     # A probe gap must never manufacture a dead end out of a configured op.
+    probe_timing: dict[str, Any] = {}
     if probe and actions:
         candidates = {a["connector"] for a in actions}
         targets = [(c, version_of[c], agent_of.get(c, ""))
                    for c in candidates if c in version_of]
         client = _shared._live_client() if targets else None
-        health = _healthcheck_many(client, targets) if client is not None else {}
+        health = (_healthcheck_many(client, targets, timing=probe_timing)
+                  if client is not None else {})
         healthy_ok = {"available", "completed", "active", "connected",
                       "ok", "success"}
         kept = []
@@ -670,6 +793,8 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
     out: dict[str, Any] = {"ok": True, "target_type": target or None,
                            "actions": actions[:limit], "count": len(actions),
                            "probed": probe}
+    if probe_timing:
+        out["_timing"] = probe_timing
     if not actions:
         # Connectors are configured, but none can contain this (the set is
         # intel/utility only, or nothing matches the target type). Don't dead-
@@ -822,6 +947,10 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
                 "status": configured.get(connector),
                 "deprecated": "deprecat" in (title or "").lower(),
                 "required_params": _required_params(conn, connector, op),
+                # Full param signature WITH select options so the agent calls
+                # run_op / emit_action_card with valid names AND valid select
+                # values directly — no guess, no bad_params round-trip.
+                "params": _param_sig(conn, connector, op),
                 "runs_on_agent": connector in agent_of,
             })
 
@@ -829,12 +958,14 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
     # Drop actions whose connector we actively probed and found unhealthy, but
     # FAIL OPEN on a probe gap (no version / no live client) — never manufacture
     # a dead end out of a configured op.
+    probe_timing: dict[str, Any] = {}
     if probe and actions:
         candidates = {a["connector"] for a in actions}
         targets = [(c, version_of[c], agent_of.get(c, ""))
                    for c in candidates if c in version_of]
         client = _shared._live_client() if targets else None
-        health = _healthcheck_many(client, targets) if client is not None else {}
+        health = (_healthcheck_many(client, targets, timing=probe_timing)
+                  if client is not None else {})
         healthy_ok = {"available", "completed", "active", "connected",
                       "ok", "success"}
         kept = []
@@ -865,6 +996,8 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
     out: dict[str, Any] = {"ok": True, "target_type": target or None,
                            "actions": actions[:limit], "count": len(actions),
                            "probed": probe}
+    if probe_timing:
+        out["_timing"] = probe_timing
     if not actions:
         # No intel lookup is configured for this. Don't dead-end the analyst:
         # build a ready-to-emit capability_gap card naming a TI connector to
@@ -1562,6 +1695,609 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
         out["record"] = _summarize_record(data)
         out["summarized"] = True
     return out
+
+
+# ---------------------------------------------------------------------------
+# First-class FortiSIEM search tools
+#
+# Ergonomic, read-only wrappers over `run_op("fortinet-fortisiem", …)`. The
+# agent reliably reaches for these (single clean call, entity pre-filled)
+# where it dodges raw `search_events`/`run_op` with its ~20 fiddly params.
+# Every wrapper returns the SAME compact `evidence_events` digest the record
+# normalizer emits, so the agent learns one event shape everywhere.
+# ---------------------------------------------------------------------------
+
+# Bytes + port + host added to the connector's stock columns so the digest can
+# show exfil volume and the host pivot without a second call.
+# NB: received-bytes is `recvBytes64` — the pub/v2 engine 400s ("Internal
+# Server Error") on the whole query if a single unknown attribute (`rcvdBytes64`)
+# is in the SELECT, so this column name must match the FortiSIEM schema exactly.
+_SIEM_SELECT = ("phRecvTime,reptDevIpAddr,eventType,eventName,srcIpAddr,"
+                "destIpAddr,destIpPort,sentBytes64,recvBytes64,user,hostName")
+
+_WINDOW_UNITS = {"m": "Minutes", "h": "Hours", "d": "Days"}
+
+
+def _parse_window(window: str) -> tuple[str, int]:
+    """'30m'|'2h'|'1d' → (rel_time unit, value) for search_events Relative Time.
+    Falls back to (Hours, 2) on anything unrecognized."""
+    m = re.fullmatch(r"\s*(\d+)\s*([mhd])\s*", str(window or "").lower())
+    if not m:
+        return "Hours", 2
+    return _WINDOW_UNITS[m.group(2)], int(m.group(1))
+
+
+def _event_rows(data: Any) -> list[dict[str, Any]]:
+    """Pull the list of event dicts out of a run_op `data` payload, wherever
+    the connector parked it (shape varies by op/version)."""
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    if isinstance(data, dict):
+        # `samples` is fsr_core's own event-list digest (it collapses big
+        # FortiSIEM/FAZ event lists into {_digest, count, samples, facets}).
+        for key in ("samples", "events", "rows", "hydra:member", "data",
+                    "results", "result", "records"):
+            v = data.get(key)
+            if isinstance(v, list):
+                return [r for r in v if isinstance(r, dict)]
+    return []
+
+
+def _siem_run(op: str, params: dict[str, Any], limit: int,
+              echo: dict[str, Any]) -> dict[str, Any]:
+    """Shared body: run a read-only FortiSIEM op, digest its events, return a
+    uniform envelope. `echo` describes the query for the agent's audit trail."""
+    from .tools_execution import run_op  # lazy: avoid import cycle at load
+    from ..llm.triage_normalize import _digest_event
+
+    res = run_op("fortinet-fortisiem", op, params)
+    if not isinstance(res, dict) or not res.get("ok"):
+        # pass the connector's own error straight through (unhealthy/timeout/etc)
+        return _siem_error(op, echo, res)
+    rows = _event_rows(res.get("data"))
+    events = [d for d in (_digest_event(r) for r in rows) if d]
+    return _envelope(op, echo, events, limit)
+
+
+def _siem_error(op: str, echo: dict[str, Any],
+                underlying: Any) -> dict[str, Any]:
+    """Build a SIEM-tool error that PROPAGATES the underlying run_op failure's
+    detail (message, issues, suggestions) instead of collapsing it to a bare
+    `code`. The opaque collapse is what made siem_search_ip/siem_raw_query
+    unrecoverable in export sess-vtd15c5v: the agent saw only
+    `code:"bad_params"` with no clue what was wrong, abandoned the first-class
+    tool, and fell back to hand-built run_op calls (which then also failed). The
+    real cause lives in `underlying` (e.g. a select-option mismatch on the
+    execute_api_request submit) — surface it so the agent (and we) can act."""
+    u = underlying if isinstance(underlying, dict) else {}
+    out: dict[str, Any] = {
+        "ok": False, "op": op, "query": echo,
+        "code": u.get("status") or u.get("code") or "siem_op_failed",
+        "message": u.get("message") or "FortiSIEM op failed",
+    }
+    # Carry the actionable bits the connector/validator already computed so the
+    # agent can self-correct rather than guess.
+    for k in ("issues", "suggestions", "valid_params", "detail"):
+        if u.get(k):
+            out[k] = u[k]
+    return out
+
+
+def _envelope(op: str, echo: dict[str, Any], events: list[dict[str, Any]],
+              limit: int) -> dict[str, Any]:
+    """Uniform success envelope; `count` is what's returned, `total_found`
+    appears only when the result was capped."""
+    out = {
+        "ok": True, "op": op, "query": echo,
+        "count": min(len(events), limit),
+        "events": events[:limit],
+        "truncated": len(events) > limit,
+    }
+    if out["truncated"]:
+        out["total_found"] = len(events)
+    return out
+
+
+@mcp.tool()
+def siem_search_ip(ip: str, direction: str = "any", window: str = "2h",
+                   limit: int = 25) -> dict[str, Any]:
+    """Search FortiSIEM events for an IP over a recent window — the easy pivot.
+
+    Wraps `run_op("fortinet-fortisiem","search_events")` with the right
+    attribute + value param pre-filled and a sane column set, returning the
+    standard event digest (ts/src/dst/bytes/service/action). Prefer this over
+    hand-building a raw search_events call.
+
+    Args:
+      ip: the IPv4 to search for.
+      direction: 'src' (source), 'dst' (destination), or 'any' (default —
+        matches either end with a single OR query).
+      window: relative lookback like '30m', '2h' (default), '1d'.
+      limit: max digested events to return (default 25).
+    """
+    clause = {"src": f"srcIpAddr={_q(ip)}",
+              "dst": f"destIpAddr={_q(ip)}"}
+    if direction in clause:
+        where = clause[direction]
+    else:  # 'any' — OR both ends (valid on the pub/v2 engine)
+        where = f"(srcIpAddr={_q(ip)} OR destIpAddr={_q(ip)})"
+    return _siem_pubv2_query(where, window=window, limit=limit,
+                             op="siem_search_ip",
+                             echo={"ip": ip, "direction": direction,
+                                   "window": window})
+
+
+@mcp.tool()
+def siem_search_host(host: str, window: str = "2h",
+                     limit: int = 25) -> dict[str, Any]:
+    """Search FortiSIEM events by host name over a recent window.
+
+    Runs a pub/v2 query (attribute='hostName') and returns the standard event
+    digest. Use to pull a compromised host's recent activity in one call.
+    """
+    return _siem_pubv2_query(f"hostName={_q(host)}", window=window, limit=limit,
+                             op="siem_search_host",
+                             echo={"host": host, "window": window})
+
+
+@mcp.tool()
+def siem_search_user(user: str, window: str = "2h",
+                     limit: int = 25) -> dict[str, Any]:
+    """Search FortiSIEM events by user name over a recent window.
+
+    Runs a pub/v2 query (attribute='user') and returns the standard event
+    digest. Use to check a user account's recent activity / other sessions.
+    """
+    return _siem_pubv2_query(f"user={_q(user)}", window=window, limit=limit,
+                             op="siem_search_user",
+                             echo={"user": user, "window": window})
+
+
+def _coerce_query_id(data: Any) -> str | None:
+    if isinstance(data, dict):
+        for k in ("queryId", "query_id", "id"):
+            if data.get(k):
+                return str(data[k])
+        # connector may wrap the FortiSIEM body under data/result
+        for k in ("data", "result", "response"):
+            qid = _coerce_query_id(data.get(k))
+            if qid:
+                return qid
+    return None
+
+
+def _q(value: Any) -> str:
+    """Quote a scalar for a FortiSIEM where clause, neutralizing embedded `"`."""
+    return '"{0}"'.format(str(value).replace('"', ""))
+
+
+# Friendly / FortiSOAR-style field names → FortiSIEM backend attribute names, so
+# a model that passes `where={"sourceIPv4": "1.2.3.4"}` (its natural shape) gets
+# a valid clause instead of an engine error.
+_WHERE_FIELD_ALIASES = {
+    "sourceip": "srcIpAddr", "sourceipv4": "srcIpAddr", "srcip": "srcIpAddr",
+    "srcipv4": "srcIpAddr", "source_ip": "srcIpAddr", "srcipaddr": "srcIpAddr",
+    "destinationip": "destIpAddr", "destip": "destIpAddr",
+    "destinationipv4": "destIpAddr", "destipv4": "destIpAddr",
+    "dstip": "destIpAddr", "dest_ip": "destIpAddr", "destipaddr": "destIpAddr",
+    "reportingdeviceip": "reptDevIpAddr", "deviceip": "reptDevIpAddr",
+    "reptdevipaddr": "reptDevIpAddr",
+    "destinationport": "destIpPort", "destport": "destIpPort",
+    "port": "destIpPort", "destipport": "destIpPort",
+    "user": "user", "username": "user",
+    "host": "hostName", "hostname": "hostName",
+}
+
+
+def _where_to_clause(where: Any) -> str:
+    """Accept a where clause as a backend-attribute string (passed through) OR a
+    ``{field: value}`` dict (the shape a model naturally emits) and return a
+    FortiSIEM clause. Dict fields are mapped through ``_WHERE_FIELD_ALIASES``;
+    list values become an OR group; multiple fields are AND-ed."""
+    if isinstance(where, str):
+        return where
+    if isinstance(where, dict):
+        parts: list[str] = []
+        for raw_field, value in where.items():
+            field = _WHERE_FIELD_ALIASES.get(str(raw_field).strip().lower(),
+                                             str(raw_field).strip())
+            if isinstance(value, (list, tuple, set)):
+                ors = " OR ".join(f"{field}={_q(v)}" for v in value if v != "")
+                if ors:
+                    parts.append(f"({ors})")
+            elif value != "" and value is not None:
+                parts.append(f"{field}={_q(value)}")
+        return " AND ".join(parts)
+    return str(where or "")
+
+
+def _siem_pubv2_query(where: str, *, select: str = "", window: str = "2h",
+                      limit: int = 25, poll_max: int = 8,
+                      op: str, echo: dict[str, Any]) -> dict[str, Any]:
+    """Shared pub/v2 event-query engine: submit → poll progress → fetch results.
+
+    The pub/v2 JSON API (`/rest/pub/v2/query/…`) is the ONLY working event-query
+    path on FortiSIEM 6.0.0 — the legacy XML `search_events` op 400s ("Content
+    is not allowed in prolog") on this build, so every `siem_search_*` helper
+    routes here too. Returns the standard `_envelope` (plus `query_id`) on
+    success, or a typed error dict on submit/poll failure.
+    """
+    import time as _time
+
+    from .tools_execution import run_op
+    from ..llm.triage_normalize import _digest_event
+
+    unit, value = _parse_window(window)
+    secs = {"Minutes": 60, "Hours": 3600, "Days": 86400}[unit] * value
+    now = int(_time.time())
+    payload = {
+        "select": select or _SIEM_SELECT,
+        "where": where,
+        "groupBy": "", "having": "", "orderBy": "phRecvTime DESC",
+        "timeRange": {"from": now - secs, "to": now},
+        # FortiSOC scope: include all customers, NO exclude (verified live).
+        "customerScope": {"groupByEachCustomer": True, "include": {"all": True}},
+    }
+    # The connector's FortiSIEM base already includes `/phoenix` — endpoint is
+    # relative to that. `execute_api_request` is gated (unknown risk) so this
+    # read-only query passes confirm=True. The engine is flaky; retry submit.
+    #
+    # NB: do NOT send `payload_format` — the live FortiSIEM connector on the box
+    # rejects it ('payload_format' is not a parameter of execute_api_request;
+    # the reference store catalogs it but the deployed connector version has only
+    # `payload`). That single bad arg failed EVERY first-class SIEM search
+    # (siem_search_ip/host/user, siem_raw_query) in loop session loop-7969af87,
+    # forcing the agent off its primary pivot path into run_op guessing. A dict
+    # `payload` is serialized as JSON by default, so the format hint is moot.
+    submit_args = {"endpoint": "/rest/pub/v2/query/eventQuery", "method": "POST",
+                   "payload": payload}
+    qid = None
+    last = None
+    for _ in range(3):
+        sub = run_op("fortinet-fortisiem", "execute_api_request", submit_args,
+                     confirm=True)
+        last = sub
+        if isinstance(sub, dict) and sub.get("ok"):
+            qid = _coerce_query_id(sub.get("data"))
+            if qid:
+                break
+        _time.sleep(1)
+    if not qid:
+        accepted = isinstance(last, dict) and last.get("ok")
+        if accepted:
+            # Submitted OK but no queryId came back — a SIEM-side quirk, not a
+            # caller error; no underlying validator detail to propagate.
+            return {"ok": False, "op": op, "query": echo, "code": "no_query_id",
+                    "message": "FortiSIEM accepted the query but returned no "
+                               "queryId"}
+        # The submit itself was rejected (e.g. bad_params on execute_api_request)
+        # — propagate the connector's actionable detail instead of an opaque code.
+        return _siem_error(op, echo, last)
+
+    # Poll + fetch on the SAME pub/v2 subsystem we submitted to (the connector's
+    # get_events_by_query_id uses the legacy XML get_records path — wrong id
+    # space for a pub/v2 queryId).
+    rows: list[dict[str, Any]] = []
+    for _ in range(max(1, poll_max)):
+        prog = run_op("fortinet-fortisiem", "execute_api_request", {
+            "endpoint": "/rest/pub/v2/query/progress", "method": "GET",
+            "query_params": {"queryId": qid}}, confirm=True)
+        done = (isinstance(prog, dict) and isinstance(prog.get("data"), dict)
+                and prog["data"].get("progress") == 100)
+        if done:
+            res = run_op("fortinet-fortisiem", "execute_api_request", {
+                "endpoint": "/rest/pub/v2/query/events/results", "method": "GET",
+                "query_params": {"queryId": qid, "offset": 0,
+                                 "limit": min(limit, 1000)}}, confirm=True)
+            if isinstance(res, dict) and res.get("ok"):
+                rows = _event_rows(res.get("data"))
+            break
+        _time.sleep(1)
+    events = [d for d in (_digest_event(r) for r in rows) if d]
+    out = _envelope(op, echo, events, limit)
+    out["query_id"] = qid
+    return out
+
+
+@mcp.tool()
+def siem_raw_query(where: str | dict[str, Any], select: str = "",
+                   window: str = "2h", limit: int = 25,
+                   poll_max: int = 8) -> dict[str, Any]:
+    """Run a vetted *native* FortiSIEM event query — the escape hatch.
+
+    For when the attribute-based `siem_search_*` helpers can't express the
+    filter you need. Goes through the connector (`run_op` execute_api_request
+    against the pub/v2 query API — submit, poll progress, fetch results), NOT a
+    direct FSM call, and uses FortiSOC scope defaults (include all, NO customer
+    exclude). Returns the standard event digest.
+
+    Args:
+      where: the filter, either form —
+        * a raw FortiSIEM clause string with **backend** attribute names, e.g.
+          `srcIpAddr="10.10.100.1" AND destIpPort=443` (find names under
+          Admin → Device Support → Event Attributes), or
+        * a ``{field: value}`` dict, e.g. `{"sourceIPv4": "1.2.3.4",
+          "destPort": 443}` — friendly field names are mapped to backend
+          attributes, list values become an OR group, fields are AND-ed.
+        `OR` across src/dst IP fields is fine on the pub/v2 engine.
+      select: comma-separated backend field names (defaults to a sane set).
+      window: relative lookback ('30m','2h','1d').
+      limit: max digested events.
+      poll_max: how many times to poll for query completion.
+    """
+    clause = _where_to_clause(where)
+    return _siem_pubv2_query(clause, select=select, window=window, limit=limit,
+                             poll_max=poll_max, op="siem_raw_query",
+                             echo={"where": clause, "window": window})
+
+
+@mcp.tool()
+def siem_events_for_incident(incident_id: str, time_from: str = "",
+                             time_to: str = "", limit: int = 25) -> dict[str, Any]:
+    """Pull the raw FortiSIEM events that drove a specific incident.
+
+    Wraps `get_associated_events_new` (incident triggeringEvents API) and
+    returns the standard event digest. This is the canonical "pivot back into
+    the originating SIEM" call when an alert came from FortiSIEM. Pass the
+    FortiSIEM `incident_id` (note: this is the live SIEM incident id, which can
+    differ from / outlive the id embedded in an old alert's sourcedata).
+
+    Args:
+      incident_id: the FortiSIEM incident id.
+      time_from / time_to: optional ISO-8601 window (e.g.
+        "2026-06-02T13:32:01Z") to scope the triggering-event search; both are
+        forwarded as the connector's timeFrom/timeTo.
+      limit: max digested events.
+    """
+    params: dict[str, Any] = {"incident_id": str(incident_id),
+                              "perPage": min(limit, 50)}
+    if time_from:
+        params["timeFrom"] = time_from
+    if time_to:
+        params["timeTo"] = time_to
+    return _siem_run("get_associated_events_new", params, limit,
+                     {"incident_id": incident_id,
+                      "timeFrom": time_from, "timeTo": time_to})
+
+
+# ---------------------------------------------------------------------------
+# First-class FortiAnalyzer search tools
+#
+# The FAZ analogue of the `siem_*` helpers: ergonomic, read-only wrappers over
+# `run_op("fortinet-fortianalyzer", …)`. FAZ is reached synchronously (not
+# agent-bound), but its log-search ops take ~20 fiddly params and two distinct
+# datetime formats — exactly the friction these tools remove. Each returns the
+# same `{ok, op, query, count, events, truncated}` envelope as the SIEM tools,
+# so the agent learns one event shape across both SIEMs.
+# ---------------------------------------------------------------------------
+
+# FAZ log-search ops (start_*/bulk) reject anything but this microsecond-Z
+# format; get_alerts is happy with plain ISO. We feed both their own.
+_FAZ_LOG_TIME = "%Y-%m-%dT%H:%M:%S.%fZ"
+_FAZ_ALERT_TIME = "%Y-%m-%dT%H:%M:%S"
+
+
+def _window_secs(window: str) -> int:
+    """'30m'|'2h'|'1d' → seconds (default 2h), reusing the SIEM window grammar."""
+    unit, value = _parse_window(window)
+    return {"Minutes": 60, "Hours": 3600, "Days": 86400}[unit] * value
+
+
+def _faz_window(window: str, fmt: str) -> tuple[str, str]:
+    """(start, end) UTC strings for a relative lookback, formatted for FAZ."""
+    import datetime
+    import time as _time
+
+    now = datetime.datetime.fromtimestamp(_time.time(), datetime.timezone.utc)
+    start = now - datetime.timedelta(seconds=_window_secs(window))
+    return start.strftime(fmt), now.strftime(fmt)
+
+
+def _faz_rows(data: Any) -> list[dict[str, Any]]:
+    """Dig the row list out of a FAZ run_op `data` payload. FAZ nests rows under
+    JSON-RPC `result.data` (sometimes `result` is a list of such blocks); run_op
+    may also pre-digest big lists into `{samples: [...]}`."""
+    def dig(node: Any) -> list[dict[str, Any]]:
+        if isinstance(node, list):
+            return [r for r in node if isinstance(r, dict)]
+        if isinstance(node, dict):
+            for key in ("samples", "data"):
+                v = node.get(key)
+                if isinstance(v, list):
+                    return [r for r in v if isinstance(r, dict)]
+            res = node.get("result")
+            if isinstance(res, dict):
+                return dig(res)
+            if isinstance(res, list):
+                out: list[dict[str, Any]] = []
+                for el in res:
+                    out.extend(dig(el))
+                return out
+        return []
+    return dig(data)
+
+
+def _faz_digest_alert(ev: dict[str, Any]) -> dict[str, Any]:
+    """Collapse one FAZ alert (get_alerts row) into a compact, model-friendly row."""
+    def g(*keys):
+        for k in keys:
+            if k in ev and not _is_empty(ev[k]):
+                return ev[k]
+        return None
+
+    row = {
+        "ts": g("alerttime", "firstlogtime", "lastlogtime"),
+        "alert_id": g("alertid"),
+        "subject": g("subject", "alert", "eventtype"),
+        "severity": g("severity"),
+        "trigger": g("triggername"),
+        "devname": g("devname"),
+        "devid": g("devid"),
+        "logtype": g("logtype"),
+        "count": g("logcount", "numofmatch"),
+        "tag": g("tag"),
+    }
+    return {k: v for k, v in row.items() if not _is_empty(v)}
+
+
+def _faz_digest_log(ev: dict[str, Any]) -> dict[str, Any]:
+    """Collapse one FAZ log row (traffic/event/etc) into the shared event shape."""
+    def g(*keys):
+        for k in keys:
+            if k in ev and not _is_empty(ev[k]):
+                return ev[k]
+        return None
+
+    row = {
+        "ts": g("itime", "eventtime", "date"),
+        "event_type": g("type", "subtype", "logid"),
+        "src": g("srcip"),
+        "dst": g("dstip"),
+        "dport": g("dstport"),
+        "service": g("service", "app"),
+        "action": g("action"),
+        "bytes_out": g("sentbyte"),
+        "bytes_in": g("rcvdbyte"),
+        "dst_country": g("dstcountry"),
+        "src_host": g("srcname", "hostname", "devname"),
+        "user": g("user", "unauthuser", "srcname"),
+        "msg": g("msg"),
+    }
+    return {k: v for k, v in row.items() if not _is_empty(v)}
+
+
+def _faz_run(op: str, params: dict[str, Any], limit: int,
+             echo: dict[str, Any], digest) -> dict[str, Any]:
+    """Shared body: run a read-only FAZ op, digest its rows, return the uniform
+    envelope (same shape as `_siem_run`). `digest` picks alert vs log shaping."""
+    from .tools_execution import run_op  # lazy: avoid import cycle at load
+
+    # All FAZ helpers are read-only by construction; FAZ op categories aren't
+    # always warmed in the safety cache, so pass confirm=True to avoid a
+    # spurious requires_confirmation halt (mirrors siem_raw_query).
+    res = run_op("fortinet-fortianalyzer", op, params, confirm=True)
+    if not isinstance(res, dict) or not res.get("ok"):
+        return {"ok": False, "op": op, "query": echo,
+                "code": (res or {}).get("status") or (res or {}).get("code")
+                or "faz_op_failed",
+                "message": (res or {}).get("message")
+                or "FortiAnalyzer op failed"}
+    events = [d for d in (digest(r) for r in _faz_rows(res.get("data"))) if d]
+    return _envelope(op, echo, events, limit)
+
+
+@mcp.tool()
+def faz_get_alerts(adom: str = "root", window: str = "24h",
+                   alert_filter: str = "", alertid: str = "",
+                   limit: int = 25) -> dict[str, Any]:
+    """List FortiAnalyzer event alerts for an ADOM over a recent window.
+
+    Wraps `run_op("fortinet-fortianalyzer","get_alerts")` with the ADOM and
+    time window pre-filled, returning a compact alert digest
+    (ts/alert_id/subject/severity/trigger/devname/count). This is the canonical
+    "what is FAZ alerting on right now" call.
+
+    Args:
+      adom: FAZ ADOM name (default 'root'). Use `get_adoms` via run_op to list.
+      window: relative lookback like '30m', '2h', '24h' (default), '7d'.
+      alert_filter: optional native FAZ alert filter (e.g. `severity>=3`).
+      alertid: optional comma-separated alert id(s) to fetch exactly.
+      limit: max digested alerts to return (default 25).
+    """
+    start, end = _faz_window(window, _FAZ_ALERT_TIME)
+    params: dict[str, Any] = {"adom_name": adom, "start": start, "end": end,
+                              "limit": min(limit, 1000)}
+    if alert_filter:
+        params["filter"] = alert_filter
+    if alertid:
+        params["alertid"] = alertid
+    return _faz_run("get_alerts", params, limit,
+                    {"adom": adom, "window": window, "filter": alert_filter,
+                     "alertid": alertid}, _faz_digest_alert)
+
+
+@mcp.tool()
+def faz_search_ip(ip: str, direction: str = "any", adom: str = "root",
+                  window: str = "24h", logtype: str = "Traffic",
+                  devid: str = "All_FortiGate", limit: int = 25) -> dict[str, Any]:
+    """Search FortiAnalyzer device logs for an IP over a recent window — the
+    easy pivot.
+
+    Wraps `start_and_fetch_bulk_device_logs` (start search + wait + fetch in one
+    synchronous call) with the IP filter, ADOM, log type and time window
+    pre-filled, returning the standard event digest
+    (ts/src/dst/dport/action/service/bytes). Prefer this over hand-building a
+    bulk-log-search call.
+
+    Args:
+      ip: the IPv4 to search for.
+      direction: 'src', 'dst', or 'any' (default — matches either side via a
+        FAZ `or` filter).
+      adom: FAZ ADOM name (default 'root').
+      window: relative lookback ('30m','2h','24h' (default),'7d').
+      logtype: FAZ log type (default 'Traffic'; e.g. 'Event','Attack','Web Filter').
+      devid: device selector (default 'All_FortiGate'; e.g. 'All_FortiProxy').
+      limit: max digested events to return (default 25).
+    """
+    if direction == "src":
+        flt = f"srcip={ip}"
+    elif direction == "dst":
+        flt = f"dstip={ip}"
+    else:
+        flt = f"srcip={ip} or dstip={ip}"
+    start, end = _faz_window(window, _FAZ_LOG_TIME)
+    return _faz_run(
+        "start_and_fetch_bulk_device_logs",
+        {"devid": devid, "adom_name": adom, "logtype": logtype,
+         "start": start, "end": end, "filter": flt, "limit": min(limit, 1000),
+         "wait_for_search_process_to_complete": True},
+        limit, {"ip": ip, "direction": direction, "adom": adom,
+                "window": window, "logtype": logtype, "devid": devid},
+        _faz_digest_log)
+
+
+@mcp.tool()
+def faz_raw_query(data: Any) -> dict[str, Any]:
+    """Run a native FortiAnalyzer JSON-RPC request — the escape hatch.
+
+    For when the `faz_get_alerts` / `faz_search_ip` helpers can't express what
+    you need. Wraps `json_rpc_freeform` ("Execute an API Request"), which takes
+    a raw FAZ JSON-RPC body and returns its response. Read-only by intent — use
+    `get`/`exec` log-search methods, not config-changing `set`/`add`/`delete`.
+
+    Args:
+      data: the JSON-RPC request body (a dict, or a JSON string), e.g.
+        `{"method": "get", "params": [{"url": "/eventmgmt/adom/root/alerts"}]}`.
+        Whatever FAZ returns is row-digested when it looks like a list of rows,
+        otherwise passed through under `raw`.
+    """
+    from .tools_execution import run_op
+
+    if isinstance(data, str):
+        import json as _json
+        try:
+            data = _json.loads(data)
+        except ValueError as e:
+            return {"ok": False, "op": "faz_raw_query",
+                    "code": "bad_json", "message": f"data is not valid JSON: {e}"}
+    res = run_op("fortinet-fortianalyzer", "json_rpc_freeform",
+                 {"data": data}, confirm=True)
+    if not isinstance(res, dict) or not res.get("ok"):
+        return {"ok": False, "op": "faz_raw_query", "query": {"data": data},
+                "code": (res or {}).get("status") or (res or {}).get("code")
+                or "faz_op_failed",
+                "message": (res or {}).get("message")
+                or "FortiAnalyzer op failed"}
+    rows = _faz_rows(res.get("data"))
+    # Only digest when the rows actually look like FAZ logs/alerts; arbitrary
+    # RPC payloads (device lists, config blocks) pass through untouched.
+    _LOG_KEYS = {"srcip", "dstip", "action", "itime", "logid", "alertid",
+                 "subject", "triggername", "sentbyte", "rcvdbyte"}
+    if rows and any(_LOG_KEYS & set(r) for r in rows[:5]):
+        events = [d for d in (_faz_digest_log(r) for r in rows) if d]
+        return _envelope("faz_raw_query", {"data": data}, events, 50)
+    return {"ok": True, "op": "faz_raw_query", "query": {"data": data},
+            "raw": res.get("data")}
 
 
 def _assert_one(client: Any, a: dict[str, Any]) -> dict[str, Any]:

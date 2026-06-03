@@ -88,6 +88,7 @@ class SkillTrace:
         self,
         calls: Optional[List[SkillCall]] = None,
         module: Optional[str] = None,
+        record_fields: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.calls: List[SkillCall] = list(calls or [])
         # Friendly module name of the record the triage session ran on
@@ -99,6 +100,14 @@ class SkillTrace:
         # cybersponse.action trigger) instead of a designer-only Referenced
         # trigger. None → bare `start` (legacy behavior).
         self.module: Optional[str] = module
+        # Field map of the triaged record (the widget-supplied `entity.fields`
+        # — {field_name: value}). Stamped by the connector alongside `module`.
+        # The trace-build path value-matches a one-off triage IOC (e.g. the IP
+        # the agent enriched) against these fields; on a hit it parameterizes
+        # the IOC to `{{ vars.input.records[0].<field> }}` via a Set Inputs
+        # step instead of baking the literal in — making the playbook
+        # re-runnable on any record of `module`. None → IOCs stay literal.
+        self.record_fields: Optional[Dict[str, Any]] = record_fields
         # Tracks how many times each base step name has been used so
         # repeated ops get stable, unique names (`Get Record`, `Get Record 2`).
         self._name_counts: Dict[str, int] = {}
@@ -168,6 +177,8 @@ class SkillTrace:
         # fixtures) see the same shape they always did.
         if self.module:
             d["module"] = self.module
+        if self.record_fields:
+            d["record_fields"] = self.record_fields
         return d
 
     def to_json(self) -> str:
@@ -178,6 +189,7 @@ class SkillTrace:
         return cls(
             [SkillCall.from_dict(c) for c in (d.get("calls") or [])],
             module=d.get("module"),
+            record_fields=d.get("record_fields"),
         )
 
     @classmethod
@@ -223,6 +235,18 @@ def set_active_trace_module(module: Optional[str]) -> None:
     m = m.split("/", 1)[0].split("?", 1)[0].strip()
     if m:
         _active.module = m
+
+
+def set_active_trace_record_fields(fields: Optional[Dict[str, Any]]) -> None:
+    """Stamp the triaged record's field map on the active trace (no-op if none
+    active or no fields). The trace-build path value-matches one-off IOCs
+    against these fields to parameterize them to `vars.input.records[0].*`.
+    Merges into any existing fields so multiple turns accrete record context."""
+    if _active is None or not isinstance(fields, dict) or not fields:
+        return
+    merged = dict(_active.record_fields or {})
+    merged.update(fields)
+    _active.record_fields = merged
 
 
 def clear_active_trace() -> None:

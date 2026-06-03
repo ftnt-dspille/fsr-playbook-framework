@@ -51,6 +51,18 @@ from .tools import anthropic_tools, dispatch, _resolve_tier as _tier_for
 DEFAULT_MODEL = os.environ.get("STUDIO_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
 
 
+# P1 — forced written assessment. When a turn runs tools but the final
+# assistant block carries no text (only tool_use / emitted cards), the chat
+# looks like it "didn't answer." We append this directive and do ONE more
+# no-tools round so the analyst always gets a narrative close.
+_ASSESSMENT_DIRECTIVE = (
+    "You ran tools but did not write anything back to the analyst. Stop "
+    "calling tools. In a short written assessment, tell the analyst: "
+    "(1) what you found, (2) your severity / disposition verdict, and "
+    "(3) the single recommended next action. Be concise and do not call tools."
+)
+
+
 def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for m in messages:
@@ -183,6 +195,63 @@ class AnthropicProvider:
         ):
             yield ev
 
+    async def _wrapup_call(
+        self,
+        *,
+        history: list[Message],
+        directive: str,
+        cached_system: Any,
+        session_id: str,
+        turn_idx: int,
+        tags: dict[str, Any],
+        self_repair_turns: int,
+        stop_reason_label: str,
+        max_tokens: int = 512,
+    ) -> AsyncIterator[Event]:
+        """One forced no-tools model round that yields its text + a UsageEvent.
+
+        Shared by the max-tool-turns wrap-up and the P1 forced-assessment
+        guarantee. Appends ``directive`` as a user turn, runs the model with
+        NO tools (so it can't keep investigating), and streams the resulting
+        text. Failures are logged and swallowed — the caller still emits a
+        terminal DoneEvent so the turn never hangs.
+        """
+        history.append(Message(role="user", content=directive))
+        try:
+            history_chars = len(json.dumps(
+                _to_anthropic_messages(history), default=str
+            ))
+        except Exception:
+            history_chars = 0
+        try:
+            async with self._client.messages.stream(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=cached_system,
+                messages=_to_anthropic_messages(history),
+            ) as stream:
+                async for event in stream:
+                    if event.type == "content_block_delta" and getattr(
+                        event.delta, "type", None
+                    ) == "text_delta":
+                        yield TextEvent(text=event.delta.text)
+                final = await stream.get_final_message()
+            usage = getattr(final, "usage", None)
+            yield UsageEvent(
+                session_id=session_id, turn=turn_idx, model=self.model,
+                input_tokens=getattr(usage, "input_tokens", 0) or 0 if usage else 0,
+                output_tokens=getattr(usage, "output_tokens", 0) or 0 if usage else 0,
+                cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0 if usage else 0,
+                cache_write=getattr(usage, "cache_creation_input_tokens", 0) or 0 if usage else 0,
+                history_chars=history_chars,
+                stop_reason=stop_reason_label,
+                self_repair_turn=self_repair_turns,
+                tool_calls=[], tags=tags,
+            )
+        except Exception:
+            import logging
+            logging.exception("%s call failed", stop_reason_label)
+
     async def stream(
         self,
         *,
@@ -195,6 +264,11 @@ class AnthropicProvider:
 
         history = list(messages)
         self_repair_turns = 0
+        # P1 — forced-assessment guarantee. `any_tools_run` flips once any
+        # tool result has been folded into history; `assessment_forced`
+        # caps the guarantee at one extra round so it can't loop.
+        any_tools_run = False
+        assessment_forced = False
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
@@ -214,6 +288,20 @@ class AnthropicProvider:
         # in the normal path this never triggers; it's a backstop.
         allowed_names = {t["name"] for t in tools}
 
+        # P4 — repeated-error guard. If a tool call with the identical
+        # (name, args) shape already failed once this turn, don't re-run it:
+        # return a guard envelope telling the model to stop retrying that exact
+        # shape and adapt (e.g. re-resolve a SIEM incidentId from sourcedata)
+        # or surface the blocker. Stops the "same 400 twice, no adaptation"
+        # budget burn seen in live triage.
+        failed_signatures: set[str] = set()
+
+        def _call_signature(nm: str, ar: dict[str, Any]) -> str:
+            try:
+                return nm + "|" + json.dumps(ar, sort_keys=True, default=str)
+            except Exception:
+                return nm + "|" + repr(ar)
+
         def _guarded_dispatch(nm: str, ar: dict[str, Any]) -> Any:
             if nm not in allowed_names:
                 return {
@@ -223,7 +311,23 @@ class AnthropicProvider:
                         f"current task intent does not permit it. Not executed."
                     ),
                 }
-            return dispatch(nm, ar)
+            sig = _call_signature(nm, ar)
+            if sig in failed_signatures:
+                return {
+                    "ok": False,
+                    "repeated_call_guard": True,
+                    "error": (
+                        f"This exact call to `{nm}` already failed earlier this "
+                        f"turn and was NOT re-run. Do not retry the identical "
+                        f"arguments — change the inputs (e.g. resolve the "
+                        f"correct id from the record's sourcedata) or stop and "
+                        f"report the blocker in your assessment."
+                    ),
+                }
+            result = dispatch(nm, ar)
+            if _is_error_result(result):
+                failed_signatures.add(sig)
+            return result
 
         # Prompt caching: mark the last tool with `cache_control` so the
         # entire (system + tools) prefix is cached for 5 min. Cached reads
@@ -405,6 +509,37 @@ class AnthropicProvider:
                                 tool_calls=tool_call_usage, tags=tags,
                             )
                             continue
+                # P1 — forced-assessment guarantee. The turn ran tools but
+                # the final assistant block has no text (only tool_use /
+                # emitted cards). Emit the usage for the round we paid for,
+                # then force ONE no-tools round so the analyst gets a written
+                # close instead of silence. Capped via `assessment_forced`.
+                final_text = "".join(
+                    b.get("text", "") for b in assistant_blocks
+                    if b.get("type") == "text"
+                ).strip()
+                if not final_text and any_tools_run and not assessment_forced:
+                    assessment_forced = True
+                    yield UsageEvent(
+                        session_id=session_id, turn=turn_idx, model=self.model,
+                        input_tokens=input_tok, output_tokens=output_tok,
+                        cache_read=cache_hit, cache_write=cache_write,
+                        history_chars=history_chars,
+                        stop_reason="assessment_forced",
+                        self_repair_turn=self_repair_turns,
+                        tool_calls=tool_call_usage, tags=tags,
+                    )
+                    turn_idx += 1
+                    async for ev in self._wrapup_call(
+                        history=history, directive=_ASSESSMENT_DIRECTIVE,
+                        cached_system=cached_system, session_id=session_id,
+                        turn_idx=turn_idx, tags=tags,
+                        self_repair_turns=self_repair_turns,
+                        stop_reason_label="assessment_summary",
+                    ):
+                        yield ev
+                    yield DoneEvent(stop_reason=final.stop_reason or "end_turn")
+                    return
                 yield UsageEvent(
                     session_id=session_id, turn=turn_idx, model=self.model,
                     input_tokens=input_tok, output_tokens=output_tok,
@@ -556,6 +691,7 @@ class AnthropicProvider:
                 return
 
             history.append(Message(role="user", content=tool_result_blocks))
+            any_tools_run = True
             yield UsageEvent(
                 session_id=session_id, turn=turn_idx, model=self.model,
                 input_tokens=input_tok, output_tokens=output_tok,
@@ -570,9 +706,10 @@ class AnthropicProvider:
         # the chat just goes silent — the user can't tell whether the
         # agent finished or got cut off. Force one more no-tools round
         # so the model can summarize where it landed and what's left.
-        history.append(Message(
-            role="user",
-            content=(
+        turn_idx += 1
+        async for ev in self._wrapup_call(
+            history=history,
+            directive=(
                 f"You've used the full tool-turn budget "
                 f"({MAX_TOOL_TURNS} rounds) without finishing. Stop "
                 f"calling tools. In 2-4 sentences, tell the user: "
@@ -581,45 +718,12 @@ class AnthropicProvider:
                 f"(3) one concrete next step they can take. Do not "
                 f"re-emit the YAML."
             ),
-        ))
-        turn_idx += 1
-        try:
-            history_chars = len(json.dumps(
-                _to_anthropic_messages(history), default=str
-            ))
-        except Exception:
-            history_chars = 0
-        try:
-            async with self._client.messages.stream(
-                model=self.model,
-                max_tokens=512,
-                system=cached_system,
-                messages=_to_anthropic_messages(history),
-            ) as stream:
-                async for event in stream:
-                    if event.type == "content_block_delta" and getattr(
-                        event.delta, "type", None
-                    ) == "text_delta":
-                        yield TextEvent(text=event.delta.text)
-                final = await stream.get_final_message()
-            usage = getattr(final, "usage", None)
-            yield UsageEvent(
-                session_id=session_id, turn=turn_idx, model=self.model,
-                input_tokens=getattr(usage, "input_tokens", 0) or 0 if usage else 0,
-                output_tokens=getattr(usage, "output_tokens", 0) or 0 if usage else 0,
-                cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0 if usage else 0,
-                cache_write=getattr(usage, "cache_creation_input_tokens", 0) or 0 if usage else 0,
-                history_chars=history_chars,
-                stop_reason="max_tool_turns_summary",
-                self_repair_turn=self_repair_turns,
-                tool_calls=[], tags=tags,
-            )
-        except Exception:
-            # If the wrap-up call fails, fall through to DoneEvent —
-            # the user still gets *something* (the prior assistant
-            # text from turn N-1).
-            import logging
-            logging.exception("max-tool-turns summary call failed")
+            cached_system=cached_system, session_id=session_id,
+            turn_idx=turn_idx, tags=tags,
+            self_repair_turns=self_repair_turns,
+            stop_reason_label="max_tool_turns_summary",
+        ):
+            yield ev
         yield DoneEvent(stop_reason="max_tool_turns")
 
 

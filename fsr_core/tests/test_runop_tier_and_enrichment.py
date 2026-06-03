@@ -57,6 +57,32 @@ def test_unknown_connector_stays_conservative():
         {"connector": "totally-unknown-conn-xyz", "op": "foo"}) == 3
 
 
+# --- Fix #3: probe-flagged unsafe ops win over the catch-all category -------
+#
+# FortiEDR's host-containment ops (`isolate_collector`, `set_collector_state`)
+# carry the catalog category `investigation` but are flagged `unsafe` in
+# op_safety. The category-first ordering used to downgrade them to tier 2
+# (auto-allow, no approval card) and they were dropped from
+# find_containment_actions' tier>=3 guard — so "isolate this host" would run
+# ungated. An `unsafe` safety verdict must escalate to tier 4 regardless of a
+# catch-all category.
+
+
+@requires_db
+def test_unsafe_op_with_investigation_category_escalates_to_tier_4():
+    # isolate_collector: op_safety='unsafe', operations.category='investigation'.
+    assert _tier_for_run_op(
+        {"connector": "fortinet-fortiedr", "op": "isolate_collector"}) == 4
+
+
+@requires_db
+def test_safe_fortiedr_reads_stay_auto_allowed():
+    # Read ops on the same connector must NOT be swept up by the fix.
+    for op in ("search_ioc", "get_collector_list", "get_event_list"):
+        assert _tier_for_run_op(
+            {"connector": "fortinet-fortiedr", "op": op}) <= 2
+
+
 # --- Fix #2: enrichment-op classifier (target = indicator type string) ------
 
 

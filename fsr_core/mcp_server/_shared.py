@@ -238,6 +238,40 @@ def _is_jinja(val: Any) -> bool:
     return isinstance(val, str) and "{{" in val and "}}" in val
 
 
+def _auto_remap_params(params: dict[str, Any] | None,
+                       issues: Any) -> dict[str, Any] | None:
+    """Recover from a single semantic-alias param miss without a round-trip.
+
+    When a call had EXACTLY ONE unknown param and the op has EXACTLY ONE
+    missing-required param, the unknown was almost certainly meant for that
+    required slot — a semantic alias `difflib` can't catch by spelling
+    (`ip`→`value`, `host`→`hostName`, `srcIP`→`source_ip_value`). These are the
+    misses that wasted ~8 run_op calls in export sess-vtd15c5v. Return
+    `{params, from, to}` with the corrected params, or None when it's not the
+    unambiguous 1↔1 case.
+
+    Conservative on purpose: only 1-unknown ↔ 1-missing, and only when the
+    unknown's value is a scalar (never shove a nested object into a scalar slot).
+    The caller MUST re-validate the returned params before trusting the remap."""
+    if not isinstance(issues, list):
+        return None
+    unknown = [i for i in issues
+               if isinstance(i, dict) and i.get("problem") == "unknown"]
+    missing = [i for i in issues
+               if isinstance(i, dict) and i.get("problem") == "missing_required"]
+    if len(unknown) != 1 or len(missing) != 1:
+        return None
+    uk, req = unknown[0].get("param"), missing[0].get("param")
+    if not uk or not req:
+        return None
+    val = (params or {}).get(uk)
+    if not isinstance(val, (str, int, float)) or isinstance(val, bool):
+        return None
+    fixed = {k: v for k, v in (params or {}).items() if k != uk}
+    fixed[req] = val
+    return {"params": fixed, "from": uk, "to": req}
+
+
 def _validate_op_params(connector: str, op: str,
                         params: dict[str, Any] | None) -> dict[str, Any] | None:
     """Validate `params` against the operation's parameter schema.
@@ -493,7 +527,22 @@ def _infer_shape(value: Any, _depth: int = 0) -> Any:
             return []
         return [_infer_shape(value[0], _depth + 1)]
     if isinstance(value, dict):
-        return {k: _infer_shape(v, _depth + 1) for k, v in value.items()}
+        shaped = {k: _infer_shape(v, _depth + 1) for k, v in value.items()}
+        # Collapse a large homogeneous map (e.g. VirusTotal query_ip's
+        # last_analysis_results: ~90 AV engines, EVERY value shaped
+        # {method,engine_name,category,result}). Echoing all 90 keys bloated the
+        # run_op tool result by tens of KB with zero added signal — the agent
+        # only needs the per-entry shape and the count, not the vendor roster.
+        # Keep one representative entry + a count sentinel.
+        if len(shaped) > 12:
+            vals = list(shaped.values())
+            first = json.dumps(vals[0], sort_keys=True)
+            if all(json.dumps(v, sort_keys=True) == first for v in vals[1:]):
+                sample_key = next(iter(shaped))
+                return {sample_key: shaped[sample_key],
+                        "__repeated__": {"keys": len(shaped),
+                                         "all_same_shape": True}}
+        return shaped
     return type(value).__name__
 
 

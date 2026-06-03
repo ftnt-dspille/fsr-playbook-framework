@@ -34,7 +34,7 @@ from ..agent.skill_trace import SkillCall, SkillTrace
 _MIN_STR_LEN = 4
 
 # Params that are never wired (they identify the step, not its data).
-_SKIP_PARAMS = frozenset({"connector", "operation"})
+_SKIP_PARAMS = frozenset({"connector", "operation", "config"})
 
 
 def _jkey(step_name: str) -> str:
@@ -118,6 +118,98 @@ def wire_inputs(
         if not matched:
             unwired.append(param)
     return wired, unwired
+
+
+# Step name of the synthetic input-staging step that reads the trigger record.
+_SET_INPUTS_STEP = "Set Inputs"
+
+
+def _step_param_container(step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The dict that holds a step's wirable params: `arguments` for connector
+    steps, `vars` for set_variable. Returns None for step types with no
+    param map to rewrite."""
+    if step.get("type") == "connector":
+        return step.get("arguments")
+    if step.get("type") == "set_variable":
+        return step.get("vars")
+    return None
+
+
+def _safe_var_name(param: str, used: set) -> str:
+    """A jinja-safe, unique set_variable key derived from a param name."""
+    base = "".join(c if (c.isalnum() or c == "_") else "_" for c in param) or "input"
+    if base[0].isdigit():
+        base = "v_" + base
+    name, i = base, 2
+    while name in used:
+        name = f"{base}_{i}"
+        i += 1
+    used.add(name)
+    return name
+
+
+def wire_record_inputs(
+    steps: List[Dict[str, Any]],
+    gaps: Dict[str, List[str]],
+    record_fields: Optional[Dict[str, Any]],
+    first_step: Optional[str],
+) -> Tuple[Dict[str, str], List[str], Optional[str]]:
+    """Parameterize one-off triage IOCs to the trigger record.
+
+    For every gap param (a value with no earlier producer that would
+    otherwise bake in as a literal), value-match its literal against the
+    triaged record's `record_fields`. On a hit at field path ``<suffix>``,
+    stage it on a synthetic ``Set Inputs`` ``set_variable`` step as
+    ``{{ vars.input.records[0]<suffix> }}`` and rewrite the consuming step's
+    param to ``{{ vars.steps.Set_Inputs.<var> }}``. The same literal reuses
+    one staged var (so two steps enriching the same IOC share it).
+
+    Caller guarantees a per-record (module-bound) trigger so
+    ``vars.input.records[0]`` resolves at runtime. Returns
+    ``(record_vars, steps, first_step)`` — ``steps`` gains the Set Inputs
+    step at the front and ``first_step`` becomes ``"Set Inputs"`` when any
+    IOC was parameterized; otherwise all three are returned unchanged.
+    Mutates `gaps` in place (matched params are removed)."""
+    if not record_fields:
+        return {}, steps, first_step
+    by_name = {s.get("name"): s for s in steps}
+    record_vars: Dict[str, str] = {}
+    used_vars: set = set()
+    val_to_var: Dict[Any, str] = {}
+
+    for sname, params in list(gaps.items()):
+        step = by_name.get(sname)
+        container = _step_param_container(step) if step else None
+        if container is None:
+            continue
+        remaining: List[str] = []
+        for param in params:
+            literal = container.get(param)
+            suffix = (_find_value_path(record_fields, literal)
+                      if _is_wirable_value(literal) else None)
+            if suffix is None:
+                remaining.append(param)
+                continue
+            key = (type(literal), literal)
+            var = val_to_var.get(key)
+            if var is None:
+                var = _safe_var_name(param, used_vars)
+                val_to_var[key] = var
+                record_vars[var] = "{{ vars.input.records[0]" + suffix + " }}"
+            container[param] = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) \
+                + "." + var + " }}"
+        if remaining:
+            gaps[sname] = remaining
+        else:
+            del gaps[sname]
+
+    if not record_vars:
+        return {}, steps, first_step
+    set_inputs = {"type": "set_variable", "name": _SET_INPUTS_STEP,
+                  "vars": record_vars}
+    if first_step:
+        set_inputs["next"] = first_step
+    return record_vars, [set_inputs] + steps, _SET_INPUTS_STEP
 
 
 def compile_trace(
