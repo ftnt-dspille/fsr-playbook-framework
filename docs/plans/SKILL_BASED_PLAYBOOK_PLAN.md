@@ -262,8 +262,14 @@ fallback still renders when the new fields are absent.
   MCP tool (reads the active session trace; flag-gated, build-only) + `assemble_playbook`/`to_yaml`;
   `wiring_resolves` eval dimension (`evals.scoring`). Connector enablement: `session_trace` storage +
   `_session_trace_scope` installed across chat_turn / resume / suspended-resume / approved-execute;
-  build prompt steers to the trace compiler first. **Remaining for the default-flip:** run the parity
-  eval campaign (wiring_resolves vs hand-author baseline) before removing the hand-author fallback.
+  build prompt steers to the trace compiler first. **Default-flip — deterministic half DONE
+  (2026-06-05, `927a43e`):** `python/evals/parity_report.py` builds each sim-replayed trace fixture
+  into a playbook and verifies it on the SAME `verify_playbook.ready_to_push` bar a hand-author
+  playbook is judged on — 2/2 ready_to_push, 0 static errors, 0 repaired, all wires verified; 7/7
+  hand-authored gold examples also ready_to_push (parity, no regression). Baseline snapshot in
+  `store/eval_runs/parity_*.md`; CI gate `python/tests/test_parity_report.py`. **Remaining (live
+  half):** measure the rate at which the MODEL hand-authoring the same scenarios fails ready_to_push
+  (the failure the fallback catches) via `harness.run(live=True)`, then remove the hand-author fallback.
 - **Phase 6 (medium) — contract + connector ◑ DONE; widget rendering TODO (out-of-repo):**
   Decision: surfacing model **(B) offer card** (not the manual Build-action handoff) — accept rides
   the existing `chat_resume` path on the SAME `session_id`, so the trace-handoff (#1 linchpin) is
