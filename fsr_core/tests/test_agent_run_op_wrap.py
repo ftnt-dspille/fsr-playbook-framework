@@ -111,6 +111,61 @@ def test_agent_wrap_success_returns_step_data():
                for m, u in client.session.calls)
 
 
+class _ConfiguredSession:
+    """Stubs the `configured=true` connector_details POST only."""
+    def __init__(self, configured_payload):
+        self._payload = configured_payload
+
+    def post(self, url, json=None, verify=None):
+        return _Resp(200, {"data": self._payload})
+
+
+class _ConfiguredClient:
+    base_url = "http://fsr.test"
+    verify_ssl = False
+
+    def __init__(self, configured_payload):
+        self.session = _ConfiguredSession(configured_payload)
+
+
+def test_configured_rows_merges_agent_config_for_dual_install(monkeypatch):
+    """A connector installed BOTH locally and on an agent must keep its
+    agent-only config resolvable — regression for code-snippet, whose agent
+    config `test` was dropped by the name-dedup so run_op never wrapped it
+    (returned the empty in-progress stub instead). See
+    fsr_agent_proxied_execute_async.md."""
+    # Local install: only the "System" config (default), no agent id.
+    local_row = {
+        "name": "code-snippet", "config_count": 1, "status": "Completed",
+        "configuration": [
+            {"id": 45, "config_id": "a54ad23a-local", "name": "System",
+             "default": True},
+        ],
+    }
+    # Agent install of the SAME connector: the "test" config lives only here.
+    agent_row = {
+        "name": "code-snippet", "config_count": 1, "status": "Completed",
+        "_agent_id": "agent-xyz",
+        "configuration": [
+            {"id": 156, "config_id": "af8622ab-agent", "name": "test",
+             "default": False},
+        ],
+    }
+    monkeypatch.setattr(te, "_agent_configured_rows", lambda client: [agent_row])
+    te._CONFIGURED_CACHE["rows"] = None  # bypass any cached set
+
+    rows = te._configured_rows(_ConfiguredClient([local_row]), force=True)
+    cs = next(r for r in rows if r["name"] == "code-snippet")
+    names = {c["name"] for c in cs["configuration"]}
+    assert names == {"System", "test"}, cs["configuration"]
+    assert cs.get("_agent_id") == "agent-xyz"
+    # The agent-only config name now resolves to its UUID (the thing the
+    # dispatch checks against _agent_config_ids).
+    assert te._resolve_config_id(rows, "code-snippet", "test") == "af8622ab-agent"
+    assert te._resolve_config_id(rows, "code-snippet", "System") == "a54ad23a-local"
+    te._CONFIGURED_CACHE["rows"] = None  # don't leak the stub into other tests
+
+
 def test_agent_wrap_connector_error_surfaces_as_failure():
     # The connector op itself failed inside the playbook (not the Boom step).
     run_step = {

@@ -234,8 +234,30 @@ def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
     if getattr(r, "status_code", 200) != 200:
         return _CONFIGURED_CACHE["rows"] or []
     rows = list(r.json().get("data") or [])
-    already = {x.get("name") for x in rows}
-    rows += [x for x in _agent_configured_rows(client) if x.get("name") not in already]
+    by_name = {x.get("name"): x for x in rows}
+    for ar in _agent_configured_rows(client):
+        name = ar.get("name")
+        existing = by_name.get(name)
+        if existing is None:
+            rows.append(ar)
+            by_name[name] = ar
+            continue
+        # Same connector installed BOTH locally and on an agent. Don't drop the
+        # agent row — its agent-only configs would become invisible to
+        # _resolve_config_id, so run_op couldn't map an agent config NAME to its
+        # UUID and would skip the agent force-fail wrap (returning the empty
+        # in-progress stub). Merge the agent's configuration entries + agent id
+        # into the existing row so agent configs stay resolvable.
+        merged = list(existing.get("configuration") or [])
+        seen = {(c.get("config_id") or c.get("id"))
+                for c in merged if isinstance(c, dict)}
+        for c in (ar.get("configuration") or []):
+            cid = (c.get("config_id") or c.get("id")) if isinstance(c, dict) else c
+            if cid not in seen:
+                merged.append(c)
+                seen.add(cid)
+        existing["configuration"] = merged
+        existing.setdefault("_agent_id", ar.get("_agent_id"))
     _CONFIGURED_CACHE["rows"] = rows
     _CONFIGURED_CACHE["ts"] = time.time()
     return rows
@@ -1194,7 +1216,8 @@ def _agent_config_ids(client) -> set[str]:
 def _run_op_via_agent_playbook(connector: str, op: str,
                                params: dict[str, Any], config_id: str,
                                version: str, agent_id: str,
-                               client, timeout_s: int = 120) -> dict[str, Any]:
+                               client, timeout_s: int = 120,
+                               step_name: str = "") -> dict[str, Any]:
     """Execute an agent-bound op ONCE via a force-fail playbook and return its
     real result. Builds [connector op] -> [set_variable boom={{ 1/0 }}],
     pushes the UNWRAPPED collection, triggers it, polls to the (expected)
@@ -1662,7 +1685,8 @@ def run_op(
         except Exception:  # noqa: BLE001
             agent_id = ""
         return _run_op_via_agent_playbook(
-            connector, op, params or {}, exec_config, version, agent_id, client)
+            connector, op, params or {}, exec_config, version, agent_id, client,
+            step_name=step_name)
 
     body = {
         "connector": connector,
