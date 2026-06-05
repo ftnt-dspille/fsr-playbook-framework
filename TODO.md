@@ -48,9 +48,39 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 - [`Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md`](../Miscellaneous/FSR_PLAYBOOK_YAML_PLAN.md) — original cross-project plan; referenced from global `~/.claude/CLAUDE.md`.
 
-## Next steps (resume state, 2026-06-01)
+## Next steps (resume state, 2026-06-05)
 
-### ★ Outstanding after the live-proof session (2026-06-01 PM) — RESUME HERE
+### ★ RESUME HERE — agent-runop fully fixed & shipped (0.3.115 live)
+Deployed **0.3.115** to FortiCloud (all workers verified). Commits: fsr_core
+`fe6bba6` (self-healing siem_events_for_incident), `d80c7e0` (agent-runop
+dual-install fix + step_name); connector `7f974f2` (0.3.110), `1381072` (0.3.115).
+
+**Agent-runop wrap: DONE & live-proven.** Root cause of the code-snippet miss
+found + fixed: a connector installed BOTH locally and on an agent lost its agent
+configs in `_configured_rows` (name-dedup dropped the agent row) → config name
+never resolved to UUID → wrap skipped. Now agent configs are merged in.
+code-snippet wraps **4/4** (was 0/8). Also fixed a latent `step_name` NameError
+in the wrap's trace recorder. Full diagnosis: memory `fsr-agent-proxied-execute-async`.
+
+**Only remaining gap is ENVIRONMENTAL:** the `lab-collector` agent (efe5dafd…)
+returns `status:failed`/empty for EVERY op (fortigate AND code-snippet, 3 snippet
+shapes) — its execution runtime is dead. A DATA-green agent run_op needs a
+working agent connector (none on this box). The wrap now surfaces that truthful
+failure instead of the silent empty stub.
+
+**Full pipeline run-green PROVEN on a non-agent connector** (2026-06-05, connector
+`a1daa68`): new harness check `chk_nonagent_playbook_runs` compiles a linear
+VirusTotal `query_ip` playbook → `dry_run_playbook` with a real `ip` input + real
+connector call → **status=finished in 3s**. Sidesteps the dead agent that keeps
+the chat-driven `offer_playbook_runs` red (that one picks fortigate). GOTCHA:
+`use_mock_output` does NOT suppress the connector call — a real run needs
+`inputs={ip:...}` or the required param is blank and the step fails.
+
+NEXT (parity eval, was blocked on coherent traces): these VT run-traces are exactly
+the fixtures the default-flip parity eval needs — fold them in. See option #2 in
+the "what's next" set.
+
+### ★ Outstanding after the live-proof session (2026-06-01 PM)
 
 **Done this session (proven):** Full triage→playbook pipeline GREEN 5/5 live on
 **10.99.249.205** (connector 0.3.78, Haiku, config `fsrpb-live`): triage → action_card
