@@ -267,9 +267,14 @@ fallback still renders when the new fields are absent.
   into a playbook and verifies it on the SAME `verify_playbook.ready_to_push` bar a hand-author
   playbook is judged on — 2/2 ready_to_push, 0 static errors, 0 repaired, all wires verified; 7/7
   hand-authored gold examples also ready_to_push (parity, no regression). Baseline snapshot in
-  `store/eval_runs/parity_*.md`; CI gate `python/tests/test_parity_report.py`. **Remaining (live
-  half):** measure the rate at which the MODEL hand-authoring the same scenarios fails ready_to_push
-  (the failure the fallback catches) via `harness.run(live=True)`, then remove the hand-author fallback.
+  `store/eval_runs/parity_*.md`; CI gate `python/tests/test_parity_report.py`. **Live half DONE
+  (2026-06-05, `08fd08e`):** sampled the hand-author baseline — 4 connector-authoring tasks through
+  the agentic build loop (sonnet-4-6). FINDING (nuanced): all 4 ALSO reach `ready_to_push`, but only
+  via an agentic verify→repair loop (35 tool calls, ~22.5k output tokens across the sample). So the
+  default-flip case is **cost + determinism, not a correctness gap**: the trace path reaches the same
+  bar in 0 LLM turns / 0 tool calls / 0 verify-repair iterations, deterministically. ⇒ **trace-first,
+  keep the hand-author loop as the fallback for sessions with no usable trace** (don't fully remove
+  it). Artifact `store/eval_runs/live_handauthor_*.json`; combined report `parity_*.md`.
 - **Phase 6 (medium) — contract + connector ◑ DONE; widget rendering TODO (out-of-repo):**
   Decision: surfacing model **(B) offer card** (not the manual Build-action handoff) — accept rides
   the existing `chat_resume` path on the SAME `session_id`, so the trace-handoff (#1 linchpin) is
