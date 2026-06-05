@@ -86,6 +86,27 @@ def test_whole_value_match_preferred_over_embedded():
     assert out["steps"][1]["arguments"]["cidr"] == "{{ vars.steps.First.net }}"
 
 
+def test_record_field_parameterizes_embedded_ioc():
+    """A hunt's first op embeds the alert's IOC in a query string with no prior
+    producer; it should parameterize to the trigger record (re-runnable), not
+    bake the IOC in as a literal."""
+    steps = [{"type": "connector", "name": "Search Events",
+              "arguments": {"connector": "fortinet-fortisiem",
+                            "operation": "search_events",
+                            "attribute": "srcIpAddr = 185.220.101.47"}}]
+    gaps = {"Search Events": ["attribute"]}
+    record_vars, new_steps, first = sc.wire_record_inputs(
+        steps, gaps, {"sourceIp": "185.220.101.47"}, "Search Events")
+    # A Set Inputs step is prepended and the trigger now points at it.
+    assert first == "Set Inputs"
+    assert new_steps[0]["name"] == "Set Inputs"
+    (var, ref), = record_vars.items()
+    assert ref == "{{ vars.input.records[0].sourceIp }}"
+    attr = steps[0]["arguments"]["attribute"]
+    assert attr == "srcIpAddr = {{ vars.steps.Set_Inputs." + var + " }}", attr
+    assert gaps == {}  # the param was resolved, not left a gap
+
+
 def test_trivial_values_are_not_wired():
     t = SkillTrace()
     t.record_run_op("c", "first", {"x": "seed_value"}, {"port": 443, "ok": True})

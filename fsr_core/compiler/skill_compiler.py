@@ -121,26 +121,34 @@ def _embeddable_scalars(output: Any) -> List[Tuple[str, str]]:
     return found
 
 
+def _embedded_span(value: str, scalar: str) -> Optional[Tuple[int, int]]:
+    """`(start, end)` of `scalar` as a bounded token inside `value`, or None.
+    The token must be flanked by non-alphanumeric chars so we never wire a
+    partial IOC (`1.2.3.4` inside `1.2.3.40`). `scalar == value` (a whole-value
+    match, handled elsewhere) returns None."""
+    if scalar == value:
+        return None
+    idx = value.find(scalar)
+    if idx < 0:
+        return None
+    end = idx + len(scalar)
+    before = value[idx - 1] if idx > 0 else ""
+    after = value[end] if end < len(value) else ""
+    if before.isalnum() or after.isalnum():
+        return None
+    return idx, end
+
+
 def _embedded_substitution(value: str, prior: List["SkillCall"]) -> Optional[str]:
     """If a distinctive prior-output scalar appears as a bounded token INSIDE the
     string `value` (e.g. the IP in `srcIpAddr = 1.2.3.4`), return `value` with
     that occurrence replaced by a `{{ vars.steps... }}` ref so the param is
-    re-runnable, else None. Whole-value matches are handled by the caller. The
-    token must be flanked by non-alphanumeric chars so we never wire a partial
-    IOC (`1.2.3.4` inside `1.2.3.40`)."""
+    re-runnable, else None. Whole-value matches are handled by the caller."""
     for src in reversed(prior):           # closest producer wins
         for scalar, path in _embeddable_scalars(src.observed_output):
-            if scalar == value:
-                continue                  # whole-value match — not our job
-            idx = value.find(scalar)
-            if idx < 0:
-                continue
-            end = idx + len(scalar)
-            before = value[idx - 1] if idx > 0 else ""
-            after = value[end] if end < len(value) else ""
-            if before.isalnum() or after.isalnum():
-                continue                  # not a clean token boundary
-            return value[:idx] + _ref_for(src, path) + value[end:]
+            span = _embedded_span(value, scalar)
+            if span is not None:
+                return value[:span[0]] + _ref_for(src, path) + value[span[1]:]
     return None
 
 
@@ -255,17 +263,30 @@ def wire_record_inputs(
             literal = container.get(param)
             suffix = (_find_value_path(record_fields, literal)
                       if _is_wirable_value(literal) else None)
+            # Embedded fallback: an IOC-shaped record-field value sitting INSIDE
+            # a query string (`srcIpAddr = <alert_ip>`) parameterizes too, so a
+            # trace-built hunt re-runs on the triggering record's IOC.
+            embed_span = None
+            if suffix is None and isinstance(literal, str):
+                for fval, fsuffix in _embeddable_scalars(record_fields):
+                    embed_span = _embedded_span(literal, fval)
+                    if embed_span is not None:
+                        suffix = fsuffix
+                        break
             if suffix is None:
                 remaining.append(param)
                 continue
-            key = (type(literal), literal)
+            key = (type(literal), literal, suffix)
             var = val_to_var.get(key)
             if var is None:
                 var = _safe_var_name(param, used_vars)
                 val_to_var[key] = var
                 record_vars[var] = "{{ vars.input.records[0]" + suffix + " }}"
-            container[param] = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) \
-                + "." + var + " }}"
+            staged = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) + "." + var + " }}"
+            if embed_span is not None:
+                container[param] = literal[:embed_span[0]] + staged + literal[embed_span[1]:]
+            else:
+                container[param] = staged
         if remaining:
             gaps[sname] = remaining
         else:
