@@ -328,6 +328,128 @@ def wire_record_inputs(
     return record_vars, [set_inputs] + steps, _SET_INPUTS_STEP
 
 
+# Containment ops gate destructive change behind a malicious verdict.
+_CONTAINMENT_OP_HINTS = ("block_", "isolate_", "quarantine", "disable_",
+                         "deny_", "contain", "ban_", "remediat")
+# Output fields that signal "this indicator is malicious".
+_VERDICT_BOOL_FIELDS = frozenset({
+    "knownmalicious", "ismalicious", "is_malicious", "malicious",
+    "blacklisted", "isblacklisted", "is_blacklisted"})
+
+
+def _is_containment_op(op: Optional[str]) -> bool:
+    op = (op or "").lower()
+    return any(h in op for h in _CONTAINMENT_OP_HINTS)
+
+
+def _find_verdict(output: Any) -> Optional[Tuple[str, str]]:
+    """`(jinja_suffix, kind)` for a malicious-verdict signal in `output`, or None.
+    `kind` is 'bool' (a True flag like `knownMalicious`) or 'count' (a `malicious`
+    integer > 0, e.g. VT's `last_analysis_stats.malicious`). Conservative: only
+    recognized fields count, so an unrecognized output yields no guess."""
+    def _walk(node: Any, path: str) -> Optional[Tuple[str, str]]:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if not isinstance(k, str):
+                    continue
+                kl, sub = k.lower(), path + _key_access(k)
+                if isinstance(v, bool):
+                    if v and kl in _VERDICT_BOOL_FIELDS:
+                        return sub, "bool"
+                elif isinstance(v, int):          # bool already handled above
+                    if kl == "malicious" and v > 0:
+                        return sub, "count"
+                else:
+                    r = _walk(v, sub)
+                    if r is not None:
+                        return r
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                r = _walk(v, f"{path}[{i}]")
+                if r is not None:
+                    return r
+        return None
+
+    return _walk(output, "")
+
+
+def insert_containment_guard(
+    compiled: Dict[str, Any], trace: SkillTrace
+) -> Dict[str, Any]:
+    """Gate a containment op behind a malicious-verdict decision.
+
+    A trace that enriches an IOC then contains it compiles to an UNCONDITIONAL
+    linear chain — re-running it would contain even when the enrichment comes
+    back clean (blocking a benign IP). When a recognized verdict signal exists in
+    an enrichment step BEFORE the first containment op, synthesize:
+
+      … enrich … → [set_variable: Assess Verdict] → [decision: Confirmed Malicious]
+                       ├─ malicious → containment → (its original next)
+                       └─ default   → skip (continue past containment)
+
+    Safe-by-default: the default branch SKIPS containment, so a wrong/absent
+    verdict never over-contains. No recognized signal → returns `compiled`
+    unchanged (no guess). Mutates and returns `compiled`."""
+    steps: List[Dict[str, Any]] = compiled.get("steps", [])
+    by_name = {c.step_name: c for c in trace.calls}
+
+    ci = next((i for i, s in enumerate(steps)
+               if s.get("type") == "connector"
+               and _is_containment_op((s.get("arguments") or {}).get("operation"))),
+              None)
+    if ci is None:
+        return compiled
+    cont = steps[ci]
+
+    verdict: Optional[Tuple[str, str]] = None
+    enrich: Optional["SkillCall"] = None
+    for s in reversed(steps[:ci]):            # closest enrichment first
+        if s.get("type") != "connector":
+            continue
+        call = by_name.get(s.get("name"))
+        if call is None:
+            continue
+        v = _find_verdict(call.observed_output)
+        if v is not None:
+            verdict, enrich = v, call
+            break
+    if verdict is None or enrich is None:
+        return compiled
+
+    suffix, kind = verdict
+    sv_name, dec_name, var = "Assess Verdict", "Confirmed Malicious", "malicious_verdict"
+    var_ref = f"vars.steps.{_jkey(sv_name)}.{var}"
+    when = ("{{ " + var_ref + " }}" if kind == "bool"
+            else "{{ (" + var_ref + " | int) > 0 }}")
+
+    cont_name = cont["name"]
+    false_target = cont.get("next")
+    extra: List[Dict[str, Any]] = []
+    if not false_target:                      # nothing after containment → skip marker
+        skip_name = "Containment Skipped"
+        extra.append({"type": "set_variable", "name": skip_name,
+                      "vars": {"containment_skipped": True}})
+        false_target = skip_name
+
+    sv = {"type": "set_variable", "name": sv_name,
+          "vars": {var: _ref_for(enrich, suffix)}, "next": dec_name}
+    dec = {"type": "decision", "name": dec_name,
+           "conditions": [{"display": "malicious", "when": when, "next": cont_name}],
+           "default": false_target}
+
+    # Rewire whatever pointed at the containment step to enter the guard instead.
+    if compiled.get("first_step") == cont_name:
+        compiled["first_step"] = sv_name
+    for s in steps:
+        if s.get("next") == cont_name:
+            s["next"] = sv_name
+
+    steps[ci:ci] = [sv, dec]                  # guard sits just before containment
+    steps.extend(extra)
+    compiled["steps"] = steps
+    return compiled
+
+
 def compile_trace(
     trace: SkillTrace, *, start_step: str = "Start"
 ) -> Dict[str, Any]:

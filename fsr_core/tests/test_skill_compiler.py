@@ -123,6 +123,62 @@ def test_record_field_parameterizes_embedded_ioc():
     assert gaps == {}  # the param was resolved, not left a gap
 
 
+def _enrich_then_contain(count=14, verdict_bool=None, contain_op="block_ip_new"):
+    t = SkillTrace()
+    out = {"attributes": {"last_analysis_stats": {"malicious": count}}}
+    if verdict_bool is not None:
+        out = {"knownMalicious": verdict_bool}
+    t.record_run_op("virustotal", "query_ip", {"ip": "9.9.9.9"}, out, ref_prefix="data")
+    t.record_run_op("fortigate-firewall", contain_op,
+                    {"ip_addresses": "9.9.9.9"}, {"status": "ok"})
+    return t
+
+
+def test_containment_guard_inserts_decision_and_set_variable():
+    """enrich(malicious count) → block compiles to a guarded branch: a
+    set_variable extracts the verdict and a decision only blocks when malicious."""
+    c = sc.compile_trace(_enrich_then_contain(count=14))
+    sc.insert_containment_guard(c, _enrich_then_contain(count=14))
+    by_type = [(s["type"], s["name"]) for s in c["steps"]]
+    assert ("set_variable", "Assess Verdict") in by_type
+    assert ("decision", "Confirmed Malicious") in by_type
+    dec = next(s for s in c["steps"] if s["type"] == "decision")
+    assert dec["conditions"][0]["next"] == "Block Ip New"      # true → contain
+    assert dec["default"] == "Containment Skipped"             # false → skip
+    assert "| int) > 0" in dec["conditions"][0]["when"]
+    # the enrichment now flows into the guard, not straight to the block
+    enrich = next(s for s in c["steps"] if s["name"] == "Query Ip")
+    assert enrich["next"] == "Assess Verdict"
+
+
+def test_containment_guard_bool_verdict_uses_truthy_condition():
+    c = sc.compile_trace(_enrich_then_contain(verdict_bool=True, contain_op="isolate_endpoint"))
+    sc.insert_containment_guard(c, _enrich_then_contain(verdict_bool=True, contain_op="isolate_endpoint"))
+    dec = next(s for s in c["steps"] if s["type"] == "decision")
+    assert dec["conditions"][0]["when"] == "{{ vars.steps.Assess_Verdict.malicious_verdict }}"
+
+
+def test_no_guard_without_verdict_signal():
+    """No recognized verdict in the enrichment → leave the chain untouched (no
+    guess), so we never synthesize a meaningless decision."""
+    t = SkillTrace()
+    t.record_run_op("shodan", "host_information", {"ip": "9.9.9.9"},
+                    {"org": "Acme", "ports": [443]}, ref_prefix="")
+    t.record_run_op("fortigate-firewall", "block_ip_new", {"ip_addresses": "9.9.9.9"}, {})
+    c = sc.compile_trace(t)
+    sc.insert_containment_guard(c, t)
+    assert not any(s["type"] == "decision" for s in c["steps"])
+
+
+def test_no_guard_without_containment():
+    t = SkillTrace()
+    t.record_run_op("virustotal", "query_ip", {"ip": "9.9.9.9"},
+                    {"attributes": {"last_analysis_stats": {"malicious": 14}}}, ref_prefix="data")
+    c = sc.compile_trace(t)
+    sc.insert_containment_guard(c, t)
+    assert not any(s["type"] == "decision" for s in c["steps"])
+
+
 def test_trivial_values_are_not_wired():
     t = SkillTrace()
     t.record_run_op("c", "first", {"x": "seed_value"}, {"port": 443, "ok": True})

@@ -623,6 +623,7 @@ def build_playbook_from_trace(
     name: str = "Triage Playbook",
     live: bool = False,
     module: str = "",
+    guard_containment: bool = True,
 ) -> dict[str, Any]:
     """Compile a playbook from the session's typed action trace instead of
     hand-authoring YAML (SKILL_BASED_PLAYBOOK_PLAN §3–5).
@@ -688,6 +689,11 @@ def build_playbook_from_trace(
             render_fn = None  # offline fallback
 
     compiled = sv.compile_and_verify(trace, render_fn=render_fn)
+    # Gate a containment op behind a malicious-verdict decision so a re-run never
+    # blocks a clean indicator (safe-by-default; no-op when no verdict signal is
+    # recognized in the enrichment outputs).
+    if guard_containment:
+        compiled = sc.insert_containment_guard(compiled, trace)
     # Explicit arg overrides; otherwise bind to the module recorded on the
     # trace (the triaged record's module, stamped by the connector). None →
     # bare `start` (a designer-only Referenced trigger).
