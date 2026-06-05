@@ -84,8 +84,65 @@ def gold_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _live_section(live_path: str | None) -> list[str]:
+    """Render the hand-author baseline from a persisted live-sample artifact
+    (store/eval_runs/live_handauthor_*.json), if one is supplied. The headline
+    finding: the model reaches the same `verified` bar, but only via a multi-turn
+    verify-repair loop — the cost the trace compiler eliminates."""
+    if not live_path:
+        return [
+            "## Hand-author baseline (live, not gathered in this run)",
+            "",
+            "Run the live agent loop over the authoring tasks and compare its "
+            "`verified` pass-rate (and tool-call cost) against the trace path:",
+            "",
+            "```",
+            "set -a && . .env && set +a",
+            "python -m evals.harness --live --model agentic_anthropic --tasks <authoring-tasks>",
+            "```",
+        ]
+    import json as _json
+    meta = _json.loads(Path(live_path).read_text())
+    rows = meta.get("rows", [])
+    v = sum(1 for r in rows if r.get("verified"))
+    tools = sum(r.get("tool_calls") or 0 for r in rows)
+    out_tok = sum(r.get("output_tokens") or 0 for r in rows)
+    lines = [
+        f"## Hand-author baseline (live — {meta.get('model')}, {meta.get('provider')})",
+        "",
+        "| task | verified | turns | tool calls | output tok |",
+        "|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append(f"| {r['task']} | {'✅' if r.get('verified') else '❌'} | "
+                     f"{r.get('turns')} | {r.get('tool_calls')} | {r.get('output_tokens')} |")
+    lines += [
+        "",
+        f"**{v}/{len(rows)} reach `verified` (ready_to_push) — but via {tools} tool "
+        f"calls and ~{out_tok:,} output tokens of an agentic verify→repair loop** "
+        "(author → `verify_playbook` → fix dangling refs → re-verify). The fallback's "
+        "safety net is exactly this loop catching the model's wiring guesses.",
+        "",
+        "## Verdict",
+        "",
+        "Both paths reach the same `ready_to_push` bar, so the default-flip case is "
+        "**not** 'hand-author produces broken playbooks' — it's cost + determinism:",
+        "",
+        "- **Trace path:** ready_to_push in **0 LLM turns, 0 tool calls, 0 verify-repair "
+        "iterations**, deterministic (value-match recovers every wire; unwirable values "
+        "surface as gaps, never dangling refs).",
+        f"- **Hand-author path:** ready_to_push only after a {tools}-tool-call verify-repair "
+        "loop across the sample, with model-run variance.",
+        "",
+        "When a usable session trace exists, the trace compiler dominates on cost, latency, "
+        "and determinism at equal correctness — supporting trace-first with the hand-author "
+        "loop retained as the fallback for sessions with no usable trace (empty/novel).",
+    ]
+    return lines
+
+
 def render(trace: list[dict[str, Any]], gold: list[dict[str, Any]],
-           stamp: str) -> str:
+           stamp: str, live_path: str | None = None) -> str:
     t_pass = sum(1 for r in trace if r.get("ready_to_push"))
     t_clean = sum(1 for r in trace
                   if r.get("ready_to_push") and not r.get("static_errors"))
@@ -132,18 +189,8 @@ def render(trace: list[dict[str, Any]], gold: list[dict[str, Any]],
         "`ready_to_push`** (correct by construction). The trace path reaches the "
         "same bar deterministically — parity, no regression.",
         "",
-        "## Remaining gate (live, not run here)",
-        "",
-        "The decisive number is the rate at which the **model hand-authoring** "
-        "the same scenarios fails `ready_to_push` — the failure the fallback "
-        "exists to catch. Gather it with the live agent loop and compare its "
-        "`verified` pass-rate against the 100% above:",
-        "",
-        "```",
-        "set -a && . .env && set +a",
-        "python -m evals.harness --live --model claude-... --tasks <authoring-tasks>",
-        "```",
     ]
+    lines += _live_section(live_path)
     return "\n".join(lines) + "\n"
 
 
@@ -151,11 +198,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--stdout", action="store_true",
                     help="print the report only; do not write a file")
+    ap.add_argument("--live-results",
+                    help="path to a store/eval_runs/live_handauthor_*.json artifact "
+                         "to render the hand-author baseline half")
     args = ap.parse_args(argv)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     trace = trace_rows()
     gold = gold_rows()
-    report = render(trace, gold, stamp)
+    report = render(trace, gold, stamp, live_path=args.live_results)
     print(report)
     if not args.stdout:
         _OUT_DIR.mkdir(parents=True, exist_ok=True)

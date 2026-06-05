@@ -1,0 +1,44 @@
+{
+  "stamp": "20260605T204826Z",
+  "model": "claude-sonnet-4-6",
+  "provider": "agentic_anthropic",
+  "metric": "verified (ready_to_push)",
+  "rows": [
+    {
+      "task": "virustotal_ip",
+      "verified": true,
+      "draft": true,
+      "turns": 6,
+      "tool_calls": 6,
+      "output_tokens": 3267,
+      "input_tokens": 110012
+    },
+    {
+      "task": "manual_input_block_ip",
+      "verified": true,
+      "draft": true,
+      "turns": 9,
+      "tool_calls": 10,
+      "output_tokens": 5578,
+      "input_tokens": 190766
+    },
+    {
+      "task": "soc_phish_block_with_approval",
+      "verified": true,
+      "draft": true,
+      "turns": 10,
+      "tool_calls": 14,
+      "output_tokens": 10386,
+      "input_tokens": 231762
+    },
+    {
+      "task": "soc_http_fallback_no_native_op",
+      "verified": true,
+      "draft": true,
+      "turns": 5,
+      "tool_calls": 5,
+      "output_tokens": 3280,
+      "input_tokens": 92708
+    }
+  ]
+}
