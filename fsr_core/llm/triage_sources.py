@@ -25,7 +25,7 @@ SOURCE_TOOLS: dict[str, dict[str, Any]] = {
         "ip": 'siem_search_ip(ip="{ip}", direction="{direction}")',
         "host": 'siem_search_host(host="{host}")',
         "user": 'siem_search_user(user="{user}")',
-        "incident": 'siem_events_for_incident(incident_id="{incident_id}")',
+        "incident": 'siem_events_for_incident(incident_id="{incident_id}"{source_ip})',
         "raw": "siem_raw_query",
     },
     "fortianalyzer": {
@@ -81,10 +81,19 @@ def _moves_for_source(ts: dict[str, Any], norm: dict[str, Any]) -> list[str]:
     indicators the record actually has."""
     ind = norm.get("indicators", {})
     moves: list[str] = []
-    if "incident" in ts and norm.get("incident_id"):
-        moves.append(ts["incident"].format(incident_id=norm["incident_id"])
-                     + "  — the events that drove this detection")
     ip = _primary_ip(norm)
+    if "incident" in ts and norm.get("incident_id"):
+        # Pass the incident's source IP too: it lets siem_events_for_incident
+        # coerce a stale/seeded id to a live one (or fall back to an IP event
+        # search) instead of dead-ending on "Invalid Incident Id".
+        src = norm.get("source_ip")
+        if not src:
+            internal = [i for i in ind.get("ips", []) if i.get("internal")]
+            src = (internal[0].get("value") if internal else None)
+        src_arg = f', source_ip="{src}"' if src else ""
+        moves.append(ts["incident"].format(incident_id=norm["incident_id"],
+                                           source_ip=src_arg)
+                     + "  — the events that drove this detection")
     if "ip" in ts and ip:
         direction = "dst" if not ip.get("internal") else "any"
         moves.append(ts["ip"].format(ip=ip["value"], direction=direction)

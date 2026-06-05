@@ -97,11 +97,152 @@ def test_search_host_uses_hostname_clause(pubv2):
     assert pubv2.wheres == ['hostName="smithDesktop"']
 
 
-def test_events_for_incident_uses_associated_events_op(captured):
+# A live get_incidents row (subset of the real shape) for incident 10868.
+_INC_ROW = {
+    "incidentId": 10868,
+    "incidentFirstSeen": 1772143815000,
+    "incidentLastSeen": 1772143815000,
+    "incidentSrc": {"srcIpAddr": "10.50.60.70"},
+    "incidentTitle": "Excessive DNS Queries",
+}
+
+_DT_RE = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z"
+
+
+@pytest.fixture
+def incident_box(monkeypatch):
+    """Mock a live box: get_incidents lists _INC_ROW; get_associated_events_new
+    succeeds only when given a timeFrom/timeTo window (mirrors FSM 6.0.0)."""
+    calls = []
+
+    def fake(connector, op, params=None, **kw):
+        params = params or {}
+        calls.append({"op": op, "params": params})
+        if op == "get_incidents":
+            return {"ok": True, "data": [_INC_ROW]}
+        if op == "get_associated_events_new":
+            if not (params.get("timeFrom") and params.get("timeTo")):
+                return {"ok": False, "status": "400",
+                        "message": 'Invalid Incident Id'}
+            return {"ok": True, "data": [_ROW]}
+        raise AssertionError(f"unexpected op {op}")
+
+    monkeypatch.setattr(texec, "run_op", fake)
+    return calls
+
+
+def test_events_for_incident_auto_windows_from_get_incidents(incident_box):
+    import re
     out = siem_events_for_incident("10868")
-    assert captured[0]["op"] == "get_associated_events_new"
-    assert captured[0]["params"]["incident_id"] == "10868"
+    ops = [c["op"] for c in incident_box]
+    assert ops[0] == "get_incidents"          # resolves the window first
+    assert "get_associated_events_new" in ops
+    aen = next(c for c in incident_box if c["op"] == "get_associated_events_new")
+    assert aen["params"]["incident_id"] == "10868"
+    # window was supplied in the connector's microsecond-Z format
+    assert re.fullmatch(_DT_RE, aen["params"]["timeFrom"])
+    assert re.fullmatch(_DT_RE, aen["params"]["timeTo"])
+    assert out["ok"] and out["count"] == 1
+
+
+def test_events_for_incident_explicit_window_skips_lookup(captured):
+    """An explicit window goes straight to the op (no get_incidents lookup),
+    and epoch inputs are coerced to the microsecond-Z format."""
+    import re
+    out = siem_events_for_incident("10868", time_from=1772143815,
+                                   time_to=1772147415)
+    assert [c["op"] for c in captured] == ["get_associated_events_new"]
+    p = captured[0]["params"]
+    assert re.fullmatch(_DT_RE, p["timeFrom"]) and re.fullmatch(_DT_RE, p["timeTo"])
     assert out["count"] == 1
+
+
+def test_events_for_incident_coerces_stale_id_by_source_ip(monkeypatch):
+    """A stale id that isn't live coerces to the live incident matching the
+    source IP, and the envelope records the coercion."""
+    def fake(connector, op, params=None, **kw):
+        params = params or {}
+        if op == "get_incidents":
+            return {"ok": True, "data": [_INC_ROW]}
+        if op == "get_associated_events_new":
+            assert params["incident_id"] == "10868"  # coerced from 17
+            assert params.get("timeFrom") and params.get("timeTo")
+            return {"ok": True, "data": [_ROW]}
+        raise AssertionError(op)
+    monkeypatch.setattr(texec, "run_op", fake)
+    out = siem_events_for_incident("17", source_ip="10.50.60.70")
+    assert out["ok"] and out["count"] == 1
+    assert out["query"]["coerced_from"] == "17"
+
+
+def test_events_for_incident_falls_back_to_ip_search(monkeypatch):
+    """No live incident anywhere → pivot to a pub/v2 IP search, tagged."""
+    def fake(connector, op, params=None, **kw):
+        params = params or {}
+        if op == "get_incidents":
+            return {"ok": True, "data": []}            # nothing live
+        if op == "execute_api_request":                # pub/v2 fallback
+            ep = params["endpoint"]
+            if ep.endswith("/query/eventQuery"):
+                return {"ok": True, "data": {"queryId": "999"}}
+            if ep.endswith("/query/progress"):
+                return {"ok": True, "data": {"progress": 100}}
+            if ep.endswith("/query/events/results"):
+                return {"ok": True, "data": {"rows": [_ROW]}}
+        raise AssertionError(f"unexpected {op} {params}")
+    monkeypatch.setattr(texec, "run_op", fake)
+    out = siem_events_for_incident("17", source_ip="10.50.60.70")
+    assert out["ok"] and out["count"] == 1
+    assert out["fallback"] == "siem_search_ip"
+    assert "10.50.60.70" in out["note"]
+
+
+def test_events_for_incident_fallback_widens_lookback(monkeypatch):
+    """The IP fallback widens its lookback until events appear: the 1d window
+    returns nothing, 7d returns events. Asserts it advanced past 1d."""
+    windows_tried = []
+
+    def fake(connector, op, params=None, **kw):
+        params = params or {}
+        if op == "get_incidents":
+            return {"ok": True, "data": []}            # nothing live
+        if op == "execute_api_request":
+            ep = params["endpoint"]
+            if ep.endswith("/query/eventQuery"):
+                # window is encoded in the timeRange span; recover it in days
+                tr = params["payload"]["timeRange"]
+                days = round((tr["to"] - tr["from"]) / 86400)
+                windows_tried.append(days)
+                # remember which span this queryId is for
+                return {"ok": True, "data": {"queryId": f"q{days}"}}
+            if ep.endswith("/query/progress"):
+                return {"ok": True, "data": {"progress": 100}}
+            if ep.endswith("/query/events/results"):
+                qid = params["query_params"]["queryId"]
+                rows = [_ROW] if qid != "q1" else []    # empty at 1d, hit at 7d
+                return {"ok": True, "data": {"rows": rows}}
+        raise AssertionError(f"unexpected {op} {params}")
+
+    monkeypatch.setattr(texec, "run_op", fake)
+    out = siem_events_for_incident("17", source_ip="10.50.60.70")
+    assert out["ok"] and out["count"] == 1
+    assert out["fallback"] == "siem_search_ip"
+    assert windows_tried[:2] == [1, 7]                  # widened 1d -> 7d
+    assert "7d" in out["note"]
+
+
+def test_events_for_incident_no_window_no_ip_gives_accurate_error(monkeypatch):
+    """Can't derive a window and no IP to fall back on → an accurate error,
+    NOT the connector's misleading 'Invalid Incident Id'."""
+    def fake(connector, op, params=None, **kw):
+        if op == "get_incidents":
+            return {"ok": True, "data": []}
+        raise AssertionError(op)
+    monkeypatch.setattr(texec, "run_op", fake)
+    out = siem_events_for_incident("17")
+    assert out["ok"] is False
+    assert out["code"] == "no_time_window"
+    assert "Invalid Incident Id" not in out["message"]
 
 
 def test_error_passthrough(monkeypatch):

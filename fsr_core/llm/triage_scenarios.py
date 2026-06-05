@@ -88,7 +88,11 @@ def _c2_recipes(norm: dict) -> list[str]:
     ext = _first(_ips(norm, internal=False))
     intern = _first(_ips(norm, internal=True))
     if inc and "incident" in ts:
-        out.append(ts["incident"].format(incident_id=inc)
+        # Pass source_ip so the wrapper can coerce a stale id / fall back to an
+        # IP event search (see siem_events_for_incident).
+        src = norm.get("source_ip") or (intern or {}).get("value")
+        src_arg = f', source_ip="{src}"' if src else ""
+        out.append(ts["incident"].format(incident_id=inc, source_ip=src_arg)
                    + "  — pull the raw events that drove this detection")
     if host and "host" in ts:
         out.append(ts["host"].format(host=host)

@@ -61,7 +61,9 @@ def test_base_prompt_has_no_repeat_across_turns_rule():
 def test_prompt_includes_scenario_recipes(c2_raw):
     sys = build_triage_prompt(c2_raw)["system"]
     assert "Known-good opening moves" in sys
-    assert "siem_events_for_incident(incident_id=\"10868\")" in sys
+    # the opening move now carries source_ip so the wrapper can coerce a stale
+    # id / fall back to an IP event search
+    assert "siem_events_for_incident(incident_id=\"10868\", source_ip=" in sys
     assert "Answer these before you conclude" in sys
 
 

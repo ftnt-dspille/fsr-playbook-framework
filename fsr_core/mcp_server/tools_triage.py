@@ -2031,33 +2031,240 @@ def siem_raw_query(where: str | dict[str, Any], select: str = "",
                              echo={"where": clause, "window": window})
 
 
+# `get_associated_events_new` (and get_incidents/get_incident_details) on the
+# live FortiSIEM 6.0.0 connector reject anything but this microsecond-Z datetime
+# format — plain ISO 400s with "time data ... does not match format". And the op
+# *requires* a timeFrom/timeTo window: omit it and the connector returns a
+# MISLEADING "Invalid Incident Id" error (verified live, probe_siem_assoc_events
+# — incident 5 fails id-only, succeeds with a window). So this wrapper always
+# supplies a window.
+_SIEM_INC_DT = "%Y-%m-%dT%H:%M:%S.%fZ"
+# The op caps the timeFrom/timeTo interval at 24h; we scope to the incident's own
+# first/last-seen and never widen past this.
+_SIEM_INC_MAX_WINDOW_SECS = 24 * 3600
+# When we can't query the incident directly and fall back to a `now`-anchored IP
+# event search, an old incident's triggering events sit well outside a 1d window.
+# Widen progressively until we find events rather than wrongly reporting "none".
+# The pub/v2 engine has NO hard window cap (verified live: 7d/30d/90d all return)
+# but wide spans complete slowly, so each carries its own poll budget (the
+# default 8 polls is why a 90d query appeared to "time out"): 30d≈27s/13 polls,
+# 90d≈43s/20 polls live. (Contrast get_associated_events_new, which is a HARD 24h
+# cap — 48h/168h 400 — hence the ≤24h incident-anchored window above.)
+_SIEM_FALLBACK_WINDOWS = (("1d", 8), ("7d", 12), ("30d", 22), ("90d", 32))
+
+
+def _to_siem_dt(value: Any) -> str:
+    """Coerce an epoch (s or ms), ISO-8601 string, or datetime to the
+    microsecond-Z format the FortiSIEM connector demands. Returns "" if it
+    can't parse (caller then derives a window)."""
+    import datetime as _dt
+
+    if value in (None, ""):
+        return ""
+    if isinstance(value, _dt.datetime):
+        d = value if value.tzinfo else value.replace(tzinfo=_dt.timezone.utc)
+        return d.astimezone(_dt.timezone.utc).strftime(_SIEM_INC_DT)
+    if isinstance(value, (int, float)) or str(value).replace(".", "", 1).isdigit():
+        n = float(value)
+        if n > 1e12:  # epoch ms
+            n /= 1000.0
+        return _dt.datetime.fromtimestamp(n, _dt.timezone.utc).strftime(_SIEM_INC_DT)
+    s = str(value).strip().replace("Z", "+00:00")
+    try:
+        d = _dt.datetime.fromisoformat(s)
+        d = d if d.tzinfo else d.replace(tzinfo=_dt.timezone.utc)
+        return d.astimezone(_dt.timezone.utc).strftime(_SIEM_INC_DT)
+    except ValueError:
+        return ""
+
+
+def _resolve_live_incident(incident_id: str,
+                           source_ip: str = "") -> dict[str, Any] | None:
+    """Find a *live* FortiSIEM incident to query for events.
+
+    Demo/seeded FortiSOAR records carry an `incidentId` that may have aged out of
+    the live SIEM (session sess-2avs5bgw passed id 17 — not on the box; live ids
+    were 5,6,10,12,13). This resolves the id the events API will actually accept:
+
+      1. exact match on the requested id, else
+      2. (coercion) most-recent live incident for `source_ip`.
+
+    Returns {incident_id, time_from, time_to, source_ip, coerced} or None when no
+    live incident is found (caller then falls back to an IP event search)."""
+    from .tools_execution import run_op
+    import datetime as _dt
+
+    now = _dt.datetime.now(_dt.timezone.utc)
+    wide_from = (now - _dt.timedelta(days=180)).strftime(_SIEM_INC_DT)
+    wide_to = now.strftime(_SIEM_INC_DT)
+    res = run_op("fortinet-fortisiem", "get_incidents", {
+        "timeFrom": wide_from, "timeTo": wide_to,
+        "incidentStatus": ["Active", "Cleared", "Open"],
+        "severity": ["High", "Medium", "Low"], "size": 500,
+    })
+    rows = _event_rows(res.get("data")) if isinstance(res, dict) and res.get("ok") else []
+
+    def _win(row: dict[str, Any]) -> tuple[str, str]:
+        fs = row.get("incidentFirstSeen") or row.get("incidentLastSeen")
+        ls = row.get("incidentLastSeen") or row.get("incidentFirstSeen")
+        if not fs:
+            return "", ""
+        f = float(fs) / 1000.0
+        t = float(ls) / 1000.0
+        # pad a little and clamp the interval to the op's 24h ceiling
+        f -= 60
+        t += 60
+        if t - f > _SIEM_INC_MAX_WINDOW_SECS:
+            f = t - _SIEM_INC_MAX_WINDOW_SECS
+        return (_dt.datetime.fromtimestamp(f, _dt.timezone.utc).strftime(_SIEM_INC_DT),
+                _dt.datetime.fromtimestamp(t, _dt.timezone.utc).strftime(_SIEM_INC_DT))
+
+    def _src(row: dict[str, Any]) -> str:
+        s = row.get("incidentSrc")
+        if isinstance(s, dict):
+            return s.get("srcIpAddr") or ""
+        return ""
+
+    want = str(incident_id)
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("incidentId")) == want:
+            tf, tt = _win(row)
+            return {"incident_id": want, "time_from": tf, "time_to": tt,
+                    "source_ip": _src(row), "coerced": False}
+
+    if source_ip:
+        cand = [r for r in rows if isinstance(r, dict) and _src(r) == source_ip]
+        cand.sort(key=lambda r: r.get("incidentLastSeen") or 0, reverse=True)
+        if cand:
+            row = cand[0]
+            tf, tt = _win(row)
+            return {"incident_id": str(row.get("incidentId")), "time_from": tf,
+                    "time_to": tt, "source_ip": source_ip, "coerced": True}
+    return None
+
+
+def _ip_fallback_search(source_ip: str, incident_id: str,
+                        limit: int) -> dict[str, Any]:
+    """`now`-anchored pub/v2 event search on an IP, widening the lookback until
+    events turn up (1d → 7d → 30d → 90d). Used when we can't query the incident's
+    triggering events directly (stale id / no live incident): an old incident's
+    events sit far outside a 1d window, so a single fixed window would wrongly
+    report "no events". Each step gets a larger poll budget so wide spans finish
+    instead of timing out. Stops at the first window that returns events."""
+    where = f"(srcIpAddr={_q(source_ip)} OR destIpAddr={_q(source_ip)})"
+    last: dict[str, Any] = {}
+    for window, poll_max in _SIEM_FALLBACK_WINDOWS:
+        out = _siem_pubv2_query(
+            where, window=window, limit=limit, poll_max=poll_max,
+            op="siem_events_for_incident",
+            echo={"incident_id": incident_id, "source_ip": source_ip,
+                  "window": window})
+        last = out if isinstance(out, dict) else {}
+        if not last.get("ok"):
+            break  # a real submit/poll failure — don't keep hammering
+        if last.get("count"):
+            last["fallback"] = "siem_search_ip"
+            last["note"] = (
+                f"incident {incident_id} not directly queryable on the live "
+                f"FortiSIEM; returned source-IP ({source_ip}) events from a "
+                f"{window} lookback instead.")
+            return last
+    # nothing found in any window (or a hard failure) — tag the last envelope
+    if last.get("ok"):
+        last["fallback"] = "siem_search_ip"
+        last["note"] = (
+            f"incident {incident_id} not directly queryable, and no events were "
+            f"found for source IP {source_ip} within "
+            f"{_SIEM_FALLBACK_WINDOWS[-1][0]}.")
+    return last
+
+
 @mcp.tool()
 def siem_events_for_incident(incident_id: str, time_from: str = "",
-                             time_to: str = "", limit: int = 25) -> dict[str, Any]:
+                             time_to: str = "", limit: int = 25,
+                             source_ip: str = "") -> dict[str, Any]:
     """Pull the raw FortiSIEM events that drove a specific incident.
 
     Wraps `get_associated_events_new` (incident triggeringEvents API) and
     returns the standard event digest. This is the canonical "pivot back into
-    the originating SIEM" call when an alert came from FortiSIEM. Pass the
-    FortiSIEM `incident_id` (note: this is the live SIEM incident id, which can
-    differ from / outlive the id embedded in an old alert's sourcedata).
+    the originating SIEM" call when an alert came from FortiSIEM.
+
+    Self-healing (so a stale/seeded id or a missing window no longer dead-ends —
+    the failure mode in session sess-2avs5bgw):
+      * The op *requires* a time window and a microsecond-Z datetime format. When
+        you don't pass one, this resolves the incident's own first/last-seen
+        window (≤24h) from `get_incidents` automatically.
+      * If the requested `incident_id` isn't live but `source_ip` is given, it
+        coerces to the most-recent live incident for that host.
+      * If no live incident exists at all, it falls back to a pub/v2 event search
+        on `source_ip`, **widening the lookback** (1d→7d→30d→90d) until events
+        turn up, and tags the envelope (`fallback`, `note`) so the caller knows
+        it pivoted instead of failing.
 
     Args:
-      incident_id: the FortiSIEM incident id.
-      time_from / time_to: optional ISO-8601 window (e.g.
-        "2026-06-02T13:32:01Z") to scope the triggering-event search; both are
-        forwarded as the connector's timeFrom/timeTo.
+      incident_id: the FortiSIEM incident id (from the alert's sourcedata /
+        record `sourceId`).
+      time_from / time_to: optional window. Accepts epoch (s/ms), ISO-8601, or
+        the connector's microsecond-Z form; coerced automatically. Omit to let
+        the wrapper derive the incident's window.
       limit: max digested events.
+      source_ip: the incident's source IP (record `sourceIP`). STRONGLY
+        recommended — enables id-coercion and the IP-search fallback.
     """
-    params: dict[str, Any] = {"incident_id": str(incident_id),
-                              "perPage": min(limit, 50)}
-    if time_from:
-        params["timeFrom"] = time_from
-    if time_to:
-        params["timeTo"] = time_to
-    return _siem_run("get_associated_events_new", params, limit,
-                     {"incident_id": incident_id,
-                      "timeFrom": time_from, "timeTo": time_to})
+    tf = _to_siem_dt(time_from)
+    tt = _to_siem_dt(time_to)
+    resolved_id = str(incident_id)
+    coerced = False
+
+    # Need a window for the op to work. If the caller didn't give a usable one,
+    # resolve it (and validate / coerce the id) from the live incident list.
+    if not (tf and tt):
+        info = _resolve_live_incident(str(incident_id), source_ip)
+        if info:
+            resolved_id = info["incident_id"]
+            tf = tf or info["time_from"]
+            tt = tt or info["time_to"]
+            coerced = info["coerced"]
+            source_ip = source_ip or info["source_ip"]
+        elif source_ip:
+            # No live incident for this id/host — pivot straight to a widening
+            # IP event search.
+            return _ip_fallback_search(source_ip, str(incident_id), limit)
+
+    echo = {"incident_id": resolved_id, "timeFrom": tf, "timeTo": tt}
+    if coerced:
+        echo["coerced_from"] = str(incident_id)
+
+    if not (tf and tt):
+        # Couldn't establish a window and have no IP to fall back on — fail with
+        # an ACCURATE hint (not the connector's misleading "Invalid Incident Id").
+        return {
+            "ok": False, "op": "get_associated_events_new", "query": echo,
+            "code": "no_time_window",
+            "message": ("get_associated_events_new requires a timeFrom/timeTo "
+                        "window on this FortiSIEM build, and none could be "
+                        "derived for this incident."),
+            "suggestions": [
+                "Pass `source_ip` so the wrapper can find the live incident / "
+                "fall back to an IP event search.",
+                "Or pass an explicit `time_from`/`time_to` window (≤24h) around "
+                "the incident.",
+            ],
+        }
+
+    params: dict[str, Any] = {"incident_id": resolved_id,
+                              "perPage": min(limit, 50),
+                              "timeFrom": tf, "timeTo": tt}
+    out = _siem_run("get_associated_events_new", params, limit, echo)
+
+    # Final self-heal: op still failed (or returned nothing) but we have an IP —
+    # pivot to the widening pub/v2 event search rather than dead-ending.
+    failed = not out.get("ok")
+    if (failed or out.get("count") == 0) and source_ip:
+        ip_out = _ip_fallback_search(source_ip, str(incident_id), limit)
+        if isinstance(ip_out, dict) and ip_out.get("ok") and ip_out.get("count"):
+            return ip_out
+    return out
 
 
 # ---------------------------------------------------------------------------
