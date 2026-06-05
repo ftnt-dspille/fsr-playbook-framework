@@ -43,6 +43,49 @@ def test_first_occurrence_left_as_literal():
     assert "Get_Ip_Report" not in out["wiring"]  # nothing wired in step 1
 
 
+def test_embedded_ioc_in_query_string_is_wired():
+    """A SIEM hunt embeds the IOC in a query string (`destIpAddr = <ip>`); the
+    IP came from a prior op's output, so it should wire the embedded occurrence
+    (not bake the IOC in as a literal) → the playbook is re-runnable."""
+    t = SkillTrace()
+    t.record_run_op("fortinet-fortisiem", "get_incidents", {},
+                    [{"incidentId": "55", "indicator": "185.220.101.47"}])
+    t.record_run_op("fortinet-fortisiem", "search_events",
+                    {"attribute": "destIpAddr = 185.220.101.47"}, {})
+    out = sc.compile_trace(t)
+    attr = out["steps"][1]["arguments"]["attribute"]
+    assert attr == "destIpAddr = {{ vars.steps.Get_Incidents[0].indicator }}", attr
+
+
+def test_embedded_match_respects_token_boundary():
+    """A partial IOC must NOT wire: 185.220.101.47 inside 185.220.101.470."""
+    t = SkillTrace()
+    t.record_run_op("c", "first", {}, {"ip": "185.220.101.47"})
+    t.record_run_op("c", "second", {"q": "host 185.220.101.470 seen"}, {})
+    out = sc.compile_trace(t)
+    assert out["steps"][1]["arguments"]["q"] == "host 185.220.101.470 seen"
+
+
+def test_embedded_skips_plain_words():
+    """An unstructured word (no digit/separator) is too coincidental to embed —
+    `Germany` appearing in both a prior output and a later literal is not wired."""
+    t = SkillTrace()
+    t.record_run_op("c", "first", {}, {"country": "Germany"})
+    t.record_run_op("c", "second", {"note": "actor based in Germany region"}, {})
+    out = sc.compile_trace(t)
+    assert out["steps"][1]["arguments"]["note"] == "actor based in Germany region"
+
+
+def test_whole_value_match_preferred_over_embedded():
+    """When the whole param equals a prior output value, emit a pure ref, not an
+    embedded substitution."""
+    t = SkillTrace()
+    t.record_run_op("c", "first", {}, {"net": "203.0.113.0/24"})
+    t.record_run_op("c", "second", {"cidr": "203.0.113.0/24"}, {})
+    out = sc.compile_trace(t)
+    assert out["steps"][1]["arguments"]["cidr"] == "{{ vars.steps.First.net }}"
+
+
 def test_trivial_values_are_not_wired():
     t = SkillTrace()
     t.record_run_op("c", "first", {"x": "seed_value"}, {"port": 443, "ok": True})

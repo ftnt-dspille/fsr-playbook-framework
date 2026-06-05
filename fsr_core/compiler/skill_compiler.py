@@ -55,16 +55,31 @@ def _is_wirable_value(v: Any) -> bool:
     return False
 
 
+# Embedded (substring) wiring is riskier than whole-value match, so it is
+# stricter: the prior-output scalar must be longer AND IOC-shaped (carry a digit
+# or a `.`/`:`/`/` separator). That targets IPs/domains/hashes/CVEs embedded in
+# query strings (`srcIpAddr = <ip>`) while excluding plain words like "Germany"
+# that coincide across unrelated steps.
+_MIN_EMBED_LEN = 7
+
+
+def _looks_structured(s: str) -> bool:
+    """IOC-ish: has a digit or a separator that plain prose words don't."""
+    return any(c.isdigit() for c in s) or any(c in s for c in ".:/")
+
+
+def _key_access(k: str) -> str:
+    """Jinja key access; bracket-quote keys that aren't bare-identifier safe
+    (e.g. `hydra:member`)."""
+    if k.isidentifier():
+        return f".{k}"
+    return f"[{k!r}]"
+
+
 def _find_value_path(output: Any, target: Any) -> Optional[str]:
     """Return a jinja access suffix (e.g. `.attributes.ip` or
     `['hydra:member'][0].ip`) into `output` whose leaf equals `target`, or
     None. Depth-first; returns the first (shallowest-leftmost) match."""
-    # Bracket-quote keys that aren't bare-identifier safe (`hydra:member`).
-    def _key_access(k: str) -> str:
-        if k.isidentifier():
-            return f".{k}"
-        return f"[{k!r}]"
-
     def _walk(node: Any, path: str) -> Optional[str]:
         if node == target and type(node) == type(target):
             return path
@@ -83,6 +98,50 @@ def _find_value_path(output: Any, target: Any) -> Optional[str]:
         return None
 
     return _walk(output, "")
+
+
+def _embeddable_scalars(output: Any) -> List[Tuple[str, str]]:
+    """`(scalar, path)` for distinctive, IOC-shaped string leaves of an output —
+    the candidates for embedded (substring) wiring."""
+    found: List[Tuple[str, str]] = []
+
+    def _walk(node: Any, path: str) -> None:
+        if isinstance(node, str):
+            if len(node.strip()) >= _MIN_EMBED_LEN and _looks_structured(node):
+                found.append((node, path))
+        elif isinstance(node, dict):
+            for k, v in node.items():
+                if isinstance(k, str):
+                    _walk(v, path + _key_access(k))
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                _walk(v, f"{path}[{i}]")
+
+    _walk(output, "")
+    return found
+
+
+def _embedded_substitution(value: str, prior: List["SkillCall"]) -> Optional[str]:
+    """If a distinctive prior-output scalar appears as a bounded token INSIDE the
+    string `value` (e.g. the IP in `srcIpAddr = 1.2.3.4`), return `value` with
+    that occurrence replaced by a `{{ vars.steps... }}` ref so the param is
+    re-runnable, else None. Whole-value matches are handled by the caller. The
+    token must be flanked by non-alphanumeric chars so we never wire a partial
+    IOC (`1.2.3.4` inside `1.2.3.40`)."""
+    for src in reversed(prior):           # closest producer wins
+        for scalar, path in _embeddable_scalars(src.observed_output):
+            if scalar == value:
+                continue                  # whole-value match — not our job
+            idx = value.find(scalar)
+            if idx < 0:
+                continue
+            end = idx + len(scalar)
+            before = value[idx - 1] if idx > 0 else ""
+            after = value[end] if end < len(value) else ""
+            if before.isalnum() or after.isalnum():
+                continue                  # not a clean token boundary
+            return value[:idx] + _ref_for(src, path) + value[end:]
+    return None
 
 
 def _ref_for(call: SkillCall, suffix: str) -> str:
@@ -116,7 +175,16 @@ def wire_inputs(
                 matched = True
                 break
         if not matched:
-            unwired.append(param)
+            # Whole-value match failed; for a string param, try wiring an
+            # IOC-shaped value EMBEDDED in it (e.g. the IP in a SIEM query
+            # `srcIpAddr = <ip>`) so a trace-built hunt is re-runnable instead
+            # of baking the IOC in as a literal.
+            sub = (_embedded_substitution(value, prior)
+                   if isinstance(value, str) else None)
+            if sub is not None:
+                wired[param] = sub
+            else:
+                unwired.append(param)
     return wired, unwired
 
 
