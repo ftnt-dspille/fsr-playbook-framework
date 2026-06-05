@@ -72,7 +72,17 @@ Branch `feat/skill-based-playbook` in FSRPlaybookYaml; connector changes on
 - Active trace is process-local module state; `_session_trace_scope` clears it in `finally` (concurrency
   caveat noted — fine for one-op-per-worker, revisit with contextvars if needed).
 
-**NEXT STEP — trace fixtures for the parity campaign (decided, not yet built):**
+**DONE (2026-06-05) — trace fixtures for the parity campaign.** `python/evals/
+build_trace_fixture.py` replays two coherent investigations (`c2_containment`,
+`enrich_then_block`) through `run_op` in SIM mode with the recorder on and dumps
+`SkillTrace.to_json()` → `store/trace_fixtures/*.json`. Each is gated on a real
+cross-step value coincidence, then fed through `score_wiring_resolution`: **both
+resolve every wire, zero static errors.** Regression test
+`python/tests/test_build_trace_fixture.py`. This is the trace-compiler side of
+the parity evidence; the remaining analytical step for the actual default-flip
+is the side-by-side vs the hand-author baseline (commit `039dfa0`).
+
+**(historical) NEXT STEP — trace fixtures for the parity campaign (decided):**
 - **Best method = replay a coherent investigation through `run_op` in SIM mode with the recorder on,
   then dump `SkillTrace.to_json()`.** Do NOT hand-author trace JSON (reintroduces the guess-the-output
   failure mode). Sim fixtures in `fsr_core/mcp_server/_sim_fixtures.py` already encode a C2 investigation
