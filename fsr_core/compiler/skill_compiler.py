@@ -121,35 +121,60 @@ def _embeddable_scalars(output: Any) -> List[Tuple[str, str]]:
     return found
 
 
-def _embedded_span(value: str, scalar: str) -> Optional[Tuple[int, int]]:
-    """`(start, end)` of `scalar` as a bounded token inside `value`, or None.
-    The token must be flanked by non-alphanumeric chars so we never wire a
-    partial IOC (`1.2.3.4` inside `1.2.3.40`). `scalar == value` (a whole-value
-    match, handled elsewhere) returns None."""
-    if scalar == value:
-        return None
-    idx = value.find(scalar)
-    if idx < 0:
-        return None
-    end = idx + len(scalar)
-    before = value[idx - 1] if idx > 0 else ""
-    after = value[end] if end < len(value) else ""
-    if before.isalnum() or after.isalnum():
-        return None
-    return idx, end
+def _embedded_spans(value: str, scalar: str) -> List[Tuple[int, int]]:
+    """All non-overlapping bounded-token spans of `scalar` in `value`. Each must
+    be flanked by non-alphanumeric chars so we never wire a partial IOC
+    (`1.2.3.4` inside `1.2.3.40`). `scalar == value` (a whole-value match,
+    handled elsewhere) yields nothing. Returns every occurrence so a bidirectional
+    hunt (`srcIpAddr = X OR destIpAddr = X`) wires BOTH, not just the first."""
+    if scalar == value or not scalar:
+        return []
+    spans: List[Tuple[int, int]] = []
+    start = 0
+    while True:
+        idx = value.find(scalar, start)
+        if idx < 0:
+            break
+        end = idx + len(scalar)
+        before = value[idx - 1] if idx > 0 else ""
+        after = value[end] if end < len(value) else ""
+        if not (before.isalnum() or after.isalnum()):
+            spans.append((idx, end))
+        start = end
+    return spans
+
+
+def _apply_spans(value: str, repls: List[Tuple[int, int, str]]) -> str:
+    """Rewrite `value`, replacing each `(start, end, text)` span. Spans are
+    applied left-to-right; overlapping spans (a later one starting before the
+    previous ended) are dropped so the longest/earliest wins."""
+    out: List[str] = []
+    last = 0
+    for start, end, text in sorted(repls, key=lambda r: (r[0], -(r[1] - r[0]))):
+        if start < last:
+            continue
+        out.append(value[last:start])
+        out.append(text)
+        last = end
+    out.append(value[last:])
+    return "".join(out)
 
 
 def _embedded_substitution(value: str, prior: List["SkillCall"]) -> Optional[str]:
-    """If a distinctive prior-output scalar appears as a bounded token INSIDE the
+    """If distinctive prior-output scalars appear as bounded tokens INSIDE the
     string `value` (e.g. the IP in `srcIpAddr = 1.2.3.4`), return `value` with
-    that occurrence replaced by a `{{ vars.steps... }}` ref so the param is
-    re-runnable, else None. Whole-value matches are handled by the caller."""
-    for src in reversed(prior):           # closest producer wins
+    EVERY such occurrence replaced by its `{{ vars.steps... }}` ref so the param
+    is re-runnable, else None. Whole-value matches are handled by the caller;
+    closest producer wins on overlap."""
+    repls: List[Tuple[int, int, str]] = []
+    for src in reversed(prior):           # closest producer first (stable on ties)
         for scalar, path in _embeddable_scalars(src.observed_output):
-            span = _embedded_span(value, scalar)
-            if span is not None:
-                return value[:span[0]] + _ref_for(src, path) + value[span[1]:]
-    return None
+            ref = _ref_for(src, path)
+            for span in _embedded_spans(value, scalar):
+                repls.append((span[0], span[1], ref))
+    if not repls:
+        return None
+    return _apply_spans(value, repls)
 
 
 def _ref_for(call: SkillCall, suffix: str) -> str:
@@ -265,12 +290,13 @@ def wire_record_inputs(
                       if _is_wirable_value(literal) else None)
             # Embedded fallback: an IOC-shaped record-field value sitting INSIDE
             # a query string (`srcIpAddr = <alert_ip>`) parameterizes too, so a
-            # trace-built hunt re-runs on the triggering record's IOC.
-            embed_span = None
+            # trace-built hunt re-runs on the triggering record's IOC. All
+            # occurrences are replaced (bidirectional `src… OR dst…` hunts).
+            embed_spans: List[Tuple[int, int]] = []
             if suffix is None and isinstance(literal, str):
                 for fval, fsuffix in _embeddable_scalars(record_fields):
-                    embed_span = _embedded_span(literal, fval)
-                    if embed_span is not None:
+                    embed_spans = _embedded_spans(literal, fval)
+                    if embed_spans:
                         suffix = fsuffix
                         break
             if suffix is None:
@@ -283,8 +309,9 @@ def wire_record_inputs(
                 val_to_var[key] = var
                 record_vars[var] = "{{ vars.input.records[0]" + suffix + " }}"
             staged = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) + "." + var + " }}"
-            if embed_span is not None:
-                container[param] = literal[:embed_span[0]] + staged + literal[embed_span[1]:]
+            if embed_spans:
+                container[param] = _apply_spans(
+                    literal, [(s, e, staged) for s, e in embed_spans])
             else:
                 container[param] = staged
         if remaining:

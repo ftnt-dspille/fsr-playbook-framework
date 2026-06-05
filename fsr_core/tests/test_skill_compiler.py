@@ -86,6 +86,22 @@ def test_whole_value_match_preferred_over_embedded():
     assert out["steps"][1]["arguments"]["cidr"] == "{{ vars.steps.First.net }}"
 
 
+def test_bidirectional_hunt_wires_every_occurrence():
+    """`srcIpAddr = X OR destIpAddr = X` must wire BOTH X's, or the playbook is
+    still half-hardcoded."""
+    t = SkillTrace()
+    t.record_run_op("fortinet-fortisiem", "get_incidents", {},
+                    [{"indicator": "185.220.101.47"}])
+    t.record_run_op(
+        "fortinet-fortisiem", "search_events",
+        {"attribute": "srcIpAddr = 185.220.101.47 OR destIpAddr = 185.220.101.47"},
+        {})
+    out = sc.compile_trace(t)
+    attr = out["steps"][1]["arguments"]["attribute"]
+    ref = "{{ vars.steps.Get_Incidents[0].indicator }}"
+    assert attr == f"srcIpAddr = {ref} OR destIpAddr = {ref}", attr
+
+
 def test_record_field_parameterizes_embedded_ioc():
     """A hunt's first op embeds the alert's IOC in a query string with no prior
     producer; it should parameterize to the trigger record (re-runnable), not
