@@ -298,6 +298,15 @@ def _resolve_tier(name: str, args: dict[str, Any]) -> int:
     return 0
 
 
+# Approval previews are for human display in the widget, which renders them as
+# JSON.stringify(preview.args). Unbounded values (e.g. push_playbook's full
+# `yaml_text`, or a 60-IOC list) produce a multi-KB wall of text that makes the
+# approval popup unusable. Cap individual strings and list lengths so the
+# preview stays a readable summary, never the whole payload.
+_PREVIEW_MAX_STR = 600
+_PREVIEW_MAX_LIST = 50
+
+
 def _mask_value(v: Any) -> Any:
     if isinstance(v, dict):
         return {k: ("***" if _SENSITIVE_KEY_RE.search(k) else _mask_value(val)) for k, val in v.items()}
@@ -306,8 +315,24 @@ def _mask_value(v: Any) -> Any:
     return v
 
 
+def _truncate_value(v: Any) -> Any:
+    """Bound a (already-masked) preview value to a human-readable size."""
+    if isinstance(v, str):
+        if len(v) > _PREVIEW_MAX_STR:
+            return v[:_PREVIEW_MAX_STR] + f"… [+{len(v) - _PREVIEW_MAX_STR} chars truncated]"
+        return v
+    if isinstance(v, dict):
+        return {k: _truncate_value(val) for k, val in v.items()}
+    if isinstance(v, list):
+        capped = [_truncate_value(x) for x in v[:_PREVIEW_MAX_LIST]]
+        if len(v) > _PREVIEW_MAX_LIST:
+            capped.append(f"… [+{len(v) - _PREVIEW_MAX_LIST} more items truncated]")
+        return capped
+    return v
+
+
 def _build_preview(name: str, args: dict[str, Any]) -> dict[str, Any]:
-    masked = _mask_value(args or {})
+    masked = _truncate_value(_mask_value(args or {}))
     return {"tool": name, "args": masked}
 
 
