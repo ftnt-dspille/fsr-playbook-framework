@@ -65,6 +65,42 @@ def _op_safety_fn():
     return lookup
 
 
+def _param_type_fn():
+    """Phase 4 target-type lookup: map a connector param's widget + observed
+    type into the single tag the walker compares a source shape against.
+    Mirrors the resolver's `_param_target_observed_type` so static and
+    cross-step checks agree. Returns None for untyped/picklist params."""
+    conn = _db()
+
+    def lookup(connector: str, op: str, param: str):
+        try:
+            row = conn.execute(
+                "SELECT type, observed_type FROM operation_params "
+                "WHERE connector_name=? AND op_name=? AND param_name=? "
+                "  AND parent_param_name IS NULL AND condition_value IS NULL",
+                (connector, op, param),
+            ).fetchone()
+        except Exception:  # noqa: BLE001
+            return None
+        if row is None:
+            return None
+        widget = (row[0] or "").lower()
+        observed = row[1]
+        if widget in {"integer", "intger"}:
+            return "int"
+        if widget in {"decimal", "numeric"}:
+            return "float"
+        if widget in {"checkbox", "boolean"}:
+            return "bool"
+        if widget in {"json", "object"}:
+            return "json_object"
+        if widget in {"text", "textarea", "richtext"}:
+            return observed  # ipv4/url/json_array/… or None for unprobed
+        return None  # select/multiselect/picklist → enum check handles it
+
+    return lookup
+
+
 def _connector_op_exists(connector: str, op: str) -> bool:
     conn = _db()
     try:
@@ -261,6 +297,7 @@ def verify_playbook(
       - unreachable_step_reference
       - missing_field_on_step_output
       - non_list_indexed
+      - type_mismatch                    (source→target type, Phase 4)
       - required_op_param_missing
       - op_param_unknown
       - branch_target_missing
@@ -338,6 +375,7 @@ def verify_playbook(
                if live_probe else None),
         module_fields_fn=_module_fields_fn(),
         op_safety_fn=_op_safety_fn(),
+        param_type_fn=_param_type_fn(),
     )
     for d in walk.diagnostics:
         bucket = required_fixes if d.severity == "error" else warnings
@@ -437,6 +475,7 @@ def _finalize(checks_run, required_fixes, warnings, evidence) -> dict[str, Any]:
         "unknown_step_reference", "unreachable_step_reference",
         "missing_field_on_step_output",
         "non_list_indexed",
+        "type_mismatch",
         "bad_jinja_filter_chain",
     )
     for code in priority_codes:

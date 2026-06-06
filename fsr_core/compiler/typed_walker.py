@@ -105,6 +105,119 @@ ModuleFieldsFn = Callable[[str], list[str]]
 OpSafetyFn = Callable[[str, str], str]
 
 
+# Resolver hook for a connector param's *target* type. Takes
+# (connector, op, param) → a target tag ('int' | 'float' | 'bool' |
+# 'json_object' | 'json_array' | 'ipv4' | 'url' | 'email' | 'iso8601' |
+# 'ipv6' | …) or None when the param is untyped / picklist / unknown.
+# Optional; without it Phase 4 source→target checking is skipped. The
+# tag vocabulary mirrors the resolver's `_param_target_observed_type`.
+ParamTypeFn = Callable[[str, str, str], Optional[str]]
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — source→target type comparison.
+# STATIC_TYPE_FLOW_PLAN.md §"Phase 4". The half that knows *source* shapes
+# (this walker) finally meets the half that knows *target* types (resolver,
+# via ParamTypeFn). Two evidence-sound rules ship here:
+#   (G2) shape-into-scalar: a list/object reference passed into a scalar
+#        param is an unambiguous error (a list can't become an int/ipv4).
+#   scalar↔scalar numeric/bool category crossings (e.g. a boolean var into
+#        an integer param). String/any/null sources stay permissive because
+#        FSR's runtime string coercion (the Phase 1b matrix) makes them
+#        broadly acceptable, and the connector-param ingestion-coercion
+#        matrix (Open Q #2) is not yet probed — so we never hard-error on a
+#        case the runtime might coerce.
+# ---------------------------------------------------------------------------
+
+# Target tags that denote a single scalar value (not a JSON container /
+# picklist). A list/object source into any of these is a hard mismatch.
+_SCALAR_TARGET_TAGS = {
+    "int", "float", "bool", "ipv4", "ipv6", "url", "email", "iso8601",
+    "epoch_seconds", "epoch_millis",
+}
+_NUMERIC_TARGET_TAGS = {"int", "float"}
+
+
+def _shape_to_src_tag(shape: Shape | None) -> str | None:
+    """Collapse a source Shape into the tag vocabulary Phase 4 compares.
+
+    Returns 'list' / 'dict' for structures, an 'int'/'float'/'bool'/'str'/
+    'null' scalar tag, or None when the source is too vague to judge
+    (scalar 'any', unknown, none) — None means "skip, don't guess"."""
+    if not isinstance(shape, dict):
+        return None
+    kind = shape.get("kind")
+    if kind == "list":
+        return "list"
+    if kind == "object":
+        return "dict"
+    if kind == "scalar":
+        return {
+            "integer": "int", "float": "float", "boolean": "bool",
+            "string": "str", "null": "null",
+        }.get(shape.get("type"))
+    return None
+
+
+def _source_target_compatible(src: str | None, tgt: str | None) -> bool:
+    """True iff a source of tag `src` is acceptable for a param of tag `tgt`.
+
+    Conservative by design: returns True whenever the runtime plausibly
+    coerces, so a False is a confident bug. See the module-level note for
+    why string/any/null sources are always tolerated."""
+    if tgt is None or src is None:
+        return True
+    if src in {"any", "str", "null"}:
+        return True
+    # Structured sources: only a matching JSON container accepts them.
+    if src == "list":
+        return tgt == "json_array"
+    if src == "dict":
+        return tgt == "json_object"
+    # src is now a concrete scalar: int / float / bool.
+    if tgt in {"json_array", "json_object"}:
+        return False  # a scalar can't fill a JSON container param
+    if tgt not in _SCALAR_TARGET_TAGS:
+        return True  # unknown/text/picklist target → permissive
+    if src in _NUMERIC_TARGET_TAGS:
+        return tgt in _NUMERIC_TARGET_TAGS  # 1 → ipv4/bool/etc is wrong
+    if src == "bool":
+        return tgt == "bool"
+    return True
+
+
+_PURE_JINJA_RE = re.compile(r"\A\{\{\s*(.+?)\s*\}\}\Z", re.DOTALL)
+_PURE_STEP_REF_RE = re.compile(
+    r"\Avars\.steps\.([A-Za-z_][A-Za-z0-9_]*)"
+    r"((?:\.[A-Za-z_][A-Za-z0-9_]*|\[\s*(?:\d+|'[^']*'|\"[^\"]*\")\s*\])*)\Z")
+_PURE_VAR_REF_RE = re.compile(r"\Avars\.([A-Za-z_][A-Za-z0-9_]*)\Z")
+
+
+def _pure_single_ref(value: Any) -> tuple[str, str, str] | None:
+    """If `value` is a single `{{ … }}` block wrapping one bare reference
+    (no filters, no surrounding text), classify it. Returns
+    ('step', key, attr_chain) or ('var', name, '') or None.
+
+    Filtered refs (`{{ x | int }}`) and interpolations (`a {{ x }} b`) are
+    skipped here — the resolver's Tier 3 already validates the former, and
+    string interpolation coerces to str so there's nothing to mismatch."""
+    if not isinstance(value, str):
+        return None
+    m = _PURE_JINJA_RE.match(value.strip())
+    if not m:
+        return None
+    expr = m.group(1).strip()
+    if "|" in expr or "(" in expr or "{%" in expr:
+        return None
+    sm = _PURE_STEP_REF_RE.match(expr)
+    if sm:
+        return ("step", sm.group(1), sm.group(2) or "")
+    vm = _PURE_VAR_REF_RE.match(expr)
+    if vm:
+        return ("var", vm.group(1), "")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Walking
 # ---------------------------------------------------------------------------
@@ -533,7 +646,7 @@ def _resolve_path(env_key: str, attr_chain: str,
 
 def _validate_branch_jinja(
     pb: Playbook, ids: list[str], typed_env: dict[str, Shape],
-    branch_name: str,
+    branch_name: str, param_type_fn: ParamTypeFn | None = None,
 ) -> tuple[list[Diagnostic], dict[str, Shape]]:
     by_id = {s.id: s for s in pb.steps}
     jinja_key_lookup = {_jinja_key(s): s for s in pb.steps}
@@ -573,6 +686,11 @@ def _validate_branch_jinja(
         # Branch-scoped `vars.<name>` reference checks for this step.
         diags.extend(_check_toplevel_vars(
             s, branch_name, var_env, var_defs, ids_set, pos))
+        # Phase 4 — source→target type check on connector params that are a
+        # pure reference to a step output or set_variable var.
+        if param_type_fn is not None and s.type in {"connector", "connector_op"}:
+            diags.extend(_check_connector_param_types(
+                s, branch_name, typed_env, var_env, visible, param_type_fn))
         # Validate refs in this step's arguments using the env *before*
         # this step's own shape is added (a step can reference itself
         # only via universal keys, handled inside _resolve_path).
@@ -817,6 +935,69 @@ def _check_toplevel_vars(
 
 
 # ---------------------------------------------------------------------------
+# Phase 4 — connector param source→target type check
+# ---------------------------------------------------------------------------
+
+def _check_connector_param_types(
+    s: Step, branch_name: str, typed_env: dict[str, Shape],
+    var_env: dict[str, Shape], visible: set[str],
+    param_type_fn: ParamTypeFn,
+) -> list[Diagnostic]:
+    """For each connector param whose value is a pure reference to a typed
+    source (step output or set_variable var), compare the source's inferred
+    type against the param's target type and emit `type_mismatch` on a
+    confident incompatibility (shape-into-scalar, or a numeric/bool category
+    crossing). Filtered/interpolated values are left to the resolver."""
+    connector, op = _connector_op(s)
+    if not connector or not op:
+        return []
+    params = s.arguments.get("params")
+    if not isinstance(params, dict):
+        return []
+    diags: list[Diagnostic] = []
+    for p_name, p_val in params.items():
+        ref = _pure_single_ref(p_val)
+        if ref is None:
+            continue
+        kind, key, rest = ref
+        if kind == "step":
+            if key not in visible:
+                continue  # visibility/typo already reported by the ref pass
+            shape, err = _resolve_path(key, rest, typed_env)
+            if err:
+                continue  # missing-field / non-list etc. already reported
+        else:  # var
+            shape = var_env.get(key)
+            if shape is None:
+                continue  # undefined-var handled by _check_toplevel_vars
+        src_tag = _shape_to_src_tag(shape)
+        if src_tag is None:
+            continue
+        try:
+            tgt_tag = param_type_fn(connector, op, p_name)
+        except Exception:  # noqa: BLE001
+            tgt_tag = None
+        if _source_target_compatible(src_tag, tgt_tag):
+            continue
+        src_desc = ("a list" if src_tag == "list"
+                    else "an object" if src_tag == "dict"
+                    else f"a {src_tag} value")
+        diags.append(Diagnostic(
+            code="type_mismatch",
+            message=(
+                f"param {p_name!r} on {connector}.{op} expects {tgt_tag!r} "
+                f"but the reference {str(p_val).strip()} resolves to "
+                f"{src_desc}"),
+            step=s.id, branch=branch_name,
+            path=f"arguments.params.{p_name}",
+            suggestion=(
+                "convert the value with a Jinja filter (e.g. `| int`) or "
+                "reference a field of the matching type"),
+        ))
+    return diags
+
+
+# ---------------------------------------------------------------------------
 # Top-level entry
 # ---------------------------------------------------------------------------
 
@@ -875,6 +1056,7 @@ def walk_playbook(
     probe: ProbeCallback | None = None,
     module_fields_fn: ModuleFieldsFn | None = None,
     op_safety_fn: OpSafetyFn | None = None,
+    param_type_fn: ParamTypeFn | None = None,
 ) -> WalkResult:
     """Walk every branch of the named playbook (or the first one) and
     return typed envs + Jinja-reference diagnostics."""
@@ -915,7 +1097,8 @@ def walk_playbook(
                 continue
             typed_env[_jinja_key(s)] = per_step[s.id]
         label = _branch_label(pb, ids)
-        diags, var_env = _validate_branch_jinja(pb, ids, typed_env, label)
+        diags, var_env = _validate_branch_jinja(
+            pb, ids, typed_env, label, param_type_fn)
         branches.append(BranchResult(
             name=label, step_ids=ids,
             typed_env=typed_env, var_env=var_env, diagnostics=diags,

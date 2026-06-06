@@ -1,7 +1,8 @@
 # Static type-flow analysis plan — source→target type checking across the branch tree
 
-**Status (updated 2026-06-06):** Phases **0, 1 (1a+1b), 2 DONE & committed**; Phases 3–5 not
-started. Connector-param ingestion coercion (Phase 1b tail) deferred to Phase 4.
+**Status (updated 2026-06-06):** Phases **0, 1 (1a+1b), 2, 4 DONE & committed**; Phases 3 & 5
+not started. Connector-param ingestion coercion (Phase 1b tail / Open Q #2) still deferred —
+Phase 4 shipped the evidence-sound subset that does NOT need it (see Phase 4 Outcome).
 **Branch:** `feat/static-type-flow` (off `feat/skill-based-playbook`).
 **Green-check:** `make verify` (307 fsr_core + 159 connector) — currently green. Note the
 python eval suite (`python/tests/test_evals_harness.py::test_run_matrix_gold_beats_echo`) is
@@ -10,9 +11,10 @@ gated by `verify_playbook` output, so any verify change must keep the gold fract
 **Commits:** `7372065` (P0 branch enum) · `5513f20`+`50157b1` (P1b coercion) · `02a699e`
 (P1a scoping) · `027bce3` (P2 var typing + P0 regression fix).
 
-**RESUME HERE →** Phase 3 (playbook parameter declared types) OR Phase 4 (source→target type
-check — the core ask; `BranchResult.var_env` is already wired to feed it). See each phase's
-**Outcome** block below for what landed. Probes are re-runnable:
+**RESUME HERE →** Phase 3 (playbook parameter declared types — would let
+`vars.input.params.<name>` flow into the Phase 4 check) OR Phase 5 (JSON trace export). The
+core ask (Phase 4 source→target check) is DONE. See each phase's **Outcome** block below for
+what landed. Probes are re-runnable:
 `PYTHONPATH=python:. .venv/bin/python -m probes.probe_set_variable_coercion` (and
 `probe_var_scoping`); results in `store/probe_results/`.
 
@@ -314,8 +316,8 @@ parse (authoring shape) exactly as before. Gold fraction restored to 0.587.
 - **Tests:** typed param flows into a connector op and a mismatch is caught; untyped param
   stays `any` (no regression on existing examples).
 
-### Phase 4 — Source-vs-target type check (the core ask)
-- New walker callback `param_type_fn(connector, op, param) -> observed_type` (same seam as
+### Phase 4 — Source-vs-target type check (the core ask) ✅ DONE 2026-06-06
+- New walker callback `param_type_fn(connector, op, param) -> target_tag` (same seam as
   `op_safety_fn`/`module_fields_fn`), wired from `tools_verify` to the resolver's
   `operation_param_observed_type` + `_param_target_observed_type`.
 - At each connector-step reference site, compare the reference's inferred source type (from
@@ -328,6 +330,39 @@ parse (authoring shape) exactly as before. Gold fraction restored to 0.587.
 - **Tests:** integer field → text param (per coercion rule), list shape → `ip` scalar
   (hard error), correctly-typed flow clean, Jinja-with-filter path unchanged.
 - Add `type_mismatch` to the required-fix code list in `tools_verify.py`.
+
+**Outcome:** `typed_walker._check_connector_param_types` runs per connector step on each
+branch. It only judges a param whose value is a **pure single reference** —
+`_pure_single_ref` accepts `{{ vars.steps.X.y }}` / `{{ vars.name }}` and rejects filtered
+(`| int`), interpolated (`a {{ x }} b`), and call (`foo()`) forms, so the resolver's Tier 3
+keeps sole ownership of filtered values and string-interpolation always coerces to str. The
+source shape comes from `typed_env` (step outputs, via `_resolve_path`) or `var_env`
+(set_variable, Phase 2); `_shape_to_src_tag` collapses it to int/float/bool/str/null/list/
+dict (scalar `any`/unknown → skip). `tools_verify._param_type_fn` maps the param's widget +
+observed_type to a target tag, mirroring the resolver's `_param_target_observed_type`.
+
+**Evidence-honest scope (Open Q #2 still unprobed):** `_source_target_compatible` ships only
+the two rules that need NO connector-param ingestion-coercion evidence:
+1. **shape-into-scalar** (list/dict → any scalar target tag: int/float/bool/ipv4/url/email/
+   iso8601/ipv6/epoch) → hard error; list↔json_array and dict↔json_object are the only
+   accepted container pairings.
+2. **numeric/bool category crossing** between two concrete scalars (bool→int, int→bool,
+   int→ipv4, …) → error; int→float promotion allowed.
+String/any/null sources are **always tolerated** (FSR's broad runtime string coercion + the
+unprobed ingestion matrix), so no hard-error fires where the runtime might coerce. Net effect:
+because most text-widget params carry `observed_type=None` (→ target tag None → skip), Phase 4
+fires mainly on explicitly-typed widgets (integer/decimal/checkbox/json) and type-probed text
+params (ipv4/url/…), which bounds false positives. **Audited all 24 `examples/*.yaml`: zero
+new `type_mismatch` diagnostics.** `type_mismatch` added to the required-fix code list +
+`_finalize` priority order. Tests: `fsr_core/tests/test_walker_param_types.py` (9 cases:
+pure-ref unit, shape→tag, compat matrix, + 6 hand-built-IR integration incl. list→scalar hard
+error and the no-`param_type_fn`/filtered-ref skip paths). `make verify` green (316 fsr_core +
+159 connector); gold eval fraction unchanged (`test_run_matrix_gold_beats_echo` green).
+
+**Deferred to a Phase 4b (when Open Q #2 is probed):** the full scalar→scalar tolerance matrix
+(e.g. should a statically-`string` var into an `integer` widget error, given FSR runtime
+`int("123")` coercion?) and list/dict → untyped-`text` param (no observed_type) — both need
+the live connector-param ingestion echo probe to ship without false positives.
 
 ### Phase 5 — JSON trace export / troubleshooting
 - Build a per-branch, per-step trace: typed_env evolution + every reference's
