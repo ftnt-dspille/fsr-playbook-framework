@@ -143,3 +143,27 @@ def test_list_step_output_into_scalar_param_flags():
     coll = Collection(name="C", playbooks=[pb])
     res = walk_playbook(coll, param_type_fn=_ptf("ipv4"))
     assert "type_mismatch" in [d.code for d in res.diagnostics]
+
+
+# ---- Phase 5: trace decisions records passes AND failures ------------------
+
+def test_type_decisions_record_pass_and_fail():
+    # mismatch case → one decision with verdict type_mismatch
+    coll = _coll("{{ vars.the_count }}")
+    res = walk_playbook(coll, param_type_fn=_ptf("ipv4"))
+    decs = [d for b in res.branches for d in b.type_decisions]
+    assert len(decs) == 1
+    d = decs[0]
+    assert d["param"] == "ip" and d["source_type"] == "int"
+    assert d["target_type"] == "ipv4" and d["verdict"] == "type_mismatch"
+    # ok case → decision recorded as ok
+    res2 = walk_playbook(coll, param_type_fn=_ptf("int"))
+    decs2 = [d for b in res2.branches for d in b.type_decisions]
+    assert decs2 and decs2[0]["verdict"] == "ok"
+
+
+def test_to_dict_carries_type_decisions():
+    coll = _coll("{{ vars.the_count }}")
+    res = walk_playbook(coll, param_type_fn=_ptf("ipv4"))
+    d = res.to_dict()
+    assert "type_decisions" in d["branches"][0]

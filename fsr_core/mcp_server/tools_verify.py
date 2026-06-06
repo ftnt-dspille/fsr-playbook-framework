@@ -410,9 +410,20 @@ def verify_playbook(
     # individual references actually resolve through unknown shapes they
     # surface as `unknown_shape_downstream_reference` (specific, useful).
 
+    # Phase 5 — persist the type trace (best-effort) and surface its path.
+    trace_path = _write_type_trace(yaml_text, playbook, walk)
+    if trace_path:
+        evidence["type_trace_path"] = trace_path
+
     # Evidence
     if verbose:
         evidence["typed_walk"] = walk.to_dict()
+        # Folded-in trace: per-branch type decisions (source→target→verdict).
+        evidence["type_trace"] = [
+            {"name": b.name, "step_ids": b.step_ids,
+             "type_decisions": b.type_decisions}
+            for b in walk.branches
+        ]
         evidence["per_step_shapes"] = walk.per_step_shapes
         # Per-step shapes re-keyed by jinja-key (step name with spaces→
         # underscores), which is what `vars.steps.<key>` actually
@@ -437,6 +448,36 @@ def verify_playbook(
     _record_history(yaml_text, playbook, result["ready_to_push"],
                     required_fixes, warnings, live_probe)
     return result
+
+
+def _write_type_trace(yaml_text: str, playbook: str | None, walk) -> str | None:
+    """Phase 5 — persist a per-branch, per-step type trace to
+    store/verify_traces/<yaml_sha>.json for troubleshooting. Best-effort;
+    never raises. Returns the path written (str) or None."""
+    try:
+        import hashlib
+        sha = hashlib.sha1((yaml_text or "").encode("utf-8")).hexdigest()[:16]
+        out_dir = REPO_ROOT / "store" / "verify_traces"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{sha}.json"
+        payload = {
+            "yaml_sha": sha,
+            "playbook": playbook,
+            "branches": [
+                {
+                    "name": b.name,
+                    "step_ids": b.step_ids,
+                    "var_env": b.var_env,
+                    "type_decisions": b.type_decisions,
+                    "diagnostics": [d.to_dict() for d in b.diagnostics],
+                }
+                for b in walk.branches
+            ],
+        }
+        path.write_text(json.dumps(payload, indent=2, default=str))
+        return str(path)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _record_history(yaml_text: str, playbook: str | None, ready: bool,

@@ -128,3 +128,37 @@ def test_next_actions_listed_when_blocked():
     res = verify_playbook(yaml_text=yaml)
     assert res["ready_to_push"] is False
     assert len(res["next_actions"]) >= 1
+
+
+def test_type_trace_written_and_pathed():
+    """Phase 5 — verify_playbook persists a trace file and returns its path;
+    verbose folds the per-branch decisions into evidence, lean mode omits
+    them (but still writes the file)."""
+    import json
+    from pathlib import Path
+
+    yaml = _yaml("""
+        collection: TestCol
+        playbooks:
+          - name: TP
+            steps:
+              - name: Start
+                type: start
+                next: set
+              - name: set
+                type: set_variable
+                vars:
+                  echo: "{{ vars.steps.set.foo }}"
+    """)
+    res = verify_playbook(yaml_text=yaml, verbose=True)
+    path = res["evidence"].get("type_trace_path")
+    assert path and Path(path).exists()
+    payload = json.loads(Path(path).read_text())
+    assert "branches" in payload and payload["yaml_sha"]
+    # verbose folds the trace into evidence
+    assert "type_trace" in res["evidence"]
+
+    # lean mode still writes the file + path, but no folded trace
+    res2 = verify_playbook(yaml_text=yaml, verbose=False)
+    assert res2["evidence"].get("type_trace_path")
+    assert "type_trace" not in res2["evidence"]

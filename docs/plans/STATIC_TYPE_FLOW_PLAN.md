@@ -1,8 +1,9 @@
 # Static type-flow analysis plan — source→target type checking across the branch tree
 
-**Status (updated 2026-06-06):** Phases **0, 1 (1a+1b), 2, 4 DONE & committed**; Phases 3 & 5
-not started. Connector-param ingestion coercion (Phase 1b tail / Open Q #2) still deferred —
-Phase 4 shipped the evidence-sound subset that does NOT need it (see Phase 4 Outcome).
+**Status (updated 2026-06-06):** Phases **0, 1 (1a+1b), 2, 3, 4, 5 ALL DONE & committed.**
+The only remaining deferral is connector-param ingestion coercion (Phase 1b tail / Open Q #2),
+which gates a future **Phase 4b** (full scalar→scalar tolerance matrix); Phase 4 shipped the
+evidence-sound subset that does NOT need it (see Phase 4 Outcome).
 **Branch:** `feat/static-type-flow` (off `feat/skill-based-playbook`).
 **Green-check:** `make verify` (307 fsr_core + 159 connector) — currently green. Note the
 python eval suite (`python/tests/test_evals_harness.py::test_run_matrix_gold_beats_echo`) is
@@ -11,10 +12,11 @@ gated by `verify_playbook` output, so any verify change must keep the gold fract
 **Commits:** `7372065` (P0 branch enum) · `5513f20`+`50157b1` (P1b coercion) · `02a699e`
 (P1a scoping) · `027bce3` (P2 var typing + P0 regression fix).
 
-**RESUME HERE →** Phase 3 (playbook parameter declared types — would let
-`vars.input.params.<name>` flow into the Phase 4 check) OR Phase 5 (JSON trace export). The
-core ask (Phase 4 source→target check) is DONE. See each phase's **Outcome** block below for
-what landed. Probes are re-runnable:
+**RESUME HERE →** All planned phases (0–5) are DONE. The only open follow-up is **Phase 4b**
+(full scalar→scalar coercion tolerance), blocked on the live connector-param ingestion probe
+(Open Q #2) — start there if/when that probe is run. Also pending: re-vendor `fsr_core` into
+the connector + deploy (per CLAUDE.md) to ship phases 3–5 to the box. See each phase's
+**Outcome** block below for what landed. Probes are re-runnable:
 `PYTHONPATH=python:. .venv/bin/python -m probes.probe_set_variable_coercion` (and
 `probe_var_scoping`); results in `store/probe_results/`.
 
@@ -386,13 +388,27 @@ error and the no-`param_type_fn`/filtered-ref skip paths). `make verify` green (
 `int("123")` coercion?) and list/dict → untyped-`text` param (no observed_type) — both need
 the live connector-param ingestion echo probe to ship without false positives.
 
-### Phase 5 — JSON trace export / troubleshooting
+### Phase 5 — JSON trace export / troubleshooting ✅ DONE 2026-06-06
 - Build a per-branch, per-step trace: typed_env evolution + every reference's
   (source_type → target_type → verdict) decision.
 - Write to `store/verify_traces/<yaml_sha>.json` AND include in `verify_playbook` verbose
   evidence (`evidence["type_trace"]`).
 - **Tests:** trace file written; verbose payload carries the trace; lean payload when
   `verbose=False`.
+
+**Outcome:** `BranchResult.type_decisions` now records every connector-param source→target
+decision (passes AND failures) as `{step, param, connector, operation, ref, ref_kind,
+source_type, target_type, verdict}`; `_check_connector_param_types` appends to it via a
+`decisions` accumulator threaded through `_validate_branch_jinja`. `WalkResult.to_dict`
+carries `type_decisions` per branch. `tools_verify._write_type_trace` persists the full
+trace (var_env + decisions + diagnostics per branch) to
+`store/verify_traces/<yaml_sha>.json` (best-effort, never raises) on EVERY verify run and
+surfaces the path as `evidence["type_trace_path"]`; `verbose=True` additionally folds the
+per-branch decisions into `evidence["type_trace"]` (lean mode omits the folded copy but still
+writes the file). `store/verify_traces/` added to `.gitignore`. Tests:
+`fsr_core/tests/test_walker_param_types.py` (+2: decisions record pass/fail, to_dict carries
+them) and `python/tests/test_verify_playbook.py` (+1 e2e: file written + pathed, verbose folds
+trace, lean omits it). `make verify` green (326 fsr_core + 159 connector); gold gate green.
 
 ---
 
@@ -402,7 +418,10 @@ the live connector-param ingestion echo probe to ship without false positives.
    runtime (informs which mismatches are error vs warning). Phase 1 probe partly answers.
 3. Whether `code_snippet` / `workflow_reference` (unknown output shapes) should ever produce
    type errors or always degrade to "unknown, skip."
-4. Trace file retention/cleanup policy for `store/verify_traces/`.
+4. Trace file retention/cleanup policy for `store/verify_traces/`. **Partly resolved
+   (2026-06-06):** the dir is gitignored and keyed by yaml_sha (so re-verifying the same YAML
+   overwrites rather than accumulates). No automatic age-based pruning yet — add one if the dir
+   grows unbounded across many distinct playbooks.
 
 ## Files in scope
 - `fsr_core/compiler/typed_walker.py` — branch walk, typed_env, type comparison (P0,P2,P4,P5).

@@ -65,6 +65,9 @@ class BranchResult:
     typed_env: dict[str, Shape]            # vars.steps.<jinja_key> -> Shape
     var_env: dict[str, Shape] = field(default_factory=dict)  # vars.<name> -> Shape
     diagnostics: list[Diagnostic] = field(default_factory=list)
+    # Phase 5 — every connector-param source→target decision on this branch
+    # (passes included), for the troubleshooting trace export.
+    type_decisions: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -82,6 +85,7 @@ class WalkResult:
                     "typed_env_keys": sorted(b.typed_env.keys()),
                     "var_env": {k: v for k, v in sorted(b.var_env.items())},
                     "diagnostics": [d.to_dict() for d in b.diagnostics],
+                    "type_decisions": b.type_decisions,
                 }
                 for b in self.branches
             ],
@@ -674,7 +678,7 @@ def _validate_branch_jinja(
     pb: Playbook, ids: list[str], typed_env: dict[str, Shape],
     branch_name: str, param_type_fn: ParamTypeFn | None = None,
     param_shapes: dict[str, Shape] | None = None,
-) -> tuple[list[Diagnostic], dict[str, Shape]]:
+) -> tuple[list[Diagnostic], dict[str, Shape], list[dict[str, Any]]]:
     by_id = {s.id: s for s in pb.steps}
     jinja_key_lookup = {_jinja_key(s): s for s in pb.steps}
     # Normalised lookup: lowercase + non-alphanumeric collapsed to `_`.
@@ -684,6 +688,7 @@ def _validate_branch_jinja(
         return re.sub(r"[^a-z0-9]+", "_", k.lower()).strip("_")
     normalised_lookup = {_norm(jk): jk for jk in jinja_key_lookup}
     diags: list[Diagnostic] = []
+    type_decisions: list[dict[str, Any]] = []  # Phase 5 trace
     visible: set[str] = set()  # jinja_keys that have run by the time we visit this step
 
     # Phase 2 — branch-local `vars.<name>` typing + scoping. var_env grows as
@@ -718,7 +723,7 @@ def _validate_branch_jinja(
         if param_type_fn is not None and s.type in {"connector", "connector_op"}:
             diags.extend(_check_connector_param_types(
                 s, branch_name, typed_env, var_env, visible, param_type_fn,
-                param_shapes))
+                param_shapes, type_decisions))
         # Validate refs in this step's arguments using the env *before*
         # this step's own shape is added (a step can reference itself
         # only via universal keys, handled inside _resolve_path).
@@ -888,7 +893,7 @@ def _validate_branch_jinja(
                             severity="warning",
                         ))
         visible.add(_jinja_key(s))
-    return diags, var_env
+    return diags, var_env, type_decisions
 
 
 # ---------------------------------------------------------------------------
@@ -971,12 +976,16 @@ def _check_connector_param_types(
     var_env: dict[str, Shape], visible: set[str],
     param_type_fn: ParamTypeFn,
     param_shapes: dict[str, Shape] | None = None,
+    decisions: list[dict[str, Any]] | None = None,
 ) -> list[Diagnostic]:
     """For each connector param whose value is a pure reference to a typed
     source (step output or set_variable var), compare the source's inferred
     type against the param's target type and emit `type_mismatch` on a
     confident incompatibility (shape-into-scalar, or a numeric/bool category
-    crossing). Filtered/interpolated values are left to the resolver."""
+    crossing). Filtered/interpolated values are left to the resolver.
+
+    When `decisions` is given, append a record per judged param (passes
+    included) for the Phase 5 trace export."""
     connector, op = _connector_op(s)
     if not connector or not op:
         return []
@@ -1010,7 +1019,16 @@ def _check_connector_param_types(
             tgt_tag = param_type_fn(connector, op, p_name)
         except Exception:  # noqa: BLE001
             tgt_tag = None
-        if _source_target_compatible(src_tag, tgt_tag):
+        ok = _source_target_compatible(src_tag, tgt_tag)
+        if decisions is not None:
+            decisions.append({
+                "step": s.id, "param": p_name,
+                "connector": connector, "operation": op,
+                "ref": str(p_val).strip(), "ref_kind": kind,
+                "source_type": src_tag, "target_type": tgt_tag,
+                "verdict": "ok" if ok else "type_mismatch",
+            })
+        if ok:
             continue
         src_desc = ("a list" if src_tag == "list"
                     else "an object" if src_tag == "dict"
@@ -1137,11 +1155,12 @@ def walk_playbook(
                 continue
             typed_env[_jinja_key(s)] = per_step[s.id]
         label = _branch_label(pb, ids)
-        diags, var_env = _validate_branch_jinja(
+        diags, var_env, type_decisions = _validate_branch_jinja(
             pb, ids, typed_env, label, param_type_fn, param_shapes)
         branches.append(BranchResult(
             name=label, step_ids=ids,
             typed_env=typed_env, var_env=var_env, diagnostics=diags,
+            type_decisions=type_decisions,
         ))
         all_diags.extend(diags)
 
