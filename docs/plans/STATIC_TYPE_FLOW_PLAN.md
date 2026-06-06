@@ -1,8 +1,20 @@
 # Static type-flow analysis plan — source→target type checking across the branch tree
 
-**Status:** PLAN ONLY (2026-06-06). No code written yet — awaiting design approval.
-**Branch when building:** new branch off `feat/skill-based-playbook` (multi-file walker change).
-**Green-check:** `make verify` after every phase.
+**Status (updated 2026-06-06):** Phases **0, 1 (1a+1b), 2 DONE & committed**; Phases 3–5 not
+started. Connector-param ingestion coercion (Phase 1b tail) deferred to Phase 4.
+**Branch:** `feat/static-type-flow` (off `feat/skill-based-playbook`).
+**Green-check:** `make verify` (307 fsr_core + 159 connector) — currently green. Note the
+python eval suite (`python/tests/test_evals_harness.py::test_run_matrix_gold_beats_echo`) is
+gated by `verify_playbook` output, so any verify change must keep the gold fraction ≥ 0.55.
+
+**Commits:** `7372065` (P0 branch enum) · `5513f20`+`50157b1` (P1b coercion) · `02a699e`
+(P1a scoping) · `027bce3` (P2 var typing + P0 regression fix).
+
+**RESUME HERE →** Phase 3 (playbook parameter declared types) OR Phase 4 (source→target type
+check — the core ask; `BranchResult.var_env` is already wired to feed it). See each phase's
+**Outcome** block below for what landed. Probes are re-runnable:
+`PYTHONPATH=python:. .venv/bin/python -m probes.probe_set_variable_coercion` (and
+`probe_var_scoping`); results in `store/probe_results/`.
 
 ---
 
