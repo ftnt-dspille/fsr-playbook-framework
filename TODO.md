@@ -12,6 +12,7 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 | Plan | Scope | Status |
 |---|---|---|
+| [`CHAT_INTELLIGENCE_PLAN.md`](docs/plans/CHAT_INTELLIGENCE_PLAN.md) | **Make the chat smarter at investigate→hunt→triage→build, and make that easy to tune.** Track A = a drive→score→attribute→pin tuning loop; Track B = the capability ladder, each rung pinned by a Track-A gate. Subsumes the investigation-quality thread. | **Phase 0 not started (2026-06-05).** Build Track A (A1–A3,A6) first. |
 | [`AGENT_HARDENING_PLAN.md`](docs/plans/AGENT_HARDENING_PLAN.md) | **Primary connector/fsr_core plan.** SOC-deployable agent: op grounding, HITL, self-heal, investigation quality, stream reliability, authoring-loop SAFE_TOOLS (absorbed from AGENT_TOOL_REGISTRY_FIX_PLAN). | Phase 0 (authoring SAFE_TOOLS) + Phase 2–4 open. Phase 1 ✅ complete (1.1–1.9, 2.8 all done). |
 | [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Prompt-cache prefix (A) + constrained emit_* generation (B) + enhance vs build separation (C). | **A ✅ done** (commit `18adb53`). B + C **parked** (low priority per 2026-05-30 decision). |
 | [`AGENT_LOOP_LIFT_PLAN.md`](docs/plans/AGENT_LOOP_LIFT_PLAN.md) | Extract event-consumer loop from `chat.py` into `fsr_core.llm.run_turn` so connector can reuse it without 200-line duplication. | **Not started — post-demo.** Prereq for CHAT_STREAMING_PLAN. |
