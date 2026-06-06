@@ -109,6 +109,11 @@ res = verify_playbook(yaml_text=open("playbook.yaml").read())
 - `fsr-read` — lean, read-only: reference lookups, live reads, validation. Best
   for testing/validation sessions.
 - `fsrpb` — the full ~80-tool authoring brain (compile, push, run, emit, debug).
+- `fsr-deploy` — connector package + deploy pipeline to SOAR:
+  `connector_status` (live version/health, read-only), `connector_build`
+  (vendor + tarball, no install), `connector_deploy` (bump → build → install →
+  warmup → verify; **mutates the live box — requires `confirm=True`**). Finds the
+  connector via `$FSR_CONNECTOR_DIR` or the standard sibling layout.
 
 A Claude Code / MCP client that opens this repo picks up `.mcp.json`
 automatically. (The gitignored `.claude/settings.json` is for personal,
