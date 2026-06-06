@@ -161,7 +161,7 @@ severity/verdict correctness, low-signal handling (don't over-escalate a benign
 alert), and scenario classification accuracy. New gate: `triage_assessment` against
 labeled scenarios in `triage_scenarios.py`.
 
-### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟡 GATE LANDED; live chain WORKS (corrected 2026-06-06) — 2 narrow gaps: trace-compiler bypass + offer-card-only gate
+### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟢 LIVE CHAIN PROVEN (0.3.123, 2026-06-06) — gate fires, grounding 1.0; open: action_coverage (staged-not-executed containment)
 Levers: `system_prompt_build.md` *Triage → build handoff* + *Canonical skeleton*.
 The built playbook must actually **automate what was investigated** — same
 ops, parameterized to the trigger record, compiling + runnable. Reuse build tasks
@@ -215,11 +215,31 @@ chain works end-to-end** when the conversation is replayed. (Transcript:
    containment ops (fortigate block) were NOT exercised in triage, so grounding would
    correctly score < 1.0 (the gate doing its job).
 
-**Next:** (a) force build-prompt adherence so a chained build calls
-`build_playbook_from_trace` first (lever above) — then the offer path fires; (b) widen
-`attach_build_fidelity` to also grade `last_assistant_yaml`/`push_playbook` builds, not
-only offer cards; (c) pin the corrected chain as a golden once it emits an offer. Plus
-the still-open parameterized-to-trigger-record check beyond ops-overlap.
+**(a) DONE — live-proven on 0.3.123.** Tightened `system_prompt_build.md`
+§*Triage → build handoff*: calling `build_playbook_from_trace` FIRST is now mandatory,
+with an explicit rebuttal of the "those were just live lookups, not steps"
+rationalization (every `run_op` is recorded). Re-drove the same chain →
+`build_playbook_from_trace` is the **first** build op, the agent emits
+`emit_playbook_offer` (`awaiting_playbook_offer`), and **`build_fidelity` fires
+end-to-end**: `grounding 1.00` (all 4 built ops — ip-quality-score/fortiguard-ioc/
+fortisiem/virustotal — really ran in triage; zero invented ops), `action_coverage
+0.00`. The trace compiler produced a grounded, runnable enrichment playbook from the
+real run. Transcript: `store/eval_runs/chatchain_1780789560.json`. **(b) proved
+unnecessary** — forcing the trace compiler routed the agent to the offer-card path the
+gate already grades, so no gate-widening was needed.
+
+**New open gap — `action_coverage`.** The staged containment `fortigate-firewall.
+block_ip_new` is ABSENT from the built playbook because it was only **staged**
+(`emit_action_card`), never executed, so it's not in the recorded trace and the
+compiler can't replay it. The build prompt (§handoff) already says an approved
+containment should appear as a manual-approval step — so the fix is: after the trace
+compiler returns the enrichment backbone, the build agent must **append the staged
+containment action as a confirmed/manual-approval step** (the one op it legitimately
+hand-adds beyond the trace). Options: (i) record staged action_cards into the session
+trace so the compiler replays them too; or (ii) prompt the build agent to read the
+staged action from history and add it. **Next:** implement one of those → re-drive →
+expect `action_coverage 1.0` + `build_fidelity` PASS → pin THAT chain as a golden.
+Plus the still-open parameterized-to-trigger-record check beyond ops-overlap.
 
 ### B5 · End-to-end chain  ·  HIGH
 Score the whole investigate→hunt→triage→build chain as ONE run (the `build_run_proof`

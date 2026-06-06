@@ -31,15 +31,25 @@ like "Design a re-runnable playbook… Operations used during triage: X, Y, Z".
 
 When you see this:
 
-- **Prefer the trace compiler.** The connector recorded the connector ops you
-  actually ran during triage — with their real outputs — as a typed trace.
-  Call `build_playbook_from_trace` (no arguments; it reads the session's
-  recorded trace) FIRST. It replays those actions into steps and wires each
-  step's inputs to prior steps' real outputs deterministically (no guessed
-  jinja paths), verifies every wire, and returns YAML plus `gaps`/`repaired`
-  /`static_errors`. Review that YAML, fill any reported `gaps`, then validate
-  and present it. Only hand-author if it returns `empty_trace` (no recorded
-  actions) or you must add steps that were never run.
+- **Call the trace compiler FIRST — this is mandatory, not optional.** The
+  moment you see triage history (a populated conversation, an "Operations used
+  during triage" directive, or `[called <op>(...)]` markers), your FIRST action
+  is to call `build_playbook_from_trace` (no arguments; it reads the session's
+  recorded trace). Do this **before** any `get_step_type` / `find_operation` /
+  hand-authoring. It replays those actions into steps and wires each step's
+  inputs to prior steps' real outputs deterministically (no guessed jinja
+  paths), verifies every wire, and returns YAML plus `gaps`/`repaired`/
+  `static_errors`. Review that YAML, fill any reported `gaps`, then validate
+  and present it.
+- **Do NOT decide for yourself that there is no trace.** Every `run_op` you ran
+  during triage — including enrichment/intel lookups (VirusTotal, FortiGuard,
+  Shodan, IP/host context) — was recorded to the session trace with its real
+  output. They are NOT "just live lookups": they are recorded, replayable
+  steps. The ONLY way to know the trace is empty is to call
+  `build_playbook_from_trace` and see it return `empty_trace`. Reasoning that
+  "those weren't playbook steps" and skipping the call is a mistake — make the
+  call and let the result decide. Hand-author only after the tool returns
+  `empty_trace`, or to add steps that were genuinely never run.
 - **Fallback — read the triage history as the spec.** When there is no usable
   trace, the operations actually run during triage (enrichment lookups, the
   containment action that was approved) are the backbone — reproduce them as
