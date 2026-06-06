@@ -307,7 +307,7 @@ at `cres.ir`, including `_per_step_schema_checks`. The resolver rewrites an `opt
 typed walk (`walk_coll`); the per-step schema checks + Jinja-shape evidence run on the fresh
 parse (authoring shape) exactly as before. Gold fraction restored to 0.587.
 
-### Phase 3 — Playbook parameter declared types
+### Phase 3 — Playbook parameter declared types ✅ DONE 2026-06-06
 - New optional YAML/IR surface for parameter types. Candidate shape (decide in build):
   `parameters: {ip: string, count: integer}` (mapping) alongside today's bare list, kept
   back-compatible (untyped list still allowed → `any`).
@@ -315,6 +315,28 @@ parse (authoring shape) exactly as before. Gold fraction restored to 0.587.
   `vars.input.params.<name>` shapes from it.
 - **Tests:** typed param flows into a connector op and a mismatch is caught; untyped param
   stays `any` (no regression on existing examples).
+
+**Outcome (user picked the mapping shape):** `parameters:` now accepts EITHER the bare list
+(untyped → `any`, unchanged) OR a mapping `{name: type}`. The parser
+(`parser.py`) splits a mapping into `Playbook.parameters` (names, for back-compat with the
+emitter + `validator._check_reserved_var_collisions`) and the new
+`Playbook.parameter_types: dict[str,str]` (IR field). Author vocabulary `_PARAM_TYPE_VOCAB` =
+{string, integer, boolean, float, number, object, json, list, array, datetime, ipv4, url,
+email, any}; `any` is stored as untyped (omitted); an unknown type is a **warning** (compiles)
+not a hard error. The walker's `_param_type_to_shape` maps each declared type to a source
+Shape (ipv4/url/email/datetime → scalar `string` for now — a permissive tag), seeds
+`param_shapes` once per playbook, and `_pure_single_ref` now recognizes
+`vars.input.params.<name>` → `("param", name, "")` so a typed param flowing into a connector
+op is judged by the same Phase 4 `_source_target_compatible` logic. Untyped params produce no
+shape → skipped (no regression). Tests: `fsr_core/tests/test_param_types_phase3.py` (8 cases:
+parser mapping/list/bad-type, type→shape, input-param ref, + 3 walker integration). `make
+verify` green (324 fsr_core + 159 connector); gold gate green; zero new parse errors across
+`examples/*.yaml`.
+
+**Note:** the resolver does NOT yet emit `vars.input.params.<name>` declarations to FSR from
+the mapping (the type is static-analysis-only metadata); the emitted playbook parameter list
+is unchanged. Wiring declared types into the emitted workflow inputs (if ever needed) is out
+of scope here.
 
 ### Phase 4 — Source-vs-target type check (the core ask) ✅ DONE 2026-06-06
 - New walker callback `param_type_fn(connector, op, param) -> target_tag` (same seam as

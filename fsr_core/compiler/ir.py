@@ -104,6 +104,11 @@ class Playbook:
     # via `arguments={name: value}` on a workflow_reference step;
     # inside the playbook, values are read as `{{vars.input.params.<name>}}`.
     parameters: list[str] = field(default_factory=list)
+    # Optional declared type per parameter (STATIC_TYPE_FLOW Phase 3). Set
+    # only when `parameters:` is authored as a mapping {name: type}; a bare
+    # list leaves this empty and each param stays `any`. Seeds
+    # `vars.input.params.<name>` shapes in the typed walker.
+    parameter_types: dict[str, str] = field(default_factory=dict)
     steps: list[Step] = field(default_factory=list)
     annotations: list["Annotation"] = field(default_factory=list)
 

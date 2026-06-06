@@ -16,6 +16,14 @@ from .ir import Annotation, Collection, Playbook, Step
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
+# Declared playbook-parameter types (STATIC_TYPE_FLOW Phase 3). Author-facing
+# vocabulary; the typed walker maps these to source Shapes. `any` is allowed
+# but stored as "untyped" (omitted from parameter_types).
+_PARAM_TYPE_VOCAB = {
+    "string", "integer", "boolean", "float", "number", "object", "json",
+    "list", "array", "datetime", "ipv4", "url", "email", "any",
+}
+
 
 def _coerce_label(v: Any) -> tuple[Any, bool]:
     """YAML 1.1 'Norway problem': bare `yes`/`no`/`on`/`off` are parsed as
@@ -610,14 +618,45 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                         if isinstance(o, dict) and isinstance(o.get("next"), str):
                             o["next"] = _resolve_ref(o["next"])
 
-        params_raw = pb_raw.get("parameters") or []
-        if not isinstance(params_raw, list) or not all(isinstance(p, str) for p in params_raw):
+        # `parameters:` accepts two shapes (STATIC_TYPE_FLOW Phase 3):
+        #   - bare list of names (untyped → each param is `any`), or
+        #   - mapping {name: type} declaring a static type per param, which
+        #     seeds `vars.input.params.<name>` in the typed walker.
+        params_in = pb_raw.get("parameters") or []
+        params_raw: list[str] = []
+        param_types: dict[str, str] = {}
+        if isinstance(params_in, dict):
+            for pname, ptype in params_in.items():
+                if not isinstance(pname, str):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="parameter names must be strings",
+                        path=f"{pb_path}.parameters",
+                    ))
+                    continue
+                params_raw.append(pname)
+                tnorm = str(ptype).strip().lower() if ptype is not None else ""
+                if tnorm and tnorm not in _PARAM_TYPE_VOCAB:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"parameter {pname!r} has unknown type "
+                                 f"{ptype!r}; allowed: "
+                                 f"{', '.join(sorted(_PARAM_TYPE_VOCAB))}"),
+                        path=f"{pb_path}.parameters.{pname}",
+                        severity="warning",
+                    ))
+                elif tnorm and tnorm != "any":
+                    param_types[pname] = tnorm
+        elif isinstance(params_in, list) and all(
+                isinstance(p, str) for p in params_in):
+            params_raw = list(params_in)
+        else:
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
-                message="parameters must be a list of strings",
+                message=("parameters must be a list of strings or a mapping "
+                         "{name: type}"),
                 path=f"{pb_path}.parameters",
             ))
-            params_raw = []
 
         # Capture the priority NAME as-authored (normalized to Title case).
         # Optional — defaults to "High" so authored playbooks run at high
@@ -700,6 +739,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             priority=priority,
             trigger=str(pb_raw.get("trigger", "start") or "start"),
             parameters=list(params_raw),
+            parameter_types=param_types,
             steps=steps,
             annotations=annotations,
         ))

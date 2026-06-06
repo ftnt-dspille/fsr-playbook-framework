@@ -191,12 +191,35 @@ _PURE_STEP_REF_RE = re.compile(
     r"\Avars\.steps\.([A-Za-z_][A-Za-z0-9_]*)"
     r"((?:\.[A-Za-z_][A-Za-z0-9_]*|\[\s*(?:\d+|'[^']*'|\"[^\"]*\")\s*\])*)\Z")
 _PURE_VAR_REF_RE = re.compile(r"\Avars\.([A-Za-z_][A-Za-z0-9_]*)\Z")
+_PURE_INPUT_PARAM_REF_RE = re.compile(
+    r"\Avars\.input\.params\.([A-Za-z_][A-Za-z0-9_]*)\Z")
+
+
+# Declared param-type string → source Shape (STATIC_TYPE_FLOW Phase 3). The
+# vocabulary is validated in the parser (`_PARAM_TYPE_VOCAB`); anything not
+# here (or `any`) leaves the param untyped → no shape → skip.
+def _param_type_to_shape(decl: str) -> Shape | None:
+    d = (decl or "").lower()
+    if d in {"string", "datetime", "ipv4", "url", "email"}:
+        return _shape_scalar("string")
+    if d == "integer":
+        return _shape_scalar("integer")
+    if d == "boolean":
+        return _shape_scalar("boolean")
+    if d in {"float", "number"}:
+        return _shape_scalar("float")
+    if d in {"object", "json"}:
+        return _shape_object()
+    if d in {"list", "array"}:
+        return _shape_list(_shape_scalar("any"))
+    return None
 
 
 def _pure_single_ref(value: Any) -> tuple[str, str, str] | None:
     """If `value` is a single `{{ … }}` block wrapping one bare reference
     (no filters, no surrounding text), classify it. Returns
-    ('step', key, attr_chain) or ('var', name, '') or None.
+    ('step', key, attr_chain), ('var', name, '') or ('param', name, '')
+    (the last for `vars.input.params.<name>`), or None.
 
     Filtered refs (`{{ x | int }}`) and interpolations (`a {{ x }} b`) are
     skipped here — the resolver's Tier 3 already validates the former, and
@@ -212,6 +235,9 @@ def _pure_single_ref(value: Any) -> tuple[str, str, str] | None:
     sm = _PURE_STEP_REF_RE.match(expr)
     if sm:
         return ("step", sm.group(1), sm.group(2) or "")
+    pm = _PURE_INPUT_PARAM_REF_RE.match(expr)
+    if pm:
+        return ("param", pm.group(1), "")
     vm = _PURE_VAR_REF_RE.match(expr)
     if vm:
         return ("var", vm.group(1), "")
@@ -647,6 +673,7 @@ def _resolve_path(env_key: str, attr_chain: str,
 def _validate_branch_jinja(
     pb: Playbook, ids: list[str], typed_env: dict[str, Shape],
     branch_name: str, param_type_fn: ParamTypeFn | None = None,
+    param_shapes: dict[str, Shape] | None = None,
 ) -> tuple[list[Diagnostic], dict[str, Shape]]:
     by_id = {s.id: s for s in pb.steps}
     jinja_key_lookup = {_jinja_key(s): s for s in pb.steps}
@@ -690,7 +717,8 @@ def _validate_branch_jinja(
         # pure reference to a step output or set_variable var.
         if param_type_fn is not None and s.type in {"connector", "connector_op"}:
             diags.extend(_check_connector_param_types(
-                s, branch_name, typed_env, var_env, visible, param_type_fn))
+                s, branch_name, typed_env, var_env, visible, param_type_fn,
+                param_shapes))
         # Validate refs in this step's arguments using the env *before*
         # this step's own shape is added (a step can reference itself
         # only via universal keys, handled inside _resolve_path).
@@ -942,6 +970,7 @@ def _check_connector_param_types(
     s: Step, branch_name: str, typed_env: dict[str, Shape],
     var_env: dict[str, Shape], visible: set[str],
     param_type_fn: ParamTypeFn,
+    param_shapes: dict[str, Shape] | None = None,
 ) -> list[Diagnostic]:
     """For each connector param whose value is a pure reference to a typed
     source (step output or set_variable var), compare the source's inferred
@@ -966,6 +995,10 @@ def _check_connector_param_types(
             shape, err = _resolve_path(key, rest, typed_env)
             if err:
                 continue  # missing-field / non-list etc. already reported
+        elif kind == "param":
+            shape = (param_shapes or {}).get(key)
+            if shape is None:
+                continue  # untyped playbook param → `any`, nothing to check
         else:  # var
             shape = var_env.get(key)
             if shape is None:
@@ -1074,6 +1107,13 @@ def walk_playbook(
             message=f"playbook {playbook_name!r} not found in collection",
         )], per_step_shapes={})
 
+    # Phase 3 — seed `vars.input.params.<name>` shapes from declared types.
+    param_shapes: dict[str, Shape] = {}
+    for pname, decl in (getattr(pb, "parameter_types", None) or {}).items():
+        sh = _param_type_to_shape(decl)
+        if sh is not None:
+            param_shapes[pname] = sh
+
     per_step: dict[str, Shape] = {}
     for s in pb.steps:
         per_step[s.id] = _synth_step_shape(
@@ -1098,7 +1138,7 @@ def walk_playbook(
             typed_env[_jinja_key(s)] = per_step[s.id]
         label = _branch_label(pb, ids)
         diags, var_env = _validate_branch_jinja(
-            pb, ids, typed_env, label, param_type_fn)
+            pb, ids, typed_env, label, param_type_fn, param_shapes)
         branches.append(BranchResult(
             name=label, step_ids=ids,
             typed_env=typed_env, var_env=var_env, diagnostics=diags,
