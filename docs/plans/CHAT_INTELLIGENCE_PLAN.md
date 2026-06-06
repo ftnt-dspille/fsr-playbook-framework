@@ -161,7 +161,7 @@ severity/verdict correctness, low-signal handling (don't over-escalate a benign
 alert), and scenario classification accuracy. New gate: `triage_assessment` against
 labeled scenarios in `triage_scenarios.py`.
 
-### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟢 LIVE CHAIN PROVEN (0.3.123, 2026-06-06) — gate fires, grounding 1.0; open: action_coverage (staged-not-executed containment)
+### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟢 LIVE CHAIN PROVEN (0.3.123, 2026-06-06) — gate fires, grounding 1.0; action_coverage fix IMPLEMENTED+offline-proven (staged action_cards now recorded into trace), pending live re-drive
 Levers: `system_prompt_build.md` *Triage → build handoff* + *Canonical skeleton*.
 The built playbook must actually **automate what was investigated** — same
 ops, parameterized to the trigger record, compiling + runnable. Reuse build tasks
@@ -228,18 +228,33 @@ real run. Transcript: `store/eval_runs/chatchain_1780789560.json`. **(b) proved
 unnecessary** — forcing the trace compiler routed the agent to the offer-card path the
 gate already grades, so no gate-widening was needed.
 
-**New open gap — `action_coverage`.** The staged containment `fortigate-firewall.
-block_ip_new` is ABSENT from the built playbook because it was only **staged**
-(`emit_action_card`), never executed, so it's not in the recorded trace and the
-compiler can't replay it. The build prompt (§handoff) already says an approved
-containment should appear as a manual-approval step — so the fix is: after the trace
-compiler returns the enrichment backbone, the build agent must **append the staged
-containment action as a confirmed/manual-approval step** (the one op it legitimately
-hand-adds beyond the trace). Options: (i) record staged action_cards into the session
-trace so the compiler replays them too; or (ii) prompt the build agent to read the
-staged action from history and add it. **Next:** implement one of those → re-drive →
-expect `action_coverage 1.0` + `build_fidelity` PASS → pin THAT chain as a golden.
-Plus the still-open parameterized-to-trigger-record check beyond ops-overlap.
+**`action_coverage` gap — FIX IMPLEMENTED (option i), offline-proven, pending live
+re-drive.** The staged containment `fortigate-firewall.block_ip_new` was ABSENT from
+the built playbook because it was only **staged** (`emit_action_card`), never executed,
+so it wasn't in the recorded trace and the compiler couldn't replay it. **Implemented
+option (i): record staged action_cards into the session trace.**
+- `SkillCall.staged: bool` flag (default False; omitted from `to_dict` when False so
+  legacy fixtures are unchanged; round-trips through JSON).
+- `SkillTrace.record_staged_action(connector, op, params, …)` appends a
+  `run_connector_action` SkillCall with `observed_output=None`, `staged=True`. Deduped
+  by `(connector, op)` against ALL prior calls — re-emitting the card, or staging an
+  op that later actually executes, adds only one step (the executed one with its real
+  output wins). Module-level `record_staged_action` convenience = no-op when no active
+  trace (studio/tests).
+- `emit_action_card` (`tools_emit.py`) calls it after its grounding+param validation
+  passes, so a staged containment lands on the trace.
+- The existing `insert_containment_guard` then gates the replayed containment behind a
+  synthesized malicious-verdict decision (safe-by-default), and `wire_record_inputs`
+  parameterizes its IOC to the trigger record.
+- Tests: `fsr_core/tests/test_staged_action_coverage.py` (8 cases incl. end-to-end
+  trace→YAML with a guarded `Block Ip New` step). `make verify` green (336 + 159).
+- fsr_core is a **symlink** from the connector → no manual vendor; `deploy.sh` rsyncs
+  it into the install package.
+
+**Next:** bump + `deploy.sh` → re-drive the live triage→build chain (real C2 alert,
+widget-style `messages[]` replay) → expect `action_coverage 1.0` + `build_fidelity`
+PASS → pin THAT chain as a golden. Plus the still-open parameterized-to-trigger-record
+check beyond ops-overlap.
 
 ### B5 · End-to-end chain  ·  HIGH
 Score the whole investigate→hunt→triage→build chain as ONE run (the `build_run_proof`

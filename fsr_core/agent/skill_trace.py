@@ -57,6 +57,13 @@ class SkillCall:
     step_name: str                          # stable; becomes the YAML step name
     resolved_inputs: Dict[str, Any] = field(default_factory=dict)
     observed_output: Any = None             # the real (full) run_op result (the data payload)
+    # True when this call was only STAGED (an `emit_action_card` the analyst
+    # was offered) and never executed, so `observed_output` is None — there is
+    # no real run to capture. The trace-build path still replays it as a step
+    # (e.g. the approved containment the investigation should automate), but
+    # it produces no output for downstream value-match wiring. See
+    # `SkillTrace.record_staged_action`.
+    staged: bool = False
     # How the captured `observed_output` nests under the FSR runtime step
     # record. run_op captures `resp.get("data", resp)`: when the raw op
     # response carried a `data` key, the runtime reference is
@@ -67,13 +74,18 @@ class SkillCall:
     ref_prefix: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "skill_id": self.skill_id,
             "step_name": self.step_name,
             "resolved_inputs": self.resolved_inputs,
             "observed_output": self.observed_output,
             "ref_prefix": self.ref_prefix,
         }
+        # Emit `staged` only when set so legacy readers / golden fixtures see
+        # the shape they always did.
+        if self.staged:
+            d["staged"] = True
+        return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SkillCall":
@@ -83,6 +95,7 @@ class SkillCall:
             resolved_inputs=d.get("resolved_inputs") or {},
             observed_output=d.get("observed_output"),
             ref_prefix=d.get("ref_prefix") or "",
+            staged=bool(d.get("staged")),
         )
 
 
@@ -183,6 +196,60 @@ class SkillTrace:
             resolved_inputs=resolved,
             observed_output=observed_output,
             ref_prefix=ref_prefix,
+        ))
+
+    def _has_op(self, connector: str, op: str) -> bool:
+        """True if a connector action for `(connector, op)` is already on the
+        trace (executed or staged) — the dedup key for staged actions."""
+        for c in self.calls:
+            ri = c.resolved_inputs or {}
+            if ri.get("connector") == connector and ri.get("operation") == op:
+                return True
+        return False
+
+    def record_staged_action(
+        self,
+        connector: str,
+        op: str,
+        params: Optional[Dict[str, Any]],
+        step_name: Optional[str] = None,
+        config: str = "",
+        agent: str = "",
+    ) -> Optional[SkillCall]:
+        """Record a STAGED connector action (an `emit_action_card` the analyst
+        was offered) as a `run_connector_action` SkillCall with no
+        `observed_output` — it was never executed.
+
+        This is what lets a trace-built playbook AUTOMATE an approved-but-staged
+        containment (`emit_action_card` for e.g. `fortigate-firewall.block_ip`):
+        the action never ran during triage, so `run_op` never recorded it and
+        the compiler had nothing to replay (the `action_coverage` gap). Recording
+        it here adds the step to the trace; `insert_containment_guard` then gates
+        it behind a malicious-verdict decision (safe-by-default), and the build
+        prompt's manual-approval handoff keeps a human in the loop.
+
+        Deduped by `(connector, op)` — re-emitting the same card across turns,
+        or staging an action that later actually executes, adds only one step
+        (the executed one, with its real output, wins). Returns the recorded
+        SkillCall, or None if no-op'd (a same-op call already exists)."""
+        if self._has_op(connector, op):
+            return None
+        base = _sanitize_step_name(step_name) if step_name else _titleize_op(op)
+        name = self._unique_name(base)
+        resolved = dict(params or {})
+        resolved["connector"] = connector
+        resolved["operation"] = op
+        if config:
+            resolved["config"] = config
+        if agent:
+            resolved["agent"] = agent
+        return self.record(SkillCall(
+            skill_id="run_connector_action",
+            step_name=name,
+            resolved_inputs=resolved,
+            observed_output=None,
+            ref_prefix="",
+            staged=True,
         ))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -286,4 +353,22 @@ def record_run_op(
     return _active.record_run_op(
         connector, op, params, observed_output, step_name, ref_prefix,
         config, agent,
+    )
+
+
+def record_staged_action(
+    connector: str,
+    op: str,
+    params: Optional[Dict[str, Any]],
+    step_name: Optional[str] = None,
+    config: str = "",
+    agent: str = "",
+) -> Optional[SkillCall]:
+    """Module-level convenience: record a staged connector action into the
+    active trace if one is installed, else no-op. This is what `emit_action_card`
+    calls — so studio/tests (no active trace) stay untouched."""
+    if _active is None:
+        return None
+    return _active.record_staged_action(
+        connector, op, params, step_name, config, agent,
     )

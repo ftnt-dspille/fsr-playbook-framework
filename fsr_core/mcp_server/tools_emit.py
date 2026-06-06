@@ -244,6 +244,14 @@ def emit_action_card(
     param_err = _validate_op_params(connector, operation, args)
     if param_err is not None:
         return param_err
+    # Record the staged action into the session trace so a later trace-built
+    # playbook AUTOMATES it — the analyst was offered this containment but it
+    # was never executed, so `run_op` never recorded it and the trace compiler
+    # had nothing to replay (the `action_coverage` gap). No-op when no trace is
+    # active (studio/tests) or the same op is already on the trace. The compiler
+    # gates it behind a malicious-verdict decision (`insert_containment_guard`).
+    from ..agent.skill_trace import record_staged_action
+    record_staged_action(connector, operation, args)
     return {
         "ok": True,
         "card": {
