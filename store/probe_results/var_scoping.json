@@ -1,0 +1,22 @@
+{
+  "probe": "var_scoping",
+  "epoch": 1780753759,
+  "base": "https://mfz9dldmc5b7hllc2rs.us-west-1.fortisoc.forticloud.com",
+  "findings": {
+    "predecessor_and_sibling": {
+      "status": "failed",
+      "run_pk": "884463",
+      "vars": {
+        "saw_a": "alpha",
+        "saw_only_false": "UNSET"
+      }
+    },
+    "for_each_item_lifetime": {
+      "status": "failed",
+      "run_pk": "884465",
+      "vars": {
+        "item_after": "UNSET"
+      }
+    }
+  }
+}

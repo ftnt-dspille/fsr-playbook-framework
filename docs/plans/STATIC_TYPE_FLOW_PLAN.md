@@ -122,8 +122,24 @@ cross-branch set_variable scoping actually gets enforced. Cross-branch tests her
 
 ### Phase 1 — Probe FSR engine behavior: variable creation, scoping, and type coercion (live)
 
-**Status: 1b (coercion matrix) DONE 2026-06-06 — see the dated matrix below. 1a (scoping)
-and connector-param ingestion still to probe.**
+**Status: 1a (scoping) + 1b (coercion matrix) DONE 2026-06-06 (live FortiCloud SOAR).
+Connector-param ingestion coercion still deferred (Open Q #2, only needed for Phase 4).**
+
+#### ✅ Phase 1a RESULT — variable scoping / lifetime (2026-06-06, live)
+Probe: `python/probes/probe_var_scoping.py` → `store/probe_results/var_scoping.json`
+(force-fail channel, same as 1b). Confirms the conservative model the walker already assumes:
+- **Predecessor visible on the taken arm:** a var set before a decision (`a="alpha"`) reads
+  back as `alpha` on the taken arm. ✓
+- **Sibling-arm isolation:** a var set ONLY on the untaken Else arm reads `UNSET` on the taken
+  arm — decision arms are exclusive (only one route executes per run). ✓
+- **`for_each` item is loop-scoped:** `{{ vars.item }}` read in the step AFTER a `for_each`
+  step is `UNSET` — the loop binding is dead outside the looping step. ✓
+
+**Phase 2 rules locked by this:** (1) a `vars.<name>` reference resolves only if a defining
+`set_variable` is a predecessor on the *same branch* (already the walker's `visible`-set
+model); (2) `vars.item` is valid only inside the step that carries `for_each` — flag it as
+undefined anywhere else. (Note: `vars` is a run-global mutable dict, but per-run only one
+decision arm runs, so the static per-branch model is sound — no cross-arm leakage observable.)
 
 This phase is the empirical foundation. **How the playbook engine actually creates
 variables and auto-coerces their types dictates what the static analyzer can soundly
