@@ -1,0 +1,334 @@
+{
+  "probe": "set_variable_coercion",
+  "epoch": 1780753122,
+  "base": "https://mfz9dldmc5b7hllc2rs.us-west-1.fortisoc.forticloud.com",
+  "run_pk": "884364",
+  "status": "failed",
+  "rows": [
+    {
+      "var": "s_false_cap",
+      "input_yaml": "\"False\"",
+      "note": "string \"False\" (capitalized)",
+      "present": true,
+      "runtime_type": "boolean",
+      "runtime_value": false
+    },
+    {
+      "var": "s_true_cap",
+      "input_yaml": "\"True\"",
+      "note": "string \"True\" (capitalized)",
+      "present": true,
+      "runtime_type": "boolean",
+      "runtime_value": true
+    },
+    {
+      "var": "s_false_lc",
+      "input_yaml": "\"false\"",
+      "note": "string \"false\" (lowercase)",
+      "present": true,
+      "runtime_type": "boolean",
+      "runtime_value": false
+    },
+    {
+      "var": "s_true_lc",
+      "input_yaml": "\"true\"",
+      "note": "string \"true\" (lowercase)",
+      "present": true,
+      "runtime_type": "boolean",
+      "runtime_value": true
+    },
+    {
+      "var": "s_int",
+      "input_yaml": "\"123\"",
+      "note": "string \"123\"",
+      "present": true,
+      "runtime_type": "integer",
+      "runtime_value": 123
+    },
+    {
+      "var": "s_zero",
+      "input_yaml": "\"0\"",
+      "note": "string \"0\"",
+      "present": true,
+      "runtime_type": "integer",
+      "runtime_value": 0
+    },
+    {
+      "var": "s_neg",
+      "input_yaml": "\"-7\"",
+      "note": "string \"-7\"",
+      "present": true,
+      "runtime_type": "integer",
+      "runtime_value": -7
+    },
+    {
+      "var": "s_leadzero",
+      "input_yaml": "\"007\"",
+      "note": "string \"007\" (leading zero)",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "007"
+    },
+    {
+      "var": "s_float",
+      "input_yaml": "\"1.5\"",
+      "note": "string \"1.5\"",
+      "present": true,
+      "runtime_type": "float",
+      "runtime_value": 1.5
+    },
+    {
+      "var": "s_hex",
+      "input_yaml": "\"0x1f\"",
+      "note": "string \"0x1f\"",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "0x1f"
+    },
+    {
+      "var": "s_list",
+      "input_yaml": "\"[\\\"a\\\", \\\"b\\\"]\"",
+      "note": "string JSON array",
+      "present": true,
+      "runtime_type": "list",
+      "runtime_value": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "var": "s_obj",
+      "input_yaml": "\"{\\\"k\\\": 1}\"",
+      "note": "string JSON object",
+      "present": true,
+      "runtime_type": "object",
+      "runtime_value": {
+        "k": 1
+      }
+    },
+    {
+      "var": "s_null",
+      "input_yaml": "\"null\"",
+      "note": "string \"null\"",
+      "present": true,
+      "runtime_type": "null",
+      "runtime_value": null
+    },
+    {
+      "var": "s_none",
+      "input_yaml": "\"None\"",
+      "note": "string \"None\" (python repr)",
+      "present": true,
+      "runtime_type": "null",
+      "runtime_value": null
+    },
+    {
+      "var": "s_empty",
+      "input_yaml": "\"\"",
+      "note": "empty string",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": ""
+    },
+    {
+      "var": "s_date",
+      "input_yaml": "\"2026-06-06\"",
+      "note": "string ISO date",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "2026-06-06"
+    },
+    {
+      "var": "s_iso",
+      "input_yaml": "\"2026-06-06T12:00:00Z\"",
+      "note": "string ISO timestamp",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "2026-06-06T12:00:00Z"
+    },
+    {
+      "var": "s_word",
+      "input_yaml": "\"hello\"",
+      "note": "plain word (json.loads should fail)",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "hello"
+    },
+    {
+      "var": "y_bool",
+      "input_yaml": "false",
+      "note": "bare YAML bool false",
+      "present": true,
+      "runtime_type": "boolean",
+      "runtime_value": false
+    },
+    {
+      "var": "y_int",
+      "input_yaml": "42",
+      "note": "bare YAML int",
+      "present": true,
+      "runtime_type": "integer",
+      "runtime_value": 42
+    },
+    {
+      "var": "y_float",
+      "input_yaml": "3.14",
+      "note": "bare YAML float",
+      "present": true,
+      "runtime_type": "float",
+      "runtime_value": 3.14
+    },
+    {
+      "var": "j_false",
+      "input_yaml": "\"{{ false }}\"",
+      "note": "Jinja {{ false }}",
+      "present": true,
+      "runtime_type": "boolean",
+      "runtime_value": false
+    },
+    {
+      "var": "j_int",
+      "input_yaml": "\"{{ 1 + 2 }}\"",
+      "note": "Jinja arithmetic",
+      "present": true,
+      "runtime_type": "integer",
+      "runtime_value": 3
+    },
+    {
+      "var": "j_list",
+      "input_yaml": "\"{{ [1, 2, 3] }}\"",
+      "note": "Jinja list literal",
+      "present": true,
+      "runtime_type": "list",
+      "runtime_value": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "var": "j_str_int",
+      "input_yaml": "\"{{ '123' }}\"",
+      "note": "Jinja string literal '123'",
+      "present": true,
+      "runtime_type": "integer",
+      "runtime_value": 123
+    },
+    {
+      "var": "s_TRUE_uc",
+      "input_yaml": "\"TRUE\"",
+      "note": "string \"TRUE\" (all caps)",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "TRUE"
+    },
+    {
+      "var": "s_yes",
+      "input_yaml": "\"yes\"",
+      "note": "string \"yes\" (YAML bool?)",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "yes"
+    },
+    {
+      "var": "s_sci",
+      "input_yaml": "\"1e3\"",
+      "note": "string \"1e3\" (scientific)",
+      "present": true,
+      "runtime_type": "float",
+      "runtime_value": 1000.0
+    },
+    {
+      "var": "s_float0",
+      "input_yaml": "\"1.0\"",
+      "note": "string \"1.0\"",
+      "present": true,
+      "runtime_type": "float",
+      "runtime_value": 1.0
+    },
+    {
+      "var": "s_ws_int",
+      "input_yaml": "\" 123 \"",
+      "note": "string \" 123 \" (whitespace-padded)",
+      "present": true,
+      "runtime_type": "integer",
+      "runtime_value": 123
+    },
+    {
+      "var": "s_comma_num",
+      "input_yaml": "\"1,000\"",
+      "note": "string \"1,000\" (thousands sep)",
+      "present": true,
+      "runtime_type": "list",
+      "runtime_value": [
+        1,
+        0
+      ]
+    },
+    {
+      "var": "s_bad_json",
+      "input_yaml": "\"[1, 2\"",
+      "note": "string \"[1, 2\" (malformed JSON)",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "[1, 2"
+    },
+    {
+      "var": "s_tilde",
+      "input_yaml": "\"~\"",
+      "note": "string \"~\" (YAML null token)",
+      "present": true,
+      "runtime_type": "string",
+      "runtime_value": "~"
+    }
+  ],
+  "raw_step_result": {
+    "debug": false,
+    "j_int": 3,
+    "s_hex": "0x1f",
+    "s_int": 123,
+    "s_iso": "2026-06-06T12:00:00Z",
+    "s_neg": -7,
+    "s_obj": {
+      "k": 1
+    },
+    "s_sci": 1000.0,
+    "s_yes": "yes",
+    "y_int": 42,
+    "j_list": [
+      1,
+      2,
+      3
+    ],
+    "s_date": "2026-06-06",
+    "s_list": [
+      "a",
+      "b"
+    ],
+    "s_none": null,
+    "s_null": null,
+    "s_word": "hello",
+    "s_zero": 0,
+    "y_bool": false,
+    "j_false": false,
+    "s_empty": "",
+    "s_float": 1.5,
+    "s_tilde": "~",
+    "task_id": "9d29633f-5072-42f3-8a54-7a409b5f1dd3",
+    "y_float": 3.14,
+    "s_float0": 1.0,
+    "s_ws_int": 123,
+    "j_str_int": 123,
+    "s_TRUE_uc": "TRUE",
+    "s_true_lc": true,
+    "s_bad_json": "[1, 2",
+    "s_false_lc": false,
+    "s_leadzero": "007",
+    "s_true_cap": true,
+    "s_comma_num": [
+      1,
+      0
+    ],
+    "s_false_cap": false
+  }
+}

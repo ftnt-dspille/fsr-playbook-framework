@@ -122,6 +122,9 @@ cross-branch set_variable scoping actually gets enforced. Cross-branch tests her
 
 ### Phase 1 — Probe FSR engine behavior: variable creation, scoping, and type coercion (live)
 
+**Status: 1b (coercion matrix) DONE 2026-06-06 — see the dated matrix below. 1a (scoping)
+and connector-param ingestion still to probe.**
+
 This phase is the empirical foundation. **How the playbook engine actually creates
 variables and auto-coerces their types dictates what the static analyzer can soundly
 claim.** We do not guess the runtime model — we drive real playbook flows on the live box,
@@ -165,6 +168,72 @@ and false-flag valid playbooks.
 - Probe playbooks kept under `python/probes/` (or `examples/`) so the matrix is
   re-verifiable when FSR upgrades.
 - Findings recorded in auto-memory; update `fsr_set_variable_coercion` with anything new.
+
+---
+
+#### ✅ Phase 1b RESULT — dated set_variable coercion matrix (2026-06-06, live FortiCloud SOAR, build 7.6.5)
+
+Probe: `python/probes/probe_set_variable_coercion.py` → raw result in
+`store/probe_results/set_variable_coercion.json`. **Mechanism gotcha discovered:** FSR drops
+success-path step results AND the run `env` server-side (both came back `{}` on a finished
+run with `isExecuted:false` routes — even the `debug:true` trigger flag was ignored). FSR
+only persists step results when the run **FAILS**, so the probe playbook is
+`start → Set Literals (set_variable) → Boom (code_snippet: raise)`; the failed run exposes
+the Set Literals step's `result` dict carrying every coerced value. (Same force-fail channel
+the connector uses for agent-op results — auto-memory `fsr_agent_proxied_execute_async`.)
+
+| input literal (what author writes) | runtime type | runtime value |
+|---|---|---|
+| `"False"` / `"True"` | **boolean** | False / True |
+| `"false"` / `"true"` | **boolean** | False / True |
+| `"TRUE"` (all-caps) | string | `"TRUE"` |
+| `"yes"` | string | `"yes"` |
+| `"123"` / `"0"` / `"-7"` | **integer** | 123 / 0 / -7 |
+| `"007"` (leading zero) | string | `"007"` |
+| `" 123 "` (ws-padded) | **integer** | 123 |
+| `"1.5"` / `"1.0"` | **float** | 1.5 / 1.0 |
+| `"1e3"` (scientific) | **float** | 1000.0 |
+| `"0x1f"` (hex) | string | `"0x1f"` |
+| `"1,000"` (commas) | **list** | `[1, 0]` (tuple-eval!) |
+| `'["a","b"]'` | **list** | `['a','b']` |
+| `'{"k":1}'` | **object** | `{'k':1}` |
+| `"[1, 2"` (malformed) | string | `"[1, 2"` |
+| `"null"` / `"None"` | **null** | None |
+| `"~"` (YAML null token) | string | `"~"` |
+| `""` (empty) | string | `""` |
+| `"hello"` | string | `"hello"` |
+| `"2026-06-06"` (date) | string | `"2026-06-06"` |
+| `"2026-06-06T12:00:00Z"` (ISO) | string | `"2026-06-06T12:00:00Z"` |
+| bare YAML `false` / `42` / `3.14` | boolean / integer / float | survive natively |
+| Jinja `"{{ false }}"` | **boolean** | False (render→`False`→coerce) |
+| Jinja `"{{ 1 + 2 }}"` | **integer** | 3 |
+| Jinja `"{{ [1,2,3] }}"` | **list** | `[1,2,3]` |
+| Jinja `"{{ '123' }}"` | **integer** | 123 (rendered `123` re-coerces!) |
+
+**The rule is NOT pure `json.loads`** (the old auto-memory claim is corrected):
+`json.loads("True")`/`("None")` would fail, yet both coerce; `json.loads("1,000")` would
+fail, yet it becomes the tuple `(1,0)`→`[1,0]`. The behavior is a *smart cast* that accepts
+both JSON tokens (`true`/`false`/`null`) **and** Python literals (`True`/`False`/`None`,
+tuple syntax) — close to `json.loads`-then-`ast.literal_eval`, but with guards that keep
+`0x1f`→str and dates→str (which `ast.literal_eval` would otherwise turn into 31 / 2014).
+
+**Predictive classifier for the Phase 2 var-typer** (reproduces the matrix for all
+author-relevant forms; degrades exotic/ambiguous forms to `any`, never false-flagging):
+1. native (non-string) value after render → its JSON type;
+2. string `S` (post-jinja-render):
+   - `S ∈ {true, false, True, False}` (exact) → **boolean**;
+   - `S ∈ {null, None}` (exact) → **null**;
+   - `re.fullmatch(r"\s*-?(0|[1-9][0-9]*)\s*", S)` → **integer** (no leading zeros);
+   - `re.fullmatch` decimal/scientific float (must contain `.`/`e`) → **float**;
+   - `S.lstrip()[:1]=="["` and `json.loads(S)` ok → **list**;
+   - `S.lstrip()[:1]=="{"` and `json.loads(S)` ok → **object**;
+   - else → **string**.
+   (Deliberately NOT special-casing `"1,000"`→tuple or `"0x1f"`: rare in authored
+   playbooks; classifier returns `string` there, which is safe for the analyzer.)
+
+**Still open from Phase 1b (deferred to when Phase 4 needs it):** connector-param ingestion
+coercion (does a `text`-widget param receiving `"123"` see int or str?) — needs an echo op
+to observe what the connector actually received; not blocking Phases 2–3. Tracked in Open Q #2.
 
 ### Phase 2 — Branch-local var typing
 - Extend `typed_env` to carry `vars.<name>` shapes per branch, populated as the walk
