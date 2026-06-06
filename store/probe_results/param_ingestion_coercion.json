@@ -1,0 +1,141 @@
+{
+  "widgets": [
+    "p_text",
+    "p_textarea",
+    "p_integer",
+    "p_decimal",
+    "p_checkbox",
+    "p_json"
+  ],
+  "matrix": {
+    "str_123": {
+      "p_text": "int",
+      "p_textarea": "int",
+      "p_integer": "int",
+      "p_decimal": "int",
+      "p_checkbox": "int",
+      "p_json": "int"
+    },
+    "int_123": {
+      "p_text": "int",
+      "p_textarea": "int",
+      "p_integer": "int",
+      "p_decimal": "int",
+      "p_checkbox": "int",
+      "p_json": "int"
+    },
+    "str_1p5": {
+      "p_text": "float",
+      "p_textarea": "float",
+      "p_integer": "float",
+      "p_decimal": "float",
+      "p_checkbox": "float",
+      "p_json": "float"
+    },
+    "float_1p5": {
+      "p_text": "float",
+      "p_textarea": "float",
+      "p_integer": "float",
+      "p_decimal": "float",
+      "p_checkbox": "float",
+      "p_json": "float"
+    },
+    "str_true": {
+      "p_text": "bool",
+      "p_textarea": "bool",
+      "p_integer": "bool",
+      "p_decimal": "bool",
+      "p_checkbox": "bool",
+      "p_json": "bool"
+    },
+    "bool_true": {
+      "p_text": "bool",
+      "p_textarea": "bool",
+      "p_integer": "bool",
+      "p_decimal": "bool",
+      "p_checkbox": "bool",
+      "p_json": "bool"
+    },
+    "str_false": {
+      "p_text": "bool",
+      "p_textarea": "bool",
+      "p_integer": "bool",
+      "p_decimal": "bool",
+      "p_checkbox": "bool",
+      "p_json": "bool"
+    },
+    "str_TRUE": {
+      "p_text": "str",
+      "p_textarea": "str",
+      "p_integer": "str",
+      "p_decimal": "str",
+      "p_checkbox": "str",
+      "p_json": "str"
+    },
+    "str_list": {
+      "p_text": "list",
+      "p_textarea": "list",
+      "p_integer": "list",
+      "p_decimal": "list",
+      "p_checkbox": "list",
+      "p_json": "list"
+    },
+    "nat_list": {
+      "p_text": "list",
+      "p_textarea": "list",
+      "p_integer": "list",
+      "p_decimal": "list",
+      "p_checkbox": "list",
+      "p_json": "list"
+    },
+    "str_obj": {
+      "p_text": "dict",
+      "p_textarea": "dict",
+      "p_integer": "dict",
+      "p_decimal": "dict",
+      "p_checkbox": "dict",
+      "p_json": "dict"
+    },
+    "nat_obj": {
+      "p_text": "dict",
+      "p_textarea": "dict",
+      "p_integer": "dict",
+      "p_decimal": "dict",
+      "p_checkbox": "dict",
+      "p_json": "dict"
+    },
+    "str_null": {
+      "p_text": "NoneType",
+      "p_textarea": "NoneType",
+      "p_integer": "NoneType",
+      "p_decimal": "NoneType",
+      "p_checkbox": "NoneType",
+      "p_json": "NoneType"
+    },
+    "str_hello": {
+      "p_text": "str",
+      "p_textarea": "str",
+      "p_integer": "str",
+      "p_decimal": "str",
+      "p_checkbox": "str",
+      "p_json": "str"
+    },
+    "str_007": {
+      "p_text": "str",
+      "p_textarea": "str",
+      "p_integer": "str",
+      "p_decimal": "str",
+      "p_checkbox": "str",
+      "p_json": "str"
+    },
+    "str_date": {
+      "p_text": "str",
+      "p_textarea": "str",
+      "p_integer": "str",
+      "p_decimal": "str",
+      "p_checkbox": "str",
+      "p_json": "str"
+    }
+  },
+  "widget_type_independent": true
+}

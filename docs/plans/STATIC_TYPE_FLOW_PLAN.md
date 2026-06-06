@@ -1,9 +1,9 @@
 # Static type-flow analysis plan — source→target type checking across the branch tree
 
-**Status (updated 2026-06-06):** Phases **0, 1 (1a+1b), 2, 3, 4, 5 ALL DONE & committed.**
-The only remaining deferral is connector-param ingestion coercion (Phase 1b tail / Open Q #2),
-which gates a future **Phase 4b** (full scalar→scalar tolerance matrix); Phase 4 shipped the
-evidence-sound subset that does NOT need it (see Phase 4 Outcome).
+**Status (updated 2026-06-06):** Phases **0, 1 (1a+1b), 2, 3, 4, 4b, 5 ALL DONE & committed.**
+Open Q #2 (connector-param ingestion coercion) is **RESOLVED** by the Phase 4b live probe; the
+finding is that NO further scalar→scalar rule is safe to add (see Phase 4b Outcome) — the
+conservative Phase 4 is the final design. Only remaining op work: re-vendor + redeploy.
 **Branch:** `feat/static-type-flow` (off `feat/skill-based-playbook`).
 **Green-check:** `make verify` (307 fsr_core + 159 connector) — currently green. Note the
 python eval suite (`python/tests/test_evals_harness.py::test_run_matrix_gold_beats_echo`) is
@@ -12,11 +12,10 @@ gated by `verify_playbook` output, so any verify change must keep the gold fract
 **Commits:** `7372065` (P0 branch enum) · `5513f20`+`50157b1` (P1b coercion) · `02a699e`
 (P1a scoping) · `027bce3` (P2 var typing + P0 regression fix).
 
-**RESUME HERE →** All planned phases (0–5) are DONE. The only open follow-up is **Phase 4b**
-(full scalar→scalar coercion tolerance), blocked on the live connector-param ingestion probe
-(Open Q #2) — start there if/when that probe is run. Also pending: re-vendor `fsr_core` into
-the connector + deploy (per CLAUDE.md) to ship phases 3–5 to the box. See each phase's
-**Outcome** block below for what landed. Probes are re-runnable:
+**RESUME HERE →** All phases (0–5 + 4b) are DONE; Open Q #2 resolved. Nothing left to design.
+Only operational task: ensure the connector is fully deployed/warmed (echo op + fsr_core phases
+3–5 shipped at 0.3.122; re-run `scripts/deploy.sh` to complete warmup/rollout-verify if a prior
+deploy was interrupted). See each phase's **Outcome** block below. Probes are re-runnable:
 `PYTHONPATH=python:. .venv/bin/python -m probes.probe_set_variable_coercion` (and
 `probe_var_scoping`); results in `store/probe_results/`.
 
@@ -383,10 +382,35 @@ pure-ref unit, shape→tag, compat matrix, + 6 hand-built-IR integration incl. l
 error and the no-`param_type_fn`/filtered-ref skip paths). `make verify` green (316 fsr_core +
 159 connector); gold eval fraction unchanged (`test_run_matrix_gold_beats_echo` green).
 
-**Deferred to a Phase 4b (when Open Q #2 is probed):** the full scalar→scalar tolerance matrix
-(e.g. should a statically-`string` var into an `integer` widget error, given FSR runtime
-`int("123")` coercion?) and list/dict → untyped-`text` param (no observed_type) — both need
-the live connector-param ingestion echo probe to ship without false positives.
+### Phase 4b — connector-param ingestion coercion probe + scalar tolerance ✅ DONE 2026-06-06
+
+**Probe:** added a `visible:false` diagnostic op `echo_param_types` to the connector (params
+declared at six widget types: text/textarea/integer/decimal/checkbox/json; returns
+`type(value).__name__` per received param) and `python/probes/probe_param_ingestion.py`, which
+calls it via the SAME `/api/integration/execute/` path a playbook connector step uses, sending
+one value into all six params at once. Live on FortiCloud SOAR (build 7.6.5). Artifact:
+`store/probe_results/param_ingestion_coercion.json` (committed). Re-runnable:
+`PYTHONPATH=python .venv/bin/python -m probes.probe_param_ingestion`.
+
+**Finding (decisive):**
+1. **Widget type is IRRELEVANT to runtime coercion** — a value sent into a `text` param and an
+   `integer` param arrives as the *same* python type. `widget_type_independent: true` across the
+   whole battery. The widget type is a UI hint, not a runtime coercion.
+2. **Ingestion applies the IDENTICAL smart-cast as `set_variable`** (the Phase 1b matrix):
+   `"123"`→int, `"1.5"`→float, `"true"`/`"false"`→bool, `"TRUE"`→str, `"007"`→str, `'["a"]'`→
+   list, `'{"k":1}'`→dict, `"null"`→None, dates→str. The Phase 4 source-type inference (which
+   reuses the Phase 1b classifier) therefore predicts EXACTLY what a connector receives.
+
+**Decision — NO new scalar→scalar rule ships (this is the evidence-driven answer, not a punt):**
+because the widget does not coerce AND a `string`-typed source can still be a python-`int()`-able
+string the smart-cast left as str (`"007"`→str, yet `int("007")==7`), flagging string→numeric
+would false-positive. So the original "should string→integer error?" question resolves to **no,
+not safely**. Phase 4's conservative rules — shape-into-scalar (justified by *connector intent*:
+a list value stays a list and won't fill a scalar-widget param) + numeric/bool category
+crossings — remain correct and are the FINAL design. **Tests:**
+`fsr_core/tests/test_param_ingestion_pin.py` pins both findings offline against the committed
+artifact (widget-independence + cast == Phase 1b classifier), so an FSR upgrade that changes
+coercion fails the build. `make verify` green.
 
 ### Phase 5 — JSON trace export / troubleshooting ✅ DONE 2026-06-06
 - Build a per-branch, per-step trace: typed_env evolution + every reference's
@@ -414,8 +438,11 @@ trace, lean omits it). `make verify` green (326 fsr_core + 159 connector); gold 
 
 ## Open questions
 1. Phase 3 parameter-type YAML shape — mapping vs list-of-dicts; default when omitted.
-2. Coercion tolerance for scalar-vs-scalar in Phase 4 — exactly which pairs FSR coerces at
-   runtime (informs which mismatches are error vs warning). Phase 1 probe partly answers.
+2. ~~Coercion tolerance for scalar-vs-scalar in Phase 4~~ **RESOLVED 2026-06-06 (Phase 4b).**
+   FSR applies a uniform smart-cast (= Phase 1b matrix) to EVERY connector param regardless of
+   widget type; the widget does not coerce. Net: no safe scalar→scalar rule exists beyond
+   Phase 4's shape + numeric/bool checks (a `string` source can be an `int()`-able str, so
+   string→numeric would FP). See Phase 4b Outcome + `probe_param_ingestion.py`.
 3. Whether `code_snippet` / `workflow_reference` (unknown output shapes) should ever produce
    type errors or always degrade to "unknown, skip."
 4. Trace file retention/cleanup policy for `store/verify_traces/`. **Partly resolved
