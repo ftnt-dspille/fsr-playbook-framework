@@ -11,6 +11,11 @@
 #   NONINTERACTIVE=1          never prompt; take defaults / skip optional steps
 set -uo pipefail
 
+# A venv activated for some OTHER project (VIRTUAL_ENV / conda) hijacks
+# `uv pip install` so deps land in the wrong env and this repo's .venv stays
+# empty. Clear them so every uv command targets THIS project's .venv.
+unset VIRTUAL_ENV CONDA_PREFIX CONDA_DEFAULT_ENV 2>/dev/null || true
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 DB="$ROOT/store/fsr_reference.db"

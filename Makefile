@@ -29,8 +29,10 @@ bootstrap: ## one-command setup: fresh clone -> green, testable state (prompts a
 
 sync: ## create .venv (if missing) and install all editable deps via uv
 	@command -v uv >/dev/null || { echo "uv not on PATH; install via: brew install uv"; exit 1; }
-	@[ -d .venv ] || uv venv --python 3.13
-	uv pip install -e ../pyfsr -e . -e ./web pytest requests-mock anyio ruff
+	@[ -d .venv ] || env -u VIRTUAL_ENV uv venv --python 3.13
+	@# Clear a stray VIRTUAL_ENV/conda env so deps land in THIS repo's .venv,
+	@# not whatever venv the caller happened to have active.
+	env -u VIRTUAL_ENV -u CONDA_PREFIX uv pip install -e ../pyfsr -e . -e ./web pytest requests-mock anyio ruff
 
 preflight: ## check dev ports are free; print holders if not
 	@for p in $(PORT_BACKEND) $(PORT_FRONTEND); do \
