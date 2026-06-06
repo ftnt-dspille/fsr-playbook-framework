@@ -174,13 +174,22 @@ and false-flag valid playbooks.
 #### ✅ Phase 1b RESULT — dated set_variable coercion matrix (2026-06-06, live FortiCloud SOAR, build 7.6.5)
 
 Probe: `python/probes/probe_set_variable_coercion.py` → raw result in
-`store/probe_results/set_variable_coercion.json`. **Mechanism gotcha discovered:** FSR drops
-success-path step results AND the run `env` server-side (both came back `{}` on a finished
-run with `isExecuted:false` routes — even the `debug:true` trigger flag was ignored). FSR
-only persists step results when the run **FAILS**, so the probe playbook is
-`start → Set Literals (set_variable) → Boom (code_snippet: raise)`; the failed run exposes
-the Set Literals step's `result` dict carrying every coerced value. (Same force-fail channel
-the connector uses for agent-op results — auto-memory `fsr_agent_proxied_execute_async`.)
+`store/probe_results/set_variable_coercion.json`. Tested on the **FortiCloud SOAR** instance
+(`mfz9...forticloud.com`, build 7.6.5).
+
+**Mechanism gotcha (FortiCloud-DEFAULT, not engine-intrinsic — per user 2026-06-06):** on
+FortiCloud, success-path step results AND run `env` are dropped server-side to save storage
+(both came back `{}` on a finished run; the per-trigger `debug:true` flag did NOT override
+it). Results persist only when the run **FAILS** under that default. **There is a SOAR
+application-config setting that makes ALL playbooks log in debug mode** (success-path results
++ env retained) — self-managed appliances commonly have this on; FortiCloud defaults it off.
+So the empty-env behavior is config-dependent, not a property of the engine. **The coercion
+MATRIX below is unaffected** — type coercion is engine behavior independent of logging.
+The probe uses a `start → Set Literals (set_variable) → Boom (code_snippet: raise)` force-fail
+so it reads results **regardless of the log setting** (portable across instances). Same
+force-fail channel the connector uses for agent-op results — auto-memory
+`fsr_agent_proxied_execute_async`. (TODO if useful: locate the exact config key and offer a
+debug-on success-path read as a cross-check.)
 
 | input literal (what author writes) | runtime type | runtime value |
 |---|---|---|
