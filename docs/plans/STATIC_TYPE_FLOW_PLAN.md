@@ -260,7 +260,7 @@ author-relevant forms; degrades exotic/ambiguous forms to `any`, never false-fla
 coercion (does a `text`-widget param receiving `"123"` see int or str?) — needs an echo op
 to observe what the connector actually received; not blocking Phases 2–3. Tracked in Open Q #2.
 
-### Phase 2 — Branch-local var typing
+### Phase 2 — Branch-local var typing ✅ DONE 2026-06-06
 - Extend `typed_env` to carry `vars.<name>` shapes per branch, populated as the walk
   passes each predecessor set_variable; infer scalar/list/object type from the value
   **using the Phase 1b coercion matrix** (e.g. `"False"`→bool, `"123"`→int, `'["a"]'`→list,
@@ -271,6 +271,27 @@ to observe what the connector actually received; not blocking Phases 2–3. Trac
   Jinja check in `validator.py` (it is branch-agnostic).
 - **Tests:** var defined on branch A not visible on branch B; var read before its
   set_variable flagged; typed var feeds Phase 4 checks.
+
+**Outcome:** `typed_walker` now carries a per-branch `var_env: {name → Shape}` on each
+`BranchResult`, populated as the walk passes each predecessor `set_variable` and typed via
+`_infer_literal_shape` (the Phase 1b classifier — `_set_variable_value_map` extracts the
+{name: value} pairs from both arg_list and normalized-flat forms). This feeds Phase 4.
+Per the user's **split decision** (NOT a literal move): `validator._check_undefined_vars`
+**keeps** the whole-playbook "never defined anywhere" warning (compile-time, all surfaces);
+the walker **adds** the branch-scoped cases it alone can see, all `severity=warning`:
+`var_read_before_definition`, `var_defined_other_branch`, `loop_var_outside_for_each`
+(`vars.item` outside a for_each step — justified by the Phase 1a probe). Disjoint: the walker
+stays silent when a name is never defined anywhere. Tests:
+`fsr_core/tests/test_walker_var_typing.py` (classifier unit + 6 scoping/typing cases). No new
+diagnostics on any `examples/*.yaml`.
+
+**Regression caught + fixed (important):** Phase 0 had pointed the *entire* `verify_playbook`
+at `cres.ir`, including `_per_step_schema_checks`. The resolver rewrites an `options:`-based
+`manual_input` to `type: InputBased` with `response_mapping` and no `inputVariables`, so the
+"InputBased needs inputs[]" check false-fired → dropped the `gold` eval fraction 0.587→0.543
+(below the 0.55 bar in `test_run_matrix_gold_beats_echo`). Fix: `cres.ir` now feeds ONLY the
+typed walk (`walk_coll`); the per-step schema checks + Jinja-shape evidence run on the fresh
+parse (authoring shape) exactly as before. Gold fraction restored to 0.587.
 
 ### Phase 3 — Playbook parameter declared types
 - New optional YAML/IR surface for parameter types. Candidate shape (decide in build):

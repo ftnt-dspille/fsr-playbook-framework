@@ -269,6 +269,9 @@ def verify_playbook(
     Warning codes (do not block):
       - unknown_shape_downstream_reference
       - output_schema_stale
+      - var_read_before_definition       (branch-scoped vars.<name>)
+      - var_defined_other_branch         (branch-scoped vars.<name>)
+      - loop_var_outside_for_each        (vars.item outside a for_each step)
     """
     try:
         from fsr_core.compiler import compile_yaml as _compile, parse_yaml
@@ -306,27 +309,30 @@ def verify_playbook(
     checks_run.append({"name": "compile", "ok": True,
                        "summary": "compile clean"})
 
-    # 2. Get the IR for the walker. Use the *resolved* IR from compile
-    # (`cres.ir`) — the resolver mutates Step objects in place, populating
-    # `step.branches` (decision routing) which is what the walker needs to
-    # enumerate every trigger→leaf path. A fresh `parse_yaml` would leave
-    # `branches={}` so branch enumeration would stop at the first decision
-    # (see STATIC_TYPE_FLOW_PLAN.md Phase 0).
-    coll = cres.ir
+    # 2. Two IR views:
+    #  - `walk_coll` = the *resolved* IR (`cres.ir`): the resolver mutates
+    #    Step objects in place, populating `step.branches` (decision routing)
+    #    which the typed walker needs to enumerate every trigger→leaf path.
+    #    A fresh parse leaves `branches={}` so enumeration would stop at the
+    #    first decision (STATIC_TYPE_FLOW_PLAN.md Phase 0).
+    #  - `coll` = a fresh parse (authoring shape): the per-step schema checks
+    #    and Jinja-shape evidence are written against the friendly shape the
+    #    author wrote. The resolver rewrites some steps in ways those checks
+    #    don't expect — e.g. an `options:`-based manual_input becomes
+    #    `type: InputBased` with `response_mapping` and no `inputVariables`,
+    #    which would false-trigger the "InputBased needs inputs[]" check.
+    coll, parse_errs = parse_yaml(yaml_text)
     if coll is None:
-        # compile succeeded but no IR attached — fall back to a re-parse so
-        # the walker still runs (branch enumeration degraded, but better
-        # than no walk at all).
-        coll, _parse_errs = parse_yaml(yaml_text)
-        if coll is None:
-            return _err("parse_inconsistency",
-                        "compile succeeded but no IR available to walk")
+        # Should not happen — compile_yaml above succeeded.
+        return _err("parse_inconsistency",
+                    "compile succeeded but parse_yaml returned no IR")
+    walk_coll = cres.ir if cres.ir is not None else coll
 
     # 3. Typed walk
     probe_cache: dict = {}
     probe_latencies: list[dict] = []
     walk = walk_playbook(
-        coll,
+        walk_coll,
         playbook_name=playbook,
         probe=(_live_probe_factory(simulated_inputs, probe_cache, probe_latencies)
                if live_probe else None),

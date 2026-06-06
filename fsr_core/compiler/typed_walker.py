@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .ir import Collection, Playbook, Step
+from .validator import _RESERVED_VARS_KEYS
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,7 @@ class BranchResult:
     name: str                              # human-readable branch label
     step_ids: list[str]                    # ordered along this branch
     typed_env: dict[str, Shape]            # vars.steps.<jinja_key> -> Shape
+    var_env: dict[str, Shape] = field(default_factory=dict)  # vars.<name> -> Shape
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
 
@@ -78,6 +80,7 @@ class WalkResult:
                     "name": b.name,
                     "step_ids": b.step_ids,
                     "typed_env_keys": sorted(b.typed_env.keys()),
+                    "var_env": {k: v for k, v in sorted(b.var_env.items())},
                     "diagnostics": [d.to_dict() for d in b.diagnostics],
                 }
                 for b in self.branches
@@ -111,6 +114,9 @@ _VARS_STEPS_RE = re.compile(
     r"((?:\.[A-Za-z_][A-Za-z0-9_]*|\[\s*(?:\d+|'[^']*'|\"[^\"]*\")\s*\])*)"
 )
 _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
+# Top-level `vars.<name>` (NOT vars.steps / vars.input — those are reserved
+# structural namespaces handled elsewhere). First segment only.
+_VARS_TOPLEVEL_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_]*)")
 # Output keys FSR adds to every step's `vars.steps.<key>` envelope.
 _UNIVERSAL_OUTPUT_KEYS = {"status", "result", "id", "name", "uuid",
                           "@id", "@type", "step_id"}
@@ -194,6 +200,90 @@ def _kind_to_scalar(entry: dict[str, Any]) -> str:
     if "bool" in kind or "checkbox" in kind:
         return "boolean"
     return "string"
+
+
+# ---------------------------------------------------------------------------
+# set_variable value → type inference (Phase 1b live coercion matrix).
+# STATIC_TYPE_FLOW_PLAN.md §"Phase 1b RESULT". set_variable smart-casts its
+# input: JSON tokens AND Python literals coerce; 0x1f / leading-zeros / dates
+# stay strings. This classifier reproduces the matrix for author-relevant
+# forms and degrades exotic/ambiguous forms to scalar `any` (never guesses).
+# ---------------------------------------------------------------------------
+
+_LIT_BOOL_TOKENS = {"true", "false", "True", "False"}      # exact match only
+_LIT_NULL_TOKENS = {"null", "None"}                         # exact match only
+_LIT_INT_RE = re.compile(r"\s*-?(?:0|[1-9][0-9]*)\s*\Z")
+_LIT_FLOAT_RE = re.compile(
+    r"\s*-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\s*\Z")
+
+
+def _infer_literal_shape(value: Any) -> Shape:
+    """Static type of a set_variable value, per the Phase 1b matrix."""
+    # Native (non-string) values: the engine keeps these as-is.
+    if isinstance(value, bool):
+        return _shape_scalar("boolean")
+    if isinstance(value, int):
+        return _shape_scalar("integer")
+    if isinstance(value, float):
+        return _shape_scalar("float")
+    if value is None:
+        return _shape_scalar("null")
+    if isinstance(value, list):
+        return _shape_list(_shape_scalar("any"))
+    if isinstance(value, dict):
+        return _shape_object({str(k): _shape_scalar("any") for k in value})
+    if not isinstance(value, str):
+        return _shape_scalar("any")
+
+    s = value
+    # Jinja present: the engine renders THEN re-coerces (e.g. "{{ '123' }}"
+    # → int 123). Can't predict statically without resolving the expr → any.
+    if "{{" in s or "{%" in s:
+        return _shape_scalar("any")
+    if s in _LIT_BOOL_TOKENS:
+        return _shape_scalar("boolean")
+    if s in _LIT_NULL_TOKENS:
+        return _shape_scalar("null")
+    if _LIT_INT_RE.match(s):
+        return _shape_scalar("integer")
+    if _LIT_FLOAT_RE.match(s) and any(c in s for c in ".eE"):
+        return _shape_scalar("float")
+    st = s.lstrip()
+    if st[:1] == "[":
+        try:
+            import json as _json
+            _json.loads(s)
+            return _shape_list(_shape_scalar("any"))
+        except Exception:  # noqa: BLE001
+            pass
+    elif st[:1] == "{":
+        try:
+            import json as _json
+            obj = _json.loads(s)
+            if isinstance(obj, dict):
+                return _shape_object(
+                    {str(k): _shape_scalar("any") for k in obj})
+        except Exception:  # noqa: BLE001
+            pass
+    return _shape_scalar("string")
+
+
+def _set_variable_value_map(step: Step) -> dict[str, Any]:
+    """{var_name: raw_value} a set_variable step defines. Handles both the
+    normalized flat shape (resolver-unwrapped) and the canonical arg_list."""
+    a = step.arguments
+    if not isinstance(a, dict):
+        return {}
+    arg_list = a.get("arg_list")
+    if isinstance(arg_list, list):
+        out: dict[str, Any] = {}
+        for item in arg_list:
+            if isinstance(item, dict) and "name" in item:
+                out[str(item["name"])] = item.get("value", "")
+        return out
+    # Flat form (post-normalize): every key except structural handoffs.
+    return {k: v for k, v in a.items()
+            if k not in {"arg_list", "step_variables", "message"}}
 
 
 def _synth_set_variable_shape(step: Step) -> Shape:
@@ -444,7 +534,7 @@ def _resolve_path(env_key: str, attr_chain: str,
 def _validate_branch_jinja(
     pb: Playbook, ids: list[str], typed_env: dict[str, Shape],
     branch_name: str,
-) -> list[Diagnostic]:
+) -> tuple[list[Diagnostic], dict[str, Shape]]:
     by_id = {s.id: s for s in pb.steps}
     jinja_key_lookup = {_jinja_key(s): s for s in pb.steps}
     # Normalised lookup: lowercase + non-alphanumeric collapsed to `_`.
@@ -456,10 +546,33 @@ def _validate_branch_jinja(
     diags: list[Diagnostic] = []
     visible: set[str] = set()  # jinja_keys that have run by the time we visit this step
 
+    # Phase 2 — branch-local `vars.<name>` typing + scoping. var_env grows as
+    # the walk passes each predecessor set_variable on THIS branch; a ref is
+    # validated against the env *before* its own step. `var_defs` (whole-pb)
+    # lets us tell "defined later on this branch" (read-before-def) from
+    # "defined only on another branch" — the never-defined-anywhere case is
+    # left to validator._check_undefined_vars (disjoint, no double-report).
+    var_env: dict[str, Shape] = {}
+    var_defs: dict[str, set[str]] = {}
+    for st in pb.steps:
+        if st.type == "set_variable":
+            for vn in _set_variable_value_map(st):
+                var_defs.setdefault(vn, set()).add(st.id)
+    ids_set = set(ids)
+    pos = {sid: i for i, sid in enumerate(ids)}
+
     for sid in ids:
         s = by_id.get(sid)
         if s is None:
             continue
+        # A set_variable's own vars are readable within its own step (intra-
+        # step chaining is permitted), so seed them before validating refs.
+        if s.type == "set_variable":
+            for vn, vv in _set_variable_value_map(s).items():
+                var_env[vn] = _infer_literal_shape(vv)
+        # Branch-scoped `vars.<name>` reference checks for this step.
+        diags.extend(_check_toplevel_vars(
+            s, branch_name, var_env, var_defs, ids_set, pos))
         # Validate refs in this step's arguments using the env *before*
         # this step's own shape is added (a step can reference itself
         # only via universal keys, handled inside _resolve_path).
@@ -629,6 +742,77 @@ def _validate_branch_jinja(
                             severity="warning",
                         ))
         visible.add(_jinja_key(s))
+    return diags, var_env
+
+
+# ---------------------------------------------------------------------------
+# Branch-scoped `vars.<name>` reference checks (Phase 2)
+# ---------------------------------------------------------------------------
+
+def _check_toplevel_vars(
+    s: Step, branch_name: str, var_env: dict[str, Shape],
+    var_defs: dict[str, set[str]], ids_set: set[str], pos: dict[str, int],
+) -> list[Diagnostic]:
+    """Validate `{{ vars.<name> }}` refs in one step against the branch-local
+    var env. Emits ONLY the branch-specific cases (the whole-playbook
+    'never defined anywhere' warning stays in validator._check_undefined_vars):
+      - loop_var_outside_for_each: `vars.item` read in a step without for_each
+      - var_read_before_definition: defined later on THIS branch
+      - var_defined_other_branch:  defined, but not on this branch
+    All warnings (vars are run-global; avoid hard-blocking on a maybe-FP)."""
+    diags: list[Diagnostic] = []
+    has_for_each = bool(getattr(s, "for_each", None))
+    my_pos = pos.get(s.id, -1)
+    seen: set[str] = set()
+    for sub, val in _walk_strings(s.arguments):
+        if not isinstance(val, str) or "{{" not in val:
+            continue
+        for jm in _JINJA_EXPR_RE.finditer(val):
+            for m in _VARS_TOPLEVEL_RE.finditer(jm.group(1)):
+                name = m.group(1)
+                if name in _RESERVED_VARS_KEYS or name in seen:
+                    continue
+                # `vars.item` is the per-iteration loop binding — live only
+                # inside a step that carries for_each (proven Phase 1a).
+                if name == "item":
+                    if not has_for_each:
+                        seen.add(name)
+                        diags.append(Diagnostic(
+                            code="loop_var_outside_for_each",
+                            message=(f"vars.item read in step {s.id!r} which "
+                                     f"has no for_each — the loop binding is "
+                                     f"only live inside the looping step; "
+                                     f"elsewhere it is undefined"),
+                            step=s.id, branch=branch_name,
+                            path=f"arguments.{sub}", severity="warning",
+                        ))
+                    continue
+                if name in var_env:
+                    continue  # defined+visible on this branch — ok (typed)
+                defs = var_defs.get(name)
+                if not defs:
+                    continue  # never defined anywhere → validator handles it
+                seen.add(name)
+                later_same_branch = any(
+                    d in ids_set and pos.get(d, -1) >= my_pos for d in defs)
+                if later_same_branch:
+                    diags.append(Diagnostic(
+                        code="var_read_before_definition",
+                        message=(f"vars.{name} read in step {s.id!r} but its "
+                                 f"defining set_variable runs later on this "
+                                 f"branch — it will be empty here"),
+                        step=s.id, branch=branch_name,
+                        path=f"arguments.{sub}", severity="warning",
+                    ))
+                else:
+                    diags.append(Diagnostic(
+                        code="var_defined_other_branch",
+                        message=(f"vars.{name} read in step {s.id!r} but is "
+                                 f"only defined on a different branch (not on "
+                                 f"{branch_name!r}) — it will be empty here"),
+                        step=s.id, branch=branch_name,
+                        path=f"arguments.{sub}", severity="warning",
+                    ))
     return diags
 
 
@@ -731,10 +915,10 @@ def walk_playbook(
                 continue
             typed_env[_jinja_key(s)] = per_step[s.id]
         label = _branch_label(pb, ids)
-        diags = _validate_branch_jinja(pb, ids, typed_env, label)
+        diags, var_env = _validate_branch_jinja(pb, ids, typed_env, label)
         branches.append(BranchResult(
             name=label, step_ids=ids,
-            typed_env=typed_env, diagnostics=diags,
+            typed_env=typed_env, var_env=var_env, diagnostics=diags,
         ))
         all_diags.extend(diags)
 
