@@ -306,13 +306,21 @@ def verify_playbook(
     checks_run.append({"name": "compile", "ok": True,
                        "summary": "compile clean"})
 
-    # 2. Parse to IR for the walker (the resolver in compile already
-    # ran; reparse just gives us the IR object).
-    coll, parse_errs = parse_yaml(yaml_text)
+    # 2. Get the IR for the walker. Use the *resolved* IR from compile
+    # (`cres.ir`) — the resolver mutates Step objects in place, populating
+    # `step.branches` (decision routing) which is what the walker needs to
+    # enumerate every trigger→leaf path. A fresh `parse_yaml` would leave
+    # `branches={}` so branch enumeration would stop at the first decision
+    # (see STATIC_TYPE_FLOW_PLAN.md Phase 0).
+    coll = cres.ir
     if coll is None:
-        # Should not happen — compile_yaml above succeeded.
-        return _err("parse_inconsistency",
-                    "compile succeeded but parse_yaml returned no IR")
+        # compile succeeded but no IR attached — fall back to a re-parse so
+        # the walker still runs (branch enumeration degraded, but better
+        # than no walk at all).
+        coll, _parse_errs = parse_yaml(yaml_text)
+        if coll is None:
+            return _err("parse_inconsistency",
+                        "compile succeeded but no IR available to walk")
 
     # 3. Typed walk
     probe_cache: dict = {}
