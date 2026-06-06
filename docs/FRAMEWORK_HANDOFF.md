@@ -55,23 +55,35 @@ it:
 - **Rebuild from a live box** (if they have FSR creds): set up `.env` (below),
   then `fsrpb probe --all` (or `fsrpb refresh`). Idempotent.
 
-## Setup (fresh clone → green)
+## Setup — one command
 
 ```sh
 git clone <fsrpb-repo> FSRPlaybookYaml
-git clone <pyfsr-repo> pyfsr            # required sibling
 cd FSRPlaybookYaml
-make sync                                # uv venv + editable installs
-cp /path/to/fsr_reference.db store/      # the handed-over DB
-make verify                              # green-check: fsr_core + connector suites
+make bootstrap
 ```
 
-`.env` is only needed for **live** work (probing, `run-op`, executing against a
-box). Offline compile/validate/verify/type-flow need just the repo + the DB.
+`make bootstrap` walks a fresh clone to a green, testable state. It's
+idempotent (re-run any time — done steps are skipped) and prompts only when it
+needs input:
 
-```sh
-cp .env.example .env     # then fill FSR_BASE_URL + one auth block
-```
+1. **uv** — offers to `brew install` it if missing.
+2. **pyfsr sibling** — clones `../pyfsr` (prompts for the git URL, or set
+   `PYFSR_REPO`).
+3. **deps** — `make sync` (uv venv + editable installs).
+4. **reference DB** — copy the handed-over file (prompts for the path, or set
+   `FSR_DB_SRC`), build from a live box (`fsrpb probe --all`), or skip.
+5. **.env** — optional; created from `.env.example` (offline work doesn't need it).
+6. **green-check** — runs the framework core suite (`fsr_core/tests/`) and
+   reports done.
+
+Unattended: `NONINTERACTIVE=1 PYFSR_REPO=… FSR_DB_SRC=… make bootstrap`.
+
+> `.env` is only needed for **live** work (probing, `run-op`, executing against
+> a box). Offline compile/validate/verify/type-flow need just the repo + the DB.
+> `make verify` (the fuller green-check) additionally runs the *connector*
+> suite, which requires the separate connector repo — `make bootstrap` uses
+> `fsr_core/tests/` instead so it works with just the framework.
 
 > Never commit `.env`. It's gitignored; keep it that way. Live upload/execute
 > probes also refuse to run unless `FSR_ALLOW_E2E=true` — never set that on prod.

@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync preflight kill-ports
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -23,6 +23,9 @@ PORT_FRONTEND := 47822
 
 help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+bootstrap: ## one-command setup: fresh clone -> green, testable state (prompts as needed)
+	@bash scripts/bootstrap.sh
 
 sync: ## create .venv (if missing) and install all editable deps via uv
 	@command -v uv >/dev/null || { echo "uv not on PATH; install via: brew install uv"; exit 1; }
@@ -61,8 +64,52 @@ dev: preflight ## run backend + frontend together; if either dies, both stop
 e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
 	cd python && uv run --project .. python -m cli e2e all
 
-tests: ## fast pytest (excludes live + slow)
+tests: ## fast pytest (excludes live + slow); incl. the offline golden-trace pin
 	$(PY) -m pytest python/tests/ -q -m "not live and not slow"
+
+# ── Chat Intelligence tuning loop (docs/plans/CHAT_INTELLIGENCE_PLAN.md) ──
+# chat-fast   = A4 cheap loop: offline STRUCTURE/contract guards (no API, secs).
+#               Reach for this by default while tuning prompts/tools/intents;
+#               it pins prompt assembly, intent routing, tool registry, the
+#               gate→lever map (A3) and the golden-trace contract (A6).
+# chat-drive  = live A1/A2: drive ONE scenario, score+render-validate, verdict.
+# chat-calibrate = live capability gate over the whole investigation fixture set.
+# chat-drive/chat-calibrate need .env FSR creds + ANTHROPIC_API_KEY + a reachable
+# deployed connector; chat-fast needs neither.
+SCENARIO ?=
+MSG ?=
+
+# The structure/contract suite — deterministic order (no:randomly) so a prompt
+# edit that breaks assembly/routing reddens here in ~2s before any live spend.
+CHAT_FAST_TESTS := \
+	fsr_core/tests/test_triage_prompt.py \
+	fsr_core/tests/test_triage_prompt_enrichment_offer.py \
+	fsr_core/tests/test_triage_preflight.py \
+	fsr_core/tests/test_low_signal_gate.py \
+	fsr_core/tests/test_intent_slice_and_params.py \
+	fsr_core/tests/test_build_prompt_skeleton.py \
+	fsr_core/tests/test_playbook_offer.py \
+	python/tests/test_run_turn.py \
+	python/tests/test_catalog_tools.py \
+	python/tests/test_emitter.py \
+	python/tests/test_chat_review.py \
+	python/tests/test_golden_traces_pin.py \
+	python/tests/test_lever_coverage.py \
+	python/tests/test_build_fidelity.py
+
+chat-fast: ## fast OFFLINE chat structure/contract guards (no API; ~2s)
+	$(PY) -m pytest $(CHAT_FAST_TESTS) -q -p no:randomly
+chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
+	@if [ -n "$(SCENARIO)" ]; then \
+		$(PY) python/cli.py chat-drive --task "$(SCENARIO)"; \
+	elif [ -n "$(MSG)" ]; then \
+		$(PY) python/cli.py chat-drive --message "$(MSG)"; \
+	else \
+		echo "usage: make chat-drive SCENARIO=<fixture-name>  |  MSG=\"...\""; exit 2; \
+	fi
+
+chat-calibrate: ## live: capability gate over every investigation fixture (costs credits)
+	$(PY) python/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),)
 
 lint: ## ruff lint (pyflakes F-rules) over fsr_core + python
 	uv run ruff check fsr_core/ python/
