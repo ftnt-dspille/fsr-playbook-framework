@@ -45,3 +45,4 @@ e2e/playwright-report/
 /store/eval_runs/calibrate_*.summary.json
 /store/eval_runs/calibrate_*_failures/
 /store/eval_runs/chatdrive_*.summary.json
+/store/eval_runs/chatchain_*.json

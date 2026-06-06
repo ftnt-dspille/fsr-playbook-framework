@@ -161,7 +161,7 @@ severity/verdict correctness, low-signal handling (don't over-escalate a benign
 alert), and scenario classification accuracy. New gate: `triage_assessment` against
 labeled scenarios in `triage_scenarios.py`.
 
-### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟡 GATE LANDED 2026-06-06 (live chain pending)
+### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🔴 GATE LANDED; live chain BLOCKED by triage→build session discontinuity (2026-06-06)
 Levers: `system_prompt_build.md` *Triage → build handoff* + *Canonical skeleton*.
 The built playbook must actually **automate what was investigated** — same
 ops, parameterized to the trigger record, compiling + runnable. Reuse build tasks
@@ -180,8 +180,33 @@ emitted ```yaml fence (`chat_drive._extract_yaml`), OR a triage→build *chain*'
 `score_build_fidelity(..., built_ops=…)`). `chat_drive.attach_build_fidelity`
 detects an offer card in the transcript and folds the gate into the verdict, so
 both a one-shot build and an investigate→offer chain are graded.
-**Pending (next):** a live multi-turn chain drive (investigate → ask to save →
-`emit_playbook_offer`) to see the gate fire end-to-end + a golden pin; and a
+**Live chain attempted (2026-06-06, connector 0.3.122).** Drove the real C2 alert
+`54f25f1f…` two ways: (1) single `build`-intent turn "investigate … then build me a
+reusable containment playbook" → agent investigated cleanly (get_record → enrich
+FortiGuard/VT/FortiSIEM → 2× search_module_records correlation → find_containment →
+`emit_action_card`) but ended on `awaiting_action_card`/`awaiting_choice`, **never
+`emit_playbook_offer`**. (2) Scripted chain: triage turn → follow-up `build` turn
+"save that investigation+containment as a reusable playbook". The build turn replied
+*"I don't see a prior triage conversation in this session history"* and asked the
+analyst to re-supply the IP / connector / source record / enrichment steps — i.e.
+**the build intent does not inherit the prior triage turn's transcript+trace within
+the same session**, so it can't ground an offer on what was just investigated. No
+offer card → `build_fidelity` never fires from a natural chain. (Transcript:
+`store/eval_runs/chatchain_1780787762.json`.) Confound to rule out: turn 1 was left
+suspended on an unanswered choice card when turn 2 was sent — answer the choice via
+`chat_resume` first, then re-test, before concluding it's pure context loss.
+
+**Root-cause hypothesis + next:** the triage→build handoff is broken at the *session
+continuity* layer (build agent's context window doesn't include the prior triage
+turn). The agent itself surfaced the supported workaround — *"give me a playbook run
+ID / incident record and I can fetch the execution trace and auto-rebuild"* — which
+is the existing `build_trace_fixture`/run-trace path. So the gate-firing chain that
+works TODAY is: investigate **with execution** (real `run_playbook`) → build from
+that run's trace, not a pure conversational save. **Next:** (a) confirm/deny the
+session-context loss after resolving the choice-card confound; (b) if real, fix the
+build prompt/runtime to carry the in-session triage transcript into the build turn
+(lever: `system_prompt_build.md` *Triage → build handoff*); (c) failing that, wire
+the run-ID auto-rebuild path as the canonical chain and pin THAT. Plus the still-open
 parameterized-to-trigger-record check beyond ops-overlap.
 
 ### B5 · End-to-end chain  ·  HIGH
