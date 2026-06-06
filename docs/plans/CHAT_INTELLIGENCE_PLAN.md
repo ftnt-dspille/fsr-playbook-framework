@@ -161,7 +161,7 @@ severity/verdict correctness, low-signal handling (don't over-escalate a benign
 alert), and scenario classification accuracy. New gate: `triage_assessment` against
 labeled scenarios in `triage_scenarios.py`.
 
-### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🔴 GATE LANDED; live chain BLOCKED by triage→build session discontinuity (2026-06-06)
+### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟡 GATE LANDED; live chain WORKS (corrected 2026-06-06) — 2 narrow gaps: trace-compiler bypass + offer-card-only gate
 Levers: `system_prompt_build.md` *Triage → build handoff* + *Canonical skeleton*.
 The built playbook must actually **automate what was investigated** — same
 ops, parameterized to the trigger record, compiling + runnable. Reuse build tasks
@@ -180,34 +180,46 @@ emitted ```yaml fence (`chat_drive._extract_yaml`), OR a triage→build *chain*'
 `score_build_fidelity(..., built_ops=…)`). `chat_drive.attach_build_fidelity`
 detects an offer card in the transcript and folds the gate into the verdict, so
 both a one-shot build and an investigate→offer chain are graded.
-**Live chain attempted (2026-06-06, connector 0.3.122).** Drove the real C2 alert
-`54f25f1f…` two ways: (1) single `build`-intent turn "investigate … then build me a
-reusable containment playbook" → agent investigated cleanly (get_record → enrich
-FortiGuard/VT/FortiSIEM → 2× search_module_records correlation → find_containment →
-`emit_action_card`) but ended on `awaiting_action_card`/`awaiting_choice`, **never
-`emit_playbook_offer`**. (2) Scripted chain: triage turn → follow-up `build` turn
-"save that investigation+containment as a reusable playbook". The build turn replied
-*"I don't see a prior triage conversation in this session history"* and asked the
-analyst to re-supply the IP / connector / source record / enrichment steps — i.e.
-**the build intent does not inherit the prior triage turn's transcript+trace within
-the same session**, so it can't ground an offer on what was just investigated. No
-offer card → `build_fidelity` never fires from a natural chain. (Transcript:
-`store/eval_runs/chatchain_1780787762.json`.) Confound to rule out: turn 1 was left
-suspended on an unanswered choice card when turn 2 was sent — answer the choice via
-`chat_resume` first, then re-test, before concluding it's pure context loss.
+**Live chain — two drives, 2026-06-06, connector 0.3.122 (real C2 alert `54f25f1f…`).**
 
-**Root-cause hypothesis + next:** the triage→build handoff is broken at the *session
-continuity* layer (build agent's context window doesn't include the prior triage
-turn). The agent itself surfaced the supported workaround — *"give me a playbook run
-ID / incident record and I can fetch the execution trace and auto-rebuild"* — which
-is the existing `build_trace_fixture`/run-trace path. So the gate-firing chain that
-works TODAY is: investigate **with execution** (real `run_playbook`) → build from
-that run's trace, not a pure conversational save. **Next:** (a) confirm/deny the
-session-context loss after resolving the choice-card confound; (b) if real, fix the
-build prompt/runtime to carry the in-session triage transcript into the build turn
-(lever: `system_prompt_build.md` *Triage → build handoff*); (c) failing that, wire
-the run-ID auto-rebuild path as the canonical chain and pin THAT. Plus the still-open
-parameterized-to-trigger-record check beyond ops-overlap.
+*Drive 1 (FLAWED — driver bug).* Scripted triage turn → follow-up `build` turn,
+but the follow-up sent only the NEW user message in `messages[]`. The build turn
+replied *"I don't see a prior triage conversation in this session history."* I first
+read this as a connector defect (session discontinuity). **It is not** — see drive 2.
+`chat_turn` feeds the LLM ONLY the caller-supplied `messages[]` (`operations.py`
+`prior = params.get("messages")`, line ~1748); the real widget replays the FULL
+accumulated conversation each turn. Drive 1 just didn't replay it.
+
+*Drive 2 (CORRECTED).* Same `session_id`, turn 2 replays widget-style
+`[user, assistant(turn-1 summary), user("build it")]`, intent `build`. Result:
+the build turn **saw the prior investigation**, authored a containment playbook
+(`get_step_type` → `get_op_schema`/`find_operation` → `validate_yaml` ×3 →
+`push_playbook`) and reached **`approval_required`** (HITL on push). **The triage→build
+chain works end-to-end** when the conversation is replayed. (Transcript:
+`store/eval_runs/chatchain_1780788431.json`.)
+
+**Two real gaps remain (both narrower than the original mis-finding):**
+1. **Build agent bypasses the trace compiler.** It said *"I don't have a recorded
+   trace … the enrichment queries were live lookups, not playbook steps"* and never
+   called `build_playbook_from_trace` — it hand-authored. This is FALSE: source
+   confirms `run_op` records every executed op into the active SkillTrace
+   (`tools_execution.py` `record_run_op`, both paths) and `_session_trace_scope`
+   persists/loads it by `session_id`, so the triage enrichment ops WERE recorded.
+   The build prompt says call `build_playbook_from_trace` FIRST
+   (`system_prompt_build.md` §*Triage → build handoff*) — the agent didn't.
+   **Prompt-adherence fix, not a data-availability fix.**
+2. **`build_fidelity` still didn't fire from this chain** — the agent went the
+   `push_playbook`/HITL route, not `emit_playbook_offer`, and `attach_build_fidelity`
+   keys off the offer card. The authored YAML lives in `last_assistant_yaml`, so the
+   gate COULD grade via the existing `_extract_yaml` path; and note hand-authored
+   containment ops (fortigate block) were NOT exercised in triage, so grounding would
+   correctly score < 1.0 (the gate doing its job).
+
+**Next:** (a) force build-prompt adherence so a chained build calls
+`build_playbook_from_trace` first (lever above) — then the offer path fires; (b) widen
+`attach_build_fidelity` to also grade `last_assistant_yaml`/`push_playbook` builds, not
+only offer cards; (c) pin the corrected chain as a golden once it emits an offer. Plus
+the still-open parameterized-to-trigger-record check beyond ops-overlap.
 
 ### B5 · End-to-end chain  ·  HIGH
 Score the whole investigate→hunt→triage→build chain as ONE run (the `build_run_proof`
