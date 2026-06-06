@@ -113,12 +113,12 @@ playbooks:
         arguments:
           connector: virustotal
           operation: query_url
-          resource: "https://example.com"
+          url: "https://example.com"
 """
 
 FETCH_WITH_MOCK = FETCH_NO_MOCK.replace(
-    'resource: "https://example.com"',
-    'resource: "https://example.com"\n          mock_result:\n            status: success',
+    'url: "https://example.com"',
+    'url: "https://example.com"\n          mock_result:\n            status: success',
 )
 
 

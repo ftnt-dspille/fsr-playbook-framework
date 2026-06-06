@@ -1,6 +1,55 @@
 # Chat Intelligence Plan — tune & enhance the investigation→build agent
 
-**Created:** 2026-06-05 · **Status:** Phase 0 not started · **Owner loop:** iterative (Claude + Dylan)
+**Created:** 2026-06-05 · **Status:** Phase 0 complete + live-exercised (A1+A2+A3+A4+A6); B1 first rung shipped; A5 deferred · **Owner loop:** iterative (Claude + Dylan)
+
+> **B1 + A4 session (2026-06-06, cont.):** **B1 — both stale goldens re-captured GREEN**
+> (offline pin: 0 stale warnings). Live-tuned `system_prompt_triage.md` over deploys
+> 0.3.117→**0.3.121**: (1) rule 3 `find_containment_actions` now non-terminal → deliverable
+> fixed; (2) elevated **two-module correlation** (`search_module_records` on BOTH `alerts`
+> AND `incidents`) into the numbered hunt loop → mail-egress **recall 5/5 = 1.00** (was stuck
+> 0.67); (3) within-turn budget discipline (no re-`get_record`, batch related-activity +
+> enrichment, stage ONE card, call containment-discovery once) → no_spiral 4/5, budget best
+> 10–12 (clean runs **6/6**). Residual: mail-egress budget passes ~40% (intermittent extra
+> searches/cards) — stochastic tail, deliberately stopped tuning. cleartext_c2 still 6/6 (no
+> regression). **A4 — `make chat-fast` SHIPPED**: 13-file offline STRUCTURE/contract suite
+> (prompt assembly, intent routing, tool registry, A3 lever map, A6 golden pin),
+> deterministic, **122 pass ~1.5s, no API** — default tuning loop vs live `make chat-calibrate`.
+> A5 (trend) deferred. Next rung: **B4** (triage→build fidelity).
+
+> **Live-drive session (2026-06-06):** forticloud reachable; first live `chat-drive
+> --task invest_outbound_cleartext_c2` (deployed connector 0.3.116) →
+> recall 1.00, budget 12/12, render clean, BUT two FAILs: (a) `no_spiral` — 5
+> consecutive `run_op` enrichment calls (serial, not fanned out) → tripped the ≤4
+> limit AND ate the budget; (b) `investigation_deliverable` — agent ended its turn
+> on a bare `find_containment_actions` (12th/last call) with no card staged. Same
+> root cause: serial enrichment crowded the card out of the budget (exactly rule
+> #6's warning). This *confirms the 2 stale goldens are a real capability gap, not
+> just a stale bar.* Fixes this session: **A3 lever gaps closed** — added levers for
+> `no_spiral`, build-track `tool_budget`, `verify_called_before_submit`,
+> `final_verify_ready_to_push`, `matches_example`, `live_tested` (were "unmapped");
+> new `python/tests/test_lever_coverage.py` drives `score()` and asserts every
+> counted gate resolves to a real lever (A3 DoD now *enforced*). **B-track prompt
+> edit (staged, NOT yet live-validated):** `system_prompt_triage.md` rule 3 now makes
+> `find_containment_actions` non-terminal — must be followed by `emit_action_card`/
+> `emit_capability_gap_card` in the same turn. **PENDING:** redeploy connector to
+> pick up the prompt edit → re-drive `invest_outbound_cleartext_c2` → if deliverable
+> + no_spiral clear, re-capture both stale goldens (`calibrate --capture`).
+
+> **Phase 0 progress (2026-06-06):** A1 `fsrpb chat-drive` (live sync `chat_turn`+`chat_resume`
+> → trace → score → render-validate → one-screen verdict with per-gate lever) + `make chat-drive`;
+> A2 `--capture-fixture` (run → proposed `tasks/*.json` + golden, human-reviewed); A3 shared
+> `python/evals/levers.py` (gate→prompt-lever, extended to build/offer/hunt; `calibrate` now imports
+> it); A6 `python/tests/test_golden_traces_pin.py` (offline, runs under `make tests`). New node render
+> bridge `widgets-src/fsrSocAssistant/tools/render_check.cjs`. Offline-verified: **812 pytest pass**
+> (`make tests`) + 295 fsr_core; render bridge + scoring + capture all green. Also fixed 3 stale
+> fixtures (`test_linter` `query_url` needs `url:`; `test_corpus_validator` `vars.op` needs a
+> `set_variable`) that collided with the in-progress validator hardening (missing-required→error,
+> undefined-`vars`, malformed-Jinja) — fixtures updated, validators left intact. **Surfaced finding:**
+> 2 committed golden traces
+> (`invest_excessive_mail_egress` 19>12 budget, `invest_outbound_cleartext_c2` no deliverable) are
+> **stale** vs current fixture quality knobs — the pin warns (recall intact) and flags re-capture
+> live. **Pending:** live `fsrpb chat-drive` against forticloud (needs creds/connector reachable) +
+> re-capture the 2 stale goldens. A4/A5 (fast/live split, trend) deliberately deferred.
 
 ## North star
 Make the chat agent measurably smarter at the full chain — **investigate → hunt →
@@ -71,12 +120,14 @@ Generalize `calibrate_investigation._lever_for` from the investigation gates to
 "edit *<section>* of *<prompt file>*" so a red eval points at the exact lever. *DoD:*
 every gate has a lever; the calibrate report is a prompt-edit worklist.
 
-### A4 · Fast local loop + live gate  ·  MEDIUM · small
-Make `fake_provider` / `lmstudio_provider` the default for **structure** tests
-(prompt assembly, tool-registry, intent routing — no API cost), and keep
-`calibrate_investigation` (live, Anthropic) as the periodic **capability** gate.
-Document the split so I reach for the cheap loop by default. *DoD:* `make chat-fast`
-(local, seconds) vs `make chat-calibrate` (live, gated).
+### A4 · Fast local loop + live gate  ·  MEDIUM · small  ·  ✅ DONE 2026-06-06
+`make chat-fast` runs a 13-file offline STRUCTURE/contract suite (prompt
+assembly, intent routing, tool registry, A3 lever map, A6 golden pin),
+deterministic (`-p no:randomly`), 122 pass in ~1.5s with **no API**. It's the
+default loop while tuning prompts/tools/intents; `make chat-calibrate` (live,
+Anthropic) stays the periodic capability gate. `CHAT_FAST_TESTS` in the Makefile
+is the curated list — add a test here when a new structural contract lands.
+*DoD met:* `make chat-fast` (local, seconds) vs `make chat-calibrate` (live, gated).
 
 ### A5 · Trend dashboard  ·  MEDIUM · small
 Aggregate `store/eval_runs/*.summary.json` into a single trend table (recall,
@@ -110,12 +161,28 @@ severity/verdict correctness, low-signal handling (don't over-escalate a benign
 alert), and scenario classification accuracy. New gate: `triage_assessment` against
 labeled scenarios in `triage_scenarios.py`.
 
-### B4 · Triage → Build fidelity  ·  CRITICAL
+### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟡 GATE LANDED 2026-06-06 (live chain pending)
 Levers: `system_prompt_build.md` *Triage → build handoff* + *Canonical skeleton*.
 The built playbook must actually **automate what was investigated** — same
 ops, parameterized to the trigger record, compiling + runnable. Reuse build tasks
 `01_…`–`10_…` and `build_trace_fixture`. Gate: `build_fidelity` (ops-overlap with the
 investigation) + existing compile/`run_playbook` success.
+
+**Done:** `scoring.score_build_fidelity(trace, yaml)` grades two sub-metrics over
+(connector, op) sets — **grounding** (every built connector op was actually
+exercised in the investigation; gate 1.0 — no invented ops) and **action_coverage**
+(the `emit_action_card` op appears as a playbook step). Auto-skips on standalone
+authoring tasks / investigation mode. Wired into `score()` as a counted gate;
+`build_fidelity` lever added; offline pin `python/tests/test_build_fidelity.py`
+(10 cases) in `make chat-fast`. Two built-ops sources: a standalone build run's
+emitted ```yaml fence (`chat_drive._extract_yaml`), OR a triage→build *chain*'s
+`playbook_offer` card `ops_summary` (`scoring.ops_from_offer_card` →
+`score_build_fidelity(..., built_ops=…)`). `chat_drive.attach_build_fidelity`
+detects an offer card in the transcript and folds the gate into the verdict, so
+both a one-shot build and an investigate→offer chain are graded.
+**Pending (next):** a live multi-turn chain drive (investigate → ask to save →
+`emit_playbook_offer`) to see the gate fire end-to-end + a golden pin; and a
+parameterized-to-trigger-record check beyond ops-overlap.
 
 ### B5 · End-to-end chain  ·  HIGH
 Score the whole investigate→hunt→triage→build chain as ONE run (the `build_run_proof`

@@ -1382,12 +1382,14 @@ class NormalizerMixin:
             return result
 
         for name, entries in rows_by_name.items():
-            # Scope to conditionally-gated params (at least one parented row).
-            # Pure top-level required params are the run_op preflight's job
-            # (_validate_op_params); the resolver historically passes them
-            # through, so we don't widen that here.
-            if all(parent is None for parent, _cond, _req in entries):
-                continue
+            # Top-level required params (every row has parent None) used to be
+            # deferred to the run_op preflight (_validate_op_params). But the
+            # authoring flow (compile → verify_playbook → push) never runs that
+            # preflight, so a missing top-level-required param compiled clean
+            # and verify_playbook reported ready_to_push=True — then FSR
+            # rejected the call at runtime. We now flag it here as an *error*
+            # (conditional/gated misses below stay warnings).
+            pure_top_level = all(parent is None for parent, _cond, _req in entries)
             # Already supplied (non-empty literal/ref) → nothing to require.
             if provided.get(name) not in (None, ""):
                 continue
@@ -1420,6 +1422,6 @@ class NormalizerMixin:
                 ),
                 path=f"{path}.arguments.params.{name}",
                 suggestion=f"add {name!r} to arguments.params",
-                severity="warning",
+                severity="error" if pure_top_level else "warning",
             ))
 

@@ -126,3 +126,36 @@ def test_empty_string_parent_param_is_not_flagged_as_conditional():
     finally:
         r.close()
     assert errs == []
+
+
+def _conditional_required(provided: dict) -> list[CompileError]:
+    r = _resolver_with_query_ip()
+    errs: list[CompileError] = []
+    try:
+        r._check_conditional_required(
+            "virustotal", "query_ip", provided, "p", errs)
+    finally:
+        r.close()
+    return errs
+
+
+def test_missing_top_level_required_param_is_an_error():
+    # Gap #1: a pure top-level required param (ip) that the author omitted
+    # used to pass through (run_op-preflight's job) and verify_playbook lied
+    # with ready_to_push=True. It is now a hard *error* so the authoring flow
+    # blocks the push.
+    errs = _conditional_required({})
+    miss = {e.path.rsplit(".", 1)[-1] for e in errs}
+    assert "ip" in miss
+    ip_err = next(e for e in errs if e.path.endswith(".ip"))
+    assert ip_err.severity == "error"
+
+
+def test_present_top_level_required_param_is_clean():
+    assert _conditional_required({"ip": "1.2.3.4"}) == []
+
+
+def test_optional_top_level_param_not_flagged():
+    # `relationships` is top-level but required=0 → never flagged.
+    miss = {e.path.rsplit(".", 1)[-1] for e in _conditional_required({"ip": "x"})}
+    assert "relationships" not in miss

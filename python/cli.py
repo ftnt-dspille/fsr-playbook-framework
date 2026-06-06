@@ -2859,6 +2859,24 @@ def cmd_evals(args: argparse.Namespace) -> int:
     return 0 if any_progress else 1
 
 
+def cmd_chat_drive(args: argparse.Namespace) -> int:
+    """Drive ONE scenario through the live connector's chat_turn, score it,
+    render-validate it, and print a one-screen verdict (Chat Intelligence Plan
+    Track A1/A2). Thin shim over `evals.chat_drive.run`."""
+    from evals import chat_drive
+
+    record = args.record
+    if record:
+        p = Path(record)
+        record = json.loads(p.read_text()) if p.exists() else json.loads(record)
+
+    return chat_drive.run(
+        task_name=args.task, message=args.message, intent=args.intent,
+        record=record, version=args.version, config=args.config,
+        capture_fixture=args.capture_fixture, as_json=args.json,
+    )
+
+
 def cmd_assert(args: argparse.Namespace) -> int:
     """Run declarative outcome assertions against the live FSR.
 
@@ -4480,6 +4498,31 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--list-runs", action="store_true",
                     help="list archived eval run ids and exit")
     sp.set_defaults(func=cmd_evals)
+
+    sp = sub.add_parser(
+        "chat-drive",
+        help="drive ONE scenario through the live connector's chat_turn, "
+             "score it (recall/quality/render), and print a verdict with the "
+             "prompt lever for each failing gate",
+    )
+    sp.add_argument("--task", default=None,
+                    help="existing investigation task fixture name "
+                         "(e.g. invest_outbound_cleartext_c2)")
+    sp.add_argument("--message", default=None,
+                    help="ad-hoc scenario message (no fixture scoring)")
+    sp.add_argument("--intent", default="triage", help="triage | build")
+    sp.add_argument("--record", default=None,
+                    help="optional record context: JSON string or path")
+    sp.add_argument("--version", default="0.3.116",
+                    help="deployed connector version to drive")
+    sp.add_argument("--config", default="fsrpb-live",
+                    help="connector config name")
+    sp.add_argument("--capture-fixture", action="store_true",
+                    help="(A2) propose a tasks/*.json + golden trace from this "
+                         "run for review (ad-hoc --message runs only)")
+    sp.add_argument("--json", action="store_true",
+                    help="also emit the full run summary as JSON")
+    sp.set_defaults(func=cmd_chat_drive)
 
     sp = sub.add_parser(
         "assert",

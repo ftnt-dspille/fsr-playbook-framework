@@ -97,6 +97,10 @@ playbooks:
 
 def test_jinja_value_skipped(db_path):
     # Jinja values resolve at runtime — never warn on them.
+    # `op` is defined by a SetVariable so this isolates the corpus-literal
+    # check (which must SKIP a Jinja `operation` value) from the orthogonal
+    # undefined-vars warning (_check_undefined_vars), which legitimately fires
+    # on a `vars.<name>` no SetVariable ever defines.
     text = """
 collection: T
 playbooks:
@@ -104,6 +108,10 @@ playbooks:
     steps:
       - name: start
         type: start
+        next: setop
+      - name: setop
+        type: set_variable
+        vars: {op: "update"}
         next: u
       - name: u
         type: update_record

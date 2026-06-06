@@ -34,26 +34,9 @@ GOLDEN_DIR = REPO_ROOT / "python" / "evals" / "golden_traces"
 RUN_DIR = REPO_ROOT / "store" / "eval_runs"
 
 # Each quality/recall failure points at the lever most likely to fix it, so a
-# failed run is self-documenting: failure -> file/knob to change, no grep.
-LEVER_MAP = {
-    "investigation_recall": "fixture required_facts vs. system_prompt_triage.md "
-                            "pivot guidance (agent didn't reach the required op)",
-    "investigation_tool_budget": "system_prompt_triage.md §pivot-discipline + "
-                                 "2.8 parallel dispatch (too many calls)",
-    "investigation_no_param_flail": "fsr_core validate_op_grounded + connector_op_defs "
-                                    "op-def cache (guessed param names)",
-    "investigation_blind_param_retry": "run_op bad_params inline valid_params + "
-                                       "system_prompt_triage.md 'call get_op_schema "
-                                       "before run_op' (hammered without lookup)",
-    "investigation_deliverable": "system_prompt_triage.md emit_action_card staging rule "
-                                 "(hunt ended without a card)",
-    "<forbidden>": "system_prompt_triage.md forbidden-pivot rule "
-                   "(fired an internal-source TI lookup)",
-}
-
-
-def _lever_for(key: str) -> str:
-    return LEVER_MAP.get(key, "unmapped — inspect trace")
+# failed run is self-documenting: failure -> file/knob to change, no grep. The
+# map is shared with chat_drive.py via evals.levers so the two tools can't drift.
+from evals.levers import lever_for as _lever_for  # noqa: E402
 
 
 def _load_baseline(stamp: str | None) -> dict | None:

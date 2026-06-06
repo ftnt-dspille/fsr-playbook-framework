@@ -220,6 +220,135 @@ def _call_args(call: dict[str, Any]) -> dict[str, Any]:
     return args if isinstance(args, dict) else {}
 
 
+# ── B4: triage→build fidelity (Chat Intelligence Plan) ──────────────────
+# "The built playbook must automate what was investigated — same ops." Grade
+# the (connector, op) overlap between the investigation trace and the compiled
+# playbook. Grounding gate defaults to 1.0: a playbook may only call ops the
+# analyst actually exercised this session — inventing an op is the failure.
+BUILD_FIDELITY_GROUNDING_GATE = float(
+    os.environ.get("EVAL_BUILD_FIDELITY_GROUNDING_GATE", "1.0"))
+
+
+def _ops_from_trace(trace: list[dict[str, Any]] | None,
+                    ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """(connector, op) pairs the investigation exercised, split into read-side
+    enrichment/query ops (`run_op`) and the staged response action(s)
+    (`emit_action_card`). Lowercased."""
+    enrich: set[tuple[str, str]] = set()
+    actions: set[tuple[str, str]] = set()
+    for c in trace or []:
+        name = c.get("name")
+        args = _call_args(c)
+        if name == "run_op":
+            conn = str(args.get("connector", "")).lower()
+            op = str(args.get("op", "")).lower()
+            if conn and op:
+                enrich.add((conn, op))
+        elif name == "emit_action_card":
+            conn = str(args.get("connector", "")).lower()
+            op = str(args.get("operation") or args.get("op") or "").lower()
+            if conn and op:
+                actions.add((conn, op))
+    return enrich, actions
+
+
+def _ops_from_yaml(yaml_text: str) -> set[tuple[str, str]]:
+    """(connector, operation) pairs from every `type: connector` step in the
+    built playbook YAML."""
+    ops: set[tuple[str, str]] = set()
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text)
+    except Exception:  # noqa: BLE001
+        return ops
+    if not isinstance(doc, dict):
+        return ops
+    for pb in (doc.get("playbooks") or []):
+        if not isinstance(pb, dict):
+            continue
+        for s in (pb.get("steps") or []):
+            if not isinstance(s, dict) or s.get("type") != "connector":
+                continue
+            a = s.get("arguments") or {}
+            if not isinstance(a, dict):
+                continue
+            conn = str(a.get("connector", "")).lower()
+            op = str(a.get("operation", "")).lower()
+            if conn and op:
+                ops.add((conn, op))
+    return ops
+
+
+def ops_from_offer_card(card: dict[str, Any] | None) -> set[tuple[str, str]]:
+    """(connector, operation) pairs from a `playbook_offer` card's
+    `ops_summary` — the built-playbook ops as the agent staged them for save,
+    before any push. Lets the fidelity gate grade a triage→build *chain* (which
+    emits an offer card, not a raw ```yaml fence)."""
+    ops: set[tuple[str, str]] = set()
+    if not isinstance(card, dict):
+        return ops
+    for e in (card.get("ops_summary") or []):
+        if not isinstance(e, dict):
+            continue
+        conn = str(e.get("connector", "")).lower()
+        op = str(e.get("operation") or e.get("op") or "").lower()
+        if conn and op:
+            ops.add((conn, op))
+    return ops
+
+
+def score_build_fidelity(trace: list[dict[str, Any]] | None,
+                         yaml_text: str | None,
+                         built_ops: set[tuple[str, str]] | None = None,
+                         ) -> dict[str, Any]:
+    """Does the built playbook automate what was investigated? (Plan B4.)
+
+    Two sub-metrics over (connector, op) sets:
+      * **grounding** — every connector op in the built playbook was one the
+        investigation actually exercised (a `run_op` enrichment OR a staged
+        action card). Catches a playbook that invents ops the analyst never
+        ran. Gate: grounding ≥ `BUILD_FIDELITY_GROUNDING_GATE` (default 1.0).
+      * **action_coverage** — the response action(s) staged via
+        `emit_action_card` appear as steps in the built playbook, so it
+        automates the recommendation, not just the read-side lookups.
+
+    Passes when grounding clears the gate AND every staged action is covered.
+    Auto-skips (not graded) when no playbook was built or the trace used no
+    ops — so it never penalizes a standalone authoring task with no
+    investigation phase.
+    """
+    enrich, actions = _ops_from_trace(trace)
+    investigated = enrich | actions
+    # built ops come from an offer card (chain runs) when given, else the
+    # emitted ```yaml fence (standalone build runs).
+    built = set(built_ops) if built_ops else _ops_from_yaml(yaml_text or "")
+    if not built or not investigated:
+        return {"passed": False, "skipped": True,
+                "detail": "no built-playbook ops or no investigation ops to compare"}
+    ungrounded = sorted(built - investigated)
+    grounding = (len(built) - len(ungrounded)) / len(built)
+    missing_actions = sorted(actions - built)
+    action_coverage = ((len(actions) - len(missing_actions)) / len(actions)
+                       if actions else 1.0)
+    passed = grounding >= BUILD_FIDELITY_GROUNDING_GATE and not missing_actions
+    detail = (f"grounding {grounding:.2f} (gate {BUILD_FIDELITY_GROUNDING_GATE}); "
+              f"action_coverage {action_coverage:.2f}")
+    if ungrounded:
+        detail += "; ungrounded ops: " + ", ".join(f"{c}.{o}" for c, o in ungrounded)
+    if missing_actions:
+        detail += "; staged action(s) absent from playbook: " + ", ".join(
+            f"{c}.{o}" for c, o in missing_actions)
+    return {
+        "passed": passed, "skipped": False,
+        "grounding": round(grounding, 3),
+        "action_coverage": round(action_coverage, 3),
+        "ungrounded_ops": [f"{c}.{o}" for c, o in ungrounded],
+        "missing_actions": [f"{c}.{o}" for c, o in missing_actions],
+        "built_ops": len(built), "investigated_ops": len(investigated),
+        "detail": detail,
+    }
+
+
 def _param_flail(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
     """Worst-offender count of DISTINCT arg-sets for a single (connector, op).
 
@@ -775,6 +904,16 @@ def score(
                   "final_verify_ready_to_push",
                   "appropriate_approval_requests"):
             out["levels"][k] = {"passed": False, "skipped": True}
+
+    # ----------------- B4: triage→build fidelity ---------------------------
+    # Does the built playbook automate what was investigated? Auto-skips on
+    # standalone authoring tasks (no investigation ops in the trace) and on
+    # investigation/refuse modes (no playbook expected), so it only grades a
+    # real triage→build chain.
+    if not investigation and not refuse:
+        out["levels"]["build_fidelity"] = score_build_fidelity(trace, yaml_text)
+    else:
+        out["levels"]["build_fidelity"] = {"passed": False, "skipped": True}
 
     # `verify_iterations_until_ready` is informational, not a gate —
     # exclude from the pass/fail aggregate. Same logic as the old

@@ -302,6 +302,88 @@ def _check_jinja_paths(pb: Playbook, pi: int,
                     ))
 
 
+def _check_malformed_jinja(pb: Playbook, pi: int,
+                           errors: list[CompileError]) -> None:
+    """Catch syntactically broken Jinja delimiters — an unclosed `{{` (or a
+    stray `}}`, `{%`/`%}` mismatch). These compile clean today (the
+    `{{ ... }}` extractor simply doesn't match an unterminated expression),
+    so the only signal is a runtime template error. A delimiter-balance scan
+    has effectively no false positives on playbook args (literal `}}` inside
+    a value is vanishingly rare) and turns that runtime failure into an
+    authoring-time error."""
+    path = f"playbooks[{pi}]"
+    for si, s in enumerate(pb.steps):
+        for sub, val in _walk_strings(s.arguments):
+            for open_tok, close_tok, label in (
+                ("{{", "}}", "expression"), ("{%", "%}", "statement")):
+                n_open = val.count(open_tok)
+                n_close = val.count(close_tok)
+                if n_open == n_close:
+                    continue
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"malformed Jinja {label} in step {s.id!r}: "
+                             f"{n_open} {open_tok!r} but {n_close} "
+                             f"{close_tok!r} — the template is unbalanced and "
+                             f"will fail at runtime"),
+                    path=f"{path}.steps[{si}].arguments.{sub}",
+                    suggestion=(f"close every {open_tok} with a matching "
+                                f"{close_tok}"),
+                    severity="error",
+                ))
+
+
+# `vars.<name>` top-level reference. Captures the first segment only.
+_VARS_TOPLEVEL_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _check_undefined_vars(pb: Playbook, pi: int,
+                          errors: list[CompileError]) -> None:
+    """Flag `{{ vars.<name> }}` references whose `<name>` is never defined —
+    not an FSR runtime key, not the loop binding, and not produced by any
+    SetVariable in the playbook. A typo'd local var silently evaluates empty
+    at runtime, so this is the only signal the author gets.
+
+    Emitted as a *warning* (not a hard block): vars are playbook-global and
+    can in principle be seeded by sources we don't fully model, so we surface
+    the suspicion without failing ready_to_push on a possible false positive.
+    """
+    path = f"playbooks[{pi}]"
+    # Runtime-provided + structural keys that are always legitimate to read.
+    defined: set[str] = set(_RESERVED_VARS_KEYS)
+    # `vars.item` (+ `vars.item.<field>`) is the per-iteration loop binding.
+    defined.add("item")
+    # Every SetVariable-defined name, gathered across the whole playbook
+    # (vars are global; definition can lexically follow the read).
+    for s in pb.steps:
+        if s.type == "set_variable" and isinstance(s.arguments, dict):
+            keys = _step_output_top_keys(s)
+            if keys:
+                defined |= keys
+    for si, s in enumerate(pb.steps):
+        for sub, val in _walk_strings(s.arguments):
+            for jm in _JINJA_EXPR_RE.finditer(val):
+                expr = jm.group(1)
+                for m in _VARS_TOPLEVEL_RE.finditer(expr):
+                    name = m.group(1)
+                    if name in defined:
+                        continue
+                    suggestion = _closest_step(name, defined)
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"Jinja reference vars.{name} in step "
+                                 f"{s.id!r}: {name!r} is never defined by a "
+                                 f"SetVariable and is not a runtime key; it "
+                                 f"will evaluate empty at runtime"),
+                        path=f"{path}.steps[{si}].arguments.{sub}",
+                        near=suggestion,
+                        suggestion=(f"did you mean vars.{suggestion}?"
+                                    if suggestion else
+                                    "define it with a set_variable step first"),
+                        severity="warning",
+                    ))
+
+
 def _closest_step(needle: str, hay) -> str | None:
     import difflib
     matches = difflib.get_close_matches(needle, list(hay), n=1, cutoff=0.6)
@@ -649,6 +731,8 @@ def validate(collection: Collection) -> list[CompileError]:
         _check_graph(pb, pi, errors)
         _check_reserved_names(pb, pi, errors)
         _check_jinja_paths(pb, pi, errors)
+        _check_malformed_jinja(pb, pi, errors)
+        _check_undefined_vars(pb, pi, errors)
 
         # Step names must be unique within a playbook. FSR's Jinja runtime
         # exposes step output at `vars.steps.<Name_with_underscores>`, so

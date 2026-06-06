@@ -36,3 +36,12 @@ e2e/playwright-report/
 # archives / recon tarballs
 *.tar.gz
 *.tgz
+
+# build artifacts
+*.egg-info/
+
+# eval run artifacts (flat logs/summaries; structured run dirs stay tracked)
+/store/eval_runs/calibrate_*.log
+/store/eval_runs/calibrate_*.summary.json
+/store/eval_runs/calibrate_*_failures/
+/store/eval_runs/chatdrive_*.summary.json
