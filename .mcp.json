@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fsr-read": {
+      "command": "uv",
+      "args": ["run", "python", "python/fsr_read_mcp.py"]
+    },
+    "fsrpb": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "fsr_core.mcp_server"]
+    }
+  }
+}
