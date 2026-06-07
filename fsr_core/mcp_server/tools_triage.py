@@ -1748,9 +1748,15 @@ def _siem_run(op: str, params: dict[str, Any], limit: int,
     """Shared body: run a read-only FortiSIEM op, digest its events, return a
     uniform envelope. `echo` describes the query for the agent's audit trail."""
     from .tools_execution import run_op  # lazy: avoid import cycle at load
+    from ..agent.skill_trace import mute_recording
     from ..llm.triage_normalize import _digest_event
 
-    res = run_op("fortinet-fortisiem", op, params)
+    # Mute: this run_op is the implementation of a named MCP pivot tool
+    # (siem_search_*/siem_events_for_incident), not an op the agent invoked
+    # directly — keep it off the build trace so the playbook stays grounded in
+    # the analyst's actual run_op calls.
+    with mute_recording():
+        res = run_op("fortinet-fortisiem", op, params)
     if not isinstance(res, dict) or not res.get("ok"):
         # pass the connector's own error straight through (unhealthy/timeout/etc)
         return _siem_error(op, echo, res)
@@ -1925,6 +1931,7 @@ def _siem_pubv2_query(where: str, *, select: str = "", window: str = "2h",
     import time as _time
 
     from .tools_execution import run_op
+    from ..agent.skill_trace import mute_recording
     from ..llm.triage_normalize import _digest_event
 
     unit, value = _parse_window(window)
@@ -1954,8 +1961,12 @@ def _siem_pubv2_query(where: str, *, select: str = "", window: str = "2h",
     qid = None
     last = None
     for _ in range(3):
-        sub = run_op("fortinet-fortisiem", "execute_api_request", submit_args,
-                     confirm=True)
+        # Mute trace recording: these submit/poll/fetch `execute_api_request`
+        # calls implement ONE logical SIEM query — they must not each land on
+        # the session trace as a raw-HTTP playbook step (the grounding gap).
+        with mute_recording():
+            sub = run_op("fortinet-fortisiem", "execute_api_request", submit_args,
+                         confirm=True)
         last = sub
         if isinstance(sub, dict) and sub.get("ok"):
             qid = _coerce_query_id(sub.get("data"))
@@ -1979,16 +1990,18 @@ def _siem_pubv2_query(where: str, *, select: str = "", window: str = "2h",
     # space for a pub/v2 queryId).
     rows: list[dict[str, Any]] = []
     for _ in range(max(1, poll_max)):
-        prog = run_op("fortinet-fortisiem", "execute_api_request", {
-            "endpoint": "/rest/pub/v2/query/progress", "method": "GET",
-            "query_params": {"queryId": qid}}, confirm=True)
+        with mute_recording():
+            prog = run_op("fortinet-fortisiem", "execute_api_request", {
+                "endpoint": "/rest/pub/v2/query/progress", "method": "GET",
+                "query_params": {"queryId": qid}}, confirm=True)
         done = (isinstance(prog, dict) and isinstance(prog.get("data"), dict)
                 and prog["data"].get("progress") == 100)
         if done:
-            res = run_op("fortinet-fortisiem", "execute_api_request", {
-                "endpoint": "/rest/pub/v2/query/events/results", "method": "GET",
-                "query_params": {"queryId": qid, "offset": 0,
-                                 "limit": min(limit, 1000)}}, confirm=True)
+            with mute_recording():
+                res = run_op("fortinet-fortisiem", "execute_api_request", {
+                    "endpoint": "/rest/pub/v2/query/events/results", "method": "GET",
+                    "query_params": {"queryId": qid, "offset": 0,
+                                     "limit": min(limit, 1000)}}, confirm=True)
             if isinstance(res, dict) and res.get("ok"):
                 rows = _event_rows(res.get("data"))
             break

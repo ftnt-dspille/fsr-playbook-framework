@@ -161,7 +161,7 @@ severity/verdict correctness, low-signal handling (don't over-escalate a benign
 alert), and scenario classification accuracy. New gate: `triage_assessment` against
 labeled scenarios in `triage_scenarios.py`.
 
-### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟢 action_coverage 1.0 LIVE-PROVEN (0.3.125, 2026-06-06) — staged containment now replayed into the trace-built playbook; NEW open: grounding 0.83 (named SIEM/FortiGuard ops fan out to execute_api_request in the trace)
+### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟢 action_coverage 1.0 LIVE-PROVEN (0.3.125, 2026-06-06) — staged containment now replayed into the trace-built playbook; grounding 1.0 CLOSED & LIVE-PROVEN on 0.3.126 (2026-06-07) — muted wrapper-internal execute_api_request fan-out; build_fidelity PASS (grounding 1.0, action_coverage 1.0)
 Levers: `system_prompt_build.md` *Triage → build handoff* + *Canonical skeleton*.
 The built playbook must actually **automate what was investigated** — same
 ops, parameterized to the trigger record, compiling + runnable. Reuse build tasks
@@ -281,10 +281,35 @@ trace-recording fidelity issue, newly VISIBLE now that the compiler actually run
 Options: (i) don't record `execute_api_request` sub-calls when they're the
 implementation of a named op already on the trace; or (ii) collapse/relabel them to the
 parent named op; or (iii) count `execute_api_request` as grounded when its connector
-matches an investigated op. **Next:** triage which layer emits the
-`execute_api_request` SkillCalls → fix → re-drive → expect `grounding 1.0` + full
-`build_fidelity` PASS → pin as a golden. Plus the still-open
-parameterized-to-trigger-record check beyond ops-overlap.
+matches an investigated op.
+
+**FIX IMPLEMENTED (option i) — CLOSED & LIVE-PROVEN on 0.3.126 (2026-06-07).** Triaged the
+emitting layer: the 6 steps are the submit→poll→fetch `run_op(...,"execute_api_request")`
+fan-out inside `_siem_pubv2_query` (`tools_triage.py`) — the engine behind every
+`siem_search_*` / `siem_events_for_incident` MCP pivot. The agent never called
+`run_op` for them directly (they're not in `investigated`), so the named MCP wrapper's
+internal connector calls were polluting the trace as raw-HTTP build steps. Fix:
+- `skill_trace.mute_recording()` context manager + `_mute_depth` counter;
+  module-level `record_run_op` no-ops while muted (nests safely, unwinds on exception).
+- `_siem_pubv2_query` brackets its 3 internal `execute_api_request` call sites in
+  `mute_recording()`; `_siem_run` (the `get_associated_events_new` path shared by the
+  same pivots) brackets its `run_op` too — so NO wrapper-internal connector call lands
+  on the build trace, only the analyst's direct `run_op` calls + staged actions.
+- Tests: `test_skill_trace.py::test_mute_recording_*` (suppress + exception-unwind).
+  `make verify` green (339 + 159). `fsr_core` is symlinked into the connector → no vendor.
+- Grounding math: built is a SET of `(connector, op)` pairs, so the 6 steps were one
+  ungrounded pair `(fortinet-fortisiem, execute_api_request)` → 5/6 = 0.83. Muting drops
+  that pair → built = {4 named + staged} ⊆ investigated → expect `grounding 1.0`.
+
+**LIVE-PROVEN.** Deployed 0.3.126 (8/8 workers) + re-drove the chain
+(`scripts/prompt_loop.py --file _b4_chain.json --scenario b4_triage_build`, real C2 alert
+`54f25f1f…`, session `loop-f279bdb5`). Built playbook = {virustotal.query_ip,
+ip-quality-score.get_ip_reputation, fortinet-fortiguard-ioc.ioc_search} + staged
+`fortigate-firewall.block_ip_new` — **ZERO `fortinet-fortisiem.execute_api_request`
+steps** (the `siem_events_for_incident` fan-out is now muted). `score_build_fidelity`:
+**grounding 1.0, action_coverage 1.0, PASS**. Export
+`exports/loop-b4_triage_build-loop-f279bdb5-1780842267.json`. **Still open:** pin this as
+a fast offline golden; the parameterized-to-trigger-record check beyond ops-overlap.
 
 ### B5 · End-to-end chain  ·  HIGH
 Score the whole investigate→hunt→triage→build chain as ONE run (the `build_run_proof`

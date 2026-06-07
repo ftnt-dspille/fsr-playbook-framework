@@ -49,6 +49,43 @@ def test_ai_supplied_step_name_is_sanitized_and_deduped():
     assert c2.step_name == "Lookup IP Geolocation 2"  # identical label de-duped
 
 
+def test_mute_recording_suppresses_module_level_record():
+    """A wrapper's internal `execute_api_request` fan-out (submit/poll/fetch)
+    must not pollute the trace as raw-HTTP playbook steps — the grounding gap.
+    `mute_recording()` no-ops the module-level recorder while active, then
+    restores it; nests safely and unwinds on exception."""
+    t = SkillTrace()
+    skill_trace.set_active_trace(t)
+
+    # Records normally when not muted.
+    assert record_run_op("virustotal", "query_ip", {"ip": "1.1.1.1"}, {}) is not None
+    assert len(t) == 1
+
+    # Muted: the internal passthrough calls are dropped.
+    with skill_trace.mute_recording():
+        assert record_run_op("fortinet-fortisiem", "execute_api_request",
+                             {"endpoint": "/submit"}, {}) is None
+        with skill_trace.mute_recording():  # nested
+            assert record_run_op("fortinet-fortisiem", "execute_api_request",
+                                 {"endpoint": "/results"}, {}) is None
+    assert len(t) == 1  # nothing recorded while muted
+
+    # Depth fully unwound — recording resumes.
+    assert record_run_op("fortinet-fortiguard-ioc", "ioc_search", {}, {}) is not None
+    assert len(t) == 2
+
+
+def test_mute_recording_unwinds_on_exception():
+    t = SkillTrace()
+    skill_trace.set_active_trace(t)
+    with pytest.raises(ValueError):
+        with skill_trace.mute_recording():
+            raise ValueError("boom")
+    # Depth restored despite the exception — recording works again.
+    assert record_run_op("virustotal", "query_ip", {}, {}) is not None
+    assert len(t) == 1
+
+
 def test_no_step_name_falls_back_to_titleized_op():
     t = SkillTrace()
     call = t.record_run_op("virustotal", "generic_rest_api_call", {}, {"x": 1})

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -289,6 +290,18 @@ class SkillTrace:
 
 _active: Optional[SkillTrace] = None
 
+# Recording-mute depth. While > 0, `record_run_op` no-ops. MCP convenience
+# wrappers (e.g. the FortiSIEM pub/v2 query engine) make several internal
+# `run_op("…","execute_api_request",…)` calls — submit → poll → fetch — to
+# implement ONE logical investigation step. Each would otherwise land on the
+# trace as a separate `execute_api_request` SkillCall, polluting the built
+# playbook with raw HTTP passthrough steps the analyst never invoked as ops
+# (the `grounding < 1.0` gap: those ops aren't in the investigated set). A
+# wrapper brackets its internal run_op fan-out in `mute_recording()` so the
+# trace stays at the named-op granularity. A counter (not a bool) keeps nesting
+# safe.
+_mute_depth: int = 0
+
 
 def set_active_trace(trace: Optional[SkillTrace]) -> None:
     """Install (or clear, with None) the trace that `record_run_op` feeds."""
@@ -335,6 +348,22 @@ def clear_active_trace() -> None:
     _active = None
 
 
+@contextmanager
+def mute_recording():
+    """Suppress `record_run_op` trace recording for the duration of the block.
+
+    Used by MCP convenience wrappers whose internal `run_op` fan-out (the
+    submit/poll/fetch HTTP calls behind a single named investigation step)
+    should NOT each become a separate trace step. Nests safely (depth counter)
+    and always restores the prior depth, even on exception."""
+    global _mute_depth
+    _mute_depth += 1
+    try:
+        yield
+    finally:
+        _mute_depth -= 1
+
+
 def record_run_op(
     connector: str,
     op: str,
@@ -347,8 +376,11 @@ def record_run_op(
 ) -> Optional[SkillCall]:
     """Module-level convenience: record into the active trace if one is
     installed, else no-op. This is what `run_op` calls — so studio/tests
-    (no active trace) stay on raw run_op, untouched."""
-    if _active is None:
+    (no active trace) stay on raw run_op, untouched.
+
+    No-ops while recording is muted (see `mute_recording`) so a wrapper's
+    internal `execute_api_request` fan-out doesn't pollute the trace."""
+    if _active is None or _mute_depth > 0:
         return None
     return _active.record_run_op(
         connector, op, params, observed_output, step_name, ref_prefix,
