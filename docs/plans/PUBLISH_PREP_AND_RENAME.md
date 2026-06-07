@@ -24,7 +24,7 @@
 | # | Task | Status |
 |---|------|--------|
 | 1 | Pin a fast offline B4 build-fidelity golden | ✅ done — `b427373` |
-| 2 | Verify slim-DB + fill-from-your-own-SOAR path is complete | ⬜ pending |
+| 2 | Verify slim-DB + fill-from-your-own-SOAR path is complete | ✅ done — caveat 1 FIXED (warmup now fills modules/fields/picklists), caveat 2 ACCEPTED. See §Task2 |
 | 3 | De-hardcode widget-fixtures path in build.sh | ✅ done — connector `1a73c9f` |
 | 4 | Unified cross-repo "work on the AI chat" runbook | ⬜ pending |
 | 5 | `.env.example` for both repos | ✅ done — `dd7c439` + connector `5a68b6f` |
@@ -47,6 +47,46 @@ Suggested order for the rest: **10 (finish) → 2 → 4 → 7 → 6 → 8 → 9*
   connector `scripts/_*.py` (8). Decide promote-vs-delete per file. ASK first.
 - **#9** Beyond ops-overlap: confirm built connector-step inputs are
   parameterized to `vars.input.records[0].*`, not hardcoded one-off IOCs.
+
+## §Task2 findings — slim-DB + warmup path (verified 2026-06-07)
+
+Traced `scripts/build.sh --slim` (connector) ↔ `warmup()` op (operations.py
+~3882) ↔ source `store/fsr_reference.db` (63 MB full).
+
+**What works (path is sound for MVP demo flows):**
+- KEEP/hard-mined tables ship populated & substantively connector-agnostic:
+  step_types(43), step_handlers(44), step_examples(66), jinja_filter_usage(1690),
+  jinja_macros(172), jinja_globals(15), jinja_tests(39), jinja_context_vars(1).
+- `warmup()` repopulates 4 WARM tables live from the operator's OWN SOAR
+  (`/api/integration/connectors/` + bulk `connector_details`): connectors,
+  operations, operation_params, op_safety. Idempotent, lifecycle-triggered,
+  live-proven. `_warmup_needed` gates on empty `connectors`.
+
+**Caveat 1 — 6 WARM tables truncated by --slim but NEVER re-warmed.**
+slim DELETEs 10 tables; warmup only writes 4. Orphaned (truncated, no warm path):
+picklists(710), modules(63), module_fields(1234), connector_icons(31),
+param_type_probes(2216), operation_examples(1172). Docstring labels these
+"Deferred — not needed for the contract's demo flows" (record-step grounding).
+Impact: a fresh operator building **record-creation / module-grounded** playbooks
+gets empty module/picklist grounding until/unless these are warmed too.
+→ RESOLVED (user: extend warmup). `warmup()` now also fills modules,
+  module_fields, picklists from the operator's own SOAR via the SAME endpoints
+  as the offline miner (`/api/3/staging_model_metadatas` +
+  `/api/3/picklist_names`, both `$relationships=true`). New helper
+  `_warmup_modules_picklists()`; `_warmup_needed()` now also fires when the
+  `modules` table is empty so upgrades auto-fill. Counts added to the warmup
+  envelope. 3 new tests in test_warmup_hooks.py. connector commit `095b44c`.
+  Still deferred (out of MVP scope, no warm path): connector_icons,
+  param_type_probes, operation_examples.
+
+**Caveat 2 — provenance leak in shipped KEEP tables.**
+`jinja_filter_usage.from_playbook` ships 362 human-readable playbook names from
+the mining corpus (mostly stock Fortinet content e.g. "Enrich Indicators", but
+some custom: "netshot domain - link profiles", "Use Case 2: Investigate Malware
+Alert"). `step_examples.from_playbook` is opaque `step:<uuid>` (no leak).
+Not sensitive (no creds/data), but ships dev-env playbook NAMES.
+→ RESOLVED (user: accept). Names are reference provenance, not runtime-matched;
+  mostly stock Fortinet content; no creds/sensitive data. Left as-is.
 
 ## Rename — FSRPlaybookYaml → fsr-playbook-framework
 
