@@ -26,7 +26,7 @@
 | 1 | Pin a fast offline B4 build-fidelity golden | ✅ done — `b427373` |
 | 2 | Verify slim-DB + fill-from-your-own-SOAR path is complete | ✅ done — caveat 1 FIXED (warmup now fills modules/fields/picklists), caveat 2 ACCEPTED. See §Task2 |
 | 3 | De-hardcode widget-fixtures path in build.sh | ✅ done — connector `1a73c9f` |
-| 4 | Unified cross-repo "work on the AI chat" runbook | ⬜ pending |
+| 4 | Unified cross-repo "work on the AI chat" runbook | ✅ done — `docs/CHAT_DEV_RUNBOOK.md` |
 | 5 | `.env.example` for both repos | ✅ done — `dd7c439` + connector `5a68b6f` |
 | 6 | Clean up scratch/diagnostic files (needs Dylan's OK before deleting) | ⬜ pending |
 | 7 | Verify a clean-clone bootstrap reaches green unattended | ⬜ pending |
