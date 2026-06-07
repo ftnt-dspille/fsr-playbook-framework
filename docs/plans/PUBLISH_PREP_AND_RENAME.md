@@ -29,7 +29,7 @@
 | 4 | Unified cross-repo "work on the AI chat" runbook | ✅ done — `docs/CHAT_DEV_RUNBOOK.md` |
 | 5 | `.env.example` for both repos | ✅ done — `dd7c439` + connector `5a68b6f` |
 | 6 | Clean up scratch/diagnostic files (needs Dylan's OK before deleting) | ⬜ pending |
-| 7 | Verify a clean-clone bootstrap reaches green unattended | ⬜ pending |
+| 7 | Verify a clean-clone bootstrap reaches green unattended | ✅ done — verified 2026-06-07, see §Task7 |
 | 8 | Connector release hygiene (README, release_notes, version) | ⬜ pending |
 | 9 | Close B4 sub-item: parameterized-to-trigger-record check | ⬜ pending |
 | 10 | Rename FSRPlaybookYaml → fsr-playbook-framework | 🔧 in progress — see §Rename |
@@ -87,6 +87,22 @@ Alert"). `step_examples.from_playbook` is opaque `step:<uuid>` (no leak).
 Not sensitive (no creds/data), but ships dev-env playbook NAMES.
 → RESOLVED (user: accept). Names are reference provenance, not runtime-matched;
   mostly stock Fortinet content; no creds/sensitive data. Left as-is.
+
+## §Task7 — clean-clone bootstrap (verified 2026-06-07)
+
+Cloned the branch into `/tmp` and ran `scripts/bootstrap.sh` fully unattended:
+```sh
+NONINTERACTIVE=1 \
+PYFSR_REPO=/Users/dylanspille/PycharmProjects/pyfsr \
+FSR_DB_SRC=<…>/store/fsr_reference.db \
+bash scripts/bootstrap.sh
+```
+Result: all 6 steps green → **339 fsr_core tests passed**, "BOOTSTRAP COMPLETE".
+Unattended path needs the 3 env vars above (uv auto-resolves toolchain;
+`make sync` clones pyfsr from PYFSR_REPO; FSR_DB_SRC seeds the gitignored 63 MB
+reference DB — **required for green**, without it step 6 reds). `.env` is
+auto-created from `.env.example` under NONINTERACTIVE but is only needed for
+live work. Temp clone removed after.
 
 ## Rename — FSRPlaybookYaml → fsr-playbook-framework
 
