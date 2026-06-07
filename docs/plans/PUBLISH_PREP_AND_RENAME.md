@@ -8,14 +8,18 @@
 <!-- ───────────────────────── RESUME HERE ───────────────────────── -->
 ## ▶ Resume here
 
-- **Last updated:** 2026-06-07 (session after the B4 grounding fix + rename staging)
+- **Last updated:** 2026-06-07 (session closed out tasks #2, #4, #6, #7, #8, #9)
 - **Branch:** `chore/b4-golden-and-publish-prep` (framework); connector → its `main`.
+- **STATUS: only task #10 (rename) remains.** All other ledger items are ✅.
 - **NEXT ACTION:** run the rename cutover — `bash finalize-rename.sh` (repo root,
   untracked) **after closing this session**, then restart Claude in
   `…/PycharmProjects/fsr-playbook-framework` and tell it to read this file.
-  After the move, mark task #10 done and pick up task #2.
+  After the move, mark task #10 done — the publish ledger is then complete.
 - **If finalize hasn't run yet:** the dir is still `FSRPlaybookYaml`; nothing
   physical changed (venv + memory intact). See §Rename.
+- **Deploy reminder:** the warmup change (task #2) is committed but NOT deployed;
+  it ships as connector **0.3.127** (notes pre-staged) on the next
+  `scripts/deploy.sh` — a live-box action, do when ready.
 - **Mirror in auto-memory:** `[[publish_prep_and_rename]]` (pointer in MEMORY.md).
 <!-- ──────────────────────────────────────────────────────────────── -->
 
@@ -31,7 +35,7 @@
 | 6 | Clean up scratch/diagnostic files | ✅ done — user chose KEEP+gitignore (not delete). `_[a-z]*.py` patterns added both repos; connector's 8 were tracked → `git rm --cached` (kept on disk) |
 | 7 | Verify a clean-clone bootstrap reaches green unattended | ✅ done — verified 2026-06-07, see §Task7 |
 | 8 | Connector release hygiene (README, release_notes, version) | ✅ done — see §Task8 (metadata decision deferred) |
-| 9 | Close B4 sub-item: parameterized-to-trigger-record check | ⬜ pending |
+| 9 | Close B4 sub-item: parameterized-to-trigger-record check | ✅ done — already impl + test-pinned, see §Task9 |
 | 10 | Rename FSRPlaybookYaml → fsr-playbook-framework | 🔧 in progress — see §Rename |
 
 Suggested order for the rest: **10 (finish) → 2 → 4 → 7 → 6 → 8 → 9**.
@@ -121,6 +125,26 @@ the **Fortinet Connector Store**, info.json needs: a real `publisher` (currently
 "Internal"), a `help_online` URL (currently null), and `cs_approved` true — the
 last is a Fortinet review gate, NOT settable by us. `category` is "utilities".
 For an internal-only distribution the current metadata is fine as-is.
+
+## §Task9 — IOC parameterization (verified 2026-06-07)
+
+Confirmed the trace→YAML build parameterizes one-off triage IOCs to the trigger
+record instead of baking literals. Mechanism lives in
+`fsr_core/compiler/skill_compiler.py` (the gap-param parameterizer ~L258):
+value-matches a literal against the trigger record's fields, stages it on a
+synthetic `Set Inputs` (set_variable) step as `{{ vars.input.records[0].<field>
+}}`, and rewrites the consuming connector step to `{{ vars.steps.Set_Inputs.<var>
+}}`. Handles embedded spans in query strings too.
+
+Test-pinned in `fsr_core/tests/test_build_from_trace.py`:
+- positive: IOC `102.220.160.21` (= record `sourceIp`) → Set Inputs
+  `{{ vars.input.records[0].sourceIp }}`, step consumes
+  `{{ vars.steps.Set_Inputs.ip }}`, and `"102.220.160.21" not in yaml`
+  (NO hardcoded IOC anywhere).
+- negative guard: no module → records[0] wouldn't resolve, so IOC stays literal
+  and no Set Inputs is injected (avoids a dangling reference).
+Caveat (by design): parameterization requires a module-bound trigger
+(record_fields + module). 55 related tests green.
 
 ## Rename — FSRPlaybookYaml → fsr-playbook-framework
 
