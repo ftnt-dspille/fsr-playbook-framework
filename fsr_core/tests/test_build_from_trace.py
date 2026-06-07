@@ -56,6 +56,23 @@ def test_tool_is_build_only_not_in_triage_slice():
     assert "build_playbook_from_trace" not in triage_names
 
 
+def test_tool_is_registered_and_advertised_for_build():
+    """The trace compiler must be in the dispatch registry, or it's never
+    advertised to the model and `_guarded_dispatch` rejects it as
+    intent-disallowed even under build — the agent then silently hand-authors
+    (losing trace grounding). Regression for the SAFE_TOOLS omission."""
+    from fsr_core.llm.tools import REGISTRY, anthropic_tools, dispatch
+    assert "build_playbook_from_trace" in REGISTRY
+    advertised = {t["name"] for t in anthropic_tools()}
+    assert "build_playbook_from_trace" in advertised
+    # Callable with no args (uses the active trace); no trace → graceful
+    # empty_trace, NOT an intent-rejection or a crash.
+    from fsr_core.agent import skill_trace
+    skill_trace.clear_active_trace()
+    out = dispatch("build_playbook_from_trace", {})
+    assert out["ok"] is False and out["code"] == "empty_trace"
+
+
 def test_recorded_config_is_emitted_on_connector_step():
     """A config id resolved by run_op (recorded on the trace) must surface as
     the connector step's `arguments.config`, so an agent-bound op runs against

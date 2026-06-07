@@ -51,6 +51,12 @@ SAFE_TOOLS: list[str] = [
     "validate_yaml",
     "compile_yaml",
     "analyze_playbook",
+    # Trace compiler (SKILL_BASED_PLAYBOOK §3–5) — build a grounded playbook
+    # from the session's recorded action trace instead of hand-authoring. The
+    # build prompt mandates calling this FIRST; without it in the registry the
+    # tool is never advertised/dispatchable and the agent silently falls back
+    # to hand-authoring (losing trace grounding + staged-action coverage).
+    "build_playbook_from_trace",
     # "find_step_recipe",  # hidden — recipes corpus not populated yet; revisit later
     # Widget card emitters — drive the chat UI's awaiting_* halts.
     "emit_choice_card",
@@ -119,6 +125,9 @@ TOOL_TIERS: dict[str, int] = {
     "validate_yaml": 0,
     "compile_yaml": 0,
     "analyze_playbook": 0,
+    # Local compile from the recorded trace (offline by default; the push is a
+    # separate, tier-gated tool). Pure authoring → tier 0.
+    "build_playbook_from_trace": 0,
     # "find_step_recipe": 0,  # hidden — see SAFE_TOOLS
     "emit_choice_card": 0,
     "emit_action_card": 0,
