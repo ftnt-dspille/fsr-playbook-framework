@@ -30,7 +30,7 @@
 | 5 | `.env.example` for both repos | ✅ done — `dd7c439` + connector `5a68b6f` |
 | 6 | Clean up scratch/diagnostic files | ✅ done — user chose KEEP+gitignore (not delete). `_[a-z]*.py` patterns added both repos; connector's 8 were tracked → `git rm --cached` (kept on disk) |
 | 7 | Verify a clean-clone bootstrap reaches green unattended | ✅ done — verified 2026-06-07, see §Task7 |
-| 8 | Connector release hygiene (README, release_notes, version) | ⬜ pending |
+| 8 | Connector release hygiene (README, release_notes, version) | ✅ done — see §Task8 (metadata decision deferred) |
 | 9 | Close B4 sub-item: parameterized-to-trigger-record check | ⬜ pending |
 | 10 | Rename FSRPlaybookYaml → fsr-playbook-framework | 🔧 in progress — see §Rename |
 
@@ -103,6 +103,24 @@ Unattended path needs the 3 env vars above (uv auto-resolves toolchain;
 reference DB — **required for green**, without it step 6 reds). `.env` is
 auto-created from `.env.example` under NONINTERACTIVE but is only needed for
 live work. Temp clone removed after.
+
+## §Task8 — connector release hygiene (2026-06-07)
+
+- **README** (connector `README.md`): fixed stale "Status — 0.1.0" → an
+  accurate "Operations" section listing all 20 ops; added the `--slim` build
+  path (default distribution is <1 M, not the old "~14M"/"~63M" full DB).
+- **release_notes.md** (user: fill current only): wrote real notes for 0.3.126
+  (grounding 1.0) and pre-staged a 0.3.127 entry for the warmup change so the
+  next `deploy.sh --bump patch` lands on 0.3.127 without re-stubbing. The 60+
+  older `_TODO` entries left as historical churn per the decision.
+- **version**: shipped is 0.3.126 (info.json); the warmup change deploys as
+  0.3.127. Not deployed this session — deploy is a live-box action.
+
+**Publish-metadata (DEFERRED — user "not sure yet").** If/when submitting to
+the **Fortinet Connector Store**, info.json needs: a real `publisher` (currently
+"Internal"), a `help_online` URL (currently null), and `cs_approved` true — the
+last is a Fortinet review gate, NOT settable by us. `category` is "utilities".
+For an internal-only distribution the current metadata is fine as-is.
 
 ## Rename — FSRPlaybookYaml → fsr-playbook-framework
 
