@@ -161,7 +161,7 @@ severity/verdict correctness, low-signal handling (don't over-escalate a benign
 alert), and scenario classification accuracy. New gate: `triage_assessment` against
 labeled scenarios in `triage_scenarios.py`.
 
-### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟢 LIVE CHAIN PROVEN (0.3.123, 2026-06-06) — gate fires, grounding 1.0; action_coverage fix IMPLEMENTED+offline-proven (staged action_cards now recorded into trace), pending live re-drive
+### B4 · Triage → Build fidelity  ·  CRITICAL  ·  🟢 action_coverage 1.0 LIVE-PROVEN (0.3.125, 2026-06-06) — staged containment now replayed into the trace-built playbook; NEW open: grounding 0.83 (named SIEM/FortiGuard ops fan out to execute_api_request in the trace)
 Levers: `system_prompt_build.md` *Triage → build handoff* + *Canonical skeleton*.
 The built playbook must actually **automate what was investigated** — same
 ops, parameterized to the trigger record, compiling + runnable. Reuse build tasks
@@ -251,10 +251,40 @@ option (i): record staged action_cards into the session trace.**
 - fsr_core is a **symlink** from the connector → no manual vendor; `deploy.sh` rsyncs
   it into the install package.
 
-**Next:** bump + `deploy.sh` → re-drive the live triage→build chain (real C2 alert,
-widget-style `messages[]` replay) → expect `action_coverage 1.0` + `build_fidelity`
-PASS → pin THAT chain as a golden. Plus the still-open parameterized-to-trigger-record
-check beyond ops-overlap.
+**LIVE-PROVEN on 0.3.125 (2026-06-06).** Re-drove the chain (real C2 alert
+`54f25f1f…`, `scripts/prompt_loop.py --file _b4_chain.json`, turn 1 triage → turn 2
+build). **Two findings:**
+
+1. **A second, latent blocker was the actual cause — `build_playbook_from_trace` was
+   never registered.** It sat in the connector's `_BUILD_ONLY_TOOLS` but was **missing
+   from `SAFE_TOOLS`**, so it was never in the dispatch registry, never advertised, and
+   the provider's intent-slice backstop rejected it (*"intent does not permit it"*) even
+   under build intent. The agent ALWAYS hand-authored instead. The earlier "grounding
+   1.0 / trace-compiler-first" claim was wrong — the transcripts show the tool rejected,
+   then a hand-authored playbook. Fix: added it to `SAFE_TOOLS` (tier 0) + regression
+   test (`225d197`). Now the agent calls it first and it succeeds.
+
+2. **`action_coverage 1.00` — CLOSED & live-proven.** With (1) fixed + the staged-action
+   trace recording (`6d316f4`), the trace-built playbook now contains the staged
+   `fortigate-firewall.block_ip_new` step (`Block Ip New`). `score_build_fidelity` on the
+   live transcript: `action_coverage 1.0`, `missing_actions []`. Export:
+   `ConnectorsV2/fsr-playbook-builder/exports/loop-b4_triage_build-loop-98594b07-1780797507.json`.
+
+**NEW open gap — `grounding 0.83` (fails the 1.0 gate).** The built playbook carries
+6 `fortinet-fortisiem.execute_api_request` steps that aren't in the named-op
+investigation set `{virustotal.query_ip, ip-quality-score.get_ip_reputation,
+fortinet-fortiguard-ioc.ioc_search, fortinet-fortisiem.get_ip_context}`. Turn 1 made
+exactly those 4 NAMED run_op calls — so a named op (FortiSIEM `get_ip_context`,
+FortiGuard `ioc_search`) fans out to multiple raw `execute_api_request` HTTP calls that
+`record_run_op` captures as generic `execute_api_request` SkillCalls. **Pre-existing
+trace-recording fidelity issue, newly VISIBLE now that the compiler actually runs.**
+Options: (i) don't record `execute_api_request` sub-calls when they're the
+implementation of a named op already on the trace; or (ii) collapse/relabel them to the
+parent named op; or (iii) count `execute_api_request` as grounded when its connector
+matches an investigated op. **Next:** triage which layer emits the
+`execute_api_request` SkillCalls → fix → re-drive → expect `grounding 1.0` + full
+`build_fidelity` PASS → pin as a golden. Plus the still-open
+parameterized-to-trigger-record check beyond ops-overlap.
 
 ### B5 · End-to-end chain  ·  HIGH
 Score the whole investigate→hunt→triage→build chain as ONE run (the `build_run_proof`
