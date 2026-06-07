@@ -1,11 +1,23 @@
-# Publish-prep + rename — resume state
+# Publish-prep + rename — LIVING TRACKER
 
-Working branch: **`chore/b4-golden-and-publish-prep`** (framework).
-Connector changes land on the connector repo's `main`.
+> **This is THE living doc for this workstream.** It is kept current so context
+> can be `/clear`ed frequently. To resume after a clear: read this top block,
+> then the task table. Convention: update the "Resume here" block + the task
+> table at the end of every work chunk, BEFORE clearing.
 
-This is the session resume point for the "solid publish" task list and the
-`FSRPlaybookYaml` → `fsr-playbook-framework` rename. If we restarted mid-rename,
-read **§Rename** first.
+<!-- ───────────────────────── RESUME HERE ───────────────────────── -->
+## ▶ Resume here
+
+- **Last updated:** 2026-06-07 (session after the B4 grounding fix + rename staging)
+- **Branch:** `chore/b4-golden-and-publish-prep` (framework); connector → its `main`.
+- **NEXT ACTION:** run the rename cutover — `bash finalize-rename.sh` (repo root,
+  untracked) **after closing this session**, then restart Claude in
+  `…/PycharmProjects/fsr-playbook-framework` and tell it to read this file.
+  After the move, mark task #10 done and pick up task #2.
+- **If finalize hasn't run yet:** the dir is still `FSRPlaybookYaml`; nothing
+  physical changed (venv + memory intact). See §Rename.
+- **Mirror in auto-memory:** `[[publish_prep_and_rename]]` (pointer in MEMORY.md).
+<!-- ──────────────────────────────────────────────────────────────── -->
 
 ## Task list (the publish ledger)
 

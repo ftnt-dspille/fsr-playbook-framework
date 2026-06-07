@@ -2,6 +2,10 @@
 
 **Last touched**: 2026-05-30. Live FSR target: `https://10.99.249.205` (label `dev`).
 
+> ⚡ **ACTIVE workstream (resume here first):** publish-prep + the
+> `FSRPlaybookYaml`→`fsr-playbook-framework` rename — living tracker at
+> **`docs/plans/PUBLISH_PREP_AND_RENAME.md`** (kept current for frequent `/clear`).
+
 This file is the master backlog + resume state. Deep multi-phase plans
 live under `docs/plans/`; frozen research/audit snapshots under
 `docs/research/`; superseded plans under `docs/archive/`.
