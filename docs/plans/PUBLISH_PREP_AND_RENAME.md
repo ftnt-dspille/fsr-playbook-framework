@@ -8,18 +8,49 @@
 <!-- ───────────────────────── RESUME HERE ───────────────────────── -->
 ## ▶ Resume here
 
-- **Last updated:** 2026-06-07 (rename cutover RAN — ledger 10/10 ✅ COMPLETE)
-- **Branch:** `chore/b4-golden-and-publish-prep` (framework); connector →
-  `feat/action-based-streaming` (its active branch; `master` is STALE at 0.3.56).
-- **STATUS: PUBLISH LEDGER COMPLETE (10/10 ✅).** Rename cutover ran successfully:
-  dir moved → `fsr-playbook-framework`, `.venv` rebuilt, connector `fsr_core`
-  symlink retargeted, auto-memory migrated, `make verify` green (339 + 162).
-  Cutover required fixing a pyfsr blocker: junk tags `v0.2.4-tag`/`v0.2.2-fix`
-  deleted, clean `v0.2.4` created at the same commit (hatch-vcs couldn't parse
-  the malformed `v0.2.4-tag` → `make sync` failed until fixed).
-- **Deploy reminder:** the warmup change (task #2) is committed but NOT deployed;
-  it ships as connector **0.3.127** (notes pre-staged) on the next
-  `scripts/deploy.sh` — a live-box action, do when ready.
+- **Last updated:** 2026-06-07 (PM — publish executed: 0.3.127 deployed, repos
+  created on Gitea, connector renamed, framework merged to `main`).
+- **STATUS: PUBLISH LEDGER COMPLETE (10/10 ✅) + published to internal remotes.**
+  Original cutover (AM): dir → `fsr-playbook-framework`, `.venv` rebuilt, connector
+  `fsr_core` symlink retargeted, auto-memory migrated, `make verify` green
+  (339 + 162). pyfsr blocker fixed (junk tags `v0.2.4-tag`/`v0.2.2-fix` deleted,
+  clean `v0.2.4` recreated so hatch-vcs / `make sync` works).
+
+### Done this session (PM)
+- **Connector 0.3.127 DEPLOYED & live-verified** — warmup now fills grounding
+  tables (modules 43 / module_fields 1036 / picklists 690 + the 4 WARM tables).
+  All 9 workers on 0.3.127. (Was task #2's pending "deploy when ready".)
+- **Framework merged to `main`** — fast-forward of `chore/b4-golden-and-publish-prep`
+  (15 commits, all publish-prep/rename + 1 golden test). Pushed to BOTH remotes.
+- **Repo homes (all 3 projects):**
+  - **framework** → GitLab `origin` (`svl-devops-gitlab01…/dspille/fsr-playbook-framework`,
+    renamed today from `agentic-playbook-creation`) **+** Gitea `gitea`
+    (`git.fndn.fortinet.net/dspille/fsr-playbook-framework`, private, default `main`).
+  - **connector** → Gitea `git.fndn.fortinet.net/dspille/connector-fsr-soc-assistant`
+    (private). NO GitLab remote. Local checkout dir still `ConnectorsV2/fsr-playbook-builder`.
+  - **widget** (`WebstormProjects/fsr_all_widgets`) → Gitea repo NOT created yet.
+- **Connector RENAMED** `fsr-playbook-builder` → `connector-fsr-soc-assistant`
+  (info.json name + label "FSR SOC Assistant" + python module
+  `connector_fsr_soc_assistant` + package dir + scripts/tests/README/pyproject).
+  `make verify` green. On branch `chore/rename-to-connector-fsr-soc-assistant`
+  (pushed to Gitea), NOT yet merged to `feat/action-based-streaming`, NOT deployed.
+
+### ⏳ Remaining follow-ups (non-ledger)
+1. **Connector live cutover** (user chose deploy-new + delete-old): deploy
+   `connector-fsr-soc-assistant` 0.3.127 to the box, then delete the orphaned
+   `fsr-playbook-builder` 0.3.127. Merge the rename branch → `feat/action-based-streaming` first.
+2. **Widget Gitea repo** — create `widget-fsr-soc-assistant` (handoff steps in chat;
+   push-to-create is DISABLED → must create via API using `GITEA_TOKEN` in `.env`,
+   scopes `write:user`+`write:repository`). 3 uncommitted `scripts/` edits — don't commit WIP.
+3. **Auto-memory refresh** — `[[connector_state]]` still says 0.3.115 / old name;
+   update to 0.3.127 + `connector-fsr-soc-assistant` + the 3 repo homes.
+4. **GitHub (framework)** — NOT pushed. User intent: keep DBs local, drop Fortinet
+   infra refs, drop most docs. Scrub pass needed BEFORE any GitHub push
+   (bundled `.db`+`store/fsr_reference.json` are in git HISTORY → would need history
+   rewrite/fresh repo, not just a delete commit).
+5. **Store-publish metadata** deferred (publisher/help_online/cs_approved — only
+   for formal Fortinet store submission).
+
 - **Mirror in auto-memory:** `[[publish_prep_and_rename]]` (pointer in MEMORY.md).
 <!-- ──────────────────────────────────────────────────────────────── -->
 
@@ -38,9 +69,9 @@
 | 9 | Close B4 sub-item: parameterized-to-trigger-record check | ✅ done — already impl + test-pinned, see §Task9 |
 | 10 | Rename FSRPlaybookYaml → fsr-playbook-framework | ✅ done — cutover ran 2026-06-07, `make verify` green at new path. See §Rename |
 
-**ALL 10 LEDGER ITEMS COMPLETE.** Non-ledger follow-ups remain: deploy warmup
-as connector 0.3.127 (live-box action, notes pre-staged); store-publish metadata
-deferred (publisher/help_online/cs_approved — only for Fortinet store submission).
+**ALL 10 LEDGER ITEMS COMPLETE + PUBLISHED.** Connector 0.3.127 deployed,
+framework merged to `main` + pushed to GitLab+Gitea. Remaining follow-ups are
+listed in the "Remaining follow-ups" block under ▶ Resume here.
 
 ### Context for the pending tasks
 - **#2** Slim-DB design CONFIRMED real (not a 63MB-distribution cliff): connector
