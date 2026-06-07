@@ -9,7 +9,8 @@
 ## ▶ Resume here
 
 - **Last updated:** 2026-06-07 (session closed out tasks #2, #4, #6, #7, #8, #9)
-- **Branch:** `chore/b4-golden-and-publish-prep` (framework); connector → its `main`.
+- **Branch:** `chore/b4-golden-and-publish-prep` (framework); connector →
+  `feat/action-based-streaming` (its active branch; `master` is STALE at 0.3.56).
 - **STATUS: only task #10 (rename) remains.** All other ledger items are ✅.
 - **NEXT ACTION:** run the rename cutover — `bash finalize-rename.sh` (repo root,
   untracked) **after closing this session**, then restart Claude in
