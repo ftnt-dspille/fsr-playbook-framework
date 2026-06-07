@@ -97,7 +97,8 @@ CHAT_FAST_TESTS := \
 	python/tests/test_chat_review.py \
 	python/tests/test_golden_traces_pin.py \
 	python/tests/test_lever_coverage.py \
-	python/tests/test_build_fidelity.py
+	python/tests/test_build_fidelity.py \
+	python/tests/test_build_fidelity_golden.py
 
 chat-fast: ## fast OFFLINE chat structure/contract guards (no API; ~2s)
 	$(PY) -m pytest $(CHAT_FAST_TESTS) -q -p no:randomly
