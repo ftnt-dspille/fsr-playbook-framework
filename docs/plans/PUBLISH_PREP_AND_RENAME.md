@@ -8,16 +8,15 @@
 <!-- ───────────────────────── RESUME HERE ───────────────────────── -->
 ## ▶ Resume here
 
-- **Last updated:** 2026-06-07 (session closed out tasks #2, #4, #6, #7, #8, #9)
+- **Last updated:** 2026-06-07 (rename cutover RAN — ledger 10/10 ✅ COMPLETE)
 - **Branch:** `chore/b4-golden-and-publish-prep` (framework); connector →
   `feat/action-based-streaming` (its active branch; `master` is STALE at 0.3.56).
-- **STATUS: only task #10 (rename) remains.** All other ledger items are ✅.
-- **NEXT ACTION:** run the rename cutover — `bash finalize-rename.sh` (repo root,
-  untracked) **after closing this session**, then restart Claude in
-  `…/PycharmProjects/fsr-playbook-framework` and tell it to read this file.
-  After the move, mark task #10 done — the publish ledger is then complete.
-- **If finalize hasn't run yet:** the dir is still `FSRPlaybookYaml`; nothing
-  physical changed (venv + memory intact). See §Rename.
+- **STATUS: PUBLISH LEDGER COMPLETE (10/10 ✅).** Rename cutover ran successfully:
+  dir moved → `fsr-playbook-framework`, `.venv` rebuilt, connector `fsr_core`
+  symlink retargeted, auto-memory migrated, `make verify` green (339 + 162).
+  Cutover required fixing a pyfsr blocker: junk tags `v0.2.4-tag`/`v0.2.2-fix`
+  deleted, clean `v0.2.4` created at the same commit (hatch-vcs couldn't parse
+  the malformed `v0.2.4-tag` → `make sync` failed until fixed).
 - **Deploy reminder:** the warmup change (task #2) is committed but NOT deployed;
   it ships as connector **0.3.127** (notes pre-staged) on the next
   `scripts/deploy.sh` — a live-box action, do when ready.
@@ -37,9 +36,11 @@
 | 7 | Verify a clean-clone bootstrap reaches green unattended | ✅ done — verified 2026-06-07, see §Task7 |
 | 8 | Connector release hygiene (README, release_notes, version) | ✅ done — see §Task8 (metadata decision deferred) |
 | 9 | Close B4 sub-item: parameterized-to-trigger-record check | ✅ done — already impl + test-pinned, see §Task9 |
-| 10 | Rename FSRPlaybookYaml → fsr-playbook-framework | 🔧 in progress — see §Rename |
+| 10 | Rename FSRPlaybookYaml → fsr-playbook-framework | ✅ done — cutover ran 2026-06-07, `make verify` green at new path. See §Rename |
 
-Suggested order for the rest: **10 (finish) → 2 → 4 → 7 → 6 → 8 → 9**.
+**ALL 10 LEDGER ITEMS COMPLETE.** Non-ledger follow-ups remain: deploy warmup
+as connector 0.3.127 (live-box action, notes pre-staged); store-publish metadata
+deferred (publisher/help_online/cs_approved — only for Fortinet store submission).
 
 ### Context for the pending tasks
 - **#2** Slim-DB design CONFIRMED real (not a 63MB-distribution cliff): connector
@@ -166,27 +167,18 @@ unaffected — only the local dir name changes.
    23 framework + 19 connector files. `make chat-fast` green pre-move.
 2. ✅ Committed: framework **`a4391d4`**, connector **`994a614`**. (Refs now point
    at the new path, which won't exist until finalize runs — that's the cutover.)
-3. ⬜ **NEXT (run after closing this session):** `finalize-rename.sh` (untracked,
-   at repo root) does the physical move:
-   ```sh
-   cd /Users/dylanspille/PycharmProjects
-   mv FSRPlaybookYaml fsr-playbook-framework
-   cd fsr-playbook-framework
-   rm -rf .venv && make sync                 # rebuild venv at new path
-   # retarget connector's fsr_core symlink
-   ln -sfn /Users/dylanspille/PycharmProjects/fsr-playbook-framework/fsr_core \
-     /Users/dylanspille/PycharmProjects/ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/fsr_core
-   # migrate auto-memory dir
-   mv ~/.claude/projects/-Users-dylanspille-PycharmProjects-FSRPlaybookYaml \
-      ~/.claude/projects/-Users-dylanspille-PycharmProjects-fsr-playbook-framework
-   make verify                               # confirm green at new path
-   ```
-4. ⬜ Restart Claude Code in `/Users/dylanspille/PycharmProjects/fsr-playbook-framework`.
-5. ⬜ Post-restart: `make verify` green, connector `make verify` green, re-read
-   this doc, mark task #10 done, continue with #2.
+3. ✅ **DONE — `finalize-rename.sh` ran 2026-06-07.** Physical move completed.
+   The script aborted mid-`make sync` on a pyfsr build error (junk tag
+   `v0.2.4-tag` unparseable by hatch-vcs). Fixed in pyfsr: deleted junk tags
+   `v0.2.4-tag` + `v0.2.2-fix`, created clean `v0.2.4` at commit `2b3d372`;
+   `git describe` → `v0.2.4-2-gf5f1564`. Re-ran `make sync` (green), then the
+   remaining steps by hand: symlink retargeted, auto-memory migrated.
+   `finalize-rename.sh` deleted after use (spent).
+4. ✅ `make verify` green at new path: **339 fsr_core + 162 connector passed.**
+5. ⬜ Restart Claude Code in `/Users/dylanspille/PycharmProjects/fsr-playbook-framework`
+   (this session's cwd was recovered after the move; a restart picks up the
+   migrated auto-memory dir cleanly).
 
-### If restarting BEFORE finalize ran
-Nothing physical changed — dir is still `FSRPlaybookYaml`, venv intact, memory
-intact. The textual edits (if committed) reference the new name; just run the
-finalize script when ready. Check `git log` on `chore/b4-golden-and-publish-prep`
-for whether step 2 committed.
+### Done — cutover complete
+Dir is now `fsr-playbook-framework`, venv rebuilt, connector symlink retargeted,
+auto-memory migrated, both suites green. Publish ledger is 10/10.
