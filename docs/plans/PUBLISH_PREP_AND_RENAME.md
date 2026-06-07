@@ -32,7 +32,7 @@
 | 3 | De-hardcode widget-fixtures path in build.sh | ✅ done — connector `1a73c9f` |
 | 4 | Unified cross-repo "work on the AI chat" runbook | ✅ done — `docs/CHAT_DEV_RUNBOOK.md` |
 | 5 | `.env.example` for both repos | ✅ done — `dd7c439` + connector `5a68b6f` |
-| 6 | Clean up scratch/diagnostic files | ✅ done — user chose KEEP+gitignore (not delete). `_[a-z]*.py` patterns added both repos; connector's 8 were tracked → `git rm --cached` (kept on disk) |
+| 6 | Clean up scratch/diagnostic files | ✅ done — user chose KEEP+gitignore (not delete). `_[a-z]*.py` patterns added both repos (framework `cfee248`, connector `255badb`); files stay on disk, none committed |
 | 7 | Verify a clean-clone bootstrap reaches green unattended | ✅ done — verified 2026-06-07, see §Task7 |
 | 8 | Connector release hygiene (README, release_notes, version) | ✅ done — see §Task8 (metadata decision deferred) |
 | 9 | Close B4 sub-item: parameterized-to-trigger-record check | ✅ done — already impl + test-pinned, see §Task9 |
@@ -79,7 +79,7 @@ gets empty module/picklist grounding until/unless these are warmed too.
   `/api/3/picklist_names`, both `$relationships=true`). New helper
   `_warmup_modules_picklists()`; `_warmup_needed()` now also fires when the
   `modules` table is empty so upgrades auto-fill. Counts added to the warmup
-  envelope. 3 new tests in test_warmup_hooks.py. connector commit `095b44c`.
+  envelope. 3 new tests in test_warmup_hooks.py. connector commit `3927a0a`.
   Still deferred (out of MVP scope, no warm path): connector_icons,
   param_type_probes, operation_examples.
 
