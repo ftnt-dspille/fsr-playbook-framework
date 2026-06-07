@@ -28,7 +28,7 @@
 | 3 | De-hardcode widget-fixtures path in build.sh | ✅ done — connector `1a73c9f` |
 | 4 | Unified cross-repo "work on the AI chat" runbook | ✅ done — `docs/CHAT_DEV_RUNBOOK.md` |
 | 5 | `.env.example` for both repos | ✅ done — `dd7c439` + connector `5a68b6f` |
-| 6 | Clean up scratch/diagnostic files (needs Dylan's OK before deleting) | ⬜ pending |
+| 6 | Clean up scratch/diagnostic files | ✅ done — user chose KEEP+gitignore (not delete). `_[a-z]*.py` patterns added both repos; connector's 8 were tracked → `git rm --cached` (kept on disk) |
 | 7 | Verify a clean-clone bootstrap reaches green unattended | ✅ done — verified 2026-06-07, see §Task7 |
 | 8 | Connector release hygiene (README, release_notes, version) | ⬜ pending |
 | 9 | Close B4 sub-item: parameterized-to-trigger-record check | ⬜ pending |
