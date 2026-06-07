@@ -1,4 +1,4 @@
-"""List + load YAML examples from FSRPlaybookYaml/examples/."""
+"""List + load YAML examples from fsr-playbook-framework/examples/."""
 from __future__ import annotations
 
 from pathlib import Path

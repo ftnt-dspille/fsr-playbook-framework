@@ -42,7 +42,7 @@ Browser app (Mac-local for v1, hostable later) that:
 ## Repo layout
 
 ```
-FSRPlaybookYaml/
+fsr-playbook-framework/
   web/
     PLAN.md                       ← this doc
     README.md

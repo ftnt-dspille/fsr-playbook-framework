@@ -9,7 +9,7 @@ this probe builds.
 
 Sources walked:
   - Miscellaneous/fortisoar/SPs/playbooks/**/*.json   (SP bundles)
-  - FSRPlaybookYaml/store/incoming/*.json             (manual drops)
+  - fsr-playbook-framework/store/incoming/*.json             (manual drops)
 
 Live FSR ingestion is left as a follow-up — see TODO I12. The schema
 already accommodates it via `source='live_fsr'`.

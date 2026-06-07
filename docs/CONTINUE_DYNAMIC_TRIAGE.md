@@ -19,7 +19,7 @@ runs), and `get_record` truncated the embedded `associated_events` (the 6.8 GB
 exfil evidence) before the model saw it — so it narrated evidence it never read.
 
 ## Status: DONE (all tested, 154 fsr_core tests green)
-All in `FSRPlaybookYaml` (canonical fsr_core — NOT yet re-vendored to connector).
+All in `fsr-playbook-framework` (canonical fsr_core — NOT yet re-vendored to connector).
 
 | Layer | File | Tests |
 |---|---|---|
@@ -89,7 +89,7 @@ the verdict checklist.
 3. **#5 Validate**: investigation eval fixtures `python/evals/tasks/25–29_*`
    (required_facts/tool_budget) to measure variance reduction objectively, then
    2–3 live `demo_hunt` runs (C2 alert + one other seeded alert).
-4. **Re-vendor to connector** when ready: `cd FSRPlaybookYaml && scripts/build.sh`,
+4. **Re-vendor to connector** when ready: `cd fsr-playbook-framework && scripts/build.sh`,
    bump connector info.json + scripts/install_to_fsr.py. See memory
    `fsr_connector_vendoring`. Until then changes are live in `demo_hunt`
    (canonical fsr_core) but NOT on the box's connector.

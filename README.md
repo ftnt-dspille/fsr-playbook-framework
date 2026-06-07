@@ -1,4 +1,4 @@
-# FSRPlaybookYaml (`fsrpb`)
+# fsr-playbook-framework (`fsrpb`)
 
 YAML → FortiSOAR playbook JSON compiler, plus a SQLite reference store of
 every connector, operation, parameter, step type, module field, Jinja

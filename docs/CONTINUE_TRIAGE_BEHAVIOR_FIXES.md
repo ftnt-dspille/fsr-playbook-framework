@@ -4,7 +4,7 @@ Created 2026-06-02. Source evidence: widget export
 `fsr_all_widgets/widgets-src/fsrPlaybookBuilder/exports/fsrpb-chat-sess-kysr33eq-1780430936817.md`
 (session `sess-kysr33eq`, widget v1.1.2, connector 0.3.94, contract 2.8.0).
 
-All work is in **`FSRPlaybookYaml/fsr_core`** (canonical). The connector vendors a
+All work is in **`fsr-playbook-framework/fsr_core`** (canonical). The connector vendors a
 copy via `build.sh` — do NOT edit the connector copy; re-vendor at the end. Tests
 run via the `.venv` (`make tests` / `./.venv/bin/python -m pytest`), never system python.
 

@@ -9,7 +9,7 @@ durable assessment; this is the backlog.
 human-in-the-loop." Phases are ordered by `severity × value`. Effort: `small (1–3h)`,
 `medium (4–12h)`, `large (1–3d)`.
 
-**Where edits land:** all `fsr_core` changes go in **`FSRPlaybookYaml/fsr_core`** (canonical). The
+**Where edits land:** all `fsr_core` changes go in **`fsr-playbook-framework/fsr_core`** (canonical). The
 connector vendors it via `scripts/build.sh`; never edit the vendored copy under
 `ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/fsr_core`. After landing, re-vendor + bump
 `info.json` + `scripts/install_to_fsr.py`.

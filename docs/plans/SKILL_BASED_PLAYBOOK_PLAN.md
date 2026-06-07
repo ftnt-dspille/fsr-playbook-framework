@@ -27,7 +27,7 @@ later evolution, explicitly out of scope here.
 **Bar:** "a saved playbook from a clean triage session compiles, resolves every jinja path, and runs
 without a wiring fix." Effort: `small (1–3h)`, `medium (4–12h)`, `large (1–3d)`.
 
-**Where edits land:** all `fsr_core` changes go in **`FSRPlaybookYaml/fsr_core`** (canonical); the
+**Where edits land:** all `fsr_core` changes go in **`fsr-playbook-framework/fsr_core`** (canonical); the
 connector vendors it via `scripts/build.sh` (never edit the vendored copy). After landing, re-vendor
 + bump `info.json` + `scripts/install_to_fsr.py`. No widget or contract change is required — the
 output is still FSRPB YAML pushed via the existing `chat_resume accept` path (contract §4, §5
@@ -38,10 +38,10 @@ output is still FSRPB YAML pushed via the existing `chat_resume accept` path (co
 ## SESSION RESUME (2026-06-01) — read this first after a clear
 
 **Status: Phases 1–5 shipped & green** (`make verify` = 99 fsr_core + 126 connector, ruff clean).
-Branch `feat/skill-based-playbook` in FSRPlaybookYaml; connector changes on
+Branch `feat/skill-based-playbook` in fsr-playbook-framework; connector changes on
 `feat/action-based-streaming` (commit `62762cf`). Neither merged to main yet.
 
-**Commits (FSRPlaybookYaml):** `89dda67` P1 · `31c3712` P2 · `b108ae8` P3 · `7e690d0` P4 ·
+**Commits (fsr-playbook-framework):** `89dda67` P1 · `31c3712` P2 · `b108ae8` P3 · `7e690d0` P4 ·
 `352b2fb` P5 tool+eval · `79c590a` P5 active-trace+prompt · `fdd3b3f` plan update.
 
 **Files that exist now (all in `fsr_core`, source — connector symlinks it, no re-vendor needed in dev):**

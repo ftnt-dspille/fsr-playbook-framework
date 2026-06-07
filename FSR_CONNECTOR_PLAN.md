@@ -1,6 +1,6 @@
 # FSR Playbook Builder — FortiSOAR Connector Plan
 
-Goal: turn the chat-driven playbook authoring side of `FSRPlaybookYaml` into a FortiSOAR connector (`.so`) that backs a chat widget. Structure the code so updates to the source app flow into the connector through a git submodule.
+Goal: turn the chat-driven playbook authoring side of `fsr-playbook-framework` into a FortiSOAR connector (`.so`) that backs a chat widget. Structure the code so updates to the source app flow into the connector through a git submodule.
 
 Scope here: **connector + portable core only.** Widget work is tracked separately in `fortisoar-widget-harness/FSR_PLAYBOOK_BUILDER_WIDGET_PLAN.md`.
 
@@ -19,7 +19,7 @@ fsr-core/                       <-- NEW standalone repo (the submodule)
   pyproject.toml
   tests/
 
-FSRPlaybookYaml/                <-- existing repo, refactored
+fsr-playbook-framework/                <-- existing repo, refactored
   fsr-core/                     <-- git submodule -> fsr-core repo
   web/backend/                  <-- now imports from fsr_core.*
   web/frontend/                 <-- unchanged
@@ -40,7 +40,7 @@ Both consumers pin `fsr-core` by commit. Updating the connector = `git submodule
 
 ---
 
-## Phase 1 — Extract `fsr-core` from `FSRPlaybookYaml`
+## Phase 1 — Extract `fsr-core` from `fsr-playbook-framework`
 
 Goal: a portable Python package with **no FastAPI, no uvicorn, no SSE, no web-specific globals**. Async is fine.
 
@@ -69,7 +69,7 @@ Goal: a portable Python package with **no FastAPI, no uvicorn, no SSE, no web-sp
 
 ---
 
-## Phase 2 — Refactor `FSRPlaybookYaml` to consume `fsr-core` as submodule
+## Phase 2 — Refactor `fsr-playbook-framework` to consume `fsr-core` as submodule
 
 1. `git submodule add <fsr-core-url> fsr-core` at repo root.
 2. Add `fsr-core/` to `pyproject.toml` as a path dependency (`fsr_core = { path = "./fsr-core", develop = true }`).
@@ -125,7 +125,7 @@ Goal: a portable Python package with **no FastAPI, no uvicorn, no SSE, no web-sp
 The day-to-day "I improved my original app, sync to the connector" loop:
 
 ```bash
-# In FSRPlaybookYaml — make changes inside fsr-core/ submodule
+# In fsr-playbook-framework — make changes inside fsr-core/ submodule
 cd fsr-core
 git checkout -b feat/new-tool
 # ... edit ...

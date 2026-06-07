@@ -121,7 +121,7 @@ So if `_resolve_config_id` returned "" for fortigate, ONE of these is true —
 4. `_resolve_config_id` matches by `connector` name but the per-agent row uses a
    different name/key.
 
-### Commands to run (laptop → box, creds from FSRPlaybookYaml/.env)
+### Commands to run (laptop → box, creds from fsr-playbook-framework/.env)
 ```python
 # scripts/fsr_live.py LiveFSR gives .base/.headers/.verify
 # A) list agents

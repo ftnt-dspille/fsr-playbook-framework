@@ -1,4 +1,4 @@
-# FSRPlaybookYaml — TODO / resume state
+# fsr-playbook-framework — TODO / resume state
 
 **Last touched**: 2026-05-30. Live FSR target: `https://10.99.249.205` (label `dev`).
 
@@ -97,7 +97,7 @@ Outstanding:
   in `ConnectorsV2/fsr-playbook-builder`: `operations.py` (conflict-safe push +
   `get_session_trace` + `_import_fsr_core()` fix), `info.json`, `scripts/live_integration.py`,
   `scripts/fsr_live.py`, `release_notes.md`. ⚠️ that tree has UNRELATED pre-existing dirty
-  files — commit only mine, don't bundle. (FSRPlaybookYaml side already committed `078d9c4`.)
+  files — commit only mine, don't bundle. (fsr-playbook-framework side already committed `078d9c4`.)
 - [x] **FortiCloud connector RESTORED** (2026-06-01, mfz9…forticloud.com). Deployed
   **0.3.79** (id=180, active), recreated `fsrpb-live` config (config_count=1); live
   `health_check` returns `ok:true`, `anthropic_reachable:true`, fsr_core importable.

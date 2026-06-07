@@ -1,6 +1,6 @@
 """Push + run + env endpoints.
 
-Subprocesses `python -m cli` from the existing FSRPlaybookYaml repo —
+Subprocesses `python -m cli` from the existing fsr-playbook-framework repo —
 reuses all the tested push/run logic (idempotent push, --follow polling,
 env rebuild). Streams live output through SSE for the run endpoint.
 """

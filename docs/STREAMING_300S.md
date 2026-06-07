@@ -4,7 +4,7 @@
 > All `operations.py:NNN` refs are the **connector** copy
 > (`ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/operations.py`);
 > `_loop_helpers.py` / `anthropic_provider.py` are **canonical** fsr_core
-> (`FSRPlaybookYaml/fsr_core/llm/`). Edit fsr_core, never the vendored copy.
+> (`fsr-playbook-framework/fsr_core/llm/`). Edit fsr_core, never the vendored copy.
 
 ## Symptom
 A long agentic **build** run (chat-driven playbook authoring) dies around the
@@ -80,7 +80,7 @@ run in the `nginx` `cyops-workflow` celery worker. Therefore:
   (`storage.py:370-414`).
 
 ## Repos / versions
-- **Canonical source:** `FSRPlaybookYaml/fsr_core` (edit here) + connector
+- **Canonical source:** `fsr-playbook-framework/fsr_core` (edit here) + connector
   `ConnectorsV2/fsr-playbook-builder/`. The connector vendors a *copy* of
   fsr_core (rebuilt by `scripts/build.sh`) — do not edit the copy.
 - **Installed on box:** `/opt/cyops/configs/integrations/connectors/fsr-playbook-builder_0_3_81/`

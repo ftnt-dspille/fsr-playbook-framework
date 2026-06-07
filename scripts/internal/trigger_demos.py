@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess, sys, time, json
 from pathlib import Path
 
-sys.path.insert(0, str(Path("/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/python")))
+sys.path.insert(0, str(Path("/Users/dylanspille/PycharmProjects/fsr-playbook-framework/python")))
 from probes import _env  # type: ignore
 
 ALERT_UUID = "db7afbf7-d8f4-4f15-a8d1-a16e1b9beb50"

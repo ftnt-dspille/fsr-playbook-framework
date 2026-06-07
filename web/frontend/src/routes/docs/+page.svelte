@@ -282,7 +282,7 @@
         <section id="env">
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Configuration</h2>
           <p class="mb-3">LLM provider credentials are managed in the Settings tab. FSR credentials live in <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">.env</code>:</p>
-          <pre class="mt-3 overflow-auto rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] p-4 font-mono text-xs leading-tight text-[var(--text-muted)]">{`# FSRPlaybookYaml/.env
+          <pre class="mt-3 overflow-auto rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] p-4 font-mono text-xs leading-tight text-[var(--text-muted)]">{`# fsr-playbook-framework/.env
 FSR_BASE_URL=https://10.99.249.205
 FSR_USERNAME=csadmin
 FSR_PASSWORD=fortinet

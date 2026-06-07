@@ -11,10 +11,10 @@ from __future__ import annotations
 import subprocess, sys, os
 from pathlib import Path
 
-sys.path.insert(0, str(Path("/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/python")))
+sys.path.insert(0, str(Path("/Users/dylanspille/PycharmProjects/fsr-playbook-framework/python")))
 from probes import _env  # type: ignore
 
-EXAMPLES = Path("/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/examples")
+EXAMPLES = Path("/Users/dylanspille/PycharmProjects/fsr-playbook-framework/examples")
 
 DEMOS = [
     ("demo_alert_action.yaml",          "FSRPB Demo Alert Action"),

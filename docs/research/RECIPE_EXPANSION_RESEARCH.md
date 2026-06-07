@@ -1,4 +1,4 @@
-# FSRPlaybookYaml Recipe Expansion Research
+# fsr-playbook-framework Recipe Expansion Research
 
 **Date**: 2026-05-06  
 **Corpus**: 1,664 live playbooks, 43 step types, 714 connectors  
@@ -394,12 +394,12 @@ def get_ruleset_constraints(name: str) -> dict:
 ## References
 
 **Files**:
-- Generator: `/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/python/recipes/generator.py` (threat-feed + data-ingest today)
-- Rulesets: `/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/python/compiler/rulesets/` (feed_ingest.py, data_ingest.py, _shared.py)
-- Corpus mining: `/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/python/probes/probe_jinja_corpus.py` (expression patterns)
-- Schema: `/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/store/schema.sql` (playbooks_seen, step_types, connectors)
-- Proof of concept: `/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/store/RECIPES.md` (5 hand-curated patterns)
-- Open TODOs: `/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/TODO.md` (I1–I10, priority order)
+- Generator: `/Users/dylanspille/PycharmProjects/fsr-playbook-framework/python/recipes/generator.py` (threat-feed + data-ingest today)
+- Rulesets: `/Users/dylanspille/PycharmProjects/fsr-playbook-framework/python/compiler/rulesets/` (feed_ingest.py, data_ingest.py, _shared.py)
+- Corpus mining: `/Users/dylanspille/PycharmProjects/fsr-playbook-framework/python/probes/probe_jinja_corpus.py` (expression patterns)
+- Schema: `/Users/dylanspille/PycharmProjects/fsr-playbook-framework/store/schema.sql` (playbooks_seen, step_types, connectors)
+- Proof of concept: `/Users/dylanspille/PycharmProjects/fsr-playbook-framework/store/RECIPES.md` (5 hand-curated patterns)
+- Open TODOs: `/Users/dylanspille/PycharmProjects/fsr-playbook-framework/TODO.md` (I1–I10, priority order)
 
 **Key corpus metrics**:
 - 1,664 playbooks

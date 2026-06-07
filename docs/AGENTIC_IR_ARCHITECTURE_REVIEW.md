@@ -11,7 +11,7 @@ medium, 15 low).
 
 The system under review: the **connector is the brain** (LLM agent loop + MCP tool registry +
 platform calls + session storage + HITL pause/resume); the **widget is a thin chat front-end**.
-Canonical source of `fsr_core` is `FSRPlaybookYaml/fsr_core` — the connector at
+Canonical source of `fsr_core` is `fsr-playbook-framework/fsr_core` — the connector at
 `ConnectorsV2/fsr-playbook-builder` **vendors** it via `scripts/build.sh` (which `rm -rf`s and
 re-copies the vendored tree, so **all `fsr_core` edits must land here, not in the connector copy**).
 

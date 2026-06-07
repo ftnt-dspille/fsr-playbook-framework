@@ -75,7 +75,7 @@ _Auto-generated from `cli.build_parser()` — re-run `python3 scripts/external/d
 
 | arg | help | meta |
 | --- | --- | --- |
-| `--db` | path to fsr_reference.db | default: `/Users/dylanspille/PycharmProjects/FSRPlaybookYaml/store/fsr_reference.db` |
+| `--db` | path to fsr_reference.db | default: `/Users/dylanspille/PycharmProjects/fsr-playbook-framework/store/fsr_reference.db` |
 
 ### `assert`
 

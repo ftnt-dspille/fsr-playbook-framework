@@ -38,7 +38,7 @@ Directory layout the tooling expects:
 
 ```
 <workspace>/
-  FSRPlaybookYaml/     <- this repo
+  fsr-playbook-framework/     <- this repo
   pyfsr/               <- required sibling
   Miscellaneous/       <- optional (api examples catalog)
 ```
@@ -58,8 +58,8 @@ it:
 ## Setup — one command
 
 ```sh
-git clone <fsrpb-repo> FSRPlaybookYaml
-cd FSRPlaybookYaml
+git clone <fsrpb-repo> fsr-playbook-framework
+cd fsr-playbook-framework
 make bootstrap
 ```
 

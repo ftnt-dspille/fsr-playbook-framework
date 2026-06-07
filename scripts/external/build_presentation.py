@@ -1,4 +1,4 @@
-"""Generate FSRPlaybookYaml presentation deck."""
+"""Generate fsr-playbook-framework presentation deck."""
 from pathlib import Path
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -682,7 +682,7 @@ def build():
             _add_textbox(slide, Inches(0.6), Inches(4.0), prs.slide_width - Inches(1.2), Inches(1.0),
                          spec["subtitle"], size=22, color=GREY)
             _add_textbox(slide, Inches(0.6), Inches(6.6), prs.slide_width - Inches(1.2), Inches(0.5),
-                         "FSRPlaybookYaml — fsrpb", size=14, color=ACCENT, bold=True)
+                         "fsr-playbook-framework — fsrpb", size=14, color=ACCENT, bold=True)
             continue
         _add_textbox(slide, Inches(0.6), Inches(0.4), prs.slide_width - Inches(1.2), Inches(0.9),
                      spec["title"], size=30, bold=True, color=NAVY)
