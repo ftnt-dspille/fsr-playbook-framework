@@ -50,12 +50,13 @@ unaffected — only the local dir name changes.
   (`~/.claude/projects/-Users-dylanspille-PycharmProjects-FSRPlaybookYaml/`) → migrate.
 
 ### Plan / progress
-1. ⬜ Bulk-replace `FSRPlaybookYaml` → `fsr-playbook-framework` in tracked text of
-   BOTH repos (exclude `store/eval_runs/*.log`, `store/**/*.db`). File lists:
-   `git grep -l FSRPlaybookYaml`. ~23 framework + ~19 connector files.
-2. ⬜ Commit the textual edits in both repos (refs now point at the new path,
-   which won't exist until the finalize script runs — that's the cutover).
-3. ⬜ `finalize-rename.sh` (written to repo root) does the physical move:
+1. ✅ Bulk-replaced `FSRPlaybookYaml` → `fsr-playbook-framework` in tracked text of
+   BOTH repos (excluded `store/eval_runs/*.log`, `store/**/*.db`, this doc).
+   23 framework + 19 connector files. `make chat-fast` green pre-move.
+2. ✅ Committed: framework **`a4391d4`**, connector **`994a614`**. (Refs now point
+   at the new path, which won't exist until finalize runs — that's the cutover.)
+3. ⬜ **NEXT (run after closing this session):** `finalize-rename.sh` (untracked,
+   at repo root) does the physical move:
    ```sh
    cd /Users/dylanspille/PycharmProjects
    mv FSRPlaybookYaml fsr-playbook-framework
