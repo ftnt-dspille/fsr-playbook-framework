@@ -54,7 +54,18 @@ _SECRET_FIELDS: dict[str, list[str]] = {
 _DEFAULTS: dict[str, dict[str, Any]] = {
     "lmstudio":  {"base_url": "http://localhost:1234/v1", "model": ""},
     "anthropic": {"base_url": None, "model": "claude-sonnet-4-5-20250929"},
-    "openai":    {"base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
+    # OpenAI defaults are env-overridable so a deployment can point the
+    # provider at any OpenAI-compatible endpoint (vLLM/Together/Groq, e.g.
+    # gpt-oss-120b) without touching the Settings UI. A value saved in the
+    # UI still wins — these only fill the blanks (see _provider_block).
+    "openai": {
+        "base_url": (os.environ.get("OPENAI_ENDPOINT")
+                     or os.environ.get("STUDIO_OPENAI_BASE_URL")
+                     or "https://api.openai.com/v1"),
+        "model": (os.environ.get("OPENAI_MODEL")
+                  or os.environ.get("STUDIO_OPENAI_MODEL")
+                  or "gpt-4o"),
+    },
 }
 
 

@@ -18,6 +18,32 @@ if str(PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_DIR))
 
 
+def _load_dotenv() -> None:
+    """Load repo-root `.env` into os.environ before anything reads it.
+
+    `settings._DEFAULTS` resolves OPENAI_ENDPOINT/OPENAI_MODEL (and other
+    providers read keys) at import time, and `make backend` runs bare
+    uvicorn with no env sourcing — so without this the .env is invisible to
+    the backend. setdefault: never clobber a real shell-exported value."""
+    env_path = REPO_ROOT / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        value = value.strip()
+        if value and value[0] not in ('"', "'"):
+            hash_idx = value.find("#")
+            if hash_idx >= 0:
+                value = value[:hash_idx].rstrip()
+        os.environ.setdefault(key.strip(), value.strip('"').strip("'"))
+
+
+_load_dotenv()
+
+
 # Self-signed FSR appliances (e.g. dev VMs) trigger urllib3's
 # InsecureRequestWarning every probe. Suppress in the backend's own log
 # unless the operator explicitly turns it back on. Subprocess output is
