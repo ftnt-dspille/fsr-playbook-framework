@@ -82,10 +82,18 @@ class AnthropicProvider:
         *,
         model: str = DEFAULT_MODEL,
         api_key: str | None = None,
+        base_url: str | None = None,
         client: AsyncAnthropic | None = None,
         approval_gateway: Any = None,
     ):
         self.model = model or DEFAULT_MODEL
+        # base_url override: point at an Anthropic-compatible gateway/proxy
+        # (corporate egress proxy, Bedrock/Vertex-compat shim, a local mock).
+        # None → the SDK's default (https://api.anthropic.com). Only forwarded
+        # when set so we don't override a caller-injected client's own base.
+        _client_kwargs: dict[str, Any] = {"max_retries": 5}
+        if base_url:
+            _client_kwargs["base_url"] = base_url
         # max_retries=5 (SDK default is 2). Failed retries cost nothing —
         # Anthropic only bills successful generations — so a higher
         # ceiling makes us robust to transient 529 overloads at zero
@@ -97,10 +105,10 @@ class AnthropicProvider:
                 "the 'anthropic' SDK is not installed; AnthropicProvider "
                 "needs it unless you inject a `client=`")
         elif api_key:
-            self._client = AsyncAnthropic(api_key=api_key, max_retries=5)
+            self._client = AsyncAnthropic(api_key=api_key, **_client_kwargs)
         else:
             # Falls back to ANTHROPIC_API_KEY env var via SDK default.
-            self._client = AsyncAnthropic(max_retries=5)
+            self._client = AsyncAnthropic(**_client_kwargs)
         # ApprovalGateway impl (fsr_core.protocols.ApprovalGateway). When
         # None, falls back to the module-level singleton in
         # `fsr_core.llm.approvals` — that's what the web backend uses.

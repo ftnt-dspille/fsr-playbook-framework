@@ -71,8 +71,16 @@ from .provider import (
 from .tools import _resolve_tier as _tier_for, dispatch, openai_tools
 
 
-DEFAULT_BASE_URL = os.environ.get("STUDIO_OPENAI_BASE_URL", "https://api.openai.com/v1")
-DEFAULT_MODEL = os.environ.get("STUDIO_OPENAI_MODEL", "gpt-4o")
+DEFAULT_BASE_URL = (
+    os.environ.get("OPENAI_ENDPOINT")
+    or os.environ.get("STUDIO_OPENAI_BASE_URL")
+    or "https://api.openai.com/v1"
+)
+DEFAULT_MODEL = (
+    os.environ.get("OPENAI_MODEL")
+    or os.environ.get("STUDIO_OPENAI_MODEL")
+    or "gpt-4o"
+)
 
 
 # Mirrors AnthropicProvider._ASSESSMENT_DIRECTIVE — the P1 forced written
@@ -100,6 +108,38 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, 
         else:
             for block in m.content:
                 out.append(block)  # type: ignore[arg-type]
+    return out
+
+
+def _normalize_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Coerce a tool list into the OpenAI Chat Completions shape
+    (`{type:"function", function:{name, description, parameters}}`).
+
+    The connector advertises an intent tool-slice using the Anthropic shape
+    (`{name, description, input_schema}`) regardless of the active provider —
+    so a triage turn reaches us with Anthropic-shaped tools and OpenAI 400s
+    with "Missing required parameter: 'tools[0].type'". We own our wire
+    format: accept either shape and convert. Already-OpenAI tools pass
+    through untouched; entries without a resolvable name are dropped."""
+    out: list[dict[str, Any]] = []
+    for t in tools or []:
+        if not isinstance(t, dict):
+            continue
+        if t.get("type") == "function" and isinstance(t.get("function"), dict):
+            out.append(t)
+            continue
+        name = t.get("name")
+        if not name:
+            continue
+        out.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": t.get("description", ""),
+                "parameters": (t.get("input_schema") or t.get("parameters")
+                               or {"type": "object", "properties": {}}),
+            },
+        })
     return out
 
 
@@ -279,8 +319,10 @@ class OpenAIProvider:
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
-        if not tools:
-            tools = openai_tools()
+        # Own the wire format: openai_tools() when the caller passed nothing,
+        # else coerce whatever shape we were handed (the connector advertises
+        # Anthropic-shaped tools for triage) into the OpenAI envelope.
+        tools = _normalize_tools(tools) if tools else openai_tools()
 
         # Defense-in-depth for the intent tool-slice (see llm/intents.py):
         # dispatch will run ANY tool name, so refuse names the caller didn't
