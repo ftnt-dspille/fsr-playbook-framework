@@ -84,6 +84,22 @@ _SCENARIOS: dict[str, list[tuple[str, str, dict[str, Any], bool]]] = {
         ("fortigate-firewall", "block_ip_new",
          {"method": "Quarantine Based", "ip_addresses": _C2_IP, "time_to_live": "1 Hour"}, True),
     ],
+    # B4 triage→build: the live capability gate, offline. Mirrors the
+    # `b4_triage_build` chat chain (scripts/_b4_chain.json on the connector):
+    # triage an alert, enrich the external source IP against EVERY configured
+    # threat-intel connector, then stage containment on the malicious IP — the
+    # exact trace the connector compiles to prove build_fidelity
+    # (action_coverage 1.0 + grounding 1.0). Pins that chain so a wiring or
+    # staged-action regression surfaces here without a live box / Anthropic.
+    "b4_triage_build": [
+        ("fortinet-fortisiem", "get_incidents",
+         {"timeFrom": "2026-05-29T00:00:00Z",
+          "timeTo": "2026-05-29T23:59:59Z"}, False),
+        ("fortinet-fortisiem", "get_ip_context", {"value": _C2_IP}, False),
+        ("virustotal", "query_ip", {"ip": _C2_IP}, False),
+        ("fortigate-firewall", "block_ip_new",
+         {"method": "Quarantine Based", "ip_addresses": _C2_IP, "time_to_live": "1 Hour"}, True),
+    ],
 }
 
 

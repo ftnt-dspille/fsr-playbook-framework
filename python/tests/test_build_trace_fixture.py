@@ -43,3 +43,21 @@ def test_enrich_then_block_has_block_after_enrich():
     calls = json.loads(bt.build_trace("enrich_then_block"))["calls"]
     ops = [c["resolved_inputs"]["operation"] for c in calls]
     assert ops == ["query_ip", "block_ip_new"], ops
+
+
+def test_b4_triage_build_enriches_every_ti_then_contains():
+    """B4 build_fidelity, offline: triage → enrich across every configured TI
+    connector → stage containment. Asserts the staged containment is captured
+    (action_coverage) and its IP came from a prior enrichment (grounding)."""
+    bt._install_sim_bridge()
+    import json
+    trace_json = bt.build_trace("b4_triage_build")
+    calls = json.loads(trace_json)["calls"]
+    ops = [c["resolved_inputs"]["operation"] for c in calls]
+    # every configured threat-intel source enriched, containment staged last
+    assert ops == ["get_incidents", "get_ip_context", "query_ip",
+                   "block_ip_new"], ops
+    # grounding: the blocked IP is value-matched from a prior op's output
+    bt.assert_cross_step_coincidence(trace_json)
+    lv = bt.verify_wiring(trace_json)
+    assert lv["passed"] is True and lv["skipped"] is False, lv
