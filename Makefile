@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate hooks publish-public publish-public-dry
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -142,3 +142,7 @@ publish-public:        ## Build sanitized snapshot and force-push to the public 
 
 publish-public-dry:    ## Build + verify the sanitized snapshot only (no push)
 	scripts/publish_public.sh --dry-run
+
+hooks:                 ## Install git hooks (pre-push auto-syncs the public mirror on `git push` of main)
+	install -m 0755 scripts/git-hooks/pre-push .git/hooks/pre-push
+	@echo "installed .git/hooks/pre-push (auto-syncs public mirror; bypass with SKIP_PUBLIC_MIRROR=1)"
