@@ -8,8 +8,10 @@
 <!-- ───────────────────────── RESUME HERE ───────────────────────── -->
 ## ▶ Resume here
 
-- **Last updated:** 2026-06-07 (PM — publish executed: 0.3.127 deployed, repos
-  created on Gitea, connector renamed, framework merged to `main`).
+- **Last updated:** 2026-06-08 — **rename cutover COMPLETE**: rename branch
+  merged to `main`, connector `connector-fsr-soc-assistant` 0.3.133 deployed
+  live (all 10 workers verified). Was the last open follow-up. Also shipped:
+  env-overridable OpenAI endpoint (Studio) + B4 triage→build offline golden.
 - **STATUS: PUBLISH LEDGER COMPLETE (10/10 ✅) + published to internal remotes.**
   Original cutover (AM): dir → `fsr-playbook-framework`, `.venv` rebuilt, connector
   `fsr_core` symlink retargeted, auto-memory migrated, `make verify` green
@@ -29,16 +31,20 @@
   - **connector** → Gitea `git.fndn.fortinet.net/dspille/connector-fsr-soc-assistant`
     (private). NO GitLab remote. Local checkout dir still `ConnectorsV2/fsr-playbook-builder`.
   - **widget** (`WebstormProjects/fsr_all_widgets`) → Gitea repo NOT created yet.
-- **Connector RENAMED** `fsr-playbook-builder` → `connector-fsr-soc-assistant`
-  (info.json name + label "FSR SOC Assistant" + python module
-  `connector_fsr_soc_assistant` + package dir + scripts/tests/README/pyproject).
-  `make verify` green. On branch `chore/rename-to-connector-fsr-soc-assistant`
-  (pushed to Gitea), NOT yet merged to `feat/action-based-streaming`, NOT deployed.
+- **Connector RENAMED + LIVE-DEPLOYED (2026-06-08)** `fsr-playbook-builder` →
+  `connector-fsr-soc-assistant` (info.json name + label "FSR SOC Assistant" +
+  python module `connector_fsr_soc_assistant` + package dir +
+  scripts/tests/README/pyproject). Rename branch merged to `main`
+  (ff, connector `f9a2874`), **0.3.133 deployed to FortiCloud — all 10 workers
+  verified on the renamed identity**. `make verify` green (161 passed; required
+  re-vendoring the FULL reference DB — a leftover slim DB had emptied the
+  connectors/operations tables → UNKNOWN_CONNECTOR offline).
 
 ### ⏳ Remaining follow-ups (non-ledger)
-1. **Connector live cutover** (user chose deploy-new + delete-old): deploy
-   `connector-fsr-soc-assistant` 0.3.127 to the box, then delete the orphaned
-   `fsr-playbook-builder` 0.3.127. Merge the rename branch → `feat/action-based-streaming` first.
+1. ✅ **DONE (2026-06-08) — Connector live cutover.** Rename branch merged →
+   `main`, `connector-fsr-soc-assistant` 0.3.133 deployed + all-workers verified.
+   Open micro-item: delete the orphaned old-identity `fsr-playbook-builder`
+   registration on the box if it still lingers.
 2. **Widget Gitea repo** — create `widget-fsr-soc-assistant` (handoff steps in chat;
    push-to-create is DISABLED → must create via API using `GITEA_TOKEN` in `.env`,
    scopes `write:user`+`write:repository`). 3 uncommitted `scripts/` edits — don't commit WIP.
