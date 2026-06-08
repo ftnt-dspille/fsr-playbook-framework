@@ -136,3 +136,9 @@ verify: ## green-check for the fsr_core + connector axis (offline)
 clean: ## remove pycache + node_modules build leftovers (NOT node_modules itself)
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	rm -rf $(FRONTEND_DIR)/.svelte-kit $(FRONTEND_DIR)/dist
+
+publish-public:        ## Build sanitized snapshot and force-push to the public GitHub mirror
+	scripts/publish_public.sh
+
+publish-public-dry:    ## Build + verify the sanitized snapshot only (no push)
+	scripts/publish_public.sh --dry-run
