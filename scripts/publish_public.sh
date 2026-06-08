@@ -50,6 +50,7 @@ rm -f  docs/AGENTIC_IR_ARCHITECTURE_REVIEW.md docs/AGENT_DATA_AUDIT.md docs/AGEN
        docs/FRAMEWORK_HANDOFF.md docs/CHAT_DEV_RUNBOOK.md
 rm -f  TODO.md DEMO.md CLAUDE.md
 rm -f  scripts/publish_public.sh   # internal tooling; also contains infra regexes
+rm -rf scripts/git-hooks           # internal git hooks; pre-push carries the internal git host
 find . -type d -name node_modules -prune -exec rm -rf {} + 2>/dev/null || true
 
 # 3. SLIM the reference catalog (ship published corpus; drop instance-derived data)
