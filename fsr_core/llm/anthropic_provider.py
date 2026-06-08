@@ -42,6 +42,7 @@ from ._loop_helpers import (
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
     compile_errors as _compile_errors,
+    drain_with_idle_timeout,
     extract_yaml_block as _extract_yaml_block,
     shrink_history as _shrink_history,
 )
@@ -364,13 +365,14 @@ class AnthropicProvider:
                 ))
             except Exception:
                 history_chars = 0
-            # §2.2 — wrap the LLM round-trip in a coroutine so we can
-            # apply asyncio.wait_for() (3.9-compatible). Text deltas are
-            # buffered and yielded after the stream completes; this means
-            # tokens aren't streamed incrementally, but the connector's
-            # per-turn batched transport makes that a non-issue there.
-            async def _run_stream() -> tuple[list[str], Any]:
-                text_out: list[str] = []
+            # §2.2 — stream the round-trip live: text deltas reach the caller
+            # (and the connector's chat_poll feed) AS THEY ARRIVE, so the widget
+            # shows a live token stream instead of the whole answer landing at
+            # once on turn completion. `_pump` keeps `get_final_message()` inside
+            # the SDK's streaming context; `drain_with_idle_timeout` supplies the
+            # per-delta inactivity timeout + cancellation (shared across
+            # providers — see _loop_helpers).
+            async def _pump():
                 async with self._client.messages.stream(
                     model=self.model,
                     max_tokens=4096,
@@ -382,14 +384,18 @@ class AnthropicProvider:
                         if _ev.type == "content_block_delta" and getattr(
                             _ev.delta, "type", None
                         ) == "text_delta":
-                            text_out.append(_ev.delta.text)
-                    _final = await _stream.get_final_message()
-                return text_out, _final
+                            yield ("text", _ev.delta.text)
+                    yield ("final", await _stream.get_final_message())
 
+            final = None
             try:
-                _text_deltas, final = await asyncio.wait_for(
-                    _run_stream(), timeout=STREAM_TIMEOUT_SECS
-                )
+                async for _kind, _payload in drain_with_idle_timeout(
+                    _pump(), timeout=STREAM_TIMEOUT_SECS
+                ):
+                    if _kind == "text":
+                        yield TextEvent(text=_payload)   # live delta
+                    else:  # "final"
+                        final = _payload
             except asyncio.TimeoutError:
                 import logging
                 logging.warning(
@@ -446,9 +452,6 @@ class AnthropicProvider:
                     msg = "Something went wrong talking to Anthropic. Please try again."
                 yield ErrorEvent(message=msg)
                 return
-
-            for _t in _text_deltas:
-                yield TextEvent(text=_t)
 
             assistant_blocks: list[dict[str, Any]] = []
             tool_calls: list[tuple[str, str, dict[str, Any]]] = []

@@ -44,6 +44,7 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 _SECRET_FIELDS: dict[str, list[str]] = {
     "lmstudio": ["api_key"],
     "anthropic": ["api_key"],
+    "openai": ["api_key"],
 }
 
 
@@ -53,6 +54,7 @@ _SECRET_FIELDS: dict[str, list[str]] = {
 _DEFAULTS: dict[str, dict[str, Any]] = {
     "lmstudio":  {"base_url": "http://localhost:1234/v1", "model": ""},
     "anthropic": {"base_url": None, "model": "claude-sonnet-4-5-20250929"},
+    "openai":    {"base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
 }
 
 
@@ -70,6 +72,10 @@ class ProviderConfig:
             # LM Studio tolerates a placeholder key but the URL is required.
             return bool(self.base_url) and bool(self.model)
         if self.name == "anthropic":
+            return bool(self.api_key) and bool(self.model)
+        if self.name == "openai":
+            # OpenAI proper requires a key; a custom base_url still needs a
+            # model selected. The key is the minimal gate.
             return bool(self.api_key) and bool(self.model)
         return bool(self.model)
 
@@ -113,8 +119,10 @@ def load_provider(name: str) -> ProviderConfig:
     api_key = secrets.get(f"{name}_api_key")
     # Migration: if anthropic and env has a key but keyring is empty,
     # write the env key across so the user doesn't have to re-paste.
-    if name == "anthropic" and not api_key:
-        env_key = os.environ.get("ANTHROPIC_API_KEY")
+    if name in ("anthropic", "openai") and not api_key:
+        env_key = os.environ.get(
+            "ANTHROPIC_API_KEY" if name == "anthropic" else "OPENAI_API_KEY"
+        )
         if env_key:
             try:
                 secrets.set(f"{name}_api_key", env_key)

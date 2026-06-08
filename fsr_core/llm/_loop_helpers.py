@@ -184,6 +184,62 @@ import os as _os
 STREAM_TIMEOUT_SECS: int = int(_os.environ.get("ANTHROPIC_STREAM_TIMEOUT_SECS", "300"))
 
 
+import asyncio as _asyncio
+
+
+async def drain_with_idle_timeout(pump, *, timeout: float):
+    """Yield items from the async generator ``pump`` live, bounded by a
+    per-item *inactivity* timeout.
+
+    Every provider's ``stream()`` needs the same scaffolding: surface each
+    streamed delta to the consumer (and thus the connector's ``chat_poll``
+    feed) the instant the upstream yields it, while still failing cleanly if
+    the upstream stalls. Buffering the whole round-trip just to wrap it in one
+    ``asyncio.wait_for`` — the old approach — defeated live streaming (the
+    answer only appeared on turn completion). This helper keeps that timeout
+    guarantee without the buffering, so the per-delta plumbing lives in ONE
+    place and each provider only supplies its SDK-specific ``pump``.
+
+    Mechanics: ``pump`` runs as a background task feeding a queue; the consumer
+    reads the queue under ``asyncio.wait_for(timeout)`` (3.9-compatible — no
+    ``asyncio.timeout()``).
+
+    - Items from ``pump`` are re-yielded verbatim (the provider tags them,
+      e.g. ``("text", str)`` / ``("final", msg)``).
+    - If no item *or* completion arrives within ``timeout`` seconds, the pump
+      is cancelled and ``asyncio.TimeoutError`` is raised.
+    - An exception raised inside ``pump`` is re-raised in the consumer's
+      context, so the provider's existing error mapping handles it unchanged.
+    """
+    q: _asyncio.Queue = _asyncio.Queue()
+
+    async def _run() -> None:
+        try:
+            async for item in pump:
+                await q.put(("item", item))
+            await q.put(("end", None))
+        except Exception as exc:  # surfaced to the consumer below
+            await q.put(("error", exc))
+
+    task = _asyncio.ensure_future(_run())
+    try:
+        while True:
+            try:
+                kind, payload = await _asyncio.wait_for(q.get(), timeout)
+            except _asyncio.TimeoutError:
+                task.cancel()
+                raise
+            if kind == "item":
+                yield payload
+            elif kind == "end":
+                return
+            else:  # ("error", exc)
+                raise payload
+    finally:
+        if not task.done():
+            task.cancel()
+
+
 def extract_yaml_block(text: str) -> str | None:
     """Return the contents of the LAST fenced ```yaml block, or None.
     Mirrors the frontend's extractYamlBlock so the in-chat YAML the user

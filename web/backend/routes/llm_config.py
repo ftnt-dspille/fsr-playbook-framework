@@ -87,9 +87,13 @@ async def test_provider(name: str, body: ProbeIn) -> dict[str, Any]:
     import time
     start = time.monotonic()
 
-    if name == "lmstudio":
+    if name in ("lmstudio", "openai"):
         if not base_url:
             return {"ok": False, "error": "base_url is required"}
+        # OpenAI proper authenticates the key on /v1/models; LM Studio's
+        # local server ignores it, so a placeholder is fine there.
+        if name == "openai" and not api_key:
+            return {"ok": False, "error": "api_key is required"}
         try:
             from openai import AsyncOpenAI
             client = AsyncOpenAI(
@@ -158,9 +162,11 @@ async def list_models(name: str, body: ProbeIn | None = None) -> dict[str, Any]:
     base_url = body.base_url or saved.base_url
     api_key = body.api_key or saved.api_key
 
-    if name == "lmstudio":
+    if name in ("lmstudio", "openai"):
         if not base_url:
             return {"ok": False, "models": [], "error": "base_url not configured"}
+        if name == "openai" and not api_key:
+            return {"ok": False, "models": [], "error": "api_key not configured"}
         try:
             from openai import AsyncOpenAI
             client = AsyncOpenAI(
