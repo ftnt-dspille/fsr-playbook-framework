@@ -125,10 +125,13 @@ on approval, and returns a validated playbook offer — driven by the local
 gpt-oss model, no FortiSOAR UI.
 
 ## Open questions
-1. **Trace recording over MCP** — confirm `set_session_trace` + the toolbox's
-   `run_op` recorder fire the same way outside the connector process (the shim
-   installs the scope, but verify `run_op`'s module-level recorder picks it up).
-   This is the one thing to spike first — it's the load-bearing assumption.
+1. ✅ **RESOLVED (2026-06-08 spike).** Trace recording works identically over MCP.
+   Verified outside any connector, sim mode: `set_active_trace(trace)` → the exact
+   MCP `run_op` entrypoint (`tools_execution.run_op`) recorded both calls into the
+   active trace → `build_playbook_from_trace("")` read it and built a valid
+   playbook (`ok=True`, `static_errors=[]`, cross-step `ip_addresses` wire
+   resolved). **The shim only needs `set_active_trace(session.trace)` around the
+   turn — no connector-specific recorder wiring.** Estimate locked at ~½ day.
 2. **Push target** — `push_playbook` writes to live FSR. For a desktop tool,
    default to *offer only* (compile + validate, return YAML) and gate the actual
    push behind an explicit `triage_build_accept` so a desktop user can't
