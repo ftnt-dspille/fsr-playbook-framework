@@ -17,7 +17,12 @@ repos:
     hooks:
       - id: pytest-fast
         name: pytest (fast subset, skips corpus)
-        entry: python3 -m pytest -m "not slow and not live" -q
+        # Use this repo's venv interpreter, NOT a bare `python3` — the system
+        # python lacks the project deps (jinja2/mcp) and its editable install
+        # points at a sibling checkout, so it collected the wrong repo's tests
+        # and errored. The venv has fsr_core installed editable (resolves to
+        # THIS repo), so no PYTHONPATH is needed. Run `make sync` to create it.
+        entry: .venv/bin/python -m pytest -m "not slow and not live" -q
         language: system
         pass_filenames: false
         # Only re-run when something the suite covers actually changed.
