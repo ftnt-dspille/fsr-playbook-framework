@@ -490,6 +490,40 @@ def _score_investigation_quality(
                        else "no deliverable card staged for the analyst "
                             f"(accepts: {', '.join(allowed)})"),
         }
+
+    # --- hunt depth: lateral pivots along a seeded multi-hop chain (B2) -------
+    # Depth = how many ordered stages of a known pivot chain the agent reached
+    # (each stage is a fact-matcher, reusing the recall matcher). Breadth =
+    # distinct connectors exercised across the hunt, reported alongside. The
+    # gate is opt-in: a fixture without `hunt_chain` skips it, because depth
+    # only means something on a scenario with a defined chain to traverse
+    # (e.g. the seeded smithDesktop -> 10.50.60.70 -> 102.220.160.21 chain).
+    chain = quality.get("hunt_chain")
+    if not chain:
+        gates["hunt_depth"] = {"passed": True, "skipped": True}
+    else:
+        reached = [s for s in chain if any(_fact_matches(s, c) for c in trace)]
+        depth = len(reached)
+        min_depth = quality.get("min_hunt_depth", len(chain))
+        connectors = set()
+        for c in trace:
+            conn = _call_args(c).get("connector")
+            if conn:
+                connectors.add(str(conn).lower())
+        breadth = len(connectors)
+        min_breadth = quality.get("min_hunt_breadth", 0)
+        passed = depth >= min_depth and breadth >= min_breadth
+        gates["hunt_depth"] = {
+            "passed": passed, "skipped": False,
+            "depth": depth, "min_depth": min_depth, "stages": len(chain),
+            "reached": [_fact_label(s) for s in reached],
+            "missing": [_fact_label(s) for s in chain if s not in reached],
+            "breadth": breadth, "min_breadth": min_breadth,
+            "connectors": sorted(connectors),
+            "detail": (f"reached {depth}/{len(chain)} pivot stage(s) "
+                       f"(min {min_depth}); breadth {breadth} connector(s)"
+                       + (f" (min {min_breadth})" if min_breadth else "")),
+        }
     return gates
 
 
