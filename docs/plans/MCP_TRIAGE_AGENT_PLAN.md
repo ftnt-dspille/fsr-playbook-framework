@@ -5,8 +5,39 @@ system prompt + grounding + tier-based HITL + auto trace→playbook) as **two MC
 tools**, so Claude Desktop / Claude Code can run a full triage-and-build turn
 turnkey — an alternate front-end to the FortiSOAR widget, with no FSR UI.
 
-> **Status:** NOT STARTED (planned 2026-06-08). Alternate path to the in-platform
-> connector + the Studio web app; see [[connector_state]], Path C = `make dev`.
+> **Status:** ✅ CORE SHIPPED (2026-06-08, offline-green). The two tools
+> `triage_build_turn` / `triage_build_resume` live in
+> `fsr_core/mcp_server/tools_agent.py`, registered on the `fsrpb` MCP server.
+> HITL approve→playbook-offer round-trip proven offline
+> (`fsr_core/tests/test_mcp_agent_shim.py`, 3 tests). Architecture written up
+> in `docs/ARCHITECTURE_AGENT_LOOP.md`; Claude Desktop config + README done.
+> **Remaining:** live smoke-test from Claude Desktop against the gpt-oss
+> gateway; optional `triage_build_accept` convenience (offer-only default
+> already covers Open-Q #2). Alternate path to the connector + Studio web app;
+> see [[connector_state]], Path C = `make dev`.
+
+### Direction change (2026-06-08) — Desktop-native is the default for Claude Desktop/Code
+The packaged `triage_build_turn` nests its **own** inner model (gpt-oss gateway,
+or Anthropic-API-with-key) — correct for the **widget/headless** case (no driving
+model there), but redundant and key-requiring when the front-end *is* Claude.
+Per user decision, for **Claude Desktop / Claude Code** the assistant drives the
+granular tools **itself** (one model, no `ANTHROPIC_API_KEY`). Added the native
+primitives that expose what the packaged turn hid:
+`triage_session_start` / `triage_session_state` / `triage_session_clear` +
+`triage_guidance` (and an MCP `triage` prompt). Flow: start → `run_op` (records)
++ `emit_action_card` (stage) → `build_playbook_from_trace()`. Offline-proven in
+`fsr_core/tests/test_mcp_native_session.py`. `triage_build_turn` stays for the
+widget/headless path. See [[feedback_desktop_native_triage]].
+
+### What shipped (vs the task table below)
+- **#1 InMemoryApprovalGateway** — already existed in `fsr_core.llm.approvals`; reused, not rewritten.
+- **#2 session store + TTL** — `_SESSIONS` dict + `_evict()` (30-min idle).
+- **#3 _assemble** — reused `intents.load_intent_prompt` + `intents.tools_for_intent` (the connector already factored these into `fsr_core.llm.intents`); added an env-backed `_EnvConfigProvider` honoring the web backend's `STUDIO_*`/`OPENAI_*` env so one `.env` drives both.
+- **#4 flattener** — `_flatten` (text + cards[] + approval/playbook_offer) + `_collapse_assistant_turn` (the `_text_of`-style history collapse) + `_staged_actions`.
+- **#5/#6 tools** — `triage_build_turn`, `triage_build_resume` (sync `@mcp.tool`, `asyncio.run`, trace scope, per-session gateway).
+- **#7 registration** — added to `fsr_core/mcp_server/__init__.py` (import + `__all__`).
+- **#8 offline test** — `test_mcp_agent_shim.py`: scripted fake provider stages a tier-3 action → suspend → resume(approve) → playbook offer; asserts the round-trip + staged_actions + error paths.
+- **#9 docs** — README MCP section + Claude Desktop JSON snippet; `docs/ARCHITECTURE_AGENT_LOOP.md`.
 
 ---
 

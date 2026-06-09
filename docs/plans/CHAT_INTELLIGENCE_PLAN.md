@@ -149,11 +149,34 @@ past the 0.8 gate on the fixture suite; add pivot-*correctness* (right indicator
 right connector) beyond raw recall. Gate: `investigation_recall` + a new
 `investigation_pivot_precision`.
 
-### B2 · Hunt — proactive, hypothesis-driven  ·  HIGH
+### B2 · Hunt — proactive, hypothesis-driven  ·  HIGH  ·  🟡 gate + offline tests landed; live re-baseline pending
 Lever: *Hunting instincts*. Measure hunt **depth** (lateral pivots from a single IOC),
 **breadth** (independent hypotheses tried), and stop-criteria (no endless flailing —
 ties to `investigation_tool_budget`). New gate: `hunt_depth` on a seeded multi-hop
 scenario (the wendy.smith → smithDesktop → 10.50.60.70 → 102.220.160.21 chain).
+
+**Done (offline, 2026-06-08):** `hunt_depth` gate added to
+`scoring._score_investigation_quality` — opt-in per fixture via an
+`investigation_quality.hunt_chain` (ordered list of pivot-stage fact-matchers,
+reusing `_fact_matches`). **Depth** = stages reached, gated at `min_hunt_depth`
+(default = chain length); **breadth** = distinct connectors exercised across the
+hunt, gated at optional `min_hunt_breadth` (default 0, reported either way);
+**stop-criteria** stays on the existing `investigation_tool_budget`. A fixture
+without `hunt_chain` skips the gate (depth only means something on a defined
+chain). Lever already mapped (`levers.LEVER_MAP["hunt_depth"]` →
+`system_prompt_triage.md §Hunting instincts`); `test_lever_coverage` stays green.
+Offline pin `python/tests/test_hunt_depth.py` (6 cases) wired into `make chat-fast`
+(141 pass ~2s). Wired onto the real seeded fixture
+`tasks/29_invest_defense_evasion_host.json` (`min_hunt_depth: 3` — must pivot past
+the host into the internal IP; stage 4 = external C2 reported, not required), with
+the prompt broadened to "follow the indicators where they lead".
+
+**Pending (live, needs credits — gpt-4o-mini re-baseline):** drive task 29
+(`make chat-drive SCENARIO=invest_defense_evasion_host`) to (a) confirm the seeded
+IP chain actually surfaces on incident `b4a62c3b…`'s related records, (b) see how
+deep gpt-4o-mini hunts vs the bar, (c) tune `system_prompt_triage.md` §Hunting
+instincts if it stops at the host, then capture a golden. Per the provider-coupling
+note, baseline on the new provider before pinning a live bar.
 
 ### B3 · Triage — assessment correctness  ·  HIGH
 Levers: `triage_normalize/classify/scenarios` + *What you do* / *Hard rules*. Score

@@ -37,6 +37,7 @@ from . import (
     tools_verify,
     tools_enhancement,
     tools_emit,
+    tools_agent,
 )
 
 # Import shared infrastructure for external use
@@ -168,6 +169,17 @@ from .tools_emit import (
     emit_playbook_offer,
 )
 
+# Packaged triage→build agent loop (MCP front-end onto fsr_core.llm) +
+# Desktop-native trace-session primitives.
+from .tools_agent import (
+    triage_build_turn,
+    triage_build_resume,
+    triage_session_start,
+    triage_session_state,
+    triage_session_clear,
+    triage_guidance,
+)
+
 # Catalog (Phase 0 + 0.5 of CONNECTOR_INTEGRATION_PLAN)
 from .tools_catalog import (
     find_api_example,
@@ -279,4 +291,12 @@ __all__ = [
     "find_api_fixture",
     "find_api_product",
     "propose_http_fallback",
+    # Packaged agent loop
+    "triage_build_turn",
+    "triage_build_resume",
+    # Desktop-native trace-session primitives
+    "triage_session_start",
+    "triage_session_state",
+    "triage_session_clear",
+    "triage_guidance",
 ]
