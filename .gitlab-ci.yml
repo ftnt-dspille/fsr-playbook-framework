@@ -1,0 +1,70 @@
+# GitLab CI for FSR Playbook Studio.
+#
+# Two jobs:
+#   • unit   — fast pytest (excludes live + slow markers, matches `make tests`)
+#   • e2e    — Playwright suite under e2e/ (frontend + backend + FSR stub)
+#
+# pyfsr is a sibling editable install (../pyfsr). The runner clones it
+# adjacent to this checkout so `uv pip install -e ../pyfsr` resolves.
+# Runner needs outbound access to github.com for that clone.
+
+stages:
+  - unit
+  - e2e
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PNPM_STORE_DIR: "$CI_PROJECT_DIR/.cache/pnpm"
+  PLAYWRIGHT_BROWSERS_PATH: "$CI_PROJECT_DIR/.cache/ms-playwright"
+  PYFSR_REF: "main"
+
+.python-setup: &python-setup
+  - python --version
+  - pip install --quiet uv
+  - git clone --depth 1 --branch "$PYFSR_REF" https://github.com/ftnt-dspille/pyfsr.git ../pyfsr
+  - uv venv --python 3.13
+  - source .venv/bin/activate
+  - uv pip install -e ../pyfsr -e . -e ./web pytest requests-mock anyio
+
+unit:
+  stage: unit
+  image: python:3.13-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git curl
+    - *python-setup
+  script:
+    - python -m pytest python/tests/ -q -m "not live and not slow"
+  cache:
+    key: unit-py313
+    paths:
+      - .cache/pip/
+
+e2e:
+  stage: e2e
+  # Playwright's official image bundles Chromium + system deps so the
+  # job doesn't pay the apt-install + browser-download cost each run.
+  image: mcr.microsoft.com/playwright:v1.60.0-jammy
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv git curl
+    - ln -sf /usr/bin/python3 /usr/local/bin/python
+    - *python-setup
+    - curl -fsSL https://get.pnpm.io/install.sh | env SHELL=bash sh -
+    - export PATH="$HOME/.local/share/pnpm:$PATH"
+    - cd e2e && pnpm install --frozen-lockfile && cd ..
+  script:
+    - source .venv/bin/activate
+    # REUSE=0 so the webServer block boots its own backend/vite/stub.
+    # The Playwright image ships Chromium, no `pnpm install-browsers`.
+    - cd e2e && REUSE=0 pnpm test
+  cache:
+    key: e2e-pw1.60
+    paths:
+      - .cache/pip/
+      - .cache/pnpm/
+      - e2e/node_modules/
+  artifacts:
+    when: on_failure
+    paths:
+      - e2e/test-results/
+      - e2e/playwright-report/
+    expire_in: 1 week

@@ -1,0 +1,31 @@
+# Pre-commit hooks. Install with: pre-commit install
+# Run all hooks manually with: pre-commit run --all-files
+repos:
+  # Ruff lint (pyflakes-class errors: unused imports/vars, undefined names,
+  # PEP 604 unions at the py39 floor). Self-contained — pre-commit fetches the
+  # pinned ruff, so it doesn't depend on a venv having ruff installed. Config
+  # (target-version, select, per-file-ignores) lives in pyproject.toml.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.13
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        # No --fix: fail fast and let the dev decide, matching the pytest hook.
+        files: '^(python/|fsr_core/)'
+
+  - repo: local
+    hooks:
+      - id: pytest-fast
+        name: pytest (fast subset, skips corpus)
+        # Use this repo's venv interpreter, NOT a bare `python3` — the system
+        # python lacks the project deps (jinja2/mcp) and its editable install
+        # points at a sibling checkout, so it collected the wrong repo's tests
+        # and errored. The venv has fsr_core installed editable (resolves to
+        # THIS repo), so no PYTHONPATH is needed. Run `make sync` to create it.
+        entry: .venv/bin/python -m pytest -m "not slow and not live" -q
+        language: system
+        pass_filenames: false
+        # Only re-run when something the suite covers actually changed.
+        # fsr_core/ holds the compiler + MCP tools the suite exercises, so a
+        # change there must trigger it too (was missing before).
+        files: '^(python/|fsr_core/|store/schema\.sql|examples/|pytest\.ini)'

@@ -1,0 +1,35 @@
+# Self-contained record-action e2e test. Inserts a tagged High-severity
+# alert, fires the playbook against it, asserts the high branch ran,
+# deletes the alert.
+
+fixture: examples/demo_alert_action.yaml
+playbook: FSRPB Demo - Triage Alert
+
+setup:
+  - kind: insert_record
+    module: alerts
+    fields:
+      name: fsrpb_e2e_test_alert
+      severity: High               # resolved to /api/3/picklists/<uuid>
+      description: temporary alert created by fsrpb e2e harness
+    capture_as: alert
+
+record: "alerts:{{ setup.alert.uuid }}"
+
+timeout_s: 180
+
+expects:
+  status: finished
+  vars:
+    verdict: escalate
+  steps:
+    Read_severity:
+      status: finished
+      result_contains: '"severity": "High"'
+    Branch_on_severity:
+      status: finished
+    Stamp_high_verdict:
+      status: finished
+    No_action_low_severity:
+      status: skipped
+cleanup: true

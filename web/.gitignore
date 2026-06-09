@@ -1,0 +1,11 @@
+data/
+node_modules/
+.svelte-kit/
+build/
+dist/
+*.db
+.env
+.env.*
+!.env.example
+__pycache__/
+*.egg-info/

@@ -1,0 +1,6 @@
+{
+  "name": "record_action_trigger",
+  "prompt": "Author a FortiSOAR playbook with a record_action trigger on the alerts module (right-click 'Triage Alert' button). Read severity from vars.input.records[0], decide if it's High vs anything else, then update_record on the alert's IRI to stamp a 'verdict' field. Output complete YAML.",
+  "gold_yaml_path": "examples/demo_alert_action.yaml",
+  "notes": "record_action trigger + update_record + Decision"
+}

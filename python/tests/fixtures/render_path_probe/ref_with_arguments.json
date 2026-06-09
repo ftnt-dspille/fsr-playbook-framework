@@ -1,0 +1,79 @@
+{
+  "scenario": "ref_with_arguments",
+  "playbook_name": "rp_ref_args_parent",
+  "description": "sync ref passing arguments to child",
+  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_ref_args_child\"\n    description: \"child for rp_ref_args_parent\"\n    is_active: true\n    parameters: ['base']\n    steps:\n      - name: \"ChildStart\"\n        type: start\n        next: \"Compute\"\n      - name: \"Compute\"\n        type: set_variable\n        vars:\n          base_echoed: \"{{ vars.input.params.base }}\"\n          product:     \"{{ (vars.input.params.base | int) * 10 }}\"\n  - name: \"rp_ref_args_parent\"\n    description: \"parent passes arguments.base=7\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"Call\"\n      - name: \"Call\"\n        type: workflow_reference\n        arguments:\n          target: rp_ref_args_child\n          arguments:\n            base: 7\n          apply_async: false\n          pass_parent_env: false\n          pass_input_record: false\n        next: \"Capture\"\n      - name: \"Capture\"\n        type: set_variable\n        vars:\n          product:  \"{{ vars.steps.Call.product }}\"\n          echoed:   \"{{ vars.steps.Call.base_echoed }}\"\n",
+  "run_status": "finished",
+  "env": {
+    "debug": true,
+    "input": {
+      "params": {},
+      "records": []
+    },
+    "echoed": 7,
+    "product": 70,
+    "request": {
+      "uri": "https://<your-fortisoar-host>/api/triggers/1/notrigger/e73f3332-dd11-51a4-a49b-463156bfb419",
+      "method": "POST",
+      "baseUri": "https://<your-fortisoar-host>",
+      "headers": {
+        "host": "<your-fortisoar-host>",
+        "proxy": "",
+        "accept": "*/*",
+        "connection": "keep-alive",
+        "user-agent": "python-requests/2.33.1",
+        "content-type": "application/json",
+        "authorization": "*******",
+        "content-length": "83",
+        "x-php-ob-level": "1",
+        "accept-encoding": "gzip, deflate"
+      },
+      "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce"
+    },
+    "task_id": "1349c693-437c-4269-a2ba-0a367bd70eec",
+    "auth_info": {
+      "auth_method": "CS HMAC"
+    },
+    "resources": {},
+    "globalMock": false,
+    "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+    "last_run_at": null,
+    "useMockOutput": false,
+    "mockPlaybookId": null
+  },
+  "steps": [
+    {
+      "name": "Call",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "product": 70,
+        "task_id": "1349c693-437c-4269-a2ba-0a367bd70eec",
+        "base_echoed": 7
+      }
+    },
+    {
+      "name": "Capture",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "echoed": 7,
+        "product": 70,
+        "task_id": "1349c693-437c-4269-a2ba-0a367bd70eec"
+      }
+    },
+    {
+      "name": "Trigger",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "1349c693-437c-4269-a2ba-0a367bd70eec",
+        "globalMock": false,
+        "useMockOutput": false
+      }
+    }
+  ]
+}

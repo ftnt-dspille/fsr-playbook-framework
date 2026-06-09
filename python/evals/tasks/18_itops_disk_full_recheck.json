@@ -1,0 +1,5 @@
+{
+  "name": "itops_disk_full_recheck",
+  "prompt": "Author a FortiSOAR playbook. Trigger: alert created in the alerts module with category 'disk_full'. Behavior: find the host record in the assets module matching the alert's `affected_host` IP, then run our `clean_tmp` Ansible job through the SSH connector against that host. After the job returns, decide based on the reported free-space percentage: if free space is still below 10% after the cleanup, page on-call via PagerDuty with the host name and current free-space value; otherwise update the alert status to 'resolved' and add a comment that auto-cleanup succeeded. Output complete YAML.",
+  "notes": "Tests find_record correlation between alert and asset modules, a connector op whose output drives the next decision, the post-action re-check pattern (action → measure → branch), and dual terminal paths (page vs auto-close). The walker must validate that vars.steps.<clean_step>.free_space_pct exists in the SSH op's typed output and that the alert IRI flows correctly into update_record."
+}
