@@ -1532,6 +1532,36 @@ def search_module_records(module: str, q: str = "",
         return {"ok": False, "code": "no_fsr_configured",
                 "message": "no FSR instance is configured — run `fsrpb env set` first"}
 
+    # A purely-numeric query ("560") almost always means the analyst wants
+    # record #560 (the per-module sequential `id`), not a text match — and
+    # $search doesn't cover the `id` column, so it returns 0 or a flood of
+    # unrelated hits. Try the `?id=<n>` equality filter first; only fall
+    # through to $search when nothing matches that id.
+    if q and q.strip().isdigit():
+        from urllib.parse import quote
+        id_url = f"{client.base_url}/api/3/{bare}?id={quote(q.strip())}&$limit=1"
+        try:
+            ir = client.session.get(id_url, verify=client.verify_ssl)
+            if ir.status_code == 200:
+                idata = ir.json()
+                imembers = [m for m in (idata.get("hydra:member") or [])
+                            if isinstance(m, dict) and m.get("@id")]
+                if imembers:
+                    m = imembers[0]
+                    label = (m.get("name") or m.get("title") or m.get("subject")
+                             or m.get("displayName") or m.get("hostname")
+                             or m.get("description")
+                             or m["@id"].rsplit("/", 1)[-1])
+                    return {
+                        "ok": True, "module": bare, "matched_by": "id",
+                        "total": 1,
+                        "results": [{"iri": m["@id"], "label": str(label)[:120],
+                                     "id": m.get("id")}],
+                        "url": id_url,
+                    }
+        except Exception:  # noqa: BLE001 — fall through to $search
+            pass
+
     # Use $search for substring match across the entity's indexed
     # fields. Falls back to a plain $limit fetch when q is empty so
     # the dropdown has *something* to render before the user types.
@@ -1585,10 +1615,57 @@ def search_module_records(module: str, q: str = "",
     }
 
 
+def _resolve_record_id(client: Any, module: str, rec_id: str,
+                       relationships: bool) -> tuple[dict[str, Any] | None,
+                                                     str, dict[str, Any] | None]:
+    """Resolve a per-module sequential ``id`` (the "Incident #560" a human
+    types) to a full record via the URL-param ``id`` equality filter.
+
+    FSR exposes two identifiers per record: the UUID (global, what
+    ``get_record`` natively wants) and the integer ``id`` (sequential
+    *within a module*, what the UI shows and the only id an analyst knows
+    off-hand). ``GET /api/3/<module>/<id>`` 404s — the path segment must be
+    a UUID — so we go through ``?id=<n>`` (default ``eq`` operator, see
+    store/QUERY_API.md §1) and take the single member.
+
+    Returns ``(record|None, url, error|None)``: the record dict on a hit,
+    or an error payload (3rd slot) the caller can return verbatim.
+    """
+    from urllib.parse import quote
+    qs = f"id={quote(rec_id)}&$limit=1"
+    if relationships:
+        qs += "&$relationships=true"
+    url = f"{client.base_url}/api/3/{module}?{qs}"
+    try:
+        r = client.session.get(url, verify=client.verify_ssl)
+    except Exception as exc:  # noqa: BLE001
+        return None, url, {"ok": False, "code": "transport_error",
+                           "message": f"GET {url} failed: {exc}", "url": url}
+    if r.status_code != 200:
+        return None, url, {"ok": False, "code": f"http_{r.status_code}",
+                           "message": (r.text[:500] or f"HTTP {r.status_code}"),
+                           "url": url}
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return None, url, {"ok": False, "code": "bad_json",
+                           "message": "FSR returned 200 but body was not JSON",
+                           "url": url}
+    members = data.get("hydra:member") or []
+    if not members or not isinstance(members[0], dict):
+        return None, url, {
+            "ok": False, "code": "not_found",
+            "message": (f"no {module} record with id {rec_id} "
+                        "(the per-module sequential number, not a UUID)"),
+            "url": url}
+    return members[0], url, None
+
+
 @mcp.tool()
 def get_record(iri: str = "", module: str = "", uuid: str = "",
-               relationships: bool = True, full: bool = False) -> dict[str, Any]:
-    """Fetch a single FSR record by IRI (or module+uuid), with relationships.
+               relationships: bool = True, full: bool = False,
+               record_id: str = "") -> dict[str, Any]:
+    """Fetch a single FSR record by IRI, module+uuid, or module+record_id.
 
     The read-only companion the triage prompt assumes when it tells the
     agent to pull an event/alert/asset row by its ``iri``/``module``/``uuid``
@@ -1597,11 +1674,23 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
     (correlated alerts, linked assets, indicators) come back inline rather
     than as bare IRIs the agent would have to chase one by one.
 
+    To fetch the record a human names by its **sequential number** (e.g.
+    "investigate case 560" / "incident #560"), pass that number as
+    ``record_id`` together with ``module`` — that integer is the per-module
+    ``id`` column, NOT a UUID, so it can't go in the IRI path (FSR would
+    404). A bare-numeric value pasted into ``uuid`` or ``iri`` is treated
+    the same way as a convenience.
+
     Args:
       iri: full record IRI (e.g. ``/api/3/alerts/<uuid>``). Takes
-        precedence over module+uuid when both are supplied.
-      module: bare module name (e.g. ``alerts``) — required if no ``iri``.
-      uuid: record UUID — required if no ``iri``.
+        precedence over module+uuid when both are supplied. A bare number
+        (or ``module:560`` shorthand) is treated as a ``record_id``.
+      module: bare module name (e.g. ``alerts``/``incidents``) — required
+        with ``uuid`` or ``record_id``.
+      uuid: record UUID — required if no ``iri``. An all-digits value is
+        treated as a ``record_id`` lookup instead.
+      record_id: the per-module sequential ``id`` (what the UI shows as
+        "#560"); resolved via ``?id=<n>`` and needs ``module``.
       relationships: when true (default), append ``?$relationships=true``
         so related entities are hydrated inline.
       full: leave this false. The default pruned projection already
@@ -1619,8 +1708,35 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
       else ``{"ok": false, "code": ..., "message": ...}``. When pruned,
       ``"summarized": true`` is set so callers know it isn't the raw body.
     """
+    # First, normalise a numeric "record id" (the per-module sequential
+    # number a human knows) out of whichever slot the agent dropped it in.
+    rid = ""
+    mod_hint = (module or "").split("?", 1)[0].strip()
+    if str(record_id).strip().isdigit():
+        rid = str(record_id).strip()
+    elif str(uuid).strip().isdigit():
+        rid = str(uuid).strip()
+    elif iri and isinstance(iri, str):
+        s = iri.strip().split("?", 1)[0]
+        head = s.split(":", 1)[0]
+        if ":" in s and "/" not in head and head.strip().isalpha() \
+                and s.partition(":")[2].strip().isdigit():
+            # `incidents:560` shorthand with a numeric tail.
+            rid = s.partition(":")[2].strip()
+            mod_hint = mod_hint or head.strip()
+        elif s.isdigit():
+            rid = s
+
     path = ""
-    if iri and isinstance(iri, str):
+    id_lookup = False
+    if rid:
+        if not mod_hint:
+            return {"ok": False, "code": "missing_module",
+                    "message": (f"record id {rid!r} needs a `module` (e.g. "
+                                "module='incidents') — the sequential number "
+                                "is only unique within a module")}
+        id_lookup = True
+    elif iri and isinstance(iri, str):
         s = iri.strip().split("?", 1)[0]
         head = s.split(":", 1)[0]
         if ":" in s and "/" not in head:
@@ -1640,33 +1756,40 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
         path = f"/api/3/{bare}/{uuid.strip()}"
     else:
         return {"ok": False, "code": "missing_target",
-                "message": "get_record requires either `iri` or both `module` and `uuid`"}
+                "message": ("get_record requires an `iri`, both `module` and "
+                            "`uuid`, or both `module` and `record_id`")}
 
     client = _shared._live_client()
     if client is None:
         return {"ok": False, "code": "no_fsr_configured",
                 "message": "no FSR instance is configured — run `fsrpb env set` first"}
 
-    url = f"{client.base_url}{path}"
-    if relationships:
-        url += "?$relationships=true"
-    try:
-        r = client.session.get(url, verify=client.verify_ssl)
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "code": "transport_error",
-                "message": f"GET {url} failed: {exc}", "url": url}
-    if r.status_code == 404:
-        return {"ok": False, "code": "not_found",
-                "message": f"no record at {path}", "url": url}
-    if r.status_code != 200:
-        return {"ok": False, "code": f"http_{r.status_code}",
-                "message": (r.text[:500] or f"HTTP {r.status_code}"),
-                "url": url}
-    try:
-        data = r.json()
-    except Exception:  # noqa: BLE001
-        return {"ok": False, "code": "bad_json",
-                "message": "FSR returned 200 but body was not JSON", "url": url}
+    if id_lookup:
+        data, url, err = _resolve_record_id(client, mod_hint, rid, relationships)
+        if err is not None:
+            return err
+        assert data is not None
+    else:
+        url = f"{client.base_url}{path}"
+        if relationships:
+            url += "?$relationships=true"
+        try:
+            r = client.session.get(url, verify=client.verify_ssl)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "code": "transport_error",
+                    "message": f"GET {url} failed: {exc}", "url": url}
+        if r.status_code == 404:
+            return {"ok": False, "code": "not_found",
+                    "message": f"no record at {path}", "url": url}
+        if r.status_code != 200:
+            return {"ok": False, "code": f"http_{r.status_code}",
+                    "message": (r.text[:500] or f"HTTP {r.status_code}"),
+                    "url": url}
+        try:
+            data = r.json()
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "code": "bad_json",
+                    "message": "FSR returned 200 but body was not JSON", "url": url}
 
     out: dict[str, Any] = {
         "ok": True,

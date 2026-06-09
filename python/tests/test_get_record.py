@@ -36,6 +36,30 @@ class _FakeSession:
         return _FakeResp(self.status, self.payload)
 
 
+class _RouteSession:
+    """Returns a different payload per matched URL substring."""
+
+    def __init__(self, routes, default=None, status=200):
+        self.routes = routes
+        self.default = default if default is not None else {"hydra:member": []}
+        self.status = status
+        self.urls: list[str] = []
+
+    def get(self, url, verify=True):
+        self.urls.append(url)
+        for needle, payload in self.routes.items():
+            if needle in url:
+                return _FakeResp(self.status, payload)
+        return _FakeResp(self.status, self.default)
+
+
+class _RouteClient:
+    def __init__(self, routes, **kw):
+        self.base_url = "https://fsr"
+        self.verify_ssl = False
+        self.session = _RouteSession(routes, **kw)
+
+
 class _FakeClient:
     def __init__(self, payload, status=200):
         self.base_url = "https://fsr"
@@ -95,3 +119,73 @@ def test_no_fsr_configured(monkeypatch):
     out = mcp_server.get_record(module="alerts", uuid="x")
     assert out["ok"] is False
     assert out["code"] == "no_fsr_configured"
+
+
+# --- numeric record_id resolution (the "investigate case 560" gap) ----------
+
+def _patch_route(monkeypatch, routes, **kw):
+    c = _RouteClient(routes, **kw)
+    monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: c)
+    return c
+
+
+def test_record_id_resolves_via_id_filter(monkeypatch):
+    member = {"@id": "/api/3/incidents/uuid-560", "id": 560, "name": "Case 560"}
+    c = _patch_route(monkeypatch, {"id=560": {"hydra:member": [member]}})
+    out = mcp_server.get_record(module="incidents", record_id="560")
+    assert out["ok"] is True
+    assert out["record"]["name"] == "Case 560"
+    assert "id=560" in c.session.urls[-1]
+    assert "$relationships=true" in c.session.urls[-1]
+
+
+def test_numeric_uuid_treated_as_record_id(monkeypatch):
+    member = {"@id": "/api/3/incidents/uuid-560", "id": 560}
+    _patch_route(monkeypatch, {"id=560": {"hydra:member": [member]}})
+    out = mcp_server.get_record(module="incidents", uuid="560")
+    assert out["ok"] is True
+    assert out["iri"] == "/api/3/incidents/uuid-560"
+
+
+def test_module_colon_number_shorthand(monkeypatch):
+    member = {"@id": "/api/3/incidents/uuid-560", "id": 560}
+    _patch_route(monkeypatch, {"id=560": {"hydra:member": [member]}})
+    out = mcp_server.get_record(iri="incidents:560")
+    assert out["ok"] is True
+
+
+def test_record_id_without_module_errors(monkeypatch):
+    _patch_route(monkeypatch, {})
+    out = mcp_server.get_record(record_id="560")
+    assert out["ok"] is False
+    assert out["code"] == "missing_module"
+
+
+def test_record_id_not_found(monkeypatch):
+    _patch_route(monkeypatch, {"id=999": {"hydra:member": []}})
+    out = mcp_server.get_record(module="incidents", record_id="999")
+    assert out["ok"] is False
+    assert out["code"] == "not_found"
+
+
+def test_search_numeric_q_uses_id_filter(monkeypatch):
+    member = {"@id": "/api/3/incidents/uuid-560", "id": 560, "name": "Case 560"}
+    c = _patch_route(monkeypatch, {"id=560": {"hydra:member": [member]}})
+    out = mcp_server.search_module_records(module="incidents", q="560")
+    assert out["ok"] is True
+    assert out["matched_by"] == "id"
+    assert out["results"][0]["id"] == 560
+    assert "id=560" in c.session.urls[-1]
+
+
+def test_search_numeric_q_falls_through_to_search(monkeypatch):
+    # id lookup misses → $search path still runs.
+    c = _patch_route(monkeypatch, {
+        "id=560": {"hydra:member": []},
+        "$search": {"hydra:member": [
+            {"@id": "/api/3/alerts/a", "name": "has 560 in name"}]},
+    })
+    out = mcp_server.search_module_records(module="alerts", q="560")
+    assert out["ok"] is True
+    assert out.get("matched_by") != "id"
+    assert "$search" in c.session.urls[-1]
