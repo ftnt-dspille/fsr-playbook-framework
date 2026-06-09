@@ -1,5 +1,9 @@
 # Static type-flow analysis plan — source→target type checking across the branch tree
 
+**✅ CLOSED (2026-06-08): all phases done AND shipped/redeployed — `connector-fsr-soc-assistant`
+0.3.133 carries phases 3–5 live, all 10 workers verified. The "re-vendor + redeploy" op task
+below is complete. Nothing left.**
+
 **Status (updated 2026-06-06):** Phases **0, 1 (1a+1b), 2, 3, 4, 4b, 5 ALL DONE & committed.**
 Open Q #2 (connector-param ingestion coercion) is **RESOLVED** by the Phase 4b live probe; the
 finding is that NO further scalar→scalar rule is safe to add (see Phase 4b Outcome) — the
