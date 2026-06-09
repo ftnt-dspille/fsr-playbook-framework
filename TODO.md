@@ -35,6 +35,7 @@ live under `docs/plans/`; frozen research/audit snapshots under
 |---|---|
 | [`PUBLISH_PREP_AND_RENAME.md`](docs/plans/PUBLISH_PREP_AND_RENAME.md) | ✅ Complete (2026-06-08). Ledger 10/10 + `FSRPlaybookYaml`→`fsr-playbook-framework` rename + connector rename cutover: `connector-fsr-soc-assistant` 0.3.133 deployed live, all 10 workers verified. |
 | [`STATIC_TYPE_FLOW_PLAN.md`](docs/plans/STATIC_TYPE_FLOW_PLAN.md) | ✅ Complete (2026-06-08). Phases 0–5 + 4b done; Open Q #2 resolved (no further scalar→scalar rule safe). Shipped & live in connector 0.3.133. |
+| [`SKILL_BASED_PLAYBOOK_PLAN.md`](docs/plans/SKILL_BASED_PLAYBOOK_PLAN.md) | ✅ Closed (2026-06-08). Trace→YAML compiler shipped + live (action_coverage 1.0 / grounding 1.0) + offline-pinned. Default-flip (remove hand-author fallback) NOT pursued — low value; keep both paths. |
 | [`HITL_GUARDRAILS_PLAN.md`](docs/archive/HITL_GUARDRAILS_PLAN.md) | ✅ All 5 phases shipped (2026-05-18). Tier-aware dispatch, approval cards, HMAC binding, sqlite persistence. |
 | [`STATIC_TYPE_VALIDATION_PLAN.md`](docs/archive/STATIC_TYPE_VALIDATION_PLAN.md) | ✅ All tiers shipped (2026-05-25). 12,317/26,093 params typed; Tier 3 chain validation; `fsrpb doctor`. |
 | [`VERIFY_PLAYBOOK_PLAN.md`](docs/archive/VERIFY_PLAYBOOK_PLAN.md) | ✅ Complete (2026-05-25). `verify_runs` history + `session_verify_stats`. |

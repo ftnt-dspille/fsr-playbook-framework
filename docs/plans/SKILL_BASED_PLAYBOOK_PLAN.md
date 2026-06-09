@@ -35,6 +35,20 @@ output is still FSRPB YAML pushed via the existing `chat_resume accept` path (co
 
 ---
 
+## ✅ CLOSED (2026-06-08)
+
+**Capability SHIPPED and LIVE — task closed; the default-flip is NOT being pursued.**
+The trace→YAML compiler (`build_playbook_from_trace`) is in `SAFE_TOOLS`, is the live
+offer-accept authoring path (`operations.py`), and is live-proven at action_coverage 1.0 +
+grounding 1.0; it's also offline-pinned (B4 + c2_containment + enrich_then_block fixtures via
+`python/evals/build_trace_fixture.py`). The one remaining item — a side-by-side baseline to
+justify **removing the hand-author fallback** — was judged low value (2026-06-08): the
+deterministic compiler already ships and the fallback is a useful safety net for
+trace-uncovered scenarios, so keeping both paths is the right call. Reopen only if the
+hand-author path is observed producing bad playbooks in practice.
+
+---
+
 ## SESSION RESUME (2026-06-01) — read this first after a clear
 
 **Status: Phases 1–5 shipped & green** (`make verify` = 99 fsr_core + 126 connector, ruff clean).
