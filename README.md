@@ -16,6 +16,15 @@ It ships three things:
   building, debugging, and stepping through playbooks, plus **MCP servers** that
   expose the same authoring/validation/run tools to agents.
 
+## Contents
+
+- [Layout](#layout) · [Reference store](#reference-store-sqlite-first) · [Setup](#setup) · [Common commands](#common-commands)
+- [MCP servers](#mcp-servers)
+- [Triage → build a playbook](#triage--build-a-playbook-claude-desktop--claude-code) — **pick your front-end:**
+  - [Native path — Claude Desktop / Claude Code, no API key](#native-path--claude-desktop--claude-code-no-api-key)
+  - [Packaged turn — FortiSOAR widget / headless](#packaged-turn--fortisoar-widget--headless)
+  - [Claude Desktop config + env vars](#claude-desktop-config--env-vars)
+
 ## Layout
 
 ```
@@ -77,9 +86,14 @@ Three MCP servers (see `.mcp.json`) expose the toolset to agents / Claude Code:
 
 The `fsrpb` server lets the assistant investigate an incident, stage containment,
 and compile a re-runnable playbook from what it did — with no FortiSOAR UI. There
-are **two ways** to drive it; pick by front-end.
+are **two ways** to drive it; pick by front-end:
 
-#### Recommended for Claude Desktop / Claude Code — drive it yourself (no API key)
+| Front-end | Path | Inner model? | Keys needed |
+|---|---|---|---|
+| **Claude Desktop / Claude Code** | [Native — drive it yourself](#native-path--claude-desktop--claude-code-no-api-key) | No — the assistant *is* Claude | `FSR_BASE_URL` + `FSR_API_KEY` |
+| **FortiSOAR widget / cron / headless** | [Packaged turn](#packaged-turn--fortisoar-widget--headless) | Yes — brings its own LLM | + `OPENAI_*` (default) **or** `ANTHROPIC_API_KEY` |
+
+#### Native path — Claude Desktop / Claude Code, no API key
 
 Claude Desktop and Claude Code **are already Claude**, so they run the triage
 loop themselves using the granular `fsrpb` tools. There is **no second model and
@@ -102,7 +116,7 @@ run—containment). `triage_session_state()` shows what's been captured so far.
 Just ask naturally — *"Triage the latest high-severity incident and build a
 containment playbook from it"* — and the assistant calls these in order.
 
-#### Packaged turn — for the FortiSOAR widget / headless runs (brings its own model)
+#### Packaged turn — FortiSOAR widget / headless
 
 `triage_build_turn` / `triage_build_resume` run the **entire** loop inside one
 tool call, using their **own** inner LLM. This exists for front-ends that are
@@ -112,8 +126,9 @@ tool call, using their **own** inner LLM. This exists for front-ends that are
 **cannot** reuse Claude Desktop's subscription). For Claude Desktop / Code, prefer
 the native primitives above and skip this.
 
-#### Config (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`)
+#### Claude Desktop config + env vars
 
+Config file (macOS): `~/Library/Application Support/Claude/claude_desktop_config.json`.
 Launch with `uv run --directory <repo>` so the project resolves and the server
 auto-loads this repo's `.env`. For the native path you don't need any LLM keys at
 all — only live-FSR access for `run_op`.
