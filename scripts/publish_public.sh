@@ -75,7 +75,13 @@ pats = [
     (re.compile(r"\b10\.99\.\d+\.\d+\b"), "<your-fortisoar-host>"),
     (re.compile(r"[a-z0-9-]+\.us-west-1\.fortisoc\.forticloud\.com"), "<your-fortisoar-host>"),
     (re.compile(r"\b[a-z0-9]+\.forticloud\.com"), "<your-fortisoar-host>"),
-    (re.compile(r"svl-devops-gitlab01\.fortilab\.fortinet\.com"), "<internal-git-host>"),
+    # Any internal Fortinet host — *.fortilab.fortinet.com (gitlab, AI gateway,
+    # …) and *.fndn.fortinet.net (Gitea). Broad on purpose so a new internal
+    # hostname can't leak the way the AI gateway nearly did. Public Fortinet
+    # URLs (repo.fortisoar.fortinet.com, sample @fortinet.com emails) don't
+    # match these suffixes and are left alone.
+    (re.compile(r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.fortilab\.fortinet\.com"), "<internal-host>"),
+    (re.compile(r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.fndn\.fortinet\.net"), "<internal-git-host>"),
 ]
 exts = {".py",".md",".ts",".svelte",".json",".yaml",".yml",".html",".sh",".txt",".cfg",".toml",".har"}
 for p in pathlib.Path(".").rglob("*"):
@@ -91,7 +97,7 @@ PY
 printf '\n# public mirror: ship the sanitized slim reference catalog\n!store/fsr_reference.db\n' >> .gitignore
 
 # 6. VERIFY — no infra leaks, no stray data blobs
-INFRA=$( { grep -rE "10\.99\.[0-9]+\.[0-9]+|us-west-1\.fortisoc\.forticloud\.com|[a-z0-9]+\.forticloud\.com|svl-devops-gitlab01" . 2>/dev/null || true; } | { grep -av "fsr_reference.db" || true; } | wc -l | tr -d ' ')
+INFRA=$( { grep -rE "10\.99\.[0-9]+\.[0-9]+|us-west-1\.fortisoc\.forticloud\.com|[a-z0-9]+\.forticloud\.com|fortilab\.fortinet\.com|fndn\.fortinet\.net|svl-devops-gitlab01" . 2>/dev/null || true; } | { grep -av "fsr_reference.db" || true; } | wc -l | tr -d ' ')
 BLOBS=$( { find . \( -name '*.db' ! -name 'fsr_reference.db' \) -o -name '*.har' -o -name 'fsr_reference.json' 2>/dev/null || true; } | wc -l | tr -d ' ')
 echo ">> verify: infra-bearing text files=$INFRA  stray-blobs=$BLOBS  files=$(find . -type f | wc -l | tr -d ' ')  size=$(du -sh . | cut -f1)"
 if [[ "$INFRA" != "0" || "$BLOBS" != "0" ]]; then echo "!! sanitation check FAILED — refusing to publish" >&2; exit 1; fi
