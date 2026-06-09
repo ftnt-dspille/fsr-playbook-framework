@@ -28,6 +28,7 @@ live under `docs/plans/`; frozen research/audit snapshots under
 |---|---|---|
 | [`VISUAL_EDITOR_PLAN.md`](docs/plans/VISUAL_EDITOR_PLAN.md) | Toggle yaml ↔ visual editor; drag/drop palette; flowchart canvas; per-step inspector; debug runner. | Phases 1–5 ✅. Remaining: 5.4/5.5/5.7 UI, Phase 6 toolbar gaps, variable picker, **browser smoke-test never done**. |
 | [`RENDER_PATH_VALIDATOR_PLAN.md`](docs/plans/RENDER_PATH_VALIDATOR_PLAN.md) | Render-path trace + heuristic checks → red badges before push. | Phases 1–3 + 5 + 6.1 ✅. Remaining: 6.2/6.3 fix-apply, 4.1–4.7 editor surfacing, 7.3 agent fail-fast. |
+| [`MCP_TRIAGE_AGENT_PLAN.md`](docs/plans/MCP_TRIAGE_AGENT_PLAN.md) | Expose the packaged triage→build loop as 2 MCP tools so Claude Desktop/Code runs it turnkey (alt to widget). Loop already extracted (`run_agent_turn`/`resume_agent_turn`) → thin session shim + HITL-resume. | **Not started (2026-06-08).** ~½ day. Spike Open-Q #1 (trace recording over MCP) first. |
 
 ### Archived / complete
 
