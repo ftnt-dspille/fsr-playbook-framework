@@ -32,6 +32,8 @@ _ROSTER: dict[str, str] = {
     "fortigate-firewall": "2.1.0",
     "cyops_utilities": "3.0.0",
     "mitre-attack": "2.0.0",
+    "fortinet-fortimanager-json-rpc": "2.0.0",
+    "fortinet-fortianalyzer": "3.3.0",
 }
 
 
@@ -220,6 +222,91 @@ def _firewall_block_ip(params: dict) -> Any:
     }
 
 
+# ---------------------------------------------------------------------------
+# NOC scenario — FortiGate "FGT-BRANCH-04" stopped reporting to FortiManager.
+# Deterministic device-down story: unreachable since 03:14, preceded by a WAN1
+# link-down at 03:11; HA peer FGT-BRANCH-04-B is still up; the last policy push
+# was clean (rules out a bad config push -> points at upstream/power).
+# ---------------------------------------------------------------------------
+_NOC_DEVICE = "FGT-BRANCH-04"
+_NOC_SERIAL = "FGT60F0000000404"
+_NOC_PEER = "FGT-BRANCH-04-B"
+_NOC_PEER_SERIAL = "FGT60F0000000405"
+_NOC_DOWN_TS = "2026-06-10T03:14:07Z"
+_NOC_LASTLOG_TS = "2026-06-10T03:13:55Z"
+
+
+def _fmg_device_row(down: bool) -> dict[str, Any]:
+    return {
+        "name": _NOC_DEVICE, "sn": _NOC_SERIAL, "ip": "10.40.4.1",
+        "conn_status": 0 if down else 1, "conf_status": "insync",
+        "db_status": "mod", "ha_mode": "a-p",
+        "platform_str": "FortiGate-60F", "os_ver": "7.4.3",
+        "last_checked": _NOC_DOWN_TS, "desc": "Branch 04 edge firewall",
+    }
+
+
+def _fmg_jsonrpc(rows: list[dict], url: str) -> dict[str, Any]:
+    """Wrap rows in the real `fortinet-fortimanager-json-rpc` get envelope.
+
+    The connector's `json_rpc_get` returns the row list under `get_response`
+    (NOT the JSON-RPC `result[].data` shape) — verified live on the box
+    (10.99.249.205, connector 1.2.6). Mirroring it here keeps the offline sim
+    faithful to production so digest-shape regressions surface in tests."""
+    return {"operation": None, "status": "Success", "message": "",
+            "data": {"get_response": rows}}
+
+
+def _fmg_json_rpc_get(params: dict) -> Any:
+    url = str(params.get("url") or "")
+    if url.endswith("/ha_slave"):
+        rows = [
+            {"name": _NOC_DEVICE, "sn": _NOC_SERIAL, "role": "master",
+             "prio": 128, "conn_status": 0, "idx": 0},
+            {"name": _NOC_PEER, "sn": _NOC_PEER_SERIAL, "role": "slave",
+             "prio": 100, "conn_status": 1, "idx": 1},
+        ]
+        return _fmg_jsonrpc(rows, url)
+    if "/_package/status" in url:
+        rows = [
+            {"pkg": "branch-edge", "dev": _NOC_DEVICE, "status": "installed"},
+            {"pkg": "branch-edge", "dev": "FGT-HQ-01", "status": "installed"},
+        ]
+        return _fmg_jsonrpc(rows, url)
+    # /dvmdb/.../device or /dvmdb/.../device/<name>
+    if url.rstrip("/").endswith("/device"):
+        rows = [
+            _fmg_device_row(down=True),
+            {"name": "FGT-HQ-01", "sn": "FGT100F000000001", "ip": "10.0.0.1",
+             "conn_status": 1, "conf_status": "insync", "ha_mode": "a-p",
+             "platform_str": "FortiGate-100F", "os_ver": "7.4.3",
+             "last_checked": "2026-06-10T03:59:50Z"},
+        ]
+        return _fmg_jsonrpc(rows, url)
+    # single named device
+    return _fmg_jsonrpc([_fmg_device_row(down=True)], url)
+
+
+def _faz_device_logs(params: dict) -> Any:
+    """Last events FGT-BRANCH-04 sent before going silent: WAN1 link-down at
+    03:11, last keepalive 03:13:55, then nothing."""
+    rows = [
+        {"itime": _NOC_LASTLOG_TS, "type": "event", "subtype": "system",
+         "logid": "0100022921", "action": "link-monitor",
+         "devname": _NOC_DEVICE, "level": "critical",
+         "msg": "Link monitor: WAN1 (wan1) is down"},
+        {"itime": "2026-06-10T03:11:02Z", "type": "event", "subtype": "system",
+         "logid": "0100020099", "action": "interface-stat-change",
+         "devname": _NOC_DEVICE, "level": "warning",
+         "msg": "Interface wan1 status changed to down"},
+        {"itime": "2026-06-10T03:05:40Z", "type": "event", "subtype": "vpn",
+         "logid": "0101037129", "action": "tunnel-down",
+         "devname": _NOC_DEVICE, "level": "error",
+         "msg": "IPsec tunnel HQ-BRANCH04 went down"},
+    ]
+    return {"data": rows}
+
+
 _EXECUTE: dict[tuple[str, str], Callable[[dict], Any]] = {
     ("fortinet-fortisiem", "get_ip_context"): _siem_ip_context,
     ("fortinet-fortisiem", "get_host_context"): _siem_host_context,
@@ -232,6 +319,9 @@ _EXECUTE: dict[tuple[str, str], Callable[[dict], Any]] = {
     ("abuseipdb", "check_ip"): _abuseipdb,
     ("fortigate-firewall", "block_ip_new"): _firewall_block_ip,
     ("fortigate-firewall", "block_ip"): _firewall_block_ip,
+    ("fortinet-fortimanager-json-rpc", "json_rpc_get"): _fmg_json_rpc_get,
+    ("fortinet-fortianalyzer", "start_and_fetch_bulk_device_logs"):
+        _faz_device_logs,
 }
 
 

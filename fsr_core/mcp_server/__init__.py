@@ -32,6 +32,7 @@ from . import (
     tools_execution,
     tools_jinja,
     tools_picklists,
+    tools_noc,
     tools_recipe,
     tools_triage,
     tools_verify,
@@ -119,6 +120,17 @@ from .tools_triage import (
     siem_search_user,
     test_find_record,
     verification_status,
+)
+
+# NOC / FortiManager + FortiAnalyzer device-diagnostic tools
+from .tools_noc import (
+    faz_event_summary,
+    faz_search_by_serial,
+    faz_search_device_events,
+    fmg_get_device_list,
+    fmg_get_device_status,
+    fmg_get_ha_status,
+    fmg_get_policy_package_status,
 )
 
 # Picklist tools
@@ -260,6 +272,14 @@ __all__ = [
     "faz_get_alerts",
     "faz_search_ip",
     "faz_raw_query",
+    # NOC / FortiManager + FortiAnalyzer device diagnostics
+    "fmg_get_device_list",
+    "fmg_get_device_status",
+    "fmg_get_ha_status",
+    "fmg_get_policy_package_status",
+    "faz_search_device_events",
+    "faz_search_by_serial",
+    "faz_event_summary",
     # Picklists
     "list_picklists",
     "get_picklist",

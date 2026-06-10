@@ -34,6 +34,11 @@ class ToolUseEvent:
 class ToolResultEvent:
     call_id: str
     result: Any
+    # Server-side wall-time (ms) the tool dispatch took. None when the
+    # result didn't pass through a measured dispatch (e.g. the approval-resume
+    # path, which executes the tool before re-entering stream()). The widget
+    # uses this to freeze a per-tool duration on the result chip.
+    duration_ms: int | None = None
     kind: Literal["tool_result"] = "tool_result"
 
 
@@ -76,6 +81,10 @@ class ToolCallUsage:
     name: str
     args_chars: int
     result_chars: int
+    # Server-side wall-time (ms) of this tool's dispatch (None if unmeasured).
+    # Folded into chat_turns.tool_calls_json for later profiling — answers
+    # "which tool was slow" from the authoritative turn record.
+    duration_ms: int | None = None
 
 
 @dataclass

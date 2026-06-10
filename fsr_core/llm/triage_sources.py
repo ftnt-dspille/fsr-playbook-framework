@@ -32,7 +32,25 @@ SOURCE_TOOLS: dict[str, dict[str, Any]] = {
         "label": "FortiAnalyzer",
         "connector": "fortinet-fortianalyzer",
         "ip": 'faz_search_ip(ip="{ip}", direction="{direction}")',
+        "device": 'faz_search_device_events(device="{device}", window="6h")',
         "alerts": 'faz_get_alerts(adom="root")',
+        "raw": "faz_raw_query",
+    },
+    # NOC device-posture source: a FortiManager-raised "device stopped
+    # reporting / went down" record. Pivots are device-centric (the device name
+    # normalizes into indicators.hosts via the `deviceName` field).
+    "fortimanager": {
+        "label": "FortiManager",
+        "connector": "fortinet-fortimanager-json-rpc",
+        "device": 'fmg_get_device_status(device="{device}")',
+        "device_extra": [
+            'fmg_get_ha_status(device="{device}")'
+            "  — HA failover or true outage? (peer up ⇒ traffic likely survived)",
+            'fmg_get_policy_package_status(device="{device}")'
+            "  — rule a bad config push in or out",
+            'faz_search_device_events(device="{device}", window="6h")'
+            "  — the last logs it sent before going silent (link-down? tunnel?)",
+        ],
         "raw": "faz_raw_query",
     },
 }
@@ -48,6 +66,10 @@ _SOURCE_ALIASES: tuple[tuple[str, str], ...] = (
     ("forti-analyzer", "fortianalyzer"),
     ("forti analyzer", "fortianalyzer"),
     ("faz", "fortianalyzer"),
+    ("fortimanager", "fortimanager"),
+    ("forti-manager", "fortimanager"),
+    ("forti manager", "fortimanager"),
+    ("fmg", "fortimanager"),
 )
 
 
@@ -102,6 +124,15 @@ def _moves_for_source(ts: dict[str, Any], norm: dict[str, Any]) -> list[str]:
     host = (ind.get("hosts") or [None])[0]
     if "host" in ts and host:
         moves.append(ts["host"].format(host=host))
+    # Device posture (NOC): the device name normalizes into `hosts` via the
+    # record's `deviceName` field. Lead with reachability, then the corroborating
+    # HA / policy-push / last-logs pivots.
+    device = (ind.get("hosts") or [None])[0]
+    if "device" in ts and device:
+        moves.append(ts["device"].format(device=device)
+                     + "  — is the device reachable right now?")
+        for tmpl in ts.get("device_extra", []):
+            moves.append(tmpl.format(device=device))
     user = (ind.get("users") or [None])[0]
     if "user" in ts and user:
         moves.append(ts["user"].format(user=user))

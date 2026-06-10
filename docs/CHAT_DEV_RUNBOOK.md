@@ -114,6 +114,23 @@ $PY scripts/prompt_loop.py --file _b4_chain.json
 - **A new tool won't dispatch** unless it's registered in `SAFE_TOOLS`
   (the `build_playbook_from_trace` regression — see auto-memory).
 - Don't kill the user's dev servers on :47821/:47822; use 47831+ for test backends.
+- **`run_op` summarizes by default — it can silently drop fields + cap lists.**
+  `_summarize_op_output`→`_truncate_generic` keeps only the first 40 dict keys
+  and first 5 list items. A tool whose digest needs a late-ordered field (e.g.
+  FMG device `name`/`sn`/`ip`, which sit past key 40) gets it stripped, and long
+  lists silently shrink to 5. If the caller does its own bounded digest, pass
+  `run_op(..., summarize=False)` — and project at the source (e.g. FMG
+  `json_rpc_get` honours `data:{fields:[…]}`) so the payload stays small.
+- **`run_op` may route through the force-fail-playbook agent-wrap, which reads a
+  PERSISTED, FSR-truncated step result.** It only SHOULD do this for connectors
+  reachable ONLY via a remote agent. `_agent_config_ids` now subtracts
+  `_local_config_ids` so a master-local config (even one a tenant agent also
+  echoes) uses direct execute. If a live read comes back capped to ~5 rows but a
+  raw `/api/integration/execute/` curl returns the full list, suspect the wrap.
+- **A connector's `json_rpc_get`-style output shape may differ from the named-op
+  shape.** The `fortinet-fortimanager-json-rpc` connector nests rows under
+  `get_response`, not `result[].data`. Keep sim fixtures faithful to the REAL
+  shape — a lying fixture makes offline green while live returns 0 rows.
 
 ## Pointers
 - Chat behavior plan / current phase: `docs/plans/CHAT_INTELLIGENCE_PLAN.md`.

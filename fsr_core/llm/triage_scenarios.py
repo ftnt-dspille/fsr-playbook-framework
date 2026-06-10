@@ -110,7 +110,79 @@ def _c2_recipes(norm: dict) -> list[str]:
     return out
 
 
+def _device_down_match(norm: dict) -> int:
+    """NOC device-down: a managed device stopped reporting / went unreachable."""
+    score = 0
+    blob = _text_blob(norm)
+    if any(w in blob for w in (
+            "stopped reporting", "stopped logging", "device down",
+            "device is down", "unreachable", "went offline", "is offline",
+            "link down", "link is down", "not responding", "lost connection",
+            "connection lost", "device disconnected", "no longer reporting")):
+        score += 2
+    src = (norm.get("source_connector") or "").lower()
+    if "fortimanager" in src or "fmg" in src:
+        score += 1
+    return score
+
+
+def _device_down_recipes(norm: dict) -> list[str]:
+    # Device-centric moves: confirm reachability in FMG, then corroborate (HA /
+    # policy push / last FAZ logs). The device name normalizes into hosts.
+    from .triage_sources import SOURCE_TOOLS, toolset_for
+
+    ts = toolset_for(norm.get("source_connector")) or SOURCE_TOOLS["fortimanager"]
+    device = _first(norm.get("indicators", {}).get("hosts", []))
+    out: list[str] = []
+    if not device:
+        return out
+    if "device" in ts:
+        out.append(ts["device"].format(device=device)
+                   + "  — confirm the device is actually unreachable first")
+        for tmpl in ts.get("device_extra", []):
+            out.append(tmpl.format(device=device))
+    else:
+        out.append(f'faz_search_device_events(device="{device}", window="6h")'
+                   "  — the last logs it sent before going silent")
+    return out
+
+
 SCENARIOS: list[dict[str, Any]] = [
+    {
+        "id": "device_down",
+        "title": "NOC — managed device down / not reporting",
+        "match": _device_down_match,
+        "ti_targets": [],
+        "siem_recipes": _device_down_recipes,
+        "verdict_checklist": [
+            "Is the device truly unreachable (FMG conn_status=down), or did HA "
+            "fail over (peer up ⇒ traffic likely survived)?",
+            "When did it go silent, and what was the LAST event before "
+            "(WAN/link down, power, tunnel down)?",
+            "Was the most recent policy-package install clean, or could a bad "
+            "config push be the cause?",
+            "Root cause: upstream/network/power vs config push — which does the "
+            "evidence point to?",
+            "Recommend the remediation; do NOT auto-run it — any fix goes "
+            "through a tier-3 approval card.",
+        ],
+        "fragment": (
+            "This is a **NOC device-down** event — a managed device stopped "
+            "reporting. Troubleshoot, don't auto-remediate: (1) confirm "
+            "reachability in FortiManager (`fmg_get_device_status`); (2) check "
+            "HA (`fmg_get_ha_status`) — a healthy peer means traffic likely "
+            "survived; (3) corroborate in FortiAnalyzer "
+            "(`faz_search_device_events`/`faz_event_summary`) to find the last "
+            "logs and any link/tunnel/power signal just before silence; (4) rule "
+            "a bad config push in or out (`fmg_get_policy_package_status`). "
+            "A device with `conn_status: unknown` and/or `is_model: true` is a "
+            "MODEL device (defined in FMG, never deployed) — that is NOT an "
+            "outage, so don't flag it as down. "
+            "Conclude with a likely root cause (upstream/network/power vs "
+            "config) and a RECOMMENDED fix — never run a reboot or re-install "
+            "without an approval card."
+        ),
+    },
     {
         "id": "c2_exfil",
         "title": "C2 / data exfiltration",

@@ -1190,13 +1190,38 @@ def _summarize_op_output(connector: str, op: str,
 _AGENT_CFG_CACHE: dict[str, Any] = {"ts": 0.0, "ids": None}
 
 
-def _agent_config_ids(client) -> set[str]:
-    """Cached set of agent-bound connector configuration UUIDs.
+def _local_config_ids(client) -> set[str]:
+    """Config UUIDs runnable LOCALLY on the master node (the non-agent
+    `configured=true` set). A raw /api/integration/execute/ against these
+    returns inline results, so they must NOT be treated as agent-proxied —
+    even when the same config_id also surfaces under a remote agent (a tenant
+    `connector_details?agent=…` query echoes the master's shared configs)."""
+    ids: set[str] = set()
+    try:
+        r = client.session.post(
+            client.base_url
+            + "/api/integration/connector_details/?format=json"
+            "&configured=true&exclude=operation&active=true",
+            json={}, verify=client.verify_ssl,
+        )
+        if getattr(r, "status_code", 200) == 200:
+            for row in (r.json().get("data") or []):
+                for cid in _row_config_ids(row):
+                    ids.add(str(cid))
+    except Exception:  # noqa: BLE001
+        pass
+    return ids
 
-    A config in this set is proxied through a FortiSOAR Agent, so a raw
-    /api/integration/execute/ against it is fire-and-forget — run_op must route
-    it through the force-fail playbook instead. Short TTL like _configured_rows
-    (the agent install set rarely changes within a session)."""
+
+def _agent_config_ids(client) -> set[str]:
+    """Cached set of config UUIDs that are ONLY reachable through a FortiSOAR
+    Agent — a raw /api/integration/execute/ against them is fire-and-forget, so
+    run_op must route them through the force-fail playbook instead.
+
+    Configs that are ALSO configured locally on the master are excluded: they
+    execute inline directly, and the agent-wrap reads its result from a
+    persisted workflow step that FSR truncates (large lists come back capped).
+    Short TTL like _configured_rows (the agent install set rarely changes)."""
     import time
     if (_AGENT_CFG_CACHE["ids"] is not None
             and (time.time() - _AGENT_CFG_CACHE["ts"]) < _CONFIGURED_TTL_S):
@@ -1206,6 +1231,9 @@ def _agent_config_ids(client) -> set[str]:
         for row in _agent_configured_rows(client):
             for cid in _row_config_ids(row):
                 ids.add(str(cid))
+        # Drop anything also runnable locally — direct execute is correct (and
+        # lossless) for those; the wrap is only for agent-EXCLUSIVE configs.
+        ids -= _local_config_ids(client)
     except Exception:  # noqa: BLE001 — fail open: treat as non-agent
         ids = set()
     _AGENT_CFG_CACHE["ids"] = ids
@@ -1217,7 +1245,8 @@ def _run_op_via_agent_playbook(connector: str, op: str,
                                params: dict[str, Any], config_id: str,
                                version: str, agent_id: str,
                                client, timeout_s: int = 120,
-                               step_name: str = "") -> dict[str, Any]:
+                               step_name: str = "",
+                               summarize: bool = True) -> dict[str, Any]:
     """Execute an agent-bound op ONCE via a force-fail playbook and return its
     real result. Builds [connector op] -> [set_variable boom={{ 1/0 }}],
     pushes the UNWRAPPED collection, triggers it, polls to the (expected)
@@ -1379,7 +1408,9 @@ def _run_op_via_agent_playbook(connector: str, op: str,
             pass
         sample = data[0] if isinstance(data, list) and data else data
         top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
-        summarized, truncated = _summarize_op_output(connector, op, data)
+        summarized, truncated = (
+            _summarize_op_output(connector, op, data)
+            if summarize else (data, False))
         _record_verification(connector, op, "tested_pass",
                              "via agent force-fail playbook")
         out = {
@@ -1492,6 +1523,7 @@ def run_op(
     config: str = "",
     confirm: bool = False,
     step_name: str = "",
+    summarize: bool = True,
 ) -> dict[str, Any]:
     """Execute a single connector operation on the live FSR instance and return
     its real output.
@@ -1522,6 +1554,11 @@ def run_op(
     `params` — dict of input parameter values for the operation.
     `config` — optional connector config name (leave empty for the default config).
     `confirm` — set True to execute operations that are not auto-safe.
+    `summarize` — when True (default), large/list outputs are field-pruned,
+        list-capped, and key-capped to keep agent context lean. Set False when
+        the caller does its own bounded digest (e.g. the NOC FMG wrappers) and
+        must see the raw rows — the generic truncation drops dict keys past the
+        first 40, which silently strips late-ordered fields like FMG `name`/`ip`.
     `step_name` — optional short, descriptive Title-Case label for this step in a
         playbook compiled from the session (e.g. "Lookup IP Geolocation"). STRONGLY
         preferred for generic passthrough ops (`execute_api_request`,
@@ -1686,7 +1723,7 @@ def run_op(
             agent_id = ""
         return _run_op_via_agent_playbook(
             connector, op, params or {}, exec_config, version, agent_id, client,
-            step_name=step_name)
+            step_name=step_name, summarize=summarize)
 
     body = {
         "connector": connector,
@@ -1748,7 +1785,9 @@ def run_op(
     # top_keys reflect the FULL shape so authoring references stay accurate.
     sample = data[0] if isinstance(data, list) and data else data
     top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
-    summarized, truncated = _summarize_op_output(connector, op, data)
+    summarized, truncated = (
+        _summarize_op_output(connector, op, data)
+        if summarize else (data, False))
     out = {
         "ok": True,
         "data": summarized,

@@ -115,6 +115,28 @@ def test_accumulates_tool_call_args_across_deltas():
     assert any(isinstance(e, ToolResultEvent) for e in events)
 
 
+def test_tool_result_carries_duration_ms():
+    """Every dispatched tool stamps server-side wall-time (ms) on its
+    ToolResultEvent and the matching ToolCallUsage, so the widget can
+    freeze a per-tool duration and the turn record can profile slowness."""
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="c1",
+                                                  name="find_connector", args='{"q":"vt"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    turn2 = [_delta_chunk(content="done"), _delta_chunk(finish="stop"), _usage_chunk()]
+    p = _provider([turn1, turn2])
+    with patch("fsr_core.llm.openai_provider.dispatch",
+               return_value={"matches": []}), \
+         patch("fsr_core.llm.openai_provider._tier_for", return_value=1):
+        events = asyncio.run(_drain(p.stream(system="", messages=[], tools=[], tags={})))
+    tr = next(e for e in events if isinstance(e, ToolResultEvent))
+    assert isinstance(tr.duration_ms, int) and tr.duration_ms >= 0
+    usage = next(e for e in events
+                 if isinstance(e, UsageEvent) and e.tool_calls)
+    assert usage.tool_calls[0].duration_ms == tr.duration_ms
+
+
 def test_tier3_call_suspends_and_stashes_session():
     """A tier-3+ tool returning pending_approval must emit an
     ApprovalRequestEvent + DoneEvent(pending_approval) and stash the

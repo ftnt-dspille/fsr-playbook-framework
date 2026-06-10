@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import uuid as _uuid
 from typing import Any, AsyncIterator
 
@@ -540,7 +541,8 @@ class OpenAIProvider:
 
             tool_messages: list[dict[str, Any]] = []
 
-            def _record(name: str, args: dict[str, Any], result: Any) -> str:
+            def _record(name: str, args: dict[str, Any], result: Any,
+                        duration_ms: int | None = None) -> str:
                 content_str = _stringify(result)
                 try:
                     args_chars = len(json.dumps(args, default=str))
@@ -548,6 +550,7 @@ class OpenAIProvider:
                     args_chars = 0
                 tool_call_usage.append(ToolCallUsage(
                     name=name, args_chars=args_chars, result_chars=len(content_str),
+                    duration_ms=duration_ms,
                 ))
                 return content_str
 
@@ -558,14 +561,16 @@ class OpenAIProvider:
 
                 async def _run_one(nm: str, ar: dict[str, Any]) -> Any:
                     async with _sem:
-                        return await asyncio.to_thread(_guarded_dispatch, nm, ar)
+                        _t0 = time.perf_counter()
+                        res = await asyncio.to_thread(_guarded_dispatch, nm, ar)
+                        return res, int((time.perf_counter() - _t0) * 1000)
 
                 batch_results = await asyncio.gather(
                     *[_run_one(name, args) for (_cid, name, args) in parallel_batch]
                 )
-                for (call_id, name, args), result in zip(parallel_batch, batch_results):
-                    yield ToolResultEvent(call_id=call_id, result=result)
-                    content_str = _record(name, args, result)
+                for (call_id, name, args), (result, dur_ms) in zip(parallel_batch, batch_results):
+                    yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
+                    content_str = _record(name, args, result, dur_ms)
                     tool_messages.append({
                         "role": "tool", "tool_call_id": call_id, "content": content_str,
                     })
@@ -577,7 +582,9 @@ class OpenAIProvider:
                     name=name, arguments=args, call_id=call_id,
                     tier=_tier_for(name, args),
                 )
+                _t0 = time.perf_counter()
                 result = _guarded_dispatch(name, args)
+                dur_ms = int((time.perf_counter() - _t0) * 1000)
                 if isinstance(result, dict) and result.get("pending_approval"):
                     remaining = list(tool_calls[i + 1:])
                     approval_id = result["approval_id"]
@@ -615,8 +622,8 @@ class OpenAIProvider:
                     )
                     break
 
-                yield ToolResultEvent(call_id=call_id, result=result)
-                content_str = _record(name, args, result)
+                yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
+                content_str = _record(name, args, result, dur_ms)
                 tool_messages.append({
                     "role": "tool", "tool_call_id": call_id, "content": content_str,
                 })

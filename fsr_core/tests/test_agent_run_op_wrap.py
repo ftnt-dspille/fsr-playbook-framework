@@ -166,6 +166,30 @@ def test_configured_rows_merges_agent_config_for_dual_install(monkeypatch):
     te._CONFIGURED_CACHE["rows"] = None  # don't leak the stub into other tests
 
 
+def test_agent_config_ids_excludes_locally_runnable(monkeypatch):
+    """A config that is configured locally on the master must NOT be treated as
+    agent-bound, even when the same config_id also surfaces under a remote agent
+    (a tenant `connector_details?agent=…` query echoes the master's shared
+    configs). Regression for the FMG json-rpc device list coming back truncated
+    to ~5 rows because run_op needlessly routed a local read through the
+    force-fail-playbook wrap (which reads a PERSISTED, FSR-capped step result)."""
+    agent_row = {
+        "name": "fortinet-fortimanager-json-rpc", "_agent_id": "tenant-1",
+        "configuration": [
+            {"config_id": "shared-evoke", "name": "evoke"},   # also local
+            {"config_id": "agent-only", "name": "remote"},     # agent-exclusive
+        ],
+    }
+    monkeypatch.setattr(te, "_agent_configured_rows", lambda client: [agent_row])
+    monkeypatch.setattr(te, "_local_config_ids", lambda client: {"shared-evoke"})
+    te._AGENT_CFG_CACHE["ids"] = None  # bypass cache
+
+    ids = te._agent_config_ids(client=object())
+    assert "shared-evoke" not in ids   # local → direct execute, no wrap
+    assert "agent-only" in ids         # agent-exclusive → still wrapped
+    te._AGENT_CFG_CACHE["ids"] = None  # don't leak into other tests
+
+
 def test_agent_wrap_connector_error_surfaces_as_failure():
     # The connector op itself failed inside the playbook (not the Boom step).
     run_step = {
