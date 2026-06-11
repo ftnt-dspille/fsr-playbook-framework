@@ -188,6 +188,44 @@ device-keyed sim. Swap to the real FS device name when wiring the live drive.
 
 **Then replicate** scenarios 2, 3, 5, 6, 7 from the same manifest shape.
 
+## Follow-up: FortiGate baseline configs for live FAZ/FMG data  ← REQUIRED
+
+Decision (2026-06-10): **prefer live data from FAZ/FMG over sim fixtures.** That
+only works if each target FortiGate is *configured for* its scenario — there must
+be a real tunnel to drop, a real SD-WAN zone to degrade, a real HA pair, etc.,
+and the device must be **logging to FortiAnalyzer + registered to FortiManager**
+so the agent's tools return genuine telemetry. The sim fixtures then become the
+CI/offline fallback only.
+
+So before the live drive of each scenario, author a **baseline FGT config**
+(an FS provisioning recipe / `config:` phase playbook — same mechanism as
+`scenarios.yaml`, just non-destructive setup) that establishes the preconditions:
+
+| Scenario | Baseline config the FGT must carry (so the fault is real) |
+|----------|------------------------------------------------------------|
+| **all** | `config log fortianalyzer setting` → FAZ + FMG registration + a clean policy package installed (so device shows up in fleet, logs flow) |
+| device down | a monitored WAN uplink (link-monitor) so the drop logs |
+| HA failover | a configured **HA cluster** (2 FGTs, heartbeat + monitored ifaces) |
+| SD-WAN degrade | an SD-WAN zone with ≥2 members + SLA health-checks |
+| VPN tunnel down | a site-to-site **IPsec phase1/phase2** (HQ↔branch) carrying real subnets |
+| config drift | an FMG-managed policy package (so out-of-sync is meaningful) |
+| resource exhaustion | a traffic generator / session source to drive CPU/mem |
+| FortiGuard degraded | FortiGuard + scheduled IPS/AV updates + logging |
+
+**Action items (follow-up thread):**
+1. Decide where the baseline configs live — FS provisioning recipes in
+   `fabric_studio_fixer` (`config:` phase / a `noc_baseline_*` recipe set) vs a
+   standalone config bundle applied at topology bring-up.
+2. Author the baseline for the VPN slice first: a working HQ↔branch IPsec tunnel
+   + FAZ logging + FMG registration on the two FGTs, then verify
+   `faz_search_device_events(logtype="vpn")` returns REAL phase2 logs (not the
+   sim) and `fmg_get_device_status` shows the device up.
+3. Confirm FAZ is actually receiving each device's logs (log-rate / device list
+   in FAZ) before relying on `faz_*` tools — a silent FAZ = empty hunts.
+4. Generalize: a per-scenario `baseline` block in `noc_scenarios.json` that
+   points at the provisioning recipe, so "stand up the lab for scenario X" is one
+   command alongside the induce/teardown.
+
 ### Open questions for the slice
 - Exact FS device name + mgmt IP + jump host for the target FGT (and an HA pair
   for scenario 2).
