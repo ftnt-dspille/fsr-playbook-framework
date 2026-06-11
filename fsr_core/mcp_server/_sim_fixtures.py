@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from . import _noc_scenarios
+
 # ---------------------------------------------------------------------------
 # Configured-connector roster (connector_details / list_configured_connectors)
 # ---------------------------------------------------------------------------
@@ -282,14 +284,23 @@ def _fmg_json_rpc_get(params: dict) -> Any:
              "platform_str": "FortiGate-100F", "os_ver": "7.4.3",
              "last_checked": "2026-06-10T03:59:50Z"},
         ]
+        # Manifest-driven NOC scenarios (vpn_tunnel_down, …) each contribute one
+        # managed-device row, so a fleet sweep shows them alongside BRANCH-04.
+        rows.extend(sc["fmg_row"] for sc in _noc_scenarios.scenarios()
+                    if sc.get("fmg_row"))
         return _fmg_jsonrpc(rows, url)
     # single named device
     return _fmg_jsonrpc([_fmg_device_row(down=True)], url)
 
 
 def _faz_device_logs(params: dict) -> Any:
-    """Last events FGT-BRANCH-04 sent before going silent: WAN1 link-down at
-    03:11, last keepalive 03:13:55, then nothing."""
+    """FAZ device logs. For a manifest NOC scenario (matched on the queried
+    ``devid``) return that scenario's canned ``faz_logs``; otherwise the default
+    FGT-BRANCH-04 device-down story (WAN1 link-down at 03:11, last keepalive
+    03:13:55, then silence)."""
+    sc = _noc_scenarios.by_device(str((params or {}).get("devid") or ""))
+    if sc and sc.get("faz_logs"):
+        return {"data": list(sc["faz_logs"])}
     rows = [
         {"itime": _NOC_LASTLOG_TS, "type": "event", "subtype": "system",
          "logid": "0100022921", "action": "link-monitor",

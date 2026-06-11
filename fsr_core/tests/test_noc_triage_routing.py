@@ -85,3 +85,32 @@ def test_security_alert_does_not_misclassify_as_device_down():
                        "hosts": [], "users": []},
     }
     assert classify_alert(norm)["id"] != "device_down"
+
+
+# ----- vpn_tunnel_down scenario --------------------------------------------
+
+def test_classify_picks_vpn_tunnel_down():
+    norm = _noc_norm(source="Fortinet FortiAnalyzer", device="FGT-BRANCH-07",
+                     name="Site-to-site VPN HQ↔BRANCH07 is down — branch isolated")
+    sc = classify_alert(norm)
+    assert sc["id"] == "vpn_tunnel_down"
+    assert sc["ti_targets"] == []  # no external TI for a NOC tunnel event
+
+
+def test_vpn_tunnel_down_recipes_confirm_device_then_read_vpn_logs():
+    norm = _noc_norm(source="Fortinet FortiAnalyzer", device="FGT-BRANCH-07",
+                     name="IPsec phase2 renegotiation failed on HQ-BRANCH07 tunnel")
+    sc = classify_alert(norm)
+    assert sc["id"] == "vpn_tunnel_down"
+    joined = " ".join(render_recipes(sc, norm))
+    # confirm reachability first (rules out a device outage)…
+    assert 'fmg_get_device_status(device="FGT-BRANCH-07")' in joined
+    # …then read the VPN logs
+    assert 'logtype="vpn"' in joined
+
+
+def test_vpn_tunnel_down_beats_device_down_on_tunnel_wording():
+    # "VPN ... is down" should NOT fall through to device_down — the device is up.
+    norm = _noc_norm(source="Fortinet FortiAnalyzer", device="FGT-BRANCH-07",
+                     name="VPN tunnel HQ-BRANCH07 is down, branch isolated")
+    assert classify_alert(norm)["id"] == "vpn_tunnel_down"

@@ -1,0 +1,52 @@
+{
+  "_README": "Single source of truth for NOC alert scenarios (see docs/plans/NOC_SCENARIO_CATALOG.md). Each entry drives: the live alert seeder (alert.*), the Fabric Studio fault recipe (induce.*), and the offline sim fixtures (fmg_row + faz_logs). `device` ties the agent's tool calls to the right story. device_down lives in code in _sim_fixtures.py for now (FGT-BRANCH-04) and is documented here for the seeder/FS side only.",
+
+  "vpn_tunnel_down": {
+    "device": "FGT-BRANCH-07",
+    "serial": "FGT60F0000000407",
+    "alert": {
+      "title": "Site-to-site VPN HQ↔BRANCH07 is down — branch isolated",
+      "description": "FortiAnalyzer reported repeated IPsec phase2-down events for tunnel HQ-BRANCH07 on FGT-BRANCH-07 starting 03:22. The branch LAN (10.70.0.0/16) can no longer reach HQ resources. The device itself is still reporting to FortiManager (reachable), so this is a tunnel/VPN failure, not a device outage.",
+      "severity": "High",
+      "source": "FortiAnalyzer",
+      "type": "Network/VPN"
+    },
+    "induce": {
+      "capability": "cli",
+      "comment": "Disable the IPsec phase1-interface on the branch FGT; the tunnel drops and FAZ logs phase2-down. teardown re-enables it.",
+      "setup": [
+        "config vpn ipsec phase1-interface",
+        "  edit HQ-BRANCH07",
+        "    set status disable",
+        "  next",
+        "end"
+      ],
+      "teardown": [
+        "config vpn ipsec phase1-interface",
+        "  edit HQ-BRANCH07",
+        "    set status enable",
+        "  next",
+        "end"
+      ]
+    },
+    "fmg_row": {
+      "name": "FGT-BRANCH-07",
+      "sn": "FGT60F0000000407",
+      "ip": "10.40.7.1",
+      "conn_status": 1,
+      "conf_status": "insync",
+      "db_status": "mod",
+      "ha_mode": "standalone",
+      "platform_str": "FortiGate-60F",
+      "os_ver": "7.4.3",
+      "last_checked": "2026-06-10T03:59:50Z",
+      "desc": "Branch 07 edge firewall"
+    },
+    "faz_logs": [
+      {"itime": "2026-06-10T03:24:11Z", "type": "event", "subtype": "vpn", "logid": "0101037133", "action": "phase2-down", "devname": "FGT-BRANCH-07", "level": "error", "msg": "IPsec phase2 SA HQ-BRANCH07 negotiation failed (retry 4)"},
+      {"itime": "2026-06-10T03:23:38Z", "type": "event", "subtype": "vpn", "logid": "0101037131", "action": "phase1-down", "devname": "FGT-BRANCH-07", "level": "error", "msg": "IPsec phase1 HQ-BRANCH07 disabled by admin / down"},
+      {"itime": "2026-06-10T03:22:05Z", "type": "event", "subtype": "vpn", "logid": "0101037129", "action": "tunnel-down", "devname": "FGT-BRANCH-07", "level": "error", "msg": "IPsec tunnel HQ-BRANCH07 went down"},
+      {"itime": "2026-06-10T03:21:50Z", "type": "event", "subtype": "system", "logid": "0100020100", "action": "system-status", "devname": "FGT-BRANCH-07", "level": "information", "msg": "Device healthy; WAN1 up, FortiManager keepalive OK"}
+    ]
+  }
+}

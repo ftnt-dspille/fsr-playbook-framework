@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 import fsr_core.mcp_server.tools_execution as texec
+from fsr_core.mcp_server import _noc_scenarios as _noc
 from fsr_core.mcp_server import _sim_fixtures as fx
 from fsr_core.mcp_server import (
     faz_event_summary,
@@ -47,7 +48,8 @@ def fmg(monkeypatch):
 
 def test_device_list_targets_dvmdb_and_digests(fmg):
     out = fmg_get_device_list(adom="root")
-    assert out["ok"] and out["count"] == 2
+    # BRANCH-04 (down) + HQ-01 (up) + every manifest NOC scenario's device.
+    assert out["ok"] and out["count"] == 2 + len(_noc.scenarios())
     call = fmg[0]
     assert call["connector"] == "fortinet-fortimanager-json-rpc"
     assert call["op"] == "json_rpc_get"
@@ -172,6 +174,37 @@ def test_event_summary_rolls_up_by_type_and_action(faz):
     assert out["by_event_type"]["event"] == 3
     assert "link-monitor" in out["by_action"]
     assert out["first_ts"] and out["last_ts"]
+
+
+# --- manifest-driven NOC scenarios (vpn_tunnel_down) --------------------------
+
+def test_manifest_loads_vpn_tunnel_down():
+    sc = _noc.load().get("vpn_tunnel_down")
+    assert sc and sc["device"] == "FGT-BRANCH-07"
+    assert _noc.by_device("FGT-BRANCH-07")["id"] == "vpn_tunnel_down"
+    assert _noc.by_device("FGT60F0000000407")["id"] == "vpn_tunnel_down"  # by serial
+    # the manifest carries an induce/teardown recipe for the FS fault driver
+    assert sc["induce"]["setup"] and sc["induce"]["teardown"]
+
+
+def test_fleet_list_includes_manifest_device_as_up(fmg):
+    out = fmg_get_device_list(adom="root")
+    br07 = next(d for d in out["devices"] if d["name"] == "FGT-BRANCH-07")
+    # the device is REACHABLE — a dead tunnel is a VPN failure, not an outage
+    assert br07["conn_status"] == "up"
+
+
+def test_faz_returns_vpn_phase2_logs_for_manifest_device(faz):
+    out = faz_search_device_events("FGT-BRANCH-07", logtype="vpn")
+    actions = [e["action"] for e in out["events"]]
+    assert "phase2-down" in actions and "tunnel-down" in actions
+    assert faz[0]["params"]["devid"] == "FGT-BRANCH-07"
+
+
+def test_faz_default_device_still_tells_device_down_story(faz):
+    # an unknown / BRANCH-04 device keeps the original link-down narrative
+    out = faz_search_device_events("FGT-BRANCH-04")
+    assert any(e["action"] == "link-monitor" for e in out["events"])
 
 
 # --- registration -------------------------------------------------------------

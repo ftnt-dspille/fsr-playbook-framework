@@ -110,6 +110,37 @@ def _c2_recipes(norm: dict) -> list[str]:
     return out
 
 
+def _vpn_tunnel_down_match(norm: dict) -> int:
+    """NOC VPN tunnel down: an IPsec/SSL VPN tunnel dropped (device still up)."""
+    score = 0
+    blob = _text_blob(norm)
+    if any(w in blob for w in (
+            "tunnel down", "tunnel is down", "vpn down", "vpn is down",
+            "ipsec", "phase2", "phase 2", "phase1", "phase 1",
+            "tunnel went down", "vpn tunnel", "site-to-site vpn",
+            "branch isolated", "renegotiation failed")):
+        score += 2
+    src = (norm.get("source_connector") or "").lower()
+    if "fortianalyzer" in src or "fortimanager" in src or "faz" in src:
+        score += 1
+    return score
+
+
+def _vpn_tunnel_down_recipes(norm: dict) -> list[str]:
+    # Tunnel-centric: confirm the device is reachable (rules out a device
+    # outage), then read its VPN logs to see phase1 vs phase2 and the peer side.
+    device = _first(norm.get("indicators", {}).get("hosts", []))
+    if not device:
+        return []
+    return [
+        f'fmg_get_device_status(device="{device}")'
+        "  — confirm the DEVICE is up first (a reachable device + dead tunnel "
+        "is a VPN failure, not an outage)",
+        f'faz_search_device_events(device="{device}", logtype="vpn", '
+        'window="6h")  — phase1/phase2-down events and the peer',
+    ]
+
+
 def _device_down_match(norm: dict) -> int:
     """NOC device-down: a managed device stopped reporting / went unreachable."""
     score = 0
@@ -181,6 +212,37 @@ SCENARIOS: list[dict[str, Any]] = [
             "Conclude with a likely root cause (upstream/network/power vs "
             "config) and a RECOMMENDED fix — never run a reboot or re-install "
             "without an approval card."
+        ),
+    },
+    {
+        "id": "vpn_tunnel_down",
+        "title": "NOC — site-to-site VPN tunnel down",
+        "match": _vpn_tunnel_down_match,
+        "ti_targets": [],
+        "siem_recipes": _vpn_tunnel_down_recipes,
+        "verdict_checklist": [
+            "Is the DEVICE itself reachable (FMG conn_status=up)? A reachable "
+            "device with a dead tunnel is a VPN failure, not a device outage.",
+            "Phase1 or phase2 — where does negotiation fail (read the FAZ vpn "
+            "logs)? Phase1 = peer/auth/IKE; phase2 = selectors/SA.",
+            "Is the remote peer reachable, and when did the tunnel last come up?",
+            "Blast radius — which subnets/services lost connectivity while the "
+            "tunnel is down?",
+            "Recommend the fix (re-enable phase1, fix selectors, check peer); "
+            "do NOT auto-remediate — any change goes through a tier-3 card.",
+        ],
+        "fragment": (
+            "This is a **NOC VPN-tunnel-down** event — a site-to-site tunnel "
+            "dropped. Troubleshoot, don't auto-remediate: (1) confirm the device "
+            "is actually UP in FortiManager (`fmg_get_device_status`) — a "
+            "reachable device with a dead tunnel is a VPN failure, NOT a device "
+            "outage; (2) read the device's VPN logs in FortiAnalyzer "
+            "(`faz_search_device_events(logtype=\"vpn\")`) to see whether phase1 "
+            "or phase2 is failing and when it last came up; (3) determine the "
+            "blast radius (which subnets lost reachability). Conclude with the "
+            "likely cause (phase1 disabled/peer down/auth vs phase2 selectors) "
+            "and a RECOMMENDED fix — never enable/disable a tunnel without an "
+            "approval card."
         ),
     },
     {
