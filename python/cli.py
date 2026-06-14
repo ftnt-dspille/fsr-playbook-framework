@@ -14,10 +14,20 @@ import argparse
 import difflib
 import json
 import os
+import re
 import sys
 import warnings
 from pathlib import Path
 from typing import Any
+
+# Local sibling modules (recover.py, picklists.py, …) and the legacy `python/`
+# layout live alongside this file, not in an installed package. Put this dir on
+# sys.path so deferred `from recover import …` / `from probes import …` resolve
+# no matter how the CLI was launched: `python cli.py`, `python -m python.cli`,
+# or the installed `fsrpb` console script (which runs from an arbitrary cwd).
+_CLI_DIR = os.path.dirname(os.path.abspath(__file__))
+if _CLI_DIR not in sys.path:
+    sys.path.insert(0, _CLI_DIR)
 
 # Repo root on path so `fsr_core.*` resolves when cli.py is run as a script.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1088,6 +1098,36 @@ def _decompile_to_yaml(coll, db_path: Path) -> str:
     return _impl(coll, db_path)
 
 
+_UUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
+)
+
+
+def _resolve_ref_arg(arg: str) -> str:
+    """Accept a bare name/UUID *or* a full FSR UI URL.
+
+    `https://10.99.249.205/playbooks/<uuid>` → extracts the UUID and, when the
+    URL host differs from the configured FSR_BASE_URL, overrides it (via env,
+    before get_config() is first called) so the pull targets the right box.
+    Auth still comes from the environment — set FSR_USERNAME/FSR_PASSWORD (or
+    FSR_API_KEY) for that host if it isn't the default instance.
+    """
+    if "://" not in arg:
+        return arg
+    from urllib.parse import urlparse
+
+    parsed = urlparse(arg)
+    host = parsed.netloc
+    if host:
+        configured = os.environ.get("FSR_BASE_URL", "")
+        cur_host = configured.replace("https://", "").replace("http://", "").split("/")[0]
+        if host != cur_host:
+            os.environ["FSR_BASE_URL"] = host
+            print(f"targeting instance from URL: {host}", file=sys.stderr)
+    m = _UUID_RE.search(parsed.path)
+    return m.group(0) if m else arg
+
+
 def cmd_pull(args: argparse.Namespace) -> int:
     """Fetch a single playbook (and its workflow_reference deps) as YAML.
 
@@ -1097,14 +1137,19 @@ def cmd_pull(args: argparse.Namespace) -> int:
     """
     from probes import _env  # type: ignore
 
+    ref = _resolve_ref_arg(args.playbook)
     cfg = _env.get_config()
     if not cfg.is_live():
         print("FSR_BASE_URL / auth not configured (.env)", file=sys.stderr)
         return 2
     client = _env.get_client()
-    coll = _fetch_workflow_with_refs(client, args.playbook)
+    coll = _fetch_workflow_with_refs(client, ref)
     if coll is None:
-        print(f"no playbook matching {args.playbook!r}", file=sys.stderr)
+        print(
+            f"no playbook matching {ref!r} on {cfg.base_url} "
+            f"(is this the right instance?)",
+            file=sys.stderr,
+        )
         return 1
     pulled = len(coll["data"][0]["workflows"])
     if pulled > 1:
@@ -1122,14 +1167,19 @@ def cmd_pull_collection(args: argparse.Namespace) -> int:
     """Fetch every playbook in a collection (folder) and decompile to YAML."""
     from probes import _env  # type: ignore
 
+    ref = _resolve_ref_arg(args.collection)
     cfg = _env.get_config()
     if not cfg.is_live():
         print("FSR_BASE_URL / auth not configured (.env)", file=sys.stderr)
         return 2
     client = _env.get_client()
-    coll = _fetch_live_collection(client, args.collection)
+    coll = _fetch_live_collection(client, ref)
     if coll is None:
-        print(f"no collection matching {args.collection!r}", file=sys.stderr)
+        print(
+            f"no collection matching {ref!r} on {cfg.base_url} "
+            f"(is this the right instance?)",
+            file=sys.stderr,
+        )
         return 1
     yaml_text = _decompile_to_yaml(coll, Path(args.db))
     if args.output:

@@ -15,11 +15,14 @@ dependencies = [
 ]
 
 [project.scripts]
-fsrpb = "cli:main"
+# `fsrpb_main` (repo-root shim) bootstraps python/ onto sys.path, then calls
+# cli.main — cli.py is NOT an installed package so it can't be the entry directly.
+fsrpb = "fsrpb_main:main"
 
 [tool.setuptools]
 # fsr_core lives at the repo root; legacy packages still under python/.
 package-dir = {"" = ".", "probes" = "python/probes", "store" = "python/store", "e2e" = "python/e2e"}
+py-modules = ["fsrpb_main"]
 packages = [
     "probes", "store", "e2e",
     "fsr_core",

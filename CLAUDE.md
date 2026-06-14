@@ -11,6 +11,8 @@ an MCP server, and an in-platform connector (lives in a sibling repo, see below)
 - `make e2e` — run every `examples/*.test.yaml` against live FSR (10/11 expected).
 - `make dev` — backend (:47821) + frontend (:47822) together. `make preflight` checks ports, `make kill-ports` frees them.
 - Single test: `uv run python -m pytest python/tests/<file>.py -q`.
+- `fsrpb` CLI: `.venv/bin/fsrpb <cmd>` from anywhere (or `python -m python.cli <cmd>` / `python python/cli.py <cmd>`) — all three work. cli.py self-bootstraps `python/` onto sys.path; the console script enters via repo-root `fsrpb_main.py`. After changing the entry point or sys.path bootstrap, re-run `uv pip install -e .`.
+  - Pull a playbook to YAML by **full UI URL**: `cli.py pull "https://<host>/playbooks/<wf-uuid>" -o out.yaml`. `/playbooks/<uuid>` is a single *workflow* → use `pull`; the collection editor URL → use `pull-collection`. A full URL auto-targets its host (overrides `FSR_BASE_URL`); supply `FSR_USERNAME`/`FSR_PASSWORD` (or `FSR_API_KEY`) for that host if it isn't the default instance. `.env` is configured for the forticloud box, **not** `10.99.249.205` (label `dev`, csadmin).
 - Python deps via **uv** (`make sync`); venv at `.venv/`. Runtime target is **Python 3.9** (SOAR baseline) — keep `fsr_core` 3.9-clean (no module-level PEP 604 unions).
 
 ## Repo layout
