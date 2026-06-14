@@ -7,6 +7,7 @@ honor. A new provider can opt in to self-repair by importing these.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 from pathlib import Path
@@ -238,6 +239,173 @@ async def drain_with_idle_timeout(pump, *, timeout: float):
     finally:
         if not task.done():
             task.cancel()
+
+
+# ───────────────────────── triage discipline ─────────────────────────
+#
+# Model-agnostic guards layered on top of raw tool dispatch for the TRIAGE
+# agent. All three rules were learned from live gpt-4o-mini runs (memory
+# `openai_terse_triage_shallow`): a weak model under-weights the system prompt
+# + pre-flight blocks and acts on the immediate user message, so depth swings
+# wildly on phrasing. A terse opener shortcut to
+#   get_record → find_containment_actions → emit_action_card  (3 calls, no hunt)
+# while a richly-enumerated prompt over-hunted (16 calls) AND fired a forbidden
+# VirusTotal lookup on an internal RFC1918 IP. Prose in system_prompt_triage.md
+# can't hold a weak model; these guards enforce the same discipline structurally
+# so behavior is consistent regardless of model or phrasing.
+#
+# All three fire only on triage-specific tool names, so build flows (whose tool
+# slice excludes them) are unaffected.
+
+# Containment-staging tools — refused until the hunt floor is met.
+_CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
+    "find_containment_actions", "emit_action_card",
+})
+# Evidence-gathering tools that count toward the floor. get_record (the alert
+# pull) and the find_* discovery meta-tools are deliberately EXCLUDED so the
+# floor forces real evidence beyond pulling the record + listing actions.
+_INVESTIGATION_TOOLS: frozenset[str] = frozenset({
+    "search_module_records", "run_op",
+    "siem_events_for_incident", "siem_search_host", "siem_search_ip",
+    "get_host_context", "get_user_context", "get_ip_context",
+    "get_device_info", "get_incident_details", "get_associated_events_new",
+    "faz_get_alerts", "faz_search_ip", "faz_raw_query",
+})
+# Discovery tools that return their full set in one shot — a second call is
+# pure waste (and the prompt says "call find_containment_actions once").
+_CALL_ONCE_DISCOVERY: frozenset[str] = frozenset({
+    "find_containment_actions", "find_enrichment_actions",
+})
+# External threat-intel connectors that should never be pointed at an internal
+# (RFC1918 / loopback / link-local) IP — enriching a private source IP against
+# public TI is the forbidden pivot the eval fixtures encode.
+_TI_CONNECTOR_TOKENS: tuple[str, ...] = (
+    "virustotal", "shodan", "ipqualityscore", "abuseipdb",
+)
+# Full pivot floor: record + cross-module search + external enrichment + a
+# pivot ≈ 3 genuine evidence calls before containment may be staged.
+MIN_INVESTIGATION_BEFORE_CONTAINMENT = 3
+
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
+    """Return (internal, external) IPv4 literals found anywhere in ``args``."""
+    internal: set[str] = set()
+    external: set[str] = set()
+    try:
+        blob = json.dumps(args, default=str)
+    except Exception:
+        blob = str(args)
+    for tok in _IP_RE.findall(blob):
+        try:
+            ip = ipaddress.ip_address(tok)
+        except ValueError:
+            continue
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            internal.add(tok)
+        else:
+            external.add(tok)
+    return internal, external
+
+
+class TriageDiscipline:
+    """Per-session triage guard. ``evaluate(name, args)`` atomically checks the
+    three discipline rules and, when the call is allowed, records it — returning
+    a guard envelope (``{"ok": False, …}``) to short-circuit dispatch or ``None``
+    to proceed. ONE atomic call so the read-only parallel batch (dispatched
+    across threads via ``asyncio.to_thread``) can't race the counter/seen-set.
+
+    Attempts — not successes — count toward the hunt floor, so a config gap or a
+    failing enrichment can't deadlock the floor (the model still gets credit for
+    trying to investigate, and MAX_TOOL_TURNS bounds the loop)."""
+
+    def __init__(self, *, floor: int = MIN_INVESTIGATION_BEFORE_CONTAINMENT):
+        import threading
+        self.floor = floor
+        self.invest_attempts = 0
+        self._called: set[str] = set()
+        # How many distinct evidence tools remain before the floor lifts —
+        # surfaced in the block message so the model knows it's making progress.
+        self._lock = threading.Lock()
+
+    def _check_locked(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        # 1. Forbidden pivot — external TI on an internal-only IP.
+        if name == "run_op":
+            connector = str((args or {}).get("connector") or "").lower()
+            if any(tok in connector for tok in _TI_CONNECTOR_TOKENS):
+                internal, external = _classify_ips(args)
+                if internal and not external:
+                    return {
+                        "ok": False,
+                        "forbidden_pivot_guard": True,
+                        "error": (
+                            f"Skipped: {connector} is an EXTERNAL threat-intel "
+                            f"lookup and the only IP in this call is internal "
+                            f"(RFC1918) — {sorted(internal)[0]}. Private/internal "
+                            f"addresses have no public TI reputation; enriching "
+                            f"them wastes budget and pollutes the verdict. Pivot "
+                            f"on internal hosts via the SIEM/CMDB context ops "
+                            f"(get_ip_context / siem_search_ip) and reserve TI "
+                            f"connectors for EXTERNAL, routable indicators."
+                        ),
+                    }
+        # 2. Call-once discovery — the set is returned in one shot.
+        if name in _CALL_ONCE_DISCOVERY and name in self._called:
+            return {
+                "ok": False,
+                "call_once_guard": True,
+                "error": (
+                    f"STOP calling `{name}` — you already called it this session "
+                    f"and it returns the FULL set in one shot. Do not call it "
+                    f"again. Act on the result you already have: pick an op from "
+                    f"it and proceed."
+                ),
+            }
+        # 3. Hunt floor — no containment before real investigation. Prescriptive:
+        # weak models re-spam a blocked tool when told "retry later", so name the
+        # ONE next call to make and forbid re-calling the blocked tool.
+        if (name in _CONTAINMENT_STAGING_TOOLS
+                and self.invest_attempts < self.floor):
+            remaining = self.floor - self.invest_attempts
+            if "search_module_records" not in self._called:
+                next_step = (
+                    "`search_module_records` on the `incidents` module for the "
+                    "host and external IP from the alert (then again on `alerts`)"
+                )
+            else:
+                next_step = (
+                    "enrich the EXTERNAL (public) IP with a threat-intel "
+                    "connector via `run_op` (VirusTotal / FortiGuard / Shodan), "
+                    "or pivot the host with `siem_search_host` / `get_ip_context`"
+                )
+            return {
+                "ok": False,
+                "hunt_floor_guard": True,
+                "investigation_calls": self.invest_attempts,
+                "required": self.floor,
+                "error": (
+                    f"Do NOT call `{name}` yet — it was NOT executed. You've run "
+                    f"{self.invest_attempts} of {self.floor} required "
+                    f"investigation steps; staging containment now would act on "
+                    f"an alert you haven't scoped. Do NOT repeat this call. Your "
+                    f"NEXT call must be: {next_step}. After ~{remaining} more "
+                    f"evidence call(s), staging will unlock automatically."
+                ),
+            }
+        return None
+
+    def evaluate(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        """Atomic check-and-record. Returns a guard envelope (block) or None
+        (allowed — and the call is recorded as dispatched)."""
+        with self._lock:
+            guard = self._check_locked(name, args or {})
+            if guard is not None:
+                return guard
+            self._called.add(name)
+            if name in _INVESTIGATION_TOOLS:
+                self.invest_attempts += 1
+            return None
 
 
 def extract_yaml_block(text: str) -> str | None:

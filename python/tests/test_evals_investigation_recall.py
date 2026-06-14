@@ -222,3 +222,35 @@ def test_score_investigation_mode_demotes_authoring_gates():
     assert lv["tool_budget"].get("informational") is True
     # Recall + the two active quality gates all pass -> perfect fraction.
     assert out["fraction"] == 1.0
+
+
+# --- discipline-guard refused calls excluded from work/forbidden gates ------
+
+def test_refused_forbidden_pivot_not_counted():
+    """A guard-refused external-TI-on-internal-IP attempt is the guard working,
+    not a violation — it must not trip the forbidden-pivot fail."""
+    forbidden = [{"tool": "run_op", "connector": "virustotal",
+                  "args_contains": ["192.168.1.1"]}]
+    trace = [
+        {"name": "run_op", "args": {"connector": "virustotal",
+                                    "params": {"ip": "192.168.1.1"}},
+         "ok": False, "refused": True},
+    ]
+    res = scoring._score_investigation(trace, [], forbidden)
+    assert res["forbidden_hit"] == []
+    # An UNrefused identical attempt still fails.
+    trace[0]["refused"] = False
+    res2 = scoring._score_investigation(trace, [], forbidden)
+    assert res2["forbidden_hit"]
+
+
+def test_refused_calls_excluded_from_budget_and_spiral():
+    executed = [{"name": "search_module_records", "args": {}, "refused": False}]
+    refused = [{"name": "find_enrichment_actions", "args": {}, "refused": True}
+               for _ in range(5)]
+    q = scoring._score_investigation_quality(executed + refused,
+                                             {"tool_budget_max": 3})
+    assert q["investigation_tool_budget"]["calls"] == 1
+    assert q["investigation_tool_budget"]["passed"] is True
+    ag = scoring._score_agentic(trace=executed + refused, text="")
+    assert ag["no_spiral"]["longest_run"] == 1

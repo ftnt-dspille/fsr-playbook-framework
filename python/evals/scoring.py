@@ -198,8 +198,12 @@ def _score_investigation(trace: list[dict[str, Any]],
         else:
             missing.append(f)
     recall = (len(matched) / len(required_facts)) if required_facts else 0.0
+    # A call the connector's discipline guard refused (`refused=True`) never
+    # executed — the model attempted it but the platform blocked it. Don't count
+    # a guard-blocked forbidden pivot as a violation; that's the guard working.
     forbidden_hit = [f for f in (forbidden_facts or [])
-                     if any(_fact_matches(f, c) for c in trace)]
+                     if any(_fact_matches(f, c) for c in trace
+                            if not c.get("refused"))]
     passed = recall >= INVESTIGATION_RECALL_GATE and not forbidden_hit
     detail = f"recall {recall:.2f} (>= {INVESTIGATION_RECALL_GATE})"
     if forbidden_hit:
@@ -438,6 +442,11 @@ def _score_investigation_quality(
     quality = quality or {}
     gates: dict[str, dict[str, Any]] = {}
 
+    # Calls the connector's discipline guard refused never executed (no upstream
+    # work, no API cost, no verdict pollution) — measure investigative work over
+    # the EXECUTED subset so a guard-blocked attempt isn't scored as work done.
+    trace = [c for c in trace if not c.get("refused")]
+
     # --- tool-budget ceiling (tighter than the authoring TOOL_BUDGET_MAX) ----
     budget = quality.get("tool_budget_max", INVESTIGATION_TOOL_BUDGET_MAX)
     n = len(trace)
@@ -615,6 +624,9 @@ def _score_agentic(*, trace: list[dict[str, Any]],
                    expected_approvals: dict[str, Any] | None = None,
                    ) -> dict[str, dict[str, Any]]:
     """tool_budget / no_spiral / adherence + verify-behavior metrics."""
+    # Discipline-guard-refused calls never executed — exclude from the
+    # work-based gates (see _score_investigation_quality).
+    trace = [c for c in trace if not c.get("refused")]
     n = len(trace)
     longest = 0
     cur_name = None

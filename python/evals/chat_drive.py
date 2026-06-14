@@ -179,9 +179,29 @@ def _result_ok(content: Any) -> bool | None:
     return str(status).lower() in ("success", "ok", "true")
 
 
+# Discipline-guard markers a tool_result carries when the connector refused to
+# execute a call (TriageDiscipline). A refused call is in the trace (the model
+# attempted it) but never ran, so scoring must not count it as a performed
+# pivot — a guard-blocked forbidden pivot is a SUCCESS of the platform, not a
+# violation by the agent.
+_GUARD_MARKERS = ("forbidden_pivot_guard", "hunt_floor_guard", "call_once_guard")
+
+
+def _result_refused(content: Any) -> bool:
+    """True when a tool_result payload is a discipline-guard refusal envelope."""
+    payload = content
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:  # noqa: BLE001
+            return False
+    return isinstance(payload, dict) and any(payload.get(m) for m in _GUARD_MARKERS)
+
+
 def transcript_to_trace(transcript: list[dict]) -> list[dict]:
-    """Build the `[{name, args, ok}]` trace `evals.scoring` consumes from a wire
-    transcript, pairing each `tool_result` onto its `tool_use` by id."""
+    """Build the `[{name, args, ok, refused}]` trace `evals.scoring` consumes
+    from a wire transcript, pairing each `tool_result` onto its `tool_use` by
+    id. `refused` flags a call the connector's discipline guard blocked."""
     trace: list[dict] = []
     by_id: dict[str, dict] = {}
     for e in transcript:
@@ -191,18 +211,20 @@ def transcript_to_trace(transcript: list[dict]) -> list[dict]:
             name = e.get("name") or ""
             entry = {"name": name,
                      "args": _normalize_args(name, e.get("input") or e.get("arguments")),
-                     "ok": None}
+                     "ok": None, "refused": False}
             trace.append(entry)
             if e.get("id"):
                 by_id[e["id"]] = entry
         elif e.get("type") == "tool_result":
-            ok = _result_ok(e.get("content") if e.get("content") is not None
-                            else e.get("result"))
+            content = (e.get("content") if e.get("content") is not None
+                       else e.get("result"))
+            ok = _result_ok(content)
+            refused = _result_refused(content)
             tid = e.get("tool_use_id")
-            if tid and tid in by_id:
-                by_id[tid]["ok"] = ok
-            elif trace:
-                trace[-1]["ok"] = ok
+            target = by_id[tid] if (tid and tid in by_id) else (trace[-1] if trace else None)
+            if target is not None:
+                target["ok"] = ok
+                target["refused"] = refused
     return trace
 
 

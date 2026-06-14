@@ -53,6 +53,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    TriageDiscipline,
     compile_errors as _compile_errors,
     drain_with_idle_timeout,
     extract_yaml_block as _extract_yaml_block,
@@ -338,6 +339,9 @@ class OpenAIProvider:
         # call that already failed this turn; return a guard envelope so the
         # model adapts instead of burning budget on the same 400 twice.
         failed_signatures: set[str] = set()
+        # Triage discipline (hunt floor + forbidden pivot + call-once) — see
+        # _loop_helpers.TriageDiscipline. Fires only on triage tool names.
+        _discipline = TriageDiscipline()
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:
             try:
@@ -367,6 +371,16 @@ class OpenAIProvider:
                         f"report the blocker in your assessment."
                     ),
                 }
+            guard = _discipline.evaluate(nm, ar)
+            if guard is not None:
+                # Terminal guards (forbidden pivot / call-once) can never
+                # succeed — register the signature so an identical re-call hits
+                # the firmer repeated_call_guard and the model stops retrying.
+                # The hunt-floor block is intentionally NOT terminal: that exact
+                # call should succeed once investigation has caught up.
+                if guard.get("forbidden_pivot_guard") or guard.get("call_once_guard"):
+                    failed_signatures.add(sig)
+                return guard
             result = dispatch(nm, ar)
             if _is_error_result(result):
                 failed_signatures.add(sig)

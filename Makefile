@@ -88,6 +88,7 @@ CHAT_FAST_TESTS := \
 	fsr_core/tests/test_triage_prompt_enrichment_offer.py \
 	fsr_core/tests/test_triage_preflight.py \
 	fsr_core/tests/test_low_signal_gate.py \
+	fsr_core/tests/test_triage_discipline.py \
 	fsr_core/tests/test_intent_slice_and_params.py \
 	fsr_core/tests/test_build_prompt_skeleton.py \
 	fsr_core/tests/test_playbook_offer.py \
