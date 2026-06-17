@@ -6,7 +6,7 @@ with the skill-trace recorder installed, then dumps ``SkillTrace.to_json()``.
 Why replay instead of hand-authoring (the original method): a hand-written
 trace re-introduces the very failure mode the trace compiler removes — guessing
 each op's output shape and the cross-step value coincidences. The sim fixtures
-(``fsr_core/mcp_server/_sim_fixtures.py``) encode a C2 investigation whose values
+(``fsr_playbooks/mcp_server/_sim_fixtures.py``) encode a C2 investigation whose values
 are cross-referenced by construction (``_C2_IP`` shows up in
 ``get_incidents.indicator`` / ``search_events.destIpAddr`` and is the input to
 ``block_ip_new``; ``_HOST_IP`` from ``search_events.srcIpAddr`` feeds
@@ -34,7 +34,7 @@ from typing import Any
 
 # These two IPs are the cross-referenced anchors the sim fixtures share; the
 # value-match wiring must recover them across steps.
-from fsr_core.mcp_server._sim_fixtures import _C2_IP, _HOST_IP
+from fsr_playbooks.mcp_server._sim_fixtures import _C2_IP, _HOST_IP
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FIXTURE_DIR = _REPO_ROOT / "store" / "trace_fixtures"
@@ -45,8 +45,8 @@ def _install_sim_bridge() -> None:
     connector's ``simulation_mode`` bridge, and clear preflight caches so each
     build is independent. Same wiring as test_sim_run_op_integration's fixture,
     minus pytest."""
-    from fsr_core.mcp_server import _sim_client as sc
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import _sim_client as sc
+    from fsr_playbooks.mcp_server import tools_execution as te
 
     env_mod = types.ModuleType("probes._env")
     env_mod.get_client = sc.get_client          # type: ignore[attr-defined]
@@ -107,8 +107,8 @@ def build_trace(scenario: str) -> str:
     """Replay one scenario through run_op (sim) with the recorder on; return the
     trace JSON. Raises if an op didn't execute cleanly (a broken sim fixture or a
     preflight regression — we want that to fail loudly, not bake a bad fixture)."""
-    from fsr_core.agent import skill_trace as st
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.agent import skill_trace as st
+    from fsr_playbooks.mcp_server import tools_execution as te
 
     steps = _SCENARIOS[scenario]
     trace = st.SkillTrace()
@@ -133,7 +133,7 @@ def assert_cross_step_coincidence(trace_json: str) -> None:
     coincidence the wiring match exists to recover: the IP a containment op
     blocks must appear in a PRIOR op's recorded output. Without this the fixture
     would 'pass' wiring trivially (nothing to wire) and prove nothing."""
-    from fsr_core.agent.skill_trace import SkillTrace
+    from fsr_playbooks.agent.skill_trace import SkillTrace
 
     trace = SkillTrace.from_json(trace_json)
     block = next((c for c in trace.calls

@@ -70,7 +70,7 @@ an empty `in-progress` stub and the widget never sees the outcome).
   double-fire the action).
 
 ## Phase A — Compiler `priority` support  (offline; Task #1)
-Files: `fsr_core/compiler/ir.py`, `parser.py`, `emitter.py`, tests.
+Files: `fsr_playbooks/compiler/ir.py`, `parser.py`, `emitter.py`, tests.
 1. `ir.py` `Playbook`: add `priority: Optional[str] = None`.
 2. `parser.py` (~line 682, near `debug=`): read `priority` from `pb_raw`; validate `High|Medium|Low|...`.
 3. `emitter.py:411`: replace hardcoded `"priority": None` with name→IRI from a constant map.
@@ -83,7 +83,7 @@ Files: `fsr_core/compiler/ir.py`, `parser.py`, `emitter.py`, tests.
   compiled IRI, so a stale constant can't break it.
 
 ## Phase B — Agent detection + force-fail wrap in `run_op`  (Task #2)
-File: `fsr_core/mcp_server/tools_execution.py`.
+File: `fsr_playbooks/mcp_server/tools_execution.py`.
 1. `_agent_config_ids(client)` → cached set of agent-bound config UUIDs (from
    `_agent_configured_rows` + `_row_config_ids`), short TTL like `_configured_rows`.
 2. In `run_op`, AFTER resolve + risk/confirm gate + preflight, BEFORE the execute POST:
@@ -113,14 +113,14 @@ Files: discovery tools + system prompt (no contract bump, no widget change).
    result narration.
 
 ## Phase D — Verify & deploy  (Task #4)
-1. `make verify` (fsr_core + connector offline).
+1. `make verify` (fsr_playbooks + connector offline).
 2. Live e2e: agent block via run_op → single execution + spinner frame in chat_poll + result card.
-3. Re-vendor fsr_core → connector; bump version + `$replace`; `scripts/deploy.sh`.
+3. Re-vendor fsr_playbooks → connector; bump version + `$replace`; `scripts/deploy.sh`.
 4. Contract harness re-capture (`probe_fsr.py` + `tests/fsr_contract.py`).
 
 ## Key refs
 - Memory: `fsr_agent_proxied_execute_async.md` (the validated recipe + gotchas).
-- `run_op` @ `fsr_core/mcp_server/tools_execution.py:1130`; `run_playbook` follow loop ~:1420;
+- `run_op` @ `fsr_playbooks/mcp_server/tools_execution.py:1130`; `run_playbook` follow loop ~:1420;
   `_resolve_config_id` :524; `_agent_configured_rows` :176; `_configured_rows` :218; `_row_config_ids` :250.
 - Streaming: connector `operations.py` `_on_event` ~:1566; `storage.append_turn_progress` :328;
   contract version const `operations.py:603` (2.5.1).

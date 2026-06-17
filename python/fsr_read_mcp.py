@@ -3,7 +3,7 @@
 
 The common live + reference-store **read** operations for backend / connector
 testing AND widget (frontend) work, exposed as a small, safe MCP surface. It
-re-registers a curated read subset of the battle-tested `fsr_core.mcp_server`
+re-registers a curated read subset of the battle-tested `fsr_playbooks.mcp_server`
 tools onto a dedicated FastMCP instance — no duplicated live-path logic, and
 none of the mutating/authoring tools (push_playbook, run_playbook, emit_*, the
 agent loop).
@@ -22,7 +22,7 @@ to inline `attributes`; `/api/3/widgets` 500s on `$orderby=name` (sort client-
 side). WRITES (widget install, record create/delete) are deliberately excluded —
 keep this server read-only; put mutations in a separate gated server.
 
-Why a separate server: `fsr_core.mcp_server` is the connector's full agent
+Why a separate server: `fsr_playbooks.mcp_server` is the connector's full agent
 brain (~60 tools, mixes reads + writes). For ad-hoc testing you want a tight,
 read-only set that's cheap in context and can't mutate the platform.
 
@@ -41,7 +41,7 @@ import os
 import sys
 from pathlib import Path
 
-# Make `fsr_core` (repo root) and `probes` (python/) importable, and run from
+# Make `fsr_playbooks` (repo root) and `probes` (python/) importable, and run from
 # the repo root so store/ + .env relative paths resolve regardless of cwd.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 for _p in (str(REPO_ROOT), str(REPO_ROOT / "python")):
@@ -52,7 +52,7 @@ os.chdir(REPO_ROOT)
 from typing import Any  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
-import fsr_core.mcp_server as fsrpb  # noqa: E402
+import fsr_playbooks.mcp_server as fsrpb  # noqa: E402
 
 read_mcp = FastMCP("fsr-read")
 

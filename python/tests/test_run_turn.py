@@ -1,4 +1,4 @@
-"""Tests for fsr_core.llm.run_turn.
+"""Tests for fsr_playbooks.llm.run_turn.
 
 Drives `run_agent_turn` / `resume_agent_turn` against the FakeProvider
 fixture and asserts every behavior chat.py used to provide inline,
@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-from fsr_core.llm.fake_provider import FakeProvider
-from fsr_core.llm.approvals import SuspendedSession
-from fsr_core.llm.provider import (
+from fsr_playbooks.llm.fake_provider import FakeProvider
+from fsr_playbooks.llm.approvals import SuspendedSession
+from fsr_playbooks.llm.provider import (
     DoneEvent,
     ErrorEvent,
     Event,
@@ -23,7 +23,7 @@ from fsr_core.llm.provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from fsr_core.llm.run_turn import (
+from fsr_playbooks.llm.run_turn import (
     KIND_ASSISTANT_TEXT,
     KIND_TOOL_RESULT,
     KIND_TOOL_USE,

@@ -144,7 +144,7 @@ def _import_studio_tools():
     backend = repo / "web" / "backend"
     if str(backend) not in sys.path:
         sys.path.insert(0, str(backend))
-    from fsr_core.llm.tools import (  # type: ignore
+    from fsr_playbooks.llm.tools import (  # type: ignore
         anthropic_tools, openai_tools, dispatch,
         clear_audit_log, snapshot_audit_log, set_eval_policy,
     )

@@ -9,8 +9,8 @@ import sqlite3
 from types import SimpleNamespace
 
 
-from fsr_core.compiler.ir import PRIORITY_LIST_NAME
-from fsr_core.compiler.resolver import Resolver
+from fsr_playbooks.compiler.ir import PRIORITY_LIST_NAME
+from fsr_playbooks.compiler.resolver import Resolver
 
 
 def _resolver_with_priorities(values: list[str]) -> Resolver:

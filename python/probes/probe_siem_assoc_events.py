@@ -13,7 +13,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "python"))
 
 from probes._env import get_config  # noqa: E402
-from fsr_core.mcp_server.tools_execution import run_op  # noqa: E402
+from fsr_playbooks.mcp_server.tools_execution import run_op  # noqa: E402
 
 
 def show(label, res):

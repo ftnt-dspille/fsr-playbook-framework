@@ -5,7 +5,7 @@ input passes) case so future refactors can't silently weaken the linter.
 """
 from __future__ import annotations
 
-from fsr_core.compiler import compile_yaml
+from fsr_playbooks.compiler import compile_yaml
 
 
 def _codes(r) -> list[str]:

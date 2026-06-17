@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import os
 import time
-from pathlib import Path
 
 from ._env import get_config  # noqa: F401  (kept for parity / future use)
 from .common import REPO_ROOT
@@ -35,7 +34,7 @@ def _run_and_read(live: _Live, coll_name: str, yaml_src: str,
                   read_step: str) -> dict:
     """Push + trigger a collection, poll to terminal, return the named
     step's persisted `result` (user vars only). Cleans up the collection."""
-    from fsr_core.compiler import compile_yaml
+    from fsr_playbooks.compiler import compile_yaml
     cres = compile_yaml(yaml_src, DB_PATH)
     if not cres.ok:
         errs = [getattr(e, "to_dict", lambda: e)() for e in (cres.errors or [])]

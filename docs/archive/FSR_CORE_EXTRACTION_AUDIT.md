@@ -19,7 +19,7 @@ The approval gateway and history sink that the plan worries about — they alrea
 ### `python/compiler/`
 
 - **No web-framework imports.** Pure stdlib + pydantic + jinja2 + sqlite3.
-- **Hard-coded reference DB path** — `validator.py:17` computes `Path(__file__).resolve().parent.parent.parent / "store" / "fsr_reference.db"`, and `rulesets/_shared.py:290-307` does the same with an `FSRPB_DB` env override and an in-tree fallback. **Refactor:** introduce a `ReferenceDB` provider (resolved via `importlib.resources.files('fsr_core.reference') / 'fsr_reference.db'`) and pass the path/connection in. Keep `FSRPB_DB` as the last-resort fallback.
+- **Hard-coded reference DB path** — `validator.py:17` computes `Path(__file__).resolve().parent.parent.parent / "store" / "fsr_reference.db"`, and `rulesets/_shared.py:290-307` does the same with an `FSRPB_DB` env override and an in-tree fallback. **Refactor:** introduce a `ReferenceDB` provider (resolved via `importlib.resources.files('fsr_playbooks.reference') / 'fsr_reference.db'`) and pass the path/connection in. Keep `FSRPB_DB` as the last-resort fallback.
 - `rulesets/feed_ingest.py:56` reads `FSRPB_INFO_JSON`. Same fix — accept a path argument; env is the fallback.
 - Everything else (resolver, typed_walker, render_analyzer, jinja_typing, emitter, parser, etc.) takes a `sqlite3.Connection` already and is portable as-is.
 
@@ -37,7 +37,7 @@ The approval gateway and history sink that the plan worries about — they alrea
 - **`usage_log.py:43`** — `STUDIO_USAGE_LOG` env. The log path is the only stateful thing; trivial to parameterize but env-fallback is fine.
 - **`lmstudio_provider.py`** — three env vars for local LM Studio. Self-contained; keep.
 
-## Implied protocol surface for `fsr_core`
+## Implied protocol surface for `fsr_playbooks`
 
 Distilled from the above; matches the plan's intent in §1.3:
 
@@ -50,7 +50,7 @@ class ConfigProvider(Protocol):
 class ReferenceDB(Protocol):
     def connect(self) -> sqlite3.Connection: ...
     # FastAPI impl: open store/fsr_reference.db (or FSRPB_DB)
-    # Connector impl: open importlib.resources.files('fsr_core.reference') / 'fsr_reference.db'
+    # Connector impl: open importlib.resources.files('fsr_playbooks.reference') / 'fsr_reference.db'
 
 class ApprovalGateway(Protocol):
     def stash(self, session: SuspendedSession) -> None: ...
@@ -64,12 +64,12 @@ The plan's `HistorySink` does **not** need to live in `fsr-core` — history-wri
 
 ## Migration steps (refined)
 
-1. Create `fsr_core/` in-place (under the current repo) before splitting to its own repo. Move trees, fix the three coupling points, run existing tests.
-2. Add `fsr_core/protocols.py` with the three Protocols above.
-3. `web/backend/llm/factory.py` → `fsr_core/llm/factory.py`: drop `from backend import settings`; accept a `ConfigProvider`. Add a `_FastAPIBackendConfigProvider` in `web/backend/` that wraps `backend.settings` and inject it at app startup.
+1. Create `fsr_playbooks/` in-place (under the current repo) before splitting to its own repo. Move trees, fix the three coupling points, run existing tests.
+2. Add `fsr_playbooks/protocols.py` with the three Protocols above.
+3. `web/backend/llm/factory.py` → `fsr_playbooks/llm/factory.py`: drop `from backend import settings`; accept a `ConfigProvider`. Add a `_FastAPIBackendConfigProvider` in `web/backend/` that wraps `backend.settings` and inject it at app startup.
 4. `validator.py` + `rulesets/_shared.py`: accept a `ReferenceDB` (or just a `sqlite3.Connection`); keep the env+path fallback as a default impl for CLI/tests.
 5. Approvals: rename the in-memory store to `InMemoryApprovalGateway` implementing the protocol; FastAPI keeps using it, connector subs in a persisted one in Phase 3.
-6. Verify with `python -c "import fsr_core, sys; assert not any('fastapi' in m for m in sys.modules)"` and the existing pytest suite.
+6. Verify with `python -c "import fsr_playbooks, sys; assert not any('fastapi' in m for m in sys.modules)"` and the existing pytest suite.
 
 ## Open items uncovered during audit
 

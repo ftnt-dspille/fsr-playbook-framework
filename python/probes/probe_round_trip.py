@@ -46,7 +46,7 @@ DB = ROOT / "store" / "fsr_reference.db"
 def _push_yaml(yaml_text: str) -> tuple[bool, str]:
     """Compile + push via the same path `fsrpb push` uses."""
     try:
-        from fsr_core.compiler import compile_yaml as _compile
+        from fsr_playbooks.compiler import compile_yaml as _compile
         from probes._env import get_client as _get
         from e2e.runner import _push, _PushError
     except Exception as exc:
@@ -1167,7 +1167,7 @@ def run_negative(name: str,
     error code/message substring. Never pushes to FSR.
     """
     try:
-        from fsr_core.compiler import compile_yaml as _compile
+        from fsr_playbooks.compiler import compile_yaml as _compile
     except Exception as exc:  # noqa: BLE001
         return {"name": name, "ok": False, "stage": "import",
                 "detail": f"{exc!r}"}

@@ -1,6 +1,6 @@
 """Live hunting + agentic-response demo (Phase 1.4 MVP).
 
-Drives the REAL triage agent loop (`fsr_core.llm.run_turn.run_agent_turn`
+Drives the REAL triage agent loop (`fsr_playbooks.llm.run_turn.run_agent_turn`
 + `AnthropicProvider`) against a live FortiSOAR record, using the same
 triage system prompt and tool slice the connector ships. It prints the
 agent's pivots (every tool call), the final analyst-facing text, and any
@@ -29,7 +29,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "python"))
-sys.path.insert(0, str(REPO_ROOT))  # fsr_core lives at the repo root
+sys.path.insert(0, str(REPO_ROOT))  # fsr_playbooks lives at the repo root
 
 # Default model: Haiku, to keep demo cost low.
 DEMO_MODEL = "claude-haiku-4-5-20251001"
@@ -53,13 +53,13 @@ async def _run(prompt: str, model: str = DEMO_MODEL,
     from probes._env import get_config
     get_config()
 
-    from fsr_core.llm.anthropic_provider import AnthropicProvider
-    from fsr_core.llm.run_turn import run_agent_turn
-    from fsr_core.llm.provider import Message
+    from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
+    from fsr_playbooks.llm.run_turn import run_agent_turn
+    from fsr_playbooks.llm.provider import Message
     # Single source of truth for the tool slice (same helper the connector
     # uses); the triage *prompt* now comes from the dynamic pre-flight below.
-    from fsr_core.llm.intents import load_intent_prompt, tools_for_intent
-    from fsr_core.llm.triage_preflight import triage_preflight
+    from fsr_playbooks.llm.intents import load_intent_prompt, tools_for_intent
+    from fsr_playbooks.llm.triage_preflight import triage_preflight
 
     provider = AnthropicProvider(model=model)
     tools = tools_for_intent("triage")

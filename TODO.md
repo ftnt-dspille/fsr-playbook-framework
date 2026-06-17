@@ -12,14 +12,14 @@ live under `docs/plans/`; frozen research/audit snapshots under
 
 ## Plan index
 
-### Connector + fsr_core (investigator / triage agent)
+### Connector + fsr_playbooks (investigator / triage agent)
 
 | Plan | Scope | Status |
 |---|---|---|
 | [`CHAT_INTELLIGENCE_PLAN.md`](docs/plans/CHAT_INTELLIGENCE_PLAN.md) | **Make the chat smarter at investigate→hunt→triage→build, and make that easy to tune.** Track A = a drive→score→attribute→pin tuning loop; Track B = the capability ladder, each rung pinned by a Track-A gate. Subsumes the investigation-quality thread. | **Phase 0 not started (2026-06-05).** Build Track A (A1–A3,A6) first. |
-| [`AGENT_HARDENING_PLAN.md`](docs/plans/AGENT_HARDENING_PLAN.md) | **Primary connector/fsr_core plan.** SOC-deployable agent: op grounding, HITL, self-heal, investigation quality, stream reliability, authoring-loop SAFE_TOOLS (absorbed from AGENT_TOOL_REGISTRY_FIX_PLAN). | Phase 0 (authoring SAFE_TOOLS) + Phase 2–4 open. Phase 1 ✅ complete (1.1–1.9, 2.8 all done). |
+| [`AGENT_HARDENING_PLAN.md`](docs/plans/AGENT_HARDENING_PLAN.md) | **Primary connector/fsr_playbooks plan.** SOC-deployable agent: op grounding, HITL, self-heal, investigation quality, stream reliability, authoring-loop SAFE_TOOLS (absorbed from AGENT_TOOL_REGISTRY_FIX_PLAN). | Phase 0 (authoring SAFE_TOOLS) + Phase 2–4 open. Phase 1 ✅ complete (1.1–1.9, 2.8 all done). |
 | [`AGENT_LOOP_REFINEMENT_PLAN.md`](docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md) | Prompt-cache prefix (A) + constrained emit_* generation (B) + enhance vs build separation (C). | **A ✅ done** (commit `18adb53`). B + C **parked** (low priority per 2026-05-30 decision). |
-| [`AGENT_LOOP_LIFT_PLAN.md`](docs/plans/AGENT_LOOP_LIFT_PLAN.md) | Extract event-consumer loop from `chat.py` into `fsr_core.llm.run_turn` so connector can reuse it without 200-line duplication. | **Not started — post-demo.** Prereq for CHAT_STREAMING_PLAN. |
+| [`AGENT_LOOP_LIFT_PLAN.md`](docs/plans/AGENT_LOOP_LIFT_PLAN.md) | Extract event-consumer loop from `chat.py` into `fsr_playbooks.llm.run_turn` so connector can reuse it without 200-line duplication. | **Not started — post-demo.** Prereq for CHAT_STREAMING_PLAN. |
 | [`CHAT_STREAMING_PLAN.md`](docs/plans/CHAT_STREAMING_PLAN.md) | Incremental agent activity (tokens, tool cards, status) pushed to SOAR widget — Option A polling or Option B SSE. | **Not started — post-demo.** Depends on AGENT_LOOP_LIFT_PLAN. |
 
 ### Studio + compiler (playbook authoring / visual editor)
@@ -60,7 +60,7 @@ live under `docs/plans/`; frozen research/audit snapshots under
 ## Next steps (resume state, 2026-06-05)
 
 ### ★ RESUME HERE — agent-runop fully fixed & shipped (0.3.115 live)
-Deployed **0.3.115** to FortiCloud (all workers verified). Commits: fsr_core
+Deployed **0.3.115** to FortiCloud (all workers verified). Commits: fsr_playbooks
 `fe6bba6` (self-healing siem_events_for_incident), `d80c7e0` (agent-runop
 dual-install fix + step_name); connector `7f974f2` (0.3.110), `1381072` (0.3.115).
 
@@ -97,18 +97,18 @@ the "what's next" set.
 New: `get_session_trace` debug op; conflict-safe `push_playbook` (mint-fresh-uuid +
 name-uniquify on 409, incl. recycle-bin/cross-team-owned clashes); 3 new harness checks
 (`trace_recorded`/`offer_accept_pushes`/`offer_playbook_runs`) + `LiveFSR.collection_exists`.
-Fixed the `No module named 'fsr_core'` flake (my bug: `get_session_trace` skipped the
-`_import_fsr_core()` bootstrap). See memory `connector_state`.
+Fixed the `No module named 'fsr_playbooks'` flake (my bug: `get_session_trace` skipped the
+`_import_fsr_playbooks()` bootstrap). See memory `connector_state`.
 
 Outstanding:
 - [ ] **Commit the connector changes** — UNCOMMITTED on branch `feat/action-based-streaming`
   in `ConnectorsV2/fsr-playbook-builder`: `operations.py` (conflict-safe push +
-  `get_session_trace` + `_import_fsr_core()` fix), `info.json`, `scripts/live_integration.py`,
+  `get_session_trace` + `_import_fsr_playbooks()` fix), `info.json`, `scripts/live_integration.py`,
   `scripts/fsr_live.py`, `release_notes.md`. ⚠️ that tree has UNRELATED pre-existing dirty
   files — commit only mine, don't bundle. (fsr-playbook-framework side already committed `078d9c4`.)
 - [x] **FortiCloud connector RESTORED** (2026-06-01, mfz9…forticloud.com). Deployed
   **0.3.79** (id=180, active), recreated `fsrpb-live` config (config_count=1); live
-  `health_check` returns `ok:true`, `anthropic_reachable:true`, fsr_core importable.
+  `health_check` returns `ok:true`, `anthropic_reachable:true`, fsr_playbooks importable.
   Root cause of the `--with-config` 500 found + fixed (connector `f3fdc03`): the
   **publish-recycle step registers a fresh connector version row**, so the
   connector_id captured at install was stale by the config-create step → POST
@@ -129,14 +129,14 @@ Outstanding:
   real connector emits `playbook_pushed` (`operations.py:2311`). Fixed the
   **widget-harness source** fixture (variant + the already-present
   decline/accept `match` keys) and re-vendored. `make verify` green
-  (105 fsr_core + 130 connector).
+  (105 fsr_playbooks + 130 connector).
 - [ ] **Optional connector hardening:** `_RUN`-suffixed throwaway names in the harness avoid
   the 409, but consider having the offer-save use a per-playbook collection name (compiler
   hardcodes `00 - FSR Studio`) instead of always `00 - FSR Studio (N)`.
 
 ### Skill-based playbook — Phase 6 follow-through (offer card, direction B)
 
-Contract `2.6.0` + connector emit/accept **shipped & green** (`make verify` = 104 fsr_core
+Contract `2.6.0` + connector emit/accept **shipped & green** (`make verify` = 104 fsr_playbooks
 + 130 connector). See `docs/plans/SKILL_BASED_PLAYBOOK_PLAN.md` Phase 6 + memory
 `skill_based_playbook_progress`. Two tracks remain — **do Track A before Track B**
 (don't burn a live deploy on a prompt that never emits the offer).
@@ -202,7 +202,7 @@ blocker) needs — fold them in.
 - [x] **F-rule sweep done.** ruff wired in: `[tool.ruff]` in `pyproject.toml`
   (target `py39`, `select = ["F"]`, `__init__.py` F401 ignored for re-exports),
   `ruff` added to `make sync` deps, new `make lint` target. `make lint` is green
-  across `fsr_core/` + `python/`; connector tree (own code) also clean.
+  across `fsr_playbooks/` + `python/`; connector tree (own code) also clean.
   Fixed 13 real **F821 undefined-name bugs** that would NameError at runtime:
   `tools_triage` (`_fetch_runs_both`/`_shape_run`/`_VERIF_RANK` unimported →
   broke `list_recent_failed_runs`/`list_playbook_runs`/`verification_status`),
@@ -214,8 +214,8 @@ blocker) needs — fold them in.
 - [ ] **Broader sweep deferred.** `ruff check --select E,W,I,UP,B,C4,SIM` surfaces
   ~885 (503 E501 line-length, 120 I001 import-order, plenty of B/SIM). ⚠️ Do NOT
   blanket-enable `UP` — UP045/UP006/UP007 (~65) rewrite `Optional[X]`→`X | None`,
-  which breaks the `fsr_core` Python-3.9 baseline. Tackle per-family, exclude UP
-  for `fsr_core`. Latent gaps found but not "fixed" (no behavior change):
+  which breaks the `fsr_playbooks` Python-3.9 baseline. Tackle per-family, exclude UP
+  for `fsr_playbooks`. Latent gaps found but not "fixed" (no behavior change):
   `probe_modules._resolve_default` result was computed but never stored (no
   `default` column on `module_fields`); `cli.py` `type_` computed unused.
 
@@ -248,7 +248,7 @@ Complete:
 - [x] Connector wiring: `operations.py` card maps + `CONTRACT_VERSION = 2.3.0`;
   persisted + summarized like other cards.
 - [x] Contract spec updated (widget harness `..._CONNECTOR_CONTRACT.md` §3/4/5).
-- [x] `make verify` green (41 fsr_core + 111 connector); 16 tests in
+- [x] `make verify` green (41 fsr_playbooks + 111 connector); 16 tests in
   `test_output_summarization.py` (emitter, suggested_card, both preflight cards).
 - [x] Committed (`7b14055`) + redeployed live (`deploy.sh` → 0.3.32, warmup ok).
 
@@ -1078,24 +1078,24 @@ assume the patterns established in 2026-05-03/04 are followed.
     catalog is cold. Root cause: the background warmup thread
     (`_trigger_background_warmup` → `fsrpb-warmup-hook`) and the inbound
     request thread mutate `sys.modules` against each other. Two windows:
-    (A) `_import_fsr_core` evicts `fsr_core.*` (incl. `_live_crudhub`) at
+    (A) `_import_fsr_playbooks` evicts `fsr_playbooks.*` (incl. `_live_crudhub`) at
     `operations.py:104-109` during re-import, so a concurrent
-    `_ensure_probes_bridge`'s `from fsr_core.mcp_server import _live_crudhub`
+    `_ensure_probes_bridge`'s `from fsr_playbooks.mcp_server import _live_crudhub`
     hits its `except: return` → no bridge; (B) `_set_simulation_mode`
     pop→rebuild at `operations.py:231-243` leaves `probes._env` briefly
     absent. Either makes `run_op`'s `from probes._env import …`
     (`tools_execution.py:1416`) raise → `probes_unavailable`.
     **Blast radius: small.** Fail-loud (clean `_err`, op never runs — no
     data/integrity/leak impact), self-heals once warm, per-worker, bounded
-    to ~1-2s after the push (the cold `fsr_core` re-import burst — NOT the
+    to ~1-2s after the push (the cold `fsr_playbooks` re-import burst — NOT the
     full catalog walk; `warmup()` body never touches `sys.modules`). A
     stable warm install never sees it; only the push→immediately-exercise
     dev loop does.
     **Fix (option 1):** wrap the mutation regions in a module-global
     `threading.RLock` **in `operations.py`** (must live in the non-evicted
-    module so the lock object survives the `fsr_core` eviction). Scope the
+    module so the lock object survives the `fsr_playbooks` eviction). Scope the
     lock to the eviction+reassign critical sections only — NOT the slow
-    `import fsr_core` (CPython's own import lock serializes that); keep the
+    `import fsr_playbooks` (CPython's own import lock serializes that); keep the
     `_set_simulation_mode` early-return (`on == _SIM_MODE["on"]`) OUTSIDE
     the lock so steady-state ops take zero acquisitions. Reassign
     `sys.modules["probes._env"]` in place (drop the bare `pop`) so it's
@@ -1106,7 +1106,7 @@ assume the patterns established in 2026-05-03/04 are followed.
     a sentinel attr and doing a targeted eviction inside
     `_ensure_probes_bridge`, not an unconditional pop. Optional belt-and-
     suspenders: lazy-retry `_ensure_probes_bridge()` once in `run_op` before
-    returning `probes_unavailable`. Edit `fsr_core` SOURCE + connector
+    returning `probes_unavailable`. Edit `fsr_playbooks` SOURCE + connector
     `operations.py`, then re-vendor. ~1-2 hr. (Investigated 2026-05-31.)
 
 

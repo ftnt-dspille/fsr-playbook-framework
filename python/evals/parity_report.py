@@ -33,14 +33,14 @@ _OUT_DIR = _REPO_ROOT / "store" / "eval_runs"
 
 
 def _verify(yaml_text: str) -> dict[str, Any]:
-    from fsr_core.mcp_server import verify_playbook
+    from fsr_playbooks.mcp_server import verify_playbook
     return verify_playbook(yaml_text=yaml_text)
 
 
 def trace_rows() -> list[dict[str, Any]]:
     """Build + verify each trace fixture; collect the per-playbook trust
     signals on the same `verified` bar a hand-author playbook is judged on."""
-    from fsr_core.mcp_server.tools_compile import build_playbook_from_trace
+    from fsr_playbooks.mcp_server.tools_compile import build_playbook_from_trace
 
     rows: list[dict[str, Any]] = []
     for path in sorted(_FIXTURE_DIR.glob("*.json")):

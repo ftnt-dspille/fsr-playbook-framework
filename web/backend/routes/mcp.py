@@ -34,7 +34,7 @@ def _allow_deny() -> tuple[set[str] | None, set[str]]:
 
 
 def _mcp():
-    import fsr_core.mcp_server as mcp_server  # imported lazily so test harnesses can stub it
+    import fsr_playbooks.mcp_server as mcp_server  # imported lazily so test harnesses can stub it
     return mcp_server.mcp
 
 

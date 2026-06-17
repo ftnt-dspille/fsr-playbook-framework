@@ -12,9 +12,9 @@ import re
 
 import yaml
 
-from fsr_core.compiler import compile_yaml
+from fsr_playbooks.compiler import compile_yaml
 
-from fsr_core.mcp_server import _FRIENDLY_FORMS
+from fsr_playbooks.mcp_server import _FRIENDLY_FORMS
 
 
 # Friendly forms that document a non-trigger step type. We synthesize a

@@ -119,10 +119,10 @@ async def _run_one(prompt: str, model: str) -> dict:
     get_config()  # load .env (FSR creds + ANTHROPIC_API_KEY)
 
     from anthropic import AsyncAnthropic
-    from fsr_core.llm.anthropic_provider import AnthropicProvider
-    from fsr_core.llm.run_turn import run_agent_turn
-    from fsr_core.llm.provider import Message
-    from fsr_core.llm.intents import load_intent_prompt, tools_for_intent
+    from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
+    from fsr_playbooks.llm.run_turn import run_agent_turn
+    from fsr_playbooks.llm.provider import Message
+    from fsr_playbooks.llm.intents import load_intent_prompt, tools_for_intent
 
     # Tier-1 org cap is 50k input tokens/min; a multi-turn investigation
     # resends growing history, so single turns can hit the per-minute

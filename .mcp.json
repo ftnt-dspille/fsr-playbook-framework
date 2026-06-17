@@ -6,7 +6,7 @@
     },
     "fsrpb": {
       "command": "uv",
-      "args": ["run", "python", "-m", "fsr_core.mcp_server"]
+      "args": ["run", "python", "-m", "fsr_playbooks.mcp_server"]
     },
     "fsr-deploy": {
       "command": "uv",

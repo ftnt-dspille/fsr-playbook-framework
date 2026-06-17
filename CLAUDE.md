@@ -4,8 +4,8 @@ YAML → FortiSOAR playbook compiler + reference store, with a Svelte visual edi
 an MCP server, and an in-platform connector (lives in a sibling repo, see below).
 
 ## Commands (use these, don't re-derive)
-- `make verify` — **the green-check for the fsr_core + connector axis** (offline): `fsr_core/tests/` + the connector's full suite, both on this repo's `.venv` (editable `fsr_core` + its `yaml`/`anthropic` deps). Run before declaring work done.
-  - GOTCHA: do **not** run the connector suite via `uv run --extra test` — that builds an isolated env without `fsr_core`, so every test errors on `ModuleNotFound: yaml`. Use this repo's `.venv` python with `PYTHONPATH=.` (what `make verify` does).
+- `make verify` — **the green-check for the fsr_playbooks + connector axis** (offline): `fsr_playbooks/tests/` + the connector's full suite, both on this repo's `.venv` (editable `fsr_playbooks` + its `yaml`/`anthropic` deps). Run before declaring work done.
+  - GOTCHA: do **not** run the connector suite via `uv run --extra test` — that builds an isolated env without `fsr_playbooks`, so every test errors on `ModuleNotFound: yaml`. Use this repo's `.venv` python with `PYTHONPATH=.` (what `make verify` does).
   - Studio frontend (`web/frontend`, Svelte) and the live/golden contract harness are NOT in `make verify` — run them separately when working on those.
 - `make tests` — fast pytest only (`-m "not live and not slow"`).
 - `make e2e` — run every `examples/*.test.yaml` against live FSR (10/11 expected).
@@ -13,11 +13,11 @@ an MCP server, and an in-platform connector (lives in a sibling repo, see below)
 - Single test: `uv run python -m pytest python/tests/<file>.py -q`.
 - `fsrpb` CLI: `.venv/bin/fsrpb <cmd>` from anywhere (or `python -m python.cli <cmd>` / `python python/cli.py <cmd>`) — all three work. cli.py self-bootstraps `python/` onto sys.path; the console script enters via repo-root `fsrpb_main.py`. After changing the entry point or sys.path bootstrap, re-run `uv pip install -e .`.
   - Pull a playbook to YAML by **full UI URL**: `cli.py pull "https://<host>/playbooks/<wf-uuid>" -o out.yaml`. `/playbooks/<uuid>` is a single *workflow* → use `pull`; the collection editor URL → use `pull-collection`. A full URL auto-targets its host (overrides `FSR_BASE_URL`); supply `FSR_USERNAME`/`FSR_PASSWORD` (or `FSR_API_KEY`) for that host if it isn't the default instance. `.env` is configured for the forticloud box, **not** `10.99.249.205` (label `dev`, csadmin).
-- Python deps via **uv** (`make sync`); venv at `.venv/`. Runtime target is **Python 3.9** (SOAR baseline) — keep `fsr_core` 3.9-clean (no module-level PEP 604 unions).
+- Python deps via **uv** (`make sync`); venv at `.venv/`. Runtime target is **Python 3.9** (SOAR baseline) — keep `fsr_playbooks` 3.9-clean (no module-level PEP 604 unions).
 
 ## Repo layout
 - `python/` — compiler, resolver, typed walker, MCP server (`python/mcp_server.py`), tests.
-- `fsr_core/` — vendored core shared with the connector. **ALWAYS edit here (fsr-playbook-framework/fsr_core/), NEVER edit the connector's copy directly** (`ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/fsr_core/`). `deploy.sh` runs `rsync` which blows away any direct edits to the connector's copy. Edit source → commit → deploy.
+- `fsr_playbooks/` — vendored core shared with the connector. **ALWAYS edit here (fsr-playbook-framework/fsr_playbooks/), NEVER edit the connector's copy directly** (`ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/fsr_playbooks/`). `deploy.sh` runs `rsync` which blows away any direct edits to the connector's copy. Edit source → commit → deploy.
 - `web/backend` (FastAPI :47821), `web/frontend` — the **Playbook Studio** editor, **Svelte 5**/Vite (:47822). This is the only frontend in this repo.
 - Connector (in-platform MCP + chat): **`/Users/dylanspille/PycharmProjects/ConnectorsV2/fsr-playbook-builder`** — has `scripts/install_to_fsr.py`, `scripts/probe_fsr.py`, `tests/fsr_contract.py`. The contract harness runs **there**, after a live `probe_fsr.py` re-capture — not in this repo's `make verify`.
 - **Angular widget** (the surface that renders inside FortiSOAR) is a separate WebStorm project with its own toolchain — not in this repo or the connector repo.

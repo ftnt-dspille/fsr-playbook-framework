@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
-import fsr_core.mcp_server as mcp_server  # noqa: E402
+import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 from agent import load_system_prompt  # noqa: E402
 
 

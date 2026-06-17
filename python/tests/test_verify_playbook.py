@@ -7,7 +7,7 @@ from __future__ import annotations
 import textwrap
 
 
-from fsr_core.mcp_server import verify_playbook
+from fsr_playbooks.mcp_server import verify_playbook
 
 
 def _yaml(body: str) -> str:

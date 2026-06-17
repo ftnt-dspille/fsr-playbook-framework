@@ -15,7 +15,7 @@ store/fsr_reference.db-wal
 **/fsr_reference.db-wal
 store/e2e_runs/
 store/verify_traces/
-fsr_core/usage.jsonl
+fsr_playbooks/usage.jsonl
 
 # ts
 ts/node_modules/

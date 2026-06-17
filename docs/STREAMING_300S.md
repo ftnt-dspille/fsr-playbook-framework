@@ -3,8 +3,8 @@
 > Briefing for an agent investigating why long build turns die ~5 min in.
 > All `operations.py:NNN` refs are the **connector** copy
 > (`ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/operations.py`);
-> `_loop_helpers.py` / `anthropic_provider.py` are **canonical** fsr_core
-> (`fsr-playbook-framework/fsr_core/llm/`). Edit fsr_core, never the vendored copy.
+> `_loop_helpers.py` / `anthropic_provider.py` are **canonical** fsr_playbooks
+> (`fsr-playbook-framework/fsr_playbooks/llm/`). Edit fsr_playbooks, never the vendored copy.
 
 ## Symptom
 A long agentic **build** run (chat-driven playbook authoring) dies around the
@@ -22,10 +22,10 @@ goes dark and the final transcript is lost.
   `_on_event` → `_event_to_wire` → `storage.append_turn_progress`
   (`:1681-1689`), then a **terminal `stream_end` frame** carrying the
   authoritative transcript + stop_reason (`:1736-1741`).
-- The agent loop: `run_agent_turn` (fsr_core) consumes
+- The agent loop: `run_agent_turn` (fsr_playbooks) consumes
   `AnthropicProvider.stream()`, which runs up to **`MAX_TOOL_TURNS = 16`** LLM
   rounds (`_loop_helpers.py:166`), each round capped at
-  **`STREAM_TIMEOUT_SECS = 300`** (`_loop_helpers.py:184`). fsr_core's own worst
+  **`STREAM_TIMEOUT_SECS = 300`** (`_loop_helpers.py:184`). fsr_playbooks's own worst
   case is 16×300s — far beyond any gateway ceiling.
 
 ## Where the ceiling actually lives (key finding)
@@ -80,9 +80,9 @@ run in the `nginx` `cyops-workflow` celery worker. Therefore:
   (`storage.py:370-414`).
 
 ## Repos / versions
-- **Canonical source:** `fsr-playbook-framework/fsr_core` (edit here) + connector
+- **Canonical source:** `fsr-playbook-framework/fsr_playbooks` (edit here) + connector
   `ConnectorsV2/fsr-playbook-builder/`. The connector vendors a *copy* of
-  fsr_core (rebuilt by `scripts/build.sh`) — do not edit the copy.
+  fsr_playbooks (rebuilt by `scripts/build.sh`) — do not edit the copy.
 - **Installed on box:** `/opt/cyops/configs/integrations/connectors/fsr-playbook-builder_0_3_81/`
   (v0.3.81). **Verify this copy contains the poll feed** before trusting any
   on-box test.

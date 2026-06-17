@@ -90,7 +90,7 @@ Ordered so nothing breaks mid-flight. Each phase is independently shippable.
    `dynamic-variable` → blocked on pyfsr gap #4.
 
 ### Phase F — on-platform execution (needs §4 decision)
-1. Reconcile `fsr_core/mcp_server/_live_crudhub.CrudhubLiveClient` with pyfsr (see §4).
+1. Reconcile `fsr_playbooks/mcp_server/_live_crudhub.CrudhubLiveClient` with pyfsr (see §4).
 
 ---
 
@@ -137,7 +137,7 @@ small PR to pyfsr (it already has the test harness + dev-box integration suite).
 fsrpb runs in two worlds:
 - **Off-platform** (CLI/studio/dev): HTTP to a remote FSR — pyfsr fits perfectly.
 - **On-platform** (inside a FortiSOAR connector): it bridges to
-  `integrations.crudhub.make_request` via `fsr_core/mcp_server/_live_crudhub.CrudhubLiveClient`,
+  `integrations.crudhub.make_request` via `fsr_playbooks/mcp_server/_live_crudhub.CrudhubLiveClient`,
   which mimics the pyfsr surface (`get/post/put/delete`, `.session`, `.base_url`).
 
 pyfsr is `requests`-only and assumes a network endpoint. Two options:

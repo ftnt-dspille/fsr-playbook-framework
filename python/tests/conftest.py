@@ -17,7 +17,7 @@ PYTHON = REPO / "python"
 DB = REPO / "store" / "fsr_reference.db"
 CORPUS = REPO.parent / "FSRPlaybookConversion" / "pb_examples" / "all_fsr_evoke_playbooks.json"
 
-# Repo root must be on path for `fsr_core.*`; python/ for `probes.*`,
+# Repo root must be on path for `fsr_playbooks.*`; python/ for `probes.*`,
 # `store.*`, `cli`, `agent.*`, `evals.*`, `recipes.*`, `chat_review`.
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(PYTHON))

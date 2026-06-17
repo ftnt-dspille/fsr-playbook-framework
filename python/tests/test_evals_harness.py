@@ -55,7 +55,7 @@ def test_score_invalid_yaml_fails_draft_and_verified():
 def test_score_gold_match():
     tasks = load_tasks(["hello_connector"])
     gold_yaml = tasks[0].gold_yaml_text()
-    from fsr_core.mcp_server import compile_yaml
+    from fsr_playbooks.mcp_server import compile_yaml
     gold_json = __import__("json").loads(compile_yaml(gold_yaml, verbose=True)["json"])
     out = score(gold_yaml, gold_json=gold_json, live=False)
     assert out["levels"]["draft"]["passed"] is True

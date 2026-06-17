@@ -14,7 +14,7 @@ The trace→playbook config plumbing is DONE and correct (see memory
   the SkillTrace (`skill_trace.record_run_op(..., config=)` →
   `resolved_inputs["config"]` → step `arguments.config` via
   `skills._compile_run_connector_action`). Verified by test +
-  `make verify` (153 fsr_core + 137 connector green).
+  `make verify` (153 fsr_playbooks + 137 connector green).
 
 **The gap:** for `fortigate-firewall`, `exec_config` comes back **`""`**, so the
 recorded trace has no config and the compiled step fails at runtime:
@@ -38,7 +38,7 @@ configuration id or name <empty> — Connector :: fortigate-firewallV5.4.0`.
 
 **Q1 — config resolution was never broken code; it was stale box state.**
 With the box as it is now (active agent `efe5dafd28b5e41cd4c37e5829ccc638`,
-fortigate `config_count=2`, `status=Completed`), the REAL fsr_core path resolves
+fortigate `config_count=2`, `status=Completed`), the REAL fsr_playbooks path resolves
 cleanly — verified live by driving `tools_execution` directly:
 - `_configured_rows(client, force=True)` includes `fortigate-firewall`.
 - `_row_config_ids(row)` → `['3bd29afa-fb38-4e8d-9c39-68e0f8f8d5d6',
@@ -63,7 +63,7 @@ Decompiled a real hand-authored fortigate step (workflow `fortigate-agent`,
 Identical to an appliance-local step **plus `"agent": "<agentId>"`**.
 `pickFromTenant`/`dynamicallySelected` are the same defaults appliance steps get.
 
-**Fix (landed, `make verify` green = 155 fsr_core + 137 connector):**
+**Fix (landed, `make verify` green = 155 fsr_playbooks + 137 connector):**
 - `skill_trace.record_run_op(..., agent="")` records `resolved["agent"]`.
 - `tools_execution` agent-playbook path passes `agent=agent_id` to the recorder.
 - `skills._compile_run_connector_action` emits `arguments.agent`.
@@ -90,7 +90,7 @@ hand-authored steps: `NormalizerMixin._check_conditional_required` (+
 `_check_param_visibility` in `connector_args`. Walks the gate chain, honors
 defaults (method defaults to Quarantine Based) and empty-string parent
 sentinels, scoped to conditionally-gated params (top-level required stays the
-preflight's job). Test: `fsr_core/tests/test_conditional_required.py` (6 cases).
+preflight's job). Test: `fsr_playbooks/tests/test_conditional_required.py` (6 cases).
 
 **Still TODO:** fold the fortigate trace into the parity-eval fixtures.
 
@@ -100,7 +100,7 @@ Agent-bound configs live UNDER THE AGENT, not on the appliance, so the plain
 `/api/integration/connectors/` (no agent filter) shows `configuration: []`.
 The connector's warmup ALREADY fetches per-agent details (this is the
 "warmup handles the agent config ids" hint):
-- `fsr_core/mcp_server/tools_execution.py::_agent_configured_rows` →
+- `fsr_playbooks/mcp_server/tools_execution.py::_agent_configured_rows` →
   `GET /api/3/agents` → per active agent
   `POST /api/integration/connector_details/?agent={id}&active=true&exclude=operation`,
   keeps rows with `config_count>0` + `status=Completed`, stamps `_agent_id`.
@@ -177,7 +177,7 @@ B3 is done for the agent path. Fold the live trace into the parity-eval fixtures
 ## Loose ends from this session
 - Throwaway diag scripts (gitignored-ish, untracked): connector
   `scripts/_b3_diag.py`, `_b3_fetch.py`. Keep for the investigation.
-- UNCOMMITTED: fsr_core changes on `feat/skill-based-playbook`
+- UNCOMMITTED: fsr_playbooks changes on `feat/skill-based-playbook`
   (skill_trace.py, tools_execution.py, skills.py, skill_compiler.py,
   connector_args.py + test_build_from_trace.py). Connector
   `feat/action-based-streaming` has its older batch + info.json/release_notes at

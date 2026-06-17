@@ -8,8 +8,8 @@ default Continue button.
 """
 from __future__ import annotations
 
-from fsr_core.compiler import compile_yaml
-from fsr_core.compiler.errors import ErrorCode
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.compiler.errors import ErrorCode
 
 
 def _wrap(args_block: str, options_block: str = "") -> str:

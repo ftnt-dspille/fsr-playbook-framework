@@ -3,7 +3,7 @@
 > **STATUS: PARKED — post-demo.** Prerequisite for chat streaming (CHAT_STREAMING_PLAN.md) but not needed for the SOC demo. Resume after demo milestone.
 
 Goal: extract the event-consumer side of `web/backend/routes/chat.py` into a reusable
-`fsr_core.llm.run_turn.run_agent_turn()` so the FortiSOAR connector can implement
+`fsr_playbooks.llm.run_turn.run_agent_turn()` so the FortiSOAR connector can implement
 `chat_turn` / `chat_resume` without duplicating 200+ lines of streaming/persistence
 glue. The web app's SSE route shrinks to input shaping + an `on_event` callback
 that serializes events for the browser.
@@ -19,7 +19,7 @@ effects from the stream's events. That consumer is what we're lifting.
 ## Surface to extract
 
 ```python
-# fsr_core/llm/run_turn.py  (NEW)
+# fsr_playbooks/llm/run_turn.py  (NEW)
 
 @dataclass
 class TurnResult:
@@ -118,7 +118,7 @@ the SuspendedSession before calling it. The gateway argument exists on
 the *provider* level: when `provider.stream()` hits a tier-3+ tool call
 mid-loop, it calls `gateway.stash(session)` and emits an
 `ApprovalRequestEvent`. Today AnthropicProvider imports
-`fsr_core.llm.approvals` directly (the backwards-compat facade), which
+`fsr_playbooks.llm.approvals` directly (the backwards-compat facade), which
 uses the in-memory default. Plan:
 
 - AnthropicProvider gains an optional `approval_gateway: ApprovalGateway`
@@ -131,16 +131,16 @@ uses the in-memory default. Plan:
 
 ## File-by-file diff sketch
 
-**NEW** `fsr_core/llm/run_turn.py` (~280 LoC)
+**NEW** `fsr_playbooks/llm/run_turn.py` (~280 LoC)
 - `TurnResult` dataclass
 - `_TextCoalescer` helper (buffer + flush)
 - `_consume_event_for_history(ev, sink, session_id, turn, seq, ...)`
 - `run_agent_turn(...)` + `resume_agent_turn(...)`
 
-**EDIT** `fsr_core/llm/__init__.py` — export `run_agent_turn`,
+**EDIT** `fsr_playbooks/llm/__init__.py` — export `run_agent_turn`,
 `resume_agent_turn`, `TurnResult`
 
-**EDIT** `fsr_core/llm/anthropic_provider.py` (~5 LoC) — accept optional
+**EDIT** `fsr_playbooks/llm/anthropic_provider.py` (~5 LoC) — accept optional
 `approval_gateway`, route stashes through it
 
 **EDIT** `web/backend/routes/chat.py` — shrinks from 622 → ~350 LoC:
@@ -204,7 +204,7 @@ async def chat_turn(config, params):
    raising AttributeError.
 6. **Test surface**. Today web/tests/test_chat.py exercises the loop end-
    to-end via the FastAPI client. After the lift those tests are still
-   the right end-to-end check. Additionally add fsr_core-level tests
+   the right end-to-end check. Additionally add fsr_playbooks-level tests
    that use `fake_provider` to drive `run_agent_turn` directly — faster
    feedback, no FastAPI startup needed.
 
@@ -239,7 +239,7 @@ Suggested commit sequence:
 - Streaming the connector's chat_turn back to the widget over SSE.
   The 0.1 cut returns the whole transcript on completion; streaming is
   a later widget concern that can use the same `on_event` hook.
-- Migrating `_yaml_tags` / `_detect_intent` / ladder eval into fsr_core.
+- Migrating `_yaml_tags` / `_detect_intent` / ladder eval into fsr_playbooks.
   They're chat-UX heuristics that the connector may want to deviate
   from (different intent space, different ladder set). Keep them in
   the consumer for now.

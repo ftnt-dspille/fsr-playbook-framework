@@ -1,4 +1,4 @@
-from fsr_core.llm.tools import (
+from fsr_playbooks.llm.tools import (
     AUDIT_LOG,
     REGISTRY,
     _resolve_tier,

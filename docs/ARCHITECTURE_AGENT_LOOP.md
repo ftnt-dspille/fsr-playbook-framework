@@ -1,7 +1,7 @@
-# Agent-loop architecture — the shared `fsr_core.llm` wiring
+# Agent-loop architecture — the shared `fsr_playbooks.llm` wiring
 
 The investigate→triage→build agent loop is **one implementation in
-`fsr_core`** with **three front-ends** that each assemble the same five
+`fsr_playbooks`** with **three front-ends** that each assemble the same five
 pieces. If you're adding a fourth surface (or debugging an existing one),
 this is the contract. Everything here is verified against the code as of
 2026-06-08; line numbers drift, so grep the symbol.
@@ -11,14 +11,14 @@ this is the contract. Everything here is verified against the code as of
 The agentic round-trip (`assistant text → tool_use → dispatch → tool_result
 → repeat`) runs **inside `provider.stream()`** (`anthropic_provider.py`,
 `openai_provider.py`, `lmstudio_provider.py`). `run_agent_turn`
-(`fsr_core/llm/run_turn.py`) is the *consumer* of that event stream — it
+(`fsr_playbooks/llm/run_turn.py`) is the *consumer* of that event stream — it
 coalesces text, writes history rows, sniffs YAML, and returns a
 `TurnResult`. No front-end writes a loop.
 
 ```
 front-end  →  run_agent_turn(provider, system, messages, tools, …)
                   └─ provider.stream()  ← the actual tool loop
-                        └─ fsr_core.llm.tools.dispatch(name, args)  ← runs the MCP tool fn
+                        └─ fsr_playbooks.llm.tools.dispatch(name, args)  ← runs the MCP tool fn
                               └─ tier 0–2: run now;  tier 3+: stash SuspendedSession + emit ApprovalRequestEvent
 ```
 
@@ -27,19 +27,19 @@ front-end  →  run_agent_turn(provider, system, messages, tools, …)
 emitted an `ApprovalRequestEvent`. The front-end resumes by popping that
 session and calling `resume_agent_turn(provider, suspended, decision)`.
 
-## The five pieces (all in `fsr_core`)
+## The five pieces (all in `fsr_playbooks`)
 
 | # | Piece | Symbol | Notes |
 |---|---|---|---|
-| 1 | Provider | `fsr_core.llm.factory.get_provider(name, **overrides)` | Needs a `ConfigProvider` installed via `set_config_provider`. Pass `approval_gateway=` as an override — the factory forwards it (filtered by the provider ctor signature). |
-| 2 | System prompt | `fsr_core.llm.intents.load_intent_prompt(intent)` | `"triage"` / `"build"`, loaded from `fsr_core/agent/system_prompt_{triage,build}.md`, inline fallback if the file is missing. |
-| 3 | Tool slice | `fsr_core.llm.intents.tools_for_intent(intent)` | `build` → `[]` (provider self-fills the full `SAFE_TOOLS` registry); `triage` → registry minus `BUILD_ONLY_TOOLS`. |
-| 4 | Trace | `fsr_core.agent.skill_trace.set_active_trace(trace)` around the turn | Makes `run_op` / `emit_action_card` record `SkillCall`s into a per-session `SkillTrace`, which `build_playbook_from_trace` later compiles. Process-local active trace; `clear_active_trace()` in a `finally`. |
-| 5 | Approvals | `fsr_core.llm.approvals` — `InMemoryApprovalGateway` / `SqliteApprovalGateway` | Implements `stash`/`peek`/`pop`/`clear`. HMAC-bound (`bind`/`verify`) so a tampered store fails closed. |
+| 1 | Provider | `fsr_playbooks.llm.factory.get_provider(name, **overrides)` | Needs a `ConfigProvider` installed via `set_config_provider`. Pass `approval_gateway=` as an override — the factory forwards it (filtered by the provider ctor signature). |
+| 2 | System prompt | `fsr_playbooks.llm.intents.load_intent_prompt(intent)` | `"triage"` / `"build"`, loaded from `fsr_playbooks/agent/system_prompt_{triage,build}.md`, inline fallback if the file is missing. |
+| 3 | Tool slice | `fsr_playbooks.llm.intents.tools_for_intent(intent)` | `build` → `[]` (provider self-fills the full `SAFE_TOOLS` registry); `triage` → registry minus `BUILD_ONLY_TOOLS`. |
+| 4 | Trace | `fsr_playbooks.agent.skill_trace.set_active_trace(trace)` around the turn | Makes `run_op` / `emit_action_card` record `SkillCall`s into a per-session `SkillTrace`, which `build_playbook_from_trace` later compiles. Process-local active trace; `clear_active_trace()` in a `finally`. |
+| 5 | Approvals | `fsr_playbooks.llm.approvals` — `InMemoryApprovalGateway` / `SqliteApprovalGateway` | Implements `stash`/`peek`/`pop`/`clear`. HMAC-bound (`bind`/`verify`) so a tampered store fails closed. |
 
 ## How each front-end wires them
 
-| Concern | Connector (`operations.py`) | Web (`web/backend/routes/chat.py`) | MCP shim (`fsr_core/mcp_server/tools_agent.py`) |
+| Concern | Connector (`operations.py`) | Web (`web/backend/routes/chat.py`) | MCP shim (`fsr_playbooks/mcp_server/tools_agent.py`) |
 |---|---|---|---|
 | Entry | `chat_turn` / `chat_resume` (sync op, `asyncio.run`) | `POST /api/chat` / `POST /approvals/{id}` (SSE) | `triage_build_turn` / `triage_build_resume` (`@mcp.tool`, `asyncio.run`) |
 | Config provider | platform-decrypted `config` dict | `backend.settings` adapter (`app.py`) | env-backed `_EnvConfigProvider` (`FSR_LLM_PROVIDER` + shared `OPENAI_*`/`ANTHROPIC_*`; `STUDIO_LLM_PROVIDER` honored as legacy fallback; default `openai` → gpt-oss gateway) |

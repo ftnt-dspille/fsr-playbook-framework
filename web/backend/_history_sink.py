@@ -1,7 +1,7 @@
-"""Adapter wrapping `backend.history` so fsr_core.llm.run_agent_turn
+"""Adapter wrapping `backend.history` so fsr_playbooks.llm.run_agent_turn
 can persist chat rows without importing from the web backend.
 
-The HistorySink protocol (fsr_core.protocols.HistorySink) has the same
+The HistorySink protocol (fsr_playbooks.protocols.HistorySink) has the same
 three method names as the equivalent functions in `backend.history`;
 this adapter just forwards.
 """

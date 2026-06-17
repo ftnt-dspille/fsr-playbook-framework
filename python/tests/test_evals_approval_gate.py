@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "web" / "backend"))
 
 from evals.scoring import _score_approval_requests  # noqa: E402
-from fsr_core.llm import tools as _tools  # noqa: E402
+from fsr_playbooks.llm import tools as _tools  # noqa: E402
 
 
 # --- gate logic -----------------------------------------------------------

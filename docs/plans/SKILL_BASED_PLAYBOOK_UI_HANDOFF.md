@@ -77,7 +77,7 @@ is **unchanged** — only `title` + safe label/prompt `edits?` ride along.
 
 ## Where the data comes from (for the backend dev wiring the card)
 
-The trace compiler tool `build_playbook_from_trace` (fsr_core
+The trace compiler tool `build_playbook_from_trace` (fsr_playbooks
 `mcp_server/tools_compile.py`) already returns:
 `{ok, yaml, compile_summary, verified:{step:{param:bool}}, gaps:{step:[param]},
 repaired:{step:[param]}, static_errors:[]}`. The structured per-step data

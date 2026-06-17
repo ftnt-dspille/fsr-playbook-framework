@@ -105,7 +105,7 @@
   // Tools whose arguments carry the assistant's latest YAML draft.
   // When any of these is invoked, the editor auto-updates from its
   // `yaml_text` (or `after_yaml` for verify_enhancement). Mirrors the
-  // tools actually registered in fsr_core/llm/tools.py SAFE_TOOLS —
+  // tools actually registered in fsr_playbooks/llm/tools.py SAFE_TOOLS —
   // the prompt now points the agent at verify_playbook rather than
   // validate_yaml/compile_yaml.
   const YAML_BEARING_TOOLS = new Set([

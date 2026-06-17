@@ -6,10 +6,10 @@ import sqlite3
 
 import pytest
 
-from fsr_core.compiler.jinja_typing import (
+from fsr_playbooks.compiler.jinja_typing import (
     extract_pure_jinja, terminal_filter, infer_terminal_observed_type,
 )
-from fsr_core.compiler.resolver.connector_args import (
+from fsr_playbooks.compiler.resolver.connector_args import (
     _param_target_observed_type, _types_compatible,
 )
 
@@ -180,7 +180,7 @@ def test_hand_curated_overrides_db():
     """`int` and similar live in the DB, but `b64encode` only exists in
     the hand-curated map. Both should resolve to the same shape via
     `filter_signature`."""
-    from fsr_core.compiler.jinja_typing import filter_signature
+    from fsr_playbooks.compiler.jinja_typing import filter_signature
     conn = _macros_conn()
     assert filter_signature("b64encode", conn) == (None, "string")
     # And the curated entry wins even when the DB disagrees:
@@ -192,7 +192,7 @@ def test_hand_curated_overrides_db():
 
 def test_hand_curated_long_tail():
     """Spot-check several formerly-NULL macros now have signatures."""
-    from fsr_core.compiler.jinja_typing import _HAND_CURATED
+    from fsr_playbooks.compiler.jinja_typing import _HAND_CURATED
     for name in ("b64encode", "json2html", "dict2items", "items2dict",
                  "fromIRI", "ipaddr", "from_yaml_all", "human_readable",
                  "bool", "count", "json_query"):
@@ -203,7 +203,7 @@ def test_hand_curated_long_tail():
 
 
 def test_validate_chain_ok_when_short():
-    from fsr_core.compiler.jinja_typing import validate_chain
+    from fsr_playbooks.compiler.jinja_typing import validate_chain
     # No filters: nothing to validate.
     assert validate_chain("vars.x", _macros_conn()) is None
     # One filter: still nothing.
@@ -211,13 +211,13 @@ def test_validate_chain_ok_when_short():
 
 
 def test_validate_chain_ok_compatible():
-    from fsr_core.compiler.jinja_typing import validate_chain
+    from fsr_playbooks.compiler.jinja_typing import validate_chain
     # int -> string consumer is fine because string accepts anything.
     assert validate_chain("vars.x | int | tojson", _macros_conn()) is None
 
 
 def test_validate_chain_flags_mismatch():
-    from fsr_core.compiler.jinja_typing import validate_chain
+    from fsr_playbooks.compiler.jinja_typing import validate_chain
     # `length` produces integer; `upper` expects string.
     bad = validate_chain("vars.x | length | upper", _macros_conn())
     assert bad is not None
@@ -226,7 +226,7 @@ def test_validate_chain_flags_mismatch():
 
 
 def test_validate_chain_silence_on_unknown():
-    from fsr_core.compiler.jinja_typing import validate_chain
+    from fsr_playbooks.compiler.jinja_typing import validate_chain
     # `first` has output_type=any → no mismatch claim downstream.
     assert validate_chain("vars.x | first | int", _macros_conn()) is None
 
@@ -239,8 +239,8 @@ def _walk(yaml_text: str):
     diagnostic codes (deduped) so tests can assert presence/absence."""
     import sys
     sys.path.insert(0, "python")
-    from fsr_core.compiler import parse_yaml
-    from fsr_core.compiler.typed_walker import walk_playbook
+    from fsr_playbooks.compiler import parse_yaml
+    from fsr_playbooks.compiler.typed_walker import walk_playbook
     coll, _errs = parse_yaml(yaml_text)
     assert coll is not None, "parse failed in test fixture"
     walk = walk_playbook(coll)

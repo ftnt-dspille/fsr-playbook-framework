@@ -11,9 +11,9 @@ import pytest
 pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
-import fsr_core.mcp_server as mcp_server  # noqa: E402
-import fsr_core.mcp_server.tools_jinja  # noqa: E402, F401
-import fsr_core.mcp_server.tools_triage  # noqa: E402, F401
+import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
+import fsr_playbooks.mcp_server.tools_jinja  # noqa: E402, F401
+import fsr_playbooks.mcp_server.tools_triage  # noqa: E402, F401
 
 
 YAML_REFERENCING_STEP = """

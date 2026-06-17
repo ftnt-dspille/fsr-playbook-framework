@@ -7,9 +7,9 @@ turnkey — an alternate front-end to the FortiSOAR widget, with no FSR UI.
 
 > **Status:** ✅ CORE SHIPPED (2026-06-08, offline-green). The two tools
 > `triage_build_turn` / `triage_build_resume` live in
-> `fsr_core/mcp_server/tools_agent.py`, registered on the `fsrpb` MCP server.
+> `fsr_playbooks/mcp_server/tools_agent.py`, registered on the `fsrpb` MCP server.
 > HITL approve→playbook-offer round-trip proven offline
-> (`fsr_core/tests/test_mcp_agent_shim.py`, 3 tests). Architecture written up
+> (`fsr_playbooks/tests/test_mcp_agent_shim.py`, 3 tests). Architecture written up
 > in `docs/ARCHITECTURE_AGENT_LOOP.md`; Claude Desktop config + README done.
 > **Remaining:** live smoke-test from Claude Desktop against the gpt-oss
 > gateway; optional `triage_build_accept` convenience (offer-only default
@@ -26,16 +26,16 @@ primitives that expose what the packaged turn hid:
 `triage_session_start` / `triage_session_state` / `triage_session_clear` +
 `triage_guidance` (and an MCP `triage` prompt). Flow: start → `run_op` (records)
 + `emit_action_card` (stage) → `build_playbook_from_trace()`. Offline-proven in
-`fsr_core/tests/test_mcp_native_session.py`. `triage_build_turn` stays for the
+`fsr_playbooks/tests/test_mcp_native_session.py`. `triage_build_turn` stays for the
 widget/headless path. See [[feedback_desktop_native_triage]].
 
 ### What shipped (vs the task table below)
-- **#1 InMemoryApprovalGateway** — already existed in `fsr_core.llm.approvals`; reused, not rewritten.
+- **#1 InMemoryApprovalGateway** — already existed in `fsr_playbooks.llm.approvals`; reused, not rewritten.
 - **#2 session store + TTL** — `_SESSIONS` dict + `_evict()` (30-min idle).
-- **#3 _assemble** — reused `intents.load_intent_prompt` + `intents.tools_for_intent` (the connector already factored these into `fsr_core.llm.intents`); added an env-backed `_EnvConfigProvider` honoring the web backend's `STUDIO_*`/`OPENAI_*` env so one `.env` drives both.
+- **#3 _assemble** — reused `intents.load_intent_prompt` + `intents.tools_for_intent` (the connector already factored these into `fsr_playbooks.llm.intents`); added an env-backed `_EnvConfigProvider` honoring the web backend's `STUDIO_*`/`OPENAI_*` env so one `.env` drives both.
 - **#4 flattener** — `_flatten` (text + cards[] + approval/playbook_offer) + `_collapse_assistant_turn` (the `_text_of`-style history collapse) + `_staged_actions`.
 - **#5/#6 tools** — `triage_build_turn`, `triage_build_resume` (sync `@mcp.tool`, `asyncio.run`, trace scope, per-session gateway).
-- **#7 registration** — added to `fsr_core/mcp_server/__init__.py` (import + `__all__`).
+- **#7 registration** — added to `fsr_playbooks/mcp_server/__init__.py` (import + `__all__`).
 - **#8 offline test** — `test_mcp_agent_shim.py`: scripted fake provider stages a tier-3 action → suspend → resume(approve) → playbook offer; asserts the round-trip + staged_actions + error paths.
 - **#9 docs** — README MCP section + Claude Desktop JSON snippet; `docs/ARCHITECTURE_AGENT_LOOP.md`.
 
@@ -43,7 +43,7 @@ widget/headless path. See [[feedback_desktop_native_triage]].
 
 ## Why this is small now
 
-The agent loop is **already extracted into `fsr_core.llm.run_turn`** — the hard
+The agent loop is **already extracted into `fsr_playbooks.llm.run_turn`** — the hard
 part is done:
 
 - `run_agent_turn(*, provider, system, messages, tools, …) -> TurnResult` —
@@ -67,11 +67,11 @@ exists, so it's a session-store problem, not a control-flow one.
 
 | Piece | Source to reuse | Notes |
 |---|---|---|
-| Provider | `fsr_core.llm.factory` | anthropic / openai from env. **Default to the local `gpt-oss-120b` OpenAI endpoint** (`OPENAI_ENDPOINT`) — see Token efficiency. |
+| Provider | `fsr_playbooks.llm.factory` | anthropic / openai from env. **Default to the local `gpt-oss-120b` OpenAI endpoint** (`OPENAI_ENDPOINT`) — see Token efficiency. |
 | System prompt | the triage `system_prompt_build.md` the connector loads | load verbatim; do not re-author. |
-| Tool slice | `SAFE_TOOLS` → `openai_tools()` / `anthropic_tools()` in `fsr_core.llm.tools` | same slice the connector advertises. |
+| Tool slice | `SAFE_TOOLS` → `openai_tools()` / `anthropic_tools()` in `fsr_playbooks.llm.tools` | same slice the connector advertises. |
 | Trace recorder | `skill_trace.set_session_trace` / `_session_trace_scope` | per-session `SkillTrace`; this is what makes `build_playbook_from_trace` work. The plain MCP toolbox does NOT auto-record — this shim is what fixes that. |
-| Approval gateway | `fsr_core.llm.approvals` (`ApprovalGateway` + `SuspendedSession`) | an **in-memory** gateway keyed by session_id is enough (no sqlite/HMAC durability needed for a desktop tool). |
+| Approval gateway | `fsr_playbooks.llm.approvals` (`ApprovalGateway` + `SuspendedSession`) | an **in-memory** gateway keyed by session_id is enough (no sqlite/HMAC durability needed for a desktop tool). |
 
 ---
 
@@ -146,7 +146,7 @@ compiler directly (mirror connector `operations.chat_resume` accept branch).
 | 4 | `transcript → {text, cards[], staged_actions[], playbook_offer}` flattener | S |
 | 5 | `@mcp.tool triage_build_turn` | S |
 | 6 | `@mcp.tool triage_build_resume` (+ optional `triage_build_accept`) | S |
-| 7 | Register in `fsr_core.mcp_server`; add to the read-only vs mutating tool gating | XS |
+| 7 | Register in `fsr_playbooks.mcp_server`; add to the read-only vs mutating tool gating | XS |
 | 8 | Offline test: stub provider that emits a tool_use→pending_approval→resume, assert the two tools round-trip a HITL approval and produce a playbook offer | M |
 | 9 | Claude Desktop config snippet + a short README section | XS |
 

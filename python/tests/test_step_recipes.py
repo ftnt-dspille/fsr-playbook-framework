@@ -15,7 +15,7 @@ import re
 
 import pytest
 
-from fsr_core.compiler import compile_yaml
+from fsr_playbooks.compiler import compile_yaml
 from recipes import step_lookup
 
 

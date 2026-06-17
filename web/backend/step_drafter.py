@@ -289,7 +289,7 @@ def validate_proposed_args(step_type: str,
     if str(repo_python) not in sys.path:
         sys.path.insert(0, str(repo_python))
     try:
-        from fsr_core.compiler import compile_yaml as _compile  # type: ignore[import-not-found]
+        from fsr_playbooks.compiler import compile_yaml as _compile  # type: ignore[import-not-found]
     except ImportError as exc:
         return [{
             "severity": "unknown",
@@ -357,8 +357,8 @@ async def draft_step_args(
     helps the UI show a "this used N tokens of context" hint without
     needing a tokenizer dependency.
     """
-    from fsr_core.llm.factory import get_provider
-    from fsr_core.llm.provider import (
+    from fsr_playbooks.llm.factory import get_provider
+    from fsr_playbooks.llm.provider import (
         Message, TextEvent, ErrorEvent, DoneEvent,
     )
 

@@ -4,7 +4,7 @@ These guard against silent offset drift when the regexes get tweaked —
 the editor relies on the ranges matching exactly so `executeEdits` lands
 the patch where the user expects.
 """
-from fsr_core.compiler.source_fixer import collect_fixes
+from fsr_playbooks.compiler.source_fixer import collect_fixes
 
 
 def _by_code(text: str) -> dict:

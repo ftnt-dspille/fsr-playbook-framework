@@ -28,9 +28,9 @@ import time
 
 import web.backend.app  # noqa: F401  — triggers _load_dotenv()
 from web.backend import settings
-from fsr_core.llm.openai_provider import OpenAIProvider
-from fsr_core.llm.tools import openai_tools
-from fsr_core.llm.provider import (
+from fsr_playbooks.llm.openai_provider import OpenAIProvider
+from fsr_playbooks.llm.tools import openai_tools
+from fsr_playbooks.llm.provider import (
     DoneEvent, ErrorEvent, Message, TextEvent,
     ToolResultEvent, ToolUseEvent, UsageEvent,
 )

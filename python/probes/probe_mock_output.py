@@ -52,7 +52,7 @@ def main() -> int:
     # 1. Compile + push
     _log(f"compiling {YAML_PATH.name}")
     sys.path.insert(0, str(REPO / "python"))
-    from fsr_core.compiler import compile_yaml
+    from fsr_playbooks.compiler import compile_yaml
     db_path = REPO / "store" / "fsr_reference.db"
     r = compile_yaml(YAML_PATH.read_text(), db_path)
     if not r.ok:

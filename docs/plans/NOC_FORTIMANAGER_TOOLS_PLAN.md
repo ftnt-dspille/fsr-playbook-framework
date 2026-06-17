@@ -2,7 +2,7 @@
 
 **Status:** Phases A + B + C DONE 2026-06-10. **LIVE DEPLOYED + VERIFIED
 2026-06-10b** on 10.99.249.205 (connector-fsr-soc-assistant **0.4.7**,
-openai/gpt-4o-mini). `fsr_core` **380 passed**. Authored 2026-06-10.
+openai/gpt-4o-mini). `fsr_playbooks` **380 passed**. Authored 2026-06-10.
 
 ## Live deploy + drive — DONE 2026-06-10b
 Box 10.99.249.205 (`csadmin/fortinet`). FMG `fortinet-fortimanager-json-rpc`
@@ -19,7 +19,7 @@ down/out-of-sync diagnosis) and fleet sweep (full 13-device root-ADOM list,
 model devices tagged not flagged as outages). No HA pair on the box (all
 standalone) → failover money-shot not demoable.
 
-### 4 bugs the live drive exposed (all fixed in canonical `fsr_core`)
+### 4 bugs the live drive exposed (all fixed in canonical `fsr_playbooks`)
 1. **FMG response shape.** `_fmg_rows` only knew `result[].data`/`samples`, but
    the `fortinet-fortimanager-json-rpc` connector nests rows under
    `get_response`. The sim fixture `_fmg_jsonrpc` *lied* (emitted `result[].data`)
@@ -78,13 +78,13 @@ connector name (UI not re-verified live).
   recommend, never auto-remediate), `ti_targets=[]`.
 - Hunt loop itself needs no new infra: pivot tools are in agent hands and
   `resume()→stream()` chains them, bounded by the `hunt_depth` lever.
-- Tests: `fsr_core/tests/test_noc_triage_routing.py` (7) — routing, scenario
+- Tests: `fsr_playbooks/tests/test_noc_triage_routing.py` (7) — routing, scenario
   classification, entity-filled recipes, no security-alert misclassification.
 - Remaining for B (optional): live drive validation against real/sim FMG+FAZ.
 
 
 ## Phase A — shipped
-- New module `fsr_core/mcp_server/tools_noc.py` (7 tools, all **tier 1**):
+- New module `fsr_playbooks/mcp_server/tools_noc.py` (7 tools, all **tier 1**):
   - FMG (all via `json_rpc_get`, portable across connector variants):
     `fmg_get_device_list`, `fmg_get_device_status`, `fmg_get_ha_status`,
     `fmg_get_policy_package_status`. Connector const `_FMG_CONNECTOR =
@@ -100,8 +100,8 @@ connector name (UI not re-verified live).
   `_faz_device_logs` (WAN1 link-down → tunnel-down → last keepalive). Added
   `fortinet-fortimanager`/`fortinet-fortianalyzer` to `_ROSTER`. HA peer up +
   clean policy install ⇒ diagnosis points at upstream/power, not a bad push.
-- Tests: `fsr_core/tests/test_noc_tools.py` (10) — contract/digest/tier/round-trip.
-  `make verify` green: 370 fsr_core + 163 connector.
+- Tests: `fsr_playbooks/tests/test_noc_tools.py` (10) — contract/digest/tier/round-trip.
+  `make verify` green: 370 fsr_playbooks + 163 connector.
 - **Resolved open Q1:** FMG named-op connector is `fortinet-fortimanager_dev`
   (`get_devices`, `get_adom_policy_package`, `reinstall_policy`); the json-rpc /
   utils variants only expose `json_rpc_*`. Phase A uses `json_rpc_get` for
@@ -143,18 +143,18 @@ All offline on fixtures for the demo; against real FMG/FAZ when configured — s
 |---|---|---|
 | Call FMG/FAZ | `run_op` → `/api/integration/execute/` | thin named tool wrappers |
 | Offline demo | `_sim_client` + `_sim_fixtures` keyed by `(connector,op)` | FMG+FAZ fixtures + NOC incident |
-| LLM picks tools reliably | `SAFE_TOOLS`+`TOOL_TIERS`+auto-schema in `fsr_core/llm/tools.py` | ~6–8 entries + tiers |
-| "Hunt / try new things" | `fsr_core/llm/triage_sources.py` source→pivot map; `hunt_depth` lever; `resume()`→`stream()` loop | a `fortimanager`/`fortianalyzer` source entry w/ pre-filled pivots |
+| LLM picks tools reliably | `SAFE_TOOLS`+`TOOL_TIERS`+auto-schema in `fsr_playbooks/llm/tools.py` | ~6–8 entries + tiers |
+| "Hunt / try new things" | `fsr_playbooks/llm/triage_sources.py` source→pivot map; `hunt_depth` lever; `resume()`→`stream()` loop | a `fortimanager`/`fortianalyzer` source entry w/ pre-filled pivots |
 | Mutations gated | tier-3 `pending_approval` → approval card | assign tier 3 to future remediation tool |
 | Widget rendering | tool_call chips (incl. new duration timers), activity trail, cards | nothing |
 
-Tools resolve via `getattr(mcp_server, name)` (`fsr_core/llm/tools.py::_resolve`);
-implement in a tools module, export from `fsr_core/mcp_server/__init__.py`, register
+Tools resolve via `getattr(mcp_server, name)` (`fsr_playbooks/llm/tools.py::_resolve`);
+implement in a tools module, export from `fsr_playbooks/mcp_server/__init__.py`, register
 in `SAFE_TOOLS`+`TOOL_TIERS`. Template: `siem_search_host` in
-`fsr_core/mcp_server/tools_triage.py`.
+`fsr_playbooks/mcp_server/tools_triage.py`.
 
 ## Tool surface (Phase A — read-only, dual-mode)
-New module `fsr_core/mcp_server/tools_noc.py`:
+New module `fsr_playbooks/mcp_server/tools_noc.py`:
 - **FMG:** `fmg_get_device_status(device)`, `fmg_get_device_list(adom?)`,
   `fmg_get_ha_status(device)`, `fmg_get_policy_package_status(device)`
 - **FAZ (event hunt, submit→poll like FortiSIEM):**
@@ -191,7 +191,7 @@ Not hard: the plumbing (registration, tiering, dispatch, approval-gating, widget
 render, hunt/pivot loop) — all proven by the SIEM side.
 
 ## Testing (definition of done)
-- fsr_core unit: each tool digest shape + sim round-trip; tier=1; NOC source-pivot map.
+- fsr_playbooks unit: each tool digest shape + sim round-trip; tier=1; NOC source-pivot map.
 - connector offline suite: `_event_to_wire`/transcript for a NOC turn; `make verify` green.
 - widget jest: NOC fixture transcript render via `render.pipeline`.
 - widget e2e: `fsrSocAssistant.nocDeviceDown.spec.js` (mock=noc_device_down) asserts FMG/FAZ chips + diagnosis card.
@@ -205,10 +205,10 @@ render, hunt/pivot loop) — all proven by the SIEM side.
 3. Multi-ADOM FMG? → optional `adom` param on tools.
 
 ## Pointers
-- Tool registry/tiers/dispatch: `fsr_core/llm/tools.py`. Tool impls/exports:
-  `fsr_core/mcp_server/tools_*.py` + `__init__.py`. Sim layer:
-  `fsr_core/mcp_server/_sim_client.py` + `_sim_fixtures.py`.
-- Hunt/pivot intelligence: `fsr_core/llm/triage_sources.py`,
+- Tool registry/tiers/dispatch: `fsr_playbooks/llm/tools.py`. Tool impls/exports:
+  `fsr_playbooks/mcp_server/tools_*.py` + `__init__.py`. Sim layer:
+  `fsr_playbooks/mcp_server/_sim_client.py` + `_sim_fixtures.py`.
+- Hunt/pivot intelligence: `fsr_playbooks/llm/triage_sources.py`,
   `triage_normalize.py`, `triage_preflight.py`; `hunt_depth` lever.
 - Widget render already handles tool chips/activity/cards (+ per-tool duration
   timers added 2026-06-10).

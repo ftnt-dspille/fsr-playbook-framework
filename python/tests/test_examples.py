@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsr_core.compiler import compile_yaml
+from fsr_playbooks.compiler import compile_yaml
 
 
 def _examples(repo_root):

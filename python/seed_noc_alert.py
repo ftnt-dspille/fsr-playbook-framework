@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Seed a NOC alert into FortiSOAR from the scenario manifest.
 
-Reads ``scenario["alert"]`` from ``fsr_core/mcp_server/noc_scenarios.json`` and
+Reads ``scenario["alert"]`` from ``fsr_playbooks/mcp_server/noc_scenarios.json`` and
 POSTs it to the **alerts** module (``/api/3/alerts`` on this box — confirmed
 2026-06-10; see HANDOFF). Picklist-typed fields (severity, type, status, source)
 are resolved name -> IRI via ``picklists.resolve_module_fields`` when live.
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MANIFEST = REPO_ROOT / "fsr_core" / "mcp_server" / "noc_scenarios.json"
+MANIFEST = REPO_ROOT / "fsr_playbooks" / "mcp_server" / "noc_scenarios.json"
 
 ALERTS_MODULE = "alerts"  # confirmed on 10.99.249.205 (not "incidents")
 

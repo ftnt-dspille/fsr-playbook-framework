@@ -22,7 +22,7 @@ pytest.importorskip(
     reason="mcp package not installed (pip install mcp)",
 )
 
-import fsr_core.mcp_server as mcp_server  # noqa: E402
+import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 
 
 # Every short type listed in resolver.SHORT_TYPE_TO_FSR — this is the

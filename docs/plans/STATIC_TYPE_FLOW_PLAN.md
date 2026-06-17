@@ -9,7 +9,7 @@ Open Q #2 (connector-param ingestion coercion) is **RESOLVED** by the Phase 4b l
 finding is that NO further scalar→scalar rule is safe to add (see Phase 4b Outcome) — the
 conservative Phase 4 is the final design. Only remaining op work: re-vendor + redeploy.
 **Branch:** `feat/static-type-flow` (off `feat/skill-based-playbook`).
-**Green-check:** `make verify` (307 fsr_core + 159 connector) — currently green. Note the
+**Green-check:** `make verify` (307 fsr_playbooks + 159 connector) — currently green. Note the
 python eval suite (`python/tests/test_evals_harness.py::test_run_matrix_gold_beats_echo`) is
 gated by `verify_playbook` output, so any verify change must keep the gold fraction ≥ 0.55.
 
@@ -17,7 +17,7 @@ gated by `verify_playbook` output, so any verify change must keep the gold fract
 (P1a scoping) · `027bce3` (P2 var typing + P0 regression fix).
 
 **RESUME HERE →** All phases (0–5 + 4b) are DONE; Open Q #2 resolved. Nothing left to design.
-Only operational task: ensure the connector is fully deployed/warmed (echo op + fsr_core phases
+Only operational task: ensure the connector is fully deployed/warmed (echo op + fsr_playbooks phases
 3–5 shipped at 0.3.122; re-run `scripts/deploy.sh` to complete warmup/rollout-verify if a prior
 deploy was interrupted). See each phase's **Outcome** block below. Probes are re-runnable:
 `PYTHONPATH=python:. .venv/bin/python -m probes.probe_set_variable_coercion` (and
@@ -129,9 +129,9 @@ Each phase is independently shippable and green under `make verify`.
 1→2 branches; each arm's `typed_env` carries only its own terminal step. Audited all 24
 `examples/*.yaml` — branch counts rose where expected, **zero new error diagnostics**
 (the two pre-existing errors in `demo_record_find_update`/`find_and_update` are unchanged).
-Tests: `fsr_core/tests/test_walker_branch_enumeration.py` (5 cases, incl. the re-parse-vs-IR
+Tests: `fsr_playbooks/tests/test_walker_branch_enumeration.py` (5 cases, incl. the re-parse-vs-IR
 regression anchor and cross-/same-branch `find_record` reference checks). `make verify`
-green (300 fsr_core + 159 connector).
+green (300 fsr_playbooks + 159 connector).
 
 **Gotcha discovered:** set_variable outputs are rewritten by the resolver to `vars.<name>`,
 NOT `vars.steps.<step>` — so a cross-branch *set_variable* leak is invisible to the current
@@ -301,7 +301,7 @@ the walker **adds** the branch-scoped cases it alone can see, all `severity=warn
 `var_read_before_definition`, `var_defined_other_branch`, `loop_var_outside_for_each`
 (`vars.item` outside a for_each step — justified by the Phase 1a probe). Disjoint: the walker
 stays silent when a name is never defined anywhere. Tests:
-`fsr_core/tests/test_walker_var_typing.py` (classifier unit + 6 scoping/typing cases). No new
+`fsr_playbooks/tests/test_walker_var_typing.py` (classifier unit + 6 scoping/typing cases). No new
 diagnostics on any `examples/*.yaml`.
 
 **Regression caught + fixed (important):** Phase 0 had pointed the *entire* `verify_playbook`
@@ -333,9 +333,9 @@ Shape (ipv4/url/email/datetime → scalar `string` for now — a permissive tag)
 `param_shapes` once per playbook, and `_pure_single_ref` now recognizes
 `vars.input.params.<name>` → `("param", name, "")` so a typed param flowing into a connector
 op is judged by the same Phase 4 `_source_target_compatible` logic. Untyped params produce no
-shape → skipped (no regression). Tests: `fsr_core/tests/test_param_types_phase3.py` (8 cases:
+shape → skipped (no regression). Tests: `fsr_playbooks/tests/test_param_types_phase3.py` (8 cases:
 parser mapping/list/bad-type, type→shape, input-param ref, + 3 walker integration). `make
-verify` green (324 fsr_core + 159 connector); gold gate green; zero new parse errors across
+verify` green (324 fsr_playbooks + 159 connector); gold gate green; zero new parse errors across
 `examples/*.yaml`.
 
 **Note:** the resolver does NOT yet emit `vars.input.params.<name>` declarations to FSR from
@@ -381,9 +381,9 @@ because most text-widget params carry `observed_type=None` (→ target tag None 
 fires mainly on explicitly-typed widgets (integer/decimal/checkbox/json) and type-probed text
 params (ipv4/url/…), which bounds false positives. **Audited all 24 `examples/*.yaml`: zero
 new `type_mismatch` diagnostics.** `type_mismatch` added to the required-fix code list +
-`_finalize` priority order. Tests: `fsr_core/tests/test_walker_param_types.py` (9 cases:
+`_finalize` priority order. Tests: `fsr_playbooks/tests/test_walker_param_types.py` (9 cases:
 pure-ref unit, shape→tag, compat matrix, + 6 hand-built-IR integration incl. list→scalar hard
-error and the no-`param_type_fn`/filtered-ref skip paths). `make verify` green (316 fsr_core +
+error and the no-`param_type_fn`/filtered-ref skip paths). `make verify` green (316 fsr_playbooks +
 159 connector); gold eval fraction unchanged (`test_run_matrix_gold_beats_echo` green).
 
 ### Phase 4b — connector-param ingestion coercion probe + scalar tolerance ✅ DONE 2026-06-06
@@ -412,7 +412,7 @@ would false-positive. So the original "should string→integer error?" question 
 not safely**. Phase 4's conservative rules — shape-into-scalar (justified by *connector intent*:
 a list value stays a list and won't fill a scalar-widget param) + numeric/bool category
 crossings — remain correct and are the FINAL design. **Tests:**
-`fsr_core/tests/test_param_ingestion_pin.py` pins both findings offline against the committed
+`fsr_playbooks/tests/test_param_ingestion_pin.py` pins both findings offline against the committed
 artifact (widget-independence + cast == Phase 1b classifier), so an FSR upgrade that changes
 coercion fails the build. `make verify` green.
 
@@ -434,9 +434,9 @@ trace (var_env + decisions + diagnostics per branch) to
 surfaces the path as `evidence["type_trace_path"]`; `verbose=True` additionally folds the
 per-branch decisions into `evidence["type_trace"]` (lean mode omits the folded copy but still
 writes the file). `store/verify_traces/` added to `.gitignore`. Tests:
-`fsr_core/tests/test_walker_param_types.py` (+2: decisions record pass/fail, to_dict carries
+`fsr_playbooks/tests/test_walker_param_types.py` (+2: decisions record pass/fail, to_dict carries
 them) and `python/tests/test_verify_playbook.py` (+1 e2e: file written + pathed, verbose folds
-trace, lean omits it). `make verify` green (326 fsr_core + 159 connector); gold gate green.
+trace, lean omits it). `make verify` green (326 fsr_playbooks + 159 connector); gold gate green.
 
 ---
 
@@ -455,11 +455,11 @@ trace, lean omits it). `make verify` green (326 fsr_core + 159 connector); gold 
    grows unbounded across many distinct playbooks.
 
 ## Files in scope
-- `fsr_core/compiler/typed_walker.py` — branch walk, typed_env, type comparison (P0,P2,P4,P5).
-- `fsr_core/mcp_server/tools_verify.py` — walk resolved IR, callbacks, evidence, trace (P0,P4,P5).
-- `fsr_core/compiler/validator.py` — relocate undefined-var check (P2).
-- `fsr_core/compiler/resolver/catalog.py` / `connector_args.py` — expose param target type (P4).
-- `fsr_core/compiler/ir.py` + `parser.py` + resolver — parameter types (P3).
-- `fsr_core/compiler/jinja_typing.py` — reuse terminal inference for var values (P2).
-- `fsr_core/tests/` — new test modules per phase.
-- Connector copy: re-vendor `fsr_core` after landing (per CLAUDE.md) to ship to the box.
+- `fsr_playbooks/compiler/typed_walker.py` — branch walk, typed_env, type comparison (P0,P2,P4,P5).
+- `fsr_playbooks/mcp_server/tools_verify.py` — walk resolved IR, callbacks, evidence, trace (P0,P4,P5).
+- `fsr_playbooks/compiler/validator.py` — relocate undefined-var check (P2).
+- `fsr_playbooks/compiler/resolver/catalog.py` / `connector_args.py` — expose param target type (P4).
+- `fsr_playbooks/compiler/ir.py` + `parser.py` + resolver — parameter types (P3).
+- `fsr_playbooks/compiler/jinja_typing.py` — reuse terminal inference for var values (P2).
+- `fsr_playbooks/tests/` — new test modules per phase.
+- Connector copy: re-vendor `fsr_playbooks` after landing (per CLAUDE.md) to ship to the box.

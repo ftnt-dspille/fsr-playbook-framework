@@ -44,7 +44,7 @@ CANDIDATE_PATHS: list[tuple[str, str]] = [
 
 def _compile_test_collection() -> dict:
     sys.path.insert(0, str(REPO_ROOT / "python"))
-    from fsr_core.compiler import compile_yaml  # type: ignore
+    from fsr_playbooks.compiler import compile_yaml  # type: ignore
 
     yaml_text = (REPO_ROOT / "examples" / "hello_connector.yaml").read_text()
     # Suffix the collection name so we can identify and clean it up.

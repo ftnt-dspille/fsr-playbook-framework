@@ -33,7 +33,7 @@ def _gold_lookup_for(tasks: list[Task]):
 
 
 def _compile_gold_json(yaml_text: str) -> dict[str, Any] | None:
-    from fsr_core.mcp_server import compile_yaml
+    from fsr_playbooks.mcp_server import compile_yaml
     out = compile_yaml(yaml_text, verbose=True)
     if not out.get("ok"):
         return None
@@ -83,7 +83,7 @@ def run_matrix(
             # task's escalation behavior. No-op when the studio tools
             # module isn't on sys.path (classic providers).
             try:
-                from fsr_core.llm.tools import (  # type: ignore
+                from fsr_playbooks.llm.tools import (  # type: ignore
                     clear_audit_log as _clr, set_eval_policy as _set_pol,
                 )
                 _set_pol(t.approval_policy)

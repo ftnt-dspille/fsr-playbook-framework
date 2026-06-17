@@ -23,8 +23,8 @@ import pytest
 pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
-import fsr_core.mcp_server as mcp_server  # noqa: E402
-import fsr_core.mcp_server._shared  # noqa: E402, F401
+import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
+import fsr_playbooks.mcp_server._shared  # noqa: E402, F401
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO / "python" / "tests" / "fixtures" / "render_path_probe"

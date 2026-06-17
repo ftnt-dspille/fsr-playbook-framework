@@ -10,7 +10,7 @@ Scope here: **connector + portable core only.** Widget work is tracked separatel
 
 ```
 fsr-core/                       <-- NEW standalone repo (the submodule)
-  fsr_core/
+  fsr_playbooks/
     compiler/                   <-- from python/compiler/
     mcp_server/                 <-- from python/mcp_server/
     llm/                        <-- from web/backend/llm/
@@ -21,7 +21,7 @@ fsr-core/                       <-- NEW standalone repo (the submodule)
 
 fsr-playbook-framework/                <-- existing repo, refactored
   fsr-core/                     <-- git submodule -> fsr-core repo
-  web/backend/                  <-- now imports from fsr_core.*
+  web/backend/                  <-- now imports from fsr_playbooks.*
   web/frontend/                 <-- unchanged
   python/                       <-- shrinks: CLI, probes, evals stay; core moves out
 
@@ -29,7 +29,7 @@ fsr-playbook-connector/         <-- NEW repo (the connector package)
   fsr-core/                     <-- git submodule -> same fsr-core repo
   connector/
     info.json
-    operations.py               <-- thin handlers calling fsr_core
+    operations.py               <-- thin handlers calling fsr_playbooks
     storage.py                  <-- history.db + secrets adapter
     requirements.txt
   Makefile                      <-- build .so, package, install
@@ -46,35 +46,35 @@ Goal: a portable Python package with **no FastAPI, no uvicorn, no SSE, no web-sp
 
 1. **Create `fsr-core` repo** with `pyproject.toml` declaring `anthropic`, `pydantic`, `sqlalchemy` (if used), `pyyaml`, `jinja2`. No `fastapi`, no `sse-starlette`, no `uvicorn`.
 2. **Move code:**
-   - `python/compiler/` → `fsr_core/compiler/`
-   - `python/mcp_server/` → `fsr_core/mcp_server/`
-   - `web/backend/llm/` → `fsr_core/llm/` (all files: `anthropic_provider.py`, `tools.py`, `approvals.py`, `factory.py`, `ladder.py`, `provider.py`, `_loop_helpers.py`, `usage_log.py`, optionally `lmstudio_provider.py`, `fake_provider.py`)
-   - `python/agent/system_prompt.md` → `fsr_core/agent/system_prompt.md`
+   - `python/compiler/` → `fsr_playbooks/compiler/`
+   - `python/mcp_server/` → `fsr_playbooks/mcp_server/`
+   - `web/backend/llm/` → `fsr_playbooks/llm/` (all files: `anthropic_provider.py`, `tools.py`, `approvals.py`, `factory.py`, `ladder.py`, `provider.py`, `_loop_helpers.py`, `usage_log.py`, optionally `lmstudio_provider.py`, `fake_provider.py`)
+   - `python/agent/system_prompt.md` → `fsr_playbooks/agent/system_prompt.md`
 3. **Audit imports.** Grep moved files for `fastapi`, `starlette`, `sse_starlette`, `request.app.state`, anything web-shaped. Refactor each into a constructor argument or a thin protocol:
    - History writer → `HistorySink` protocol (FastAPI app provides SQLite-backed impl, connector provides its own).
    - Secrets/config reader → `ConfigProvider` protocol (FastAPI uses dotenv+keyring, connector uses FortiSOAR secrets store).
    - Approval callback → `ApprovalGateway` protocol (FastAPI uses in-memory queue + SSE, connector uses persisted state keyed by `turn_id`).
-4. **Public API surface** — `fsr_core/__init__.py` exports:
+4. **Public API surface** — `fsr_playbooks/__init__.py` exports:
    ```python
-   from fsr_core.llm.factory import build_provider
-   from fsr_core.llm.tools import build_tool_registry, ToolRegistry
-   from fsr_core.llm.approvals import ApprovalGateway
-   from fsr_core.compiler import compile_yaml, validate_yaml, resolve_yaml
-   from fsr_core.mcp_server import ALL_TOOLS
+   from fsr_playbooks.llm.factory import build_provider
+   from fsr_playbooks.llm.tools import build_tool_registry, ToolRegistry
+   from fsr_playbooks.llm.approvals import ApprovalGateway
+   from fsr_playbooks.compiler import compile_yaml, validate_yaml, resolve_yaml
+   from fsr_playbooks.mcp_server import ALL_TOOLS
    ```
-5. **Reference DB**: ship `fsr_core/reference/fsr_reference.db` as a build artifact via a `scripts/build_reference.py` that runs the probes. Connector and FastAPI both read from `importlib.resources.files('fsr_core.reference') / 'fsr_reference.db'`.
+5. **Reference DB**: ship `fsr_playbooks/reference/fsr_reference.db` as a build artifact via a `scripts/build_reference.py` that runs the probes. Connector and FastAPI both read from `importlib.resources.files('fsr_playbooks.reference') / 'fsr_reference.db'`.
 6. **Tests**: move/duplicate the relevant unit tests for compiler + tools into `fsr-core/tests/`. CI runs them on every PR to the submodule.
 
-**Done when**: `python -c "import fsr_core; assert not any('fastapi' in m for m in sys.modules)"` passes, and `fsr-core`'s test suite is green.
+**Done when**: `python -c "import fsr_playbooks; assert not any('fastapi' in m for m in sys.modules)"` passes, and `fsr-core`'s test suite is green.
 
 ---
 
 ## Phase 2 — Refactor `fsr-playbook-framework` to consume `fsr-core` as submodule
 
 1. `git submodule add <fsr-core-url> fsr-core` at repo root.
-2. Add `fsr-core/` to `pyproject.toml` as a path dependency (`fsr_core = { path = "./fsr-core", develop = true }`).
+2. Add `fsr-core/` to `pyproject.toml` as a path dependency (`fsr_playbooks = { path = "./fsr-core", develop = true }`).
 3. Delete the moved directories from `python/` and `web/backend/llm/`.
-4. Update imports throughout `web/backend/` — `from llm.anthropic_provider` → `from fsr_core.llm.anthropic_provider`, etc.
+4. Update imports throughout `web/backend/` — `from llm.anthropic_provider` → `from fsr_playbooks.llm.anthropic_provider`, etc.
 5. Wire FastAPI's own implementations of `HistorySink`, `ConfigProvider`, `ApprovalGateway` (these may already exist inline — just lift them).
 6. Run the existing e2e suite. Must pass unchanged.
 
@@ -149,14 +149,14 @@ make package        # rebuild .so
 
 ## Status (2026-05-28)
 
-- **Phase 1 (in-place extraction)** ✅ complete on `main`. `fsr_core/` lives at the repo root; web backend consumes it directly. Audit + protocols in `docs/plans/FSR_CORE_EXTRACTION_AUDIT.md`.
+- **Phase 1 (in-place extraction)** ✅ complete on `main`. `fsr_playbooks/` lives at the repo root; web backend consumes it directly. Audit + protocols in `docs/plans/FSR_CORE_EXTRACTION_AUDIT.md`.
 - **Phase 3 (connector standup)** — initial cut shipped on `~/PycharmProjects/ConnectorsV2/fsr-playbook-builder`:
   - All 10 operations declared in `info.json` with password-typed `anthropic_api_key`
   - **Real:** `health_check`, `compile_yaml`, `validate_yaml`, `resolve_yaml`, `push_playbook` (via `integrations.crudhub.make_request`), `chat_turn`, `chat_resume`, `chat_history`
-  - **Stubbed:** `dry_run_playbook`, `render_jinja` (need their own fsr_core entry points)
+  - **Stubbed:** `dry_run_playbook`, `render_jinja` (need their own fsr_playbooks entry points)
   - sqlite-backed `Storage` + `PersistedApprovalGateway` so paused HITL turns survive worker restart
-  - 29 tests passing; `fsr_core` consumed via editable install for now (submodule deferred per Phase 2)
-- **Agent-loop lift** ✅ done on `agent-loop-lift` branch (5 commits). `fsr_core.llm.run_agent_turn` is the shared consumer used by both `web/backend/routes/chat.py` and the connector. Plan + risk list in `docs/plans/AGENT_LOOP_LIFT_PLAN.md`.
+  - 29 tests passing; `fsr_playbooks` consumed via editable install for now (submodule deferred per Phase 2)
+- **Agent-loop lift** ✅ done on `agent-loop-lift` branch (5 commits). `fsr_playbooks.llm.run_agent_turn` is the shared consumer used by both `web/backend/routes/chat.py` and the connector. Plan + risk list in `docs/plans/AGENT_LOOP_LIFT_PLAN.md`.
 
 ## Resolved decisions (2026-05-28)
 

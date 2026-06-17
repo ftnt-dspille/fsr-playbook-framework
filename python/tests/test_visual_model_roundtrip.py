@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from fsr_core.compiler.visual_model import to_visual, from_visual
+from fsr_playbooks.compiler.visual_model import to_visual, from_visual
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 FIXTURES = sorted(p for p in EXAMPLES.glob("*.yaml") if not p.name.endswith(".test.yaml"))

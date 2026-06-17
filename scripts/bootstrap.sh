@@ -98,7 +98,7 @@ else
             uv run fsrpb probe --all || die "probe failed (check .env creds / box reachability)"
             ok "reference store built" ;;
         *)
-            warn "skipped — reference/discovery tools and some fsr_core tests need the DB" ;;
+            warn "skipped — reference/discovery tools and some fsr_playbooks tests need the DB" ;;
     esac
 fi
 
@@ -120,7 +120,7 @@ fi
 
 # --- 6. green-check -------------------------------------------------------
 say "6/6  green-check (framework core test suite)"
-if uv run python -m pytest fsr_core/tests/ -q; then
+if uv run python -m pytest fsr_playbooks/tests/ -q; then
     echo
     ok "BOOTSTRAP COMPLETE — framework core is green."
     echo "    Next: 'fsrpb verify examples/<file>.yaml', or open this repo in an MCP"

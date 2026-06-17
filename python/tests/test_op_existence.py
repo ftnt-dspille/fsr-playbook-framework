@@ -13,7 +13,7 @@ import sqlite3
 
 import pytest
 
-import fsr_core.mcp_server._shared as _shared
+import fsr_playbooks.mcp_server._shared as _shared
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +22,7 @@ def _isolate_op_def_cache(tmp_path, monkeypatch):
     isolate it per-test so ops cached by one test never leak into another (or
     touch the real reference store). Tests that need a specific DB override
     this with their own `monkeypatch.setattr(te, "DB_PATH", ...)` afterward."""
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     monkeypatch.setattr(te, "DB_PATH", str(tmp_path / "op_def_cache.db"))
 
 
@@ -79,7 +79,7 @@ def test_validate_op_exists_skips_empty_catalogue(store):
 # --- emit_action_card -------------------------------------------------------
 
 def test_emit_action_card_rejects_phantom_op(store):
-    from fsr_core.mcp_server.tools_emit import emit_action_card
+    from fsr_playbooks.mcp_server.tools_emit import emit_action_card
     out = emit_action_card(
         id="c1", connector="virustotal", operation="lookup_ip",
         summary="Look up the IP", args={"ip": "1.2.3.4"}, editable_fields=["ip"],
@@ -89,7 +89,7 @@ def test_emit_action_card_rejects_phantom_op(store):
 
 
 def test_emit_action_card_allows_real_op(store):
-    from fsr_core.mcp_server.tools_emit import emit_action_card
+    from fsr_playbooks.mcp_server.tools_emit import emit_action_card
     out = emit_action_card(
         id="c1", connector="virustotal", operation="get_ip_reputation",
         summary="Look up the IP", args={"ip": "1.2.3.4"}, editable_fields=["ip"],
@@ -110,7 +110,7 @@ class _FakeClient:
 
 
 def test_validate_op_live_rejects_phantom(monkeypatch):
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     monkeypatch.setattr(te, "_configured_rows",
                         lambda client, force=False: [{"name": "virustotal", "id": "cid-1"}])
     client = _FakeClient(["get_ip_reputation", "get_domain_reputation"])
@@ -122,7 +122,7 @@ def test_validate_op_live_rejects_phantom(monkeypatch):
 
 
 def test_validate_op_live_accepts_real(monkeypatch):
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     monkeypatch.setattr(te, "_configured_rows",
                         lambda client, force=False: [{"name": "virustotal", "id": "cid-1"}])
     assert te._validate_op_live(_FakeClient(["get_ip_reputation"]),
@@ -131,7 +131,7 @@ def test_validate_op_live_accepts_real(monkeypatch):
 
 def test_validate_op_live_never_blocks_on_lookup_failure(monkeypatch):
     """A transient detail-fetch error must not false-reject a real op."""
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     monkeypatch.setattr(te, "_configured_rows",
                         lambda client, force=False: [{"name": "virustotal", "id": "cid-1"}])
 
@@ -143,7 +143,7 @@ def test_validate_op_live_never_blocks_on_lookup_failure(monkeypatch):
 
 
 def test_validate_op_live_skips_when_live_list_empty(monkeypatch):
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     monkeypatch.setattr(te, "_configured_rows",
                         lambda client, force=False: [{"name": "virustotal", "id": "cid-1"}])
     assert te._validate_op_live(_FakeClient([]), "virustotal", "anything") is None
@@ -176,7 +176,7 @@ _VT_OPS = {
 
 
 def test_validate_op_params_live_rejects_unknown_param():
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     op_def = {"operation": "get_ip_reputation", "parameters": _VT_OPS["get_ip_reputation"]}
     err = te._validate_op_params_live(op_def, "virustotal", "get_ip_reputation",
                                       {"ip_address": "1.2.3.4"})
@@ -189,7 +189,7 @@ def test_validate_op_params_live_rejects_unknown_param():
 
 
 def test_validate_op_params_live_suggests_near_match():
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     op_def = {"operation": "get_ip_reputation", "parameters": _VT_OPS["get_ip_reputation"]}
     # a close typo of a real param -> near-match suggestion.
     err = te._validate_op_params_live(op_def, "virustotal", "get_ip_reputation",
@@ -200,14 +200,14 @@ def test_validate_op_params_live_suggests_near_match():
 
 
 def test_validate_op_params_live_accepts_good_args():
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     op_def = {"operation": "get_ip_reputation", "parameters": _VT_OPS["get_ip_reputation"]}
     assert te._validate_op_params_live(
         op_def, "virustotal", "get_ip_reputation", {"ip": "1.2.3.4"}) is None
 
 
 def test_validate_op_params_live_fails_open_without_param_list():
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     # No parameters on the live op → can't prove a name is unknown.
     assert te._validate_op_params_live(
         {"operation": "x", "parameters": []}, "c", "x", {"anything": 1}) is None
@@ -217,7 +217,7 @@ def test_validate_op_params_live_fails_open_without_param_list():
 def _stub_unsynced_live(monkeypatch, store, client):
     """Wire validate_op_grounded down its live path: empty store for the
     connector + a configured/healthy live client."""
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     # the store fixture has NO ops for 'shodan' → store_ops_count == 0
     monkeypatch.setattr(te, "_db", lambda: sqlite3.connect(store))
     # point the sqlite-backed op-def cache at the same temp store
@@ -259,7 +259,7 @@ def test_validate_op_grounded_without_params_skips_param_check(monkeypatch, stor
 def test_emit_action_card_blocks_flailed_param_on_unsynced(monkeypatch, store):
     """End-to-end: a card with a guessed param name for an un-synced connector
     is rejected before it can reach the analyst."""
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     client = _FakeOpClient({"host": [
         {"name": "ip", "title": "IP", "type": "text", "required": True}]})
     monkeypatch.setattr(te, "_db", lambda: sqlite3.connect(store))
@@ -270,7 +270,7 @@ def test_emit_action_card_blocks_flailed_param_on_unsynced(monkeypatch, store):
     monkeypatch.setattr(te, "_preflight_connector",
                         lambda c, conn, config="": None)
     monkeypatch.setattr(te, "_live_client_for_grounding", lambda: client)
-    from fsr_core.mcp_server.tools_emit import emit_action_card
+    from fsr_playbooks.mcp_server.tools_emit import emit_action_card
     out = emit_action_card(
         id="c1", connector="shodan", operation="host",
         summary="Look up the host", args={"ip_address": "1.2.3.4"},
@@ -293,7 +293,7 @@ class _CountingClient:
 
 
 def test_op_def_cache_roundtrip_and_ttl(tmp_path, monkeypatch):
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     monkeypatch.setattr(te, "DB_PATH", str(tmp_path / "s.db"))
     assert te._cached_op_defs("shodan", "1.0.0") is None
     te._store_op_defs("shodan", "1.0.0", [{"operation": "host"}])
@@ -306,7 +306,7 @@ def test_op_def_cache_roundtrip_and_ttl(tmp_path, monkeypatch):
 
 
 def test_live_ops_for_is_cached_after_first_fetch(tmp_path, monkeypatch):
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     monkeypatch.setattr(te, "DB_PATH", str(tmp_path / "s.db"))
     monkeypatch.setattr(te, "_configured_rows",
                         lambda c, force=False: [
@@ -318,7 +318,7 @@ def test_live_ops_for_is_cached_after_first_fetch(tmp_path, monkeypatch):
 
 
 def test_populate_op_definitions_warms_all_configured(tmp_path, monkeypatch):
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     db = tmp_path / "s.db"
     con = sqlite3.connect(db)
     con.execute("CREATE TABLE operations (connector_name TEXT, op_name TEXT)")
@@ -342,7 +342,7 @@ def test_populate_op_definitions_warms_all_configured(tmp_path, monkeypatch):
 
 
 def test_populate_op_definitions_respects_budget_and_fresh_cache(tmp_path, monkeypatch):
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     db = tmp_path / "s.db"
     monkeypatch.setattr(te, "DB_PATH", str(db))
     monkeypatch.setattr(te, "_db", lambda: sqlite3.connect(":memory:"))

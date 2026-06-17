@@ -23,7 +23,6 @@ import os
 import re
 import sys
 import time
-from pathlib import Path
 
 import requests
 
@@ -149,7 +148,6 @@ class _Live:
 
     def _auth(self, cfg) -> str:
         if cfg.api_key:
-            scheme = os.environ.get("FSR_AUTH_SCHEME", "API-KEY")
             # API keys are sent as-is by pyfsr; try bearer-less first.
             return f"{cfg.api_key}"
         r = requests.post(f"{self.base}/auth/authenticate",
@@ -220,7 +218,7 @@ def _json_type(v) -> str:
 
 
 def main() -> None:
-    from fsr_core.compiler import compile_yaml
+    from fsr_playbooks.compiler import compile_yaml
 
     epoch = int(os.environ.get("PROBE_EPOCH") or time.time())
     coll_name = f"__svcoerce_{epoch}"

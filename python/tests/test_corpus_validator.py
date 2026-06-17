@@ -3,8 +3,8 @@
 The classic catch: lowercase `operation: append` when the live corpus
 shows every UpdateRecord step uses `Append` or `Overwrite` (capitalized).
 """
-from fsr_core.compiler import compile_yaml
-from fsr_core.compiler.errors import ErrorCode
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.compiler.errors import ErrorCode
 
 
 def test_update_record_lowercase_operation_warns(db_path):
@@ -67,8 +67,8 @@ def test_likely_required_key_missing_warns(db_path):
     # which 100% of corpus Decision steps set. The resolver doesn't
     # inject it (it's user-supplied semantic content), so the absence
     # surfaces as a likely-required-key warning.
-    from fsr_core.compiler.parser import parse_yaml
-    from fsr_core.compiler.corpus_validator import CorpusValidator
+    from fsr_playbooks.compiler.parser import parse_yaml
+    from fsr_playbooks.compiler.corpus_validator import CorpusValidator
     import sqlite3
     coll, _ = parse_yaml("""
 collection: T

@@ -6,8 +6,8 @@ against live exports under fortisoar/SPs/playbooks/.
 """
 from __future__ import annotations
 
-from fsr_core.compiler import compile_yaml
-from fsr_core.compiler.errors import ErrorCode
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.compiler.errors import ErrorCode
 
 
 def _compile_and_get_inputs(db_path, inputs_yaml: str):

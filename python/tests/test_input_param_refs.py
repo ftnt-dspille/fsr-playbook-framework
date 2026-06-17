@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fsr_core.compiler.errors import ErrorCode
-from fsr_core.compiler.resolver import Resolver
+from fsr_playbooks.compiler.errors import ErrorCode
+from fsr_playbooks.compiler.resolver import Resolver
 
 
 def _resolver() -> Resolver:

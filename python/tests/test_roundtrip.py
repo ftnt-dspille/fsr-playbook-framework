@@ -12,7 +12,7 @@ import sqlite3
 
 import pytest
 
-from fsr_core.compiler.roundtrip import roundtrip
+from fsr_playbooks.compiler.roundtrip import roundtrip
 
 
 @pytest.mark.slow

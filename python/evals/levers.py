@@ -23,7 +23,7 @@ LEVER_MAP: dict[str, str] = {
                             "pivot guidance (agent didn't reach the required op)",
     "investigation_tool_budget": "system_prompt_triage.md §pivot-discipline + "
                                  "2.8 parallel dispatch (too many calls)",
-    "investigation_no_param_flail": "fsr_core validate_op_grounded + connector_op_defs "
+    "investigation_no_param_flail": "fsr_playbooks validate_op_grounded + connector_op_defs "
                                     "op-def cache (guessed param names)",
     "investigation_blind_param_retry": "run_op bad_params inline valid_params + "
                                        "system_prompt_triage.md 'call get_op_schema "
@@ -64,7 +64,7 @@ LEVER_MAP: dict[str, str] = {
     "live_tested": "system_prompt_build.md §Canonical skeleton "
                    "(dry-run did not reach a terminal state — check trigger/wiring)",
     # ---- HITL approval behaviour -> tools.py tier gate + triage prompt ----
-    "appropriate_approval_requests": "fsr_core/llm/tools.py tier/approval gate + "
+    "appropriate_approval_requests": "fsr_playbooks/llm/tools.py tier/approval gate + "
                                      "system_prompt_triage.md containment rules "
                                      "(over- or under-escalated tier-3+ ops)",
 }

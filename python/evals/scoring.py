@@ -39,7 +39,7 @@ _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n", re.IGNORECASE)
 
 
 def _verify(yaml_text: str, *, live: bool) -> dict[str, Any]:
-    from fsr_core.mcp_server import verify_playbook
+    from fsr_playbooks.mcp_server import verify_playbook
     return verify_playbook(yaml_text=yaml_text, live_probe=live)
 
 
@@ -104,7 +104,7 @@ def _first_playbook_name(yaml_text: str) -> str | None:
 
 
 def _compile_obj(yaml_text: str) -> dict[str, Any]:
-    from fsr_core.mcp_server import compile_yaml
+    from fsr_playbooks.mcp_server import compile_yaml
     return compile_yaml(yaml_text, verbose=True)
 
 
@@ -681,8 +681,8 @@ def score_wiring_resolution(trace_json: str, *, live: bool = False) -> dict[str,
     survives. Returns a level dict ({passed, skipped, detail, ...}).
     """
     try:
-        from fsr_core.agent.skill_trace import SkillTrace
-        from fsr_core.compiler import skill_verify as sv
+        from fsr_playbooks.agent.skill_trace import SkillTrace
+        from fsr_playbooks.compiler import skill_verify as sv
     except ImportError as exc:  # pragma: no cover
         return {"passed": False, "skipped": True, "detail": f"unavailable: {exc}"}
 
@@ -693,7 +693,7 @@ def score_wiring_resolution(trace_json: str, *, live: bool = False) -> dict[str,
     render_fn = None
     if live:
         try:
-            from fsr_core.mcp_server import render_jinja as render_fn  # noqa: PLC0415
+            from fsr_playbooks.mcp_server import render_jinja as render_fn  # noqa: PLC0415
         except Exception:  # noqa: BLE001
             render_fn = None
 
@@ -742,7 +742,7 @@ def score_offer_timing(trace: list[dict[str, Any]]) -> dict[str, Any]:
     advisory). Returns a level dict.
     """
     try:
-        from fsr_core.mcp_server.tools_discovery import _op_risk
+        from fsr_playbooks.mcp_server.tools_discovery import _op_risk
     except ImportError as exc:  # pragma: no cover
         return {"passed": False, "skipped": True, "detail": f"unavailable: {exc}"}
 
@@ -866,7 +866,7 @@ def score(
             }
         else:
             try:
-                from fsr_core.mcp_server import dry_run_playbook  # noqa: PLC0415
+                from fsr_playbooks.mcp_server import dry_run_playbook  # noqa: PLC0415
                 kw = dict(dry_run_kwargs or {})
                 # Infer playbook name from the YAML when the caller didn't
                 # pin one. Lets re-baseline runs exercise tier-3 without

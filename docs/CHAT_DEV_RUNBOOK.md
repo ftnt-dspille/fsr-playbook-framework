@@ -9,21 +9,21 @@ touching prompts, tools, intents, or the chat operations.
 
 | Repo | Path | What it owns for chat |
 |------|------|-----------------------|
-| **Framework** (this repo) | `…/PycharmProjects/fsr-playbook-framework` | `fsr_core/` — the shared brain: prompt assembly, intent routing, tool registry, tier/safety, the agent loop. Plus the offline test harness + scoring. |
-| **Connector** | `…/PycharmProjects/ConnectorsV2/fsr-playbook-builder` | The in-platform surface: `chat_turn`/`chat_poll`/`chat_resume` operations, live crudhub bridge, deploy + live-drive tooling. Consumes `fsr_core` (vendored at build, symlinked in dev). |
+| **Framework** (this repo) | `…/PycharmProjects/fsr-playbook-framework` | `fsr_playbooks/` — the shared brain: prompt assembly, intent routing, tool registry, tier/safety, the agent loop. Plus the offline test harness + scoring. |
+| **Connector** | `…/PycharmProjects/ConnectorsV2/fsr-playbook-builder` | The in-platform surface: `chat_turn`/`chat_poll`/`chat_resume` operations, live crudhub bridge, deploy + live-drive tooling. Consumes `fsr_playbooks` (vendored at build, symlinked in dev). |
 
-**Golden rule (from CLAUDE.md):** edit `fsr_core` **only** in the framework repo.
-The connector's `fsr_core` is a symlink in dev and is `rsync`-replaced at build —
+**Golden rule (from CLAUDE.md):** edit `fsr_playbooks` **only** in the framework repo.
+The connector's `fsr_playbooks` is a symlink in dev and is `rsync`-replaced at build —
 direct edits there are destroyed. Source edit → commit → deploy.
 
-## Where the chat behavior lives (fsr_core)
+## Where the chat behavior lives (fsr_playbooks)
 
-- **Prompts** — `fsr_core/…` triage/system prompt assembly (pinned by
+- **Prompts** — `fsr_playbooks/…` triage/system prompt assembly (pinned by
   `test_triage_prompt*.py`, `test_build_prompt_skeleton.py`).
 - **Intent routing** — slicing a user turn → intent + params
   (`test_intent_slice_and_params.py`).
 - **Tool registry / SAFE_TOOLS** — what the agent can call + tier/HITL
-  (`fsr_core.llm.tools`). A tool the agent must use has to be in `SAFE_TOOLS`
+  (`fsr_playbooks.llm.tools`). A tool the agent must use has to be in `SAFE_TOOLS`
   or it's never advertised/dispatchable.
 - **Gates → levers** — low-signal / enrichment-offer / playbook-offer gates
   (`test_low_signal_gate.py`, `test_playbook_offer.py`, `test_lever_coverage.py`).
@@ -59,13 +59,13 @@ make chat-calibrate SCENARIO=<name> # just one
 
 ### 4. Full offline green-check before declaring done
 ```sh
-make verify     # fsr_core/tests + the connector's offline suite on this repo's .venv
+make verify     # fsr_playbooks/tests + the connector's offline suite on this repo's .venv
 ```
 
 ## Shipping a change to the live box (connector)
 
-`fsr_core` edits don't reach the platform until the connector is rebuilt +
-installed. Use the **unified deploy** (bump → vendor `fsr_core` → build slim
+`fsr_playbooks` edits don't reach the platform until the connector is rebuilt +
+installed. Use the **unified deploy** (bump → vendor `fsr_playbooks` → build slim
 tarball → install via `$replace` → post-install warmup → all-workers rollout
 gate). Do **not** run the steps by hand.
 
@@ -107,10 +107,10 @@ $PY scripts/prompt_loop.py --file _b4_chain.json
 ## Gotchas (the ones that bite)
 
 - **Never `uv run --extra test` the connector suite** — it builds an env without
-  `fsr_core`, so every test errors `ModuleNotFound: yaml`. Use `make verify`
+  `fsr_playbooks`, so every test errors `ModuleNotFound: yaml`. Use `make verify`
   (this repo's `.venv` + `PYTHONPATH=.`).
 - **Source `.env` BEFORE** any live drive (`prompt_loop.py`, `chat-drive`).
-- **Edit `fsr_core` in the framework only.** Re-vendor via `deploy.sh`.
+- **Edit `fsr_playbooks` in the framework only.** Re-vendor via `deploy.sh`.
 - **A new tool won't dispatch** unless it's registered in `SAFE_TOOLS`
   (the `build_playbook_from_trace` regression — see auto-memory).
 - Don't kill the user's dev servers on :47821/:47822; use 47831+ for test backends.

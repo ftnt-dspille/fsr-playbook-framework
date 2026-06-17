@@ -11,7 +11,7 @@ import importlib
 
 scoring = importlib.import_module("evals.scoring")
 
-from fsr_core.agent.skill_trace import SkillTrace
+from fsr_playbooks.agent.skill_trace import SkillTrace
 
 
 def _good_trace_json():

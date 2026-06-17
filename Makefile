@@ -84,14 +84,14 @@ MSG ?=
 # The structure/contract suite — deterministic order (no:randomly) so a prompt
 # edit that breaks assembly/routing reddens here in ~2s before any live spend.
 CHAT_FAST_TESTS := \
-	fsr_core/tests/test_triage_prompt.py \
-	fsr_core/tests/test_triage_prompt_enrichment_offer.py \
-	fsr_core/tests/test_triage_preflight.py \
-	fsr_core/tests/test_low_signal_gate.py \
-	fsr_core/tests/test_triage_discipline.py \
-	fsr_core/tests/test_intent_slice_and_params.py \
-	fsr_core/tests/test_build_prompt_skeleton.py \
-	fsr_core/tests/test_playbook_offer.py \
+	fsr_playbooks/tests/test_triage_prompt.py \
+	fsr_playbooks/tests/test_triage_prompt_enrichment_offer.py \
+	fsr_playbooks/tests/test_triage_preflight.py \
+	fsr_playbooks/tests/test_low_signal_gate.py \
+	fsr_playbooks/tests/test_triage_discipline.py \
+	fsr_playbooks/tests/test_intent_slice_and_params.py \
+	fsr_playbooks/tests/test_build_prompt_skeleton.py \
+	fsr_playbooks/tests/test_playbook_offer.py \
 	python/tests/test_run_turn.py \
 	python/tests/test_catalog_tools.py \
 	python/tests/test_emitter.py \
@@ -116,20 +116,20 @@ chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
 chat-calibrate: ## live: capability gate over every investigation fixture (costs credits)
 	$(PY) python/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),)
 
-lint: ## ruff lint (pyflakes F-rules) over fsr_core + python
-	uv run ruff check fsr_core/ python/
+lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + python
+	uv run ruff check fsr_playbooks/ python/
 
-# The connector + Angular widget both consume fsr_core, so the green-check that
-# matters is fsr_core + the connector's offline suite — both run on THIS repo's
-# .venv, which carries the editable fsr_core install and its deps (yaml, anthropic).
+# The connector + Angular widget both consume fsr_playbooks, so the green-check that
+# matters is fsr_playbooks + the connector's offline suite — both run on THIS repo's
+# .venv, which carries the editable fsr_playbooks install and its deps (yaml, anthropic).
 # (Do NOT use `uv run --extra test` in the connector: it builds an isolated env
-#  without fsr_core, so its whole suite errors on ModuleNotFound.)
+#  without fsr_playbooks, so its whole suite errors on ModuleNotFound.)
 VENV_PY  := $(CURDIR)/.venv/bin/python
 CONNECTOR_DIR := /Users/dylanspille/PycharmProjects/ConnectorsV2/fsr-playbook-builder
 
-verify: ## green-check for the fsr_core + connector axis (offline)
-	@echo "→ [1/2] fsr_core tests"
-	$(VENV_PY) -m pytest fsr_core/tests/ -q
+verify: ## green-check for the fsr_playbooks + connector axis (offline)
+	@echo "→ [1/2] fsr_playbooks tests"
+	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q
 	@echo "→ [2/2] connector suite (offline; live tests self-skip)"
 	cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q
 	@echo "✓ verify passed"

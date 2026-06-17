@@ -40,7 +40,7 @@ compounding bugs.
 - **Symptom:** #4 (agent banging its head authoring YAML in a triage session).
 - **Evidence:** export shows `validate_yaml`, `compile_yaml`, `get_step_type`,
   `find_operation` all called while `intent: triage`.
-- **Files:** `fsr_core/llm/intents.py:29` (`BUILD_ONLY_TOOLS`) +
+- **Files:** `fsr_playbooks/llm/intents.py:29` (`BUILD_ONLY_TOOLS`) +
   `tools_for_intent()` — these are *supposed* to be dropped for triage. The
   connector caller (`operations.py`, vendored) must actually pass that filtered
   slice to the provider; verify it does (build returns `[]` = "provider
@@ -63,7 +63,7 @@ compounding bugs.
   from the advertised (intent-filtered) tool list and routes BOTH dispatch
   paths through `_guarded_dispatch`, which refuses to execute any tool not in
   that set (returns an `{ok:false}` envelope instead of authoring/mutating).
-  **Tests:** `fsr_core/tests/test_intent_slice_and_params.py` asserts the
+  **Tests:** `fsr_playbooks/tests/test_intent_slice_and_params.py` asserts the
   triage slice excludes all of `BUILD_ONLY_TOOLS` and keeps the core
   discovery tools.
 - **Status:** DONE · **Priority:** _
@@ -103,7 +103,7 @@ compounding bugs.
 - **Status:** DONE (widget) · **Priority:** _
 
 ### A4 — Triage prompt doesn't explicitly forbid YAML / handle timeline asks
-- **File:** `fsr_core/agent/system_prompt_triage.md`
+- **File:** `fsr_playbooks/agent/system_prompt_triage.md`
 - **Proposed fix:** add an explicit clause: triage never authors YAML; for
   timeline/summary requests, produce a narrative ordered-events summary from
   get_record + enrichment, and offer "save as playbook" only via the
@@ -128,7 +128,7 @@ VirusTotal despite it being configured + Available** (export line 374) because
   `get_domain_reputation`, `get_url_reputation`, `get_file_reputation`,
   `get_pulse_indicators` (not IP), `fortigate get_addresses`,
   `get_blocked_ip`, and the `exploit-prediction-scoring-system` connector.
-- **Files:** `fsr_core/mcp_server/tools_triage.py`
+- **Files:** `fsr_playbooks/mcp_server/tools_triage.py`
   - `_TARGET_KEYWORDS` :297 (`ip → ("ip","address","blacklist")`)
   - `_is_enrichment_op` :337 (generic intel token passes regardless of indicator)
   - `_INTEL_TOKENS` :318 (`"score"` pulls in EPSS; `"address"` pulls in fw addrs)
@@ -175,7 +175,7 @@ VirusTotal despite it being configured + Available** (export line 374) because
 - **Root cause:** `ev.resultStatus` is set server-side; the tool returns no
   `ok:true` (unlike siblings), so the connector's classifier treats missing
   `ok` as failure. Widget side: `view.controller.js:971` only renders the label.
-- **File:** `fsr_core/mcp_server/tools_triage.py:842` (`list_configured_connectors`
+- **File:** `fsr_playbooks/mcp_server/tools_triage.py:842` (`list_configured_connectors`
   returns `{configured, probed, count}` — no `ok`).
 - **Proposed fix:** return `{"ok": True, ...}`; OR fix the connector result
   classifier to treat a payload+missing-`ok` as success. Audit other tools that
@@ -186,7 +186,7 @@ VirusTotal despite it being configured + Available** (export line 374) because
 ### C2 — `unknown priority 'High'` is an unsynced picklist, not a model error (#5)
 - **Evidence:** `valid: (none synced — run the modules probe)` — the connector
   DB has zero WorkflowPriority rows.
-- **File:** `fsr_core/compiler/resolver/__init__.py:43-74` (`_resolve_priority`).
+- **File:** `fsr_playbooks/compiler/resolver/__init__.py:43-74` (`_resolve_priority`).
 - **Proposed fix:** (a) sync WorkflowPriority into the connector reference DB;
   (b) when the list is empty/unsynced, leave priority unset **silently** (no
   `bad_value` warning) — an unsynced reference table must not read as an
@@ -221,7 +221,7 @@ round-trip.
 - **Status:** DONE · **Priority:** _
 
 ### D2 — "Look up before you write" hard rule in build prompt
-- **File:** `fsr_core/agent/system_prompt_build.md`
+- **File:** `fsr_playbooks/agent/system_prompt_build.md`
 - **Proposed fix:** mandate `get_step_type` + `find_operation`/`get_op_schema`
   before writing any not-yet-used step/op; never guess an op name. The model
   only learned `set_variable` after 3 failures and guessed `get_api_response`.

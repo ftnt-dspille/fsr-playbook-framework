@@ -16,14 +16,14 @@ side channel that pushes events as they happen.
 
 ## What already exists (do not rebuild)
 
-`fsr_core/llm/run_turn.py::run_agent_turn` already separates two sinks
+`fsr_playbooks/llm/run_turn.py::run_agent_turn` already separates two sinks
 for every event it emits:
 
 - `on_event: EventCallback` — fired per event *before* persistence. The
   web app wires this to an `asyncio.Queue` and yields SSE frames
   (`web/backend/routes/chat.py:300-360`). **This is the listener path's
   reuse point.**
-- `history_sink: HistorySink` (`fsr_core/protocols.py:45`) — persists
+- `history_sink: HistorySink` (`fsr_playbooks/protocols.py:45`) — persists
   each event as a `chat_message` row scoped by `session_id`, with a
   monotonic `seq`. Docstring confirms the connector pre-supplies
   `session_id`, so rows land **from the first round-trip**. **This is
@@ -167,7 +167,7 @@ Option B reuses the same `history_sink`, Option A is never wasted work.
 
 ## Tests (per repo policy — no test-naked widget changes)
 
-- **fsr_core / connector (pytest):** `get_chat_events` cursor paging
+- **fsr_playbooks / connector (pytest):** `get_chat_events` cursor paging
   (after_seq, empty, limit); `turn_status` transitions incl.
   `awaiting_approval`/`error`; background turn writes rows incrementally
   (assert rows appear before turn `done`).

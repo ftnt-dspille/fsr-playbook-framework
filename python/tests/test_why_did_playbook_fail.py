@@ -11,10 +11,10 @@ import pytest
 pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
-import fsr_core.mcp_server as mcp_server  # noqa: E402
-import fsr_core.mcp_server.tools_jinja  # noqa: E402, F401
-import fsr_core.mcp_server.tools_recipe  # noqa: E402, F401
-import fsr_core.mcp_server.tools_triage  # noqa: E402, F401
+import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
+import fsr_playbooks.mcp_server.tools_jinja  # noqa: E402, F401
+import fsr_playbooks.mcp_server.tools_recipe  # noqa: E402, F401
+import fsr_playbooks.mcp_server.tools_triage  # noqa: E402, F401
 
 
 YAML = """
@@ -110,7 +110,7 @@ def test_list_runs_error_surfaces_structured(monkeypatch):
 
 
 def test_looks_like_run_id():
-    from fsr_core.mcp_server.tools_recipe import _looks_like_run_id
+    from fsr_playbooks.mcp_server.tools_recipe import _looks_like_run_id
     assert _looks_like_run_id("676747")
     assert _looks_like_run_id("abcdef12-3456-7890-abcd-ef1234567890")
     assert not _looks_like_run_id("Block Indicator")

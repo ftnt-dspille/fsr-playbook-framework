@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("mcp.server.fastmcp",
                     reason="mcp package not installed")
 
-import fsr_core.mcp_server as mcp_server  # noqa: E402
+import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 
 
 def test_missing_key_with_close_match_returns_high_confidence_swap():

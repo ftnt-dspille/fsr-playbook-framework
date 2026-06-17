@@ -45,13 +45,13 @@ derives from it.
   `set_port_link(dev, port, up=False)` does a runtime **cable break** (link-down,
   cable kept) and `up=True` repairs it; `power_off_device`/`power_on_device`;
   `set_vm_parameters` (cpu/memory, applies on reinstall). Verified live.
-- **Agent tools** — `fsr_core/mcp_server/tools_noc.py`
+- **Agent tools** — `fsr_playbooks/mcp_server/tools_noc.py`
   (`fmg_get_device_list/_status/_ha_status/_policy_package_status`,
   `faz_search_device_events/_by_serial/_event_summary`) already read FMG/FAZ.
-- **Scenario classifier** — `fsr_core/llm/triage_scenarios.py` routes an Alert to
+- **Scenario classifier** — `fsr_playbooks/llm/triage_scenarios.py` routes an Alert to
   a scenario (`device_down`, `c2_exfil`, `generic`) and injects guidance. New NOC
   scenarios are added here (one dict each), mirroring `device_down`.
-- **Sim fixtures** — `fsr_core/mcp_server/_sim_fixtures.py` serves canned FMG/FAZ
+- **Sim fixtures** — `fsr_playbooks/mcp_server/_sim_fixtures.py` serves canned FMG/FAZ
   data when the connector's `simulation_mode` is on. Currently one hardcoded
   device-down story; needs to become a **scenario registry** keyed so multiple
   stories coexist.
@@ -162,7 +162,7 @@ sim fixture. `device` ties the agent's tool calls to the right story.
 **Vertical slice first (scenario 4, VPN tunnel down)** — prove the whole pipeline
 end-to-end before replicating:
 
-1. ✅ **Manifest** — `fsr_core/mcp_server/noc_scenarios.json` + loader
+1. ✅ **Manifest** — `fsr_playbooks/mcp_server/noc_scenarios.json` + loader
    `_noc_scenarios.py` (`load`/`scenarios`/`by_device`) with the
    `vpn_tunnel_down` entry (alert + induce/teardown + fmg_row + faz_logs).
 2. ✅ **Classifier** — `vpn_tunnel_down` scenario in `triage_scenarios.py`
@@ -171,7 +171,7 @@ end-to-end before replicating:
 3. ✅ **Sim** — `_sim_fixtures.py` appends each manifest device to the FMG device
    list (reachable) and serves the scenario's `faz_logs` keyed on the queried
    `devid`; BRANCH-04 device-down path untouched. Tests added.
-   → `fsr_core` **387 passed** (offline slice complete + green).
+   → `fsr_playbooks` **387 passed** (offline slice complete + green).
 4. ⏳ **Alert seeder** — `seed_noc_alert.py --scenario vpn_tunnel_down` (FSR side):
    POST an Alert from the manifest, print IRI + widget deep-link. (Connector repo
    `scripts/`, alongside `prompt_loop.py`.) BLOCKED on alert-module confirmation.

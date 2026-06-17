@@ -58,7 +58,7 @@ if os.environ.get("FSR_SUPPRESS_INSECURE_WARNING", "true").lower() != "false":
 
 # Smoke-import the compiler so we fail fast if the integration is broken.
 try:
-    import fsr_core.compiler as compiler  # noqa: F401
+    import fsr_playbooks.compiler as compiler  # noqa: F401
     _compiler_ok = True
     _compiler_err: str | None = None
 except Exception as e:  # pragma: no cover
@@ -68,15 +68,15 @@ except Exception as e:  # pragma: no cover
 
 app = FastAPI(title="FSR Playbook Studio", version="0.0.1")
 
-# Install the backend-settings-backed ConfigProvider so fsr_core.llm
+# Install the backend-settings-backed ConfigProvider so fsr_playbooks.llm
 # can resolve provider configs without importing the web backend.
-from fsr_core.llm import factory as _llm_factory  # noqa: E402
+from fsr_playbooks.llm import factory as _llm_factory  # noqa: E402
 from . import settings as _settings  # noqa: E402
-from fsr_core.protocols import ProviderConfig as _CoreProviderConfig  # noqa: E402
+from fsr_playbooks.protocols import ProviderConfig as _CoreProviderConfig  # noqa: E402
 
 
 class _BackendConfigProvider:
-    """Adapter from `backend.settings` to fsr_core's ConfigProvider."""
+    """Adapter from `backend.settings` to fsr_playbooks's ConfigProvider."""
     def get_active_provider_name(self) -> str:
         return _settings.get_active_provider_name()
 
@@ -99,7 +99,7 @@ def _install_approval_persistence() -> None:
     secrets store so persisted tokens still verify after a restart; without a
     stable key the binding check fails closed and the analyst re-issues."""
     import secrets as _secrets
-    from fsr_core.llm import approvals as _approvals
+    from fsr_playbooks.llm import approvals as _approvals
 
     if not os.environ.get("FSR_APPROVAL_HMAC_KEY"):
         try:

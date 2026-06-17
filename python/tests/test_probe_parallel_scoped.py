@@ -21,7 +21,7 @@ import pytest
 
 pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
 
-import fsr_core.mcp_server.tools_triage as tt  # noqa: E402
+import fsr_playbooks.mcp_server.tools_triage as tt  # noqa: E402
 
 
 class _FakeResp:
@@ -72,7 +72,7 @@ def _patch_live(monkeypatch, client):
     # which survives across runs on disk — so a prior probe of the same connector
     # name short-circuits the live healthcheck and the session is never hit. Force
     # a miss so these tests deterministically exercise the live probe path.
-    from fsr_core.mcp_server import tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
     monkeypatch.setattr(te, "_cached_health", lambda *a, **k: None)
     monkeypatch.setattr(te, "_store_health", lambda *a, **k: None)
 
@@ -124,7 +124,7 @@ def test_agent_connector_probe_passes_agent_id(monkeypatch):
     client = _FakeClient(sess)
     _patch_live(monkeypatch, client)
 
-    import fsr_core.mcp_server.tools_execution as te
+    import fsr_playbooks.mcp_server.tools_execution as te
     seen: list[tuple[str, str, str]] = []
 
     def _fake_health(client_arg, name, version, config="", agent_id=""):

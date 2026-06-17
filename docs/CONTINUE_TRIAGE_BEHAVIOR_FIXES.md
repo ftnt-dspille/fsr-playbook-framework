@@ -4,7 +4,7 @@ Created 2026-06-02. Source evidence: widget export
 `fsr_all_widgets/widgets-src/fsrPlaybookBuilder/exports/fsrpb-chat-sess-kysr33eq-1780430936817.md`
 (session `sess-kysr33eq`, widget v1.1.2, connector 0.3.94, contract 2.8.0).
 
-All work is in **`fsr-playbook-framework/fsr_core`** (canonical). The connector vendors a
+All work is in **`fsr-playbook-framework/fsr_playbooks`** (canonical). The connector vendors a
 copy via `build.sh` — do NOT edit the connector copy; re-vendor at the end. Tests
 run via the `.venv` (`make tests` / `./.venv/bin/python -m pytest`), never system python.
 
@@ -23,7 +23,7 @@ Both turns ended `stop_reason=end_turn` with the last assistant block containing
 tool calls + one IOC card, no narrative. The agent looks like it "didn't answer."
 
 **Fix options (pick A, fall back to B):**
-- **A. Post-loop guarantee.** In `fsr_core/llm/run_turn.py`, after the tool loop
+- **A. Post-loop guarantee.** In `fsr_playbooks/llm/run_turn.py`, after the tool loop
   completes, inspect the final assistant content. If it has no text block (only
   tool_use/cards), issue ONE more model turn with a forced directive: *"Summarize
   the triage: what you found, severity verdict, and the single recommended next
@@ -80,7 +80,7 @@ both turns; no adaptation.
 **Fix:**
 - When building FortiSIEM op params, resolve `incidentId` from the linked alert's
   `sourcedata` rather than the FortiSOAR id. Check the SIEM tool wrappers in
-  `fsr_core/llm/tools.py` (`siem_events_for_incident`, `siem_search_ip`).
+  `fsr_playbooks/llm/tools.py` (`siem_events_for_incident`, `siem_search_ip`).
 - Add a repeated-error guard: if an op returns the identical `code/op/query` 400
   twice, stop retrying that shape and surface the blocker in the assessment.
 
@@ -104,7 +104,7 @@ Files: `tools.py` (SIEM wrappers), loop guard in `run_turn.py` / `_loop_helpers.
   when the turn ran tools but the final assistant block has no text
   (`any_tools_run and not final_text`), capped by `assessment_forced`. The
   max-tool-turns tail was refactored onto the same helper. Tests:
-  `fsr_core/tests/test_forced_assessment.py` (forces when tools-only; no extra
+  `fsr_playbooks/tests/test_forced_assessment.py` (forces when tools-only; no extra
   call when final has text; never for a pure-text turn).
 - **P3 low-signal gate — DONE.** `intents.classify_message` →
   `trivial|continue|directive` + `gate_directive`; `triage_preflight` takes
@@ -122,7 +122,7 @@ Files: `tools.py` (SIEM wrappers), loop guard in `run_turn.py` / `_loop_helpers.
   `repeated_call_guard` envelope telling the model to adapt or report. Test:
   `test_repeated_error_guard.py`.
 
-`make verify` green: 213 fsr_core + 154 connector. NOTE: connector's `fsr_core`
+`make verify` green: 213 fsr_playbooks + 154 connector. NOTE: connector's `fsr_playbooks`
 is a **symlink** to canonical in-tree, so no manual re-vendor needed for tests;
 the rm-rf/recopy vendoring only happens at package/deploy time.
 

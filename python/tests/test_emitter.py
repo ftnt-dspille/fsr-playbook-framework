@@ -1,4 +1,4 @@
-from fsr_core.compiler import compile_yaml
+from fsr_playbooks.compiler import compile_yaml
 
 
 def _hello(repo_root):
@@ -142,7 +142,7 @@ def test_debug_flag_defaults_to_false(db_path):
 
 def _priority_iri(db_path, value):
     import sqlite3
-    from fsr_core.compiler.ir import PRIORITY_LIST_NAME
+    from fsr_playbooks.compiler.ir import PRIORITY_LIST_NAME
     c = sqlite3.connect(db_path)
     row = c.execute(
         "SELECT item_iri FROM picklists WHERE list_name=? AND item_value=?",
@@ -200,7 +200,7 @@ playbooks:
 
 
 def test_priority_unknown_warns_and_unsets(db_path):
-    from fsr_core.compiler.errors import ErrorCode
+    from fsr_playbooks.compiler.errors import ErrorCode
     yaml_text = """
 collection: TestPriorityBad
 playbooks:

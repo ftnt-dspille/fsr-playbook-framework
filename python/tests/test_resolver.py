@@ -1,5 +1,5 @@
-from fsr_core.compiler import compile_yaml
-from fsr_core.compiler.errors import ErrorCode
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.compiler.errors import ErrorCode
 
 
 def _yaml(steps_block: str) -> str:
@@ -273,7 +273,7 @@ def test_typed_param_skips_jinja(db_path):
 def test_tier23_ipv4_validator_unit():
     """Pure-function tests for the new observed_type validators. These
     don't need the DB — they catch validator regressions cheaply."""
-    from fsr_core.compiler.resolver.connector_args import (
+    from fsr_playbooks.compiler.resolver.connector_args import (
         _is_ipv4, _is_url, _is_email, _is_iso8601,
         _is_json_object, _is_json_array,
     )

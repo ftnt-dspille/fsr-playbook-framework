@@ -7,7 +7,7 @@ reference store of every connector/op/param/step-type, a typed validator
 
 > **Scope.** This repo is the framework. The **connector**
 > (`fsr-playbook-builder`, a separate repo) and the **Studio** web editor
-> (`web/`) are *consumers* — the connector just vendors `fsr_core/` and wraps
+> (`web/`) are *consumers* — the connector just vendors `fsr_playbooks/` and wraps
 > it as an on-platform integration. You do not need either to use the
 > framework. If someone asked for "the connector code," what they usually
 > want is this — the engine the connector runs.
@@ -16,8 +16,8 @@ reference store of every connector/op/param/step-type, a typed validator
 
 | Path | What |
 |------|------|
-| `fsr_core/compiler/` | parser, resolver, typed walker — the compile + static-analysis core. **Pure-offline, zero live deps.** |
-| `fsr_core/mcp_server/` | ~80 MCP tools (compile, validate, verify, discovery, live execution, triage). Launch: `python -m fsr_core.mcp_server`. |
+| `fsr_playbooks/compiler/` | parser, resolver, typed walker — the compile + static-analysis core. **Pure-offline, zero live deps.** |
+| `fsr_playbooks/mcp_server/` | ~80 MCP tools (compile, validate, verify, discovery, live execution, triage). Launch: `python -m fsr_playbooks.mcp_server`. |
 | `python/cli.py` | the `fsrpb` CLI (`fsrpb compile`, `validate`, `verify`, `probe`, `run-op`, …). |
 | `python/probes/` | reference-store builders — hit a live FSR box and populate `store/fsr_reference.db`. |
 | `python/fsr_read_mcp.py` | a lean **read-only** MCP server (subset of the above) for testing/validation. |
@@ -74,7 +74,7 @@ needs input:
 4. **reference DB** — copy the handed-over file (prompts for the path, or set
    `FSR_DB_SRC`), build from a live box (`fsrpb probe --all`), or skip.
 5. **.env** — optional; created from `.env.example` (offline work doesn't need it).
-6. **green-check** — runs the framework core suite (`fsr_core/tests/`) and
+6. **green-check** — runs the framework core suite (`fsr_playbooks/tests/`) and
    reports done.
 
 Unattended: `NONINTERACTIVE=1 PYFSR_REPO=… FSR_DB_SRC=… make bootstrap`.
@@ -83,7 +83,7 @@ Unattended: `NONINTERACTIVE=1 PYFSR_REPO=… FSR_DB_SRC=… make bootstrap`.
 > a box). Offline compile/validate/verify/type-flow need just the repo + the DB.
 > `make verify` (the fuller green-check) additionally runs the *connector*
 > suite, which requires the separate connector repo — `make bootstrap` uses
-> `fsr_core/tests/` instead so it works with just the framework.
+> `fsr_playbooks/tests/` instead so it works with just the framework.
 
 > Never commit `.env`. It's gitignored; keep it that way. Live upload/execute
 > probes also refuse to run unless `FSR_ALLOW_E2E=true` — never set that on prod.
@@ -100,8 +100,8 @@ fsrpb run-op virustotal query_ip --params '{"ip":"8.8.8.8"}'   # live (needs .en
 
 **Python API** (offline core — no live box):
 ```python
-from fsr_core.compiler import compile_yaml
-from fsr_core.mcp_server import verify_playbook   # structured punch-list
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.mcp_server import verify_playbook   # structured punch-list
 res = verify_playbook(yaml_text=open("playbook.yaml").read())
 ```
 
@@ -132,4 +132,4 @@ machine-specific overrides only — don't rely on it for sharing.)
 | compile / validate / verify / type-flow | repo + DB (no pyfsr, no box) |
 | reference lookups (connectors/ops/params) | repo + DB |
 | probe / run-op / execute live | repo + DB + `pyfsr` + `.env` + reachable FSR |
-| build the connector | the separate `fsr-playbook-builder` repo (vendors `fsr_core`) |
+| build the connector | the separate `fsr-playbook-builder` repo (vendors `fsr_playbooks`) |

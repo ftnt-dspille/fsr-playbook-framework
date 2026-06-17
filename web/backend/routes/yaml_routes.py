@@ -14,12 +14,12 @@ import yaml
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from fsr_core.compiler import compile_yaml as _compile_yaml
-from fsr_core.compiler.parser import parse_yaml
-from fsr_core.compiler.resolver import Resolver
-from fsr_core.compiler.validator import validate as _validate
-from fsr_core.compiler.arg_validator import ArgValidator
-from fsr_core.compiler.source_fixer import collect_fixes as _collect_fixes
+from fsr_playbooks.compiler import compile_yaml as _compile_yaml
+from fsr_playbooks.compiler.parser import parse_yaml
+from fsr_playbooks.compiler.resolver import Resolver
+from fsr_playbooks.compiler.validator import validate as _validate
+from fsr_playbooks.compiler.arg_validator import ArgValidator
+from fsr_playbooks.compiler.source_fixer import collect_fixes as _collect_fixes
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB = REPO_ROOT / "store" / "fsr_reference.db"
@@ -303,8 +303,8 @@ def shapes(body: YamlIn) -> dict[str, Any]:
     flag per step indicating *why* its shape is unknown so the picker
     can prompt the user to verify (or otherwise enrich) it.
     """
-    from fsr_core.compiler.typed_walker import walk_playbook
-    from fsr_core.compiler.parser import parse_yaml
+    from fsr_playbooks.compiler.typed_walker import walk_playbook
+    from fsr_playbooks.compiler.parser import parse_yaml
     try:
         coll, errs = parse_yaml(body.text)
     except Exception as e:

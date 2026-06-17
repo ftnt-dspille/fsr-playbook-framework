@@ -2,7 +2,7 @@
 
 POST /api/chat with {messages: [{role, content}], current_yaml?: str}.
 Streams Server-Sent Events with the normalized event shape from
-fsr_core.llm.provider.
+fsr_playbooks.llm.provider.
 """
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from backend import settings as _settings
-from fsr_core.llm.factory import get_provider
-from fsr_core.llm.provider import (
+from fsr_playbooks.llm.factory import get_provider
+from fsr_playbooks.llm.provider import (
     ApprovalRequestEvent,
     DoneEvent,
     ErrorEvent,
@@ -27,12 +27,12 @@ from fsr_core.llm.provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from fsr_core.llm import approvals as _approval_store
-from fsr_core.llm.run_turn import run_agent_turn, resume_agent_turn
+from fsr_playbooks.llm import approvals as _approval_store
+from fsr_playbooks.llm.run_turn import run_agent_turn, resume_agent_turn
 from backend.system_prompt import build_system_prompt
 from backend import history as history_db
 from backend._history_sink import BackendHistorySink
-from fsr_core.llm.usage_log import est_tokens, log_turn
+from fsr_playbooks.llm.usage_log import est_tokens, log_turn
 
 import asyncio
 

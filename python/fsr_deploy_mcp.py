@@ -94,7 +94,7 @@ def connector_status() -> dict[str, Any]:
         res = fsr.execute("health_check", {}, timeout=60)
         d = res.data if isinstance(res.data, dict) else {}
         return {"ok": bool(res.ok), "status": res.status,
-                "fsr_core_version": d.get("fsr_core_version"),
+                "fsr_playbooks_version": d.get("fsr_playbooks_version"),
                 "worker_identity": {k: v for k, v in d.items()
                                     if "version" in k.lower() or "worker" in k.lower()},
                 "connector_dir": str(cdir)}
@@ -104,7 +104,7 @@ def connector_status() -> dict[str, Any]:
 
 @deploy_mcp.tool()
 def connector_build(slim: bool = True, timeout_s: int = 300) -> dict[str, Any]:
-    """Build the connector tarball (vendor fsr_core + reference DB → .tgz).
+    """Build the connector tarball (vendor fsr_playbooks + reference DB → .tgz).
 
     Read-only w.r.t. the live box — it does NOT install. `slim=True` ships the
     truncated reference DB (warmup repopulates on the box). Returns the built

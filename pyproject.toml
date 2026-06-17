@@ -20,19 +20,20 @@ dependencies = [
 fsrpb = "fsrpb_main:main"
 
 [tool.setuptools]
-# fsr_core lives at the repo root; legacy packages still under python/.
+# fsr_playbooks lives at the repo root; legacy packages still under python/.
 package-dir = {"" = ".", "probes" = "python/probes", "store" = "python/store", "e2e" = "python/e2e"}
 py-modules = ["fsrpb_main"]
 packages = [
     "probes", "store", "e2e",
-    "fsr_core",
-    "fsr_core.compiler", "fsr_core.compiler.resolver", "fsr_core.compiler.rulesets",
-    "fsr_core.mcp_server",
-    "fsr_core.llm",
+    "fsr_playbooks",
+    "fsr_playbooks.compiler", "fsr_playbooks.compiler.resolver", "fsr_playbooks.compiler.rulesets",
+    "fsr_playbooks.mcp_server",
+    "fsr_playbooks.llm",
+    "fsr_playbooks.agent",
 ]
 
 [tool.ruff]
-# fsr_core ships into the SOAR 3.9 runtime, so lint at the lowest baseline we
+# fsr_playbooks ships into the SOAR 3.9 runtime, so lint at the lowest baseline we
 # support — this is what catches module-level PEP 604 unions before they reach
 # the connector. The Studio backend/CLI run on 3.11+, but py39 is the safe floor.
 target-version = "py39"

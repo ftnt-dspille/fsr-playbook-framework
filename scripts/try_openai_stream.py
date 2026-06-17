@@ -24,8 +24,8 @@ import os
 import sys
 import time
 
-from fsr_core.llm.openai_provider import OpenAIProvider
-from fsr_core.llm.provider import (
+from fsr_playbooks.llm.openai_provider import OpenAIProvider
+from fsr_playbooks.llm.provider import (
     DoneEvent, ErrorEvent, Message, TextEvent, ToolUseEvent,
     ToolResultEvent, UsageEvent,
 )

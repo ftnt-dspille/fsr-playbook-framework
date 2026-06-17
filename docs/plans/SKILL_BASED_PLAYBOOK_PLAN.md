@@ -2,7 +2,7 @@
 
 **Why this exists.** Today a playbook is built by having the LLM **hand-author FSRPB YAML** at
 the end of a triage session (the `build_playbook_from_session` / `chat_resume accept` path), guided
-by schema-lookup tools and the long string of jinja warnings in `fsr_core/mcp_server/tools_compile.py`
+by schema-lookup tools and the long string of jinja warnings in `fsr_playbooks/mcp_server/tools_compile.py`
 (lines ~155–345). The dominant failure mode is **variable wiring** — the model guessing the output
 shape of a connector op and writing the wrong jinja path (`vars.steps.enrich['hydra:member'][0].x`).
 The second is **branch flattening** — an interactive triage (a `choice_card` / `capability_gap` the
@@ -27,7 +27,7 @@ later evolution, explicitly out of scope here.
 **Bar:** "a saved playbook from a clean triage session compiles, resolves every jinja path, and runs
 without a wiring fix." Effort: `small (1–3h)`, `medium (4–12h)`, `large (1–3d)`.
 
-**Where edits land:** all `fsr_core` changes go in **`fsr-playbook-framework/fsr_core`** (canonical); the
+**Where edits land:** all `fsr_playbooks` changes go in **`fsr-playbook-framework/fsr_playbooks`** (canonical); the
 connector vendors it via `scripts/build.sh` (never edit the vendored copy). After landing, re-vendor
 + bump `info.json` + `scripts/install_to_fsr.py`. No widget or contract change is required — the
 output is still FSRPB YAML pushed via the existing `chat_resume accept` path (contract §4, §5
@@ -51,14 +51,14 @@ hand-author path is observed producing bad playbooks in practice.
 
 ## SESSION RESUME (2026-06-01) — read this first after a clear
 
-**Status: Phases 1–5 shipped & green** (`make verify` = 99 fsr_core + 126 connector, ruff clean).
+**Status: Phases 1–5 shipped & green** (`make verify` = 99 fsr_playbooks + 126 connector, ruff clean).
 Branch `feat/skill-based-playbook` in fsr-playbook-framework; connector changes on
 `feat/action-based-streaming` (commit `62762cf`). Neither merged to main yet.
 
 **Commits (fsr-playbook-framework):** `89dda67` P1 · `31c3712` P2 · `b108ae8` P3 · `7e690d0` P4 ·
 `352b2fb` P5 tool+eval · `79c590a` P5 active-trace+prompt · `fdd3b3f` plan update.
 
-**Files that exist now (all in `fsr_core`, source — connector symlinks it, no re-vendor needed in dev):**
+**Files that exist now (all in `fsr_playbooks`, source — connector symlinks it, no re-vendor needed in dev):**
 - `compiler/skills.py` — 4 demo-core skill descriptors + registry (P1).
 - `agent/skill_trace.py` — `SkillCall`/`SkillTrace`, `record_run_op`, process-local active trace (P2).
 - `compiler/skill_compiler.py` — `compile_trace`, `wire_inputs` (value-match), `render_context`,
@@ -81,7 +81,7 @@ Branch `feat/skill-based-playbook` in fsr-playbook-framework; connector changes 
   sometimes (VirusTotal) and directly other times (AbuseIPDB, crudhub `hydra:member`) — handled by
   `SkillCall.ref_prefix`, set in `run_op` from whether the raw resp had a `data` key.
 - `build_playbook_from_session` (in the original plan prose) **does not exist as a function** — the
-  session→YAML compile is the build-intent agent loop in `fsr_core/llm/run_turn.py`; the trace path is
+  session→YAML compile is the build-intent agent loop in `fsr_playbooks/llm/run_turn.py`; the trace path is
   the new `build_playbook_from_trace` tool.
 - Active trace is process-local module state; `_session_trace_scope` clears it in `finally` (concurrency
   caveat noted — fine for one-op-per-worker, revisit with contextvars if needed).
@@ -99,7 +99,7 @@ is the side-by-side vs the hand-author baseline (commit `039dfa0`).
 **(historical) NEXT STEP — trace fixtures for the parity campaign (decided):**
 - **Best method = replay a coherent investigation through `run_op` in SIM mode with the recorder on,
   then dump `SkillTrace.to_json()`.** Do NOT hand-author trace JSON (reintroduces the guess-the-output
-  failure mode). Sim fixtures in `fsr_core/mcp_server/_sim_fixtures.py` already encode a C2 investigation
+  failure mode). Sim fixtures in `fsr_playbooks/mcp_server/_sim_fixtures.py` already encode a C2 investigation
   with **cross-referenced values** (`_C2_IP` in `search_events.destIpAddr` → `block_ip_new` input;
   `_HOST_IP` from `get_ip_context` → `get_host_context` input; owner/user link) — exactly what
   value-match must recover. Deterministic + offline → CI-safe.
@@ -261,15 +261,15 @@ fallback still renders when the new fields are absent.
 ## Phased rollout
 
 - **Phase 1 (small) — ✅ DONE (`89dda67`):** Skill descriptor schema + the 4 demo-core descriptors
-  (§1) in `fsr_core/compiler/skills.py`. Pure registry; 1:1 step-type rule enforced.
+  (§1) in `fsr_playbooks/compiler/skills.py`. Pure registry; 1:1 step-type rule enforced.
 - **Phase 2 (small) — ✅ DONE (`31c3712`):** `SkillCall` trace recorder (§2) in
-  `fsr_core/agent/skill_trace.py`. `record_run_op` hooked into both `run_op` success paths (direct +
+  `fsr_playbooks/agent/skill_trace.py`. `record_run_op` hooked into both `run_op` success paths (direct +
   agent-routed), capturing the FULL output + a `ref_prefix` flag; no-op without an active trace.
-- **Phase 3 (large) — ✅ DONE (`b108ae8`):** `fsr_core/compiler/skill_compiler.py` — candidate steps
+- **Phase 3 (large) — ✅ DONE (`b108ae8`):** `fsr_playbooks/compiler/skill_compiler.py` — candidate steps
   + value-match wiring (trivial-value rejection, bracket-quoting, `ref_prefix`-aware paths) + render
   context that mirrors runtime nesting. (The plan's `build_playbook_from_session` name resolved to the
-  build-intent agent loop, which lives in `fsr_core`; entry point shipped in Phase 5.)
-- **Phase 4 (medium) — ✅ DONE (`7e690d0`):** `fsr_core/compiler/skill_verify.py` — verify/repair via
+  build-intent agent loop, which lives in `fsr_playbooks`; entry point shipped in Phase 5.)
+- **Phase 4 (medium) — ✅ DONE (`7e690d0`):** `fsr_playbooks/compiler/skill_verify.py` — verify/repair via
   StrictUndefined local Jinja (or injected live `render_jinja`) + reused `parser`/`validator`
   `_check_jinja_paths`; bad wires repaired to literal + recorded as a gap.
 - **Phase 5 (small) — ✅ DONE (`352b2fb`, `79c590a`; connector `62762cf`):** `build_playbook_from_trace`
@@ -296,15 +296,15 @@ fallback still renders when the new fields are absent.
   - **Contract `2.6.0` shipped** in `FSR_PLAYBOOK_BUILDER_CONNECTOR_CONTRACT.md` (widget repo):
     `playbook_offer` enriched with per-entry `{skill_id, step_type, wiring_label, verified, branch?}`
     + optional `draft_steps` tree + safe inline `edits` on accept; §4/§5/§6/§9 (T17/T18) updated.
-  - **fsr_core:** `emit_playbook_offer` tool (`tools_emit.py`) — model-triggered, but the card body is
+  - **fsr_playbooks:** `emit_playbook_offer` tool (`tools_emit.py`) — model-triggered, but the card body is
     compiled HERE from the active trace via `skill_compiler.summarize_for_offer` (never hand-written
     wiring). Registered in `mcp_server/__init__` + `llm/tools.py` (SAFE_TOOLS, tier 0); triage prompt
-    steers the offer. Tests: `fsr_core/tests/test_playbook_offer.py` (5).
+    steers the offer. Tests: `fsr_playbooks/tests/test_playbook_offer.py` (5).
   - **connector:** `_CARD_*` maps + `awaiting_playbook_offer`; decision whitelist `accept|decline`;
     `_resume_playbook_offer_accept` (compile trace → `compile_yaml` → `push_playbook` → `playbook_pushed`
     info_card; never dead-ends on empty/compile/push failure); direct `decline` end_turn; `CONTRACT_VERSION
     = "2.6.0"`. Tests: 3 in `test_chat_operations.py` + 1 replay in `test_mock_replay.py`; fixture
-    `playbook_draft_branching.json`. `make verify` green (104 fsr_core + 130 connector).
+    `playbook_draft_branching.json`. `make verify` green (104 fsr_playbooks + 130 connector).
   - **Still TODO (WebStorm widget repo):** render the reviewable draft (compact → "Review steps"
     expand, verify badges, `draft_steps` branch view, safe inline edits folding into the accept
     payload) + `fsrPlaybookBuilder.playbookDraft.spec.js` e2e. Ship via `scripts/ship.sh`.

@@ -1,6 +1,6 @@
 """Tests for annotations + step.comment auto-note behavior."""
-from fsr_core.compiler import compile_yaml
-from fsr_core.compiler.decompiler import decompile
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.compiler.decompiler import decompile
 
 
 def _yaml_with_comment() -> str:

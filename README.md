@@ -6,7 +6,7 @@ playbooks from a simple, human-readable IR instead of hand-wiring playbook JSON.
 
 It ships three things:
 
-- **Compiler + resolver** (`fsr_core`, `python/`) — turn the simplified YAML IR
+- **Compiler + resolver** (`fsr_playbooks`, `python/`) — turn the simplified YAML IR
   into FortiSOAR playbook JSON, with a typed walker that resolves variable wiring
   and type-checks source → target across the branch tree.
 - **Reference store** (`store/fsr_reference.db`) — a SQLite catalog of connectors,
@@ -28,7 +28,7 @@ It ships three things:
 ## Layout
 
 ```
-fsr_core/    compiler, resolver, typed walker, MCP server (shared with the connector)
+fsr_playbooks/    compiler, resolver, typed walker, MCP server (shared with the connector)
 python/      CLI (fsrpb), probes that build the reference DB, extra MCP servers, tests
 web/         FastAPI backend (:47821) + Svelte 5 Studio editor (:47822)
 ts/          TypeScript compiler (widget-runnable; consumes fsr_reference.json)
@@ -58,17 +58,17 @@ make bootstrap     # fresh clone -> green, testable state (creates .venv, instal
 make sync          # create .venv and install all editable deps via uv
 ```
 
-`fsr_core` is also vendored into the in-platform connector, whose runtime is
-Python 3.9 — keep `fsr_core` 3.9-clean (no module-level PEP 604 unions).
+`fsr_playbooks` is also vendored into the in-platform connector, whose runtime is
+Python 3.9 — keep `fsr_playbooks` 3.9-clean (no module-level PEP 604 unions).
 
 ## Common commands
 
 ```sh
-make verify        # offline green-check: fsr_core + connector test suites
+make verify        # offline green-check: fsr_playbooks + connector test suites
 make tests         # fast pytest (excludes live + slow), incl. the offline golden-trace pin
 make dev           # run backend (:47821) + frontend (:47822) together
 make e2e           # run every examples/*.test.yaml against a live FSR
-make lint          # ruff over fsr_core + python
+make lint          # ruff over fsr_playbooks + python
 fsrpb --help       # the CLI (compile, validate, resolve, refresh, query the store)
 ```
 
@@ -76,7 +76,7 @@ fsrpb --help       # the CLI (compile, validate, resolve, refresh, query the sto
 
 Three MCP servers (see `.mcp.json`) expose the toolset to agents / Claude Code:
 
-- **`fsrpb`** (`fsr_core.mcp_server`) — authoring: compile/validate/resolve YAML,
+- **`fsrpb`** (`fsr_playbooks.mcp_server`) — authoring: compile/validate/resolve YAML,
   find connectors/operations, get step schemas, debug sessions.
 - **`fsr-read`** (`python/fsr_read_mcp.py`) — read-only live FortiSOAR queries
   (records, picklists, run_op, verify_playbook).
@@ -144,7 +144,7 @@ override it — the `env` block wins):
       "command": "uv",
       "args": ["run", "--directory",
                "/absolute/path/to/fsr-playbook-framework",
-               "python", "-m", "fsr_core.mcp_server"],
+               "python", "-m", "fsr_playbooks.mcp_server"],
       "env": {
         "FSR_BASE_URL": "https://your-instance.fortisoar.example.com",
         "FSR_API_KEY":  "<scoped FortiSOAR API key>"
@@ -192,9 +192,9 @@ Restart Claude Desktop after editing the config — it only reads it at launch.
 
 ```bash
 .venv/bin/python - <<'PY'
-from fsr_core.mcp_server import tools_agent as ta
-from fsr_core.mcp_server.tools_execution import run_op
-from fsr_core.mcp_server.tools_compile import build_playbook_from_trace
+from fsr_playbooks.mcp_server import tools_agent as ta
+from fsr_playbooks.mcp_server.tools_execution import run_op
+from fsr_playbooks.mcp_server.tools_compile import build_playbook_from_trace
 ta.triage_session_start(entity={"module": "incidents"})
 run_op(connector="virustotal", operation="query_ip", params={"ip": "8.8.8.8"})
 print("recorded:", ta.triage_session_state()["count"])
@@ -203,4 +203,4 @@ PY
 ```
 
 See [`docs/ARCHITECTURE_AGENT_LOOP.md`](docs/ARCHITECTURE_AGENT_LOOP.md) for how
-all three front-ends (widget, web app, MCP) share the same `fsr_core.llm` wiring.
+all three front-ends (widget, web app, MCP) share the same `fsr_playbooks.llm` wiring.

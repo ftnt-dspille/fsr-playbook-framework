@@ -14,7 +14,7 @@
   env-overridable OpenAI endpoint (Studio) + B4 triage→build offline golden.
 - **STATUS: PUBLISH LEDGER COMPLETE (10/10 ✅) + published to internal remotes.**
   Original cutover (AM): dir → `fsr-playbook-framework`, `.venv` rebuilt, connector
-  `fsr_core` symlink retargeted, auto-memory migrated, `make verify` green
+  `fsr_playbooks` symlink retargeted, auto-memory migrated, `make verify` green
   (339 + 162). pyfsr blocker fixed (junk tags `v0.2.4-tag`/`v0.2.2-fix` deleted,
   clean `v0.2.4` recreated so hatch-vcs / `make sync` works).
 
@@ -140,7 +140,7 @@ PYFSR_REPO=/Users/dylanspille/PycharmProjects/pyfsr \
 FSR_DB_SRC=<…>/store/fsr_reference.db \
 bash scripts/bootstrap.sh
 ```
-Result: all 6 steps green → **339 fsr_core tests passed**, "BOOTSTRAP COMPLETE".
+Result: all 6 steps green → **339 fsr_playbooks tests passed**, "BOOTSTRAP COMPLETE".
 Unattended path needs the 3 env vars above (uv auto-resolves toolchain;
 `make sync` clones pyfsr from PYFSR_REPO; FSR_DB_SRC seeds the gitignored 63 MB
 reference DB — **required for green**, without it step 6 reds). `.env` is
@@ -169,13 +169,13 @@ For an internal-only distribution the current metadata is fine as-is.
 
 Confirmed the trace→YAML build parameterizes one-off triage IOCs to the trigger
 record instead of baking literals. Mechanism lives in
-`fsr_core/compiler/skill_compiler.py` (the gap-param parameterizer ~L258):
+`fsr_playbooks/compiler/skill_compiler.py` (the gap-param parameterizer ~L258):
 value-matches a literal against the trigger record's fields, stages it on a
 synthetic `Set Inputs` (set_variable) step as `{{ vars.input.records[0].<field>
 }}`, and rewrites the consuming connector step to `{{ vars.steps.Set_Inputs.<var>
 }}`. Handles embedded spans in query strings too.
 
-Test-pinned in `fsr_core/tests/test_build_from_trace.py`:
+Test-pinned in `fsr_playbooks/tests/test_build_from_trace.py`:
 - positive: IOC `102.220.160.21` (= record `sourceIp`) → Set Inputs
   `{{ vars.input.records[0].sourceIp }}`, step consumes
   `{{ vars.steps.Set_Inputs.ip }}`, and `"102.220.160.21" not in yaml`
@@ -193,8 +193,8 @@ unaffected — only the local dir name changes.
 
 ### Why it needs care (couplings)
 - Live session cwd is inside the dir → can't plain `mv` mid-session.
-- `.venv` has absolute paths (editable `fsr_core` + `../pyfsr`) → rebuild needed.
-- Connector `fsr_core` symlink is ABSOLUTE to `FSRPlaybookYaml/fsr_core` → retarget.
+- `.venv` has absolute paths (editable `fsr_playbooks` + `../pyfsr`) → rebuild needed.
+- Connector `fsr_playbooks` symlink is ABSOLUTE to `FSRPlaybookYaml/fsr_playbooks` → retarget.
 - Auto-memory dir is keyed on the path
   (`~/.claude/projects/-Users-dylanspille-PycharmProjects-FSRPlaybookYaml/`) → migrate.
 
@@ -211,7 +211,7 @@ unaffected — only the local dir name changes.
    `git describe` → `v0.2.4-2-gf5f1564`. Re-ran `make sync` (green), then the
    remaining steps by hand: symlink retargeted, auto-memory migrated.
    `finalize-rename.sh` deleted after use (spent).
-4. ✅ `make verify` green at new path: **339 fsr_core + 162 connector passed.**
+4. ✅ `make verify` green at new path: **339 fsr_playbooks + 162 connector passed.**
 5. ⬜ Restart Claude Code in `/Users/dylanspille/PycharmProjects/fsr-playbook-framework`
    (this session's cwd was recovered after the move; a restart picks up the
    migrated auto-memory dir cleanly).

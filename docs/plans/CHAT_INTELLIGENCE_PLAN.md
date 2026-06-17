@@ -41,7 +41,7 @@
 > `python/evals/levers.py` (gate→prompt-lever, extended to build/offer/hunt; `calibrate` now imports
 > it); A6 `python/tests/test_golden_traces_pin.py` (offline, runs under `make tests`). New node render
 > bridge `widgets-src/fsrSocAssistant/tools/render_check.cjs`. Offline-verified: **812 pytest pass**
-> (`make tests`) + 295 fsr_core; render bridge + scoring + capture all green. Also fixed 3 stale
+> (`make tests`) + 295 fsr_playbooks; render bridge + scoring + capture all green. Also fixed 3 stale
 > fixtures (`test_linter` `query_url` needs `url:`; `test_corpus_validator` `vars.op` needs a
 > `set_variable`) that collided with the in-progress validator hardening (missing-required→error,
 > undefined-`vars`, malformed-Jinja) — fixtures updated, validators left intact. **Surfaced finding:**
@@ -70,12 +70,12 @@ fast, then alternate.
 
 ## What already exists (build on this, don't rebuild)
 
-**The chat brain** — `fsr_core/llm/`:
+**The chat brain** — `fsr_playbooks/llm/`:
 - `run_turn.py` — the event-consumer loop · `tools.py` — tool dispatch + tier/approval gate · `intents.py` — intent registry
 - Dynamic triage: `triage_normalize.py`, `triage_preflight.py`, `triage_scenarios.py`, `triage_sources.py`, `triage_prompt.py`
 - Providers: `anthropic_provider.py`, `fake_provider.py`, `lmstudio_provider.py`, `factory.py` (fake/lmstudio = no-cost local iteration)
 
-**The prompts** (the primary tuning levers) — `fsr_core/agent/`:
+**The prompts** (the primary tuning levers) — `fsr_playbooks/agent/`:
 - `system_prompt_triage.md` — sections: *Record context · What you do · Hunting instincts · Hard rules · Quick-action intents*
 - `system_prompt_build.md` — sections: *Workflow · Triage → build handoff · Canonical skeleton*
 
@@ -269,9 +269,9 @@ option (i): record staged action_cards into the session trace.**
 - The existing `insert_containment_guard` then gates the replayed containment behind a
   synthesized malicious-verdict decision (safe-by-default), and `wire_record_inputs`
   parameterizes its IOC to the trigger record.
-- Tests: `fsr_core/tests/test_staged_action_coverage.py` (8 cases incl. end-to-end
+- Tests: `fsr_playbooks/tests/test_staged_action_coverage.py` (8 cases incl. end-to-end
   trace→YAML with a guarded `Block Ip New` step). `make verify` green (336 + 159).
-- fsr_core is a **symlink** from the connector → no manual vendor; `deploy.sh` rsyncs
+- fsr_playbooks is a **symlink** from the connector → no manual vendor; `deploy.sh` rsyncs
   it into the install package.
 
 **LIVE-PROVEN on 0.3.125 (2026-06-06).** Re-drove the chain (real C2 alert
@@ -319,7 +319,7 @@ internal connector calls were polluting the trace as raw-HTTP build steps. Fix:
   same pivots) brackets its `run_op` too — so NO wrapper-internal connector call lands
   on the build trace, only the analyst's direct `run_op` calls + staged actions.
 - Tests: `test_skill_trace.py::test_mute_recording_*` (suppress + exception-unwind).
-  `make verify` green (339 + 159). `fsr_core` is symlinked into the connector → no vendor.
+  `make verify` green (339 + 159). `fsr_playbooks` is symlinked into the connector → no vendor.
 - Grounding math: built is a SET of `(connector, op)` pairs, so the 6 steps were one
   ungrounded pair `(fortinet-fortisiem, execute_api_request)` → 5/6 = 0.83. Muting drops
   that pair → built = {4 named + staged} ⊆ investigated → expect `grounding 1.0`.

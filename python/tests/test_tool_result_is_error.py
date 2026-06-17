@@ -6,7 +6,7 @@ connector failure escalates/alternates instead of being blindly retried.
 """
 from __future__ import annotations
 
-from fsr_core.llm.anthropic_provider import _is_error_result
+from fsr_playbooks.llm.anthropic_provider import _is_error_result
 
 
 def test_ok_false_envelope_is_error():

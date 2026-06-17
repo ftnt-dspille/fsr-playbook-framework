@@ -6,8 +6,8 @@ the step level (siblings of `arguments:`) instead of buried under
 canonical wire shape.
 """
 
-from fsr_core.compiler import compile_yaml
-from fsr_core.compiler.errors import ErrorCode
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.compiler.errors import ErrorCode
 
 
 def test_step_level_mock_result_hoists(db_path):

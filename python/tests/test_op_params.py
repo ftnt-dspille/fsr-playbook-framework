@@ -13,7 +13,7 @@ import sqlite3
 
 import pytest
 
-import fsr_core.mcp_server._shared as _shared
+import fsr_playbooks.mcp_server._shared as _shared
 
 
 @pytest.fixture
@@ -178,7 +178,7 @@ def test_skips_when_no_params_catalogued(store):
 # --- emit_action_card -------------------------------------------------------
 
 def test_emit_action_card_rejects_incomplete_args(store):
-    from fsr_core.mcp_server.tools_emit import emit_action_card
+    from fsr_playbooks.mcp_server.tools_emit import emit_action_card
     out = emit_action_card(
         id="c1", connector="virustotal", operation="get_ip_reputation",
         summary="Look up", args={"limit": 10}, editable_fields=["limit"],
@@ -187,7 +187,7 @@ def test_emit_action_card_rejects_incomplete_args(store):
 
 
 def test_emit_action_card_allows_valid_args(store):
-    from fsr_core.mcp_server.tools_emit import emit_action_card
+    from fsr_playbooks.mcp_server.tools_emit import emit_action_card
     out = emit_action_card(
         id="c1", connector="virustotal", operation="get_ip_reputation",
         summary="Look up", args={"ip": "1.2.3.4"}, editable_fields=["ip"],
@@ -199,7 +199,7 @@ def test_get_op_schema_groups_conditional_params_with_empty_parent_sentinels(
         store, monkeypatch):
     """Connector warmup writes top-level parent/condition as empty strings.
     Treat those like NULL so onchange branches still render as select groups."""
-    from fsr_core.mcp_server import tools_discovery as td
+    from fsr_playbooks.mcp_server import tools_discovery as td
 
     monkeypatch.setattr(td._shared, "DB_PATH", store)
     con = sqlite3.connect(store)
@@ -239,7 +239,7 @@ def _add_schema_columns(store, *, static=None, observed=None):
 def test_get_op_schema_excludes_untyped_static_output_schema(store, monkeypatch):
     """E3: the static FortiSOAR output schema is untyped scaffolding and must
     never be surfaced — only the run-derived observed schema is trustworthy."""
-    from fsr_core.mcp_server import tools_discovery as td
+    from fsr_playbooks.mcp_server import tools_discovery as td
 
     monkeypatch.setattr(td._shared, "DB_PATH", store)
     # Static = 1000-line empty-string scaffold (simulated); observed = real shape.
@@ -259,7 +259,7 @@ def test_get_op_schema_excludes_untyped_static_output_schema(store, monkeypatch)
 def test_get_op_schema_slim_hint_steers_to_run_op_for_safe_ops(store, monkeypatch):
     """E3: with no observed schema, a read-only (safe) op's slim hint points the
     agent at run_op to observe the real output rather than the excluded scaffold."""
-    from fsr_core.mcp_server import tools_discovery as td
+    from fsr_playbooks.mcp_server import tools_discovery as td
 
     monkeypatch.setattr(td._shared, "DB_PATH", store)
     _add_schema_columns(
@@ -276,7 +276,7 @@ def test_get_op_schema_slim_hint_steers_to_run_op_for_safe_ops(store, monkeypatc
 
 
 def test_get_op_schema_slim_hint_reports_observed_when_present(store, monkeypatch):
-    from fsr_core.mcp_server import tools_discovery as td
+    from fsr_playbooks.mcp_server import tools_discovery as td
 
     monkeypatch.setattr(td._shared, "DB_PATH", store)
     _add_schema_columns(store, static=None, observed='{"reputation": 5}')

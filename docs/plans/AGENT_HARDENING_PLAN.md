@@ -9,16 +9,16 @@ durable assessment; this is the backlog.
 human-in-the-loop." Phases are ordered by `severity × value`. Effort: `small (1–3h)`,
 `medium (4–12h)`, `large (1–3d)`.
 
-**Where edits land:** all `fsr_core` changes go in **`fsr-playbook-framework/fsr_core`** (canonical). The
+**Where edits land:** all `fsr_playbooks` changes go in **`fsr-playbook-framework/fsr_playbooks`** (canonical). The
 connector vendors it via `scripts/build.sh`; never edit the vendored copy under
-`ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/fsr_core`. After landing, re-vendor + bump
+`ConnectorsV2/fsr-playbook-builder/fsr-playbook-builder/fsr_playbooks`. After landing, re-vendor + bump
 `info.json` + `scripts/install_to_fsr.py`.
 
 ---
 
 ## ✅ Phase 0 — Authoring loop SAFE_TOOLS (absorbed from AGENT_TOOL_REGISTRY_FIX_PLAN.md, verified 2026-05-30)
 
-All authoring tools are in `SAFE_TOOLS`, `TOOL_TIERS`, and the built `REGISTRY`. Verified by `python -c "from fsr_core.llm.tools import REGISTRY; print(sorted(REGISTRY))"`. Tiers correct: `validate_yaml`/`compile_yaml`/`analyze_playbook` at tier 0; `why_did_playbook_fail`/`get_run_env`/`list_playbook_runs`/`assert_playbook_outcome` at tier 1; `push_playbook`/`run_playbook`/`dry_run_playbook` at tier -1 (dynamic, HITL-gated). Only intentional omission: `find_step_recipe` (corpus not populated). `MAX_TOOL_TURNS = 16` (raised from 12); live calibration run did not hit the ceiling.
+All authoring tools are in `SAFE_TOOLS`, `TOOL_TIERS`, and the built `REGISTRY`. Verified by `python -c "from fsr_playbooks.llm.tools import REGISTRY; print(sorted(REGISTRY))"`. Tiers correct: `validate_yaml`/`compile_yaml`/`analyze_playbook` at tier 0; `why_did_playbook_fail`/`get_run_env`/`list_playbook_runs`/`assert_playbook_outcome` at tier 1; `push_playbook`/`run_playbook`/`dry_run_playbook` at tier -1 (dynamic, HITL-gated). Only intentional omission: `find_step_recipe` (corpus not populated). `MAX_TOOL_TURNS = 16` (raised from 12); live calibration run did not hit the ceiling.
 
 ---
 
@@ -373,7 +373,7 @@ boundary; every call before it (read-only, tier ≤ 2 by construction) fans out
 via `asyncio.gather(asyncio.to_thread(dispatch, …))` capped at
 `MAX_PARALLEL_TOOLS=8` (`_loop_helpers`), `tool_result` blocks emitted in
 `tool_use` order, tier-3+ still suspends one-at-a-time as before. Test:
-`fsr_core/tests/test_parallel_dispatch.py` (concurrency + order + mixed-tier
+`fsr_playbooks/tests/test_parallel_dispatch.py` (concurrency + order + mixed-tier
 suspend). Live on connector 0.3.26+.
 
 A live hunt's wall-clock is dominated by **sequential** tool round-trips: `anthropic_provider`'s tool
@@ -413,7 +413,7 @@ model. Claude already emits multiple `tool_use` blocks per turn; the initial gat
   `args_hash`, so the token no longer matches. Surfaced to the widget as the new
   `approval_unverified` stop_reason (connector contract **2.2.0**). Tests: `test_approval_hmac.py` (7).
 - **3.2 Persist suspended sessions** (MEDIUM, large) · ✅ DONE (2026-05-30) — `SqliteApprovalGateway`
-  (sqlite + pickled `SuspendedSession`, TTL gc) in `fsr_core.llm.approvals`; module default gateway
+  (sqlite + pickled `SuspendedSession`, TTL gc) in `fsr_playbooks.llm.approvals`; module default gateway
   made swappable (`set_default_gateway`). Web backend installs one at startup (deferred from import
   so keyring isn't touched early) so both the provider stash side and the chat-route resolve side
   share one persisted store across a restart. Pins a stable `FSR_APPROVAL_HMAC_KEY` in the keyring

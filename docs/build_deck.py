@@ -792,7 +792,7 @@ title(s, "It's a connector — so it ships like one",
 comps = [
     ("In-platform connector", "the engine", "the agent loop, tools, gating, remote execution, trace capture", ACCENT2),
     ("AngularJS widget", "the surface", "chat drawer on the record · renders cards · halt-and-resume", ACCENT),
-    ("fsr_core", "the shared core", "triage pipeline · tier model · compiler · reference store", WARN),
+    ("fsr_playbooks", "the shared core", "triage pipeline · tier model · compiler · reference store", WARN),
 ]
 x = 0.6
 for h, tag, b, c in comps:
@@ -815,7 +815,7 @@ for k, d in facts:
     cx += 3.0
 note(s, """
 De-risk the 'how hard is this to adopt' question. It's a connector. It installs through the same mechanism as every other FortiSOAR connector — no new appliance, no endpoint agent rollout, no separate console to stand up or train on. The widget just surfaces it on the record the analyst already uses.
-Reinforce the components: the connector is the engine, the widget is the surface, and fsr_core is the shared brain that both the connector and the widget run.
+Reinforce the components: the connector is the engine, the widget is the surface, and fsr_playbooks is the shared brain that both the connector and the widget run.
 The 'already real today' strip is your credibility anchor: it's live on a real build, the guardrails have tests, remote agent execution is proven, and it works across 700+ connectors. This is not a prototype slideware pitch — it's running.
 """)
 footer(s, 18)

@@ -1,7 +1,7 @@
 # Agent tool registry + dead-weight remediation plan
 
 **Status:** 2026-05-28 — proposed, not started.
-**Motivation:** session 2026-05-28 audit revealed that the system prompt mandates 10 tools the agent literally cannot call because they are absent from `SAFE_TOOLS` in `fsr_core/llm/tools.py`. This is the root cause of the "playbook AI creation is broken" symptom: the agent has no way to validate, no way to analyze, no way to push, no way to triage. It falls back to raw generation, the editor's YAML extractor finds nothing, and the user sees an empty assistant bubble.
+**Motivation:** session 2026-05-28 audit revealed that the system prompt mandates 10 tools the agent literally cannot call because they are absent from `SAFE_TOOLS` in `fsr_playbooks/llm/tools.py`. This is the root cause of the "playbook AI creation is broken" symptom: the agent has no way to validate, no way to analyze, no way to push, no way to triage. It falls back to raw generation, the editor's YAML extractor finds nothing, and the user sees an empty assistant bubble.
 
 This plan also bundles the smaller dead-weight findings so we close them in one sweep rather than leaving them as drift.
 
@@ -13,11 +13,11 @@ The agent's authoring loop is broken until `SAFE_TOOLS` reflects what the prompt
 
 ### 0.1 Add the four pure-compute tools the prompt mandates
 
-Edit `fsr_core/llm/tools.py`:
+Edit `fsr_playbooks/llm/tools.py`:
 - Append to `SAFE_TOOLS`: `validate_yaml`, `compile_yaml`, `analyze_playbook`, `find_step_recipe`.
 - Add to `TOOL_TIERS` as tier 0 (local compute, no FSR I/O, no side effects).
 
-**Done when:** `fsr_core.llm.tools.REGISTRY` contains all four; a quick `python -c "from fsr_core.llm.tools import REGISTRY; print(sorted(REGISTRY))"` shows them.
+**Done when:** `fsr_playbooks.llm.tools.REGISTRY` contains all four; a quick `python -c "from fsr_playbooks.llm.tools import REGISTRY; print(sorted(REGISTRY))"` shows them.
 
 ### 0.2 Smoke-test the loop
 

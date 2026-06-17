@@ -1,5 +1,5 @@
-from fsr_core.compiler import compile_yaml
-from fsr_core.compiler.errors import ErrorCode
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.compiler.errors import ErrorCode
 
 
 def test_find_record_missing_query(db_path):
@@ -381,7 +381,7 @@ def test_mcp_validate_yaml_returns_next_fix():
     the `next_fix` field gives it the single most actionable next step."""
     import sys
     sys.path.insert(0, "python")
-    from fsr_core.mcp_server import validate_yaml as mcp_validate
+    from fsr_playbooks.mcp_server import validate_yaml as mcp_validate
     # A bare `collection:` with no playbooks is a missing_field on the
     # `playbooks` path — canonical first error to test the next_fix
     # prioritization. (Omitting the collection key entirely no longer
