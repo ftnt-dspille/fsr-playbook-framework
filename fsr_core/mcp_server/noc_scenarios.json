@@ -1,5 +1,5 @@
 {
-  "_README": "Single source of truth for NOC alert scenarios (see docs/plans/NOC_SCENARIO_CATALOG.md). Each entry drives: the live alert seeder (alert.*), the Fabric Studio fault recipe (induce.*), and the offline sim fixtures (fmg_row + faz_logs). `device` ties the agent's tool calls to the right story. device_down lives in code in _sim_fixtures.py for now (FGT-BRANCH-04) and is documented here for the seeder/FS side only.",
+  "_README": "Single source of truth for NOC alert scenarios (see docs/plans/NOC_SCENARIO_CATALOG.md). Each entry drives: the live alert seeder (alert.* -> /api/3/alerts), the Fabric Studio fault recipe (induce.*), the BASELINE precondition config (baseline.* -> a non-destructive FS recipe so the fault is REAL against live FAZ/FMG), and the offline sim fixtures (fmg_row + faz_logs). `target.*` holds the per-site FGT facts (device/mgmt_ip/jump_host) and is PLACEHOLDER (${...}) until the real Fabric Studio devices are known — fill these in before the live drive. `device` ties the agent's tool calls to the right story. The FS scenarios.yaml recipes are GENERATED from this manifest via python/gen_fs_recipes.py. device_down lives in code in _sim_fixtures.py for now (FGT-BRANCH-04) and is documented here for the seeder/FS side only.",
 
   "vpn_tunnel_down": {
     "device": "FGT-BRANCH-07",
@@ -11,9 +11,98 @@
       "source": "FortiAnalyzer",
       "type": "Network/VPN"
     },
+    "target": {
+      "_comment": "PLACEHOLDER. Two managed FGTs for the VPN slice. Fill device/mgmt_ip/jump_host from Fabric Studio before the live drive; the generator substitutes these into the FS recipe scope/connection.",
+      "hq": {
+        "device": "${FGT_HQ}",
+        "mgmt_ip": "${MGMT_IP_HQ}",
+        "jump_host": "${JUMP_HOST}",
+        "lan_subnet": "${HQ_LAN_SUBNET}",
+        "wan_ip": "${HQ_WAN_IP}"
+      },
+      "branch": {
+        "device": "${FGT_BRANCH}",
+        "mgmt_ip": "${MGMT_IP_BRANCH}",
+        "jump_host": "${JUMP_HOST}",
+        "lan_subnet": "10.70.0.0/16",
+        "wan_ip": "${BRANCH_WAN_IP}"
+      },
+      "shared": {
+        "tunnel_name": "HQ-BRANCH07",
+        "psk": "${IPSEC_PSK}",
+        "faz_ip": "${FAZ_IP}",
+        "fmg_ip": "${FMG_IP}"
+      }
+    },
+    "baseline": {
+      "capability": "cli",
+      "comment": "Preconditions so the VPN fault is REAL against live FAZ/FMG: a working HQ<->branch IPsec phase1/phase2 tunnel, FAZ logging enabled, and FMG central-management registration. NON-DESTRUCTIVE; run once at lab bring-up on BOTH FGTs. peer/local addrs and subnets differ per side, so the generator emits one baseline recipe per side (setup_hq / setup_branch). Placeholders (${...}) come from target.*.",
+      "setup_branch": [
+        "config log fortianalyzer setting",
+        "  set status enable",
+        "  set server ${FAZ_IP}",
+        "  set upload-option realtime",
+        "end",
+        "config system central-management",
+        "  set type fortimanager",
+        "  set fmg ${FMG_IP}",
+        "end",
+        "config vpn ipsec phase1-interface",
+        "  edit HQ-BRANCH07",
+        "    set interface wan1",
+        "    set peertype any",
+        "    set proposal aes256-sha256",
+        "    set remote-gw ${HQ_WAN_IP}",
+        "    set psksecret ${IPSEC_PSK}",
+        "    set status enable",
+        "  next",
+        "end",
+        "config vpn ipsec phase2-interface",
+        "  edit HQ-BRANCH07-p2",
+        "    set phase1name HQ-BRANCH07",
+        "    set src-subnet 10.70.0.0 255.255.0.0",
+        "    set dst-subnet ${HQ_LAN_SUBNET}",
+        "  next",
+        "end"
+      ],
+      "setup_hq": [
+        "config log fortianalyzer setting",
+        "  set status enable",
+        "  set server ${FAZ_IP}",
+        "  set upload-option realtime",
+        "end",
+        "config system central-management",
+        "  set type fortimanager",
+        "  set fmg ${FMG_IP}",
+        "end",
+        "config vpn ipsec phase1-interface",
+        "  edit HQ-BRANCH07",
+        "    set interface wan1",
+        "    set peertype any",
+        "    set proposal aes256-sha256",
+        "    set remote-gw ${BRANCH_WAN_IP}",
+        "    set psksecret ${IPSEC_PSK}",
+        "    set status enable",
+        "  next",
+        "end",
+        "config vpn ipsec phase2-interface",
+        "  edit HQ-BRANCH07-p2",
+        "    set phase1name HQ-BRANCH07",
+        "    set src-subnet ${HQ_LAN_SUBNET}",
+        "    set dst-subnet 10.70.0.0 255.255.0.0",
+        "  next",
+        "end"
+      ],
+      "probe": {
+        "command": "diagnose vpn tunnel list name HQ-BRANCH07",
+        "comment": "Run on the branch FGT after both sides are up; expect a phase2 SA with 'status=up' and installed selectors."
+      },
+      "assert_up": "tunnel HQ-BRANCH07 shows an established phase2 SA (status=up); FAZ device list shows ${FGT_BRANCH} logging; FMG fleet shows ${FGT_BRANCH} registered + insync.",
+      "verify_after": "Once green, faz_search_device_events(devid=${FGT_BRANCH}, logtype=\"vpn\") returns REAL phase2 logs and fmg_get_device_status shows the device up — NOT the sim fixture."
+    },
     "induce": {
       "capability": "cli",
-      "comment": "Disable the IPsec phase1-interface on the branch FGT; the tunnel drops and FAZ logs phase2-down. teardown re-enables it.",
+      "comment": "Disable the IPsec phase1-interface on the branch FGT; the tunnel drops and FAZ logs phase2-down. teardown re-enables it. REQUIRES the baseline above already applied.",
       "setup": [
         "config vpn ipsec phase1-interface",
         "  edit HQ-BRANCH07",

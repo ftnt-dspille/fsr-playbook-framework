@@ -213,23 +213,33 @@ So before the live drive of each scenario, author a **baseline FGT config**
 | FortiGuard degraded | FortiGuard + scheduled IPS/AV updates + logging |
 
 **Action items (follow-up thread):**
-1. Decide where the baseline configs live — FS provisioning recipes in
-   `fabric_studio_fixer` (`config:` phase / a `noc_baseline_*` recipe set) vs a
-   standalone config bundle applied at topology bring-up.
-2. Author the baseline for the VPN slice first: a working HQ↔branch IPsec tunnel
-   + FAZ logging + FMG registration on the two FGTs, then verify
-   `faz_search_device_events(logtype="vpn")` returns REAL phase2 logs (not the
-   sim) and `fmg_get_device_status` shows the device up.
+1. ✅ **Decided:** baseline configs live as FS seed-check recipes, **generated**
+   from `noc_scenarios.json` by `python/gen_fs_recipes.py` (emits
+   `noc-baseline-<id>[-side]` non-destructive + `noc-fault-<id>` destructive,
+   `enabled:false`). Merge the output into
+   `fabric_studio_fixer/backend/seed_checks/scenarios.yaml`.
+2. ◐ **VPN slice baseline scaffolded (placeholders).** Manifest `vpn_tunnel_down`
+   now has `target.*` (HQ/branch FGT device/mgmt_ip/jump_host + shared
+   tunnel/PSK/FAZ/FMG — all `${...}`) and a `baseline.*` block (FAZ logging +
+   FMG central-mgmt + IPsec phase1/phase2 per side, a probe, and an assert).
+   **STILL NEEDED before the live drive:** real FGT device names + mgmt IPs +
+   jump host + PSK/WAN/subnet/FAZ/FMG values → fill `target.*`, run the seeder +
+   FS baseline, then verify `faz_search_device_events(logtype="vpn")` returns
+   REAL phase2 logs and `fmg_get_device_status` shows the device up.
 3. Confirm FAZ is actually receiving each device's logs (log-rate / device list
    in FAZ) before relying on `faz_*` tools — a silent FAZ = empty hunts.
-4. Generalize: a per-scenario `baseline` block in `noc_scenarios.json` that
-   points at the provisioning recipe, so "stand up the lab for scenario X" is one
-   command alongside the induce/teardown.
+4. ✅ **Done:** per-scenario `baseline` block in `noc_scenarios.json`; the
+   generator turns "stand up the lab for scenario X" into one command alongside
+   the induce/teardown. Alert seeder: `python/seed_noc_alert.py --scenario <id>`
+   (→ **`alerts`** module, confirmed on this box; `--dry-run` for offline).
 
 ### Open questions for the slice
 - Exact FS device name + mgmt IP + jump host for the target FGT (and an HA pair
-  for scenario 2).
-- Whether to generate the FS `scenarios.yaml` recipe from `noc_scenarios.json`
+  for scenario 2). **← still the blocker for item 2's live drive.**
+- ✅ Resolved: **generate** the FS `scenarios.yaml` recipe from
+  `noc_scenarios.json` (`gen_fs_recipes.py`).
+- ✅ Resolved: alert module is **`alerts`** on 10.99.249.205.
+- (superseded) Whether to generate the FS `scenarios.yaml` recipe from `noc_scenarios.json`
   or hand-keep both (generation avoids drift but couples the repos).
 - Alert module: `alerts` vs `incidents` on this box (plural-modules note in
   `forticloud_demo_scenario` memory) — confirm before the seeder hardcodes a path.
