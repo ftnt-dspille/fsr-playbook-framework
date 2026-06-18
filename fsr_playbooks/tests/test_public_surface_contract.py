@@ -61,6 +61,8 @@ SURFACE_A_MODULES = [
     "fsr_playbooks.mcp_server._sim_fixtures",
     "fsr_playbooks.mcp_server._sim_client",
     "fsr_playbooks.mcp_server.tools_discovery",
+    # connector & playbook-run discovery — shared authoring/triage surface
+    "fsr_playbooks.mcp_server.tools_connector_discovery",
     # execution facade — the stable run/healthcheck surface the carved-out
     # triage cluster imports (RECONCILIATION_PLAN Phase 1, D4=(a))
     "fsr_playbooks.execution_api",
@@ -96,6 +98,12 @@ SURFACE_A_SYMBOLS = [
     ("fsr_playbooks.execution_api", "run_op"),
     ("fsr_playbooks.execution_api", "tier_for_run_op"),
     ("fsr_playbooks.execution_api", "mute_recording"),
+    # connector-awareness tools re-exported from mcp_server
+    ("fsr_playbooks.mcp_server", "list_configured_connectors"),
+    ("fsr_playbooks.mcp_server", "find_containment_actions"),
+    ("fsr_playbooks.mcp_server", "find_enrichment_actions"),
+    ("fsr_playbooks.mcp_server", "get_run_env"),
+    ("fsr_playbooks.mcp_server", "list_playbook_runs"),
 ]
 
 

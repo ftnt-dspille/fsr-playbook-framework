@@ -73,6 +73,15 @@ SAFE_TOOLS: list[str] = [
     # Phase 1.3 — side-effecting execution (tier-dynamic).
     "push_playbook",
     "run_playbook",
+    # Connector & playbook-run discovery — shared with the SOC triage path.
+    # RECONCILIATION_PLAN: connector-awareness is authoring (knowing what
+    # connectors are installed/configured/running + what actions a step can
+    # call), NOT alert investigation, so it lives in the library. Tier 1.
+    "get_run_env",
+    "list_configured_connectors",
+    "list_playbook_runs",
+    "find_containment_actions",
+    "find_enrichment_actions",
 ]
 
 
@@ -123,6 +132,12 @@ TOOL_TIERS: dict[str, int] = {
     "dry_run_playbook": -1,
     "push_playbook": -1,
     "run_playbook": -1,
+    # Connector & playbook-run discovery — read-only, auto-confirm.
+    "get_run_env": 1,
+    "list_configured_connectors": 1,
+    "list_playbook_runs": 1,
+    "find_containment_actions": 1,
+    "find_enrichment_actions": 1,
 }
 
 # Op-name / category classifiers used as fallback when op_safety has no

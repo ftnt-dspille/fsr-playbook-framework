@@ -27,6 +27,7 @@ from . import (
     tools_analysis,
     tools_catalog,
     tools_compile,
+    tools_connector_discovery,
     tools_corpus,
     tools_discovery,
     tools_execution,
@@ -44,6 +45,15 @@ from ._shared import mcp, REPO_ROOT, DB_PATH, _safe_op_category, _err, _db, _row
 
 # Re-export public tool names
 # (Users import these via `from mcp_server import <tool_name>`)
+
+# Connector & playbook-run discovery (shared with the SOC triage path)
+from .tools_connector_discovery import (
+    get_run_env,
+    list_configured_connectors,
+    list_playbook_runs,
+    find_containment_actions,
+    find_enrichment_actions,
+)
 
 # Discovery tools
 from .tools_discovery import (
