@@ -93,22 +93,78 @@ internals.
 0.6 Publish `0.3.66`.
 **After Phase 0 the leak is closed.** Phases 1–3 are correctness/dedup, not leak-driven.
 
-### Phase 1 — re-home triage into `fsr_soc_triage/` (the real work)
-1.1 **Per-file import audit** of the connector triage cluster (static + grep for lazy/
-    runtime `import fsr_playbooks...`). Produce the exact seam list. Confirm it's only
-    `llm.tools` + `mcp_server` (+ whatever the audit adds).
-1.2 `git mv` the cluster from `connector/fsr_playbooks/{mcp_server,llm,agent}/…` into
-    `connector/fsr_soc_triage/…`. Keep internal triage↔triage imports (rewrite
-    `fsr_playbooks.llm.triage_x` → `fsr_soc_triage.triage_x`).
-1.3 Rewrite the seam imports to consume the **installed** `fsr_playbooks` (unchanged paths,
-    just no longer a sibling).
-1.4 Register triage with the library's `_tools_triage_or_err()` hook from the new namespace.
-1.5 **Gate:** connector test suite green offline (the 29 + triage tests), with `fsr_playbooks`
-    resolved from an installed wheel, not the vendored dir.
+### Phase 1 — re-home triage into its own namespace (the real work)
+1.1 **Per-file import audit** ✅ DONE (2026-06-18). The seam is bigger than the first naive
+    grep suggested — triage uses **relative** imports inside `fsr_playbooks`, hiding the
+    coupling. Findings:
+
+  **Cross-boundary PRIVATE seam (13 kept-library internals triage depends on):**
+  - `mcp_server._shared`: `_db`, `_rows`, `_VERIF_RANK`, `_capability_gap_suggestion`, `_live_client`
+  - `mcp_server.tools_execution`: `_fetch_runs_both`, `_shape_run`, `_live_healthcheck`,
+    `_cached_health`, `_store_health`, `_agent_configured_rows`, `run_op`  ← **7 internals; the crux**
+  - `llm.tools._tier_for_run_op`, `agent.skill_trace.mute_recording`
+
+  **Cross-boundary PUBLIC seam (stable, fine):** `_shared.mcp`,
+  `intents.{DIRECTIVE, classify_message, gate_directive, load_intent_prompt}`.
+
+  **Non-shipped deps:** `probes._env.{get_client,get_config}` (dev client; connector must
+  vendor `probes` or supply an equivalent), `integrations.crudhub` / `connectors.core.connector`
+  (on-platform loopback — present on the appliance, absent from the wheel; `_live_crudhub.py`
+  already try/excepts these).
+
+  **Intra-cluster (becomes internal on re-home, harmless):** tools_noc→tools_triage
+  (`_envelope`, `_faz_*`, `_is_empty`, `_FAZ_LOG_TIME`), preflight→normalize
+  (`_RELATED_ALERT_KEYS`, `_digest_event`), prompt→{normalize,scenarios,sources}, etc.
+
+  → **The re-home is blocked on D4 (below): does `tools_execution` stay public?** Triage's
+  dominant coupling is to its 7 private helpers. Either promote them to a stable public API,
+  or move `tools_execution` out of the public package with triage.
+1.2 **[LIBRARY] Build the public execution facade** — a NEW module
+    `fsr_playbooks/execution_api.py` that imports the chosen internals and re-exports them under
+    stable, non-underscore names. This is the *only* surface triage may import from the kept
+    library for run/exec; it's the frozen contract. Rename map:
+
+    | Internal (today) | Public facade name | Source |
+    |---|---|---|
+    | `_shared._VERIF_RANK` | `VERIF_RANK` | _shared |
+    | `_shared._rows` | `query_rows` | _shared |
+    | `_shared._db` | `open_reference_db` | _shared |
+    | `_shared._live_client` | `live_client` | _shared |
+    | `_shared._capability_gap_suggestion` | `capability_gap_suggestion` | _shared |
+    | `tools_execution._shape_run` | `shape_run` | tools_execution |
+    | `tools_execution._store_health` | `store_health` | tools_execution |
+    | `tools_execution._cached_health` | `cached_health` | tools_execution |
+    | `tools_execution._fetch_runs_both` | `fetch_runs` | tools_execution |
+    | `tools_execution._agent_configured_rows` | `agent_configured_rows` | tools_execution |
+    | `tools_execution._live_healthcheck` | `live_healthcheck` | tools_execution |
+    | `tools_execution.run_op` | `run_op` (already public) | tools_execution |
+    | `llm.tools._tier_for_run_op` | `tier_for_run_op` | llm.tools |
+    | `agent.skill_trace.mute_recording` | `mute_recording` (already public) | agent.skill_trace |
+
+    The facade only RE-EXPORTS (no logic), so the underscore originals stay put and unrenamed —
+    zero risk to existing internal callers. `__all__` lists exactly these names.
+1.3 **[LIBRARY] Freeze it:** extend `tests/test_public_surface_contract.py` with the
+    `execution_api` names so any future drop/rename of a promoted symbol goes red in the library
+    suite first. **Gate:** library suite green; clean-venv `from fsr_playbooks import execution_api`
+    and `from fsr_playbooks.execution_api import run_op, shape_run, live_client` succeed.
+    Cut a `0.3.67` with the facade (triage consumes a pinned version that HAS it).
+1.4 **[CONNECTOR] `git mv`** the cluster from `connector/fsr_playbooks/{mcp_server,llm,agent}/…`
+    into the new triage namespace (name per D1). Rewrite imports:
+    - triage↔triage internal imports → new namespace (e.g. `..llm.triage_normalize` → sibling).
+    - seam imports → `from fsr_playbooks.execution_api import <public name>` (the table above) and
+      `from fsr_playbooks.llm.intents import …` / `from fsr_playbooks.mcp_server import mcp`.
+    - `_live_crudhub.py` keeps its `integrations.crudhub` / `connectors.core.connector` try/except
+      (on-platform, unchanged).
+1.5 **[CONNECTOR]** Register triage with the library's `_tools_triage_or_err()` hook from the
+    new namespace (Risk C) — triage relights the severed tendrils without patching library internals.
+1.6 **Gate:** connector test suite green offline (29 + triage tests) with `fsr_playbooks`
+    resolved from the **installed `0.3.67` wheel**, not the vendored dir; and a grep proving no
+    `from .` / `..` import in triage still points at a kept-library module.
 
 ### Phase 2 — cut the connector over to the pinned package
 2.1 Delete connector `fsr_playbooks/` and `fsr_core.bak/`.
-2.2 `requirements.txt` → add `fsr-playbooks==0.3.66` (drop anthropic/openai if the
+2.2 `requirements.txt` → add `fsr-playbooks==0.3.67` (the facade-bearing release from 1.3;
+    NOT 0.3.66, which predates `execution_api`) (drop anthropic/openai if the
     `[llm]` extra covers them; keep pyyaml only if used directly).
 2.3 Rework `_ensure_fsr_playbooks_path()` → version-assert guard (Risk B.2).
 2.4 Zip-build materializes the pinned wheel into the bundle (Risk B.3).
@@ -141,3 +197,32 @@ internals.
 - **D2 — public vs private index for `fsr_playbooks`:** it's already public (accidentally).
   Keep public going forward, or move to a private index and republish? Affects 2.4 fetch.
 - **D3 — `[llm]`/`[mcp]` extras vs pinning anthropic/openai in the connector directly.**
+- **D4 — does `tools_execution` stay in the public package? (BLOCKS Phase 1)** The audit shows
+  triage couples to 7 private helpers of `tools_execution` + 4 of `_shared`. Three ways out:
+  - **(a) Promote** ~13 private symbols to a documented, stable public "extension API" in
+    `fsr_playbooks` (rename sans underscore, freeze via the public-surface contract test).
+    Keeps run/deploy in the public package per the REORG decision; cost = a real public API
+    surface to maintain + triage pinned to it.
+  - **(b) Move `tools_execution` (and `_shared`'s live bits) OUT** with triage into the
+    connector. Public package becomes pure authoring (compile/emit/verify/catalog/corpus/
+    jinja/picklists/discovery + llm build path). Cleanest seam — the coupling leaves with the
+    code — but the public package loses "run a playbook," reversing the REORG "running is
+    authoring" call, and any authoring user who wanted run/push loses it.
+  - **(c) Duplicate the thin run-helpers** into triage (copy `_fetch_runs_both`/`_shape_run`/
+    health helpers). Fast, but reintroduces exactly the drift this whole effort kills. Reject
+    unless the helpers are trivial + stable.
+  *Leaning (a)* — preserves the REORG boundary and keeps one copy; the ~13 symbols are a
+  bounded, mechanical promotion. Decide before any Phase 1 code moves.
+
+  **Sizing (read 2026-06-18, judging a vs c):** the promotion surface is small and stable —
+  `_shared`: `_VERIF_RANK` (1-line const), `_rows` (2 loc), `_db` (10), `_live_client` (18),
+  `_capability_gap_suggestion` (33). `tools_execution`: `_shape_run` (16), `_store_health` (14),
+  `_cached_health` (26), `_fetch_runs_both` (29), `_agent_configured_rows` (40),
+  `_live_healthcheck` (59), and **`run_op` (291) which is ALREADY `@mcp.tool()` / public**.
+  So the real work is exposing ~10 stable helpers (~250 loc) under non-underscore names via a
+  thin `fsr_playbooks.execution` facade, frozen by `test_public_surface_contract.py`. None are
+  churn-prone. `_db`/`_live_client` already soft-depend on non-shipped `probes` via try/except,
+  so triage's `probes` need is the same posture the public package already takes, not a new one.
+  → **(a) chosen as the cheap, drift-free path; (b) rejected (rips out the public run/healthcheck
+  tools authoring users use); (c) rejected (reintroduces drift).**
+  **DECISION (2026-06-18): LOCKED = (a). See Phase 1 steps below.**
