@@ -61,6 +61,9 @@ SURFACE_A_MODULES = [
     "fsr_playbooks.mcp_server._sim_fixtures",
     "fsr_playbooks.mcp_server._sim_client",
     "fsr_playbooks.mcp_server.tools_discovery",
+    # execution facade — the stable run/healthcheck surface the carved-out
+    # triage cluster imports (RECONCILIATION_PLAN Phase 1, D4=(a))
+    "fsr_playbooks.execution_api",
 ]
 
 # Surface-A symbols that must resolve at their named path (module, attr).
@@ -78,6 +81,21 @@ SURFACE_A_SYMBOLS = [
     ("fsr_playbooks.llm.run_turn", "run_agent_turn"),
     ("fsr_playbooks.llm.tools", "anthropic_tools"),
     ("fsr_playbooks.mcp_server.tools_compile", "build_playbook_from_trace"),
+    # execution_api facade names (the frozen run/exec contract for triage)
+    ("fsr_playbooks.execution_api", "VERIF_RANK"),
+    ("fsr_playbooks.execution_api", "capability_gap_suggestion"),
+    ("fsr_playbooks.execution_api", "open_reference_db"),
+    ("fsr_playbooks.execution_api", "live_client"),
+    ("fsr_playbooks.execution_api", "query_rows"),
+    ("fsr_playbooks.execution_api", "agent_configured_rows"),
+    ("fsr_playbooks.execution_api", "cached_health"),
+    ("fsr_playbooks.execution_api", "fetch_runs"),
+    ("fsr_playbooks.execution_api", "live_healthcheck"),
+    ("fsr_playbooks.execution_api", "shape_run"),
+    ("fsr_playbooks.execution_api", "store_health"),
+    ("fsr_playbooks.execution_api", "run_op"),
+    ("fsr_playbooks.execution_api", "tier_for_run_op"),
+    ("fsr_playbooks.execution_api", "mute_recording"),
 ]
 
 
