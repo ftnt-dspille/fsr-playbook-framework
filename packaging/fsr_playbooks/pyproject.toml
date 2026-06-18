@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fsr_playbooks"
-version = "0.3.63"
+version = "0.3.64"
 description = "FortiSOAR playbook authoring/compiler framework: YAML->FSR-JSON compiler, LLM co-authoring, and MCP server tools."
 readme = "README.md"
 # Ships into the SOAR 3.9 runtime — do NOT raise to match the fsrpb root dist (>=3.11).
