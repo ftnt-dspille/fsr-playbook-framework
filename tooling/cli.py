@@ -478,6 +478,16 @@ def cmd_push(args: argparse.Namespace) -> int:
     from fsr_playbooks.compiler import compile_yaml
     from probes import _env  # type: ignore
 
+    # CLI flags override whatever .env has (must happen before get_config()).
+    if getattr(args, "url", None):
+        os.environ["FSR_BASE_URL"] = args.url
+    if getattr(args, "user", None):
+        os.environ["FSR_USERNAME"] = args.user
+    if getattr(args, "password", None):
+        os.environ["FSR_PASSWORD"] = args.password
+    if getattr(args, "url", None) or getattr(args, "user", None) or getattr(args, "password", None):
+        _env._cached_cfg = None  # force re-read with updated env
+
     text = Path(args.input).read_text()
     result = compile_yaml(text, Path(args.db))
     if not result.ok:
@@ -4374,6 +4384,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("push", help="compile + POST to /api/3/import_jobs (upsert)")
     sp.add_argument("input")
+    sp.add_argument("--url", metavar="URL",
+                    help="FortiSOAR base URL (overrides FSR_BASE_URL / .env)")
+    sp.add_argument("--user", metavar="USER",
+                    help="FortiSOAR username (overrides FSR_USERNAME / .env)")
+    sp.add_argument("--password", metavar="PASS",
+                    help="FortiSOAR password (overrides FSR_PASSWORD / .env)")
     sp.add_argument("--mode",
                     choices=["safe", "replace", "create", "update", "upsert"],
                     default="safe",
