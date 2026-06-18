@@ -98,12 +98,17 @@ client = FortiSOAR(
     verify_ssl=True,
 )
 
-# Idempotent upsert: update if the collection's UUID exists, else create.
-uuid = collection["uuid"]
-try:
-    client.put(f"/api/3/workflow_collections/{uuid}", data=collection)
-except Exception:
-    client.post("/api/3/workflow_collections", data=collection)
+# Push the compiled collection. The compiler-assigned uuid is preserved, so
+# re-deploys can target it with client.workflow_collections.update(uuid, ...)
+# / .delete(uuid).
+client.workflow_collections.create(
+    name=collection["name"],
+    description=collection.get("description", ""),
+    visible=collection.get("visible", True),
+    uuid=collection["uuid"],
+    workflows=collection["workflows"],     # full workflow objects (steps + routes)
+    record_tags=collection.get("recordTags"),
+)
 ```
 
 ### 4. Trigger the playbook and wait for it
@@ -111,25 +116,21 @@ except Exception:
 ```python
 import time
 
-# UUID of the "Hello Connector" workflow inside the compiled collection.
 wf_uuid = collection["workflows"][0]["uuid"]
 
-resp = client.post(
-    f"/api/triggers/1/notrigger/{wf_uuid}",
-    data={"input": {}, "request": {"data": {}}, "useMockOutput": False,
-          "globalMock": False},
-)
-task_id = resp["task_id"]
+run = client.playbooks.trigger(playbook="Hello Connector", inputs={})
+task_id = run["task_id"]
 
-# Poll for the top-level execution to reach a terminal state.
+# Poll the run records (shaped dicts: task_id, name, status, error_message, ...)
+# until this run reaches a terminal state.
 while True:
-    runs = client.get(
-        "/api/wf/api/workflows/",
-        params={"task_id": task_id, "parent_wf__isnull": True},
+    match = next(
+        (r for r in client.playbooks.runs(playbook_uuid=wf_uuid, limit=5)
+         if r["task_id"] == task_id),
+        None,
     )
-    rows = runs.get("hydra:member", runs.get("data", []))
-    status = rows[0]["status"] if rows else "pending"
-    if status in ("finished", "failed", "completed", "terminated"):
+    status = match["status"] if match else "pending"
+    if status in ("finished", "failed", "terminated"):
         print("execution status:", status)
         break
     time.sleep(2)
