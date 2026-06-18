@@ -87,10 +87,12 @@ internals.
 ### Phase 0 — publish the clean library first (unblocks everything, low risk)
 0.1 Delete PyPI `0.3.62`–`0.3.65` (poisoned). *(owner: user — PyPI creds)*
 0.2 Commit the in-flight message-block feature (green, 15/15) as its own commit.
-0.3 Bump `packaging/fsr_playbooks/pyproject.toml` → `0.3.66`.
-0.4 Fast-forward `reorg/phase-0-freeze-surface` → `main` (9 ahead / 0 behind).
-0.5 Build wheel, **gate:** `unzip -l` shows zero `triage_*|tools_triage|tools_noc|_live_crudhub|system_prompt_triage`; clean-venv `import fsr_playbooks` + `import fsr_playbooks.mcp_server` succeed.
-0.6 Publish `0.3.66`.
+0.3 Bump `packaging/fsr_playbooks/pyproject.toml` → `0.3.66`. ✅ (then → `0.3.67`, see Phase 1)
+0.4 Fast-forward `reorg/phase-0-freeze-surface` → `main`. ✅
+0.5 Build wheel, **gate:** `unzip -l` shows zero `triage_*|tools_triage|tools_noc|_live_crudhub|system_prompt_triage`; clean-venv `import fsr_playbooks` + `import fsr_playbooks.mcp_server` succeed. ✅
+0.6 **Publish `0.3.67`** (NOT 0.3.66 — superseded). 0.3.67 is triage-free AND carries the
+    Phase-1 facade, so a single publish closes the leak and unblocks the connector. *(owner: user)*
+    Built wheel: `packaging/fsr_playbooks/dist/fsr_playbooks-0.3.67-py3-none-any.whl`.
 **After Phase 0 the leak is closed.** Phases 1–3 are correctness/dedup, not leak-driven.
 
 ### Phase 1 — re-home triage into its own namespace (the real work)
@@ -143,11 +145,13 @@ internals.
 
     The facade only RE-EXPORTS (no logic), so the underscore originals stay put and unrenamed —
     zero risk to existing internal callers. `__all__` lists exactly these names.
-1.3 **[LIBRARY] Freeze it:** extend `tests/test_public_surface_contract.py` with the
-    `execution_api` names so any future drop/rename of a promoted symbol goes red in the library
-    suite first. **Gate:** library suite green; clean-venv `from fsr_playbooks import execution_api`
-    and `from fsr_playbooks.execution_api import run_op, shape_run, live_client` succeed.
-    Cut a `0.3.67` with the facade (triage consumes a pinned version that HAS it).
+1.2 ✅ DONE (2026-06-18) — `fsr_playbooks/execution_api.py` created; pure re-export, underscore
+    originals untouched.
+1.3 **[LIBRARY] Freeze it:** ✅ DONE — `test_public_surface_contract.py` extended (+1 module,
+    +14 symbols); 62 passed. Wheel `0.3.67` built & verified: facade present, triage absent,
+    `from fsr_playbooks.execution_api import run_op, shape_run, live_client, tier_for_run_op`
+    imports from a clean `[mcp,llm]` install. **Remaining: user publishes 0.3.67.**
+    --- below here Phase 1 is NOT yet started (connector-side) ---
 1.4 **[CONNECTOR] `git mv`** the cluster from `connector/fsr_playbooks/{mcp_server,llm,agent}/…`
     into the new triage namespace (name per D1). Rewrite imports:
     - triage↔triage internal imports → new namespace (e.g. `..llm.triage_normalize` → sibling).
