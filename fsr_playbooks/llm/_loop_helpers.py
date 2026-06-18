@@ -10,7 +10,6 @@ import hashlib
 import ipaddress
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 
@@ -426,8 +425,8 @@ def compile_errors(yaml_text: str) -> str | None:
     except Exception as e:
         return f"compiler import failed: {e}"
 
-    db = Path(__file__).resolve().parents[2] / "data" / "fsr_reference.db"
-    res = _cy(yaml_text, db)
+    from .._db import default_db_path
+    res = _cy(yaml_text, default_db_path())
     if res.ok:
         return None
     blocking = [e for e in res.errors if e.severity != "warning"]

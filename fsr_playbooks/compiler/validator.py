@@ -9,12 +9,12 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from pathlib import Path
 
+from .._db import default_db_path
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Playbook, Step
 
-_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "fsr_reference.db"
+_DB_PATH = default_db_path()
 
 # Find every Jinja expression. Non-greedy; tolerates whitespace.
 _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)

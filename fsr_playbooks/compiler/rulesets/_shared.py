@@ -292,12 +292,14 @@ def _open_ref_db() -> sqlite3.Connection | None:
     the in-tree store/fsr_reference.db. Returns None when nothing usable
     is available so the rule degrades quietly on a fresh install.
     """
+    from ..._db import PACKAGED_SLIM_DB, REPO_PROBED_DB
+
     candidates: list[Path] = []
     env = os.environ.get("FSRPB_DB")
     if env:
         candidates.append(Path(env))
-    here = Path(__file__).resolve().parents[3]
-    candidates.append(here / "data" / "fsr_reference.db")
+    candidates.append(REPO_PROBED_DB)
+    candidates.append(PACKAGED_SLIM_DB)
     for p in candidates:
         if p.exists():
             try:

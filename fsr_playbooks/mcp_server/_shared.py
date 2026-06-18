@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from .._db import default_db_path
+
 class _FallbackFastMCP:
     """No-op FastMCP shim for connector runtimes.
 
@@ -41,7 +43,7 @@ else:
 # Paths
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
+DB_PATH = default_db_path()
 
 # ---------------------------------------------------------------------------
 # MCP server instance (shared across all tools)

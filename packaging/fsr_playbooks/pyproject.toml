@@ -62,3 +62,8 @@ exclude = ["fsr_playbooks.tests*"]
 # Non-.py runtime assets that MUST ship (system prompts, NOC scenarios).
 "fsr_playbooks.agent" = ["*.md"]
 "fsr_playbooks.mcp_server" = ["*.json"]
+# Slim compile catalog (~0.6 MB): stable step/jinja/recipe tables so a fresh
+# install compiles without a probed DB. Built by
+# tooling/catalog/build_compile_catalog.py; per-install tables ship empty
+# (warmed from the target SOAR).
+"fsr_playbooks" = ["_data/*.db"]

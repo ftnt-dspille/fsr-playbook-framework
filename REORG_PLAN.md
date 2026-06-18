@@ -22,7 +22,7 @@ alert records, diagnose NOC devices, hit the live crudhub → **connector** (inv
 | 1 | Remove investigation/triage from the library | ✅ library side done (`c040744`) |
 | 1b | Connector absorbs the removed code; rewrite its imports | ⏳ separate session (needs FortiSOAR SDK) |
 | 2 | Physically split non-shipped tooling (`python/` → `tooling/`) | ✅ rename + scratch sweep done; themed-subdir regroup deferred |
-| 3 | Reorg the reference-cache data (`store/` → `data/`, slim DB) | ☐ todo |
+| 3 | Reorg the reference-cache data (`store/` → `data/`, slim DB) | ✅ done (3a rename + 3b slim DB shipped) |
 | 4 | Move root docs into `docs/`; confirm `web/`+`ts/` decoupled | ☐ todo (low risk) |
 | 5 | Connector cutover to a pinned `fsr_playbooks` package | ☐ last (needs 1b + 3) |
 
@@ -150,19 +150,28 @@ Done in two commits — **3a rename** (mechanical) then **3b slim DB** (the subs
 2. gitignore: retarget the `store/…` rules to `data/…`; drop the now-dead `/python/_[a-z]*.py` rule.
 3. **Gate:** tooling suite green; `fsrpb compile` of a sample still works against `data/fsr_reference.db`.
 
-### 3b — slim DB builder + ship as package-data
-4. NEW `tooling/catalog/build_compile_catalog.py` (`tooling/catalog/` does not exist yet): copy
-   the globally-stable tables only — `step_types, step_handlers, step_examples, jinja_macros,
-   jinja_globals, jinja_tests, jinja_context_vars, recipes, api_endpoints` — into
-   `data/slim/fsr_reference.db` (~1 MB, **tracked**). Exclude the per-install tables
-   (`connectors, operations, operation_params, op_safety, modules, module_fields, picklists`) and
-   scratch/corpus/telemetry tables.
-5. Ship `data/slim/fsr_reference.db` as package-data via `packaging/fsr_playbooks/pyproject.toml`,
-   and teach the library to fall back to the packaged slim DB when no `data/fsr_reference.db` exists
-   (fresh install has no probed DB).
-6. **Gate (revised — no live fallback):** wheel `unzip -l` shows the ~1 MB slim DB and no 65 MB /
-   no investigation; clean-venv compile of a *stable-only* sample playbook succeeds against the slim
-   DB; a connector-referencing playbook fails with a clear `CompileError` (asserted, not a hang/trace).
+### 3b — slim DB builder + ship as package-data ✅
+4. ✅ NEW `tooling/catalog/build_compile_catalog.py`: copies the **full schema** (so every table the
+   resolver may touch exists → missing connector = clean `CompileError`, not "no such table") but
+   populates ONLY the stable tables — `step_types, step_handlers, step_examples, jinja_macros,
+   jinja_globals, jinja_tests, jinja_context_vars, recipes, connector_op_defs` — then VACUUMs.
+   **Output landed inside the package** at `fsr_playbooks/_data/fsr_reference.db` (not repo-root
+   `data/slim/`): the packaging build uses `where=../..` + `include=["fsr_playbooks*"]`, so
+   package-data must live under the package tree. **0.59 MB, tracked** (gitignore negation
+   `!fsr_playbooks/_data/fsr_reference.db`). Deliberately *excluded* though stable: the authoring-hint
+   corpus (`jinja_expressions` ~7.8k, `jinja_filter_usage` ~1.7k) and the REST catalog
+   (`api_endpoints*` ~1.2k) — the compiler reads none of them; only `tools_jinja` does, and it
+   degrades to "no suggestions". Including them ballooned the DB to ~4 MB.
+5. ✅ New `fsr_playbooks/_db.py` centralizes DB resolution (`default_db_path()` + `PACKAGED_SLIM_DB`
+   / `REPO_PROBED_DB`): `$FSRPB_DB` → repo `data/fsr_reference.db` (dev) → packaged slim. Wired the
+   6 library sites (`mcp_server/_shared`, `compiler/{validator,rulesets/_shared}`,
+   `llm/{tools,_loop_helpers}`). Shipped as package-data via `"fsr_playbooks" = ["_data/*.db"]` in
+   `packaging/fsr_playbooks/pyproject.toml`.
+6. ✅ **Gate (no live fallback):** wheel `unzip -l` shows the 0.59 MB slim DB, no 65 MB, no
+   investigation modules. **Fresh-venv install proof** (no repo `data/`): `default_db_path()` →
+   the in-package slim DB; `compile_yaml(decision_branch)` → ok; `compile_yaml(virustotal)` →
+   `ok=False`, blocking `unknown connector: 'virustotal'`. Pinned by
+   `fsr_playbooks/tests/test_slim_catalog.py` (3 tests).
 
 ## Phase 4 — Docs / web / ts (low risk, anytime)
 1. Root `*.md` (ARCHITECTURE/AUTHORING/CAPABILITIES/DEMO/PRESENTATION/…) → `docs/`, leaving

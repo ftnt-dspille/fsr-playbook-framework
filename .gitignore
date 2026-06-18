@@ -13,6 +13,9 @@ data/fsr_reference.db-wal
 **/fsr_reference.db
 **/fsr_reference.db-shm
 **/fsr_reference.db-wal
+# ...except the tracked, shipped slim catalog (built by
+# tooling/catalog/build_compile_catalog.py; ~0.6 MB, package-data).
+!fsr_playbooks/_data/fsr_reference.db
 data/e2e_runs/
 data/verify_traces/
 fsr_playbooks/usage.jsonl

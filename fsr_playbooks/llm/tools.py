@@ -21,10 +21,10 @@ import time
 import typing
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, get_args, get_origin
 
 import fsr_playbooks.mcp_server as mcp_server
+from .._db import default_db_path
 
 
 # Allow-list. Names match attribute names on `mcp_server`.
@@ -135,7 +135,7 @@ _SAFE_CATEGORIES = {"investigation", "query", "utilities", "enrichment", "verifi
 _SENSITIVE_KEY_RE = re.compile(r"(?i)(password|token|api[_-]?key|secret|authorization|bearer)")
 
 
-_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "fsr_reference.db"
+_DB_PATH = default_db_path()
 
 
 def _lookup_op_metadata(connector: str, op: str) -> tuple[str | None, str | None]:
