@@ -13,7 +13,7 @@ import ast
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SRC = REPO_ROOT / "python" / "mcp_server.py"
+SRC = REPO_ROOT / "tooling" / "mcp_server.py"
 OUT = REPO_ROOT / "store" / "MCP_TOOLS.md"
 
 

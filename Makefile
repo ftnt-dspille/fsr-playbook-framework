@@ -64,10 +64,10 @@ dev: preflight ## run backend + frontend together; if either dies, both stop
 	wait
 
 e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
-	cd python && uv run --project .. python -m cli e2e all
+	cd tooling && uv run --project .. python -m cli e2e all
 
 tests: ## fast pytest (excludes live + slow); incl. the offline golden-trace pin
-	$(PY) -m pytest python/tests/ -q -m "not live and not slow"
+	$(PY) -m pytest tooling/tests/ -q -m "not live and not slow"
 
 # ── Chat Intelligence tuning loop (docs/plans/CHAT_INTELLIGENCE_PLAN.md) ──
 # chat-fast   = A4 cheap loop: offline STRUCTURE/contract guards (no API, secs).
@@ -92,32 +92,32 @@ CHAT_FAST_TESTS := \
 	fsr_playbooks/tests/test_intent_slice_and_params.py \
 	fsr_playbooks/tests/test_build_prompt_skeleton.py \
 	fsr_playbooks/tests/test_playbook_offer.py \
-	python/tests/test_run_turn.py \
-	python/tests/test_catalog_tools.py \
-	python/tests/test_emitter.py \
-	python/tests/test_chat_review.py \
-	python/tests/test_golden_traces_pin.py \
-	python/tests/test_lever_coverage.py \
-	python/tests/test_build_fidelity.py \
-	python/tests/test_build_fidelity_golden.py \
-	python/tests/test_hunt_depth.py
+	tooling/tests/test_run_turn.py \
+	tooling/tests/test_catalog_tools.py \
+	tooling/tests/test_emitter.py \
+	tooling/tests/test_chat_review.py \
+	tooling/tests/test_golden_traces_pin.py \
+	tooling/tests/test_lever_coverage.py \
+	tooling/tests/test_build_fidelity.py \
+	tooling/tests/test_build_fidelity_golden.py \
+	tooling/tests/test_hunt_depth.py
 
 chat-fast: ## fast OFFLINE chat structure/contract guards (no API; ~2s)
 	$(PY) -m pytest $(CHAT_FAST_TESTS) -q -p no:randomly
 chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
 	@if [ -n "$(SCENARIO)" ]; then \
-		$(PY) python/cli.py chat-drive --task "$(SCENARIO)"; \
+		$(PY) tooling/cli.py chat-drive --task "$(SCENARIO)"; \
 	elif [ -n "$(MSG)" ]; then \
-		$(PY) python/cli.py chat-drive --message "$(MSG)"; \
+		$(PY) tooling/cli.py chat-drive --message "$(MSG)"; \
 	else \
 		echo "usage: make chat-drive SCENARIO=<fixture-name>  |  MSG=\"...\""; exit 2; \
 	fi
 
 chat-calibrate: ## live: capability gate over every investigation fixture (costs credits)
-	$(PY) python/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),)
+	$(PY) tooling/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),)
 
-lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + python
-	uv run ruff check fsr_playbooks/ python/
+lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
+	uv run ruff check fsr_playbooks/ tooling/
 
 # The connector + Angular widget both consume fsr_playbooks, so the green-check that
 # matters is fsr_playbooks + the connector's offline suite — both run on THIS repo's

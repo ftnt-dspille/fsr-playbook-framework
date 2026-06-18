@@ -238,7 +238,7 @@ def _walk(yaml_text: str):
     """Compile a playbook and run the typed walker. Returns the
     diagnostic codes (deduped) so tests can assert presence/absence."""
     import sys
-    sys.path.insert(0, "python")
+    sys.path.insert(0, "tooling")
     from fsr_playbooks.compiler import parse_yaml
     from fsr_playbooks.compiler.typed_walker import walk_playbook
     coll, _errs = parse_yaml(yaml_text)

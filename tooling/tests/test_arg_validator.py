@@ -380,7 +380,7 @@ def test_mcp_validate_yaml_returns_next_fix():
     """The agent burns context iterating against the full error list;
     the `next_fix` field gives it the single most actionable next step."""
     import sys
-    sys.path.insert(0, "python")
+    sys.path.insert(0, "tooling")
     from fsr_playbooks.mcp_server import validate_yaml as mcp_validate
     # A bare `collection:` with no playbooks is a missing_field on the
     # `playbooks` path — canonical first error to test the next_fix

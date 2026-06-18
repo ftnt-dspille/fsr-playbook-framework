@@ -50,3 +50,6 @@ e2e/playwright-report/
 # one-shot diagnostic/scratch helpers (kept on disk, never committed).
 # Scoped to single-underscore names so __init__.py etc. are unaffected.
 /python/_[a-z]*.py
+
+# ad-hoc scratch one-offs (never shipped, not tracked)
+tooling/scratch/_*.py

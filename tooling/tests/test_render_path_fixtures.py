@@ -27,7 +27,7 @@ import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 import fsr_playbooks.mcp_server._shared  # noqa: E402, F401
 
 REPO = Path(__file__).resolve().parents[2]
-FIXTURE_DIR = REPO / "python" / "tests" / "fixtures" / "render_path_probe"
+FIXTURE_DIR = REPO / "tooling" / "tests" / "fixtures" / "render_path_probe"
 
 
 def _load_fixtures() -> list[Path]:

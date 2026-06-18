@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT / "python"))
+sys.path.insert(0, str(REPO_ROOT / "tooling"))
 
 from probes.common import CATALOG_DB_PATH  # noqa: E402
 from fsr_playbooks.mcp_server.tools_catalog import (  # noqa: E402

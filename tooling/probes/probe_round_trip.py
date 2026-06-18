@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "tooling"))
 
 from probes._env import get_client  # noqa: E402
 

@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "python"))
+sys.path.insert(0, str(REPO_ROOT / "tooling"))
 sys.path.insert(0, str(REPO_ROOT))  # fsr_playbooks lives at the repo root
 
 # Default model: Haiku, to keep demo cost low.

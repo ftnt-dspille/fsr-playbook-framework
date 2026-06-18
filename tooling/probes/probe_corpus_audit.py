@@ -98,7 +98,7 @@ EXPECTED_KEYS: dict[str, dict[str, set[str]]] = {
                       "internal_email_attachments", "message", "label"},
     },
     "CodeSnippet": {
-        "friendly":  {"code", "python", "config", "mock_result", "condition"},
+        "friendly":  {"code", "tooling", "config", "mock_result", "condition"},
         "canonical": {"connector", "operation", "operationTitle", "version",
                       "params", "step_variables", "pickFromTenant"},
     },

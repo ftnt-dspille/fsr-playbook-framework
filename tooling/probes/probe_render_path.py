@@ -39,11 +39,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "python"))
+sys.path.insert(0, str(REPO / "tooling"))
 
 from probes import _env  # noqa: E402
 
-FIXTURE_DIR = REPO / "python" / "tests" / "fixtures" / "render_path_probe"
+FIXTURE_DIR = REPO / "tooling" / "tests" / "fixtures" / "render_path_probe"
 COLL_NAME = "FSRPB Render Path Probe"
 TERMINAL = {"finished", "failed", "terminated", "skipped",
             "finished_with_error", "rejected"}
@@ -464,7 +464,7 @@ def _push(yaml_text: str) -> dict[str, str]:
         push = subprocess.run(
             [sys.executable, "-m", "cli", "push", str(tmp),
              "--mode", "replace"],
-            cwd=str(REPO / "python"), capture_output=True, text=True,
+            cwd=str(REPO / "tooling"), capture_output=True, text=True,
         )
     finally:
         tmp.unlink(missing_ok=True)

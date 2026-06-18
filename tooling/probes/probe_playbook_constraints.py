@@ -43,7 +43,7 @@ CANDIDATE_PATHS: list[tuple[str, str]] = [
 
 
 def _compile_test_collection() -> dict:
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     from fsr_playbooks.compiler import compile_yaml  # type: ignore
 
     yaml_text = (REPO_ROOT / "examples" / "hello_connector.yaml").read_text()

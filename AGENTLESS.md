@@ -117,7 +117,7 @@ Cursor, Continue, Zed, Claude Code, custom scripts — can register it:
   "mcpServers": {
     "fsrpb": {
       "command": "python",
-      "args": ["/path/to/fsrpb/python/cli.py", "mcp"]
+      "args": ["/path/to/fsrpb/tooling/cli.py", "mcp"]
     }
   }
 }

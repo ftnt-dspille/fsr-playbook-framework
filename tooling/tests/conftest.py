@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-PYTHON = REPO / "python"
+PYTHON = REPO / "tooling"
 DB = REPO / "store" / "fsr_reference.db"
 CORPUS = REPO.parent / "FSRPlaybookConversion" / "pb_examples" / "all_fsr_evoke_playbooks.json"
 

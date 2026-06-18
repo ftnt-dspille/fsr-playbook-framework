@@ -104,7 +104,7 @@ def inventory_summary() -> dict[str, Any]:
     sync.
     """
     import sys as _sys
-    _py = REPO_ROOT / "python"
+    _py = REPO_ROOT / "tooling"
     if str(_py) not in _sys.path:
         _sys.path.insert(0, str(_py))
     import inventory as inv
@@ -120,7 +120,7 @@ def api_examples(q: str, product: str | None = None,
     """FTS search over the api_examples_catalog. Returns entry_id so the
     UI can call /synthesize-http-step on a specific row."""
     import sys as _sys
-    _py = REPO_ROOT / "python"
+    _py = REPO_ROOT / "tooling"
     if str(_py) not in _sys.path:
         _sys.path.insert(0, str(_py))
     from fsr_playbooks.mcp_server import search_api_examples as _search  # type: ignore
@@ -136,7 +136,7 @@ def synthesize_http_step(entry_id: int, step_name: str = "Call API") -> dict[str
     exposes — no LLM, just a catalog row → http_request step transform.
     """
     import sys as _sys
-    _py = REPO_ROOT / "python"
+    _py = REPO_ROOT / "tooling"
     if str(_py) not in _sys.path:
         _sys.path.insert(0, str(_py))
     from fsr_playbooks.mcp_server import synthesize_http_step as _synth  # type: ignore
@@ -170,7 +170,7 @@ def synthesize_http_step(entry_id: int, step_name: str = "Call API") -> dict[str
 @router.get("/inventory/search")
 def inventory_search(q: str, limit: int = 15) -> dict[str, Any]:
     import sys as _sys
-    _py = REPO_ROOT / "python"
+    _py = REPO_ROOT / "tooling"
     if str(_py) not in _sys.path:
         _sys.path.insert(0, str(_py))
     import inventory as inv
@@ -565,7 +565,7 @@ def list_example_prompts() -> list[dict[str, Any]]:
     option in the chat starter dropdown automatically.
     """
     import json as _json
-    tasks_dir = REPO_ROOT / "python" / "evals" / "tasks"
+    tasks_dir = REPO_ROOT / "tooling" / "evals" / "tasks"
     if not tasks_dir.exists():
         return []
     out: list[dict[str, Any]] = []

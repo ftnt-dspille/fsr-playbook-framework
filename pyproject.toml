@@ -15,13 +15,13 @@ dependencies = [
 ]
 
 [project.scripts]
-# `fsrpb_main` (repo-root shim) bootstraps python/ onto sys.path, then calls
+# `fsrpb_main` (repo-root shim) bootstraps tooling/ onto sys.path, then calls
 # cli.main — cli.py is NOT an installed package so it can't be the entry directly.
 fsrpb = "fsrpb_main:main"
 
 [tool.setuptools]
-# fsr_playbooks lives at the repo root; legacy packages still under python/.
-package-dir = {"" = ".", "probes" = "python/probes", "store" = "python/store", "e2e" = "python/e2e"}
+# fsr_playbooks lives at the repo root; non-shipped tooling lives under tooling/.
+package-dir = {"" = ".", "probes" = "tooling/probes", "store" = "tooling/store", "e2e" = "tooling/e2e"}
 py-modules = ["fsrpb_main"]
 packages = [
     "probes", "store", "e2e",
@@ -37,7 +37,7 @@ packages = [
 # support — this is what catches module-level PEP 604 unions before they reach
 # the connector. The Studio backend/CLI run on 3.11+, but py39 is the safe floor.
 target-version = "py39"
-extend-exclude = ["web/frontend", "store", ".venv"]
+extend-exclude = ["web/frontend", "store", ".venv", "tooling/scratch"]
 
 [tool.ruff.lint]
 # Start with pyflakes (F): unused imports/vars, redefinitions, undefined names,

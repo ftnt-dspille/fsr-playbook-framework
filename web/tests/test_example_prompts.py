@@ -38,7 +38,7 @@ def test_has_gold_flag_matches_gold_pointer():
     from pathlib import Path
 
     tasks_dir = (Path(__file__).resolve().parents[2]
-                 / "python" / "evals" / "tasks")
+                 / "tooling" / "evals" / "tasks")
     on_disk = {}
     for p in tasks_dir.glob("*.json"):
         data = json.loads(p.read_text())

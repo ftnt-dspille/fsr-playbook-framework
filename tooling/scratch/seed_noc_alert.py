@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Live path.
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     from probes._env import get_client, get_config  # noqa: E402
     import picklists  # noqa: E402
 

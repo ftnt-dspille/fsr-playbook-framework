@@ -44,7 +44,7 @@ from pathlib import Path
 # Make `fsr_playbooks` (repo root) and `probes` (python/) importable, and run from
 # the repo root so store/ + .env relative paths resolve regardless of cwd.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-for _p in (str(REPO_ROOT), str(REPO_ROOT / "python")):
+for _p in (str(REPO_ROOT), str(REPO_ROOT / "tooling")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 os.chdir(REPO_ROOT)

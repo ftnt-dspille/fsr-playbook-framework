@@ -10,7 +10,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-sys.path.insert(0, str(REPO / "python"))
+sys.path.insert(0, str(REPO / "tooling"))
 
 from probes._env import get_config  # noqa: E402
 from fsr_playbooks.mcp_server.tools_execution import run_op  # noqa: E402

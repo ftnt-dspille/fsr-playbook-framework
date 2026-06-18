@@ -17,7 +17,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 EXAMPLES = REPO / "examples"
-PYTHON_DIR = REPO / "python"
+PYTHON_DIR = REPO / "tooling"
 
 
 pytestmark = pytest.mark.live

@@ -17,7 +17,7 @@ CLI = ["python3", "cli.py"]  # cwd will be python/
 def _run(repo_root, *args, **kw):
     return subprocess.run(
         CLI + list(args),
-        cwd=repo_root / "python",
+        cwd=repo_root / "tooling",
         capture_output=True, text=True, **kw,
     )
 

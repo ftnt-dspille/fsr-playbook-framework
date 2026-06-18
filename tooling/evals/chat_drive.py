@@ -36,8 +36,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT / "python") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+if str(REPO_ROOT / "tooling") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -47,8 +47,8 @@ CONN = "fsr-playbook-builder"
 DEFAULT_VERSION = "0.3.116"
 DEFAULT_CONFIG = "fsrpb-live"
 RUN_DIR = REPO_ROOT / "store" / "eval_runs"
-TASKS_DIR = REPO_ROOT / "python" / "evals" / "tasks"
-GOLDEN_DIR = REPO_ROOT / "python" / "evals" / "golden_traces"
+TASKS_DIR = REPO_ROOT / "tooling" / "evals" / "tasks"
+GOLDEN_DIR = REPO_ROOT / "tooling" / "evals" / "golden_traces"
 
 # The node render bridge lives in the (sibling) widget repo. Path is overridable
 # so the Python loop never hard-depends on the widget tree being present.

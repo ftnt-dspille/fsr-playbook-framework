@@ -26,8 +26,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT / "python") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+if str(REPO_ROOT / "tooling") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 

@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PYTHON_DIR = REPO_ROOT / "python"
+PYTHON_DIR = REPO_ROOT / "tooling"
 if str(PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_DIR))
 

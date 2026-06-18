@@ -285,7 +285,7 @@ def validate_proposed_args(step_type: str,
     diagnostic so the route handler can render it gracefully.
     """
     import sys
-    repo_python = REPO_ROOT / "python"
+    repo_python = REPO_ROOT / "tooling"
     if str(repo_python) not in sys.path:
         sys.path.insert(0, str(repo_python))
     try:

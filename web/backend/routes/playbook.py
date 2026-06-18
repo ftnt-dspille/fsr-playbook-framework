@@ -24,7 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PYTHON_DIR = REPO_ROOT / "python"
+PYTHON_DIR = REPO_ROOT / "tooling"
 
 
 router = APIRouter(prefix="/api", tags=["playbook"])

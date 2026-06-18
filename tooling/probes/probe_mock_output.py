@@ -51,7 +51,7 @@ def main() -> int:
 
     # 1. Compile + push
     _log(f"compiling {YAML_PATH.name}")
-    sys.path.insert(0, str(REPO / "python"))
+    sys.path.insert(0, str(REPO / "tooling"))
     from fsr_playbooks.compiler import compile_yaml
     db_path = REPO / "store" / "fsr_reference.db"
     r = compile_yaml(YAML_PATH.read_text(), db_path)
@@ -63,7 +63,7 @@ def main() -> int:
     import subprocess
     push = subprocess.run(
         [sys.executable, "-m", "cli", "push", str(YAML_PATH), "--mode", "replace"],
-        cwd=str(REPO / "python"), capture_output=True, text=True,
+        cwd=str(REPO / "tooling"), capture_output=True, text=True,
     )
     if push.returncode != 0:
         _log(f"push failed:\n{push.stderr}")

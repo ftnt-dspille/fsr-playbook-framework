@@ -21,7 +21,7 @@ alert records, diagnose NOC devices, hit the live crudhub → **connector** (inv
 | 0 | Freeze the library's public surface (re-exports + contract test) | ✅ done (`20db683`) |
 | 1 | Remove investigation/triage from the library | ✅ library side done (`c040744`) |
 | 1b | Connector absorbs the removed code; rewrite its imports | ⏳ separate session (needs FortiSOAR SDK) |
-| 2 | Physically split non-shipped tooling (`python/` → `tooling/`) | ☐ todo |
+| 2 | Physically split non-shipped tooling (`python/` → `tooling/`) | ✅ rename + scratch sweep done; themed-subdir regroup deferred |
 | 3 | Reorg the reference-cache data (`store/` → `data/`, slim DB) | ☐ todo |
 | 4 | Move root docs into `docs/`; confirm `web/`+`ts/` decoupled | ☐ todo (low risk) |
 | 5 | Connector cutover to a pinned `fsr_playbooks` package | ☐ last (needs 1b + 3) |
@@ -114,13 +114,25 @@ cutover it must own them itself:
 > Blocked offline: a full connector run needs the FortiSOAR `connectors` SDK, which isn't installed
 > here. Verify on an appliance.
 
-## Phase 2 — Split library vs. non-shipped tooling
-1. `git mv python/ tooling/` (preserve history); regroup into `probes/ catalog/ deploy/ e2e/ evals/`.
-2. Sweep ad-hoc one-offs into `tooling/scratch/` or delete — decide per file. **Now orphaned by
-   Phase 1** (read the moved investigation files): `python/{gen_fs_recipes,seed_noc_alert,demo_hunt}.py`.
-3. Confirm `fsr_playbooks` imports nothing from `tooling/` (clean post-Phase-1).
-4. Update root `pyproject.toml` (`fsrpb` dist) for the `python/`→`tooling/` move.
-5. **Gate:** library + tooling suites green; `fsrpb` CLI still runs.
+## Phase 2 — Split library vs. non-shipped tooling ✅ (rename; regroup deferred)
+1. ✅ `git mv python/ tooling/` (history preserved — 204 renames). Path refs rewired:
+   `fsrpb_main.py` sys.path bootstrap, `pyproject.toml` `package-dir`, `pytest.ini` `testpaths`,
+   `Makefile`, `.gitlab-ci.yml`, `CLAUDE.md`, `AGENTLESS.md`, plus every functional `/ "python"`
+   sys.path/cwd construction in `tooling/**` and `web/backend/**`.
+2. ✅ Ad-hoc one-offs swept to `tooling/scratch/`: the 3 Phase-1 orphans
+   (`gen_fs_recipes,seed_noc_alert,demo_hunt`, tracked) + 5 untracked `_*.py` probes
+   (`tooling/scratch/_*.py`, now gitignored). `tooling/scratch` excluded from ruff.
+3. ✅ Confirmed `fsr_playbooks` imports nothing from `tooling/` (clean).
+4. ✅ `pyproject.toml` `fsrpb` dist updated (`package-dir` → `tooling/{probes,store,e2e}`).
+5. ✅ **Gate:** tooling suite **806 passed** (unchanged from baseline), `import fsr_playbooks`
+   clean, `fsrpb` CLI runs, ruff green.
+
+**Deferred — themed-subdir regroup** (`probes/ catalog/ deploy/ e2e/ evals/`): the flat top-level
+modules (`cli`, `recover`, `picklists`, `preflight`, `inventory`, `connector_configs`,
+`chat_review`, `agent_stats`, `fsr_{read,deploy}_mcp`) import each other and are imported by name
+off `tooling/` on sys.path; moving them into subpackages breaks those flat imports for zero gate
+value. Do it only if/when the `tooling/` layout itself needs the structure. `probes/ evals/ e2e/`
+already exist as subdirs; `catalog/ deploy/` were never created.
 
 ## Phase 3 — Reference-cache data reorg
 1. `store/` → `data/`; gitignore the heavy artifacts (65 MB `fsr_reference.db`, drafts, runs).
