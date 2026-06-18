@@ -181,6 +181,20 @@ Done as one combined change (the vendored copy wired triage → move+delete+pin 
     in `fsr_soc_triage/triage_prompt.py` needs its `.md` load path confirmed.
 - Tested vs the locally-built `0.3.67` wheel (PyPI publish pending). NOT merged to connector main.
 
+### D6 — connector-awareness is authoring, NOT investigation (decided 2026-06-18)
+The cut is "alert triage/investigation (connector) vs agentic playbook creation (library)".
+Connector-awareness (what connectors are installed/configured/running + what actions a step
+can call) is needed by the CREATION path, so it stays in the library — only alert/incident
+investigation is connector-private. Call-graph analysis confirmed 5 tools extract CLEAN (zero
+SIEM/FAZ/record drag):
+- **DONE (library):** `fsr_playbooks/mcp_server/tools_connector_discovery.py` — `get_run_env`,
+  `list_configured_connectors`, `list_playbook_runs`, `find_containment_actions`,
+  `find_enrichment_actions` (+ helpers/constants), registered tier-1, frozen in contract,
+  folded into the unpublished `0.3.67` (REGISTRY 31→36). Library suite 291 pass.
+- **DONE (connector):** removed those from `fsr_soc_triage`; `registry.py` registers only
+  pure-investigation tools; `_build_run_filter_qs` kept locally (shared by staying
+  `list_recent_failed_runs`). 289 pass.
+
 ### Phase 2 — cut the connector over to the pinned package
 2.1 Delete connector `fsr_playbooks/` and `fsr_core.bak/`.
 2.2 `requirements.txt` → add `fsr-playbooks==0.3.67` (the facade-bearing release from 1.3;
