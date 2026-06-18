@@ -10,6 +10,50 @@ This file is the master backlog + resume state. Deep multi-phase plans
 live under `docs/plans/`; frozen research/audit snapshots under
 `docs/research/`; superseded plans under `docs/archive/`.
 
+## ★ REORG follow-ups (added 2026-06-18) — see `REORG_PLAN.md`
+
+Phases 0–3 of the `REORG_PLAN.md` are landed on branch
+`reorg/phase-0-freeze-surface` (commits `20db683`…`bffe18a`):
+`python/`→`tooling/`, `store/`→`data/`, and a shipped 0.59 MB slim compile
+catalog (`fsr_playbooks/_data/fsr_reference.db`). Library 270 + tooling 807
+green; fresh-venv wheel compile proven.
+
+**Live-verified against the module-admin appliance (10.99.249.205, csadmin):**
+- ✅ auth + read-only API via the repo `pyfsr` client (read `workflow_collections`).
+- ✅ `fsrpb health` — pulled 47 configured connectors (exercises the live client
+  path end-to-end; `connector-fsr-soc-assistant 0.4.7` is installed there).
+
+**Still unverified live (do on an appliance; couldn't complete offline):**
+- [ ] **compile → push → run/dry-run → cleanup** round-trip of a throwaway
+      collection (the plan's acceptance bar). Started against 10.99.249.205 but
+      not completed — `fsrpb push --mode create <compiled.json>`, confirm via
+      `/api/3/workflow_collections`, then delete. NB: this is the module-admin
+      box with publish quirks (`/api/3` 503; one bad draft wedges all publishes —
+      see pyfsr memory), so prefer `create` mode + immediate cleanup, or use the
+      lab box `10.99.249.159` instead.
+- [ ] **warmup / crudhub ingest** writing to `data/fsr_reference.db` — the #1
+      acceptance item; proves the `store/`→`data/` rename end-to-end live and
+      repopulates the per-install tables. (`fsrpb refresh`/`pull` family.)
+- [ ] **Live MCP tool path** (`run_op` and friends) — my Phase-2/3 fix repointed
+      the library `mcp_server/*` `sys.path.insert(REPO_ROOT/"tooling")` hooks into
+      `probes._env`/`recipes`. Imports verified offline; exercise one read-only
+      `run_op` live to confirm the repaired path actually dispatches.
+- [ ] **web backend** (FastAPI) + **Playwright e2e** + **ts compiler build** —
+      byte-compile clean, paths point at `tooling/`+`data/`, but none were run.
+
+**Code follow-up (not appliance-gated):**
+- [ ] `scripts/publish_public.sh` still slims the DB inline via `DELETE`+`VACUUM`
+      (deleting `recipes`/`connector_op_defs`/`api_endpoints`/`jinja_expressions`).
+      Now redundant with the Phase-3b builder
+      (`tooling/catalog/build_compile_catalog.py`) + the tracked
+      `fsr_playbooks/_data` slim catalog. Reconcile during Phase 5 (publishing):
+      either ship the committed slim DB directly or call the builder.
+- [ ] Cosmetic: `web/backend/app.py` var is still named `PYTHON_DIR` while
+      pointing at `tooling/` (harmless; rename for clarity).
+- [ ] Remaining plan phases: **4** (root `*.md` → `docs/`; confirm `web/`+`ts/`
+      import-decoupled) and **1b/5** (connector carve-out of investigation modules
+      + cutover to the pinned `fsr_playbooks` package; needs the FortiSOAR SDK).
+
 ## Plan index
 
 ### Connector + fsr_playbooks (investigator / triage agent)
