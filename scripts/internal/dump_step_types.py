@@ -11,7 +11,7 @@ USAGE — on the FortiSOAR appliance, as root:
     scp dump_step_types.py root@fsr:/tmp/
     sudo /opt/cyops-workflow/.env/bin/python /tmp/dump_step_types.py
     cat /tmp/step_types.log
-    scp root@fsr:/tmp/step_types.json ./store/incoming/step_types.json
+    scp root@fsr:/tmp/step_types.json ./data/incoming/step_types.json
 
 What it captures, per task:
   - task name (celery name, often dotted: workflow.tasks.connector)

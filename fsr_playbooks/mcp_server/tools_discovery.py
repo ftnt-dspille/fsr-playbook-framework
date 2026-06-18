@@ -1016,7 +1016,7 @@ def get_connector_source(connector: str, file: str = "operations.py") -> dict[st
     On success: `{ok: true, source: "...", cached: bool}`
     On failure: `{ok: false, error: "..."}`
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
         from probes._env import get_client
     except ImportError:

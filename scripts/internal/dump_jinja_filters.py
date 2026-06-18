@@ -6,7 +6,7 @@ USAGE — on the FortiSOAR appliance, as root:
     sudo /opt/cyops-workflow/.env/bin/python /tmp/dump_jinja_filters.py \
         > /tmp/filters.json 2> /tmp/filters.log
     cat /tmp/filters.log
-    scp root@fsr:/tmp/filters.json ./store/incoming/filters.json
+    scp root@fsr:/tmp/filters.json ./data/incoming/filters.json
 
 The script:
   1. Boots Django (DJANGO_SETTINGS_MODULE=sealab.settings) so registered apps

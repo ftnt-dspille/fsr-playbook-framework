@@ -1,6 +1,6 @@
 // FSRPB TypeScript compiler — widget-runnable.
 //
-// Loads `store/fsr_reference.json` (produced by the Python probes) and
+// Loads `data/fsr_reference.json` (produced by the Python probes) and
 // compiles a YAML playbook to FortiSOAR import JSON. Mirrors the Python
 // compiler's stages: parse → resolve → validate → layout → emit.
 //

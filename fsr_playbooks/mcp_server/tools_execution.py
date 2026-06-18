@@ -889,7 +889,7 @@ def _live_client_for_grounding():
     `run_op`'s resolution path, and so tests can stub the live half. Never
     raises — any resolution problem yields None (fail open)."""
     try:
-        sys.path.insert(0, str(REPO_ROOT / "python"))
+        sys.path.insert(0, str(REPO_ROOT / "tooling"))
         from probes._env import get_client, get_config
     except ImportError:
         return None
@@ -1568,7 +1568,7 @@ def run_op(
         it to the step-name charset and guarantees uniqueness, so collisions are
         de-duplicated automatically — you don't need to number them.
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
         from probes._env import get_client, get_config
     except ImportError:
@@ -1834,7 +1834,7 @@ def push_playbook(yaml_text: str) -> dict[str, Any]:
         {ok: false, errors: [...]} on compile failure.
         {ok: false, error: str} on push failure.
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
         from fsr_playbooks.compiler import compile_yaml as _compile
         from probes._env import get_client, get_config
@@ -1892,7 +1892,7 @@ def run_playbook(playbook: str,
         `ok` is True only when status == "finished"; "finished_with_error"
         and "failed" return ok=False with diagnostics.
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
         from probes._env import get_client, get_config
         from cli import _resolve_workflow_ident
@@ -2042,7 +2042,7 @@ def dry_run_playbook(yaml_text: str, playbook: str,
             from e2e.runner import _hard_purge
             client = get_client()
             # Re-fetch the workflow uuids in case the push reshaped them.
-            sys.path.insert(0, str(REPO_ROOT / "python"))
+            sys.path.insert(0, str(REPO_ROOT / "tooling"))
             _hard_purge(client, coll_uuid,
                         {"workflows": [{"uuid": w["uuid"]}
                                        for w in push.get("workflows", [])]})

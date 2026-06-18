@@ -8,7 +8,7 @@ This is the canonical step-handler registry. Each step type's
 
 USAGE on the FSR appliance:
     sudo /opt/cyops-workflow/.env/bin/python /tmp/dump_function_map.py
-    scp root@fsr:/tmp/function_map.json ./store/incoming/
+    scp root@fsr:/tmp/function_map.json ./data/incoming/
 
 Captures per entry: signature, parameters w/ kinds & defaults,
 docstring, source file (where available — many will be Cython .so

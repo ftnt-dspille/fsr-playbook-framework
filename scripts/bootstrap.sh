@@ -7,7 +7,7 @@
 # Idempotent: every step detects "already done" and skips. Prompts only when
 # it genuinely needs input; honors env-var overrides so it can run unattended:
 #   PYFSR_REPO=<git-url>      pyfsr sibling to clone if ../pyfsr is missing
-#   FSR_DB_SRC=<path>         reference DB to copy into store/ if missing
+#   FSR_DB_SRC=<path>         reference DB to copy into data/ if missing
 #   NONINTERACTIVE=1          never prompt; take defaults / skip optional steps
 set -uo pipefail
 
@@ -18,7 +18,7 @@ unset VIRTUAL_ENV CONDA_PREFIX CONDA_DEFAULT_ENV 2>/dev/null || true
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-DB="$ROOT/store/fsr_reference.db"
+DB="$ROOT/data/fsr_reference.db"
 PYFSR_DIR="$ROOT/../pyfsr"
 
 # --- pretty + prompt helpers ----------------------------------------------
@@ -91,7 +91,7 @@ else
         c|C)
             [ -z "$src" ] && src="$(ask 'path to fsr_reference.db' '')"
             [ -f "$src" ] || die "no file at: $src"
-            mkdir -p "$ROOT/store"; cp "$src" "$DB"; ok "copied DB into store/" ;;
+            mkdir -p "$ROOT/data"; cp "$src" "$DB"; ok "copied DB into data/" ;;
         b|B)
             [ -f "$ROOT/.env" ] || { warn ".env needed to reach a live box — set it up in step 5 first, then re-run with choice [b]"; }
             say "    building reference store (fsrpb probe --all) — needs live FSR creds in .env"

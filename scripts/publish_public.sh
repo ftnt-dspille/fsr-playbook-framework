@@ -19,13 +19,13 @@
 #   scripts/publish_public.sh --dry-run  # build + verify only; print tree; no push
 #
 # Requires: gh (authed as the repo owner), sqlite3, the local full
-# store/fsr_reference.db present.
+# data/fsr_reference.db present.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 GH_OWNER="${GH_OWNER:-ftnt-dspille}"
 GH_REPO="${GH_REPO:-fsr-playbook-framework}"
-REF_DB="$SRC/store/fsr_reference.db"
+REF_DB="$SRC/data/fsr_reference.db"
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
 
@@ -38,8 +38,8 @@ git -C "$SRC" archive HEAD | tar -x -C "$BUILD"
 cd "$BUILD"
 
 # 2. DROP — data blobs, captures, internal/strategic/planning docs, infra scripts
-rm -f  fsrpb.db python/store/playbooks.db store/drafts.db store/store.db store/fsr_reference.json
-rm -rf store/eval_runs store/probe_results store/incoming
+rm -f  fsrpb.db tooling/store/playbooks.db data/drafts.db data/store.db data/fsr_reference.json
+rm -rf data/eval_runs data/probe_results data/incoming
 rm -rf docs/archive docs/plans docs/research docs/corpus_audit scripts/internal
 rm -f  docs/build_deck.py docs/FSR_Playbook_AI_Deepdive.pptx fsrpb_presentation.pptx \
        PRESENTATION_OUTLINE.md FSR_CONNECTOR_PLAN.md scripts/external/build_presentation.py
@@ -55,8 +55,8 @@ find . -type d -name node_modules -prune -exec rm -rf {} + 2>/dev/null || true
 
 # 3. SLIM the reference catalog (ship published corpus; drop instance-derived data)
 if [[ ! -f "$REF_DB" ]]; then echo "!! missing $REF_DB (the full local catalog) — cannot build slim DB" >&2; exit 1; fi
-cp -f "$REF_DB" store/fsr_reference.db
-sqlite3 store/fsr_reference.db <<'SQL'
+cp -f "$REF_DB" data/fsr_reference.db
+sqlite3 data/fsr_reference.db <<'SQL'
 BEGIN;
 DELETE FROM modules; DELETE FROM module_fields; DELETE FROM picklists;
 DELETE FROM connector_icons; DELETE FROM param_type_probes; DELETE FROM connector_health;
@@ -94,7 +94,7 @@ for p in pathlib.Path(".").rglob("*"):
 PY
 
 # 5. allow the slim reference DB to ship (the repo gitignores *.db)
-printf '\n# public mirror: ship the sanitized slim reference catalog\n!store/fsr_reference.db\n' >> .gitignore
+printf '\n# public mirror: ship the sanitized slim reference catalog\n!data/fsr_reference.db\n' >> .gitignore
 
 # 6. VERIFY — no infra leaks, no stray data blobs
 INFRA=$( { grep -rE "10\.99\.[0-9]+\.[0-9]+|us-west-1\.fortisoc\.forticloud\.com|[a-z0-9]+\.forticloud\.com|fortilab\.fortinet\.com|fndn\.fortinet\.net|svl-devops-gitlab01" . 2>/dev/null || true; } | { grep -av "fsr_reference.db" || true; } | wc -l | tr -d ' ')

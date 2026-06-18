@@ -168,7 +168,7 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
     task_id here with the candidate Jinja for the NEXT step's argument to
     confirm it resolves correctly before wiring it into the YAML.
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
         from probes._env import get_client
     except ImportError:

@@ -4,7 +4,7 @@
  *
  * Lifecycle pattern: each spec creates a uniquely-named draft via the
  * real PUT /api/playbooks/draft/{name} endpoint (against the live
- * backend, which writes to store/drafts.db), then deletes it in
+ * backend, which writes to data/drafts.db), then deletes it in
  * afterAll. Test names use a timestamp so re-runs don't collide if
  * a prior cleanup was interrupted.
  */

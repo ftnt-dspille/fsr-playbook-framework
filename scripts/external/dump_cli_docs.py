@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Iterable
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "python"))
+sys.path.insert(0, str(REPO / "tooling"))
 
 from cli import build_parser  # noqa: E402
 

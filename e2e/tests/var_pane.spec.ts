@@ -15,7 +15,7 @@
  *      highlight ("= critical") appears in emerald on the right leaf.
  *
  * Each test seeds a uniquely-named draft and tears it down so reruns
- * don't collide on the shared store/drafts.db.
+ * don't collide on the shared data/drafts.db.
  */
 import { test, expect } from '@playwright/test';
 import { seedDraft, deleteDraft, openDraft, waitForDraftYaml, SAMPLE_YAML } from './helpers';

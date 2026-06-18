@@ -166,7 +166,7 @@ def generate_recipe(
     except Exception as exc:  # noqa: BLE001
         return _err("info_json_invalid", f"info.json parse failed: {exc}")
 
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
         from recipes import (generate_data_ingest_recipe,  # noqa: PLC0415
                              generate_threat_feed_recipe)
@@ -492,7 +492,7 @@ def why_did_playbook_fail(
     # Step 2 — if YAML wasn't supplied, pull the live playbook + decompile.
     if not yaml_text:
         try:
-            sys.path.insert(0, str(REPO_ROOT / "python"))
+            sys.path.insert(0, str(REPO_ROOT / "tooling"))
             from cli import (  # type: ignore
                 _fetch_workflow_with_refs, _decompile_to_yaml,
             )

@@ -8,7 +8,7 @@
  * whole path:
  *
  *   picker → click example → Save (Clone & Edit) → modal → confirm
- *     → new draft exists in store/drafts.db
+ *     → new draft exists in data/drafts.db
  *     → active doc switches to the new draft
  *     → the cloned YAML matches the example's source
  */

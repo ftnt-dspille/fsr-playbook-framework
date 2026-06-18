@@ -90,7 +90,7 @@ def review_chat_session(session_id: str) -> dict[str, Any]:
     has `{severity: error|warning|info, code, title, detail, turn?,
     suggestion?}`. The headline is a one-liner suitable for chat output.
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
         import chat_review
     except ImportError as exc:
@@ -117,7 +117,7 @@ def review_recent_thumbs_down(limit: int = 10) -> dict[str, Any]:
       }
     """
     import sqlite3 as _sql
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
         import chat_review
     except ImportError as exc:
@@ -240,7 +240,7 @@ def find_step_recipe(intent: str = "",
     Returns: {ok: true, matches: [{name, description, intent_keywords,
              connector, step_types, steps_yaml, notes}, ...]}.
     """
-    sys.path.insert(0, str(REPO_ROOT / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
     from recipes import step_lookup
     matches = step_lookup.find(
         intent=intent, connector=connector, step_type=step_type, limit=limit,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate `python/agent/static_grammar_block.md` — the cacheable
+"""Generate `tooling/agent/static_grammar_block.md` — the cacheable
 prompt prefix containing byte-identical-across-tenants reference data.
 
 Output gets prepended to the live `system_prompt.md` so Anthropic
@@ -21,12 +21,12 @@ from pathlib import Path
 from textwrap import indent
 
 REPO = Path(__file__).resolve().parents[1]
-PYTHON_DIR = REPO / "python"
-DB_PATH = REPO / "store" / "fsr_reference.db"
-OUT_PATH = PYTHON_DIR / "agent" / "static_grammar_block.md"
+TOOLING_DIR = REPO / "tooling"
+DB_PATH = REPO / "data" / "fsr_reference.db"
+OUT_PATH = TOOLING_DIR / "agent" / "static_grammar_block.md"
 
-if str(PYTHON_DIR) not in sys.path:
-    sys.path.insert(0, str(PYTHON_DIR))
+if str(TOOLING_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLING_DIR))
 
 # Friendly forms + canonical mapping live in tools_discovery.
 # Import only the data; do not pull in MCP server side effects.
