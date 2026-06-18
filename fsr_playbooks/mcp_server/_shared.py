@@ -41,7 +41,7 @@ else:
 # Paths
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
+DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
 
 # ---------------------------------------------------------------------------
 # MCP server instance (shared across all tools)

@@ -23,7 +23,7 @@ from evals.scoring import score
 from evals.tasks import Task, load_tasks
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RUNS_DIR = REPO_ROOT / "store" / "eval_runs"
+RUNS_DIR = REPO_ROOT / "data" / "eval_runs"
 
 
 def _gold_lookup_for(tasks: list[Task]):

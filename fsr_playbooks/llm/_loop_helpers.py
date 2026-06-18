@@ -426,7 +426,7 @@ def compile_errors(yaml_text: str) -> str | None:
     except Exception as e:
         return f"compiler import failed: {e}"
 
-    db = Path(__file__).resolve().parents[2] / "store" / "fsr_reference.db"
+    db = Path(__file__).resolve().parents[2] / "data" / "fsr_reference.db"
     res = _cy(yaml_text, db)
     if res.ok:
         return None

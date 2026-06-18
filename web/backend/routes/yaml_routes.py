@@ -22,7 +22,7 @@ from fsr_playbooks.compiler.arg_validator import ArgValidator
 from fsr_playbooks.compiler.source_fixer import collect_fixes as _collect_fixes
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_DB = REPO_ROOT / "store" / "fsr_reference.db"
+DEFAULT_DB = REPO_ROOT / "data" / "fsr_reference.db"
 
 router = APIRouter(prefix="/api/yaml", tags=["yaml"])
 

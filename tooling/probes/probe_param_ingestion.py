@@ -26,7 +26,7 @@ import sys
 from ._env import get_config
 from .common import REPO_ROOT
 
-OUT_PATH = REPO_ROOT / "store" / "probe_results" / "param_ingestion_coercion.json"
+OUT_PATH = REPO_ROOT / "data" / "probe_results" / "param_ingestion_coercion.json"
 
 WIDGETS = ["p_text", "p_textarea", "p_integer", "p_decimal",
            "p_checkbox", "p_json"]

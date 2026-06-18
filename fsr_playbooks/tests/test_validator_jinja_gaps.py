@@ -11,7 +11,7 @@ verify_playbook report ready_to_push=True):
 """
 from fsr_playbooks.compiler import compile_yaml
 
-DB = "store/fsr_reference.db"
+DB = "data/fsr_reference.db"
 
 
 def _errs(yaml_text: str):

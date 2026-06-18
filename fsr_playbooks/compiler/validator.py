@@ -14,7 +14,7 @@ from pathlib import Path
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Playbook, Step
 
-_DB_PATH = Path(__file__).resolve().parent.parent.parent / "store" / "fsr_reference.db"
+_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "fsr_reference.db"
 
 # Find every Jinja expression. Non-greedy; tolerates whitespace.
 _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)

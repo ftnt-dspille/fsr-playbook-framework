@@ -15,7 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
+DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
 
 MAX_PER_OP = 5
 

@@ -14,7 +14,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 PYTHON = REPO / "tooling"
-DB = REPO / "store" / "fsr_reference.db"
+DB = REPO / "data" / "fsr_reference.db"
 CORPUS = REPO.parent / "FSRPlaybookConversion" / "pb_examples" / "all_fsr_evoke_playbooks.json"
 
 # Repo root must be on path for `fsr_playbooks.*`; python/ for `probes.*`,

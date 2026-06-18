@@ -331,7 +331,7 @@ def run(db_path: Path, out_dir: Path,
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog=PROBE_NAME)
-    p.add_argument("--db", default=str(REPO_ROOT / "store" / "fsr_reference.db"))
+    p.add_argument("--db", default=str(REPO_ROOT / "data" / "fsr_reference.db"))
     p.add_argument("--out", default=str(REPO_ROOT / "docs" / "corpus_audit"))
     p.add_argument("--type", default=None,
                    help="filter to one step_type_name (e.g. ManualInput)")

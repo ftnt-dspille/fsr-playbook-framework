@@ -135,15 +135,34 @@ value. Do it only if/when the `tooling/` layout itself needs the structure. `pro
 already exist as subdirs; `catalog/ deploy/` were never created.
 
 ## Phase 3 — Reference-cache data reorg
-1. `store/` → `data/`; gitignore the heavy artifacts (65 MB `fsr_reference.db`, drafts, runs).
-2. `tooling/catalog/build_compile_catalog.py`: filter the probed DB to globally-stable tables only
-   (step_types/handlers, jinja_*), strip connector icons → `data/slim/fsr_reference.db` (~1 MB,
-   tracked). Instance-specific UUIDs (picklists/connectors/modules) are warmed from the target
-   SOAR, not shipped.
-3. Ship `data/slim/fsr_reference.db` as package-data via `packaging/fsr_playbooks/pyproject.toml`.
-4. Verify the resolver degrades to a live lookup on a cache miss (graceful off-platform compile).
-5. **Gate:** wheel `unzip -l` shows the ~1 MB slim DB and no 65 MB / no investigation; clean-venv
-   compile of a sample playbook works against the slim DB.
+**Revised 2026-06-18** after verifying there is NO cache-miss → live-lookup fallback (see Open
+verifications). Decision: *accept the limit* — ship the stable catalog, no new resolver feature.
+A slim-DB compile of a stable-only playbook succeeds; a playbook referencing a live connector
+op/picklist/module fails with a clear `CompileError` until `warmup` fills those tables.
+
+Done in two commits — **3a rename** (mechanical) then **3b slim DB** (the substantive win).
+
+### 3a — `store/` → `data/` rename
+1. `mv store data` (the 65 MB `fsr_reference.db`, 134 MB `rpm_cache/` are already gitignored;
+   `**/fsr_reference.db` covers the new path). Rewire the 8 hardcoded `store/` path constants:
+   library `mcp_server/_shared.py`, `tooling/{cli,picklists,probes/common}.py`,
+   `web/backend/{routes/ref,routes/yaml_routes,step_drafter}.py`.
+2. gitignore: retarget the `store/…` rules to `data/…`; drop the now-dead `/python/_[a-z]*.py` rule.
+3. **Gate:** tooling suite green; `fsrpb compile` of a sample still works against `data/fsr_reference.db`.
+
+### 3b — slim DB builder + ship as package-data
+4. NEW `tooling/catalog/build_compile_catalog.py` (`tooling/catalog/` does not exist yet): copy
+   the globally-stable tables only — `step_types, step_handlers, step_examples, jinja_macros,
+   jinja_globals, jinja_tests, jinja_context_vars, recipes, api_endpoints` — into
+   `data/slim/fsr_reference.db` (~1 MB, **tracked**). Exclude the per-install tables
+   (`connectors, operations, operation_params, op_safety, modules, module_fields, picklists`) and
+   scratch/corpus/telemetry tables.
+5. Ship `data/slim/fsr_reference.db` as package-data via `packaging/fsr_playbooks/pyproject.toml`,
+   and teach the library to fall back to the packaged slim DB when no `data/fsr_reference.db` exists
+   (fresh install has no probed DB).
+6. **Gate (revised — no live fallback):** wheel `unzip -l` shows the ~1 MB slim DB and no 65 MB /
+   no investigation; clean-venv compile of a *stable-only* sample playbook succeeds against the slim
+   DB; a connector-referencing playbook fails with a clear `CompileError` (asserted, not a hang/trace).
 
 ## Phase 4 — Docs / web / ts (low risk, anytime)
 1. Root `*.md` (ARCHITECTURE/AUTHORING/CAPABILITIES/DEMO/PRESENTATION/…) → `docs/`, leaving
@@ -185,9 +204,17 @@ use it:
 ---
 
 ## Open verifications (cheap; do before the phase that needs them)
-- [ ] Confirm the resolver cache-miss → live-lookup fallback exists (Phase 3 step 4).
-- [ ] Confirm picklist/connector/module UUIDs are truly per-install (justifies excluding them from
-      the slim DB — Phase 3 step 2).
+- [x] ~~Confirm the resolver cache-miss → live-lookup fallback exists~~ — **it does NOT.** The
+      resolver hard-fails: a missing step_type/connector/op/picklist row makes `_resolve_step`
+      (`fsr_playbooks/compiler/resolver/normalizers.py:22–55`) append a `CompileError` and return —
+      no live lookup, anywhere. So Phase 3 step 4's "degrades to a live lookup" premise is **false**;
+      a slim DB means *off-platform compile only works for playbooks that reference solely the
+      shipped stable tables* (step_types/handlers/jinja_*/recipes). Anything touching a live
+      connector op / picklist / module needs `warmup` against a real SOAR first. (See revised Phase 3.)
+- [x] ~~Confirm picklist/connector/module UUIDs are truly per-install~~ — **yes, confirmed.** Probed
+      live per appliance (`tooling/probes/probe_modules.py` reads `/api/3/staging_model_metadatas`
+      + `/api/3/picklist_names`); warmed via `warmup`, never shipped. Justifies excluding
+      connectors/operations/operation_params/op_safety/modules/module_fields/picklists from the slim DB.
 - [x] ~~Re-grep connector for surface-A imports not yet listed~~ (done in Phase 0).
 - [x] ~~Confirm `llm/tools.py` split scope~~ — resolved: `_tier_for_run_op` is generic and STAYS;
       no split needed.

@@ -33,7 +33,7 @@ EXAMPLES_DIR = REPO_ROOT / "examples"
 # `fsr_reference.db` reference store. Easier to back up / wipe / sync.
 # DRAFTS_DB_PATH override lets the e2e fixture point at a tempdir so
 # CI runs don't share state with a developer's live drafts.db.
-DRAFTS_DB = Path(os.environ.get("DRAFTS_DB_PATH") or REPO_ROOT / "store" / "drafts.db")
+DRAFTS_DB = Path(os.environ.get("DRAFTS_DB_PATH") or REPO_ROOT / "data" / "drafts.db")
 
 router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
 

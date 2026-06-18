@@ -29,8 +29,8 @@ import requests
 from ._env import get_config
 from .common import REPO_ROOT
 
-DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
-OUT_PATH = REPO_ROOT / "store" / "probe_results" / "set_variable_coercion.json"
+DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
+OUT_PATH = REPO_ROOT / "data" / "probe_results" / "set_variable_coercion.json"
 
 
 # --------------------------------------------------------------------------

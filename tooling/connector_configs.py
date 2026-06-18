@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CACHE_PATH = REPO_ROOT / "store" / "connector_config_map.json"
+CACHE_PATH = REPO_ROOT / "data" / "connector_config_map.json"
 
 # In-process cache: "connector:config_name" → config_id (UUID).
 _cache: dict[str, str] | None = None

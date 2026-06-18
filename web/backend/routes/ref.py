@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
+DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
 
 # Friendly shorthand types the YAML compiler accepts. Source of truth:
 # python/compiler/resolver.py SHORT_TYPE_TO_FSR. Mirrored here so the

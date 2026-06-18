@@ -14,7 +14,7 @@ from fsr_playbooks.compiler.typed_walker import (
     _infer_literal_shape, walk_playbook,
 )
 
-DB = Path("store/fsr_reference.db")
+DB = Path("data/fsr_reference.db")
 
 
 def _walk(text: str):

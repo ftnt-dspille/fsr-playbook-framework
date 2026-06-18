@@ -135,7 +135,7 @@ _SAFE_CATEGORIES = {"investigation", "query", "utilities", "enrichment", "verifi
 _SENSITIVE_KEY_RE = re.compile(r"(?i)(password|token|api[_-]?key|secret|authorization|bearer)")
 
 
-_DB_PATH = Path(__file__).resolve().parents[2] / "store" / "fsr_reference.db"
+_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "fsr_reference.db"
 
 
 def _lookup_op_metadata(connector: str, op: str) -> tuple[str | None, str | None]:

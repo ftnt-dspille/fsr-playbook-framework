@@ -26,7 +26,7 @@ from .common import (
 )
 
 PROBE_NAME = "probe_jinja_backend"
-INCOMING = REPO_ROOT / "store" / "incoming" / "filters.json"
+INCOMING = REPO_ROOT / "data" / "incoming" / "filters.json"
 
 
 def _scalarize(v: Any) -> Any:

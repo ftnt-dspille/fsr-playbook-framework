@@ -31,7 +31,7 @@ sys.path.insert(0, str(REPO_ROOT))
 DEMO_MODEL = "claude-haiku-4-5-20251001"
 
 GOLDEN_DIR = REPO_ROOT / "tooling" / "evals" / "golden_traces"
-RUN_DIR = REPO_ROOT / "store" / "eval_runs"
+RUN_DIR = REPO_ROOT / "data" / "eval_runs"
 
 # Each quality/recall failure points at the lever most likely to fix it, so a
 # failed run is self-documenting: failure -> file/knob to change, no grep. The

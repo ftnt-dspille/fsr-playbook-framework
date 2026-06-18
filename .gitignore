@@ -7,14 +7,14 @@ venv/
 !.env.example
 
 # generated artifacts
-store/fsr_reference.db
-store/fsr_reference.db-shm
-store/fsr_reference.db-wal
+data/fsr_reference.db
+data/fsr_reference.db-shm
+data/fsr_reference.db-wal
 **/fsr_reference.db
 **/fsr_reference.db-shm
 **/fsr_reference.db-wal
-store/e2e_runs/
-store/verify_traces/
+data/e2e_runs/
+data/verify_traces/
 fsr_playbooks/usage.jsonl
 
 # ts
@@ -31,7 +31,7 @@ e2e/playwright-report/
 .idea/
 .vscode/
 .DS_Store
-/store/rpm_cache/
+/data/rpm_cache/
 
 # archives / recon tarballs
 *.tar.gz
@@ -41,15 +41,15 @@ e2e/playwright-report/
 *.egg-info/
 
 # eval run artifacts (flat logs/summaries; structured run dirs stay tracked)
-/store/eval_runs/calibrate_*.log
-/store/eval_runs/calibrate_*.summary.json
-/store/eval_runs/calibrate_*_failures/
-/store/eval_runs/chatdrive_*.summary.json
-/store/eval_runs/chatchain_*.json
+/data/eval_runs/calibrate_*.log
+/data/eval_runs/calibrate_*.summary.json
+/data/eval_runs/calibrate_*_failures/
+/data/eval_runs/chatdrive_*.summary.json
+/data/eval_runs/chatchain_*.json
 
-# one-shot diagnostic/scratch helpers (kept on disk, never committed).
+# ad-hoc scratch one-offs / diagnostic helpers (kept on disk, never committed).
 # Scoped to single-underscore names so __init__.py etc. are unaffected.
-/python/_[a-z]*.py
-
-# ad-hoc scratch one-offs (never shipped, not tracked)
 tooling/scratch/_*.py
+
+# chat-session event logs (scratch, never shipped)
+data/fsrpb-chat-sess/

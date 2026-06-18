@@ -13,7 +13,7 @@ from pathlib import Path
 from fsr_playbooks.compiler import compile_yaml, parse_yaml
 from fsr_playbooks.compiler.typed_walker import walk_playbook
 
-DB = Path("store/fsr_reference.db")
+DB = Path("data/fsr_reference.db")
 
 _DECISION = Path("examples/decision_branch.yaml").read_text()
 

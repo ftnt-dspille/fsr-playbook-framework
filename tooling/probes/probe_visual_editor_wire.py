@@ -62,7 +62,7 @@ def _push_yaml(yaml_text: str) -> tuple[bool, str]:
         from e2e.runner import _push, _PushError
     except Exception as exc:
         return False, f"import failed: {exc!r}"
-    db = ROOT / "store" / "fsr_reference.db"
+    db = ROOT / "data" / "fsr_reference.db"
     result = _compile(yaml_text, db)
     if not result.ok:
         msgs = "; ".join(f"{e.code.value}: {e.message}" for e in result.errors)

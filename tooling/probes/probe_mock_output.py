@@ -53,7 +53,7 @@ def main() -> int:
     _log(f"compiling {YAML_PATH.name}")
     sys.path.insert(0, str(REPO / "tooling"))
     from fsr_playbooks.compiler import compile_yaml
-    db_path = REPO / "store" / "fsr_reference.db"
+    db_path = REPO / "data" / "fsr_reference.db"
     r = compile_yaml(YAML_PATH.read_text(), db_path)
     if not r.ok:
         _log(f"compile failed: {[e.to_dict() for e in r.errors]}")

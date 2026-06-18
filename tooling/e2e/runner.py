@@ -788,11 +788,11 @@ def _check_expects(record: dict, expects: dict) -> list[str]:
 
 
 def _store_db_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "store" / "fsr_reference.db"
+    return Path(__file__).resolve().parents[2] / "data" / "fsr_reference.db"
 
 
 def _default_log_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "store" / "e2e_runs"
+    return Path(__file__).resolve().parents[2] / "data" / "e2e_runs"
 
 
 def cleanup_all(client, patterns: list[str]) -> int:

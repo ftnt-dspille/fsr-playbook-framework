@@ -28,7 +28,7 @@ from .common import (
 )
 
 PROBE_NAME = "probe_step_handlers"
-INCOMING = REPO_ROOT / "store" / "incoming" / "function_map.json"
+INCOMING = REPO_ROOT / "data" / "incoming" / "function_map.json"
 
 
 def _ingest(conn: sqlite3.Connection, function_map: dict) -> int:

@@ -35,7 +35,7 @@ from typing import Any
 from backend.step_examples import cluster_examples, STEP_TYPE_TO_CORPUS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
+DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
 
 
 # Per-step-type "what does this step do" intro the model reads first.

@@ -33,7 +33,7 @@ SP_PLAYBOOKS_DIR = (
     Path.home() / "PycharmProjects" / "Miscellaneous"
     / "fortisoar" / "SPs" / "playbooks"
 )
-INCOMING_DIR = REPO_ROOT / "store" / "incoming"
+INCOMING_DIR = REPO_ROOT / "data" / "incoming"
 
 
 def _load_step_type_index(conn: sqlite3.Connection) -> dict[str, str]:

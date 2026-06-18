@@ -32,7 +32,7 @@ from fsr_playbooks.compiler.typed_walker import _infer_literal_shape
 # Resolve the repo-root store/ path from this file (…/fsr_playbooks/tests/…).
 from pathlib import Path
 _ARTIFACT = (Path(__file__).resolve().parents[2]
-             / "store" / "probe_results" / "param_ingestion_coercion.json")
+             / "data" / "probe_results" / "param_ingestion_coercion.json")
 
 # String-input rows → the literal string the probe sent, so we can re-derive
 # the expected type via the Phase 1b classifier and prove the two casts agree.

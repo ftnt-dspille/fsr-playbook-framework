@@ -46,7 +46,7 @@ from evals.levers import lever_for  # noqa: E402
 CONN = "fsr-playbook-builder"
 DEFAULT_VERSION = "0.3.116"
 DEFAULT_CONFIG = "fsrpb-live"
-RUN_DIR = REPO_ROOT / "store" / "eval_runs"
+RUN_DIR = REPO_ROOT / "data" / "eval_runs"
 TASKS_DIR = REPO_ROOT / "tooling" / "evals" / "tasks"
 GOLDEN_DIR = REPO_ROOT / "tooling" / "evals" / "golden_traces"
 

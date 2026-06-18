@@ -297,7 +297,7 @@ def _open_ref_db() -> sqlite3.Connection | None:
     if env:
         candidates.append(Path(env))
     here = Path(__file__).resolve().parents[3]
-    candidates.append(here / "store" / "fsr_reference.db")
+    candidates.append(here / "data" / "fsr_reference.db")
     for p in candidates:
         if p.exists():
             try:

@@ -38,7 +38,7 @@ from probes._env import get_client  # noqa: E402
 # version, so re-using collection names triggers spurious 409s on
 # every push after the first.
 PROBE_COLLECTION_PREFIX = "_fsrpb_rt_"
-DB = ROOT / "store" / "fsr_reference.db"
+DB = ROOT / "data" / "fsr_reference.db"
 
 
 # ── HTTP / push helpers ───────────────────────────────────────────────

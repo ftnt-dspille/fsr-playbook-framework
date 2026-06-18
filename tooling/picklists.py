@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
-CACHE_PATH = REPO_ROOT / "store" / "picklist_name_map.json"
+DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
+CACHE_PATH = REPO_ROOT / "data" / "picklist_name_map.json"
 
 # In-process caches.
 _iri_cache: dict[str, str] = {}                   # "ListName:itemvalue" → IRI

@@ -457,7 +457,7 @@ def _write_type_trace(yaml_text: str, playbook: str | None, walk) -> str | None:
     try:
         import hashlib
         sha = hashlib.sha1((yaml_text or "").encode("utf-8")).hexdigest()[:16]
-        out_dir = REPO_ROOT / "store" / "verify_traces"
+        out_dir = REPO_ROOT / "data" / "verify_traces"
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"{sha}.json"
         payload = {

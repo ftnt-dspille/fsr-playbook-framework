@@ -40,7 +40,7 @@ try:
 except Exception:
     pass
 
-DEFAULT_DB = Path(__file__).resolve().parent.parent / "store" / "fsr_reference.db"
+DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "fsr_reference.db"
 
 
 def _print_errors(errors) -> None:
@@ -4219,14 +4219,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="audit per-step-type params — writes Markdown reports")
     sp.add_argument("--out", default="docs/step_params",
                     help="output directory (default: docs/step_params)")
-    sp.add_argument("--db", default="store/fsr_reference.db",
+    sp.add_argument("--db", default="data/fsr_reference.db",
                     help="reference DB path")
     sp.set_defaults(func=cmd_dump_step_params)
 
     sp = sub.add_parser("audit-shapes",
         help="diff resolver whitelists vs playbook_steps corpus")
     sp.add_argument("--out", default="docs/corpus_audit")
-    sp.add_argument("--db", default="store/fsr_reference.db")
+    sp.add_argument("--db", default="data/fsr_reference.db")
     sp.add_argument("--type", default=None,
                     help="filter to one step_type_name (e.g. ManualInput)")
     sp.set_defaults(func=cmd_audit_shapes)
@@ -4540,7 +4540,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="emit the full matrix as JSON on stdout")
     sp.add_argument("--save", action="store_true",
                     help="archive matrix.json + report.md under "
-                         "store/eval_runs/<run_id>/ (auto-implied by "
+                         "data/eval_runs/<run_id>/ (auto-implied by "
                          "--baseline)")
     sp.add_argument("--baseline", default=None,
                     help="prior run id to diff against; prints a "

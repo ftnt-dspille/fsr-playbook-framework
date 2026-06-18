@@ -26,8 +26,8 @@ from ._env import get_config  # noqa: F401  (kept for parity / future use)
 from .common import REPO_ROOT
 from .probe_set_variable_coercion import _Live, _ENGINE_KEYS, _TERMINAL
 
-DB_PATH = REPO_ROOT / "store" / "fsr_reference.db"
-OUT_PATH = REPO_ROOT / "store" / "probe_results" / "var_scoping.json"
+DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
+OUT_PATH = REPO_ROOT / "data" / "probe_results" / "var_scoping.json"
 
 
 def _run_and_read(live: _Live, coll_name: str, yaml_src: str,

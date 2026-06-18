@@ -37,7 +37,7 @@ from typing import Any
 from fsr_playbooks.mcp_server._sim_fixtures import _C2_IP, _HOST_IP
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_FIXTURE_DIR = _REPO_ROOT / "store" / "trace_fixtures"
+_FIXTURE_DIR = _REPO_ROOT / "data" / "trace_fixtures"
 
 
 def _install_sim_bridge() -> None:

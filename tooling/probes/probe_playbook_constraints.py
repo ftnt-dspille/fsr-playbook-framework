@@ -52,7 +52,7 @@ def _compile_test_collection() -> dict:
         "collection: Compiler Demo",
         "collection: Compiler Demo __fsrpb_probe__",
     )
-    result = compile_yaml(yaml_text, REPO_ROOT / "store" / "fsr_reference.db")
+    result = compile_yaml(yaml_text, REPO_ROOT / "data" / "fsr_reference.db")
     if not result.ok:
         raise RuntimeError(f"compile failed: {[e.to_dict() for e in result.errors]}")
     return result.fsr_json
