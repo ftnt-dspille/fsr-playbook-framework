@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fsr_playbooks"
-version = "0.3.62"
+version = "0.3.63"
 description = "FortiSOAR playbook authoring/compiler framework: YAML->FSR-JSON compiler, LLM co-authoring, and MCP server tools."
 readme = "README.md"
 # Ships into the SOAR 3.9 runtime — do NOT raise to match the fsrpb root dist (>=3.11).
@@ -36,6 +36,11 @@ mcp = [
     "fsr_playbooks[llm]",
     "mcp>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ftnt-dspille/fsr-playbook-framework"
+Repository = "https://github.com/ftnt-dspille/fsr-playbook-framework"
+Issues = "https://github.com/ftnt-dspille/fsr-playbook-framework/issues"
 
 # ---------------------------------------------------------------------------
 # Build config. This dist lives at packaging/fsr_playbooks/ but the source tree

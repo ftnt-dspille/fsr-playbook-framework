@@ -1,35 +1,49 @@
-# fsr_playbooks (packaging dist)
+# fsr_playbooks
 
-Dedicated build for the `fsr_playbooks` package — the FortiSOAR playbook
-authoring/compiler framework (YAML→FSR-JSON compiler, LLM co-authoring, MCP
-server tools). The source tree lives at the **repo root** (`../../fsr_playbooks`);
-this directory only holds the `pyproject.toml` that builds it as its own dist,
-since the root `pyproject.toml` is taken by the `fsrpb` CLI dist.
+A FortiSOAR **playbook authoring & compiler framework**:
 
-## Install (Phase 1: git+https, wheel only)
+- **Compiler** — turn readable YAML into FortiSOAR playbook JSON (parser →
+  resolver → validator → emitter), round-trip lossless with structured
+  diagnostics.
+- **Agent** — LLM co-authoring helpers for building and triaging playbooks.
+- **MCP server** — tools that expose the compiler, connector/Jinja reference,
+  and playbook authoring to MCP-compatible clients.
 
-```
-pip install "git+https://github.com/ftnt-dspille/fsr-playbook-framework.git@main#subdirectory=packaging/fsr_playbooks"
-```
+## Install
 
-Extras:
-- (base) — compiler + agent: `pyyaml`, `ruamel.yaml`, `jinja2`
-- `[llm]` — `openai`, `anthropic`
-- `[mcp]` — `mcp` (implies `[llm]`)
-
-## Build / verify locally
-
-```
-uv build --wheel --out-dir dist        # from this directory
-unzip -l dist/*.whl                     # confirm fsr_playbooks/** + .md/.json
+```bash
+pip install fsr_playbooks            # base: compiler + agent
+pip install "fsr_playbooks[llm]"     # + OpenAI / Anthropic providers
+pip install "fsr_playbooks[mcp]"     # + MCP server (implies [llm])
 ```
 
-> The relative `..` package-dir works for pip's in-place VCS **wheel** build off
-> a clone. An sdist would be broken by the `..` — only wheels are shipped via VCS.
+Requires Python 3.9+ (the base compiler). The `[mcp]` extra requires 3.10+.
 
-## Known Phase-1 limitation
+## Quickstart
 
-The MCP live-execution / recipe tools (`mcp_server/tools_{execution,recipe,discovery}.py`)
-lazily `import probes._env` / `e2e.runner`, which are sibling root packages **not**
-included in this dist. Those specific tools won't work standalone; everything else
-(compiler, agent, the rest of the MCP surface) imports cleanly.
+```python
+from fsr_playbooks.compiler import ...  # compile YAML -> FortiSOAR playbook JSON
+```
+
+See the compiler module for the parse → resolve → validate → emit pipeline.
+
+## Extras
+
+| Extra    | Adds                          | Use for                          |
+|----------|-------------------------------|----------------------------------|
+| (base)   | `pyyaml`, `ruamel.yaml`, `jinja2` | YAML → FSR JSON compilation  |
+| `[llm]`  | `openai`, `anthropic`         | LLM-assisted authoring / triage  |
+| `[mcp]`  | `mcp` (+ `[llm]`)             | running the MCP server tools      |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Links
+
+- Source: https://github.com/ftnt-dspille/fsr-playbook-framework
+
+> Note: the MCP server's live-execution / recipe tools depend on the reference
+> store and probe helpers that ship with the full framework repo, not this
+> package alone. The compiler, agent, and the rest of the MCP surface work
+> standalone.
