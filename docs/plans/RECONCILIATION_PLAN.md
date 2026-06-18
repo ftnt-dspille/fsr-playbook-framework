@@ -165,6 +165,22 @@ internals.
     resolved from the **installed `0.3.67` wheel**, not the vendored dir; and a grep proving no
     `from .` / `..` import in triage still points at a kept-library module.
 
+### Phase 1.4–2 EXECUTION STATUS (2026-06-18) — WIP on connector branch `reorg/triage-rehome`
+Done as one combined change (the vendored copy wired triage → move+delete+pin inseparable):
+- ✅ 9 triage/NOC files → `fsr_soc_triage/` (flattened, connector-owned); seam imports via
+  `fsr_playbooks.execution_api` + `llm.intents` + `mcp_server._shared`.
+- ✅ Deleted vendored `fsr_playbooks/` (106 files) + `fsr_core.bak/`; depends on published lib.
+- ✅ Repointed `operations.py` + root `tests/`; recovered 16 triage tests + fixtures, repointed.
+- ✅ `_load_prompt` reads `system_prompt_triage.md` from `fsr_soc_triage`.
+- **286 tests pass; 26 fail on TWO integration seams (need design, not mechanics):**
+  - **D5 — tool REGISTRY/tiers:** `anthropic_provider` *curates* `REGISTRY` at import (NOT via
+    `@mcp.tool` side-effects); Phase 1 pruned the triage/NOC entries, so importing the cluster
+    does NOT re-add them. The connector must explicitly re-register its triage/NOC tools + safety
+    tiers. Affects `test_noc_tools`, `test_*_tier_*`, `test_*_slice*`. **Approach undecided.**
+  - **Triage prompt content:** `test_triage_prompt*` assert `.md`-derived text; the prompt builder
+    in `fsr_soc_triage/triage_prompt.py` needs its `.md` load path confirmed.
+- Tested vs the locally-built `0.3.67` wheel (PyPI publish pending). NOT merged to connector main.
+
 ### Phase 2 — cut the connector over to the pinned package
 2.1 Delete connector `fsr_playbooks/` and `fsr_core.bak/`.
 2.2 `requirements.txt` → add `fsr-playbooks==0.3.67` (the facade-bearing release from 1.3;
