@@ -114,7 +114,7 @@ def test_digest_tags_model_device():
     assert model["conn_status"] == "unknown"
     assert model["is_model"] is True
     real = _fmg_digest_device({
-        "name": "Branch2", "sn": "FGVM...", "ip": "10.99.250.17",
+        "name": "Branch2", "sn": "FGVM...", "ip": "192.0.2.17",
         "conn_status": 0, "flags": None,
     })
     assert real["conn_status"] == "down"

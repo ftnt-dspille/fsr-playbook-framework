@@ -9,7 +9,7 @@ since the root `pyproject.toml` is taken by the `fsrpb` CLI dist.
 ## Install (Phase 1: git+https, wheel only)
 
 ```
-pip install "git+https://svl-devops-gitlab01.fortilab.fortinet.com/dspille/fsr-playbook-framework.git@<ref>#subdirectory=packaging/fsr_playbooks"
+pip install "git+https://github.com/ftnt-dspille/fsr-playbook-framework.git@main#subdirectory=packaging/fsr_playbooks"
 ```
 
 Extras:

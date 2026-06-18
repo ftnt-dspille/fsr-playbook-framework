@@ -29,8 +29,8 @@ from .tools_triage import (
     _FAZ_LOG_TIME,
 )
 
-# FortiManager connector to drive. The box at 10.99.249.205 runs the json-rpc
-# variant; all FMG builds (fortinet-fortimanager, *_dev, *-json-rpc) expose the
+# FortiManager connector to drive. The json-rpc variant and all FMG builds
+# (fortinet-fortimanager, *_dev, *-json-rpc) expose the
 # json_rpc_get op this module relies on, so this is the only thing to change to
 # retarget a differently-named build.
 _FMG_CONNECTOR = "fortinet-fortimanager-json-rpc"

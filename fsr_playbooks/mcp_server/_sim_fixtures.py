@@ -252,9 +252,9 @@ def _fmg_jsonrpc(rows: list[dict], url: str) -> dict[str, Any]:
     """Wrap rows in the real `fortinet-fortimanager-json-rpc` get envelope.
 
     The connector's `json_rpc_get` returns the row list under `get_response`
-    (NOT the JSON-RPC `result[].data` shape) — verified live on the box
-    (10.99.249.205, connector 1.2.6). Mirroring it here keeps the offline sim
-    faithful to production so digest-shape regressions surface in tests."""
+    (NOT the JSON-RPC `result[].data` shape) — verified live against the
+    connector (v1.2.6). Mirroring it here keeps the offline sim faithful to
+    production so digest-shape regressions surface in tests."""
     return {"operation": None, "status": "Success", "message": "",
             "data": {"get_response": rows}}
 

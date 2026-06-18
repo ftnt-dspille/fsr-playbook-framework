@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,8 +9,13 @@ description = "FortiSOAR playbook authoring/compiler framework: YAML->FSR-JSON c
 readme = "README.md"
 # Ships into the SOAR 3.9 runtime — do NOT raise to match the fsrpb root dist (>=3.11).
 requires-python = ">=3.9"
-license = { text = "Proprietary" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Dylan Spille" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+]
 
 # Base = compiler + agent dataclasses. Verified by import scan (2026-06-17):
 # NOT jsonschema (0 uses), NOT pyfsr (never hard-imported).
