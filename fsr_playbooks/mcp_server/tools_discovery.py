@@ -1226,7 +1226,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
                     "IRIs; friendly names are resolved at import."
                 ),
                 "type": (
-                    "optional — 'comment' (default) or 'actionlog', or a "
+                    "optional — 'comment' (default), or a "
                     "full `/api/3/picklists/<uuid>` IRI from the "
                     "'Comment Type' picklist."
                 ),

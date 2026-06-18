@@ -187,7 +187,7 @@ normalized to null on round-trip.
 
 ## Step-level cross-cutting fields (siblings of `arguments:`)
 
-Four concepts apply across step types and can be written at the step
+Five concepts apply across step types and can be written at the step
 level instead of buried under `arguments:`. The compiler folds them into
 the canonical wire shape — both forms are accepted, but pick one:
 
@@ -199,6 +199,8 @@ the canonical wire shape — both forms are accepted, but pick one:
     data: { score: 0 }
   set:                                    # inline vars stamped after step
     last_lookup_at: "{{ now() }}"
+  message:                               # post a comment to the record
+    content: "Enrichment complete for {{ vars.item }}"
   arguments:
     connector: my-conn
     operation: lookup
@@ -211,9 +213,44 @@ the canonical wire shape — both forms are accepted, but pick one:
   trigger filter (`{logic: AND|OR, filters: [{field, op, value?}]}`).
 - `set:` — sugar for `arguments.step_variables`. Same spelling whether
   the step is `set_variable` (where it's `vars:`) or anything else.
+- `message:` — post a collaboration comment to the record after the step
+  runs. Supported on all step types except `delay` and `set_api_keys`.
+  See below for the full field reference.
 
 Setting the same value at step level *and* under `arguments:` is an
 error so authors don't accidentally end up with two values.
+
+### `message:` — posting a comment to the record
+
+The `message:` block tells FSR to post a collaboration comment on the
+associated record after the step completes. It works on any step type
+(connector, set_variable, create_record, find_record, decision, etc.)
+except `delay` and `set_api_keys`.
+
+```yaml
+- name: Block IP
+  type: connector
+  message:
+    content: "Blocked {{ vars.src_ip }} on FortiGate."
+    record: "{{ vars.input.records[0]['@id'] }}"   # omit when triggered on a record
+    tags: [containment]                             # optional; names auto-resolved
+    thread: false                                   # optional; default false
+  arguments:
+    connector: fortigate-firewall
+    operation: block_ip
+    params: { ip: "{{ vars.src_ip }}" }
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `content` | yes | Comment text. Jinja supported. Plain text is auto-wrapped in `<p>…</p>`; raw HTML passes through. |
+| `record` | situational | IRI of the record to attach the comment to. **Omit when the playbook runs on a triggered record** — FSR attaches it automatically. Use `records:` for a Jinja expression. |
+| `records` | situational | Jinja expression resolving to a record IRI. Alternative to `record:` when you need dynamic resolution. |
+| `tags` | no | List of tag names. Unknown names are auto-created on first use. |
+| `thread` | no | Boolean, default `false`. |
+
+The `type:` field is omitted intentionally — all comments use the
+standard Comment type (`/api/3/picklists/ff599189-…`). Do not set it.
 
 ## Setting variables: where they go under `arguments`
 

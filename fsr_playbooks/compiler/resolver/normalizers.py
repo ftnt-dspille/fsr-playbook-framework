@@ -108,14 +108,26 @@ class NormalizerMixin:
         # Per-step-type argument validation
         if step.type == "connector" or step.type in ("stop", "end"):
             self._resolve_connector_args(step, path, errors)
-            return
-        if step.type == "workflow_reference":
+            # message block still applies to connector steps — fall through.
+        elif step.type == "workflow_reference":
             self._resolve_workflow_reference_args(step, path, errors, pb_by_name or {})
         elif step.type == "set_variable":
             self._normalize_set_variable_args(step, path, errors)
         elif step.type == "start":
             self._normalize_start_args(step)
         # decision: no further ref-checking in v1 — args are free-form jinja.
+
+        # message: posts a collaboration comment after the step runs.
+        # Supported on all step types except delay (Wait) and set_api_keys,
+        # which the FSR engine doesn't wire a post_message call for.
+        _NO_MESSAGE_TYPES = {
+            "delay", "set_api_keys",
+            "start", "start_on_create", "start_on_update",
+        }
+        if (step.type not in _NO_MESSAGE_TYPES
+                and isinstance(step.arguments, dict)
+                and isinstance(step.arguments.get("message"), dict)):
+            self._normalize_message_block(step, path, errors)
 
     def _normalize_record_action_args(
         self, step: Step, path: str, errors: list[CompileError],
@@ -1015,29 +1027,14 @@ class NormalizerMixin:
                 unwrapped[item["name"]] = item.get("value", "")
             siblings = {k: v for k, v in a.items() if k != "arg_list"}
             step.arguments = {**unwrapped, **siblings}
-        # Normalize the message-to-record sugar block. The wire shape FSR
-        # expects (observed in store/incoming/.../FSRPB Manual-Input Test):
-        #   message: {tags: [iri…], type: <picklist iri>, thread: bool,
-        #             content: "<html>", records: "<iri or jinja>"}
-        # When a manual-trigger playbook fires on a record context, FSR
-        # automatically attaches the message to that record; in that case
-        # `records:` is omitted. If there's no triggered-record context
-        # (e.g. designer Run button with no record), the author MUST set
-        # `record:` (single) or `records:` (jinja list) to a record IRI.
-        if isinstance(step.arguments.get("message"), dict):
-            self._normalize_message_block(step, path, errors)
 
     # FSR's built-in "Comment Type" picklist — drives the message kind on
-    # the record's collaboration panel. Two stock values:
-    #   Comment    → shows as a normal comment (default for set-variable
-    #                message: blocks)
-    #   ActionLog  → shows in the Action Log feed instead
-    # UUIDs are stable across stock FSR installs; sourced from
-    # `fsrpb picklist show "Comment Type"`. If a deployment customizes
-    # this picklist, authors should pass a full IRI instead of a name.
+    # the record's collaboration panel. Only the Comment value is used;
+    # the IRI is stable across stock FSR installs (sourced from
+    # `fsrpb picklist show "Comment Type"`). If a deployment customizes
+    # this picklist, authors can pass a full IRI instead of a name.
     _MESSAGE_TYPE_IRIS = {
-        "comment":   "/api/3/picklists/ff599189-3eeb-4c86-acb0-a7915e85ac3b",
-        "actionlog": "/api/3/picklists/1165899b-7091-4291-aafc-487c4309e8ff",
+        "comment": "/api/3/picklists/ff599189-3eeb-4c86-acb0-a7915e85ac3b",
     }
     _DEFAULT_MESSAGE_TYPE_IRI = _MESSAGE_TYPE_IRIS["comment"]
 
@@ -1151,8 +1148,7 @@ class NormalizerMixin:
                 msg_type = self._MESSAGE_TYPE_IRIS[key]
             else:
                 msg_type = default_iri
-                known = ", ".join(live_options) if live_options else \
-                    "Comment, ActionLog"
+                known = ", ".join(live_options) if live_options else "Comment"
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
                     message=(f"set_variable.message.type {msg_type_raw!r} is "
@@ -1179,9 +1175,8 @@ class NormalizerMixin:
             "type": msg_type,
             "thread": thread,
             "content": content,
+            "records": rec_value if rec_value is not None else "",
         }
-        if rec_value is not None:
-            wire["records"] = rec_value
         a["message"] = wire
 
     def _summarize_visible_set(

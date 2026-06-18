@@ -269,7 +269,7 @@ playbooks:
     assert msg["tags"] == ["/api/3/tags/auto_block"]
     assert msg["type"].startswith("/api/3/picklists/")
     assert msg["thread"] is False
-    assert "records" not in msg  # omitted -> FSR auto-attaches
+    assert msg["records"] == ""  # empty string; FSR auto-attaches from trigger context
 
 
 def test_message_sugar_record_override(db_path):
@@ -325,13 +325,10 @@ playbooks:
 
 
 def test_message_type_friendly_names_resolve_to_comment_type_picklist(db_path):
-    """`type: Comment` and `type: ActionLog` map to the Comment Type
-    picklist's stock IRIs. Case-insensitive."""
+    """`type: Comment` maps to the Comment Type picklist IRI. Case-insensitive."""
     for friendly, expected_uuid in [
-        ("Comment",   "ff599189-3eeb-4c86-acb0-a7915e85ac3b"),
-        ("comment",   "ff599189-3eeb-4c86-acb0-a7915e85ac3b"),
-        ("ActionLog", "1165899b-7091-4291-aafc-487c4309e8ff"),
-        ("actionlog", "1165899b-7091-4291-aafc-487c4309e8ff"),
+        ("Comment", "ff599189-3eeb-4c86-acb0-a7915e85ac3b"),
+        ("comment", "ff599189-3eeb-4c86-acb0-a7915e85ac3b"),
     ]:
         text = f"""
 collection: T
