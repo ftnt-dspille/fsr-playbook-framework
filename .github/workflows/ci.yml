@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # Pinned to match .pre-commit-config.yaml so local + CI agree.
+      # Config (target-version py39, select F) lives in pyproject.toml.
+      - run: uvx ruff@0.14.13 check fsr_playbooks
+
+  test:
+    name: pytest (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor is 3.9 (SOAR runtime), but mcp requires >=3.10, so the test
+        # matrix starts at 3.10. ruff enforces the py39 syntax floor above.
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install deps
+        # The package's declared deps ([mcp] implies [llm]) + test-only tools.
+        # Verified to run the full fsr_playbooks suite with nothing else.
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install pyyaml "ruamel.yaml" jinja2 openai anthropic "mcp>=1.0" \
+                         pytest requests-mock anyio
+      - name: Run tests
+        # Call the venv interpreter directly — deterministic, avoids uv trying
+        # to sync the root project (which expects a sibling pyfsr checkout).
+        run: .venv/bin/python -m pytest fsr_playbooks/tests -q -m "not live and not slow"
+
+  package:
+    name: build + twine check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build wheel
+        # Relative package-dir (../..) resolves against the checked-out repo
+        # root for this in-place build off the clone.
+        run: cd packaging/fsr_playbooks && uv build --wheel --out-dir dist
+      - name: Validate metadata
+        run: uvx twine check packaging/fsr_playbooks/dist/*.whl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fsr_playbooks-wheel
+          path: packaging/fsr_playbooks/dist/*.whl
