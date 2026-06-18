@@ -32,9 +32,7 @@ from . import (
     tools_execution,
     tools_jinja,
     tools_picklists,
-    tools_noc,
     tools_recipe,
-    tools_triage,
     tools_verify,
     tools_enhancement,
     tools_emit,
@@ -97,40 +95,6 @@ from .tools_corpus import (
     review_recent_thumbs_down,
     search_api_examples,
     search_playbooks,
-)
-
-# Triage tools
-from .tools_triage import (
-    faz_get_alerts,
-    faz_raw_query,
-    faz_search_ip,
-    find_containment_actions,
-    find_enrichment_actions,
-    get_record,
-    get_run_env,
-    list_configured_connectors,
-    list_playbook_runs,
-    list_recent_failed_runs,
-    list_tags,
-    search_module_records,
-    siem_events_for_incident,
-    siem_raw_query,
-    siem_search_host,
-    siem_search_ip,
-    siem_search_user,
-    test_find_record,
-    verification_status,
-)
-
-# NOC / FortiManager + FortiAnalyzer device-diagnostic tools
-from .tools_noc import (
-    faz_event_summary,
-    faz_search_by_serial,
-    faz_search_device_events,
-    fmg_get_device_list,
-    fmg_get_device_status,
-    fmg_get_ha_status,
-    fmg_get_policy_package_status,
 )
 
 # Picklist tools
@@ -252,34 +216,6 @@ __all__ = [
     "find_step_examples",
     "find_step_recipe",
     "search_api_examples",
-    # Triage
-    "find_containment_actions",
-    "find_enrichment_actions",
-    "get_record",
-    "get_run_env",
-    "list_configured_connectors",
-    "list_tags",
-    "list_recent_failed_runs",
-    "list_playbook_runs",
-    "verification_status",
-    "test_find_record",
-    "search_module_records",
-    "siem_search_ip",
-    "siem_search_host",
-    "siem_search_user",
-    "siem_events_for_incident",
-    "siem_raw_query",
-    "faz_get_alerts",
-    "faz_search_ip",
-    "faz_raw_query",
-    # NOC / FortiManager + FortiAnalyzer device diagnostics
-    "fmg_get_device_list",
-    "fmg_get_device_status",
-    "fmg_get_ha_status",
-    "fmg_get_policy_package_status",
-    "faz_search_device_events",
-    "faz_search_by_serial",
-    "faz_event_summary",
     # Picklists
     "list_picklists",
     "get_picklist",
@@ -311,12 +247,4 @@ __all__ = [
     "find_api_fixture",
     "find_api_product",
     "propose_http_fallback",
-    # Packaged agent loop
-    "triage_build_turn",
-    "triage_build_resume",
-    # Desktop-native trace-session primitives
-    "triage_session_start",
-    "triage_session_state",
-    "triage_session_clear",
-    "triage_guidance",
 ]

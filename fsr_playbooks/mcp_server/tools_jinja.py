@@ -180,7 +180,10 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
 
     values: dict[str, Any] = {}
     if from_pb_execution:
-        from .tools_triage import get_run_env
+        try:
+            from .tools_triage import get_run_env
+        except ImportError:
+            return {"error": "from_pb_execution requires the investigation tools (tools_triage), which are not part of the authoring library"}
         run_env = get_run_env(from_pb_execution)  # reuse the same transform
         if "error" in run_env:
             return {"error": f"from_pb_execution lookup failed: {run_env['error']}"}

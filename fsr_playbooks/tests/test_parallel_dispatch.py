@@ -164,7 +164,7 @@ def test_mixed_turn_parallelizes_readonly_then_suspends(monkeypatch):
     turns = [
         _FinalMessage([
             _tool_use("c1", "find_connector", {"q": "a"}),
-            _tool_use("c2", "get_record", {"iri": "x"}),
+            _tool_use("c2", "search_playbooks", {"q": "x"}),
             _tool_use("c3", "run_op", {"connector": "fg", "op": "block_ip"}),
             _tool_use("c4", "find_connector", {"q": "after"}),
         ]),

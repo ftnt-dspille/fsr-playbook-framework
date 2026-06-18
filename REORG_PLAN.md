@@ -114,7 +114,30 @@ fsr-playbook-framework/
    the appliance smoke. Added `tests/test_public_surface_contract.py` as the standing safety net.
 *This is the net that lets later internal moves be non-breaking.*
 
-### Phase 1 — Carve out investigation/triage (surface B) — the one coordinated-cutover phase
+### Phase 1 — Carve out investigation/triage (surface B) — ✅ LIBRARY SIDE DONE (2026-06-17)
+
+> **Scope decision (2026-06-17, owner):** the framework repo is to hold **only the playbook
+> authoring/compilation library + the web frontend**. Investigation/triage (SIEM/FAZ search, alert
+> records, NOC device diagnostics, live crudhub) is NOT authoring → removed from the library.
+> The mental model that governs the cut: **"library makes playbooks; connector investigates
+> incidents."** `tools_execution` (run/push/dry-run/healthcheck playbooks) is kept — running and
+> deploying a playbook is part of the authoring lifecycle.
+>
+> **Done (library side, branch `reorg/phase-0-freeze-surface`):** removed 11 modules
+> (`llm/triage_*`, `mcp_server/{tools_triage,tools_noc,_live_crudhub,_noc_scenarios,noc_scenarios.json}`,
+> `agent/system_prompt_triage.md`) + 17 investigation tests; pruned `mcp_server/__init__.py` and
+> `llm/tools.py` (SAFE_TOOLS/TOOL_TIERS) of investigation tools; severed the two authoring→investigation
+> tendrils (`tools_jinja.render_jinja`'s `from_pb_execution`, `tools_recipe.assert_playbook_outcome`)
+> to degrade gracefully. **Gate: import clean, suite 267 passed, surface-A contract 48 green.**
+>
+> **NOTE — connector unaffected:** the connector still vendors its own full copy of `fsr_playbooks`,
+> so removing investigation from the *canonical* library does not break it. Connector absorption of
+> the removed modules into a connector-owned home (+ `operations.py` import rewrite) and the pinned-
+> package cutover remain — and can't be gated offline here (needs the FortiSOAR `connectors` SDK).
+> The original surface-A/B "paired commit" framing below assumed the connector imported from the
+> canonical library; it doesn't yet (it vendors), so library-first removal is safe.
+
+<details><summary>Original surface-B carve-out steps (superseded by the scope decision above)</summary>
 1. Split `llm/tools.py`: keep `anthropic_tools` (authoring) in the library; move
    `_tier_for_run_op` + triage helpers out.
 2. Move surface-B modules (`llm/triage_*`, `mcp_server/tools_{execution,agent}`, `_live_crudhub`,
@@ -126,6 +149,12 @@ fsr-playbook-framework/
 5. **Gate:** library tests green WITHOUT triage; connector tests green importing triage locally;
    `import fsr_playbooks.mcp_server` succeeds with no triage present. **Paired commit** (library
    removal + connector absorption land together).
+</details>
+
+**Remaining Phase 1 follow-up (connector side, separate session — can't gate offline):**
+- [ ] Give the connector a connector-owned home for the removed modules (or rely on its vendored copy until the Phase 5 pinned-package cutover).
+- [ ] Rewrite `operations.py` investigation imports off `fsr_playbooks.*` once that home exists.
+- [ ] Live appliance smoke (see pyfsr memory: lab `10.99.249.159`, module box `10.99.249.205`).
 
 ### Phase 2 — Split library vs. tooling physically
 1. `git mv python/ tooling/` (preserve history); regroup into `probes/ deploy/ e2e/ evals/`.

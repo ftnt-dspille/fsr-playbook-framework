@@ -1,6 +1,6 @@
 """MCP tools: Tools Recipe"""
 from __future__ import annotations
-from . import _shared, tools_triage, tools_jinja
+from . import _shared, tools_jinja
 
 import json
 import re
@@ -18,6 +18,24 @@ from ._shared import (
 )
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
+
+
+def _tools_triage_or_err():
+    """Lazy handle to the investigation tools (``tools_triage``), which are
+    connector-owned and NOT part of the authoring library (REORG_PLAN: "library
+    makes playbooks; connector investigates incidents"). Returns the module, or
+    an error envelope when it's absent so live-run diagnostics degrade cleanly
+    instead of raising at import. Present whenever these tools run in the
+    connector runtime."""
+    try:
+        from . import tools_triage
+    except ImportError:
+        return None, _err(
+            "no_investigation_tools",
+            "this live-run diagnostic requires the investigation tools "
+            "(tools_triage), which are not part of the authoring library",
+        )
+    return tools_triage, None
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -65,6 +83,14 @@ def assert_playbook_outcome(assertions: list[dict[str, Any]]) -> dict[str, Any]:
     if client is None:
         return {"ok": False, "code": "no_live_fsr",
                 "message": "FSR instance not configured"}
+    # tools_triage is investigation/triage (connector-owned post REORG_PLAN
+    # Phase 1); imported lazily so the bare library stays importable. Present
+    # whenever this live-FSR assertion tool actually runs (connector runtime).
+    try:
+        from . import tools_triage
+    except ImportError:
+        return {"ok": False, "code": "no_investigation_tools",
+                "message": "assert_playbook_outcome requires investigation tools (tools_triage) not present in the authoring library"}
     results = [tools_triage._assert_one(client, a if isinstance(a, dict) else {})
                for a in assertions]
     passed = sum(1 for r in results if r.get("ok"))
@@ -284,6 +310,9 @@ def diagnose_yaml_against_pb_execution(
         pb_execution: workflow PK (digits, e.g. "676747") OR task_id UUID
             of the failed (or completed) run to use as the env source.
     """
+    tools_triage, _miss = _tools_triage_or_err()
+    if _miss is not None:
+        return _miss
     env_out = tools_triage.get_run_env(pb_execution)
     if "error" in env_out or env_out.get("ok") is False:
         return _err(
@@ -428,6 +457,9 @@ def why_did_playbook_fail(
         on resolution failure.
     """
     # Step 1 — resolve playbook_or_id to a concrete run.
+    tools_triage, _miss = _tools_triage_or_err()
+    if _miss is not None:
+        return _miss
     run_match: dict[str, Any] | None = None
     error_message: str | None = None
     if _looks_like_run_id(playbook_or_id):

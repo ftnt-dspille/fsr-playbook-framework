@@ -16,7 +16,18 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from . import _noc_scenarios
+
+def _noc_scenarios_or_none():
+    """NOC scenario manifest (investigation/triage data, connector-owned after
+    REORG_PLAN Phase 1). Imported lazily and optionally: the authoring sim path
+    stays usable in the bare library — it simply contributes no NOC scenario
+    rows when the connector-owned manifest isn't present."""
+    try:
+        from . import _noc_scenarios
+    except ImportError:
+        return None
+    return _noc_scenarios
+
 
 # ---------------------------------------------------------------------------
 # Configured-connector roster (connector_details / list_configured_connectors)
@@ -286,8 +297,9 @@ def _fmg_json_rpc_get(params: dict) -> Any:
         ]
         # Manifest-driven NOC scenarios (vpn_tunnel_down, …) each contribute one
         # managed-device row, so a fleet sweep shows them alongside BRANCH-04.
-        rows.extend(sc["fmg_row"] for sc in _noc_scenarios.scenarios()
-                    if sc.get("fmg_row"))
+        if (_noc := _noc_scenarios_or_none()) is not None:
+            rows.extend(sc["fmg_row"] for sc in _noc.scenarios()
+                        if sc.get("fmg_row"))
         return _fmg_jsonrpc(rows, url)
     # single named device
     return _fmg_jsonrpc([_fmg_device_row(down=True)], url)
@@ -298,7 +310,8 @@ def _faz_device_logs(params: dict) -> Any:
     ``devid``) return that scenario's canned ``faz_logs``; otherwise the default
     FGT-BRANCH-04 device-down story (WAN1 link-down at 03:11, last keepalive
     03:13:55, then silence)."""
-    sc = _noc_scenarios.by_device(str((params or {}).get("devid") or ""))
+    _noc = _noc_scenarios_or_none()
+    sc = _noc.by_device(str((params or {}).get("devid") or "")) if _noc else None
     if sc and sc.get("faz_logs"):
         return {"data": list(sc["faz_logs"])}
     rows = [
