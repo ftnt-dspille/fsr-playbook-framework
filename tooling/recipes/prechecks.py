@@ -61,7 +61,11 @@ def check_connector_installed(
     try:
         resp = client.get(
             "/api/integration/connectors/",
-            params={"name": name, "$limit": 50},
+            # NB: the integration API is Django-REST — it paginates on
+            # `page_size`/`page` (default 30) and returns rows under `data`,
+            # NOT the crudhub's `$limit`/`hydra:member`. Passing `$limit` here
+            # silently caps results at 30.
+            params={"name": name, "page_size": 1000},
         )
     except Exception as exc:  # noqa: BLE001
         return PrecheckResult(
@@ -69,16 +73,17 @@ def check_connector_installed(
             code="connector_check_failed",
             message=f"could not reach FSR to verify connector {name!r}: {exc}",
         )
-    rows = (resp or {}).get("hydra:member") or []
+    rows = (resp or {}).get("data") or (resp or {}).get("hydra:member") or []
     if not rows:
         # Try a broader catalog scan for close matches.
         suggestions: list[str] = []
         try:
             broad = client.get(
-                "/api/integration/connectors/", params={"$limit": 300}
+                "/api/integration/connectors/", params={"page_size": 1000}
             )
             installed = [
-                (r.get("name") or "") for r in (broad or {}).get("hydra:member") or []
+                (r.get("name") or "")
+                for r in ((broad or {}).get("data") or (broad or {}).get("hydra:member") or [])
             ]
             needle = name.lower().replace("-", "").replace("_", "")
             suggestions = sorted({

@@ -63,8 +63,13 @@ def list_configurations(connector: str) -> list[dict]:
     client = _live_client()
     if client is None:
         return []
+    # The integration API is Django-REST: it paginates on `page_size`/`page`
+    # (default 30) — the crudhub's `$limit` is silently ignored here, which used
+    # to cap this at the first 30 connectors. Filter by name server-side and
+    # raise the page size so a connector past the default page is still found.
     r = client.session.get(
-        client.base_url + "/api/integration/connectors/?$limit=300",
+        client.base_url + "/api/integration/connectors/",
+        params={"name": connector, "page_size": 1000},
         verify=client.verify_ssl,
     )
     if r.status_code != 200:
