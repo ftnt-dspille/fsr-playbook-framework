@@ -1,0 +1,5 @@
+{
+  "name": "noc_sla_breach_repoll",
+  "prompt": "Author a FortiSOAR playbook. Trigger: a NOC ticket in the tickets module is updated such that its `sla_pct` field crosses 80 AND its severity is High or Critical. Behavior: page the queue's primary on-call user via PagerDuty with the ticket details. Then wait 15 minutes. After the delay, re-read the same ticket from the tickets module to check its `acknowledged_at` field. If it's still null, page the on-call's manager via PagerDuty AND update the ticket's severity to one notch higher (High → Critical; Critical stays Critical, but add a comment 'Already at top severity'). If acknowledged, just finish. Output complete YAML.",
+  "notes": "Tests start_on_update with op:changed on sla_pct, a delay step used for its real purpose (wait before re-checking state), a SECOND find_record on the same module to re-read the triggering record (the trigger's vars.input.records[0] is stale after the delay), nested decision on the acknowledged_at value, and a same-severity guard. The walker must NOT let the agent reference vars.input.records[0].acknowledged_at after the delay — that's the stale-trigger bug this task probes."
+}

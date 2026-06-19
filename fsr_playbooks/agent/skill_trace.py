@@ -1,0 +1,406 @@
+"""SkillCall trace recorder — capture the typed action trace of a session.
+
+The agent **already runs the connector ops** during triage, so their real
+outputs sit in the tool loop's `run_op` results. This module is the thin
+recorder (SKILL_BASED_PLAYBOOK_PLAN §2) that captures, per executed
+action, what is already there:
+
+    SkillCall = {skill_id, step_name, resolved_inputs, observed_output}
+
+`observed_output` is the asset that makes everything downstream reliable:
+it is both the **wiring source** (§3, value-match over captured outputs)
+and the **render context** for verification (§4). No `output_schema`
+declaration is needed up front — the real output *is* the schema for
+this session.
+
+Design: there is no session handle inside the global `run_op` MCP tool,
+so the connector's per-session wrapper installs a process-local active
+trace via `set_active_trace()`; `record_run_op()` is a no-op when no
+trace is active (studio, tests, eval harness), keeping live triage on raw
+`run_op` untouched. The connector persists `trace.to_json()` next to the
+transcript and rehydrates with `SkillTrace.from_json()` for the
+session→YAML compile.
+"""
+from __future__ import annotations
+
+import json
+import re
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+# Step-name charset rule (mirrors tools_emit._NAME_RE): letters, digits,
+# spaces, underscores. The recorder generates names that already satisfy
+# it so a recorded step_name can be used as a YAML step name unedited.
+_NAME_OK = re.compile(r"[^A-Za-z0-9 _]+")
+
+
+def _titleize_op(op: str) -> str:
+    """`isolate_host` -> `Isolate Host`. Sanitized to the step-name charset."""
+    words = re.split(r"[_\-\s]+", op or "")
+    pretty = " ".join(w.capitalize() for w in words if w) or "Step"
+    return _NAME_OK.sub("", pretty).strip() or "Step"
+
+
+def _sanitize_step_name(s: str) -> str:
+    """Coerce an AI-supplied step label to the YAML step-name charset
+    (letters/digits/spaces/underscores), collapse whitespace, and bound the
+    length. Uniqueness is handled separately by `SkillTrace._unique_name`."""
+    pretty = _NAME_OK.sub("", (s or "").strip())
+    pretty = re.sub(r"\s+", " ", pretty).strip()
+    return pretty[:80].strip() or "Step"
+
+
+@dataclass
+class SkillCall:
+    skill_id: str
+    step_name: str                          # stable; becomes the YAML step name
+    resolved_inputs: Dict[str, Any] = field(default_factory=dict)
+    observed_output: Any = None             # the real (full) run_op result (the data payload)
+    # True when this call was only STAGED (an `emit_action_card` the analyst
+    # was offered) and never executed, so `observed_output` is None — there is
+    # no real run to capture. The trace-build path still replays it as a step
+    # (e.g. the approved containment the investigation should automate), but
+    # it produces no output for downstream value-match wiring. See
+    # `SkillTrace.record_staged_action`.
+    staged: bool = False
+    # How the captured `observed_output` nests under the FSR runtime step
+    # record. run_op captures `resp.get("data", resp)`: when the raw op
+    # response carried a `data` key, the runtime reference is
+    # `vars.steps.<name>.data.<path>` (ref_prefix="data"); otherwise the
+    # payload sits directly at `vars.steps.<name>.<path>` (ref_prefix="").
+    # The wiring compiler (§3) uses this so generated paths match runtime,
+    # and the verify loop (§4) keys its render context the same way.
+    ref_prefix: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {
+            "skill_id": self.skill_id,
+            "step_name": self.step_name,
+            "resolved_inputs": self.resolved_inputs,
+            "observed_output": self.observed_output,
+            "ref_prefix": self.ref_prefix,
+        }
+        # Emit `staged` only when set so legacy readers / golden fixtures see
+        # the shape they always did.
+        if self.staged:
+            d["staged"] = True
+        return d
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "SkillCall":
+        return cls(
+            skill_id=d["skill_id"],
+            step_name=d["step_name"],
+            resolved_inputs=d.get("resolved_inputs") or {},
+            observed_output=d.get("observed_output"),
+            ref_prefix=d.get("ref_prefix") or "",
+            staged=bool(d.get("staged")),
+        )
+
+
+class SkillTrace:
+    """Ordered record of the SkillCalls executed in one session.
+
+    Order is dependency order (the agent ran the ops in the order it
+    needed them), which §3 relies on for value-match wiring.
+    """
+
+    def __init__(
+        self,
+        calls: Optional[List[SkillCall]] = None,
+        module: Optional[str] = None,
+        record_fields: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.calls: List[SkillCall] = list(calls or [])
+        # Friendly module name of the record the triage session ran on
+        # (e.g. "alerts", "incidents") — set by the connector when it opens
+        # the per-turn trace scope from the triaged record. NOT derivable
+        # from the recorded ops; it's the investigation's subject. The
+        # trace-build path binds the playbook's start trigger to it so the
+        # playbook runs from that module's record listing (a manual
+        # cybersponse.action trigger) instead of a designer-only Referenced
+        # trigger. None → bare `start` (legacy behavior).
+        self.module: Optional[str] = module
+        # Field map of the triaged record (the widget-supplied `entity.fields`
+        # — {field_name: value}). Stamped by the connector alongside `module`.
+        # The trace-build path value-matches a one-off triage IOC (e.g. the IP
+        # the agent enriched) against these fields; on a hit it parameterizes
+        # the IOC to `{{ vars.input.records[0].<field> }}` via a Set Inputs
+        # step instead of baking the literal in — making the playbook
+        # re-runnable on any record of `module`. None → IOCs stay literal.
+        self.record_fields: Optional[Dict[str, Any]] = record_fields
+        # Tracks how many times each base step name has been used so
+        # repeated ops get stable, unique names (`Get Record`, `Get Record 2`).
+        self._name_counts: Dict[str, int] = {}
+        for c in self.calls:
+            base = c.step_name.rsplit(" ", 1)[0] if c.step_name[-1:].isdigit() else c.step_name
+            self._name_counts[base] = self._name_counts.get(base, 0) + 1
+
+    def _unique_name(self, base: str) -> str:
+        n = self._name_counts.get(base, 0) + 1
+        self._name_counts[base] = n
+        return base if n == 1 else f"{base} {n}"
+
+    def record(self, call: SkillCall) -> SkillCall:
+        self.calls.append(call)
+        return call
+
+    def record_run_op(
+        self,
+        connector: str,
+        op: str,
+        params: Optional[Dict[str, Any]],
+        observed_output: Any,
+        step_name: Optional[str] = None,
+        ref_prefix: str = "",
+        config: str = "",
+        agent: str = "",
+    ) -> SkillCall:
+        """Record one `run_op` execution as a `run_connector_action`
+        SkillCall. `params` are the resolved inputs the agent passed;
+        `observed_output` MUST be the FULL op output (not the summarized
+        payload returned to the LLM) so value-match wiring has the real
+        shape to match against. `ref_prefix` is "data" when the raw op
+        response wrapped its payload in a `data` key (so runtime refs are
+        `vars.steps.<name>.data.*`), else "" (refs sit directly).
+
+        `config` is the configuration id run_op resolved for this execution
+        (incl. an agent-bound connector's per-agent config). The compiled
+        connector step carries it as `arguments.config` so a trace-built
+        playbook runs against the SAME config the agent used — agent-bound
+        connectors have no `""`-resolvable default, so without this the
+        runtime fails with INTEGRATION-12 (no matching configuration).
+
+        `agent` is the FortiSOAR Agent id when run_op routed the op through an
+        agent (agent-bound connectors like fortigate-firewall). The compiled
+        step carries it as `arguments.agent` — a playbook connector step for an
+        agent-routed connector needs the agent binding too, not just the
+        config id, or the workflow engine can't reach the connector."""
+        # An AI-supplied step_name is sanitized to the charset; the op-derived
+        # title is the fallback. EITHER way the base goes through _unique_name so
+        # repeats get a stable numeric suffix — an AI label can't break the
+        # one-name-per-step invariant the wiring compiler relies on.
+        base = _sanitize_step_name(step_name) if step_name else _titleize_op(op)
+        name = self._unique_name(base)
+        resolved = dict(params or {})
+        resolved["connector"] = connector
+        resolved["operation"] = op
+        if config:
+            resolved["config"] = config
+        if agent:
+            resolved["agent"] = agent
+        return self.record(SkillCall(
+            skill_id="run_connector_action",
+            step_name=name,
+            resolved_inputs=resolved,
+            observed_output=observed_output,
+            ref_prefix=ref_prefix,
+        ))
+
+    def _has_op(self, connector: str, op: str) -> bool:
+        """True if a connector action for `(connector, op)` is already on the
+        trace (executed or staged) — the dedup key for staged actions."""
+        for c in self.calls:
+            ri = c.resolved_inputs or {}
+            if ri.get("connector") == connector and ri.get("operation") == op:
+                return True
+        return False
+
+    def record_staged_action(
+        self,
+        connector: str,
+        op: str,
+        params: Optional[Dict[str, Any]],
+        step_name: Optional[str] = None,
+        config: str = "",
+        agent: str = "",
+    ) -> Optional[SkillCall]:
+        """Record a STAGED connector action (an `emit_action_card` the analyst
+        was offered) as a `run_connector_action` SkillCall with no
+        `observed_output` — it was never executed.
+
+        This is what lets a trace-built playbook AUTOMATE an approved-but-staged
+        containment (`emit_action_card` for e.g. `fortigate-firewall.block_ip`):
+        the action never ran during triage, so `run_op` never recorded it and
+        the compiler had nothing to replay (the `action_coverage` gap). Recording
+        it here adds the step to the trace; `insert_containment_guard` then gates
+        it behind a malicious-verdict decision (safe-by-default), and the build
+        prompt's manual-approval handoff keeps a human in the loop.
+
+        Deduped by `(connector, op)` — re-emitting the same card across turns,
+        or staging an action that later actually executes, adds only one step
+        (the executed one, with its real output, wins). Returns the recorded
+        SkillCall, or None if no-op'd (a same-op call already exists)."""
+        if self._has_op(connector, op):
+            return None
+        base = _sanitize_step_name(step_name) if step_name else _titleize_op(op)
+        name = self._unique_name(base)
+        resolved = dict(params or {})
+        resolved["connector"] = connector
+        resolved["operation"] = op
+        if config:
+            resolved["config"] = config
+        if agent:
+            resolved["agent"] = agent
+        return self.record(SkillCall(
+            skill_id="run_connector_action",
+            step_name=name,
+            resolved_inputs=resolved,
+            observed_output=None,
+            ref_prefix="",
+            staged=True,
+        ))
+
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {"calls": [c.to_dict() for c in self.calls]}
+        # Emit `module` only when set so a legacy reader (and golden
+        # fixtures) see the same shape they always did.
+        if self.module:
+            d["module"] = self.module
+        if self.record_fields:
+            d["record_fields"] = self.record_fields
+        return d
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), default=str)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "SkillTrace":
+        return cls(
+            [SkillCall.from_dict(c) for c in (d.get("calls") or [])],
+            module=d.get("module"),
+            record_fields=d.get("record_fields"),
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> "SkillTrace":
+        if not text:
+            return cls()
+        return cls.from_dict(json.loads(text))
+
+    def __len__(self) -> int:
+        return len(self.calls)
+
+
+# ---------------------------------------------------------------------------
+# Process-local active trace — installed by the connector's session wrapper
+# ---------------------------------------------------------------------------
+
+_active: Optional[SkillTrace] = None
+
+# Recording-mute depth. While > 0, `record_run_op` no-ops. MCP convenience
+# wrappers (e.g. the FortiSIEM pub/v2 query engine) make several internal
+# `run_op("…","execute_api_request",…)` calls — submit → poll → fetch — to
+# implement ONE logical investigation step. Each would otherwise land on the
+# trace as a separate `execute_api_request` SkillCall, polluting the built
+# playbook with raw HTTP passthrough steps the analyst never invoked as ops
+# (the `grounding < 1.0` gap: those ops aren't in the investigated set). A
+# wrapper brackets its internal run_op fan-out in `mute_recording()` so the
+# trace stays at the named-op granularity. A counter (not a bool) keeps nesting
+# safe.
+_mute_depth: int = 0
+
+
+def set_active_trace(trace: Optional[SkillTrace]) -> None:
+    """Install (or clear, with None) the trace that `record_run_op` feeds."""
+    global _active
+    _active = trace
+
+
+def get_active_trace() -> Optional[SkillTrace]:
+    return _active
+
+
+def set_active_trace_module(module: Optional[str]) -> None:
+    """Stamp the triaged module on the active trace (no-op if none active).
+
+    Lets the connector record the investigation's subject module once it
+    knows the triaged record's type, without rebuilding the trace. The
+    trace-build path reads it to bind the playbook's start trigger.
+    `module` is normalized to the friendly short name (an IRI like
+    `/api/3/alerts/<uuid>` collapses to `alerts`)."""
+    if _active is None or not module:
+        return
+    m = module
+    if "/api/3/" in m:
+        m = m.split("/api/3/", 1)[1]
+    m = m.split("/", 1)[0].split("?", 1)[0].strip()
+    if m:
+        _active.module = m
+
+
+def set_active_trace_record_fields(fields: Optional[Dict[str, Any]]) -> None:
+    """Stamp the triaged record's field map on the active trace (no-op if none
+    active or no fields). The trace-build path value-matches one-off IOCs
+    against these fields to parameterize them to `vars.input.records[0].*`.
+    Merges into any existing fields so multiple turns accrete record context."""
+    if _active is None or not isinstance(fields, dict) or not fields:
+        return
+    merged = dict(_active.record_fields or {})
+    merged.update(fields)
+    _active.record_fields = merged
+
+
+def clear_active_trace() -> None:
+    global _active
+    _active = None
+
+
+@contextmanager
+def mute_recording():
+    """Suppress `record_run_op` trace recording for the duration of the block.
+
+    Used by MCP convenience wrappers whose internal `run_op` fan-out (the
+    submit/poll/fetch HTTP calls behind a single named investigation step)
+    should NOT each become a separate trace step. Nests safely (depth counter)
+    and always restores the prior depth, even on exception."""
+    global _mute_depth
+    _mute_depth += 1
+    try:
+        yield
+    finally:
+        _mute_depth -= 1
+
+
+def record_run_op(
+    connector: str,
+    op: str,
+    params: Optional[Dict[str, Any]],
+    observed_output: Any,
+    step_name: Optional[str] = None,
+    ref_prefix: str = "",
+    config: str = "",
+    agent: str = "",
+) -> Optional[SkillCall]:
+    """Module-level convenience: record into the active trace if one is
+    installed, else no-op. This is what `run_op` calls — so studio/tests
+    (no active trace) stay on raw run_op, untouched.
+
+    No-ops while recording is muted (see `mute_recording`) so a wrapper's
+    internal `execute_api_request` fan-out doesn't pollute the trace."""
+    if _active is None or _mute_depth > 0:
+        return None
+    return _active.record_run_op(
+        connector, op, params, observed_output, step_name, ref_prefix,
+        config, agent,
+    )
+
+
+def record_staged_action(
+    connector: str,
+    op: str,
+    params: Optional[Dict[str, Any]],
+    step_name: Optional[str] = None,
+    config: str = "",
+    agent: str = "",
+) -> Optional[SkillCall]:
+    """Module-level convenience: record a staged connector action into the
+    active trace if one is installed, else no-op. This is what `emit_action_card`
+    calls — so studio/tests (no active trace) stay untouched."""
+    if _active is None:
+        return None
+    return _active.record_staged_action(
+        connector, op, params, step_name, config, agent,
+    )

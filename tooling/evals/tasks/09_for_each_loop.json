@@ -1,0 +1,6 @@
+{
+  "name": "for_each_loop",
+  "prompt": "Author a FortiSOAR playbook that builds a static list of three alert payloads in a set_variable step, then runs a for_each loop over the list using create_record on the alerts module. Each iteration uses vars.item to populate fields. Output complete YAML.",
+  "gold_yaml_path": "examples/demo_for_each.yaml",
+  "notes": "for_each + non-bulk create_record"
+}

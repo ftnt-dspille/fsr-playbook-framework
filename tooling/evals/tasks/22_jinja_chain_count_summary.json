@@ -1,0 +1,5 @@
+{
+  "name": "jinja_chain_count_summary",
+  "prompt": "Author a FortiSOAR playbook that triggers on alert creation, counts the number of items in the alert's `vars.input.records[0].artifactsRelatedToAlerts` list, and posts a Slack message via the slack connector's send_message operation. The message body must read exactly `Alert artifacts: <COUNT>` where `<COUNT>` is the integer count rendered into the string. Use a single set_variable step to build the message body via a Jinja expression. Output complete YAML.",
+  "notes": "Tier 3.4: forces a typed Jinja chain — `| length` (integer) embedded inside a string. Natural correct shape: `\"Alert artifacts: {{ vars.input.records[0].artifactsRelatedToAlerts | length }}\"` (concat happens at template level, no filter mismatch). Natural wrong shapes: `{{ ... | length | upper }}` (chain mismatch — int into upper), `{{ ... | upper | length }}` (upper expects str, gets list). The verified gate fires `bad_jinja_filter_chain` on either. Success = ready_to_push=True without `bad_jinja_filter_chain` surviving to the final YAML."
+}

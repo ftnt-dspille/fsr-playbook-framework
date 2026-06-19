@@ -1,0 +1,29 @@
+fixture: examples/demo_alert_on_create.yaml
+playbook: FSRPB Demo - On Alert Create
+
+# Setup creates a Phishing alert. Because this playbook uses
+# start_on_create with a matching when-filter (type LIKE 'Phishing'),
+# the setup POST itself fires the run — no explicit trigger call.
+setup:
+  - kind: create_record
+    module: alerts
+    fields:
+      name: fsrpb_e2e_on_create_seed
+      severity: Medium
+      status: Open
+      type: Phishing
+    capture_as: alert
+
+auto_trigger: true
+timeout_s: 90
+
+expects:
+  status: finished
+  steps:
+    Stamp_marker:
+      status: finished
+  record:
+    capture: alert
+    contains:
+      description: fsrpb_e2e_on_create_marker
+cleanup: true
