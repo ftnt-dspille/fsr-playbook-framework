@@ -1,5 +1,19 @@
 # fsr_playbooks ↔ connector reconciliation plan
 
+> **HANDOFF STATE (2026-06-19)**
+> - ✅ **PyPI leak resolved.** Old `0.3.62–0.3.65` (shipped triage) deleted; **`0.3.67` published**
+>   — triage-free, includes `execution_api` + `tools_connector_discovery`. Verified clean on PyPI.
+> - ✅ **Framework pushed** — GitLab origin + public GitHub mirror (`ftnt-dspille/fsr-playbook-framework`,
+>   auto-synced by the pre-push sanitizer). Release `v0.3.67` published; `publish.yml` (OIDC) succeeded.
+> - ⚠️ **Connector NOT pushed** — `git.fndn.fortinet.net:2222` is unreachable from the dev env (ssh
+>   timeout). **Owner must push** connector `main` (the rename) + branch `reorg/triage-rehome` (the
+>   carve-out + connector-awareness split).
+> - ⏳ **Connector branch is a green-ish WIP**: 289 tests pass; **23 fail on integration seams**
+>   (triage prompt content/loading; tool-slice + run_op tiering; one compile test). These are the
+>   next work, then Phase 2 (pin `==0.3.67`, version-assert guard, zip-materialize) and Phase 3
+>   (live appliance verify). See the per-phase status blocks below.
+
+
 **Goal:** one copy of the compiler/authoring surface (the public `fsr_playbooks`
 package), one copy of triage/investigation (the connector), no drift, and **no
 runtime breakage on the SOAR worker.**
@@ -90,9 +104,10 @@ internals.
 0.3 Bump `packaging/fsr_playbooks/pyproject.toml` → `0.3.66`. ✅ (then → `0.3.67`, see Phase 1)
 0.4 Fast-forward `reorg/phase-0-freeze-surface` → `main`. ✅
 0.5 Build wheel, **gate:** `unzip -l` shows zero `triage_*|tools_triage|tools_noc|_live_crudhub|system_prompt_triage`; clean-venv `import fsr_playbooks` + `import fsr_playbooks.mcp_server` succeed. ✅
-0.6 **Publish `0.3.67`** (NOT 0.3.66 — superseded). 0.3.67 is triage-free AND carries the
-    Phase-1 facade, so a single publish closes the leak and unblocks the connector. *(owner: user)*
-    Built wheel: `packaging/fsr_playbooks/dist/fsr_playbooks-0.3.67-py3-none-any.whl`.
+0.6 **Publish `0.3.67`** ✅ DONE (2026-06-19) via GitHub Release `v0.3.67` → `publish.yml` (OIDC
+    Trusted Publishing). Live + verified triage-free on PyPI. NOT 0.3.66 (superseded). To cut a
+    future release: bump `packaging/fsr_playbooks/pyproject.toml`, then publish a GitHub Release
+    on the mirror (or Actions → Publish to PyPI → Run).
 **After Phase 0 the leak is closed.** Phases 1–3 are correctness/dedup, not leak-driven.
 
 ### Phase 1 — re-home triage into its own namespace (the real work)
