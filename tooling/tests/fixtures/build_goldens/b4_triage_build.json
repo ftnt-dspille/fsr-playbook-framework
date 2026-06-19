@@ -1,0 +1,255 @@
+{
+  "_source": "live B4 triage->build chain, connector 0.3.126, session loop-f279bdb5 (2026-06-07)",
+  "_proves": "grounding 1.0 after muting the siem_events_for_incident execute_api_request fan-out (commit f7d0845)",
+  "manifest": {
+    "session": "loop-f279bdb5",
+    "scenario": "b4_triage_build",
+    "mode": "live",
+    "connector": {
+      "name": "fsr-playbook-builder",
+      "version": "0.3.126"
+    },
+    "entity": "/api/3/alerts/54f25f1f-808e-4bbb-8e20-e95855291184",
+    "turns": 2
+  },
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "/api/3/alerts/54f25f1f-808e-4bbb-8e20-e95855291184",
+        "relationships": true
+      },
+      "ok": null
+    },
+    {
+      "name": "find_enrichment_actions",
+      "args": {
+        "target_type": "ip",
+        "probe": true
+      },
+      "ok": null
+    },
+    {
+      "name": "siem_events_for_incident",
+      "args": {
+        "incident_id": 10999,
+        "source_ip": "192.168.77.49",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "query_ip",
+        "params": {
+          "ip": "108.17.204.5"
+        },
+        "step_name": "Enrich Destination IP - VirusTotal"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "shodan",
+        "op": "search_ip",
+        "params": {
+          "ip": "108.17.204.5"
+        },
+        "step_name": "Enrich Destination IP - Shodan"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "ip-quality-score",
+        "op": "get_ip_reputation",
+        "params": {
+          "ip_address": "108.17.204.5"
+        },
+        "step_name": "Enrich Destination IP - IP Quality Score"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-ioc",
+        "op": "ioc_search",
+        "params": {
+          "indicator": "108.17.204.5"
+        },
+        "step_name": "Enrich Destination IP - FortiGuard IOC"
+      },
+      "ok": null
+    },
+    {
+      "name": "find_containment_actions",
+      "args": {
+        "target_type": "ip",
+        "probe": true
+      },
+      "ok": null
+    },
+    {
+      "name": "emit_action_card",
+      "args": {
+        "id": "block_external_ip",
+        "connector": "fortigate-firewall",
+        "operation": "block_ip_new",
+        "summary": "Block outbound traffic to malicious IP 108.17.204.5 (credential harvesting endpoint)",
+        "args": {
+          "ip": "108.17.204.5",
+          "ip_addresses": "108.17.204.5",
+          "ip_type": "IPv4",
+          "method": "Policy Based",
+          "ip_block_policy": "Malicious IP Block",
+          "ip_group_name": "Credential_Theft_Destinations",
+          "time_to_live": "1 Year",
+          "duration": 31536000
+        },
+        "editable_fields": [
+          "ip_block_policy",
+          "ip_group_name",
+          "time_to_live",
+          "method"
+        ]
+      },
+      "ok": null
+    },
+    {
+      "name": "build_playbook_from_trace",
+      "args": {},
+      "ok": null
+    },
+    {
+      "name": "validate_yaml",
+      "args": {
+        "yaml_text": "playbooks:\n  - name: Alert Triage - Enrich & Block Malicious Destination IP\n    description: \"Enriches external IPs found in an alert against VirusTotal, IP Quality Score, and FortiGuard IOC; stages an IP block on configured firewall.\"\n    parameters: []\n    steps:\n      - name: Start\n        type: start\n        module: alerts\n        next: Enrich Destination IP VirusTotal\n      \n      - name: Enrich Destination IP VirusTotal\n        type: connector\n        connector: virustotal\n        operation: query_ip\n        config: 246b2e51-4eaa-42bf-a5b2-8ae0907c0b37\n        params:\n          ip: \"{{ vars.input.records[0].destinationIp }}\"\n        next: Enrich Destination IP IP Quality Score\n      \n      - name: Enrich Destination IP IP Quality Score\n        type: connector\n        connector: ip-quality-score\n        operation: get_ip_reputation\n        config: a244eba1-c4d2-4fba-90d3-3700fd9817c9\n        params:\n          ip_address: \"{{ vars.input.records[0].destinationIp }}\"\n        next: Enrich Destination IP FortiGuard IOC\n      \n      - name: Enrich Destination IP FortiGuard IOC\n        type: connector\n        connector: fortinet-fortiguard-ioc\n        operation: ioc_search\n        config: 1ca72e75-d121-4876-bc4d-76fd39d4b896\n        params:\n          indicator: \"{{ vars.input.records[0].destinationIp }}\"\n        next: Block Malicious IP\n      \n      - name: Block Malicious IP\n        type: connector\n        connector: fortigate-firewall\n        operation: block_ip_new\n        config: \"\"\n        params:\n          ip: \"{{ vars.input.records[0].destinationIp }}\"\n          ip_addresses: \"{{ vars.input.records[0].destinationIp }}\"\n          ip_type: IPv4\n          method: Policy Based\n          ip_block_policy: Malicious IP Block\n          ip_group_name: Credential_Theft_Destinations\n          time_to_live: 1 Year\n          duration: 31536000\n        next: Complete\n      \n      - name: Complete\n        type: end\n"
+      },
+      "ok": null
+    },
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "/api/3/alerts/54f25f1f-808e-4bbb-8e20-e95855291184",
+        "full": true
+      },
+      "ok": null
+    },
+    {
+      "name": "validate_yaml",
+      "args": {
+        "yaml_text": "playbooks:\n  - name: Alert Triage - Enrich & Block Malicious Destination IP\n    description: \"Enriches external IPs found in an alert against VirusTotal, IP Quality Score, and FortiGuard IOC; stages an IP block on configured firewall after approval.\"\n    parameters: []\n    steps:\n      - name: Start\n        type: start\n        module: alerts\n        button_label: Triage Alert\n        next: Extract Destination IP\n      \n      - name: Extract Destination IP\n        type: set_variable\n        variables:\n          destination_ip: \"{{ vars.input.records[0].title | regex_search('to (\\\\d+\\\\.\\\\d+\\\\.\\\\d+\\\\.\\\\d+)', '\\\\1') | first }}\"\n        next: Enrich Against VirusTotal\n      \n      - name: Enrich Against VirusTotal\n        type: connector\n        connector: virustotal\n        operation: query_ip\n        config: 246b2e51-4eaa-42bf-a5b2-8ae0907c0b37\n        params:\n          ip: \"{{ vars.destination_ip }}\"\n        next: Enrich Against IP Quality Score\n      \n      - name: Enrich Against IP Quality Score\n        type: connector\n        connector: ip-quality-score\n        operation: get_ip_reputation\n        config: a244eba1-c4d2-4fba-90d3-3700fd9817c9\n        params:\n          ip_address: \"{{ vars.destination_ip }}\"\n        next: Enrich Against FortiGuard IOC\n      \n      - name: Enrich Against FortiGuard IOC\n        type: connector\n        connector: fortinet-fortiguard-ioc\n        operation: ioc_search\n        config: 1ca72e75-d121-4876-bc4d-76fd39d4b896\n        params:\n          indicator: \"{{ vars.destination_ip }}\"\n        next: Review Enrichment\n      \n      - name: Review Enrichment\n        type: manual_input\n        prompt: \"Review threat intelligence enrichment for {{ vars.destination_ip }}. Proceed with IP block?\"\n        fields:\n          - name: proceed_with_block\n            label: \"Approve IP Block?\"\n            type: boolean\n            default: \"true\"\n        next: Decide on Block\n      \n      - name: Decide on Block\n        type: decision\n        conditions:\n          - when: \"vars.steps.Review_Enrichment.data.proceed_with_block == true\"\n            display: \"Block IP\"\n            next: Block Malicious IP\n        default_branch:\n          display: \"Skip Block\"\n          next: Complete\n      \n      - name: Block Malicious IP\n        type: connector\n        connector: fortigate-firewall\n        operation: block_ip_new\n        config: \"\"\n        params:\n          ip: \"{{ vars.destination_ip }}\"\n          ip_addresses: \"{{ vars.destination_ip }}\"\n          ip_type: IPv4\n          method: Policy Based\n          ip_block_policy: Malicious IP Block\n          ip_group_name: Credential_Theft_Destinations\n          time_to_live: 1 Year\n          duration: 31536000\n        next: Complete\n      \n      - name: Complete\n        type: end\n"
+      },
+      "ok": null
+    },
+    {
+      "name": "get_step_type",
+      "args": {
+        "name": "connector",
+        "verbose": true
+      },
+      "ok": null
+    },
+    {
+      "name": "get_step_type",
+      "args": {
+        "name": "manual_input",
+        "verbose": true
+      },
+      "ok": null
+    },
+    {
+      "name": "emit_decision_step",
+      "args": {
+        "name": "Decide on Block",
+        "conditions": [
+          {
+            "display": "Block IP",
+            "when": "vars.steps.Review_Enrichment.input.proceed_with_block",
+            "next": "Block Malicious IP"
+          }
+        ],
+        "default_branch": {
+          "display": "Skip Block",
+          "next": "Complete"
+        }
+      },
+      "ok": null
+    },
+    {
+      "name": "validate_yaml",
+      "args": {
+        "yaml_text": "playbooks:\n  - name: Alert Triage - Enrich & Block Malicious Destination IP\n    description: \"Enriches external IPs found in an alert against VirusTotal, IP Quality Score, and FortiGuard IOC; stages an IP block on configured firewall after approval.\"\n    parameters: []\n    steps:\n      - name: Start\n        type: start\n        module: alerts\n        next: Extract Destination IP\n      \n      - name: Extract Destination IP\n        type: set_variable\n        variables:\n          destination_ip: \"{{ vars.input.records[0].title | regex_search('to (\\\\d+\\\\.\\\\d+\\\\.\\\\d+\\\\.\\\\d+)', '\\\\1') | first }}\"\n        next: Enrich Against VirusTotal\n      \n      - name: Enrich Against VirusTotal\n        type: connector\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: \"\"\n          params:\n            ip: \"{{ vars.destination_ip }}\"\n        next: Enrich Against IP Quality Score\n      \n      - name: Enrich Against IP Quality Score\n        type: connector\n        arguments:\n          connector: ip-quality-score\n          operation: get_ip_reputation\n          config: \"\"\n          params:\n            ip_address: \"{{ vars.destination_ip }}\"\n        next: Enrich Against FortiGuard IOC\n      \n      - name: Enrich Against FortiGuard IOC\n        type: connector\n        arguments:\n          connector: fortinet-fortiguard-ioc\n          operation: ioc_search\n          config: \"\"\n          params:\n            indicator: \"{{ vars.destination_ip }}\"\n        next: Review Enrichment\n      \n      - name: Review Enrichment\n        type: manual_input\n        arguments:\n          title: \"Approve Firewall Block?\"\n          description: \"Destination IP {{ vars.destination_ip }} has been enriched. Review threat intelligence and approve IP block on firewall.\"\n          inputs:\n            - name: approve_block\n              kind: checkbox\n              label: \"Yes, proceed with IP block\"\n              default: \"true\"\n        options:\n          - display: \"Approve Block\"\n            primary: true\n            next: Block Malicious IP\n          - display: \"Skip Block\"\n            next: Complete\n      \n      - name: Block Malicious IP\n        type: connector\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip_new\n          config: \"\"\n          params:\n            ip: \"{{ vars.destination_ip }}\"\n            ip_addresses: \"{{ vars.destination_ip }}\"\n            ip_type: IPv4\n            method: Policy Based\n            ip_block_policy: Malicious IP Block\n            ip_group_name: Credential_Theft_Destinations\n            time_to_live: 1 Year\n            duration: 31536000\n        next: Complete\n      \n      - name: Complete\n        type: end\n"
+      },
+      "ok": null
+    },
+    {
+      "name": "get_step_type",
+      "args": {
+        "name": "set_variable",
+        "verbose": true
+      },
+      "ok": null
+    },
+    {
+      "name": "get_op_schema",
+      "args": {
+        "connector": "fortigate-firewall",
+        "op": "block_ip_new",
+        "verbose": true
+      },
+      "ok": null
+    },
+    {
+      "name": "validate_yaml",
+      "args": {
+        "yaml_text": "playbooks:\n  - name: Alert Triage - Enrich & Block Malicious Destination IP\n    description: \"Enriches external IPs found in an alert against VirusTotal, IP Quality Score, and FortiGuard IOC; stages an IP block on configured firewall after approval.\"\n    parameters: []\n    steps:\n      - name: Start\n        type: start\n        module: alerts\n        next: Extract Destination IP\n      \n      - name: Extract Destination IP\n        type: set_variable\n        vars:\n          destination_ip: \"{{ vars.input.records[0].title | regex_search('to (\\\\d+\\\\.\\\\d+\\\\.\\\\d+\\\\.\\\\d+)', '\\\\1') | first }}\"\n        next: Enrich Against VirusTotal\n      \n      - name: Enrich Against VirusTotal\n        type: connector\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: \"\"\n          params:\n            ip: \"{{ vars.destination_ip }}\"\n        next: Enrich Against IP Quality Score\n      \n      - name: Enrich Against IP Quality Score\n        type: connector\n        arguments:\n          connector: ip-quality-score\n          operation: get_ip_reputation\n          config: \"\"\n          params:\n            ip_address: \"{{ vars.destination_ip }}\"\n        next: Enrich Against FortiGuard IOC\n      \n      - name: Enrich Against FortiGuard IOC\n        type: connector\n        arguments:\n          connector: fortinet-fortiguard-ioc\n          operation: ioc_search\n          config: \"\"\n          params:\n            indicator: \"{{ vars.destination_ip }}\"\n        next: Review Enrichment\n      \n      - name: Review Enrichment\n        type: manual_input\n        arguments:\n          title: \"Approve Firewall Block for {{ vars.destination_ip }}?\"\n          description: \"Destination IP has been enriched against threat intelligence sources. Review findings and approve IP block on firewall.\"\n          inputs:\n            - name: comment\n              kind: textarea\n              label: \"Analyst Notes\"\n              required: false\n        options:\n          - display: \"Approve & Block IP\"\n            primary: true\n            next: Block Malicious IP\n          - display: \"Skip Block\"\n            next: Complete\n      \n      - name: Block Malicious IP\n        type: connector\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip_new\n          config: \"\"\n          params:\n            method: Policy Based\n            ip_block_policy: Malicious IP Block\n            ip_type: IPv4\n            ip: \"{{ vars.destination_ip }}\"\n            ip_group_name: Credential_Theft_Destinations\n        next: Complete\n      \n      - name: Complete\n        type: end\n"
+      },
+      "ok": null
+    },
+    {
+      "name": "analyze_playbook",
+      "args": {
+        "yaml_text": "playbooks:\n  - name: Alert Triage - Enrich & Block Malicious Destination IP\n    description: \"Enriches external IPs found in an alert against VirusTotal, IP Quality Score, and FortiGuard IOC; stages an IP block on configured firewall after approval.\"\n    parameters: []\n    steps:\n      - name: Start\n        type: start\n        module: alerts\n        next: Extract Destination IP\n      \n      - name: Extract Destination IP\n        type: set_variable\n        vars:\n          destination_ip: \"{{ vars.input.records[0].title | regex_search('to (\\\\d+\\\\.\\\\d+\\\\.\\\\d+\\\\.\\\\d+)', '\\\\1') | first }}\"\n        next: Enrich Against VirusTotal\n      \n      - name: Enrich Against VirusTotal\n        type: connector\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: \"\"\n          params:\n            ip: \"{{ vars.destination_ip }}\"\n        next: Enrich Against IP Quality Score\n      \n      - name: Enrich Against IP Quality Score\n        type: connector\n        arguments:\n          connector: ip-quality-score\n          operation: get_ip_reputation\n          config: \"\"\n          params:\n            ip_address: \"{{ vars.destination_ip }}\"\n        next: Enrich Against FortiGuard IOC\n      \n      - name: Enrich Against FortiGuard IOC\n        type: connector\n        arguments:\n          connector: fortinet-fortiguard-ioc\n          operation: ioc_search\n          config: \"\"\n          params:\n            indicator: \"{{ vars.destination_ip }}\"\n        next: Review Enrichment\n      \n      - name: Review Enrichment\n        type: manual_input\n        arguments:\n          title: \"Approve Firewall Block for {{ vars.destination_ip }}?\"\n          description: \"Destination IP has been enriched against threat intelligence sources. Review findings and approve IP block on firewall.\"\n          inputs:\n            - name: comment\n              kind: textarea\n              label: \"Analyst Notes\"\n              required: false\n        options:\n          - display: \"Approve & Block IP\"\n            primary: true\n            next: Block Malicious IP\n          - display: \"Skip Block\"\n            next: Complete\n      \n      - name: Block Malicious IP\n        type: connector\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip_new\n          config: \"\"\n          params:\n            method: Policy Based\n            ip_block_policy: Malicious IP Block\n            ip_type: IPv4\n            ip: \"{{ vars.destination_ip }}\"\n            ip_group_name: Credential_Theft_Destinations\n        next: Complete\n      \n      - name: Complete\n        type: end\n",
+        "execute_safe_ops": false,
+        "input": {
+          "records": [
+            {
+              "@id": "/api/3/alerts/54f25f1f-808e-4bbb-8e20-e95855291184",
+              "title": "Outbound cleartext password usage from non guest network from 192.168.77.49 to 108.17.204.5 on port 110"
+            }
+          ]
+        }
+      },
+      "ok": null
+    },
+    {
+      "name": "find_jinja_filter",
+      "args": {
+        "q": "regex_search"
+      },
+      "ok": null
+    },
+    {
+      "name": "get_filter_examples",
+      "args": {
+        "name": "regex_search",
+        "limit": 5
+      },
+      "ok": null
+    },
+    {
+      "name": "push_playbook",
+      "args": {
+        "yaml_text": "playbooks:\n  - name: Alert Triage - Enrich & Block Malicious Destination IP\n    description: \"Enriches external IPs found in an alert against VirusTotal, IP Quality Score, and FortiGuard IOC; stages an IP block on configured firewall after approval.\"\n    parameters: []\n    steps:\n      - name: Start\n        type: start\n        module: alerts\n        next: Extract Destination IP\n      \n      - name: Extract Destination IP\n        type: set_variable\n        vars:\n          destination_ip: \"{{ vars.input.records[0].title | regex_search('to (\\\\d+\\\\.\\\\d+\\\\.\\\\d+\\\\.\\\\d+)', '\\\\\\\\1') }}\"\n        next: Enrich Against VirusTotal\n      \n      - name: Enrich Against VirusTotal\n        type: connector\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: \"\"\n          params:\n            ip: \"{{ vars.destination_ip }}\"\n        next: Enrich Against IP Quality Score\n      \n      - name: Enrich Against IP Quality Score\n        type: connector\n        arguments:\n          connector: ip-quality-score\n          operation: get_ip_reputation\n          config: \"\"\n          params:\n            ip_address: \"{{ vars.destination_ip }}\"\n        next: Enrich Against FortiGuard IOC\n      \n      - name: Enrich Against FortiGuard IOC\n        type: connector\n        arguments:\n          connector: fortinet-fortiguard-ioc\n          operation: ioc_search\n          config: \"\"\n          params:\n            indicator: \"{{ vars.destination_ip }}\"\n        next: Review Enrichment\n      \n      - name: Review Enrichment\n        type: manual_input\n        arguments:\n          title: \"Approve Firewall Block for {{ vars.destination_ip }}?\"\n          description: \"Destination IP has been enriched against threat intelligence sources. Review findings and approve IP block on firewall.\"\n          inputs:\n            - name: comment\n              kind: textarea\n              label: \"Analyst Notes\"\n              required: false\n        options:\n          - display: \"Approve & Block IP\"\n            primary: true\n            next: Block Malicious IP\n          - display: \"Skip Block\"\n            next: Complete\n      \n      - name: Block Malicious IP\n        type: connector\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip_new\n          config: \"\"\n          params:\n            method: Policy Based\n            ip_block_policy: Malicious IP Block\n            ip_type: IPv4\n            ip: \"{{ vars.destination_ip }}\"\n            ip_group_name: Credential_Theft_Destinations\n        next: Complete\n      \n      - name: Complete\n        type: end\n"
+      },
+      "ok": null
+    }
+  ],
+  "built_yaml": "playbooks:\n  - name: Alert Triage - Enrich & Block Malicious Destination IP\n    description: \"Enriches external IPs found in an alert against VirusTotal, IP Quality Score, and FortiGuard IOC; stages an IP block on configured firewall after approval.\"\n    parameters: []\n    steps:\n      - name: Start\n        type: start\n        module: alerts\n        next: Extract Destination IP\n      \n      - name: Extract Destination IP\n        type: set_variable\n        vars:\n          destination_ip: \"{{ vars.input.records[0].title | regex_search('to (\\\\d+\\\\.\\\\d+\\\\.\\\\d+\\\\.\\\\d+)', '\\\\\\\\1') }}\"\n        next: Enrich Against VirusTotal\n      \n      - name: Enrich Against VirusTotal\n        type: connector\n        arguments:\n          connector: virustotal\n          operation: query_ip\n          config: \"\"\n          params:\n            ip: \"{{ vars.destination_ip }}\"\n        next: Enrich Against IP Quality Score\n      \n      - name: Enrich Against IP Quality Score\n        type: connector\n        arguments:\n          connector: ip-quality-score\n          operation: get_ip_reputation\n          config: \"\"\n          params:\n            ip_address: \"{{ vars.destination_ip }}\"\n        next: Enrich Against FortiGuard IOC\n      \n      - name: Enrich Against FortiGuard IOC\n        type: connector\n        arguments:\n          connector: fortinet-fortiguard-ioc\n          operation: ioc_search\n          config: \"\"\n          params:\n            indicator: \"{{ vars.destination_ip }}\"\n        next: Review Enrichment\n      \n      - name: Review Enrichment\n        type: manual_input\n        arguments:\n          title: \"Approve Firewall Block for {{ vars.destination_ip }}?\"\n          description: \"Destination IP has been enriched against threat intelligence sources. Review findings and approve IP block on firewall.\"\n          inputs:\n            - name: comment\n              kind: textarea\n              label: \"Analyst Notes\"\n              required: false\n        options:\n          - display: \"Approve & Block IP\"\n            primary: true\n            next: Block Malicious IP\n          - display: \"Skip Block\"\n            next: Complete\n      \n      - name: Block Malicious IP\n        type: connector\n        arguments:\n          connector: fortigate-firewall\n          operation: block_ip_new\n          config: \"\"\n          params:\n            method: Policy Based\n            ip_block_policy: Malicious IP Block\n            ip_type: IPv4\n            ip: \"{{ vars.destination_ip }}\"\n            ip_group_name: Credential_Theft_Destinations\n        next: Complete\n      \n      - name: Complete\n        type: end\n"
+}

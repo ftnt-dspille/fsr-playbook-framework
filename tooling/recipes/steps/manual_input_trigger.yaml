@@ -1,0 +1,33 @@
+name: manual_input_trigger
+description: |
+  First-step pattern for user-initiated playbooks: the trigger IS a
+  manual_input. Do NOT prepend a `start` step — FSR designer renders
+  this as a manual trigger that prompts the user before running.
+intent_keywords:
+  - manual trigger
+  - user trigger
+  - operator trigger
+  - prompt for input
+  - first step manual
+  - manual_input trigger
+connector: null
+step_types:
+  - manual_input
+notes: |
+  Replace <ID_FIELD>, <LABEL>, and the title/description text. `kind`
+  options include text, ipv4, ipv6, email, url, picklist, lookup, integer.
+steps_yaml: |
+  - type: manual_input
+    name: Collect Input
+    arguments:
+      title: Provide Input
+      description: Enter the value to act on.
+      inputs:
+        - name: target_value
+          kind: text
+          label: Target Value
+          required: true
+    options:
+      - display: Continue
+        primary: true
+        next: <NEXT_STEP_NAME>

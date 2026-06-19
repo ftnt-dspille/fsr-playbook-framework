@@ -1,0 +1,6 @@
+{
+  "name": "alert_on_create",
+  "prompt": "Author a FortiSOAR playbook that fires on-create for the alerts module. The playbook reads the new alert and stamps a comments field via update_record on vars.input.records[0]['@id']. Output complete YAML.",
+  "gold_yaml_path": "examples/demo_alert_on_create.yaml",
+  "notes": "start_on_create trigger"
+}

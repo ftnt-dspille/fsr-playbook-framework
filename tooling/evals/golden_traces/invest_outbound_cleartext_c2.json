@@ -1,0 +1,134 @@
+{
+  "fixture": "invest_outbound_cleartext_c2",
+  "captured": "20260606T135155Z",
+  "model": "deployed:fsr-playbook-builder-0.3.117",
+  "stop_reason": "awaiting_action_card",
+  "recall": 1.0,
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "module": "alerts",
+        "uuid": "54f25f1f-808e-4bbb-8e20-e95855291184"
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "sourceIp:192.168.77.49 OR destinationIp:108.17.204.5",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "incidents",
+        "q": "sourceIp:192.168.77.49 OR destinationIp:108.17.204.5",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "find_enrichment_actions",
+      "args": {
+        "target_type": "ip",
+        "probe": true,
+        "limit": 25
+      },
+      "ok": null
+    },
+    {
+      "name": "siem_events_for_incident",
+      "args": {
+        "incident_id": 10999,
+        "limit": 25
+      },
+      "ok": null
+    },
+    {
+      "name": "siem_events_for_incident",
+      "args": {
+        "incident_id": 10999,
+        "source_ip": "192.168.77.49",
+        "time_from": "2026-05-30T12:00:00Z",
+        "time_to": "2026-05-30T12:15:00Z",
+        "limit": 25
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-ioc",
+        "op": "ioc_search",
+        "params": {
+          "indicator": "108.17.204.5"
+        },
+        "step_name": "Enrich Destination IP with FortiGuard IOC"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "query_ip",
+        "params": {
+          "ip": "108.17.204.5"
+        },
+        "step_name": "Get IP Reputation from VirusTotal"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "ip-quality-score",
+        "op": "get_ip_reputation",
+        "params": {
+          "ip_address": "108.17.204.5"
+        },
+        "step_name": "Get IP Reputation from IP Quality Score"
+      },
+      "ok": null
+    },
+    {
+      "name": "find_containment_actions",
+      "args": {
+        "target_type": "ip",
+        "probe": true,
+        "limit": 25
+      },
+      "ok": null
+    },
+    {
+      "name": "emit_action_card",
+      "args": {
+        "id": "block_dest_ip_108",
+        "connector": "fortigate-firewall",
+        "operation": "block_ip_new",
+        "summary": "Block outbound egress to 108.17.204.5 (POP3 cleartext credential exfiltration destination) for 1 day via firewall policy",
+        "args": {
+          "ip": "108.17.204.5",
+          "ip_addresses": "108.17.204.5",
+          "ip_type": "IPv4",
+          "method": "Policy Based",
+          "ip_block_policy": "Outbound Credential Exfiltration Block",
+          "ip_group_name": "Blocked_Exfil_IPs",
+          "duration": 1,
+          "time_to_live": "1 Day"
+        },
+        "editable_fields": [
+          "ip_block_policy",
+          "ip_group_name",
+          "time_to_live",
+          "method"
+        ]
+      },
+      "ok": null
+    }
+  ]
+}
