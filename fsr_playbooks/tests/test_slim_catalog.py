@@ -31,8 +31,12 @@ def test_slim_db_is_present_and_shaped():
     try:
         assert conn.execute("SELECT COUNT(*) FROM step_types").fetchone()[0] > 0
         assert conn.execute("SELECT COUNT(*) FROM jinja_macros").fetchone()[0] > 0
-        # Per-install tables ship empty — schema present, zero rows.
-        for t in ("connectors", "operations", "picklists", "modules"):
+        # Module *type names* ship as a stable baseline catalog so the
+        # resolver can validate/canonicalize module names offline.
+        assert conn.execute("SELECT COUNT(*) FROM modules").fetchone()[0] > 0
+        # The UUID-bearing per-install tables still ship empty — warmed,
+        # not stale-shipped.
+        for t in ("connectors", "operations", "picklists"):
             assert conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] == 0, t
     finally:
         conn.close()

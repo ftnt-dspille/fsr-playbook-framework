@@ -8,6 +8,29 @@ from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
 from ._constants import _looks_like_uuid
 
+# Valid operators for a field-based trigger (`when:` on start_on_create /
+# start_on_update). Empirically the only operators FSR emits in the
+# `fieldbasedtrigger.filters[].operator` slot across the probed corpus, plus
+# the symmetric variants FSR's query layer accepts (gte/lte/lt/notlike/
+# isnotnull) that the corpus simply never exercised. A wrong operator does
+# not error at deploy — the trigger just silently never matches — so we reject
+# unknowns at compile time. `changed` is update-only (enforced separately).
+_TRIGGER_OPS: frozenset[str] = frozenset({
+    "eq", "neq", "gt", "gte", "lt", "lte",
+    "isnull", "isnotnull",
+    "in", "nin", "in_all",
+    "like", "notlike",
+    "changed",
+})
+# Common author mistakes → the FSR operator that does what they meant. FSR has
+# no startswith/endswith/contains: substring/prefix matching is `like`.
+_TRIGGER_OP_FIXUPS: dict[str, str] = {
+    "startswith": "like", "endswith": "like", "contains": "like",
+    "equals": "eq", "==": "eq", "!=": "neq", "not_equals": "neq",
+    "greater_than": "gt", "less_than": "lt",
+    "not_in": "nin", "is_null": "isnull", "is_not_null": "isnotnull",
+}
+
 
 class NormalizerMixin:
     """Methods for normalizing step arguments and dispatching by step type."""
@@ -262,6 +285,13 @@ class NormalizerMixin:
                 path=f"{path}.arguments.module",
                 severity="warning",
             ))
+        # Canonicalize each module name against the catalog (case-fix
+        # 'Alerts' → 'alerts', warn on unknowns). Silent no-op when the
+        # modules table is unwarmed/empty.
+        modules = [
+            self.resolve_module_name(m, f"{path}.arguments.module", errors)
+            for m in modules
+        ]
         a["resource"] = modules[0]
         a["resources"] = modules
         a.setdefault("step_variables",
@@ -321,6 +351,29 @@ class NormalizerMixin:
                     path=f"{path}.arguments.when.filters[{i}].field",
                 ))
                 continue
+            # Validate the operator against FSR's field-based-trigger set. An
+            # invalid op (e.g. `startswith`) compiles green but yields a
+            # trigger that never fires, so this is a blocking error.
+            opath = f"{path}.arguments.when.filters[{i}].op"
+            if op not in _TRIGGER_OPS:
+                fix = _TRIGGER_OP_FIXUPS.get(op)
+                if fix is None:
+                    import difflib
+                    m = difflib.get_close_matches(
+                        op, sorted(_TRIGGER_OPS), n=1, cutoff=0.6)
+                    fix = m[0] if m else None
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        f"invalid trigger operator {op!r} — not a valid "
+                        f"field-based-trigger operator (valid: "
+                        f"{', '.join(sorted(_TRIGGER_OPS))})"
+                    ),
+                    path=opath,
+                    near=fix,
+                    suggestion=(f"did you mean {fix!r}?" if fix else None),
+                ))
+                continue
             if op == "changed":
                 if step_type != "start_on_update":
                     errors.append(CompileError(
@@ -375,6 +428,8 @@ class NormalizerMixin:
             return
         module = a.pop("module", None)
         if module and isinstance(module, str):
+            module = self.resolve_module_name(
+                module, f"{path}.arguments.module", errors)
             iri = f"/api/3/{module}" if not module.startswith("/api/") else module
             if step.type in ("create_record", "insert_record"):
                 a.setdefault("collection", iri)
@@ -913,11 +968,23 @@ class NormalizerMixin:
         Already-canonical args (`connector`+`operation`+`params`) pass
         through untouched.
         """
-        from connector_configs import resolve_config_id
         a = step.arguments if isinstance(step.arguments, dict) else {}
         if a.get("connector") and a.get("operation") and a.get("params"):
+            self._require_nonempty_snippet(a.get("params"), path, errors)
             step.arguments = a
             return
+        # Deferred + optional: connector_configs lives in the dev `tooling/`
+        # tree (not shipped in the wheel) and is only needed to resolve a
+        # friendly `config:` name to a UUID. Importing it at function top
+        # crashed every code_snippet compile in a fresh install. When it's
+        # unavailable, degrade to the same "unresolved config" fallback the
+        # function already uses (`cid = "" `) so the friendly `code:` form
+        # still compiles offline — warmup fills the real UUID later.
+        try:
+            from connector_configs import resolve_config_id
+        except ModuleNotFoundError:
+            def resolve_config_id(_connector, _name):  # noqa: ANN001
+                return None
         _FRIENDLY = {"code", "python", "config", "mock_result", "condition"}
         _CANONICAL = {
             "connector", "operation", "operationTitle", "version",
@@ -941,7 +1008,40 @@ class NormalizerMixin:
         params.setdefault("python_function", code)
         a["params"] = params
         a.setdefault("step_variables", [])
+        self._require_nonempty_snippet(params, path, errors)
         step.arguments = a
+
+    @staticmethod
+    def _require_nonempty_snippet(
+        params, path: str, errors: list[CompileError],
+    ) -> None:
+        """Reject a code_snippet step whose resolved ``python_function`` is
+        empty/whitespace.
+
+        Two authoring paths land here with an empty snippet: a step-level
+        ``connector:``/``operation:``/``params:`` block (which the parser
+        does NOT hoist into ``arguments`` for non-connector steps, so the
+        body is dropped), or a friendly form with no ``code:``/``python:``.
+        Either way the step used to compile green and deploy a no-op
+        snippet. Fail it with an actionable message instead.
+        """
+        code = ""
+        if isinstance(params, dict):
+            code = params.get("python_function") or ""
+        if isinstance(code, str) and code.strip():
+            return
+        errors.append(CompileError(
+            code=ErrorCode.MISSING_FIELD,
+            message=(
+                "code_snippet step has an empty `python_function` — no code "
+                "to run"
+            ),
+            path=f"{path}.arguments.params.python_function",
+            suggestion=(
+                "put the code under `arguments.params.python_function:` "
+                "(canonical) or use the friendly `arguments.code:` form"
+            ),
+        ))
 
     def _normalize_delay_args(
         self, step: Step, path: str, errors: list[CompileError],

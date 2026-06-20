@@ -49,6 +49,12 @@ STABLE_TABLES = (
     "jinja_context_vars",
     "recipes",
     "connector_op_defs",
+    # Module *type names* (alerts, incidents, indicators, …) are globally
+    # stable for an FSR version and carry no per-install UUIDs — shipping
+    # them lets the resolver validate/canonicalize module names offline
+    # ('Alerts' → 'alerts', flag typos). A target's custom modules are still
+    # picked up by `warmup`, which overwrites this baseline.
+    "modules",
 )
 
 # Deliberately EXCLUDED though globally stable: the authoring-hint corpus
@@ -132,7 +138,7 @@ def check() -> int:
             n = conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
             if n == 0:
                 problems.append(f"stable table {t!r} is empty")
-        for t in ("connectors", "operations", "picklists", "modules"):
+        for t in ("connectors", "operations", "picklists"):
             n = conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
             if n != 0:
                 problems.append(f"per-install table {t!r} has {n} rows (should be empty)")
