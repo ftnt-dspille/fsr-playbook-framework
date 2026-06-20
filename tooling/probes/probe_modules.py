@@ -296,6 +296,17 @@ def _stamp_provenance(conn: sqlite3.Connection, client) -> None:
         fsr_version=fsr_version,
         last_publish_time=last_publish,
     )
+    # Baseline the cheap row counts so a later `check-fresh` can detect
+    # add/delete drift (incl. picklist value adds that publish nothing).
+    for coll in ("model_metadatas", "attribute_metadatas",
+                 "picklists", "picklist_names", "tags"):
+        try:
+            r = client.get(f"/api/3/{coll}?$limit=0")
+            total = r.get("hydra:totalItems") if isinstance(r, dict) else None
+            if isinstance(total, int):
+                _catalog_meta.record_count(conn, coll, total)
+        except Exception:  # noqa: BLE001
+            pass
     conn.commit()
 
 
