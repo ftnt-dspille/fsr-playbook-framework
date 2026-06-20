@@ -1,0 +1,37 @@
+# Test sidecar for demo_pure_logic.yaml. Driven by `fsrpb e2e run`.
+#
+# Schema:
+#   fixture        — relative path to the YAML to compile + push
+#   playbook       — playbook name within the collection to trigger
+#   input          — parameter values for the run. Riden into the trigger
+#                    body's `request.data`; FSR maps request.data.<k> →
+#                    vars.input.params.<k> at runtime.
+#   timeout_s      — overall budget for the run to reach a terminal status
+#   expects:
+#     status       — required workflow.status (default: finished)
+#     vars         — exact-match dict checked against env.vars from get_run_env
+#     steps        — per-step assertions: name → {status?, result_contains?}
+#   cleanup        — true (default) to hard-purge the collection at the end
+
+fixture: examples/demo_pure_logic.yaml
+playbook: Route Severity Pure
+input:
+  severity: high
+timeout_s: 120
+
+expects:
+  status: finished
+  vars:
+    tier: tier2          # only the last set_variable persists at top-level env;
+                         # intermediates live in steps.<Name>.result instead.
+  steps:
+    Read_severity:
+      status: finished
+      result_contains: '"severity": "high"'
+    Branch_on_severity:
+      status: finished
+    Escalate_to_Tier_2:
+      status: finished
+    No_action_low_severity:
+      status: skipped
+cleanup: true

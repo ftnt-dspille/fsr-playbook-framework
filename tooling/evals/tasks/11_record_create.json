@@ -1,0 +1,6 @@
+{
+  "name": "record_create",
+  "prompt": "Author a FortiSOAR playbook with a manual trigger that takes an 'alert_name' parameter and creates an alert record. The new alert's description should include the marker 'fsrpb_e2e_create' so test runs can be cleaned up. Output complete YAML.",
+  "gold_yaml_path": "examples/demo_record_create.yaml",
+  "notes": "create_record step"
+}

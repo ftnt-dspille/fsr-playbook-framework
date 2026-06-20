@@ -1,0 +1,33 @@
+name: approval_gate
+description: |
+  SOC analyst approve/reject gate using a manual_input with two options.
+  Branches to the named approve/reject steps. Use after a data-collection
+  step so the prompt can echo the value being approved.
+intent_keywords:
+  - approval
+  - approve reject
+  - confirm before
+  - human in the loop
+  - SOC approval
+  - gate
+connector: null
+step_types:
+  - manual_input
+notes: |
+  Replace <APPROVE_STEP> and <REJECT_STEP> with the actual step names you
+  branch to. The Jinja in `description` references the prior input step's
+  ID — if your prior step is named differently, update `Collect_Input`
+  (note: spaces in step names become underscores).
+steps_yaml: |
+  - type: manual_input
+    name: Approval Request
+    arguments:
+      title: Confirm Action
+      description: "Confirm action on: {{ vars.steps.Collect_Input.input.target_value }}"
+      inputs: []
+    options:
+      - display: Approve
+        primary: true
+        next: <APPROVE_STEP>
+      - display: Reject
+        next: <REJECT_STEP>

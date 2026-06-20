@@ -1,0 +1,49 @@
+name: Publish to PyPI
+
+# Builds the fsr_playbooks wheel and publishes it to PyPI via Trusted
+# Publishing (OIDC) — no API token stored in the repo. PyPI verifies the
+# workflow identity directly.
+#
+# ONE-TIME PyPI SETUP (required before the first run):
+#   PyPI -> your account -> Publishing -> "Add a pending publisher"
+#     PyPI Project Name:  fsr_playbooks
+#     Owner:              ftnt-dspille
+#     Repository name:    fsr-playbook-framework
+#     Workflow name:      publish.yml
+#     Environment name:   pypi
+#
+# To release: bump `version` in packaging/fsr_playbooks/pyproject.toml (PyPI
+# rejects re-uploading an existing version), then either publish a GitHub
+# Release or run this workflow manually (Actions -> Publish to PyPI -> Run).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: build + publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # required for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Build wheel
+        # Wheel only — the relative ../.. package-dir makes a valid in-place
+        # wheel off the clone but cannot produce a correct sdist.
+        run: cd packaging/fsr_playbooks && uv build --wheel --out-dir dist
+
+      - name: Validate metadata
+        run: uvx twine check packaging/fsr_playbooks/dist/*.whl
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packaging/fsr_playbooks/dist

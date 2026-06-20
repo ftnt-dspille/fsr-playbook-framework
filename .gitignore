@@ -1,0 +1,61 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# generated artifacts
+data/fsr_reference.db
+data/fsr_reference.db-shm
+data/fsr_reference.db-wal
+**/fsr_reference.db
+**/fsr_reference.db-shm
+**/fsr_reference.db-wal
+# ...except the tracked, shipped slim catalog (built by
+# tooling/catalog/build_compile_catalog.py; ~0.6 MB, package-data).
+!fsr_playbooks/_data/fsr_reference.db
+data/e2e_runs/
+data/verify_traces/
+fsr_playbooks/usage.jsonl
+
+# ts
+ts/node_modules/
+ts/dist/
+ts/.vitest-cache/
+
+# e2e (Playwright)
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+/data/rpm_cache/
+
+# archives / recon tarballs
+*.tar.gz
+*.tgz
+
+# build artifacts
+*.egg-info/
+
+# eval run artifacts (flat logs/summaries; structured run dirs stay tracked)
+/data/eval_runs/calibrate_*.log
+/data/eval_runs/calibrate_*.summary.json
+/data/eval_runs/calibrate_*_failures/
+/data/eval_runs/chatdrive_*.summary.json
+/data/eval_runs/chatchain_*.json
+
+# ad-hoc scratch one-offs / diagnostic helpers (kept on disk, never committed).
+# Scoped to single-underscore names so __init__.py etc. are unaffected.
+tooling/scratch/_*.py
+
+# chat-session event logs (scratch, never shipped)
+data/fsrpb-chat-sess/
+
+# public mirror: ship the sanitized slim reference catalog
+!data/fsr_reference.db

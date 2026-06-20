@@ -1,0 +1,6 @@
+{
+  "name": "delay_step",
+  "prompt": "Author a FortiSOAR playbook with a manual trigger that pauses for 2 seconds with a delay step, then runs a set_variable step that stamps done=true. Output complete YAML.",
+  "gold_yaml_path": "examples/demo_delay.yaml",
+  "notes": "delay step canonical args"
+}

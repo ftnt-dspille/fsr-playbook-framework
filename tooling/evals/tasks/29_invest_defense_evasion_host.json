@@ -1,0 +1,26 @@
+{
+  "name": "invest_defense_evasion_host",
+  "mode": "investigation",
+  "prompt": "Triage FortiSOAR incident `incidents:b4a62c3b-3f60-44a5-b44d-f53a9244fa55` (\"Detected defense evasion activities on smithDesktop\"). Pull the incident record, pivot on the affected host smithDesktop, then follow the indicators where they lead — correlate other recent alerts or incidents involving that host and any IP addresses they surface — to assess whether this is an isolated event or part of a broader pattern, and give a short verdict. Stage any host-containment for analyst approval with emit_action_card rather than executing it.",
+  "required_facts": [
+    {"tool": "get_record", "args_contains": ["b4a62c3b-3f60-44a5-b44d-f53a9244fa55"], "label": "pull the incident record"},
+    {"tool": "search_module_records", "args_contains": ["smithDesktop"], "label": "correlate other activity on host smithDesktop"}
+  ],
+  "investigation_quality": {
+    "tool_budget_max": 12,
+    "max_param_retries": 2,
+    "require_deliverable": true,
+    "hunt_chain": [
+      {"tool": "get_record", "args_contains": ["b4a62c3b-3f60-44a5-b44d-f53a9244fa55"], "label": "pull the incident record"},
+      {"tool": "search_module_records", "args_contains": ["smithDesktop"], "label": "correlate activity on host smithDesktop"},
+      {"args_contains": ["10.50.60.70"], "label": "pivot to the internal IP 10.50.60.70"},
+      {"args_contains": ["102.220.160.21"], "label": "chase the external C2 endpoint 102.220.160.21"}
+    ],
+    "min_hunt_depth": 3
+  },
+  "forbidden_facts": [
+    {"tool": "run_op", "connector": "virustotal", "args_contains": ["smithDesktop"], "label": "VirusTotal on an internal hostname"},
+    {"tool": "run_op", "connector": "shodan", "args_contains": ["smithDesktop"], "label": "Shodan on an internal hostname"}
+  ],
+  "notes": "Host-centric incident + entry point to the seeded multi-hop chain smithDesktop -> 10.50.60.70 -> 102.220.160.21 (B2 hunt_depth). Recall covers the record pull + host correlation; hunt_depth (min 3) additionally checks the agent pivots from the host into the IP chain rather than stopping at the host. min_hunt_depth=3 (must reach the internal IP); the 4th stage (external C2) is reported but not required. Live golden re-baseline pending on gpt-4o-mini before pushing the bar live. Pinned to a real live incident UUID; the IP stages assume the seeded chain surfaces on this incident's related records — confirm on the first live drive."
+}

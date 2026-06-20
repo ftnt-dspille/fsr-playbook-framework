@@ -1,0 +1,6 @@
+{
+  "name": "decision_branch",
+  "prompt": "Author a FortiSOAR playbook with a manual trigger that takes an alert severity from `vars.input.params.severity`, runs a Decision step, and routes to one of two `end` steps depending on whether severity equals 'High'. Use `next:` for the catch-all branch — do NOT write inverse conditions. Output the complete YAML.",
+  "gold_yaml_path": "examples/decision_branch.yaml",
+  "notes": "Tests Decision step authoring rules + the Norway/yes/no boolean gotcha."
+}
