@@ -19,16 +19,25 @@ _TRIGGER_OPS: frozenset[str] = frozenset({
     "eq", "neq", "gt", "gte", "lt", "lte",
     "isnull", "isnotnull",
     "in", "nin", "in_all",
+    # `like`/`notlike` = case-insensitive SUBSTRING/pattern match on a scalar
+    # field (UI "Matches Pattern"). `contains`/`notcontains` = membership in a
+    # COLLECTION/relationship field such as tags (UI "Contains"). They are
+    # distinct FSR operators — do NOT collapse one into the other.
     "like", "notlike",
+    "contains", "notcontains",
     "changed",
 })
 # Common author mistakes → the FSR operator that does what they meant. FSR has
-# no startswith/endswith/contains: substring/prefix matching is `like`.
+# no startswith/endswith — substring/prefix matching on a scalar field is
+# `like`. NOTE: `contains` is a REAL, distinct operator (collection membership,
+# UI "Contains"), so it must NOT be rewritten to `like` — that silently turns a
+# tags-membership trigger into a pattern match and shows the wrong UI operator.
 _TRIGGER_OP_FIXUPS: dict[str, str] = {
-    "startswith": "like", "endswith": "like", "contains": "like",
+    "startswith": "like", "endswith": "like",
     "equals": "eq", "==": "eq", "!=": "neq", "not_equals": "neq",
     "greater_than": "gt", "less_than": "lt",
     "not_in": "nin", "is_null": "isnull", "is_not_null": "isnotnull",
+    "not_contains": "notcontains", "does_not_contain": "notcontains",
 }
 
 

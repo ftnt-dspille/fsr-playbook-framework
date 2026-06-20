@@ -106,6 +106,57 @@ playbooks:
     assert any("changed" in e.message for e in blocking), blocking
 
 
+def _trigger_with_op(op: str) -> str:
+    return f"""
+collection: 00-test
+playbooks:
+  - name: Trigger
+    steps:
+      - name: On Create
+        type: start_on_create
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - {{field: tags, op: {op}, value: malware}}
+        next: Done
+      - name: Done
+        type: set_variable
+        vars: {{x: 1}}
+"""
+
+
+def test_contains_is_a_distinct_operator_not_rewritten_to_like():
+    # `contains` (collection membership, UI "Contains") must survive verbatim —
+    # it is NOT the same as `like` (substring match, UI "Matches Pattern").
+    import json
+    res, blocking = _errs(_trigger_with_op("contains"))
+    assert res.ok, blocking
+    blob = json.dumps(res.fsr_json)
+    assert '"operator": "contains"' in blob
+    assert '"operator": "like"' not in blob
+
+
+def test_like_stays_like():
+    import json
+    res, blocking = _errs(_trigger_with_op("like"))
+    assert res.ok, blocking
+    assert '"operator": "like"' in json.dumps(res.fsr_json)
+
+
+def test_notcontains_passes_and_aliases_fixed():
+    res, blocking = _errs(_trigger_with_op("notcontains"))
+    assert res.ok, blocking
+    # friendly aliases canonicalize to notcontains (blocking-with-fixup, then
+    # the author applies it) — assert the alias is recognized, not unknown.
+    from fsr_playbooks.compiler.resolver.normalizers import (
+        _TRIGGER_OP_FIXUPS,
+        _TRIGGER_OPS,
+    )
+    assert "contains" in _TRIGGER_OPS and "notcontains" in _TRIGGER_OPS
+    assert "contains" not in _TRIGGER_OP_FIXUPS  # never downgraded to like
+
+
 def test_known_lowercase_module_passes_clean():
     yaml_text = """
 collection: 00-test
