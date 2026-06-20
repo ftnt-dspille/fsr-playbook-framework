@@ -450,6 +450,18 @@ SELECT kind,
 FROM v_verification_state
 GROUP BY kind;
 
+-- ---------- Catalog provenance / freshness ----------
+-- Single source of truth for WHERE and WHEN this catalog was warmed. Drives the
+-- multi-instance guard (base_url_hash) and the two-level freshness check
+-- (fsr_version, last_publish_time, count:<coll>, etag:<coll>). See
+-- fsr_playbooks/_catalog_meta.py for the key vocabulary. Distinct from
+-- _probe_runs (per-run audit log); this is the *current* state.
+CREATE TABLE IF NOT EXISTS _catalog_meta (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at TEXT NOT NULL                 -- ISO-8601 UTC
+);
+
 -- ---------- Audit ----------
 CREATE TABLE IF NOT EXISTS _probe_runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

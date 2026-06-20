@@ -22,6 +22,8 @@ class ErrorCode(str, Enum):
     DUPLICATE_STEP_ID = "duplicate_step_id"
     NO_TRIGGER = "no_trigger"
     BAD_VALUE = "bad_value"
+    INSTANCE_MISMATCH = "instance_mismatch"  # catalog warmed from a different SOAR
+    STALE_CATALOG = "stale_catalog"          # catalog is behind the live SOAR
 
 
 @dataclass
