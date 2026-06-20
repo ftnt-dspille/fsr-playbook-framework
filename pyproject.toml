@@ -1,0 +1,50 @@
+[project]
+name = "fsrpb"
+version = "0.0.1"
+description = "FortiSOAR Playbook YAML compiler + reference store"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+    "ruamel.yaml>=0.18",
+    "jsonschema>=4.21",
+    "jinja2>=3.1",
+    # Local sibling repo, installed editable in dev:
+    #   pip install -e ../pyfsr
+    "pyfsr",
+    "mcp>=1.0",
+]
+
+[project.scripts]
+# `fsrpb_main` (repo-root shim) bootstraps tooling/ onto sys.path, then calls
+# cli.main — cli.py is NOT an installed package so it can't be the entry directly.
+fsrpb = "fsrpb_main:main"
+
+[tool.setuptools]
+# fsr_playbooks lives at the repo root; non-shipped tooling lives under tooling/.
+package-dir = {"" = ".", "probes" = "tooling/probes", "store" = "tooling/store", "e2e" = "tooling/e2e"}
+py-modules = ["fsrpb_main"]
+packages = [
+    "probes", "store", "e2e",
+    "fsr_playbooks",
+    "fsr_playbooks.compiler", "fsr_playbooks.compiler.resolver", "fsr_playbooks.compiler.rulesets",
+    "fsr_playbooks.mcp_server",
+    "fsr_playbooks.llm",
+    "fsr_playbooks.agent",
+]
+
+[tool.ruff]
+# Lint at the supported floor (requires-python >=3.10) so version-specific
+# lints (e.g. pyupgrade rewrites) target the lowest runtime we ship to.
+target-version = "py310"
+extend-exclude = ["web/frontend", "store", ".venv", "tooling/scratch"]
+
+[tool.ruff.lint]
+# Start with pyflakes (F): unused imports/vars, redefinitions, undefined names,
+# f-strings without placeholders. Broaden (E/I/UP/B) in a follow-up sweep.
+select = ["F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ files re-export submodule symbols (and, in mcp_server,
+# import tool modules purely to register their @mcp.tool decorators). The
+# "unused import" is the intended public surface / registration side effect.
+"**/__init__.py" = ["F401"]

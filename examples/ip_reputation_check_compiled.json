@@ -1,0 +1,393 @@
+{
+  "type": "workflow_collections",
+  "macros": [],
+  "exported_tags": [],
+  "data": [
+    {
+      "@type": "WorkflowCollection",
+      "name": "IP Reputation Enrichment",
+      "description": "Check IP reputation and set alert severity based on organizational data.",
+      "visible": true,
+      "image": null,
+      "uuid": "3c07ba78-04bb-5e74-ba9b-3a1f0e5a58cd",
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "name": "IP Reputation Check",
+          "aliasName": null,
+          "tag": "",
+          "description": "Enriches alerts by looking up organization information based on source IP domain.\nIf organization is found, sets severity to Critical; otherwise Low.\nDemonstrates the complete workflow: extract data \u2192 connector call \u2192 decision \u2192 update.\n",
+          "isActive": false,
+          "debug": false,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": 0,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": null,
+          "collection": null,
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/299d1b19-745c-567b-b34a-ca34059afe84",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {},
+              "status": null,
+              "top": "120",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "group": null,
+              "uuid": "299d1b19-745c-567b-b34a-ca34059afe84"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Extract source IP and domain",
+              "description": null,
+              "arguments": {
+                "source_ip": "{{ vars.input.records[0].sourceIp }}",
+                "source_domain": "{{ vars.input.records[0].senderDomain | default('Fortinet') }}"
+              },
+              "status": null,
+              "top": "220",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "3c469c6c-c74d-521c-945a-db766e027dc1"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Get Organization Details",
+              "description": null,
+              "arguments": {
+                "connector": "fortinet-fortisiem",
+                "operation": "get_org_name_by_org_id",
+                "config": "",
+                "params": {
+                  "domain_id": "{{ vars.source_domain }}"
+                },
+                "version": "5.4.2",
+                "name": "Fortinet FortiSIEM",
+                "operationTitle": "Get Organization Details",
+                "step_variables": [],
+                "pickFromTenant": false
+              },
+              "status": null,
+              "top": "320",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "cccd603e-b78d-537d-b72a-07278e8a68f6"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Extract organization result",
+              "description": null,
+              "arguments": {
+                "org_found": "{{ vars.steps.lookup_organization.org_name is not none }}",
+                "org_name": "{{ vars.steps.lookup_organization.org_name | default('Unknown') }}"
+              },
+              "status": null,
+              "top": "420",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "f4128dcb-a02f-5b56-ba53-30074df0d16f"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Decide severity based on organization",
+              "description": null,
+              "arguments": {
+                "conditions": [
+                  {
+                    "option": "Critical",
+                    "condition": "{{ vars.org_found }}"
+                  }
+                ]
+              },
+              "status": null,
+              "top": "520",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/12254cf5-5db7-4b1a-8cb1-3af081924b28",
+              "group": null,
+              "uuid": "9549b64f-0820-5f1d-9810-ffc4eea6ab2a"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Set Critical severity",
+              "description": null,
+              "arguments": {
+                "new_severity": "Critical"
+              },
+              "status": null,
+              "top": "620",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "4bbf011c-bf05-568b-9794-2634e0983844"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Set Low severity",
+              "description": null,
+              "arguments": {
+                "new_severity": "Low"
+              },
+              "status": null,
+              "top": "720",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "dfce4962-5e05-542d-9984-dfb24cb779e4"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Update alert severity",
+              "description": null,
+              "arguments": {
+                "collection": "alerts",
+                "resource": {
+                  "severity": "{{ vars.new_severity | picklist('severity') }}"
+                }
+              },
+              "status": null,
+              "top": "820",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/b593663d-7d13-40ce-a3a3-96dece928722",
+              "group": null,
+              "uuid": "d7e6aa27-190c-571a-8dff-8b2970a31cc2"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "start->extract_source_ip",
+              "targetStep": "/api/3/workflow_steps/3c469c6c-c74d-521c-945a-db766e027dc1",
+              "sourceStep": "/api/3/workflow_steps/299d1b19-745c-567b-b34a-ca34059afe84",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "c3ae9b40-32ba-55ef-9e77-2a0749f77602"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "extract_source_ip->lookup_organization",
+              "targetStep": "/api/3/workflow_steps/cccd603e-b78d-537d-b72a-07278e8a68f6",
+              "sourceStep": "/api/3/workflow_steps/3c469c6c-c74d-521c-945a-db766e027dc1",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "5de4804d-939d-5e29-b8d2-434436d21d36"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "lookup_organization->extract_org_result",
+              "targetStep": "/api/3/workflow_steps/f4128dcb-a02f-5b56-ba53-30074df0d16f",
+              "sourceStep": "/api/3/workflow_steps/cccd603e-b78d-537d-b72a-07278e8a68f6",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "3478e5d9-135b-5c72-b8c6-75cc2b834d48"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "extract_org_result->severity_decision",
+              "targetStep": "/api/3/workflow_steps/9549b64f-0820-5f1d-9810-ffc4eea6ab2a",
+              "sourceStep": "/api/3/workflow_steps/f4128dcb-a02f-5b56-ba53-30074df0d16f",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "46af3830-11df-50bb-bfad-a7d886ebcf52"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "severity_decision:Critical->set_critical_severity",
+              "targetStep": "/api/3/workflow_steps/4bbf011c-bf05-568b-9794-2634e0983844",
+              "sourceStep": "/api/3/workflow_steps/9549b64f-0820-5f1d-9810-ffc4eea6ab2a",
+              "label": "Critical",
+              "isExecuted": false,
+              "group": null,
+              "uuid": "766a6ef2-c8e1-5081-9144-16defdb514dc"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "severity_decision:Low->set_low_severity",
+              "targetStep": "/api/3/workflow_steps/dfce4962-5e05-542d-9984-dfb24cb779e4",
+              "sourceStep": "/api/3/workflow_steps/9549b64f-0820-5f1d-9810-ffc4eea6ab2a",
+              "label": "Low",
+              "isExecuted": false,
+              "group": null,
+              "uuid": "82f13a23-902e-5051-a4b9-3f7332ae8ca5"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "set_critical_severity->update_alert",
+              "targetStep": "/api/3/workflow_steps/d7e6aa27-190c-571a-8dff-8b2970a31cc2",
+              "sourceStep": "/api/3/workflow_steps/4bbf011c-bf05-568b-9794-2634e0983844",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "bd173e07-25bc-5c61-a9fc-b1efadad6663"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "set_low_severity->update_alert",
+              "targetStep": "/api/3/workflow_steps/d7e6aa27-190c-571a-8dff-8b2970a31cc2",
+              "sourceStep": "/api/3/workflow_steps/dfce4962-5e05-542d-9984-dfb24cb779e4",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "5fe0bbfb-34f2-5807-9bc1-615d3ea30e71"
+            }
+          ],
+          "groups": [
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note",
+              "description": "Trigger on Alert records. Extract the source IP and domain information\nfor organizational lookup.\n",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "120",
+              "left": "440",
+              "height": "0",
+              "width": "300",
+              "uuid": "f0e2077a-56d4-5fbf-bc13-a644438e6ea5",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note",
+              "description": "Read the sourceIp and senderDomain fields from the alert record.\nStore them as variables for use in the connector call.\n",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "220",
+              "left": "440",
+              "height": "0",
+              "width": "300",
+              "uuid": "f203e525-8592-54e3-a0e5-74925fa8c201",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note",
+              "description": "Call the FortiSIEM connector to look up organization information.\nThe response will be available in vars.steps.lookup_organization.\n",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "320",
+              "left": "440",
+              "height": "0",
+              "width": "300",
+              "uuid": "57d88a79-329c-5cca-8391-3b4062d3ca7e",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note",
+              "description": "Extract the organization name from the connector response.\nCheck if a result was found (non-null org_name indicates success).\n",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "420",
+              "left": "440",
+              "height": "0",
+              "width": "300",
+              "uuid": "466056ef-e87b-5e63-a6c1-5f22d1dc717d",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note",
+              "description": "Branch based on whether organization was found.\nIf organization is known, route to Critical; otherwise to Low.\n",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "520",
+              "left": "440",
+              "height": "0",
+              "width": "300",
+              "uuid": "479ddb2d-59df-5e71-b286-b797b28d0a8a",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note",
+              "description": "Prepare to update the alert with Critical severity\nbecause the organization was identified.\n",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "620",
+              "left": "440",
+              "height": "0",
+              "width": "300",
+              "uuid": "e25f3851-81a5-55fe-8108-ef2718fed4e6",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note",
+              "description": "Prepare to update the alert with Low severity\nbecause the organization could not be identified.\n",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "720",
+              "left": "440",
+              "height": "0",
+              "width": "300",
+              "uuid": "f9dbf2fd-710e-574e-b071-de5d2d19eb94",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note",
+              "description": "Update the alert record with the new severity level.\nThe picklist filter converts the string to the proper picklist reference.\n",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "820",
+              "left": "440",
+              "height": "0",
+              "width": "300",
+              "uuid": "b762e814-2c38-5cc5-9995-764cf2554b38",
+              "recordTags": []
+            }
+          ],
+          "priority": null,
+          "playbookOrigin": null,
+          "isEditable": true,
+          "uuid": "e366af2a-9e77-5be3-a117-1c396ef3c4af",
+          "owners": [],
+          "isPrivate": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "manual_input_then_act",
+  "prompt": "Author a FortiSOAR playbook ('Confirm Before Block') with a manual trigger that pauses on a manual_input step asking the SOC analyst to approve a block. The 'approve' option routes to a set_variable step that records the action; the 'reject' option routes to a separate set_variable step. Output complete YAML.",
+  "gold_yaml_path": "examples/manual_input_then_act.yaml",
+  "notes": "approval-then-act flow"
+}

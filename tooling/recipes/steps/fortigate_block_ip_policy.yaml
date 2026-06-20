@@ -1,0 +1,32 @@
+name: fortigate_block_ip_policy
+description: |
+  Block one or more IPs on FortiGate using the Policy Based method
+  (writes the address into a named address group attached to a policy).
+  All params are pre-set to the valid set under method='Policy Based';
+  no validation cascade.
+intent_keywords:
+  - block ip fortigate
+  - fortigate block
+  - policy based block
+  - address group block
+  - firewall block ip
+connector: fortigate-firewall
+operation: block_ip_new
+step_types:
+  - connector
+notes: |
+  Replace <POLICY_NAME>, <ADDRESS_GROUP>, and the IP Jinja expression
+  with values that match your FortiGate config. ip_type=IPv6 is also
+  valid; flip if you're blocking v6.
+steps_yaml: |
+  - type: connector
+    name: Block IP on FortiGate
+    arguments:
+      connector: fortigate-firewall
+      operation: block_ip_new
+      params:
+        method: Policy Based
+        ip_block_policy: <POLICY_NAME>
+        ip_group_name: <ADDRESS_GROUP>
+        ip_type: IPv4
+        ip: "{{ vars.steps.Collect_Input.input.target_value }}"

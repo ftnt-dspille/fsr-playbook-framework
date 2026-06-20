@@ -1,0 +1,72 @@
+{
+  "scenario": "for_each_empty_list",
+  "playbook_name": "rp_for_each_empty",
+  "description": "for_each over an empty list",
+  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_for_each_empty\"\n    description: \"for_each empty\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"Loop\"\n      - name: \"Loop\"\n        type: set_variable\n        for_each:\n          item: \"{{ [] }}\"\n          parallel: false\n        vars:\n          current: \"{{ vars.item }}\"\n        next: \"Capture\"\n      - name: \"Capture\"\n        type: set_variable\n        vars:\n          loop_seen: \"{{ vars.steps.Loop }}\"\n",
+  "run_status": "finished",
+  "env": {
+    "debug": true,
+    "input": {
+      "params": {},
+      "records": []
+    },
+    "request": {
+      "uri": "https://<your-fortisoar-host>/api/triggers/1/notrigger/6bf520b5-7fc0-5938-aa8c-ef0c8eb83fe9",
+      "method": "POST",
+      "baseUri": "https://<your-fortisoar-host>",
+      "headers": {
+        "host": "<your-fortisoar-host>",
+        "proxy": "",
+        "accept": "*/*",
+        "connection": "keep-alive",
+        "user-agent": "python-requests/2.33.1",
+        "content-type": "application/json",
+        "authorization": "*******",
+        "content-length": "83",
+        "x-php-ob-level": "1",
+        "accept-encoding": "gzip, deflate"
+      },
+      "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce"
+    },
+    "task_id": "9aa44a8f-8501-4b97-b72e-eecda669a308",
+    "auth_info": {
+      "auth_method": "CS HMAC"
+    },
+    "loop_seen": [],
+    "resources": {},
+    "globalMock": false,
+    "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+    "last_run_at": null,
+    "useMockOutput": false,
+    "mockPlaybookId": null
+  },
+  "steps": [
+    {
+      "name": "Capture",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "9aa44a8f-8501-4b97-b72e-eecda669a308",
+        "loop_seen": []
+      }
+    },
+    {
+      "name": "Loop",
+      "type_name": null,
+      "status": "finished",
+      "result": []
+    },
+    {
+      "name": "Trigger",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "9aa44a8f-8501-4b97-b72e-eecda669a308",
+        "globalMock": false,
+        "useMockOutput": false
+      }
+    }
+  ]
+}

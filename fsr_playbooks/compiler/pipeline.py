@@ -1,0 +1,97 @@
+"""End-to-end compile entry: YAML text -> FSR JSON dict + errors.
+
+Library-first: this is what every consumer (CLI, MCP, widget) calls.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Optional
+
+from .arg_validator import ArgValidator
+from .corpus_validator import CorpusValidator
+from .emitter import emit
+from .errors import CompileError
+from .ir import Collection
+from .linter import lint
+from .parser import parse_yaml
+from .resolver import Resolver
+from .validator import validate
+
+
+@dataclass
+class CompileResult:
+    fsr_json: Optional[dict[str, Any]] = None
+    errors: list[CompileError] = field(default_factory=list)
+    ir: Optional[Collection] = None
+
+    @property
+    def ok(self) -> bool:
+        blocking = [e for e in self.errors if e.severity != "warning"]
+        return not blocking and self.fsr_json is not None
+
+    @property
+    def warnings(self) -> list[CompileError]:
+        return [e for e in self.errors if e.severity == "warning"]
+
+
+def compile_yaml(
+    text: str, db_path: Path,
+    lax_codes: Optional[set[str]] = None,
+) -> CompileResult:
+    """Compile YAML to FSR JSON.
+
+    lax_codes: iterable of ErrorCode values (or their str) to demote from
+    error → warning before blocking checks fire. Use for round-trip Path B
+    where unknown_param / unknown_connector should not block emission.
+    """
+    lax_set: set[str] = {str(c) for c in (lax_codes or set())}
+
+    def _demote(errs: list[CompileError]) -> list[CompileError]:
+        if not lax_set:
+            return errs
+        for e in errs:
+            if str(e.code) in lax_set and e.severity == "error":
+                e.severity = "warning"
+        return errs
+
+    coll, errs = parse_yaml(text)
+    errs = _demote(errs)
+    parse_blocking = [e for e in errs if e.severity != "warning"]
+    if parse_blocking or coll is None:
+        # Even on parse failure we attempt the raw-text linter so the
+        # caller sees the foot-gun cause when the parser bails out on
+        # a derived symptom (e.g. branches mapping that became {True:}).
+        lint_errs = lint(text, coll)
+        return CompileResult(errors=errs + lint_errs, ir=coll)
+
+    all_warnings: list[CompileError] = [e for e in errs if e.severity == "warning"]
+    lint_errs = _demote(lint(text, coll))
+    if any(e.severity != "warning" for e in lint_errs):
+        return CompileResult(errors=lint_errs, ir=coll)
+    all_warnings.extend(lint_errs)
+
+    def _has_blocking(errs: list[CompileError]) -> bool:
+        _demote(errs)
+        blocking = [e for e in errs if e.severity != "warning"]
+        all_warnings.extend(e for e in errs if e.severity == "warning")
+        return bool(blocking)
+
+    resolver = Resolver(db_path)
+    try:
+        errs = resolver.resolve(coll)
+        if _has_blocking(errs):
+            return CompileResult(errors=errs, ir=coll)
+        errs = ArgValidator(resolver.conn).validate(coll)
+        if not _has_blocking(errs):
+            errs = CorpusValidator(resolver.conn).validate(coll)
+    finally:
+        resolver.close()
+    if _has_blocking(errs):
+        return CompileResult(errors=errs, ir=coll)
+
+    errs = _demote(validate(coll))
+    if _has_blocking(errs):
+        return CompileResult(errors=errs, ir=coll)
+
+    return CompileResult(fsr_json=emit(coll), errors=all_warnings, ir=coll)

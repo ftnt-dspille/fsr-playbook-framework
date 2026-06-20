@@ -1,0 +1,48 @@
+# find_record + update_record — the canonical "look something up, mutate it"
+# pattern. Most ingestion playbooks look like this.
+#
+# `find_record` (handler `find_data`):
+#   module: target module name (alerts, incidents, indicators, etc.)
+#   query: filter spec; supports `eq`, `contains`, `in`, etc.
+#   partial: when true, returns first page only
+#
+# `update_record` (handler `update_data`):
+#   collection: module name (yes, "collection" — the param name is misleading;
+#               it's the records collection, not a workflow_collection)
+#   resource: dict of {field: new_value}; the record IRI to update is
+#             passed via the special `__bulk` mechanism FSR adds at runtime.
+
+collection: Compiler Examples
+description: find + update pattern.
+visible: true
+
+playbooks:
+  - name: Tag Existing Indicator
+    description: Look up an indicator by value and tag it.
+    parameters:
+      - indicator_value
+      - tag
+    steps:
+      - name: start
+        type: start
+        next: find
+
+      - name: find
+        type: find_record
+        next: Apply tag
+        arguments:
+          module: indicators
+          query:
+            logic: AND
+            filters:
+              - field: value
+                operator: eq
+                value: "{{ vars.input.params.indicator_value }}"
+          partial: true
+
+      - name: Apply tag
+        type: update_record
+        arguments:
+          collection: indicators
+          resource:
+            tags: "{{ vars.steps.find['hydra:member'][0].tags + [vars.input.params.tag] }}"

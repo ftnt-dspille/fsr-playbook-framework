@@ -1,0 +1,32 @@
+fixture: examples/demo_alert_on_status_change.yaml
+playbook: FSRPB Demo - On Alert Status Change
+
+# Setup: insert an alert with status Open and a known marker name.
+setup:
+  - kind: create_record
+    module: alerts
+    fields:
+      name: fsrpb_e2e_on_update_seed
+      severity: Medium
+      status: Open
+    capture_as: alert
+
+# 3rd trigger mode: PUT the captured record to fire post_update.
+# Changing `status` matches the playbook's when:{op: changed, field: status}.
+mutate:
+  capture: alert
+  fields:
+    status: Investigating
+
+timeout_s: 90
+
+expects:
+  status: finished
+  steps:
+    Stamp_marker:
+      status: finished
+  record:
+    capture: alert
+    contains:
+      description: fsrpb_e2e_on_update_marker
+cleanup: true
