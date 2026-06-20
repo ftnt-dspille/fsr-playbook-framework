@@ -450,6 +450,21 @@ SELECT kind,
 FROM v_verification_state
 GROUP BY kind;
 
+-- ---------- Connector configurations (Tier-2, per-install) ----------
+-- Maps a connector + friendly config name to its per-instance config UUID.
+-- These records are created out-of-band on each FSR box and are NOT portable,
+-- so they're WARMED into this table (not shipped). The compiler reads it via
+-- Resolver.resolve_config_id() — no live lookup, no dev-only `tooling/` import.
+-- `config_name = '__default__'` holds the instance's default config for a
+-- connector. Replaces the legacy data/connector_config_map.json cache.
+CREATE TABLE IF NOT EXISTS connector_configs (
+    connector   TEXT NOT NULL,
+    config_name TEXT NOT NULL,                 -- friendly name, or '__default__'
+    config_id   TEXT,                          -- per-instance UUID (NULL if none)
+    is_default  INTEGER DEFAULT 0,
+    PRIMARY KEY (connector, config_name)
+);
+
 -- ---------- Catalog provenance / freshness ----------
 -- Single source of truth for WHERE and WHEN this catalog was warmed. Drives the
 -- multi-instance guard (base_url_hash) and the two-level freshness check

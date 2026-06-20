@@ -964,27 +964,23 @@ class NormalizerMixin:
             connector, operation, version, params.python_function, config,
             operationTitle, step_variables, pickFromTenant.
 
-        config UUID is resolved via connector_configs (live, cached).
-        Already-canonical args (`connector`+`operation`+`params`) pass
-        through untouched.
+        config UUID is resolved offline from the warmed `connector_configs`
+        catalog table (Resolver.resolve_config_id) — no live lookup, no
+        dev-only `tooling/` import. Already-canonical args
+        (`connector`+`operation`+`params`) pass through untouched.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
         if a.get("connector") and a.get("operation") and a.get("params"):
             self._require_nonempty_snippet(a.get("params"), path, errors)
             step.arguments = a
             return
-        # Deferred + optional: connector_configs lives in the dev `tooling/`
-        # tree (not shipped in the wheel) and is only needed to resolve a
-        # friendly `config:` name to a UUID. Importing it at function top
-        # crashed every code_snippet compile in a fresh install. When it's
-        # unavailable, degrade to the same "unresolved config" fallback the
-        # function already uses (`cid = "" `) so the friendly `code:` form
-        # still compiles offline — warmup fills the real UUID later.
-        try:
-            from connector_configs import resolve_config_id
-        except ModuleNotFoundError:
-            def resolve_config_id(_connector, _name):  # noqa: ANN001
-                return None
+        # Config resolution reads the warmed `connector_configs` table via the
+        # CatalogLookupMixin (in-package, offline). When that table is unwarmed
+        # it returns None and we degrade to an unresolved config UUID (`""`) so
+        # the friendly `code:` form still compiles offline — warmup fills the
+        # real UUID later. This used to import the dev-only `tooling/`
+        # connector_configs module, which crashed every code_snippet compile in
+        # a fresh wheel.
         _FRIENDLY = {"code", "python", "config", "mock_result", "condition"}
         _CANONICAL = {
             "connector", "operation", "operationTitle", "version",
@@ -998,7 +994,7 @@ class NormalizerMixin:
         config_name = a.pop("config", None) if isinstance(
             a.get("config"), str) and not _looks_like_uuid(a.get("config")) \
             else None
-        cid = resolve_config_id("code-snippet", config_name) or ""
+        cid = self.resolve_config_id("code-snippet", config_name) or ""
         a.setdefault("connector", "code-snippet")
         a.setdefault("operation", "python_inline_code_editor")
         a.setdefault("operationTitle", "Execute Python Code")

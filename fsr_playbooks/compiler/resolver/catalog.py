@@ -151,6 +151,41 @@ class CatalogLookupMixin:
         ))
         return name
 
+    def resolve_config_id(
+        self, connector: str, config_name: Optional[str] = None
+    ) -> Optional[str]:
+        """Return the per-instance config UUID for ``connector`` (+ optional
+        friendly ``config_name``), read from the warmed ``connector_configs``
+        table. ``None`` when unwarmed or unknown.
+
+        This is the in-package replacement for the dev-only
+        ``tooling/connector_configs.py``: the compiler must resolve configs
+        offline from the warmed catalog, never by importing ``tooling/`` or
+        hitting the network. When ``config_name`` is None we return the
+        instance's default config (``config_name = '__default__'``), falling
+        back to any single config for the connector.
+        """
+        try:
+            if config_name:
+                row = self.conn.execute(
+                    "SELECT config_id FROM connector_configs "
+                    "WHERE connector = ? AND config_name = ?",
+                    (connector, config_name),
+                ).fetchone()
+                return (row[0] or None) if row else None
+            # default: the '__default__' row, else the is_default row, else any.
+            row = self.conn.execute(
+                "SELECT config_id FROM connector_configs "
+                "WHERE connector = ? "
+                "ORDER BY (config_name = '__default__') DESC, is_default DESC "
+                "LIMIT 1",
+                (connector,),
+            ).fetchone()
+            return (row[0] or None) if row else None
+        except sqlite3.OperationalError:
+            # Table absent on an old/slim DB — unwarmed, nothing to resolve.
+            return None
+
     def connector(self, name: str) -> Optional[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM connectors WHERE name = ?", (name,),
