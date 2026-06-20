@@ -8,15 +8,19 @@ name = "fsr_playbooks"
 dynamic = ["version"]
 description = "FortiSOAR playbook authoring/compiler framework: YAML->FSR-JSON compiler, LLM co-authoring, and MCP server tools."
 readme = "README.md"
-# Targets FortiSOAR 8.0.0 (Python 3.12) — the only supported runtime going
-# forward. Older 3.9/3.11 SOAR boxes are intentionally out of scope.
-requires-python = ">=3.12"
+# The compiler/CLI runs off-box (CI, pyfsr's [playbooks] extra, dev laptops),
+# so the floor tracks the lowest still-supported Python (3.10; 3.9 is EOL) — not
+# the SOAR runtime. No 3.12-only syntax is used; deps all support 3.10.
+requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Dylan Spille" }]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 # Base = compiler + agent dataclasses. Verified by import scan (2026-06-17):

@@ -2,7 +2,7 @@
 name = "fsrpb"
 version = "0.0.1"
 description = "FortiSOAR Playbook YAML compiler + reference store"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "pyyaml>=6.0",
     "ruamel.yaml>=0.18",
@@ -33,10 +33,9 @@ packages = [
 ]
 
 [tool.ruff]
-# fsr_playbooks ships into the SOAR 3.9 runtime, so lint at the lowest baseline we
-# support — this is what catches module-level PEP 604 unions before they reach
-# the connector. The Studio backend/CLI run on 3.11+, but py39 is the safe floor.
-target-version = "py39"
+# Lint at the supported floor (requires-python >=3.10) so version-specific
+# lints (e.g. pyupgrade rewrites) target the lowest runtime we ship to.
+target-version = "py310"
 extend-exclude = ["web/frontend", "store", ".venv", "tooling/scratch"]
 
 [tool.ruff.lint]
