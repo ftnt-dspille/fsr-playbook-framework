@@ -397,9 +397,10 @@ class NormalizerMixin:
                     "operator": "changed",
                 })
             else:
+                _op_display = (op + "_pattern") if op.endswith("like") else op
                 out_filters.append({
                     "type": "primitive", "field": field, "value": value,
-                    "operator": op, "_operator": op,
+                    "operator": op, "_operator": _op_display,
                 })
         return {"sort": [], "limit": 30, "logic": logic, "filters": out_filters}
 
