@@ -44,6 +44,12 @@ rm -rf docs/archive docs/plans docs/research docs/corpus_audit scripts/internal
 rm -f  docs/build_deck.py docs/FSR_Playbook_AI_Deepdive.pptx fsrpb_presentation.pptx \
        PRESENTATION_OUTLINE.md FSR_CONNECTOR_PLAN.md scripts/external/build_presentation.py
 rm -f  web/PLAN.md web/ARCHITECTURE_HARDENING_PLAN.md web/UI_CONSOLIDATION_PLAN.md
+# Root-level planning/strategy docs are internal by default (docs/plans/ is
+# already stripped wholesale above). Glob, not named files, so a NEW *_PLAN.md
+# at the repo root can't leak silently the way the regex check won't catch
+# strategic content. NB: this also drops the previously-public REORG_PLAN.md
+# and PYFSR_MIGRATION_PLAN.md from future snapshots.
+rm -f  ./*_PLAN.md
 rm -f  docs/AGENTIC_IR_ARCHITECTURE_REVIEW.md docs/AGENT_DATA_AUDIT.md docs/AGENT_DATA_GAPS.md \
        docs/AGENT_PROMPT_ADHERENCE.md docs/AGENT_TOOL_USAGE.md \
        docs/CONTINUE_DYNAMIC_TRIAGE.md docs/CONTINUE_TRIAGE_BEHAVIOR_FIXES.md docs/EVAL_PROMPTS.md \

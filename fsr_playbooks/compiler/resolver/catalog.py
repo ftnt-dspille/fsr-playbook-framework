@@ -84,6 +84,108 @@ class CatalogLookupMixin:
         if not isinstance(script, str):
             return None
         return script.rsplit("/", 1)[-1]
+    def resolve_module_name(
+        self,
+        raw: str,
+        path: str,
+        errors: list[CompileError],
+    ) -> str:
+        """Validate / canonicalize a friendly module name against the
+        ``modules`` catalog. Returns the canonical lowercase type name.
+
+        FSR module *type* names are lowercase plural tokens ('alerts',
+        'incidents', 'indicators') — the same token that goes into a
+        ``/api/3/<module>`` IRI and a trigger's ``resource``. Authors
+        routinely write the UI label instead ('Alerts'); the trigger /
+        record-CRUD normalizers used to copy that through verbatim, so a
+        capital-A 'Alerts' resource shipped to FSR and silently never
+        matched. Case-fix it here with a warning.
+
+        Provenance handling mirrors ``_resolve_priority``: when the
+        ``modules`` table is empty (an unwarmed / pre-name-catalog slim
+        DB) we have nothing to validate against, so pass the value
+        through SILENTLY rather than emit a warning the author can't act
+        on. Unknown-but-non-empty names are a *warning* (not a hard
+        error) because a target install may carry custom modules that
+        aren't in the shipped baseline catalog.
+        """
+        if not isinstance(raw, str) or not raw.strip():
+            return raw
+        name = raw.strip()
+        # Already an IRI — caller handles the /api/3/ form; don't touch.
+        if name.startswith("/api/"):
+            return name
+        known = [r[0] for r in self.conn.execute(
+            "SELECT name FROM modules").fetchall()]
+        if not known:
+            # Unwarmed catalog (no module names shipped/synced) — silent.
+            return name
+        if name in known:
+            return name
+        by_lower = {k.lower(): k for k in known}
+        canon = by_lower.get(name.lower())
+        if canon is not None:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"module {name!r} is not the canonical FSR type name "
+                    f"(module names are lowercase) — rewrote to {canon!r}"
+                ),
+                path=path,
+                near=canon,
+                suggestion=f"use {canon!r}",
+                severity="warning",
+            ))
+            return canon
+        sug = difflib.get_close_matches(name.lower(), known, n=1, cutoff=0.6)
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(
+                f"unknown module {name!r} — not in the reference catalog "
+                f"(ignore if it's a custom module on the target install)"
+            ),
+            path=path,
+            near=sug[0] if sug else None,
+            suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+            severity="warning",
+        ))
+        return name
+
+    def resolve_config_id(
+        self, connector: str, config_name: Optional[str] = None
+    ) -> Optional[str]:
+        """Return the per-instance config UUID for ``connector`` (+ optional
+        friendly ``config_name``), read from the warmed ``connector_configs``
+        table. ``None`` when unwarmed or unknown.
+
+        This is the in-package replacement for the dev-only
+        ``tooling/connector_configs.py``: the compiler must resolve configs
+        offline from the warmed catalog, never by importing ``tooling/`` or
+        hitting the network. When ``config_name`` is None we return the
+        instance's default config (``config_name = '__default__'``), falling
+        back to any single config for the connector.
+        """
+        try:
+            if config_name:
+                row = self.conn.execute(
+                    "SELECT config_id FROM connector_configs "
+                    "WHERE connector = ? AND config_name = ?",
+                    (connector, config_name),
+                ).fetchone()
+                return (row[0] or None) if row else None
+            # default: the '__default__' row, else the is_default row, else any.
+            row = self.conn.execute(
+                "SELECT config_id FROM connector_configs "
+                "WHERE connector = ? "
+                "ORDER BY (config_name = '__default__') DESC, is_default DESC "
+                "LIMIT 1",
+                (connector,),
+            ).fetchone()
+            return (row[0] or None) if row else None
+        except sqlite3.OperationalError:
+            # Table absent on an old/slim DB — unwarmed, nothing to resolve.
+            return None
+
     def connector(self, name: str) -> Optional[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM connectors WHERE name = ?", (name,),

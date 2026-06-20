@@ -262,7 +262,52 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
                     key=f"{module}:{attr['name']}",
                     method="live_api_get", status="seen",
                 )
+
+    _stamp_provenance(conn, client)
     return n_modules, n_fields, errors
+
+
+def _stamp_provenance(conn: sqlite3.Connection, client) -> None:
+    """Record which instance (+ version / publish watermark) this catalog was
+    warmed from, into ``_catalog_meta`` — drives the compile-time multi-instance
+    guard and the Tier-0/Tier-1 freshness check. Best-effort: the two extra
+    GETs are cheap and failure here must not fail the warmup."""
+    from fsr_playbooks import _catalog_meta
+
+    cfg = _env.get_config()
+    fsr_version = None
+    last_publish = None
+    try:  # public, no-auth, ~25 B — Tier-0 upgrade gate
+        v = client.get("/api/version")
+        if isinstance(v, dict):
+            fsr_version = v.get("version")
+    except Exception:  # noqa: BLE001
+        pass
+    try:  # appliance-wide publish watermark — Tier-1 gate
+        p = client.get("/api/publish/error")
+        if isinstance(p, dict):
+            last_publish = p.get("last_publish_time")
+    except Exception:  # noqa: BLE001
+        pass
+    _catalog_meta.stamp_instance(
+        conn,
+        instance_label=cfg.instance_label,
+        base_url=cfg.base_url,
+        fsr_version=fsr_version,
+        last_publish_time=last_publish,
+    )
+    # Baseline the cheap row counts so a later `check-fresh` can detect
+    # add/delete drift (incl. picklist value adds that publish nothing).
+    for coll in ("model_metadatas", "attribute_metadatas",
+                 "picklists", "picklist_names", "tags"):
+        try:
+            r = client.get(f"/api/3/{coll}?$limit=0")
+            total = r.get("hydra:totalItems") if isinstance(r, dict) else None
+            if isinstance(total, int):
+                _catalog_meta.record_count(conn, coll, total)
+        except Exception:  # noqa: BLE001
+            pass
+    conn.commit()
 
 
 # ----------------------- local fallback -----------------------

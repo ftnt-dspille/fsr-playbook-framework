@@ -83,6 +83,11 @@ class Resolver(
 
     def resolve(self, collection: Collection) -> list[CompileError]:
         errors: list[CompileError] = []
+        # Multi-instance guard: if a target SOAR is configured (FSR_BASE_URL)
+        # but the cached catalog was warmed from a different one, picklist IRIs
+        # and connector configs may silently mis-resolve. Surface it up front.
+        from ..._catalog_meta import instance_guard
+        instance_guard(self.conn, errors)
         # Build name→Playbook map for in-collection workflow_reference targets.
         pb_by_name = {pb.name: pb for pb in collection.playbooks}
         for pi, pb in enumerate(collection.playbooks):

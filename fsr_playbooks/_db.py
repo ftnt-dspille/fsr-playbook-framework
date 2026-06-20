@@ -7,14 +7,18 @@ Resolution order (first hit wins):
    gitignored). Present only in a source checkout.
 3. ``fsr_playbooks/_data/fsr_reference.db`` — the packaged slim catalog shipped in
    the wheel. Stable tables only (step types/handlers, jinja, recipes, api
-   endpoints); the per-install tables (connectors/operations/picklists/modules)
-   ship empty.
+   endpoints, plus the ``modules`` *name* catalog — module type names are
+   globally stable for an FSR version and carry no per-install UUIDs); the
+   UUID-bearing per-install tables (connectors/operations/picklists) ship empty.
 
-A fresh ``pip install fsr_playbooks`` has only (3): enough to compile playbooks
-that reference solely the stable catalog. A playbook that references a live
-connector op / picklist / module needs ``warmup`` against a target SOAR to fill
-those tables first — until then the resolver reports a clear ``CompileError``
-(it does NOT fall back to a live lookup).
+A fresh ``pip install fsr_playbooks`` has (3): enough to compile playbooks that
+reference solely the stable catalog AND to validate/canonicalize module names
+offline (e.g. ``Alerts`` → ``alerts``). A playbook that references a live
+connector op / picklist needs ``warmup`` against a target SOAR (which sources
+the data through pyfsr) to fill those tables first — until then the resolver
+reports a clear ``CompileError`` (it does NOT fall back to a live lookup).
+``warmup`` also overwrites the baseline ``modules`` catalog with the target's
+own set, picking up any custom modules.
 """
 from __future__ import annotations
 
