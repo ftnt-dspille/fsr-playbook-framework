@@ -14,7 +14,7 @@ from __future__ import annotations
 # Single source of truth for the published version. The packaging dist
 # (packaging/fsr_playbooks/pyproject.toml) reads this via dynamic version, and
 # the FortiSOAR connector asserts the worker imported exactly this build.
-__version__ = "0.3.68"
+__version__ = "0.4.0"
 
 from fsr_playbooks.compiler import (
     compile_yaml, parse_yaml, validate, emit,
