@@ -1,3 +1,15 @@
+---
+title: ManualTask Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- manual-task
+- step-parameters
+canonical: false
+summary: ManualTask step parameter reference.
+---
+
 # ManualTask
 
 - FSR step_type_name: `ManualTask`

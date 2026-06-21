@@ -1,3 +1,16 @@
+---
+title: FindRecords Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- find-records
+- query
+- step-parameters
+canonical: false
+summary: FindRecords step parameter reference.
+---
+
 # FindRecords
 
 - FSR step_type_name: `FindRecords`

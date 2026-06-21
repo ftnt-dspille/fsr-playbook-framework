@@ -1,3 +1,16 @@
+---
+title: Connectors Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- connectors
+- step-parameters
+- operations
+canonical: false
+summary: Connectors step parameter reference.
+---
+
 # Connectors
 
 - FSR step_type_name: `Connectors`

@@ -1,3 +1,20 @@
+---
+title: fsr-playbook-framework Architecture
+category: architecture
+status: reference
+source: hand-written
+topics:
+- compiler-design
+- reference-store
+- authoring-flows
+- agent-integration
+- mvc
+canonical: true
+summary: 'Architecture & end-state: three authoring surfaces (CLI/agent/visual) converge
+  on simplified YAML IR, compiled to FSR JSON. North star is the reference store as
+  the brain.'
+---
+
 # fsr-playbook-framework — architecture & end state
 
 **Status**: living doc. Last updated 2026-05-03. Compiler v1, reference store, live e2e (push/run/poll/env), MCP server (16 tools), and corpus-mined Jinja docs are all live. Open: demo MVP + Phase 8 frontend research (Monaco YAML editor + LLM chat).

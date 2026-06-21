@@ -1,3 +1,19 @@
+---
+title: Using fsrpb Without an LLM
+category: tools
+status: reference
+source: hand-written
+topics:
+- python-imports
+- cli
+- api
+- scripts
+- no-llm-workflows
+canonical: false
+summary: 'Four access paths for fsrpb tools without LLM in loop: direct Python imports,
+  CLI mirror, REST API, test DSL.'
+---
+
 # Using fsrpb without an LLM
 
 Every MCP tool in this repo is a plain Python function. The

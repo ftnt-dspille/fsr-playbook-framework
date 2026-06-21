@@ -1,3 +1,15 @@
+---
+title: Cybersponse Post Update Trigger
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- trigger
+- post-update
+canonical: false
+summary: Cybersponse post-update trigger reference.
+---
+
 # cybersponse.post_update
 
 - FSR step_type_name: `cybersponse.post_update`

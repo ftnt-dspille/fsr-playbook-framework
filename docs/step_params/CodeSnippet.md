@@ -1,3 +1,16 @@
+---
+title: CodeSnippet Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- code-snippet
+- python
+- jinja
+canonical: false
+summary: CodeSnippet step parameter reference.
+---
+
 # CodeSnippet
 
 - FSR step_type_name: `CodeSnippet`

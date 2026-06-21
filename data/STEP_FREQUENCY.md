@@ -1,3 +1,18 @@
+---
+title: Step-Type Frequency in the FSR Playbook Corpus
+category: playbook-authoring
+status: reference
+source: live-verified
+topics:
+- frequency
+- corpus
+- 1596-playbooks
+- statistics
+canonical: true
+summary: 'Derived from 119 collections / 1596 playbooks (2026-05-03): prioritizes
+  which step types the e2e harness must exercise.'
+---
+
 # Step-type frequency in the FSR playbook corpus
 
 Derived from `pb_examples/all_fsr_evoke_playbooks.json` — 119 collections,

@@ -1,3 +1,19 @@
+---
+title: Agent-Loop Architecture — Shared fsr_playbooks.llm Wiring
+category: architecture
+status: reference
+source: hand-written
+topics:
+- agent-loop
+- investigate
+- triage
+- build
+- llm-wiring
+canonical: false
+summary: 'Shared investigate→triage→build agent loop implementation across repos:
+  one fsr_playbooks.llm wiring.'
+---
+
 # Agent-loop architecture — the shared `fsr_playbooks.llm` wiring
 
 The investigate→triage→build agent loop is **one implementation in

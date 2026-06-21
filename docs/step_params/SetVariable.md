@@ -1,3 +1,15 @@
+---
+title: SetVariable Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- set-variable
+- step-parameters
+canonical: false
+summary: SetVariable step parameter reference.
+---
+
 # SetVariable
 
 - FSR step_type_name: `SetVariable`

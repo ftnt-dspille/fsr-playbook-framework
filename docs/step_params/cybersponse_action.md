@@ -1,3 +1,15 @@
+---
+title: Cybersponse Action
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- action
+- execution
+canonical: false
+summary: Cybersponse action step reference.
+---
+
 # cybersponse.action
 
 - FSR step_type_name: `cybersponse.action`

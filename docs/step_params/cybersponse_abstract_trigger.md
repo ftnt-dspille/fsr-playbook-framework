@@ -1,3 +1,15 @@
+---
+title: Cybersponse Abstract Trigger
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- trigger
+- abstract
+canonical: false
+summary: Cybersponse abstract trigger reference.
+---
+
 # cybersponse.abstract_trigger
 
 - FSR step_type_name: `cybersponse.abstract_trigger`

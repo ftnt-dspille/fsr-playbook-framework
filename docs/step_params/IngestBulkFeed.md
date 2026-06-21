@@ -1,3 +1,16 @@
+---
+title: IngestBulkFeed Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- ingest-bulk-feed
+- threat-feed
+- step-parameters
+canonical: false
+summary: IngestBulkFeed step parameter reference.
+---
+
 # IngestBulkFeed
 
 - FSR step_type_name: `IngestBulkFeed`

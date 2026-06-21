@@ -1,3 +1,15 @@
+---
+title: Cybersponse Post Create Trigger
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- trigger
+- post-create
+canonical: false
+summary: Cybersponse post-create trigger reference.
+---
+
 # cybersponse.post_create
 
 - FSR step_type_name: `cybersponse.post_create`

@@ -1,3 +1,17 @@
+---
+title: Web Studio Plan
+category: plans
+status: plan
+source: hand-written
+topics:
+- web
+- studio
+- frontend
+- planning
+canonical: false
+summary: Plan for the web-based playbook studio.
+---
+
 # FSR Playbook Studio — Web app plan
 
 **Status**: Phase 5 in progress (LLM-modular + history backend done; UI routes pending)

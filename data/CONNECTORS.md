@@ -1,3 +1,19 @@
+---
+title: FortiSOAR Connectors Cheatsheet
+category: connectors
+status: reference
+source: live-verified
+topics:
+- connectors
+- operations
+- parameters
+- categories
+- 714-connectors
+canonical: true
+summary: '714 connectors · 6773 operations · 26093 parameters across 157 categories.
+  Per-op signature format: op_name(req: type, [opt: type]).'
+---
+
 # FortiSOAR connectors cheatsheet
 
 Generated from `store/fsr_reference.db` by `python/store/export_connectors.py`. Source-of-truth is the live FSR appliance's `/api/integration/connectors/` endpoint plus the catalog via `/api/query/solutionpacks`.

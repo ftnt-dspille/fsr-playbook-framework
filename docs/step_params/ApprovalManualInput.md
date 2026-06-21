@@ -1,3 +1,16 @@
+---
+title: ApprovalManualInput Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- approval
+- manual-input
+- step-parameters
+canonical: false
+summary: ApprovalManualInput step parameter reference.
+---
+
 # ApprovalManualInput
 
 - FSR step_type_name: `ApprovalManualInput`

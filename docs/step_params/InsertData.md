@@ -1,3 +1,15 @@
+---
+title: InsertData Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- insert-data
+- step-parameters
+canonical: false
+summary: InsertData step parameter reference.
+---
+
 # InsertData
 
 - FSR step_type_name: `InsertData`

@@ -1,3 +1,18 @@
+---
+title: FortiSOAR Playbook Step Types
+category: playbook-authoring
+status: reference
+source: live-verified
+topics:
+- step-types
+- api-reference
+- occurrence-frequency
+- examples
+canonical: true
+summary: Source-of-truth for 43 playbook step types ordered by frequency; includes
+  API schema + real-world examples from 7000+ steps.
+---
+
 # FortiSOAR playbook step types
 
 Generated from `store/fsr_reference.db` by `python/store/export_step_types.py`. Source-of-truth is the live FSR appliance's `/api/3/workflow_step_types/` endpoint plus mined samples from `/api/3/workflow_steps?$relationships=true`.

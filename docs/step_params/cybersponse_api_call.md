@@ -1,3 +1,15 @@
+---
+title: Cybersponse API Call
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- api-call
+- integration
+canonical: false
+summary: Cybersponse API call step reference.
+---
+
 # cybersponse.api_call
 
 - FSR step_type_name: `cybersponse.api_call`

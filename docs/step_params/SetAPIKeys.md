@@ -1,3 +1,16 @@
+---
+title: SetAPIKeys Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- set-api-keys
+- credentials
+- step-parameters
+canonical: false
+summary: SetAPIKeys step parameter reference.
+---
+
 # SetAPIKeys
 
 - FSR step_type_name: `SetAPIKeys`

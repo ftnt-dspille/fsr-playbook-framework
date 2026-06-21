@@ -1,3 +1,18 @@
+---
+title: Manual Input — Full Variant Catalog
+category: playbook-authoring
+status: reference
+source: live-verified
+topics:
+- manual-input
+- approval-steps
+- form-builder
+- variants
+canonical: true
+summary: 'Full variant catalog for ManualInput + ApprovalManualInput steps: 166 +
+  4 examples from live appliance + UI form-builder.'
+---
+
 # Manual Input — full variant catalog
 
 Sources:

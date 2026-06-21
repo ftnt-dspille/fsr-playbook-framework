@@ -1,3 +1,19 @@
+---
+title: Authoring Playbooks in YAML
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- yaml-syntax
+- step-types
+- playbook-structure
+- variables
+- branching
+canonical: true
+summary: 'Working guide for simplified YAML syntax the compiler accepts: playbook
+  shape, step types, parameter binding, trigger patterns.'
+---
+
 # Authoring playbooks in YAML
 
 This is the working guide for writing FortiSOAR playbooks in the simplified

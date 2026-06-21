@@ -1,3 +1,16 @@
+---
+title: RunScript Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- run-script
+- bash
+- step-parameters
+canonical: false
+summary: RunScript step parameter reference.
+---
+
 # RunScript
 
 - FSR step_type_name: `RunScript`

@@ -1,3 +1,16 @@
+---
+title: Enhance Addendum
+category: tools
+status: reference
+source: hand-written
+topics:
+- enhance
+- agent-prompt
+- instructions
+canonical: false
+summary: Enhancement addendum for the agent system prompt.
+---
+
 # Enhance mode (overrides "Required workflow" above)
 
 The user has an existing playbook in the editor. Your job is the

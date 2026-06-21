@@ -1,3 +1,16 @@
+---
+title: ManualInput Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- manual-input
+- hitl
+- step-parameters
+canonical: false
+summary: ManualInput step parameter reference.
+---
+
 # ManualInput
 
 - FSR step_type_name: `ManualInput`

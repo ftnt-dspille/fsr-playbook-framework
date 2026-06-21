@@ -1,3 +1,16 @@
+---
+title: Playbook Step Parameters — Index
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- step-parameters
+- index
+- reference
+canonical: false
+summary: Index for playbook step parameter deep-dives (one per step type).
+---
+
 # Step type param audit
 
 | step_type | corpus rows | distinct keys | gaps |

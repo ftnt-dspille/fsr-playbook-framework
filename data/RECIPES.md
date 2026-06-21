@@ -1,3 +1,19 @@
+---
+title: FortiSOAR Playbook Recipes
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- recipes
+- patterns
+- threat-feed
+- data-ingest
+- examples
+canonical: true
+summary: Curated multi-step composition patterns (threat-feed ingestion, data-ingest,
+  HITL); complete, importable YAML.
+---
+
 # FortiSOAR playbook recipes
 
 Generated from `examples/*.yaml` + `store/fsr_reference.db` by `python/store/export_recipes.py`. Recipes are *multi-step* compositions — for per-step shape see `STEP_TYPES.md`, for connector ops see `CONNECTORS.md`.

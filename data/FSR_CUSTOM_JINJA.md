@@ -1,3 +1,19 @@
+---
+title: FortiSOAR-Custom Jinja Capabilities
+category: playbook-authoring
+status: live-verified
+source: live-verified
+topics:
+- jinja
+- filters
+- macros
+- globals
+- custom-functions
+canonical: true
+summary: 170+ filters / 15 globals / 39 tests + signatures introspected from FSR appliance.
+  FortiSOAR-specific Jinja extensions.
+---
+
 # FortiSOAR-custom Jinja capabilities
 
 Generated from `store/fsr_reference.db` by `python/store/export_jinja_cheatsheet.py`. Source-of-truth is the live FSR appliance via `inspect.signature()` introspection on the workflow service's Jinja Environment (`backend_introspect` method).

@@ -1,3 +1,15 @@
+---
+title: UpdateRecord Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- update-record
+- step-parameters
+canonical: false
+summary: UpdateRecord step parameter reference.
+---
+
 # UpdateRecord
 
 - FSR step_type_name: `UpdateRecord`

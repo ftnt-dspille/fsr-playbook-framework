@@ -1,3 +1,16 @@
+---
+title: WorkflowReference Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- workflow-reference
+- sub-workflows
+- step-parameters
+canonical: false
+summary: WorkflowReference step parameter reference.
+---
+
 # WorkflowReference
 
 - FSR step_type_name: `WorkflowReference`

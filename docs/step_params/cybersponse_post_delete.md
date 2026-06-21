@@ -1,3 +1,15 @@
+---
+title: Cybersponse Post Delete Trigger
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- trigger
+- post-delete
+canonical: false
+summary: Cybersponse post-delete trigger reference.
+---
+
 # cybersponse.post_delete
 
 - FSR step_type_name: `cybersponse.post_delete`

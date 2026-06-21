@@ -1,3 +1,16 @@
+---
+title: SendMail Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- send-mail
+- email
+- step-parameters
+canonical: false
+summary: SendMail step parameter reference.
+---
+
 # SendMail
 
 - FSR step_type_name: `SendMail`

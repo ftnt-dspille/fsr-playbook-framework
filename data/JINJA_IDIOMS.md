@@ -1,3 +1,18 @@
+---
+title: FSR Jinja Idioms
+category: playbook-authoring
+status: reference
+source: live-verified
+topics:
+- jinja-patterns
+- idioms
+- best-practices
+- 1669-playbooks
+canonical: true
+summary: 'Patterns observed in 1,669 live FortiSOAR playbooks: how set/for/if get
+  composed in production.'
+---
+
 # FSR Jinja Idioms
 
 Patterns observed in 1,669 live FortiSOAR playbooks. These are the **idioms** —

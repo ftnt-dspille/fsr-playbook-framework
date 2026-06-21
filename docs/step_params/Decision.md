@@ -1,3 +1,16 @@
+---
+title: Decision Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- decision
+- step-parameters
+- branching
+canonical: false
+summary: Decision step parameter reference.
+---
+
 # Decision
 
 - FSR step_type_name: `Decision`

@@ -1,3 +1,18 @@
+---
+title: /api/wf/* Django Service — Full Reference
+category: api-reference
+status: reference
+source: live-verified
+topics:
+- django-api
+- workflow-control
+- run-management
+- cython-introspection
+canonical: true
+summary: Runtime introspection of /api/wf/* endpoints; class/method signatures, docstrings,
+  attributes (Cython compiled, so recovered via inspection).
+---
+
 # `/api/wf/*` Django service — full reference
 
 Source-of-truth: runtime introspection (`inspect.getmembers` + `manage.py

@@ -1,3 +1,19 @@
+---
+title: fsrpb Capabilities Dashboard
+category: tools
+status: reference
+source: hand-written
+topics:
+- recipes
+- examples
+- entry-points
+- commands
+- agent-tools
+canonical: false
+summary: 'User-friendly capabilities table: find your goal, follow entry-point (command/script),
+  land on runnable or agent-followable workflow.'
+---
+
 # What can I do with fsrpb?
 
 A capabilities dashboard for users who are new to the toolchain. Find your goal in the left column, follow the entry-point in the middle, and you'll land on either a runnable command or a script the agent can follow end-to-end.

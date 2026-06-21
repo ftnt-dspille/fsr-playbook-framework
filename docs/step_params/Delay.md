@@ -1,3 +1,16 @@
+---
+title: Delay Step Parameters
+category: playbook-authoring
+status: reference
+source: hand-written
+topics:
+- delay
+- sleep
+- step-parameters
+canonical: false
+summary: Delay step parameter reference.
+---
+
 # Delay
 
 - FSR step_type_name: `Delay`
