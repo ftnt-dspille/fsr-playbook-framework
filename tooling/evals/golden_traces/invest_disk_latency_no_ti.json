@@ -1,0 +1,26 @@
+{
+  "fixture": "invest_disk_latency_no_ti",
+  "captured": "20260530T192043Z",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "end_turn",
+  "recall": 1.0,
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "module": "alerts",
+        "uuid": "8d74ff80-3b63-406b-b748-6aca1f1f30ff"
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "ORDERS-ERP",
+        "limit": 20
+      },
+      "ok": true
+    }
+  ]
+}

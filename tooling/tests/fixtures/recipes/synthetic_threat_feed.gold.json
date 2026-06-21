@@ -1,0 +1,493 @@
+{
+  "_recipe": {
+    "connector": "synthetic_threat_feed",
+    "fetch_op": "fetch_indicators",
+    "incremental_param": "since",
+    "kind": "threat-feed",
+    "notes": "Replace REPLACE_WITH_CONFIG_UUID with the connector instance UUID after import. "
+  },
+  "data": [
+    {
+      "@type": "WorkflowCollection",
+      "description": "Sample playbooks for Synthetic Threat Feed. Clone these into a separate collection before customizing \u2014 the sample collection is replaced on connector upgrade.",
+      "name": "Sample - Synthetic Threat Feed - 1.0.0",
+      "recordTags": [
+        "synthetic_threat_feed"
+      ],
+      "uuid": "4536b766-6799-5af6-b120-bd79adb65254",
+      "visible": true,
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "debug": true,
+          "description": "Manually fetch indicators from Synthetic Threat Feed. Diagnostic / on-demand.",
+          "isActive": false,
+          "name": "Get Indicators",
+          "parameters": [],
+          "recordTags": [
+            "synthetic_threat_feed"
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Start -> Fetch",
+              "sourceStep": "/api/3/workflow_steps/d76e744c-4f85-563a-9f4a-4f0b1fdf5433",
+              "targetStep": "/api/3/workflow_steps/31dc6f39-92d5-5365-85fe-98f388984855",
+              "uuid": "a2bd31d7-c60b-5fca-b3bd-796477895dbd"
+            }
+          ],
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "executeButtonText": "Fetch",
+                "inputVariables": [],
+                "noRecordExecution": true,
+                "resources": [
+                  "alerts"
+                ],
+                "route": "3a8a19a3-a6f9-5ccb-b906-e6e9ccc7fa37",
+                "singleRecordExecution": false,
+                "step_variables": {
+                  "input": {
+                    "params": [],
+                    "records": "{{vars.input.records}}"
+                  }
+                },
+                "title": "Synthetic Threat Feed: Get Indicators"
+              },
+              "left": "40",
+              "name": "Start",
+              "stepType": "/api/3/workflow_step_types/f414d039-bb0d-4e59-9c39-a8f1e880b18a",
+              "top": "40",
+              "uuid": "d76e744c-4f85-563a-9f4a-4f0b1fdf5433"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "config": "REPLACE_WITH_CONFIG_UUID",
+                "connector": "synthetic_threat_feed",
+                "name": "Synthetic Threat Feed",
+                "operation": "fetch_indicators",
+                "operationTitle": "Fetch Indicators",
+                "params": {},
+                "pickFromTenant": false,
+                "step_variables": [],
+                "version": "1.0.0"
+              },
+              "left": "300",
+              "name": "Fetch Indicators",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "top": "200",
+              "uuid": "31dc6f39-92d5-5365-85fe-98f388984855"
+            }
+          ],
+          "synchronous": false,
+          "triggerStep": "/api/3/workflow_steps/d76e744c-4f85-563a-9f4a-4f0b1fdf5433",
+          "uuid": "966f5c1c-c1de-5cd4-9b8d-adf10b34e328"
+        },
+        {
+          "@type": "Workflow",
+          "debug": true,
+          "description": "Fetch and create indicators from Synthetic Threat Feed. Called as a child workflow.",
+          "isActive": false,
+          "name": "> Synthetic Threat Feed > Fetch and Create",
+          "parameters": [
+            "lastPullTime"
+          ],
+          "recordTags": [
+            "dataingestion",
+            "fetch",
+            "create",
+            "synthetic_threat_feed"
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Start -> Configuration",
+              "sourceStep": "/api/3/workflow_steps/e92b61cb-eac3-591a-b4e2-d745caf046d2",
+              "targetStep": "/api/3/workflow_steps/7b3c7a31-b800-51ac-bc02-c381bfd32475",
+              "uuid": "d07cdff9-78d5-57ef-a866-dfec9818d427"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Configuration -> Decision",
+              "sourceStep": "/api/3/workflow_steps/7b3c7a31-b800-51ac-bc02-c381bfd32475",
+              "targetStep": "/api/3/workflow_steps/1e610fad-197e-5931-aebb-78d13441049e",
+              "uuid": "80f421ac-51b8-5543-ab2d-25219b0fee15"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": "Yes For Mapping",
+              "name": "Decision -> Sample",
+              "sourceStep": "/api/3/workflow_steps/1e610fad-197e-5931-aebb-78d13441049e",
+              "targetStep": "/api/3/workflow_steps/49e1b7c5-7d83-53e9-b8d0-9d34e057343c",
+              "uuid": "f94bb17e-bb0b-59f1-9dd9-1a49776df699"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": "No For Ingestion",
+              "name": "Decision -> Fetch",
+              "sourceStep": "/api/3/workflow_steps/1e610fad-197e-5931-aebb-78d13441049e",
+              "targetStep": "/api/3/workflow_steps/7093dfca-c8df-5d6b-9742-c111d946d007",
+              "uuid": "47ed9661-391d-5b03-a36e-d240786aa309"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Fetch -> Build",
+              "sourceStep": "/api/3/workflow_steps/7093dfca-c8df-5d6b-9742-c111d946d007",
+              "targetStep": "/api/3/workflow_steps/c8fa5a73-0732-5027-a71d-9348e15ff184",
+              "uuid": "a810fa31-9d22-5926-8435-82476ffa4acf"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Build -> Create",
+              "sourceStep": "/api/3/workflow_steps/c8fa5a73-0732-5027-a71d-9348e15ff184",
+              "targetStep": "/api/3/workflow_steps/5acfabeb-f4c6-5011-a669-72d41326be2d",
+              "uuid": "b552a0cc-db29-502c-9248-da9364334f34"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Create -> Save",
+              "sourceStep": "/api/3/workflow_steps/5acfabeb-f4c6-5011-a669-72d41326be2d",
+              "targetStep": "/api/3/workflow_steps/2e76c8c0-b8e6-51ab-92d0-3b1559366900",
+              "uuid": "36baec5a-74fd-59cd-aa99-f6451b387bd1"
+            }
+          ],
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "step_variables": {
+                  "_configuration_schema": "[{\"title\": \"Reputation\", \"name\": \"reputation\", \"type\": \"select\", \"required\": true, \"options\": [\"Good\", \"Suspicious\", \"Malicious\", \"No Reputation Available\", \"TBD\"], \"value\": \"Suspicious\"}, {\"title\": \"TLP\", \"name\": \"tlp\", \"type\": \"select\", \"options\": [\"Red\", \"Amber\", \"Green\", \"White\"], \"value\": \"Amber\"}, {\"title\": \"Confidence\", \"name\": \"confidence\", \"type\": \"integer\", \"value\": 75}, {\"title\": \"Maximum Age (in days)\", \"name\": \"expiry\", \"type\": \"integer\", \"value\": 30}]",
+                  "input": {
+                    "params": []
+                  }
+                }
+              },
+              "left": "40",
+              "name": "Start",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "top": "40",
+              "uuid": "e92b61cb-eac3-591a-b4e2-d745caf046d2"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "confidence": 75,
+                "expiry": 30,
+                "reputation": "Suspicious",
+                "reputation_map": "{'Good': {{'IndicatorReputation' | picklist('Good') }}, 'Malicious': {{'IndicatorReputation' | picklist('Malicious') }}, 'Suspicious': {{'IndicatorReputation' | picklist('Suspicious') }}, 'TBD': {{'IndicatorReputation' | picklist('TBD') }}, 'No Reputation Available': {{'IndicatorReputation' | picklist('No Reputation Available') }}}",
+                "tlp": "Amber",
+                "tlp_map": "{'Red': {{'TrafficLightProtocol' | picklist('Red') }}, 'Amber': {{'TrafficLightProtocol' | picklist('Amber') }}, 'Green': {{'TrafficLightProtocol' | picklist('Green') }}, 'White': {{'TrafficLightProtocol' | picklist('White') }}}",
+                "type_of_feed_map": "{'ip': {{'ThreatIntelFeedType' | picklist('IPv4 Address') }}, 'domain': {{'ThreatIntelFeedType' | picklist('Domain') }}, 'url': {{'ThreatIntelFeedType' | picklist('URL') }}, 'hash': {{'ThreatIntelFeedType' | picklist('FileHash-SHA256') }}, 'vulnerability': {{'ThreatIntelFeedType' | picklist('CVE') }}}"
+              },
+              "left": "40",
+              "name": "Configuration",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "top": "160",
+              "uuid": "7b3c7a31-b800-51ac-bc02-c381bfd32475"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "conditions": [
+                  {
+                    "condition": "{{ vars.request.env_setup == true }}",
+                    "option": "Yes For Mapping",
+                    "step_iri": "/api/3/workflow_steps/49e1b7c5-7d83-53e9-b8d0-9d34e057343c",
+                    "step_name": "Return Sample Data"
+                  },
+                  {
+                    "default": true,
+                    "option": "No For Ingestion",
+                    "step_iri": "/api/3/workflow_steps/7093dfca-c8df-5d6b-9742-c111d946d007",
+                    "step_name": "Fetch Indicators"
+                  }
+                ]
+              },
+              "left": "40",
+              "name": "Is Data Only For Mapping",
+              "stepType": "/api/3/workflow_step_types/12254cf5-5db7-4b1a-8cb1-3af081924b28",
+              "top": "300",
+              "uuid": "1e610fad-197e-5931-aebb-78d13441049e"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "data": "[\n  {\n    \"value\": \"192.0.2.1\",\n    \"type\": \"ip\",\n    \"score\": 80,\n    \"risk_string\": \"sample\"\n  },\n  {\n    \"value\": \"203.0.113.5\",\n    \"type\": \"ip\",\n    \"score\": 65,\n    \"risk_string\": \"sample\"\n  }\n]"
+              },
+              "left": "320",
+              "name": "Return Sample Data",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "top": "300",
+              "uuid": "49e1b7c5-7d83-53e9-b8d0-9d34e057343c"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "config": "REPLACE_WITH_CONFIG_UUID",
+                "connector": "synthetic_threat_feed",
+                "name": "Synthetic Threat Feed",
+                "operation": "fetch_indicators",
+                "operationTitle": "Fetch Indicators",
+                "params": {
+                  "limit": 100,
+                  "since": "{{vars.input.params.lastPullTime}}"
+                },
+                "pickFromTenant": false,
+                "step_variables": [],
+                "version": "1.0.0"
+              },
+              "left": "600",
+              "name": "Fetch Indicators",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "top": "300",
+              "uuid": "7093dfca-c8df-5d6b-9742-c111d946d007"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "currentPullTime": "{{ arrow.utcnow().isoformat() }}",
+                "data": "{{vars.steps.Fetch_Indicators.indicators}}"
+              },
+              "left": "600",
+              "name": "Build Feed List",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "top": "440",
+              "uuid": "c8fa5a73-0732-5027-a71d-9348e15ff184"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "__recommend": [],
+                "_showJson": false,
+                "collection": "/api/ingest-feeds/threat_intel_feeds",
+                "for_each": {
+                  "__bulk": true,
+                  "batch_size": 100,
+                  "condition": "",
+                  "item": "{{vars.data}}"
+                },
+                "resource": {
+                  "__replace": "",
+                  "confidence": "{% if vars.confidence %}{{ vars.confidence }}{% else %}{{ (vars.item.score | int) }}{% endif %}",
+                  "description": "{% if vars.item.risk_string %}Synthetic Threat Feed: {{vars.item.risk_string}}{% else %}Synthetic Threat Feed indicator{% endif %}",
+                  "expiresOn": "{% if vars.expiry %}{{ arrow.utcnow().int_timestamp + (vars.expiry | int)*24*60*60 }}{% else %}None{% endif %}",
+                  "reputation": "{% if vars.reputation %}{{ vars.reputation | resolveRange(vars.reputation_map) }}{% else %}None{% endif %}",
+                  "source": "Synthetic Threat Feed",
+                  "sourceData": "{{vars.item | toJSON}}",
+                  "sourceId": "{{vars.item.value}}",
+                  "tLP": "{% if vars.tlp %}{{ vars.tlp | resolveRange(vars.tlp_map) }}{% else %}None{% endif %}",
+                  "typeOfFeed": "{{ vars.item.type | resolveRange(vars.type_of_feed_map) }}",
+                  "value": "{{vars.item.value}}"
+                },
+                "step_variables": [],
+                "when": "{{vars.data | length > 0}}"
+              },
+              "left": "600",
+              "name": "Create Record",
+              "stepType": "/api/3/workflow_step_types/7b221880-716b-4726-a2ca-5e568d330b3e",
+              "top": "560",
+              "uuid": "5acfabeb-f4c6-5011-a669-72d41326be2d"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "currentPullTime": "{{vars.currentPullTime}}"
+              },
+              "left": "600",
+              "name": "Save Result",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "top": "680",
+              "uuid": "2e76c8c0-b8e6-51ab-92d0-3b1559366900"
+            }
+          ],
+          "synchronous": false,
+          "triggerStep": "/api/3/workflow_steps/e92b61cb-eac3-591a-b4e2-d745caf046d2",
+          "uuid": "58e05c1b-3a1c-57b2-a2f4-35d19efbb801"
+        },
+        {
+          "@type": "Workflow",
+          "debug": true,
+          "description": "Scheduled ingestion orchestrator for Synthetic Threat Feed. Maintains per-install LastPullTime macro.",
+          "isActive": false,
+          "name": "Synthetic Threat Feed > Ingest",
+          "parameters": [],
+          "recordTags": [
+            "dataingestion",
+            "ingest",
+            "synthetic_threat_feed"
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Start -> Configuration",
+              "sourceStep": "/api/3/workflow_steps/a1e498f6-2d78-59a7-8168-43ec2045005f",
+              "targetStep": "/api/3/workflow_steps/f0296802-b555-5ec3-b511-6045cf666eb3",
+              "uuid": "bc0ea4c0-a16e-5080-8973-de1cf6bc2f0c"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Configuration -> Get Macro",
+              "sourceStep": "/api/3/workflow_steps/f0296802-b555-5ec3-b511-6045cf666eb3",
+              "targetStep": "/api/3/workflow_steps/e46097a6-9a53-5714-a74f-2f229f3efebd",
+              "uuid": "57156714-e699-5515-aa61-6c1a664a7837"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Get Macro -> Extract",
+              "sourceStep": "/api/3/workflow_steps/e46097a6-9a53-5714-a74f-2f229f3efebd",
+              "targetStep": "/api/3/workflow_steps/d49e5343-746c-5f14-9c2c-3bde9750da45",
+              "uuid": "fecc2379-aae4-5b3b-839f-0c5e0847fea2"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Extract -> Invoke",
+              "sourceStep": "/api/3/workflow_steps/d49e5343-746c-5f14-9c2c-3bde9750da45",
+              "targetStep": "/api/3/workflow_steps/66541a91-8955-5e03-a484-deed72387421",
+              "uuid": "e4002799-2cbe-5744-825a-2144d99416f5"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "isExecuted": false,
+              "label": null,
+              "name": "Invoke -> Update Macro",
+              "sourceStep": "/api/3/workflow_steps/66541a91-8955-5e03-a484-deed72387421",
+              "targetStep": "/api/3/workflow_steps/54d04ca7-524c-599d-8c71-054a63f0b9e1",
+              "uuid": "c49a16e9-f61d-5353-88a4-260364363d0e"
+            }
+          ],
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  }
+                }
+              },
+              "left": "20",
+              "name": "Start",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "top": "20",
+              "uuid": "a1e498f6-2d78-59a7-8168-43ec2045005f"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "fetchTime": "0",
+                "pullTimeMacro": "SyntheticThreatFeedLastPullTime_{{vars['audit_info']['cyops_playbook_iri'].split('/')[-1].replace('-','_')}}"
+              },
+              "left": "180",
+              "name": "Configuration",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "top": "100",
+              "uuid": "f0296802-b555-5ec3-b511-6045cf666eb3"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "connector": "cyops_utilities",
+                "operation": "make_cyops_request",
+                "operationTitle": "FSR: Make FortiSOAR API Call",
+                "params": {
+                  "body": "",
+                  "iri": "/api/wf/api/dynamic-variable/?name={{vars.pullTimeMacro}}",
+                  "method": "GET"
+                },
+                "step_variables": [],
+                "version": "3.2.0"
+              },
+              "left": "380",
+              "name": "Get Macro Value",
+              "stepType": "/api/3/workflow_step_types/0109f35d-090b-4a2b-bd8a-94cbc3508562",
+              "top": "180",
+              "uuid": "e46097a6-9a53-5714-a74f-2f229f3efebd"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "lastPullTime": "{% if (vars.steps.Get_Macro_Value.data['hydra:member'] | length) > 0 %}{{ vars.steps.Get_Macro_Value.data['hydra:member'][0].value }}{% else %}0{% endif %}"
+              },
+              "left": "560",
+              "name": "Extract Value from Response",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "top": "260",
+              "uuid": "d49e5343-746c-5f14-9c2c-3bde9750da45"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "apply_async": false,
+                "arguments": {
+                  "lastPullTime": "{{vars.lastPullTime}}"
+                },
+                "step_variables": [],
+                "workflowReference": "/api/3/workflows/58e05c1b-3a1c-57b2-a2f4-35d19efbb801"
+              },
+              "left": "760",
+              "name": "Fetch Indicators",
+              "stepType": "/api/3/workflow_step_types/74932bdc-b8b6-4d24-88c4-1a4dfbc524f3",
+              "top": "360",
+              "uuid": "66541a91-8955-5e03-a484-deed72387421"
+            },
+            {
+              "@type": "WorkflowStep",
+              "arguments": {
+                "connector": "cyops_utilities",
+                "operation": "updatemacro",
+                "operationTitle": "CyOPs: Update Macro",
+                "params": {
+                  "macro": "{{vars.pullTimeMacro}}",
+                  "value": "{{vars.steps.Fetch_Indicators.currentPullTime}}"
+                },
+                "step_variables": [],
+                "version": "3.2.0"
+              },
+              "left": "960",
+              "name": "Update Pull Time",
+              "stepType": "/api/3/workflow_step_types/0109f35d-090b-4a2b-bd8a-94cbc3508562",
+              "top": "460",
+              "uuid": "54d04ca7-524c-599d-8c71-054a63f0b9e1"
+            }
+          ],
+          "synchronous": false,
+          "triggerStep": "/api/3/workflow_steps/a1e498f6-2d78-59a7-8168-43ec2045005f",
+          "uuid": "dfb3b9cb-f0e6-5f6d-9922-4d26f650af03"
+        }
+      ]
+    }
+  ],
+  "exported_tags": [
+    "create",
+    "dataingestion",
+    "fetch",
+    "ingest",
+    "synthetic_threat_feed"
+  ],
+  "type": "workflow_collections"
+}

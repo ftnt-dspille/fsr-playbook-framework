@@ -1,0 +1,6 @@
+{
+  "alerts.severity": "Severity",
+  "alerts.status": "AlertStatus",
+  "alerts.type": "AlertType",
+  "incidents.status": "IncidentStatus"
+}

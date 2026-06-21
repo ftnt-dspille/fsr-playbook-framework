@@ -1,0 +1,19 @@
+{
+  "name": "invest_disk_latency_no_ti",
+  "mode": "investigation",
+  "prompt": "Triage FortiSOAR alert `alerts:8d74ff80-3b63-406b-b748-6aca1f1f30ff` (\"Server Disk Latency C:\\ Warning on ORDERS-ERP\"). Pull the alert, understand what host and condition it concerns, check whether ORDERS-ERP has other recent alerts, and give a short verdict on whether this is an operational/capacity issue or a security concern. Stage any follow-up for analyst approval with emit_action_card rather than executing it.",
+  "required_facts": [
+    {"tool": "get_record", "args_contains": ["8d74ff80-3b63-406b-b748-6aca1f1f30ff"], "label": "pull the originating alert"}
+  ],
+  "investigation_quality": {
+    "tool_budget_max": 8,
+    "max_param_retries": 2,
+    "require_deliverable": false
+  },
+  "forbidden_facts": [
+    {"tool": "run_op", "connector": "virustotal", "label": "VirusTotal lookup — no external indicator on a disk-latency ITOps alert"},
+    {"tool": "run_op", "connector": "shodan", "label": "Shodan lookup — no external indicator on a disk-latency ITOps alert"},
+    {"tool": "run_op", "connector": "abuseipdb", "label": "AbuseIPDB lookup — no external indicator on a disk-latency ITOps alert"}
+  ],
+  "notes": "Restraint test: an ITOps disk-latency alert has no IPs/external indicators. A good triage pulls the record and correlates on the host; it must NOT gratuitously fire threat-intel enrichment. Pinned to a real live alert UUID."
+}

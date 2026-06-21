@@ -1,0 +1,122 @@
+{
+  "scenario": "ref_inside_for_each",
+  "playbook_name": "rp_ref_loop_parent",
+  "description": "for_each over ref calls; capture per-iteration outputs",
+  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_ref_loop_child\"\n    description: \"child for rp_ref_loop_parent\"\n    is_active: true\n    parameters: ['n']\n    steps:\n      - name: \"ChildStart\"\n        type: start\n        next: \"Compute\"\n      - name: \"Compute\"\n        type: set_variable\n        vars:\n          squared: \"{{ (vars.input.params.n | int) ** 2 }}\"\n  - name: \"rp_ref_loop_parent\"\n    description: \"parent calls child once per item\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"Loop\"\n      - name: \"Loop\"\n        type: workflow_reference\n        for_each:\n          item: \"{{ [1, 2, 3] }}\"\n          parallel: false\n        arguments:\n          target: rp_ref_loop_child\n          arguments:\n            n: \"{{ vars.item }}\"\n          apply_async: false\n          pass_parent_env: false\n          pass_input_record: false\n        next: \"Capture\"\n      - name: \"Capture\"\n        type: set_variable\n        vars:\n          loop_seen: \"{{ vars.steps.Loop }}\"\n          loop_count: \"{{ vars.steps.Loop | length }}\"\n",
+  "run_status": "finished",
+  "env": {
+    "debug": true,
+    "input": {
+      "params": {},
+      "records": []
+    },
+    "request": {
+      "uri": "https://198.51.100.10/api/triggers/1/notrigger/8b95d683-d89a-56a0-86bc-6abc76194045",
+      "method": "POST",
+      "baseUri": "https://198.51.100.10",
+      "headers": {
+        "host": "198.51.100.10",
+        "proxy": "",
+        "accept": "*/*",
+        "connection": "keep-alive",
+        "user-agent": "python-requests/2.33.1",
+        "content-type": "application/json",
+        "authorization": "*******",
+        "content-length": "83",
+        "x-php-ob-level": "1",
+        "accept-encoding": "gzip, deflate"
+      },
+      "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce"
+    },
+    "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4",
+    "auth_info": {
+      "auth_method": "CS HMAC"
+    },
+    "loop_seen": [
+      {
+        "debug": true,
+        "squared": 1,
+        "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+      },
+      {
+        "debug": true,
+        "squared": 4,
+        "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+      },
+      {
+        "debug": true,
+        "squared": 9,
+        "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+      }
+    ],
+    "resources": {},
+    "globalMock": false,
+    "loop_count": 3,
+    "currentUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+    "last_run_at": null,
+    "useMockOutput": false,
+    "mockPlaybookId": null
+  },
+  "steps": [
+    {
+      "name": "Capture",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4",
+        "loop_seen": [
+          {
+            "debug": true,
+            "squared": 1,
+            "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+          },
+          {
+            "debug": true,
+            "squared": 4,
+            "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+          },
+          {
+            "debug": true,
+            "squared": 9,
+            "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+          }
+        ],
+        "loop_count": 3
+      }
+    },
+    {
+      "name": "Loop",
+      "type_name": null,
+      "status": "finished",
+      "result": [
+        {
+          "debug": true,
+          "squared": 1,
+          "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+        },
+        {
+          "debug": true,
+          "squared": 4,
+          "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+        },
+        {
+          "debug": true,
+          "squared": 9,
+          "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4"
+        }
+      ]
+    },
+    {
+      "name": "Trigger",
+      "type_name": null,
+      "status": "finished",
+      "result": {
+        "debug": true,
+        "task_id": "d1ace448-87de-43a8-8c0c-a82c3e87f8c4",
+        "globalMock": false,
+        "useMockOutput": false
+      }
+    }
+  ]
+}

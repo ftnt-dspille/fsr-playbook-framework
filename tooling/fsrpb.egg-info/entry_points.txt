@@ -1,0 +1,2 @@
+[console_scripts]
+fsrpb = cli:main

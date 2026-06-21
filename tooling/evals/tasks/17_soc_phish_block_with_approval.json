@@ -1,0 +1,5 @@
+{
+  "name": "soc_phish_block_with_approval",
+  "prompt": "Author a FortiSOAR playbook. Trigger: an alert is created in the alerts module tagged 'phishing'. Behavior: for every IP listed in the alert's `sender_ips` field, look it up via the VirusTotal connector's ip-reputation operation. If any IP's reputation score is above 50, pause on a manual_input step that asks an analyst whether to block (options: 'Block', 'Skip'). On 'Block', call the FortiGate connector's address-block operation for each high-score IP. Either way, finish by adding a comment to the originating alert summarizing which IPs were scored and what action was taken. Output complete YAML.",
+  "notes": "Compound forcing-function task: tests start_on_create with a tag filter, multi-IP for_each over upstream output, threshold decision on a numeric score, manual_input with two options routing to divergent paths, multiple connector_op calls with picklist params, and a set_variable/message comment posted back to vars.input.records[0]. Validator must catch unreachable vars.steps.<lookup>.score refs on the 'Skip' branch."
+}
