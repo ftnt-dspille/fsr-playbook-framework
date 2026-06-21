@@ -15,6 +15,16 @@ repos:
 
   - repo: local
     hooks:
+      - id: infra-leak-guard
+        name: infra-leak guard (no internal hosts in tracked source)
+        # Blocks 10.99.x.x, *.fortinet.com/.net, *.forticloud.com from entering
+        # the public mirror. Scans staged additions only. Uses a bare python3 —
+        # the script has no third-party deps, so it runs without the venv.
+        entry: python3 scripts/check_infra_leaks.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: pytest-fast
         name: pytest (fast subset, skips corpus)
         # Use this repo's venv interpreter, NOT a bare `python3` — the system
