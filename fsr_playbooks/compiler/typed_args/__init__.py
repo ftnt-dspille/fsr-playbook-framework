@@ -23,6 +23,9 @@ from .steps import (
     SetVariableArgs,
     ArgListEntry,
     expand_set_variable,
+    DecisionArgs,
+    DecisionCondition,
+    expand_decision,
 )
 
 __all__ = [
@@ -42,4 +45,7 @@ __all__ = [
     "SetVariableArgs",
     "ArgListEntry",
     "expand_set_variable",
+    "DecisionArgs",
+    "DecisionCondition",
+    "expand_decision",
 ]

@@ -21,6 +21,8 @@ from ..typed_args.trigger import (  # noqa: F401
 # first per-step-type model). The reserved-key rename still runs earlier in
 # the RewriterMixin; this only owns the arg_list → flat-dict unwrap.
 from ..typed_args.steps import expand_set_variable as _expand_set_variable_typed
+# decision branch-promotion + condition-key typo check (Phase 2 model).
+from ..typed_args.steps import expand_decision as _expand_decision_typed
 
 
 class NormalizerMixin:
@@ -594,24 +596,14 @@ class NormalizerMixin:
         copied into `step.branches[option] = next` so the existing emitter
         path (which resolves label → step_iri off `step.branches`) handles
         wiring without authors having to maintain a parallel map.
+
+        Delegates to the typed-args layer (`typed_args.steps.expand_decision`),
+        which owns the `DecisionArgs`/`DecisionCondition` models. Beyond the
+        byte-identical branch-promotion, the typed condition model now catches
+        a mistyped condition key (e.g. `nxt:`) that previously dropped the
+        branch silently. Mutates `step.arguments`/`step.branches` in place.
         """
-        a = step.arguments if isinstance(step.arguments, dict) else None
-        if not a:
-            return
-        conds = a.get("conditions")
-        if not isinstance(conds, list):
-            return
-        cleaned = []
-        for c in conds:
-            if not isinstance(c, dict):
-                cleaned.append(c)
-                continue
-            opt_next = c.get("next")
-            opt_label = c.get("option")
-            if opt_next and opt_label:
-                step.branches.setdefault(opt_label, opt_next)
-            cleaned.append({k: v for k, v in c.items() if k != "next"})
-        a["conditions"] = cleaned
+        _expand_decision_typed(step.arguments, step.branches, path, errors)
 
     def _normalize_manual_input_args(
         self, step: Step, path: str, errors: list[CompileError],

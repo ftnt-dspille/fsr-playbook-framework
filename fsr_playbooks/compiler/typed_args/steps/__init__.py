@@ -16,10 +16,12 @@ from __future__ import annotations
 
 from ..base import StrictArgs  # noqa: F401  (re-export for symmetry)
 from .set_variable import SetVariableArgs, ArgListEntry, expand_set_variable
+from .decision import DecisionArgs, DecisionCondition, expand_decision
 
 # Step type → typed argument model. Grows incrementally through Phase 2.
 STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     "set_variable": SetVariableArgs,
+    "decision": DecisionArgs,
 }
 
 
@@ -34,4 +36,7 @@ __all__ = [
     "SetVariableArgs",
     "ArgListEntry",
     "expand_set_variable",
+    "DecisionArgs",
+    "DecisionCondition",
+    "expand_decision",
 ]
