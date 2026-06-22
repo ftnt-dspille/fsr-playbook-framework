@@ -7,78 +7,16 @@ from typing import Any
 from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
 from ._constants import _looks_like_uuid
-
-# Valid operators for a field-based trigger (`when:` on start_on_create /
-# start_on_update). Empirically the only operators FSR emits in the
-# `fieldbasedtrigger.filters[].operator` slot across the probed corpus, plus
-# the symmetric variants FSR's query layer accepts (gte/lte/lt/notlike/
-# isnotnull) that the corpus simply never exercised. A wrong operator does
-# not error at deploy — the trigger just silently never matches — so we reject
-# unknowns at compile time. `changed` is update-only (enforced separately).
-_TRIGGER_OPS: frozenset[str] = frozenset({
-    "eq", "neq", "gt", "gte", "lt", "lte",
-    "isnull", "isnotnull",
-    "in", "nin", "in_all",
-    # `like`/`notlike` = case-insensitive SQL-LIKE pattern match on a scalar
-    # field (UI "Matches Pattern" / "Does Not Match Pattern"). `contains` /
-    # `notcontains` are accepted as authoring sugar for the UI "Contains" /
-    # "Does Not Contain" operators — but those are NOT distinct wire operators:
-    # live probing (probe_trigger_matrix) + the SOAR designer both show the UI
-    # emits `like`/`notlike` with the value wrapped in `%…%`. A raw
-    # `operator: contains` on a scalar field NEVER fires (query layer 400s it),
-    # so `_expand_when` rewrites contains→like / notcontains→notlike with a
-    # `%…%`-wrapped value. (True jsonb `contains` on a JSON column is a separate
-    # concern we don't author here.)
-    "like", "notlike",
-    "contains", "notcontains",
-    "changed",
-})
-# Forgiving aliases: friendly / near-miss operator spellings an agent or human
-# might reasonably try → the canonical FSR token. Auto-applied with a warning
-# (not blocked) so authoring is lenient. Token-only swaps (no value change).
-_TRIGGER_OP_ALIASES: dict[str, str] = {
-    "equals": "eq", "==": "eq", "=": "eq", "is": "eq",
-    "!=": "neq", "ne": "neq", "<>": "neq",
-    "not_equals": "neq", "notequals": "neq", "not_equal": "neq",
-    "greater_than": "gt", ">": "gt",
-    "greater_than_equals": "gte", "greater_or_equal": "gte", ">=": "gte",
-    "less_than": "lt", "<": "lt",
-    "less_than_equals": "lte", "less_or_equal": "lte", "<=": "lte",
-    "not_in": "nin", "notin": "nin",
-    "in_list": "in", "is_in_list": "in", "is_one_of": "in",
-    "is_not_in_list": "nin", "is_not_one_of": "nin",
-    "is_null": "isnull", "null": "isnull", "is_empty": "isnull",
-    "is_not_null": "isnotnull", "not_null": "isnotnull", "exists": "isnotnull",
-    "matches_pattern": "like", "matches": "like", "ilike": "like",
-    "does_not_match": "notlike", "does_not_match_pattern": "notlike",
-    "not_like": "notlike",
-    "is_changed": "changed", "has_changed": "changed",
-}
-# Pattern-producing rewrites: op → (canonical operator, wildcard wrap mode).
-# FSR has no scalar startswith/endswith/contains operator — they are all `like`
-# (or `notlike`) with the value wrapped. Live-verified against the SOAR designer
-# and probe_trigger_matrix. Auto-applied with a warning.
-_TRIGGER_OP_REWRITE: dict[str, tuple[str, str]] = {
-    "contains": ("like", "both"), "icontains": ("like", "both"),
-    "notcontains": ("notlike", "both"), "not_contains": ("notlike", "both"),
-    "does_not_contain": ("notlike", "both"),
-    "startswith": ("like", "prefix"), "starts_with": ("like", "prefix"),
-    "endswith": ("like", "suffix"), "ends_with": ("like", "suffix"),
-}
-
-
-def _wrap_like_value(val, mode: str):
-    """Wrap a plain substring for SQL LIKE. Returns (new_value, changed).
-    Leaves values that already contain `%`/`_` wildcards untouched."""
-    if not isinstance(val, str) or not val:
-        return val, False
-    if "%" in val or "_" in val:
-        return val, False
-    if mode == "prefix":
-        return f"{val}%", True
-    if mode == "suffix":
-        return f"%{val}", True
-    return f"%{val}%", True
+# Field-based-trigger `when:` typing now lives in the typed-args layer. The
+# operator tables + `_wrap_like_value` are re-exported here for backward
+# compatibility (tests and any callers import them from this module).
+from ..typed_args.trigger import (  # noqa: F401
+    expand_when as _expand_when_typed,
+    _TRIGGER_OPS,
+    _TRIGGER_OP_ALIASES,
+    _TRIGGER_OP_REWRITE,
+    _wrap_like_value,
+)
 
 
 class NormalizerMixin:
@@ -363,123 +301,13 @@ class NormalizerMixin:
     def _expand_when(
         self, when, step_type: str, path: str, errors: list[CompileError],
     ):
-        if not isinstance(when, dict):
-            errors.append(CompileError(
-                code=ErrorCode.BAD_VALUE,
-                message="`when:` must be a mapping with logic/filters",
-                path=f"{path}.arguments.when",
-            ))
-            return None
-        logic = str(when.get("logic", "AND")).upper()
-        if logic not in ("AND", "OR"):
-            logic = "AND"
-        raw_filters = when.get("filters") or []
-        if not isinstance(raw_filters, list):
-            errors.append(CompileError(
-                code=ErrorCode.BAD_VALUE,
-                message="`when.filters` must be a list",
-                path=f"{path}.arguments.when.filters",
-            ))
-            return None
-        out_filters = []
-        for i, f in enumerate(raw_filters):
-            if not isinstance(f, dict):
-                errors.append(CompileError(
-                    code=ErrorCode.BAD_VALUE,
-                    message="filter entries must be mappings",
-                    path=f"{path}.arguments.when.filters[{i}]",
-                ))
-                continue
-            field = f.get("field")
-            op = f.get("op") or f.get("operator") or "eq"
-            value = f.get("value")
-            if not field:
-                errors.append(CompileError(
-                    code=ErrorCode.MISSING_FIELD,
-                    message="filter requires `field:`",
-                    path=f"{path}.arguments.when.filters[{i}].field",
-                ))
-                continue
-            opath = f"{path}.arguments.when.filters[{i}].op"
-            orig_op = str(op).strip()
-            op = orig_op.lower()
-            # wrap mode for pattern operators (None ⇒ no value transform).
-            wrap = None
-            # 1. pattern-producing rewrites (contains/startswith/endswith/…).
-            if op in _TRIGGER_OP_REWRITE:
-                op, wrap = _TRIGGER_OP_REWRITE[op]
-                errors.append(CompileError(
-                    code=ErrorCode.BAD_VALUE, severity="warning",
-                    message=(f"operator {orig_op!r} has no scalar FSR equivalent "
-                             f"— compiling to {op!r} with a {wrap}-wrapped "
-                             f"`%` pattern (SQL LIKE)"),
-                    path=opath,
-                ))
-            # 2. token-only aliases (==, equals, is_in_list, …).
-            elif op in _TRIGGER_OP_ALIASES:
-                canon = _TRIGGER_OP_ALIASES[op]
-                if canon != op:
-                    errors.append(CompileError(
-                        code=ErrorCode.BAD_VALUE, severity="warning",
-                        message=f"operator {orig_op!r} → {canon!r}",
-                        path=opath,
-                    ))
-                op = canon
-            # 3. still unknown after aliasing → blocking, with closest match.
-            if op not in _TRIGGER_OPS:
-                import difflib
-                m = difflib.get_close_matches(
-                    op, sorted(_TRIGGER_OPS), n=1, cutoff=0.6)
-                fix = m[0] if m else None
-                errors.append(CompileError(
-                    code=ErrorCode.BAD_VALUE,
-                    message=(
-                        f"invalid trigger operator {orig_op!r} — not a valid "
-                        f"field-based-trigger operator (valid: "
-                        f"{', '.join(sorted(_TRIGGER_OPS))})"
-                    ),
-                    path=opath, near=fix,
-                    suggestion=(f"did you mean {fix!r}?" if fix else None),
-                ))
-                continue
-            if op == "changed":
-                if step_type != "start_on_update":
-                    errors.append(CompileError(
-                        code=ErrorCode.BAD_VALUE,
-                        message="`op: changed` only valid on start_on_update",
-                        path=f"{path}.arguments.when.filters[{i}].op",
-                    ))
-                    continue
-                out_filters.append({
-                    "type": "object", "field": field, "value": None,
-                    "_value": {"display": "", "itemValue": ""},
-                    "operator": "changed",
-                })
-            else:
-                # `like`/`notlike` are SQL LIKE. Apply the wildcard wrap: the
-                # explicit mode from a rewrite (contains/startswith/…), or — for
-                # a bare `like`/`notlike` value with no wildcard — `both`, since
-                # a bare value matches exactly and the substring trigger would
-                # silently never fire. `_operator` mirrors the operator (corpus
-                # + SOAR designer agree: `like`/`notlike`, never `like_pattern`).
-                emit_val = value
-                if op in ("like", "notlike"):
-                    mode = wrap or "both"
-                    emit_val, changed = _wrap_like_value(value, mode)
-                    if changed and wrap is None:
-                        errors.append(CompileError(
-                            code=ErrorCode.BAD_VALUE, severity="warning",
-                            message=(f"`{op}` value {value!r} has no `%`/`_` "
-                                     f"wildcard — auto-wrapped to {emit_val!r} so "
-                                     f"it substring-matches instead of matching "
-                                     f"exactly (which silently never fires)"),
-                            path=opath,
-                        ))
-                out_filters.append({
-                    "type": "primitive", "field": field, "value": emit_val,
-                    "operator": op, "_operator": op,
-                })
-        return {"sort": [], "limit": 30, "logic": logic, "filters": out_filters}
+        """Compile a friendly `when:` block into a `fieldbasedtrigger` dict.
+
+        Delegates to the typed-args layer (`typed_args.trigger.expand_when`),
+        which owns the `WhenGroup`/`WhenLeaf` models, the operator
+        alias/rewrite/wildcard-wrap semantics, and nested AND/OR authoring.
+        """
+        return _expand_when_typed(when, step_type, path, errors)
 
     def _normalize_record_crud_args(
         self, step: Step, path: str, errors: list[CompileError],

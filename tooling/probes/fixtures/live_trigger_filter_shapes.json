@@ -1,0 +1,183 @@
+{
+  "source": "box 198.51.100.205 /api/3/workflows",
+  "leaf_samples": {
+    "object": {
+      "type": "object",
+      "field": "typeofindicator",
+      "value": "/api/3/picklists/1c4def41-b578-49a3-9063-8aa46f757c08",
+      "_value": {
+        "@id": "/api/3/picklists/1c4def41-b578-49a3-9063-8aa46f757c08",
+        "display": "Port",
+        "itemValue": "Port"
+      },
+      "operator": "eq"
+    },
+    "primitive": {
+      "type": "primitive",
+      "field": "source",
+      "value": "Fortinet FortiAnalyzer",
+      "operator": "eq",
+      "_operator": "eq"
+    },
+    "array": {
+      "type": "array",
+      "field": "recordTags",
+      "value": [
+        "/api/3/tags/FortiRecon",
+        "/api/3/tags/EASM"
+      ],
+      "module": "recordTags",
+      "operator": "in_all",
+      "template": "tags",
+      "OPERATOR_KEY": "$",
+      "previousOperator": "in_all",
+      "previousTemplate": "tags"
+    },
+    "primitive_like": {
+      "type": "primitive",
+      "field": "cVEList",
+      "value": "%CVE%",
+      "operator": "like",
+      "_operator": "like"
+    },
+    "datetime": {
+      "type": "datetime",
+      "field": "dueBy",
+      "value": "true",
+      "operator": "isnull"
+    }
+  },
+  "nested_group_samples": [
+    {
+      "logic": "OR",
+      "filters": [
+        {
+          "type": "object",
+          "field": "reputation",
+          "value": "true",
+          "_value": {
+            "@id": "true",
+            "display": "",
+            "itemValue": ""
+          },
+          "operator": "isnull"
+        },
+        {
+          "type": "object",
+          "field": "reputation",
+          "value": "/api/3/picklists/ae98ebc6-beef-4882-9980-1d88fc6d87cd",
+          "_value": {
+            "@id": "/api/3/picklists/ae98ebc6-beef-4882-9980-1d88fc6d87cd",
+            "display": "TBD",
+            "itemValue": "TBD"
+          },
+          "operator": "eq"
+        }
+      ]
+    },
+    {
+      "logic": "OR",
+      "filters": [
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/5a5a7d42-be27-4903-858a-19909ebfa1eb",
+          "_value": {
+            "@id": "/api/3/picklists/5a5a7d42-be27-4903-858a-19909ebfa1eb",
+            "display": "Domain",
+            "itemValue": "Domain"
+          },
+          "operator": "eq"
+        },
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/0ca054f2-d923-4992-a4a7-c516e6df281e",
+          "_value": {
+            "@id": "/api/3/picklists/0ca054f2-d923-4992-a4a7-c516e6df281e",
+            "display": "FileHash-MD5",
+            "itemValue": "FileHash-MD5"
+          },
+          "operator": "eq"
+        },
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/143e40b0-e643-468d-b968-a542fc85f08d",
+          "_value": {
+            "@id": "/api/3/picklists/143e40b0-e643-468d-b968-a542fc85f08d",
+            "display": "FileHash-SHA1",
+            "itemValue": "FileHash-SHA1"
+          },
+          "operator": "eq"
+        },
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/4ea7b083-a0af-41ea-8d7c-7ace16021722",
+          "_value": {
+            "@id": "/api/3/picklists/4ea7b083-a0af-41ea-8d7c-7ace16021722",
+            "display": "FileHash-SHA256",
+            "itemValue": "FileHash-SHA256"
+          },
+          "operator": "eq"
+        },
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/c0beeda4-2c7a-4214-b7e5-53ba1649539c",
+          "_value": {
+            "@id": "/api/3/picklists/c0beeda4-2c7a-4214-b7e5-53ba1649539c",
+            "display": "IP Address",
+            "itemValue": "IP Address"
+          },
+          "operator": "eq"
+        },
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/353a37b4-3eeb-43ee-aac6-64806422cfec",
+          "_value": {
+            "@id": "/api/3/picklists/353a37b4-3eeb-43ee-aac6-64806422cfec",
+            "display": "URL",
+            "itemValue": "URL"
+          },
+          "operator": "eq"
+        },
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/80bd55b0-6d88-4beb-bec3-97954f261c4d",
+          "_value": {
+            "@id": "/api/3/picklists/80bd55b0-6d88-4beb-bec3-97954f261c4d",
+            "display": "Email Address",
+            "itemValue": "Email Address"
+          },
+          "operator": "eq"
+        },
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/0162241b-f5bf-4917-a150-00e920be47bd",
+          "_value": {
+            "@id": "/api/3/picklists/0162241b-f5bf-4917-a150-00e920be47bd",
+            "display": "File",
+            "itemValue": "File"
+          },
+          "operator": "eq"
+        },
+        {
+          "type": "object",
+          "field": "typeofindicator",
+          "value": "/api/3/picklists/e72907c5-2088-4e85-99d0-6c7970a5470e",
+          "_value": {
+            "@id": "/api/3/picklists/e72907c5-2088-4e85-99d0-6c7970a5470e",
+            "display": "User",
+            "itemValue": "User"
+          },
+          "operator": "eq"
+        }
+      ]
+    }
+  ]
+}
