@@ -37,7 +37,6 @@ from . import (
     tools_verify,
     tools_enhancement,
     tools_emit,
-    tools_agent,
 )
 
 # Import shared infrastructure for external use
@@ -153,17 +152,6 @@ from .tools_emit import (
     emit_decision_step,
     emit_manual_input,
     emit_playbook_offer,
-)
-
-# Packaged triage→build agent loop (MCP front-end onto fsr_playbooks.llm) +
-# Desktop-native trace-session primitives.
-from .tools_agent import (
-    triage_build_turn,
-    triage_build_resume,
-    triage_session_start,
-    triage_session_state,
-    triage_session_clear,
-    triage_guidance,
 )
 
 # Catalog (Phase 0 + 0.5 of CONNECTOR_INTEGRATION_PLAN)
