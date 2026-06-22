@@ -22,6 +22,7 @@ already lives inside `provider.stream()`. This module is the
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from dataclasses import dataclass, field
@@ -169,6 +170,7 @@ async def run_agent_turn(
     session_id: Optional[str] = None,
     user_message_seq_base: int = -100,
     coalesce_text: bool = True,
+    timeout_secs: float = 600,
 ) -> TurnResult:
     """Drive one user turn through the provider and return the transcript.
 
@@ -206,6 +208,9 @@ async def run_agent_turn(
         at tool / turn / end boundaries; False writes each as its own
         row. The web app keeps True; tests may turn it off for
         clarity.
+      timeout_secs: hard deadline on the provider stream. Default 600 s
+        (10 min). On expiry, emits an ErrorEvent and returns with
+        stop_reason="stream_error". Set lower in tests to keep them fast.
 
     Returns: TurnResult with the full transcript, stop_reason, captured
     session_id (from the first UsageEvent), and last_assistant_yaml
@@ -226,99 +231,114 @@ async def run_agent_turn(
     # overwrites. See chat.py L379-388 for the original incident note.
 
     try:
-        async for ev in provider.stream(
-            system=system, messages=messages, tools=tools, tags=tags,
-        ):
-            await _fire_event_callback(on_event, ev)
-            result.transcript.append(ev)
+        async with asyncio.timeout(timeout_secs):
+            async for ev in provider.stream(
+                system=system, messages=messages, tools=tools, tags=tags,
+            ):
+                await _fire_event_callback(on_event, ev)
+                result.transcript.append(ev)
 
-            if isinstance(ev, UsageEvent):
-                if coalesce_text:
-                    coalescer.flush(history_sink, result.session_id)
-                if result.session_id is None:
-                    # First UsageEvent: capture the session_id and
-                    # retroactively log the user messages from the
-                    # request body. Negative seq base so they sort
-                    # before the assistant rows in this same turn.
-                    result.session_id = ev.session_id
-                    if history_sink is not None:
-                        for i, m in enumerate(messages):
-                            if m.role == "user" and isinstance(m.content, str):
-                                history_sink.record_chat_message(
-                                    ev.session_id,
-                                    ev.turn,
-                                    user_message_seq_base + i,
-                                    kind=KIND_USER,
-                                    content=m.content,
-                                )
-                result.stop_reason = ev.stop_reason
+                if isinstance(ev, UsageEvent):
+                    if coalesce_text:
+                        # Flush buffered text before the new round-trip; increment
+                        # seq only when a row was actually written (2.7 fix: seq
+                        # increments at flush boundaries, not on first text append).
+                        if coalescer.flush(history_sink, result.session_id):
+                            seq_in_turn += 1
+                    if result.session_id is None:
+                        # First UsageEvent: capture the session_id and
+                        # retroactively log the user messages from the
+                        # request body. Negative seq base so they sort
+                        # before the assistant rows in this same turn.
+                        result.session_id = ev.session_id
+                        if history_sink is not None:
+                            for i, m in enumerate(messages):
+                                if m.role == "user" and isinstance(m.content, str):
+                                    history_sink.record_chat_message(
+                                        ev.session_id,
+                                        ev.turn,
+                                        user_message_seq_base + i,
+                                        kind=KIND_USER,
+                                        content=m.content,
+                                    )
+                    result.stop_reason = ev.stop_reason
 
-            elif isinstance(ev, TextEvent) and result.session_id:
-                if coalesce_text:
-                    coalescer.append(ev.text, turn=turn_for_history, seq=seq_in_turn)
-                    if not coalescer.buf[:-1]:  # this was the first append
-                        seq_in_turn += 1
-                    # Sniff fenced yaml block from the running buffer
-                    # so a block split across deltas still scores.
-                    found = extract_yaml_block(coalescer.joined())
-                    if found:
-                        result.last_assistant_yaml = found
-                else:
+                elif isinstance(ev, TextEvent) and result.session_id:
+                    if coalesce_text:
+                        coalescer.append(ev.text, turn=turn_for_history, seq=seq_in_turn)
+                        # Sniff fenced yaml block from the running buffer
+                        # so a block split across deltas still scores.
+                        found = extract_yaml_block(coalescer.joined())
+                        if found:
+                            result.last_assistant_yaml = found
+                    else:
+                        if history_sink is not None:
+                            history_sink.record_chat_message(
+                                result.session_id, turn_for_history, seq_in_turn,
+                                kind=KIND_ASSISTANT_TEXT, content=ev.text,
+                            )
+                            seq_in_turn += 1
+                        found = extract_yaml_block(ev.text)
+                        if found:
+                            result.last_assistant_yaml = found
+
+                elif isinstance(ev, ToolUseEvent) and result.session_id:
+                    if coalesce_text:
+                        if coalescer.flush(history_sink, result.session_id):
+                            seq_in_turn += 1
                     if history_sink is not None:
                         history_sink.record_chat_message(
                             result.session_id, turn_for_history, seq_in_turn,
-                            kind=KIND_ASSISTANT_TEXT, content=ev.text,
+                            kind=KIND_TOOL_USE, name=ev.name,
+                            content=json.dumps(ev.arguments, default=str),
                         )
-                        seq_in_turn += 1
-                    found = extract_yaml_block(ev.text)
-                    if found:
-                        result.last_assistant_yaml = found
+                    seq_in_turn += 1
+                    # Mid-stream tag mutation. The provider holds a reference
+                    # to `tags`; mutating in place propagates the
+                    # playbook_collection tag onto subsequent UsageEvents.
+                    if ev.name in _YAML_TAGGING_TOOLS:
+                        yaml_arg = ev.arguments.get("yaml_text") \
+                            if isinstance(ev.arguments, dict) else None
+                        derived = _yaml_tags(yaml_arg)
+                        if derived:
+                            tags.update(derived)
 
-            elif isinstance(ev, ToolUseEvent) and result.session_id:
-                if coalesce_text:
-                    coalescer.flush(history_sink, result.session_id)
-                if history_sink is not None:
-                    history_sink.record_chat_message(
-                        result.session_id, turn_for_history, seq_in_turn,
-                        kind=KIND_TOOL_USE, name=ev.name,
-                        content=json.dumps(ev.arguments, default=str),
-                    )
-                seq_in_turn += 1
-                # Mid-stream tag mutation. The provider holds a reference
-                # to `tags`; mutating in place propagates the
-                # playbook_collection tag onto subsequent UsageEvents.
-                if ev.name in _YAML_TAGGING_TOOLS:
-                    yaml_arg = ev.arguments.get("yaml_text") \
-                        if isinstance(ev.arguments, dict) else None
-                    derived = _yaml_tags(yaml_arg)
-                    if derived:
-                        tags.update(derived)
+                elif isinstance(ev, ToolResultEvent) and result.session_id:
+                    if coalesce_text:
+                        if coalescer.flush(history_sink, result.session_id):
+                            seq_in_turn += 1
+                    if history_sink is not None:
+                        payload = ev.result if isinstance(ev.result, str) \
+                            else json.dumps(ev.result, default=str)
+                        history_sink.record_chat_message(
+                            result.session_id, turn_for_history, seq_in_turn,
+                            kind=KIND_TOOL_RESULT, name=ev.call_id,
+                            content=payload,
+                        )
+                    seq_in_turn += 1
 
-            elif isinstance(ev, ToolResultEvent) and result.session_id:
-                if coalesce_text:
-                    coalescer.flush(history_sink, result.session_id)
-                if history_sink is not None:
-                    payload = ev.result if isinstance(ev.result, str) \
-                        else json.dumps(ev.result, default=str)
-                    history_sink.record_chat_message(
-                        result.session_id, turn_for_history, seq_in_turn,
-                        kind=KIND_TOOL_RESULT, name=ev.call_id,
-                        content=payload,
-                    )
-                seq_in_turn += 1
+                elif isinstance(ev, DoneEvent):
+                    result.stop_reason = ev.stop_reason
 
-            elif isinstance(ev, DoneEvent):
-                result.stop_reason = ev.stop_reason
+                elif isinstance(ev, ErrorEvent):
+                    result.error = ev.message
+                    if result.stop_reason is None:
+                        result.stop_reason = "error"
 
-            elif isinstance(ev, ErrorEvent):
-                result.error = ev.message
-                if result.stop_reason is None:
-                    result.stop_reason = "error"
+            # Final flush in case the stream ended without a terminal
+            # tool / Usage boundary (e.g. ErrorEvent or pure-text turn).
+            if coalesce_text:
+                if coalescer.flush(history_sink, result.session_id):
+                    seq_in_turn += 1
 
-        # Final flush in case the stream ended without a terminal
-        # tool / Usage boundary (e.g. ErrorEvent or pure-text turn).
+    except asyncio.TimeoutError:
+        result.error = f"provider stream timed out after {timeout_secs:.0f} s"
+        result.stop_reason = "stream_error"
         if coalesce_text:
             coalescer.flush(history_sink, result.session_id)
+        err_ev = ErrorEvent(message=result.error)
+        await _fire_event_callback(on_event, err_ev)
+        result.transcript.append(err_ev)
 
     except Exception as exc:  # noqa: BLE001
         result.error = f"{type(exc).__name__}: {exc}"
