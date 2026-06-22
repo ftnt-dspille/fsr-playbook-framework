@@ -24,7 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PYTHON_DIR = REPO_ROOT / "tooling"
+TOOLING_DIR = REPO_ROOT / "tooling"
 
 
 router = APIRouter(prefix="/api", tags=["playbook"])
@@ -37,7 +37,7 @@ def _cli_cmd(*args: str) -> list[str]:
 def _cli_env() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = (
-        str(PYTHON_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+        str(TOOLING_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     )
     # Belt-and-braces — even with -W, some libs print to stderr directly.
     env.setdefault("PYTHONWARNINGS", "ignore")

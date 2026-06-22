@@ -17,7 +17,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 EXAMPLES = REPO / "examples"
-PYTHON_DIR = REPO / "tooling"
+TOOLING_DIR = REPO / "tooling"
 
 
 pytestmark = pytest.mark.live
@@ -38,7 +38,7 @@ def fsrpb(*args: str, input_text: str | None = None) -> tuple[int, str, str]:
     """Run `fsrpb` (python -m cli) with the given args. Return (rc, stdout, stderr)."""
     cmd = [sys.executable, "-m", "cli", *args]
     proc = subprocess.run(
-        cmd, cwd=PYTHON_DIR, input=input_text, capture_output=True, text=True,
+        cmd, cwd=TOOLING_DIR, input=input_text, capture_output=True, text=True,
     )
     return proc.returncode, proc.stdout, proc.stderr
 

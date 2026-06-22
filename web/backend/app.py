@@ -13,9 +13,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PYTHON_DIR = REPO_ROOT / "tooling"
-if str(PYTHON_DIR) not in sys.path:
-    sys.path.insert(0, str(PYTHON_DIR))
+TOOLING_DIR = REPO_ROOT / "tooling"
+if str(TOOLING_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLING_DIR))
 
 
 def _load_dotenv() -> None:

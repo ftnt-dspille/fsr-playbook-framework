@@ -82,8 +82,10 @@ scripts/publish_public.sh
 docs/build_deck.py
 *.pptx
 PRESENTATION_OUTLINE.md
+docs/PRESENTATION_OUTLINE.md
 /*_PLAN.md
 web/*_PLAN.md
+docs/*_PLAN.md
 docs/AGENTIC_IR_ARCHITECTURE_REVIEW.md
 docs/AGENT_DATA_AUDIT.md
 docs/AGENT_DATA_GAPS.md
@@ -94,7 +96,9 @@ docs/EVAL_PROMPTS.md
 docs/FRAMEWORK_HANDOFF.md
 docs/CHAT_DEV_RUNBOOK.md
 TODO.md
+docs/TODO.md
 DEMO.md
+docs/DEMO.md
 CLAUDE.md
 
 # runtime logs (local only)
