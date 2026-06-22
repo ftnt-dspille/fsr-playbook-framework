@@ -17,6 +17,10 @@ from ..typed_args.trigger import (  # noqa: F401
     _TRIGGER_OP_REWRITE,
     _wrap_like_value,
 )
+# set_variable arg-shape typing lives in the typed-args layer too (Phase 2,
+# first per-step-type model). The reserved-key rename still runs earlier in
+# the RewriterMixin; this only owns the arg_list → flat-dict unwrap.
+from ..typed_args.steps import expand_set_variable as _expand_set_variable_typed
 
 
 class NormalizerMixin:
@@ -1021,23 +1025,18 @@ class NormalizerMixin:
         FSR expects on the wire. `arg_list` is an internal handoff key —
         users write `vars:` at the step level (parser rejects anything
         else for set_variable steps).
+
+        Delegates to the typed-args layer (`typed_args.steps.
+        expand_set_variable`), which owns the `SetVariableArgs` model and the
+        unwrap walk. A ``None`` return means "leave arguments unchanged"
+        (no arg_list, non-list arg_list, or a malformed entry).
         """
         a = step.arguments
         if not isinstance(a, dict):
             return
-        if "arg_list" in a and isinstance(a["arg_list"], list):
-            unwrapped: dict = {}
-            for i, item in enumerate(a["arg_list"]):
-                if not isinstance(item, dict) or "name" not in item:
-                    errors.append(CompileError(
-                        code=ErrorCode.BAD_VALUE,
-                        message="arg_list entries must be {name, value} mappings",
-                        path=f"{path}.arguments.arg_list[{i}]",
-                    ))
-                    return
-                unwrapped[item["name"]] = item.get("value", "")
-            siblings = {k: v for k, v in a.items() if k != "arg_list"}
-            step.arguments = {**unwrapped, **siblings}
+        new = _expand_set_variable_typed(a, path, errors)
+        if new is not None:
+            step.arguments = new
 
     # FSR's built-in "Comment Type" picklist — drives the message kind on
     # the record's collaboration panel. Only the Comment value is used;
