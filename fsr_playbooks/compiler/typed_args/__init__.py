@@ -27,6 +27,7 @@ from .steps import (
     DecisionCondition,
     expand_decision,
 )
+from .field_validator import FieldValueValidator
 
 __all__ = [
     "StrictArgs",
@@ -48,4 +49,5 @@ __all__ = [
     "DecisionArgs",
     "DecisionCondition",
     "expand_decision",
+    "FieldValueValidator",
 ]

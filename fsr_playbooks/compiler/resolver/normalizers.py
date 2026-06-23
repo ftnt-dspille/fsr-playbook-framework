@@ -23,6 +23,8 @@ from ..typed_args.trigger import (  # noqa: F401
 from ..typed_args.steps import expand_set_variable as _expand_set_variable_typed
 # decision branch-promotion + condition-key typo check (Phase 2 model).
 from ..typed_args.steps import expand_decision as _expand_decision_typed
+# field/value validation for trigger filters against the warmed catalog.
+from ..typed_args import FieldValueValidator
 
 
 class NormalizerMixin:
@@ -302,7 +304,43 @@ class NormalizerMixin:
             a["fieldbasedtrigger"] = {
                 "sort": [], "limit": 30, "logic": "AND", "filters": [],
             }
+        # Field/value validation against the warmed catalog. Runs after the
+        # filter tree is structurally valid. With multiple resolved modules a
+        # field may legitimately exist on only some of them, so a finding is
+        # emitted only when it holds for *every* module (invalid everywhere).
+        self._validate_trigger_fields(a, modules, path, errors)
         step.arguments = a
+
+    def _validate_trigger_fields(
+        self, a: dict, modules: list[str], path: str,
+        errors: list[CompileError],
+    ) -> None:
+        """Validate `fieldbasedtrigger` filters against the catalog.
+
+        Silent no-op when there are no filters or no resolved modules. Each
+        module is validated into its own bucket; a finding is promoted only
+        when present for every module. Buckets are keyed by error `path`
+        (stable across modules for a given filter) — the messages embed the
+        module name and per-module valid lists, so they would never intersect.
+        A field/value valid on any one module is therefore never flagged.
+        """
+        fbt = a.get("fieldbasedtrigger")
+        if not isinstance(fbt, dict):
+            return
+        filters = fbt.get("filters")
+        if not isinstance(filters, list) or not filters or not modules:
+            return
+        validator = FieldValueValidator(self.conn)
+        per_module: list[dict[str | None, CompileError]] = []
+        for m in modules:
+            bucket: list[CompileError] = []
+            validator.validate_trigger_filters(filters, m, path, bucket)
+            per_module.append({e.path: e for e in bucket})
+        common = set(per_module[0])
+        for keys in per_module[1:]:
+            common &= set(keys)
+        for key in sorted(common, key=lambda p: p or ""):
+            errors.append(per_module[0][key])
 
     def _expand_when(
         self, when, step_type: str, path: str, errors: list[CompileError],

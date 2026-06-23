@@ -157,6 +157,35 @@ def _step_output_top_keys(s: Step) -> set[str] | None:
     return None
 
 
+def _has_cycle(pb: Playbook) -> bool:
+    """Return True if the playbook's step graph contains a directed cycle.
+
+    Used to short-circuit _check_jinja_paths: predecessor analysis on a cyclic
+    graph produces unreliable reachability sets and may emit spurious errors.
+    _check_graph will report the actual cycle as an error independently.
+    """
+    by_id = {s.id: s for s in pb.steps}
+    WHITE, GREY, BLACK = 0, 1, 2
+    color: dict[str, int] = {sid: WHITE for sid in by_id}
+
+    def _dfs(sid: str) -> bool:
+        color[sid] = GREY
+        s = by_id.get(sid)
+        if s is not None:
+            for nxt in _step_outgoing(s):
+                if nxt not in by_id:
+                    continue
+                c = color.get(nxt, WHITE)
+                if c == GREY:
+                    return True
+                if c == WHITE and _dfs(nxt):
+                    return True
+        color[sid] = BLACK
+        return False
+
+    return any(_dfs(sid) for sid in list(by_id) if color[sid] == WHITE)
+
+
 def _compute_predecessors(pb: Playbook) -> dict[str, set[str]]:
     """For each step id, return the set of step ids that *can* run before it.
 
@@ -212,6 +241,11 @@ def _check_jinja_paths(pb: Playbook, pi: int,
          wrong shape; observed schemas are more authoritative).
     """
     path = f"playbooks[{pi}]"
+    # Skip Jinja path analysis on cyclic graphs — predecessor sets are
+    # unreliable for cycles and produce spurious reachability errors.
+    # _check_graph (always called before this) reports the cycle itself.
+    if _has_cycle(pb):
+        return
     by_jinja_key: dict[str, Step] = {}
     for s in pb.steps:
         sname = s.name or s.id
