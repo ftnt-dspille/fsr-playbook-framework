@@ -23,6 +23,8 @@ from ..typed_args.trigger import (  # noqa: F401
 from ..typed_args.steps import expand_set_variable as _expand_set_variable_typed
 # decision branch-promotion + condition-key typo check (Phase 2 model).
 from ..typed_args.steps import expand_decision as _expand_decision_typed
+# friendly-duration → canonical TimeBased expansion (Phase 2 model).
+from ..typed_args.steps import expand_delay as _expand_delay_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
 
@@ -1014,24 +1016,13 @@ class NormalizerMixin:
             a, "delay", _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
-        delay = {"days": 0, "hours": 0, "minutes": 0, "seconds": 0}
-        for k in ("days", "hours", "minutes", "seconds"):
-            if k in a:
-                delay[k] = int(a.pop(k))
-        if not any(delay.values()):
-            delay["seconds"] = 1  # avoid zero-delay edge cases
-        a["type"] = a.get("type", "TimeBased")
-        a["delay"] = delay
-        a.setdefault("rule", {
-            "actions": [{
-                "type": "resume_playbook", "enabled": True,
-                # FSR-instance-wide constant; same value on every box.
-                "channel_uuid": "e2ce87c2-c55a-11ec-9d64-0242ac120002",
-            }],
-            "is_active": True,
-            "event_source": "crudhub",
-        })
-        step.arguments = a
+        # Delegate the friendly→canonical transform to the typed-args layer
+        # (`typed_args.steps.expand_delay`), which owns the `DelayArgs` model and
+        # the duration coercion. A ``None`` return means "leave unchanged" (not a
+        # dict, already canonical, or a duration value failed int validation).
+        new = _expand_delay_typed(a, path, errors)
+        if new is not None:
+            step.arguments = new
 
     def _normalize_start_args(self, step: Step) -> None:
         """abstract_trigger needs `arguments.step_variables.input.params`

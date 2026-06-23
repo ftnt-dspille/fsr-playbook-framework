@@ -96,10 +96,13 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         method="live_api_get", status="tested_pass",
         notes=f"connectors_with_config={n_conn}, rows={len(all_rows)}",
     )
-    # Record the ETag for a future Tier-2 conditional-refetch (Level-2 freshness check).
+    # Record the ETag for a future Tier-2 conditional-refetch (Level-2 freshness
+    # check) and stamp the Tier-2 warm time — symmetric with probe_modules so a
+    # connector_configs-only warmup still advances data_warmed_at (the TTL clock).
+    from fsr_playbooks import _catalog_meta
     if etag:
-        from fsr_playbooks import _catalog_meta
         _catalog_meta.record_etag(conn, "connector_configs", etag)
+    _catalog_meta.record_data_warmed_at(conn)
     return n_conn, len(all_rows), []
 
 

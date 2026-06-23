@@ -146,6 +146,49 @@ def record_data_warmed_at(conn: sqlite3.Connection) -> None:
     set_(conn, "data_warmed_at", _utcnow())
 
 
+# ----------------------- Tier-2 freshness consume side -----------------------
+# The capture side (record_etag / record_data_warmed_at) is written by the
+# warmup probes. These read-side helpers let a conditional-refetch consumer
+# decide *whether* to refetch (TTL) and *how* (If-None-Match with the stored
+# ETag). They are pure — no network — so they ship in the wheel alongside the
+# multi-instance guard.
+
+DEFAULT_TTL_SECONDS = 24 * 60 * 60  # 1 day
+
+
+def get_data_warmed_at(conn: sqlite3.Connection) -> str | None:
+    """ISO-8601 UTC of the last Tier-2 warm, or ``None`` if never warmed."""
+    return get(conn, "data_warmed_at")
+
+
+def get_etag(conn: sqlite3.Connection, collection: str) -> str | None:
+    """Last-seen response ETag for ``collection``, or ``None`` if unrecorded."""
+    return get(conn, f"etag:{collection}")
+
+
+def is_ttl_expired(
+    conn: sqlite3.Connection, ttl_seconds: int = DEFAULT_TTL_SECONDS
+) -> bool:
+    """True when the Tier-2 catalog is stale and a refresh should be considered.
+
+    Stale means: never warmed (no ``data_warmed_at``), the stamp is unparseable
+    (treat as expired — better to refetch than trust a corrupt timestamp), or
+    the warm is at least ``ttl_seconds`` old. A timestamp without an explicit
+    offset is assumed UTC (matches :func:`_utcnow`).
+    """
+    stamp = get_data_warmed_at(conn)
+    if not stamp:
+        return True
+    try:
+        warmed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return True
+    if warmed.tzinfo is None:
+        warmed = warmed.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - warmed).total_seconds()
+    return age >= ttl_seconds
+
+
 # ----------------------- the multi-instance guard -----------------------
 
 def check_instance(conn: sqlite3.Connection, base_url: str) -> tuple[str, str, str]:

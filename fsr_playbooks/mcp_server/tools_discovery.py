@@ -25,6 +25,31 @@ DB_PATH = _shared.DB_PATH
 
 
 @mcp.tool()
+def get_step_arg_schema(step_type: str) -> dict[str, Any]:
+    """JSON Schema for a step type's `arguments`, for pre-compile validation.
+
+    Returns `{step_type, json_schema}` when the type is modeled (today:
+    set_variable, decision — coverage grows over time), else
+    `{step_type, json_schema: null, modeled: false, note, modeled_types}` so the
+    caller can tell "not modeled yet" from an empty schema and discover what IS
+    available.
+    """
+    from ..compiler.typed_args.schema import emit_step_arg_schema, list_modeled_step_types
+
+    schema = emit_step_arg_schema(step_type)
+    if schema is None:
+        return {
+            "step_type": step_type,
+            "json_schema": None,
+            "modeled": False,
+            "note": f"{step_type!r} has no typed-args model yet; arguments are "
+                    "validated imperatively at compile time.",
+            "modeled_types": list_modeled_step_types(),
+        }
+    return {"step_type": step_type, "json_schema": schema, "modeled": True}
+
+
+@mcp.tool()
 def find_connector(q: str, limit: int = 15,
                    verbose: bool = False) -> dict[str, Any]:
     """Fuzzy-search connectors by name, label, category, or description.

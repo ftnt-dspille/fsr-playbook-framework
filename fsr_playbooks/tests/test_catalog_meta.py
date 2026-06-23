@@ -11,6 +11,7 @@ Covers ``fsr_playbooks/_catalog_meta.py``:
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -133,3 +134,50 @@ def test_data_warmed_at_sets_iso_timestamp(conn):
     assert "T" in ts
     assert "-" in ts
     assert ":" in ts
+
+
+# ----------------------- Tier-2 freshness consume side -----------------------
+
+
+def test_get_data_warmed_at_absent_is_none(conn):
+    assert cm.get_data_warmed_at(conn) is None
+
+
+def test_get_data_warmed_at_after_record(conn):
+    cm.record_data_warmed_at(conn)
+    assert cm.get_data_warmed_at(conn) == cm.get(conn, "data_warmed_at")
+
+
+def test_get_etag_roundtrip_and_absent(conn):
+    assert cm.get_etag(conn, "picklists") is None
+    cm.record_etag(conn, "picklists", "W/\"abc\"")
+    assert cm.get_etag(conn, "picklists") == "W/\"abc\""
+
+
+def test_is_ttl_expired_when_never_warmed(conn):
+    # No data_warmed_at stamp at all → treat as expired (force a first warm).
+    assert cm.is_ttl_expired(conn) is True
+
+
+def test_is_ttl_expired_within_window(conn):
+    recent = datetime.now(timezone.utc) - timedelta(seconds=60)
+    cm.set_(conn, "data_warmed_at", recent.isoformat(timespec="seconds"))
+    assert cm.is_ttl_expired(conn, ttl_seconds=3600) is False
+
+
+def test_is_ttl_expired_past_window(conn):
+    old = datetime.now(timezone.utc) - timedelta(seconds=7200)
+    cm.set_(conn, "data_warmed_at", old.isoformat(timespec="seconds"))
+    assert cm.is_ttl_expired(conn, ttl_seconds=3600) is True
+
+
+def test_is_ttl_expired_malformed_timestamp(conn):
+    cm.set_(conn, "data_warmed_at", "not-a-timestamp")
+    assert cm.is_ttl_expired(conn) is True
+
+
+def test_is_ttl_expired_naive_timestamp_assumed_utc(conn):
+    # A stamp without an offset must not raise (assume UTC) and compare sanely.
+    recent = datetime.now(timezone.utc).replace(tzinfo=None)
+    cm.set_(conn, "data_warmed_at", recent.isoformat(timespec="seconds"))
+    assert cm.is_ttl_expired(conn, ttl_seconds=3600) is False

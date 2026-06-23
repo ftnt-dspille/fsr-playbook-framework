@@ -26,8 +26,9 @@ def test_registry_models_set_variable():
 
 def test_registry_unmodeled_type_falls_back():
     # Unmodeled step types must report no model so the resolver keeps using
-    # the imperative path — the migration's incremental contract.
-    assert is_modeled("delay") is False
+    # the imperative path — the migration's incremental contract. (connector is
+    # catalog-entangled and intentionally still imperative.)
+    assert is_modeled("connector") is False
     assert STEP_ARG_MODELS.get("connector") is None
 
 

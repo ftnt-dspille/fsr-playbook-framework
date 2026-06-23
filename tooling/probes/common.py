@@ -162,6 +162,70 @@ def record_verification(
     )
 
 
+def conditional_refetch(
+    client,
+    *,
+    url: str,
+    conn: sqlite3.Connection,
+    collection: str,
+    params: dict | None = None,
+    ttl_seconds: int | None = None,
+) -> tuple[str, object]:
+    """Tier-2 freshness refresh: refetch ``collection`` only when stale.
+
+    The warmup probes capture an ETag (``record_etag``) and a warm timestamp
+    (``record_data_warmed_at``). This consumes both: it short-circuits while the
+    catalog is within its TTL, and otherwise issues a conditional GET
+    (``If-None-Match`` with the stored ETag) so an unchanged collection costs a
+    cheap 304 instead of a full re-pull.
+
+    Returns ``(outcome, payload)``:
+
+    - ``("fresh", None)``      — within TTL; no request made.
+    - ``("unchanged", None)``  — TTL expired, server returned **304** (ETag
+      matched). ``data_warmed_at`` is bumped (content is still current).
+    - ``("refreshed", body)``  — TTL expired, server returned **200**. The new
+      ETag (if any) is recorded and ``data_warmed_at`` bumped; the caller is
+      responsible for writing ``body`` into the catalog tables.
+    - ``("error", message)``   — the request failed or returned an unexpected
+      status; nothing is written.
+
+    Pure protocol/bookkeeping — the caller owns per-collection table writes,
+    which differ by shape (picklists vs connector_configs vs …).
+    """
+    from fsr_playbooks import _catalog_meta
+
+    ttl = _catalog_meta.DEFAULT_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+    if not _catalog_meta.is_ttl_expired(conn, ttl):
+        return "fresh", None
+
+    headers = {}
+    etag = _catalog_meta.get_etag(conn, collection)
+    if etag:
+        headers["If-None-Match"] = etag
+
+    try:
+        resp = client.session.get(
+            client.base_url + url,
+            params=params,
+            headers=headers or None,
+            verify=client.verify_ssl,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return "error", f"{collection}: {exc!r}"
+
+    if resp.status_code == 304:
+        _catalog_meta.record_data_warmed_at(conn)
+        return "unchanged", None
+    if resp.status_code == 200:
+        new_etag = resp.headers.get("ETag")
+        if new_etag:
+            _catalog_meta.record_etag(conn, collection, new_etag)
+        _catalog_meta.record_data_warmed_at(conn)
+        return "refreshed", resp.json()
+    return "error", f"{collection}: unexpected status {resp.status_code}"
+
+
 LOCAL_SOURCE_METHODS = frozenset({
     "rpm_info_json",
     "schema_json",
