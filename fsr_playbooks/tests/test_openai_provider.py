@@ -230,3 +230,25 @@ def test_resume_deny_synthesizes_denial_without_dispatch():
     mock_dispatch.assert_not_called()
     tr = next(e for e in events if isinstance(e, ToolResultEvent))
     assert tr.result.get("code") == "user_denied"
+
+
+# ── stop_reason contract normalization ───────────────────────────────────────
+# Regression: the OpenAI path used to leak the raw finish_reason ("stop") into
+# the connector's stop_reason contract, so a normal turn ended on "stop"
+# instead of "end_turn" (which the AnthropicProvider emits natively and the
+# live chat test T3 + widget contract expect). See _contract_stop_reason.
+def test_contract_stop_reason_normalizes_openai_finish_reasons():
+    from fsr_playbooks.llm.openai_provider import _contract_stop_reason
+
+    # The headline bug: OpenAI's "stop" must become the contract's "end_turn".
+    assert _contract_stop_reason("stop") == "end_turn"
+    # A missing/empty finish_reason is a clean completion → end_turn.
+    assert _contract_stop_reason(None) == "end_turn"
+    assert _contract_stop_reason("") == "end_turn"
+    # Token-limit truncation maps onto the contract's "max_turns".
+    assert _contract_stop_reason("length") == "max_turns"
+    # Content filter is a terminal error per the contract.
+    assert _contract_stop_reason("content_filter") == "error"
+    # Already-contract / unknown values pass through unchanged (forward-safe).
+    assert _contract_stop_reason("end_turn") == "end_turn"
+    assert _contract_stop_reason("awaiting_choice") == "awaiting_choice"

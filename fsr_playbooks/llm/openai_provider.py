@@ -85,6 +85,31 @@ DEFAULT_MODEL = (
 )
 
 
+# OpenAI's chat-completions `finish_reason` vocabulary differs from the
+# connector's stop_reason contract (which the AnthropicProvider satisfies
+# natively, since Anthropic already returns "end_turn"). Without this mapping
+# the OpenAI path leaks the raw "stop"/"length" tokens, so a normal turn ends
+# on stop_reason="stop" instead of the contract's "end_turn" — silently
+# breaking every consumer keyed on the contract (the live chat test T3, etc.).
+# Map the OpenAI tokens onto the same vocabulary Anthropic emits.
+_FINISH_TO_CONTRACT = {
+    "stop": "end_turn",
+    "length": "max_turns",
+    "content_filter": "error",
+    "function_call": "end_turn",
+    "tool_calls": "end_turn",  # only reached when the tool loop already closed
+}
+
+
+def _contract_stop_reason(finish_reason: str | None) -> str:
+    """Normalize an OpenAI finish_reason to the connector stop_reason contract.
+
+    A missing/empty finish_reason means a clean completion → "end_turn"."""
+    if not finish_reason:
+        return "end_turn"
+    return _FINISH_TO_CONTRACT.get(finish_reason, finish_reason)
+
+
 # Mirrors AnthropicProvider._ASSESSMENT_DIRECTIVE — the P1 forced written
 # assessment when a turn ran tools but closed with no narrative text.
 _ASSESSMENT_DIRECTIVE = (
@@ -222,10 +247,10 @@ class OpenAIProvider:
             "tool_call_id": suspended.tool_use_id,
             "content": _stringify(resolved),
         })
-        for pid, _pn, _pa in suspended.remaining_tool_calls:
+        for skipped in suspended.remaining_tool_calls:
             tool_messages.append({
                 "role": "tool",
-                "tool_call_id": pid,
+                "tool_call_id": skipped.call_id,
                 "content": "{\"ok\": false, \"code\": \"superseded_by_approval\"}",
             })
 
@@ -536,11 +561,11 @@ class OpenAIProvider:
                         stop_reason_label="assessment_summary",
                     ):
                         yield ev
-                    yield DoneEvent(stop_reason=finish_reason or "stop")
+                    yield DoneEvent(stop_reason=_contract_stop_reason(finish_reason))
                     return
 
                 yield _emit_usage(finish_reason or "")
-                yield DoneEvent(stop_reason=finish_reason or "stop")
+                yield DoneEvent(stop_reason=_contract_stop_reason(finish_reason))
                 return
 
             # --- tool execution with HITL approval boundary ---------------
@@ -614,7 +639,12 @@ class OpenAIProvider:
                         tier=int(result.get("tier", 3)),
                         history_snapshot=list(history[1:]),
                         prior_tool_result_blocks=list(tool_messages),
-                        remaining_tool_calls=remaining,
+                        remaining_tool_calls=[
+                            _approvals.SkippedToolCall(
+                                call_id=cid, name=cn, args=ca,
+                            )
+                            for cid, cn, ca in remaining
+                        ],
                         system=system,
                         tags=dict(tags),
                         summary=result.get("summary"),
