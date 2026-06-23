@@ -5,6 +5,7 @@ Verifies that:
   2. A playbook with a cycle gets a cycle error but NO spurious
      'step not reachable' / predecessor errors from _check_jinja_paths.
 """
+from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks.compiler.validator import _has_cycle
 from fsr_playbooks.compiler.ir import Playbook, Step
@@ -72,7 +73,8 @@ playbooks:
         next: StepA
 """
 
-DB = "data/fsr_reference.db"
+# Resolve via the standard order so CI falls back to the packaged slim DB.
+DB = default_db_path()
 
 
 def test_cycle_error_reported():

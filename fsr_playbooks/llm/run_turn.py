@@ -23,6 +23,7 @@ already lives inside `provider.stream()`. This module is the
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
 from dataclasses import dataclass, field
@@ -41,6 +42,39 @@ from .provider import (
     ToolUseEvent,
     UsageEvent,
 )
+
+
+@contextlib.asynccontextmanager
+async def _total_timeout(delay: float):
+    """``asyncio.timeout(delay)`` backport for the 3.10 SOAR runtime floor.
+
+    ``asyncio.timeout()`` is 3.11+, so on 3.10 we arm a one-shot loop timer
+    that cancels the current task when ``delay`` elapses and re-raise that as
+    ``TimeoutError`` — matching the contract the call site relies on. On 3.11+
+    we delegate to the stdlib implementation.
+    """
+    if hasattr(asyncio, "timeout"):
+        async with asyncio.timeout(delay):
+            yield
+        return
+    task = asyncio.current_task()
+    expired = False
+
+    def _fire() -> None:
+        nonlocal expired
+        expired = True
+        if task is not None:
+            task.cancel()
+
+    handle = asyncio.get_event_loop().call_later(delay, _fire)
+    try:
+        yield
+    except asyncio.CancelledError:
+        if expired:
+            raise asyncio.TimeoutError from None
+        raise
+    finally:
+        handle.cancel()
 
 
 # Tool names whose `yaml_text` argument should re-tag the turn with the
@@ -231,7 +265,7 @@ async def run_agent_turn(
     # overwrites. See chat.py L379-388 for the original incident note.
 
     try:
-        async with asyncio.timeout(timeout_secs):
+        async with _total_timeout(timeout_secs):
             async for ev in provider.stream(
                 system=system, messages=messages, tools=tools, tags=tags,
             ):

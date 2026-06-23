@@ -10,10 +10,14 @@ instead. These tests pin that.
 """
 from pathlib import Path
 
+from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml, parse_yaml
 from fsr_playbooks.compiler.typed_walker import walk_playbook
 
-DB = Path("data/fsr_reference.db")
+# Resolve via the standard order ($FSRPB_DB → repo probed cache → packaged
+# slim catalog) so CI (no gitignored data/fsr_reference.db) falls back to the
+# shipped DB, which carries the stable tables these tests query.
+DB = default_db_path()
 
 _DECISION = Path("examples/decision_branch.yaml").read_text()
 

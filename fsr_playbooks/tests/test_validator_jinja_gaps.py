@@ -9,9 +9,11 @@ verify_playbook report ready_to_push=True):
     *warning* (vars are playbook-global; surface the suspicion without
     hard-blocking on a possible false positive).
 """
+from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
 
-DB = "data/fsr_reference.db"
+# Resolve via the standard order so CI falls back to the packaged slim DB.
+DB = default_db_path()
 
 
 def _errs(yaml_text: str):

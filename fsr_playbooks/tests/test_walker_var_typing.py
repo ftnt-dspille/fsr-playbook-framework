@@ -7,14 +7,14 @@ validator._check_undefined_vars cannot: read-before-define, defined-on-other-
 branch, and loop-var-outside-for_each. The never-defined-anywhere case stays
 with the validator (disjoint — no double report).
 """
-from pathlib import Path
-
+from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks.compiler.typed_walker import (
     _infer_literal_shape, walk_playbook,
 )
 
-DB = Path("data/fsr_reference.db")
+# Resolve via the standard order so CI falls back to the packaged slim DB.
+DB = default_db_path()
 
 
 def _walk(text: str):
