@@ -27,6 +27,10 @@ class ToolUseEvent:
     # tier-3+ calls without re-resolving on the client. 0 = tier
     # unknown (e.g. provider didn't stamp it; defaults to "safe" badge).
     tier: int = 0
+    # True for events synthesized by resume_agent_turn to represent tool
+    # calls that were skipped because an earlier call in the same turn
+    # triggered an approval gate.
+    synthetic: bool = False
     kind: Literal["tool_use"] = "tool_use"
 
 
@@ -39,6 +43,8 @@ class ToolResultEvent:
     # path, which executes the tool before re-entering stream()). The widget
     # uses this to freeze a per-tool duration on the result chip.
     duration_ms: int | None = None
+    # True for events synthesized by resume_agent_turn (see ToolUseEvent.synthetic).
+    synthetic: bool = False
     kind: Literal["tool_result"] = "tool_result"
 
 

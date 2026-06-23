@@ -60,10 +60,14 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
         return {"error": "FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)"}
     client = get_client()
 
-    # task_id (UUID) → workflow PK. Try live, then historical (purged after ~30-60 min).
+    # task_id (UUID) → workflow PK. Use pyfsr wrapper if possible.
+    # For UUID resolution, fall back to raw session calls since playbooks API
+    # doesn't expose task_id→PK lookup directly.
     is_uuid = "-" in pb_execution and not pb_execution.isdigit()
     pk_url = None
+    data = None
     if is_uuid:
+        # No pyfsr wrapper for task_id lookup; use raw session.
         for path in ("/api/wf/api/workflows/", "/api/wf/api/historical-workflows/"):
             try:
                 pr = client.session.get(
@@ -79,24 +83,23 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
                 break
         if not pk_url:
             return {"error": f"no workflow run found for task_id {pb_execution!r} (checked live + historical)"}
-        url = client.base_url + "/api" + pk_url + "?step_detail=true"
-    else:
-        url = client.base_url + f"/api/wf/api/workflows/{pb_execution}/?step_detail=true"
-
-    try:
-        r = client.session.get(url, verify=client.verify_ssl)
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"fetch failed: {e!r}"}
-    # Numeric PK can live in either table — fall back to historical on 404.
-    if r.status_code == 404 and not is_uuid:
-        url = client.base_url + f"/api/wf/api/historical-workflows/{pb_execution}/?step_detail=true"
         try:
-            r = client.session.get(url, verify=client.verify_ssl)
+            data = client.playbooks.get_execution(pk_url.rstrip("/").rsplit("/", 1)[-1], step_detail=True)
         except Exception as e:  # noqa: BLE001
-            return {"error": f"historical fetch failed: {e!r}"}
-    if r.status_code != 200:
-        return {"error": f"HTTP {r.status_code}", "body": r.text[:300]}
-    data = r.json()
+            return {"error": f"fetch failed: {e!r}"}
+    else:
+        # Use pyfsr wrapper for numeric PK lookup with step_detail.
+        try:
+            data = client.playbooks.get_execution(pb_execution, step_detail=True)
+        except ValueError:
+            # PK not found in live table; get_execution already tries historical internally.
+            return {"error": f"workflow run {pb_execution!r} not found (checked live + historical)"}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"fetch failed: {e!r}"}
+
+    if not isinstance(data, dict):
+        return {"error": "fetch failed: unexpected response type"}
+
     env_obj = data.get("env") or {}
     steps_arr = data.get("steps") or []
     steps_map: dict = {}
@@ -912,12 +915,18 @@ def list_configured_connectors(probe: bool = False,
         return {"error": "FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)"}
     client = get_client()
     try:
-        r = client.session.post(
-            client.base_url
-            + "/api/integration/connector_details/?format=json&configured=true&exclude=operation&active=true",
-            json={}, verify=client.verify_ssl,
-        )
-        rows = list((r.json().get("data") or []) if r.status_code == 200 else [])
+        # Use pyfsr wrapper for configured connectors list
+        configured_objs = client.connectors.list_configured()
+        rows = [
+            {
+                "name": c.name,
+                "status": c.status or "completed",
+                "version": c.version,
+                "label": c.label,
+                "config_count": len(c.configurations) if c.configurations else 0,
+            }
+            for c in configured_objs
+        ]
     except Exception as e:  # noqa: BLE001
         return {"error": f"connector_details fetch failed: {e!r}"}
 
@@ -1027,17 +1036,16 @@ def list_playbook_runs(playbook: str | None = None,
     if not playbook_uuid:
         if not playbook:
             return {"error": "provide playbook (name) or playbook_uuid"}
-        # Resolve name → uuid.
-        import urllib.parse
-        qs = urllib.parse.urlencode({"name": playbook, "$limit": 5})
-        nr = client.session.get(client.base_url + f"/api/3/workflows?{qs}",
-                                verify=client.verify_ssl)
-        if nr.status_code != 200:
-            return {"error": f"name lookup HTTP {nr.status_code}"}
-        members = nr.json().get("hydra:member") or []
-        if not members:
-            return {"error": f"no playbook named {playbook!r}"}
-        playbook_uuid = members[0].get("uuid")
+        # Resolve name → uuid using pyfsr wrapper
+        try:
+            defs = client.playbooks.list(name=playbook, limit=5)
+            if not defs:
+                return {"error": f"no playbook named {playbook!r}"}
+            playbook_uuid = defs[0].get("uuid")
+            if not playbook_uuid:
+                return {"error": f"playbook {playbook!r} has no uuid"}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"name lookup failed: {e!r}"}
     template_iri = f"/api/3/workflows/{playbook_uuid}"
     fetch = limit * 4 if not include_finished else limit
     extra = _build_run_filter_qs(

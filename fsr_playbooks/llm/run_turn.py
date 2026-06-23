@@ -393,6 +393,43 @@ async def resume_agent_turn(
         await _fire_event_callback(on_event, err_ev)
         return result
 
+    # §2.3 — Surface skipped tools. Tool calls that were in the same assistant
+    # turn as the approval-gated call but never ran are recorded in
+    # suspended.remaining_tool_calls. Emit synthetic ToolUseEvent +
+    # ToolResultEvent pairs now so the SSE stream, history_sink, and transcript
+    # all reflect the interrupted intent, letting the UI render "skipped" chips
+    # and the history DB record a complete turn picture.
+    for skipped in suspended.remaining_tool_calls:
+        use_ev = ToolUseEvent(
+            name=skipped.name,
+            arguments=skipped.args,
+            call_id=skipped.call_id,
+            synthetic=True,
+        )
+        res_ev = ToolResultEvent(
+            call_id=skipped.call_id,
+            result={"ok": False, "code": "superseded_by_approval"},
+            synthetic=True,
+        )
+        for ev in (use_ev, res_ev):
+            result.transcript.append(ev)
+            await _fire_event_callback(on_event, ev)
+        if history_sink is not None:
+            history_sink.record_chat_message(
+                suspended.session_id, turn_for_history, seq_in_turn,
+                kind=KIND_TOOL_USE, name=skipped.name,
+                content=json.dumps(skipped.args, default=str),
+            )
+            seq_in_turn += 1
+            history_sink.record_chat_message(
+                suspended.session_id, turn_for_history, seq_in_turn,
+                kind=KIND_TOOL_RESULT, name=skipped.call_id,
+                content=json.dumps(
+                    {"ok": False, "code": "superseded_by_approval"}, default=str,
+                ),
+            )
+            seq_in_turn += 1
+
     try:
         async for ev in resume_fn(suspended=suspended, decision=decision):
             await _fire_event_callback(on_event, ev)

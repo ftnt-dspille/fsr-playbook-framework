@@ -28,6 +28,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+@dataclass
+class SkippedToolCall:
+    """A tool call from the same assistant turn that was not dispatched
+    because an earlier call in the same turn triggered an approval gate.
+
+    On resume, these are synthesized as superseded_by_approval results
+    so the model receives one tool_result per tool_use it emitted.
+    """
+    call_id: str
+    name: str
+    args: dict[str, Any]
+
+
 # 10 minutes. Long enough that a user can context-switch to read the
 # args; short enough that a stale approval doesn't sit around for hours
 # if someone walks away.
@@ -113,7 +126,7 @@ class SuspendedSession:
     # when we suspended. Stored as (call_id, name, args). On resume
     # they're synthesized as `{ok: false, code: "superseded_by_approval"}`
     # so the model sees one tool_result per tool_use it emitted.
-    remaining_tool_calls: list[tuple[str, str, dict[str, Any]]]
+    remaining_tool_calls: list[SkippedToolCall]
     system: str
     tags: dict[str, Any]
     summary: str | None = None

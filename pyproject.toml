@@ -8,6 +8,7 @@ dependencies = [
     "ruamel.yaml>=0.18",
     "jsonschema>=4.21",
     "jinja2>=3.1",
+    "pydantic>=2",
     # Local sibling repo, installed editable in dev:
     #   pip install -e ../pyfsr
     "pyfsr",

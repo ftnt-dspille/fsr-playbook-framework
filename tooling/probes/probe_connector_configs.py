@@ -29,15 +29,21 @@ PROBE_NAME = "probe_connector_configs"
 CONNECTORS_URL = "/api/integration/connectors/"
 
 
-def _fetch(client) -> list[dict]:
+def _fetch(client) -> tuple[list[dict], str | None]:
+    """Fetch connector configs; return (data, etag_header).
+
+    The ETag response header (if present) can be used for conditional refetches
+    in a future Tier-2 freshness check.
+    """
     r = client.session.get(
         client.base_url + CONNECTORS_URL,
         params={"page_size": 1000},
         verify=client.verify_ssl,
     )
     if r.status_code != 200:
-        return []
-    return r.json().get("data") or []
+        return [], None
+    etag = r.headers.get("ETag")
+    return r.json().get("data") or [], etag
 
 
 def _rows_for(connector: str, configs: list[dict]) -> list[tuple]:
@@ -64,7 +70,7 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     if client is None:
         return 0, 0, ["env not configured"]
     try:
-        members = _fetch(client)
+        members, etag = _fetch(client)
     except Exception as e:  # noqa: BLE001
         return 0, 0, [f"connectors: {e!r}"]
 
@@ -90,6 +96,10 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         method="live_api_get", status="tested_pass",
         notes=f"connectors_with_config={n_conn}, rows={len(all_rows)}",
     )
+    # Record the ETag for a future Tier-2 conditional-refetch (Level-2 freshness check).
+    if etag:
+        from fsr_playbooks import _catalog_meta
+        _catalog_meta.record_etag(conn, "connector_configs", etag)
     return n_conn, len(all_rows), []
 
 

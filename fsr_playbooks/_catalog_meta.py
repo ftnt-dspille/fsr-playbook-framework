@@ -141,6 +141,11 @@ def record_etag(conn: sqlite3.Connection, collection: str, etag: str) -> None:
     set_(conn, f"etag:{collection}", etag)
 
 
+def record_data_warmed_at(conn: sqlite3.Connection) -> None:
+    """Record the current UTC timestamp as the last Tier-2 warm time."""
+    set_(conn, "data_warmed_at", _utcnow())
+
+
 # ----------------------- the multi-instance guard -----------------------
 
 def check_instance(conn: sqlite3.Connection, base_url: str) -> tuple[str, str, str]:

@@ -101,3 +101,35 @@ def test_guard_ok_when_target_matches(conn, monkeypatch):
     errors: list[CompileError] = []
     cm.instance_guard(conn, errors)
     assert errors == []
+
+
+# ----------------------- ETag & data_warmed_at (Tier-2 support) -----------------------
+
+
+def test_record_etag_roundtrip(conn):
+    cm.record_etag(conn, "picklists", "abc123def456")
+    retrieved = cm.get(conn, "etag:picklists")
+    assert retrieved == "abc123def456"
+
+
+def test_record_etag_idempotent(conn):
+    cm.record_etag(conn, "tags", "v1-etag")
+    assert cm.get(conn, "etag:tags") == "v1-etag"
+    cm.record_etag(conn, "tags", "v2-etag")  # upsert
+    assert cm.get(conn, "etag:tags") == "v2-etag"
+
+
+def test_get_etag_absent_defaults_none(conn):
+    retrieved = cm.get(conn, "etag:nonexistent")
+    assert retrieved is None
+
+
+def test_data_warmed_at_sets_iso_timestamp(conn):
+    cm.record_data_warmed_at(conn)
+    ts = cm.get(conn, "data_warmed_at")
+    assert ts is not None
+    # Verify ISO-8601 UTC format: "2026-06-23T12:34:56" (no Z suffix in this impl)
+    assert len(ts) >= 19  # YYYY-MM-DDTHH:MM:SS
+    assert "T" in ts
+    assert "-" in ts
+    assert ":" in ts

@@ -12,7 +12,7 @@ from typing import Any
 
 
 from fsr_playbooks.llm.fake_provider import FakeProvider
-from fsr_playbooks.llm.approvals import SuspendedSession
+from fsr_playbooks.llm.approvals import SuspendedSession, SkippedToolCall
 from fsr_playbooks.llm.provider import (
     DoneEvent,
     ErrorEvent,
@@ -445,3 +445,60 @@ def test_resume_happy_path_collects_transcript():
     txt_rows = [m for m in sink.messages if m["kind"] == KIND_ASSISTANT_TEXT]
     assert len(txt_rows) == 1
     assert "resumed" in txt_rows[0]["content"]
+
+
+# ----- 12. §2.3 — synthetic skipped-tool events on resume -----------------
+
+def test_resume_emits_synthetic_events_for_skipped_tools():
+    """remaining_tool_calls → synthetic ToolUseEvent + ToolResultEvent before
+    the provider stream fires; both appear in transcript and history_sink."""
+    skipped = [
+        SkippedToolCall(call_id="c-skip1", name="get_record", args={"id": "1"}),
+        SkippedToolCall(call_id="c-skip2", name="run_op", args={"op": "x"}),
+    ]
+    suspended = SuspendedSession(
+        approval_id="appr-2", session_id="sess-2", tool="dangerous_op",
+        tool_use_id="tu-gated", args={}, tier=3,
+        history_snapshot=[], prior_tool_result_blocks=[],
+        remaining_tool_calls=skipped, system="sys", tags={},
+    )
+    sink = _RecordingSink()
+    events_seen: list[Event] = []
+    provider = _ScriptedResumeProvider([
+        TextEvent(text="ok"),
+        _usage(session="sess-2", stop="end_turn"),
+        DoneEvent(stop_reason="end_turn"),
+    ])
+
+    result = _run(resume_agent_turn(
+        provider=provider, suspended=suspended, decision="deny",
+        history_sink=sink, on_event=lambda ev: events_seen.append(ev),
+    ))
+
+    # Both skipped tools appear in the event stream as synthetic pairs.
+    synth_use = [e for e in events_seen if isinstance(e, ToolUseEvent) and e.synthetic]
+    synth_res = [e for e in events_seen if isinstance(e, ToolResultEvent) and e.synthetic]
+    assert len(synth_use) == 2, f"expected 2 synthetic ToolUseEvents, got {synth_use}"
+    assert len(synth_res) == 2, f"expected 2 synthetic ToolResultEvents, got {synth_res}"
+    assert {e.name for e in synth_use} == {"get_record", "run_op"}
+
+    # Both appear in transcript.
+    synth_in_transcript = [e for e in result.transcript
+                           if isinstance(e, (ToolUseEvent, ToolResultEvent))
+                           and e.synthetic]
+    assert len(synth_in_transcript) == 4
+
+    # history_sink recorded tool_use + tool_result rows for each skipped call.
+    skip_use_rows = [m for m in sink.messages
+                     if m["kind"] == KIND_TOOL_USE and m["name"] in {"get_record", "run_op"}]
+    skip_res_rows = [m for m in sink.messages
+                     if m["kind"] == KIND_TOOL_RESULT
+                     and m["name"] in {"c-skip1", "c-skip2"}]
+    assert len(skip_use_rows) == 2
+    assert len(skip_res_rows) == 2
+    # seq values are unique and consecutive starting from 0.
+    seqs = sorted(m["seq"] for m in skip_use_rows + skip_res_rows)
+    assert seqs == list(range(len(seqs)))
+
+    # The real resume still ran: text reply appeared.
+    assert result.stop_reason == "end_turn"

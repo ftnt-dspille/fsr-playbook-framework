@@ -140,13 +140,20 @@ def _insert_field(
 # ----------------------- live -----------------------
 
 def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]],
-                                      list[tuple[str, str, str]], int]:
-    """Returns (item_id_to_value, list_name_to_options, items_rows, totalItems).
+                                      list[tuple[str, str, str]], int, str | None]:
+    """Returns (item_id_to_value, list_name_to_options, items_rows, totalItems, etag).
 
     `items_rows` is a list of (list_name, item_value, item_iri) tuples,
-    ready for bulk-insertion into the `picklists` table.
+    ready for bulk-insertion into the `picklists` table. `etag` is the
+    ETag response header (if present), for use in Tier-2 freshness checks.
     """
-    r = client.get(PICKLISTS_URL)
+    resp = client.session.get(
+        client.base_url + PICKLISTS_URL,
+        verify=client.verify_ssl,
+    )
+    resp.raise_for_status()
+    r = resp.json()
+    etag = resp.headers.get("ETag")
     members = r.get("hydra:member", [])
     item_id_to_value: dict[str, str] = {}
     list_name_to_options: dict[str, list[str]] = {}
@@ -166,7 +173,7 @@ def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]],
                 items_rows.append((name, iv, iid))
         if name:
             list_name_to_options[name] = opts
-    return item_id_to_value, list_name_to_options, items_rows, len(members)
+    return item_id_to_value, list_name_to_options, items_rows, len(members), etag
 
 
 def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
@@ -175,8 +182,9 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         return 0, 0, ["env not configured"]
     errors: list[str] = []
 
+    picklists_etag = None
     try:
-        picklist_items, picklist_lists, items_rows, n_pl = _load_picklists(client)
+        picklist_items, picklist_lists, items_rows, n_pl, picklists_etag = _load_picklists(client)
     except Exception as e:  # noqa: BLE001
         return 0, 0, [f"picklists: {e!r}"]
     # Persist (list_name, item_value, item_iri) so the resolver can map
@@ -198,8 +206,15 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     # Tags catalog — drives compile-time validation of
     # set_variable.message.tags so the agent can't ship a playbook that
     # silently creates a typo tag at runtime.
+    tags_etag = None
     try:
-        rt = client.get(TAGS_URL)
+        tags_resp = client.session.get(
+            client.base_url + TAGS_URL,
+            verify=client.verify_ssl,
+        )
+        tags_resp.raise_for_status()
+        rt = tags_resp.json()
+        tags_etag = tags_resp.headers.get("ETag")
         tag_rows: list[tuple[str, str]] = []
         for m in rt.get("hydra:member") or []:
             if not isinstance(m, dict):
@@ -222,8 +237,15 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     except Exception as e:  # noqa: BLE001
         errors.append(f"tags: {e!r}")
 
+    metadata_etag = None
     try:
-        r = client.get(METADATA_URL)
+        metadata_resp = client.session.get(
+            client.base_url + METADATA_URL,
+            verify=client.verify_ssl,
+        )
+        metadata_resp.raise_for_status()
+        r = metadata_resp.json()
+        metadata_etag = metadata_resp.headers.get("ETag")
     except Exception as e:  # noqa: BLE001
         return 0, 0, [f"metadata: {e!r}"]
     record_verification(
@@ -264,6 +286,20 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
                 )
 
     _stamp_provenance(conn, client)
+
+    # Record ETags for Tier-2 freshness checks (conditional re-pull on TTL expiry).
+    # Best-effort: these are supplementary to the core warmup.
+    from fsr_playbooks import _catalog_meta
+    if picklists_etag:
+        _catalog_meta.record_etag(conn, "picklists", picklists_etag)
+    if tags_etag:
+        _catalog_meta.record_etag(conn, "tags", tags_etag)
+    if metadata_etag:
+        _catalog_meta.record_etag(conn, "model_metadatas", metadata_etag)
+    # Also record data_warmed_at timestamp for TTL tracking.
+    _catalog_meta.record_data_warmed_at(conn)
+    conn.commit()  # _stamp_provenance already committed, but re-record these for atomicity
+
     return n_modules, n_fields, errors
 
 

@@ -29,6 +29,10 @@ dependencies = [
     "pyyaml>=6.0",
     "ruamel.yaml>=0.18",
     "jinja2>=3.1",
+    # The typed_args compile layer (compiler/typed_args/*) hard-imports pydantic
+    # v2 (Discriminator/Tag/AliasChoices), reached unconditionally via the
+    # compiler resolver — so it's a base runtime dep, not an extra.
+    "pydantic>=2",
 ]
 
 [project.optional-dependencies]

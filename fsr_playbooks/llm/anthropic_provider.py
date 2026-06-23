@@ -180,10 +180,10 @@ class AnthropicProvider:
             "content": _stringify(resolved),
             "is_error": _is_error_result(resolved),
         })
-        for pid, _pn, _pa in suspended.remaining_tool_calls:
+        for skipped in suspended.remaining_tool_calls:
             resumed_blocks.append({
                 "type": "tool_result",
-                "tool_use_id": pid,
+                "tool_use_id": skipped.call_id,
                 "content": "{\"ok\": false, \"code\": "
                             "\"superseded_by_approval\"}",
                 "is_error": True,
@@ -672,7 +672,12 @@ class AnthropicProvider:
                         tier=int(result.get("tier", 3)),
                         history_snapshot=_to_anthropic_messages(history),
                         prior_tool_result_blocks=list(tool_result_blocks),
-                        remaining_tool_calls=list(pending_remaining),
+                        remaining_tool_calls=[
+                            _approvals.SkippedToolCall(
+                                call_id=cid, name=cn, args=ca,
+                            )
+                            for cid, cn, ca in pending_remaining
+                        ],
                         system=system,
                         tags=dict(tags),
                         summary=result.get("summary"),
