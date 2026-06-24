@@ -180,6 +180,32 @@ def test_type_decision_based_accepted(db_path):
     assert r.ok, [str(e) for e in r.errors]
 
 
+def test_description_defaults_to_title_when_omitted(db_path):
+    """AGENT_DX_PLAN D1 — a manual_input with no `description:` used to emit an
+    empty description body, which validates offline but FSR's runtime rejects.
+    The description now falls back to the title so the prompt still runs."""
+    text = _wrap("          title: Approve the heist?\n")
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+    schema = r.fsr_json["data"][0]["workflows"][0]["steps"][1]["arguments"]\
+        ["input"]["schema"]
+    assert schema["title"] == "Approve the heist?"
+    assert schema["description"] == "Approve the heist?"
+
+
+def test_explicit_description_is_preserved(db_path):
+    """An explicit description must win over the title fallback."""
+    text = _wrap(
+        "          title: Approve?\n"
+        "          description: Read carefully before approving\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+    schema = r.fsr_json["data"][0]["workflows"][0]["steps"][1]["arguments"]\
+        ["input"]["schema"]
+    assert schema["description"] == "Read carefully before approving"
+
+
 def test_kind_ipv4_compiles(db_path):
     """I17 — formType=ipv4 was never in our whitelist, but live FSR
     uses it (audit §4). Should now compile and emit the webAddress

@@ -745,7 +745,10 @@ class NormalizerMixin:
             step.arguments = a
             return
         title = a.pop("title", None) or step.name or "Awaiting input"
-        description = a.pop("description", "")
+        # FSR's runtime rejects a manual_input with an empty description body even
+        # though it validates fine offline. Fall back to the title (always
+        # non-empty) so a description-less prompt still runs. See AGENT_DX_PLAN D1.
+        description = a.pop("description", None) or title
         raw_options = a.pop("options", None) or [{"option": "Continue", "primary": True}]
         options = []
         # Per-option `next:` — promote into the step's branch map so the
