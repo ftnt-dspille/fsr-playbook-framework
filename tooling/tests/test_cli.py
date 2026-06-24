@@ -8,10 +8,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 
 import pytest
 
-CLI = ["python3", "cli.py"]  # cwd will be python/
+# Use the SAME interpreter running the tests (the project .venv), not a bare
+# "python3" — under pre-commit's minimal PATH that resolves to the system python
+# which lacks the project deps (jinja2/mcp), so the CLI subprocess ImportError'd
+# even though the test process itself had them. sys.executable is venv-correct
+# everywhere (make tests, pre-commit, CI).
+CLI = [sys.executable, "cli.py"]  # cwd will be python/
 
 
 def _run(repo_root, *args, **kw):
