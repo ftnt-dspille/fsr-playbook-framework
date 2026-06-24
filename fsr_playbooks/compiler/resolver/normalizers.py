@@ -25,6 +25,8 @@ from ..typed_args.steps import expand_set_variable as _expand_set_variable_typed
 from ..typed_args.steps import expand_decision as _expand_decision_typed
 # friendly-duration → canonical TimeBased expansion (Phase 2 model).
 from ..typed_args.steps import expand_delay as _expand_delay_typed
+# friendly code/config -> canonical CodeSnippet expansion (Phase 2 model).
+from ..typed_args.steps import expand_code_snippet as _expand_code_snippet_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
 
@@ -919,19 +921,19 @@ class NormalizerMixin:
         catalog table (Resolver.resolve_config_id) — no live lookup, no
         dev-only `tooling/` import. Already-canonical args
         (`connector`+`operation`+`params`) pass through untouched.
+
+        Delegates to the typed-args layer (`typed_args.steps.
+        expand_code_snippet`), which owns the `CodeSnippetArgs` model and the
+        friendly→canonical transform. A ``None`` return means "leave arguments
+        unchanged" (not a dict, already canonical, or a friendly field failed
+        validation).
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
         if a.get("connector") and a.get("operation") and a.get("params"):
             self._require_nonempty_snippet(a.get("params"), path, errors)
             step.arguments = a
             return
-        # Config resolution reads the warmed `connector_configs` table via the
-        # CatalogLookupMixin (in-package, offline). When that table is unwarmed
-        # it returns None and we degrade to an unresolved config UUID (`""`) so
-        # the friendly `code:` form still compiles offline — warmup fills the
-        # real UUID later. This used to import the dev-only `tooling/`
-        # connector_configs module, which crashed every code_snippet compile in
-        # a fresh wheel.
+        # Check for unknown keys before delegating to the typed layer.
         _FRIENDLY = {"code", "python", "config", "mock_result", "condition"}
         _CANONICAL = {
             "connector", "operation", "operationTitle", "version",
@@ -941,22 +943,22 @@ class NormalizerMixin:
             a, "code_snippet", _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
-        code = a.pop("code", None) or a.pop("python", None) or ""
-        config_name = a.pop("config", None) if isinstance(
-            a.get("config"), str) and not _looks_like_uuid(a.get("config")) \
-            else None
+        # Delegate the friendly→canonical transform to the typed-args layer
+        # (`typed_args.steps.expand_code_snippet`), which owns the `CodeSnippetArgs` model.
+        new = _expand_code_snippet_typed(a, path, errors)
+        if new is None:
+            return
+        # Resolve the config UUID from the warmed connector_configs table.
+        # The expand walk doesn't consume config, so we check for it here.
+        config_name = None
+        if "config" in new:
+            config_val = new.pop("config")
+            if isinstance(config_val, str) and not _looks_like_uuid(config_val):
+                config_name = config_val
         cid = self.resolve_config_id("code-snippet", config_name) or ""
-        a.setdefault("connector", "code-snippet")
-        a.setdefault("operation", "python_inline_code_editor")
-        a.setdefault("operationTitle", "Execute Python Code")
-        a.setdefault("version", "2.1.4")
-        a.setdefault("config", cid)
-        params = a.get("params") if isinstance(a.get("params"), dict) else {}
-        params.setdefault("python_function", code)
-        a["params"] = params
-        a.setdefault("step_variables", [])
-        self._require_nonempty_snippet(params, path, errors)
-        step.arguments = a
+        new.setdefault("config", cid)
+        self._require_nonempty_snippet(new.get("params"), path, errors)
+        step.arguments = new
 
     @staticmethod
     def _require_nonempty_snippet(

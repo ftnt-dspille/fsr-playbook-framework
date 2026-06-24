@@ -18,12 +18,14 @@ from ..base import StrictArgs  # noqa: F401  (re-export for symmetry)
 from .set_variable import SetVariableArgs, ArgListEntry, expand_set_variable
 from .decision import DecisionArgs, DecisionCondition, expand_decision
 from .delay import DelayArgs, expand_delay
+from .code_snippet import CodeSnippetArgs, expand_code_snippet
 
 # Step type → typed argument model. Grows incrementally through Phase 2.
 STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     "set_variable": SetVariableArgs,
     "decision": DecisionArgs,
     "delay": DelayArgs,
+    "code_snippet": CodeSnippetArgs,
 }
 
 
@@ -43,4 +45,6 @@ __all__ = [
     "expand_decision",
     "DelayArgs",
     "expand_delay",
+    "CodeSnippetArgs",
+    "expand_code_snippet",
 ]
