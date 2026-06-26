@@ -76,7 +76,9 @@ exclude = ["fsr_playbooks.tests*"]
 # install compiles without a probed DB. Built by
 # tooling/catalog/build_compile_catalog.py; per-install tables ship empty
 # (warmed from the target SOAR).
-"fsr_playbooks" = ["_data/*.db"]
+# `*.json` ships the grounded output-shape oracle (gap D) so the connector's
+# offline shape-probe works before any on-box warm.
+"fsr_playbooks" = ["_data/*.db", "_data/*.json"]
 
 [tool.setuptools.dynamic]
 version = { attr = "fsr_playbooks.__version__" }
