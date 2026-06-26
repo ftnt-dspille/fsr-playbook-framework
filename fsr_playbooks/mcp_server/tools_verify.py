@@ -25,6 +25,53 @@ import sys
 from typing import Any
 
 from ._shared import mcp, REPO_ROOT, DB_PATH, _err, _db
+from fsr_playbooks.compiler.record_op_checks import (
+    check_connector_config,
+    check_op_params,
+    check_record_module,
+    check_required_record_fields,
+    check_unknown_record_fields,
+)
+
+
+# ---------------------------------------------------------------------------
+# Grounded output-shape oracle (pilot gap D). Shapes measured from real runs
+# (tooling/ground_shapes.py, tooling/sweep_shapes.py) and persisted next to the
+# packaged slim DB. Loaded once; used as the OFFLINE probe so `verify_playbook`
+# checks `vars.steps.<op>.<path>` references against measured shapes even with
+# no live FSR. Strictly additive: un-observed ops return None → walker falls
+# back to inference, never worse than before.
+# ---------------------------------------------------------------------------
+
+_GROUNDED_STORE = None
+
+
+def _grounded_store():
+    global _GROUNDED_STORE
+    if _GROUNDED_STORE is None:
+        from fsr_playbooks._db import PACKAGED_SLIM_DB
+        from fsr_playbooks.compiler.grounded_shapes import GroundedShapeStore
+        path = PACKAGED_SLIM_DB.parent / "grounded_shapes.json"
+        _GROUNDED_STORE = GroundedShapeStore.load(path)
+    return _GROUNDED_STORE
+
+
+def _combined_probe(live_probe_fn):
+    """Probe that tries the live shape first, then the grounded oracle.
+
+    With no live probe (offline verify) this is the grounded oracle alone.
+    """
+    from fsr_playbooks.compiler.grounded_shapes import grounded_probe
+    grounded = grounded_probe(_grounded_store())
+    if live_probe_fn is None:
+        return grounded
+
+    def _probe(connector, op, arguments):
+        shape = live_probe_fn(connector, op, arguments)
+        if shape is not None:
+            return shape
+        return grounded(connector, op, arguments)
+    return _probe
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +187,104 @@ def _connector_exists(name: str) -> bool:
         return False
 
 
+def _known_modules() -> list[str]:
+    """All module names in the catalog (empty when un-warmed)."""
+    conn = _db()
+    try:
+        return [r[0] for r in conn.execute("SELECT name FROM modules").fetchall()]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _module_required_fields(module: str) -> list[str]:
+    """Required field_names for a module (F). Empty when un-warmed."""
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT field_name FROM module_fields "
+            "WHERE module_name=? AND required=1",
+            (module,),
+        ).fetchall()
+        return [r[0] for r in rows]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _module_field_names(module: str) -> list[str]:
+    """All field_names for a module (unknown-field check). Empty when un-warmed."""
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT field_name FROM module_fields WHERE module_name=?",
+            (module,),
+        ).fetchall()
+        return [r[0] for r in rows]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _op_declared_params(connector: str, op: str) -> list[str]:
+    """All declared param names for a connector op (G unknown-name check),
+    across any nesting/condition — conservative, to avoid flagging a valid
+    nested/conditional param used at the top level."""
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT param_name FROM operation_params "
+            "WHERE connector_name=? AND op_name=?",
+            (connector, op),
+        ).fetchall()
+        return [r[0] for r in rows]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _op_required_params(connector: str, op: str) -> list[str]:
+    """Top-level *unconditional* required params with no default (G missing-
+    check). Excludes nested (parent_param_name) and conditional
+    (condition_value) params — required only when a sibling is set — and params
+    carrying a `default_value` (FSR supplies the default, so omitting them is
+    not a failure). Flagging any of those would false-fire on valid playbooks."""
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT param_name FROM operation_params "
+            "WHERE connector_name=? AND op_name=? AND required=1 "
+            "  AND parent_param_name IS NULL AND condition_value IS NULL "
+            "  AND (default_value IS NULL OR default_value='')",
+            (connector, op),
+        ).fetchall()
+        return [r[0] for r in rows]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _connector_config_status(connector: str) -> tuple[bool, list[str], bool]:
+    """(configs_known, config_names, has_default) for a connector.
+
+    `configs_known` is False when the whole connector_configs table is empty
+    (warm never ran) — the config check skips entirely in that case, so an
+    un-warmed slim DB never false-flags a connector as un-configured."""
+    conn = _db()
+    try:
+        any_rows = conn.execute(
+            "SELECT 1 FROM connector_configs LIMIT 1"
+        ).fetchone()
+        if any_rows is None:
+            return (False, [], False)
+        rows = conn.execute(
+            "SELECT config_name, is_default FROM connector_configs "
+            "WHERE connector=?",
+            (connector,),
+        ).fetchall()
+    except Exception:  # noqa: BLE001
+        return (False, [], False)
+    # `__default__` is a synthetic pointer row, not a user-visible config name.
+    names = [r[0] for r in rows if r[0] and r[0] != "__default__"]
+    has_default = any(bool(r[1]) for r in rows)
+    return (True, names, has_default)
+
+
 def _live_probe_factory(simulated_inputs: dict | None,
                         cache: dict, latencies: list):
     """Build a probe callback that calls `run_op` for safe ops. Caches
@@ -189,7 +334,7 @@ def _live_probe_factory(simulated_inputs: dict | None,
 # step id directly to each diagnostic.
 # ---------------------------------------------------------------------------
 
-def _per_step_schema_checks(coll) -> list[dict[str, Any]]:
+def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str, Any]]:
     fixes: list[dict[str, Any]] = []
     for pi, pb in enumerate(coll.playbooks):
         all_ids = {s.id for s in pb.steps}
@@ -231,6 +376,52 @@ def _per_step_schema_checks(coll) -> list[dict[str, Any]]:
                         "near": near,
                         "severity": "error",
                     })
+                elif connector and op:
+                    # Op exists — validate its params (G) and config bind.
+                    fixes.extend(check_op_params(
+                        connector=connector, operation=op,
+                        params=a.get("params"),
+                        declared_params=_op_declared_params(connector, op),
+                        required_params=_op_required_params(connector, op),
+                        step_id=s.id, path=spath,
+                    ))
+                # Connector-config existence is *instance-specific* (which
+                # configs exist on THIS target), so it's a live-target preflight
+                # — pyfsr D3's domain — not an offline-static fact. Running it
+                # offline false-flags any playbook authored for a different box
+                # (a connector not configured on the warm target). Gate on
+                # live_probe so the default offline path never blocks on it.
+                if connector and live_probe:
+                    known, names, has_def = _connector_config_status(connector)
+                    fixes.extend(check_connector_config(
+                        connector=connector, config_value=a.get("config"),
+                        configs_known=known, config_names=names,
+                        has_default=has_def, step_id=s.id, path=spath,
+                    ))
+
+            elif t in {"create_record", "insert_record", "update_record"}:
+                module = a.get("module")
+                # Module existence applies to all record writes.
+                fixes.extend(check_record_module(
+                    module=module, known_modules=_known_modules(),
+                    step_id=s.id, path=spath,
+                ))
+                # Required-field completeness is creation-only (update is a
+                # partial patch — an absent required field is legal).
+                if isinstance(module, str) and module:
+                    # Unknown-field check applies to create + update (a bogus
+                    # key is wrong either way); warning severity.
+                    fixes.extend(check_unknown_record_fields(
+                        module=module, resource=a.get("resource"),
+                        known_fields=_module_field_names(module),
+                        step_id=s.id, path=spath,
+                    ))
+                    if t != "update_record":
+                        fixes.extend(check_required_record_fields(
+                            module=module, resource=a.get("resource"),
+                            required_fields=_module_required_fields(module),
+                            step_id=s.id, path=spath,
+                        ))
 
             elif t == "manual_input":
                 # InputBased manual_input must declare at least one input.
@@ -298,12 +489,19 @@ def verify_playbook(
       - missing_field_on_step_output
       - non_list_indexed
       - type_mismatch                    (source→target type, Phase 4)
-      - required_op_param_missing
+      - required_op_param_missing       (connector-op declared required param)
       - op_param_unknown
+      - required_record_field_missing   (create_record missing a required field)
+      - unknown_module                  (record write into a non-existent module)
+      - connector_config_missing        (live_probe only — no config on target)
+      - unknown_connector_config        (live_probe only — config: name unknown)
       - branch_target_missing
       - workflow_reference_unresolvable (error severity only)
 
     Warning codes (do not block):
+      - op_param_unknown_name           (unknown connector-op param name)
+      - unknown_record_field            (resource key not a field of the module)
+      - connector_config_no_default     (configs exist but none is default)
       - unknown_shape_downstream_reference
       - output_schema_stale
       - var_read_before_definition       (branch-scoped vars.<name>)
@@ -371,8 +569,9 @@ def verify_playbook(
     walk = walk_playbook(
         walk_coll,
         playbook_name=playbook,
-        probe=(_live_probe_factory(simulated_inputs, probe_cache, probe_latencies)
-               if live_probe else None),
+        probe=_combined_probe(
+            _live_probe_factory(simulated_inputs, probe_cache, probe_latencies)
+            if live_probe else None),
         module_fields_fn=_module_fields_fn(),
         op_safety_fn=_op_safety_fn(),
         param_type_fn=_param_type_fn(),
@@ -387,7 +586,7 @@ def verify_playbook(
     })
 
     # 4. Per-step schema check
-    schema_issues = _per_step_schema_checks(coll)
+    schema_issues = _per_step_schema_checks(coll, live_probe=live_probe)
     for issue in schema_issues:
         bucket = required_fixes if issue["severity"] == "error" else warnings
         bucket.append(issue)
@@ -512,6 +711,8 @@ def _finalize(checks_run, required_fixes, warnings, evidence) -> dict[str, Any]:
     priority_codes = (
         "parse_error", "missing_field", "unknown_step_type",
         "required_op_param_missing", "op_param_unknown",
+        "required_record_field_missing", "connector_config_missing",
+        "unknown_module", "unknown_connector_config",
         "branch_target_missing", "unknown_connector", "unknown_operation",
         "unknown_step_reference", "unreachable_step_reference",
         "missing_field_on_step_output",

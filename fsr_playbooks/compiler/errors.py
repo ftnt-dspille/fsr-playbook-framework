@@ -24,6 +24,7 @@ class ErrorCode(str, Enum):
     BAD_VALUE = "bad_value"
     INSTANCE_MISMATCH = "instance_mismatch"  # catalog warmed from a different SOAR
     STALE_CATALOG = "stale_catalog"          # catalog is behind the live SOAR
+    INTERNAL = "internal"                    # tooling/install fault, not the YAML
 
 
 @dataclass

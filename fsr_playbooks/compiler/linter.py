@@ -35,6 +35,7 @@ import re
 
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Step
+from .snippet_checks import check_snippet
 
 # YAML 1.1 boolean tokens (case-insensitive). Quoting any of these
 # in a string-keyed context preserves the literal.
@@ -193,6 +194,92 @@ def _check_mock_result(s: Step, pi: int, si: int) -> CompileError | None:
     )
 
 
+_SEVERITY_TO_CODE = {
+    "error": ErrorCode.BAD_VALUE,
+    "warning": ErrorCode.BAD_VALUE,
+}
+
+
+def _snippet_body(s: Step) -> str | None:
+    """Pull the Python body out of a code_snippet step, friendly or canonical.
+
+    Friendly authoring puts it under ``arguments.code`` / ``arguments.python``;
+    the canonical CodeSnippet shape (post-expand, or a decompiled playbook) puts
+    it under ``arguments.params.python_function``. Return the first non-empty
+    string found, else None.
+    """
+    if s.type != "code_snippet":
+        return None
+    args = s.arguments or {}
+    for key in ("code", "python"):
+        v = args.get(key)
+        if isinstance(v, str) and v.strip():
+            return v
+    params = args.get("params")
+    if isinstance(params, dict):
+        v = params.get("python_function")
+        if isinstance(v, str) and v.strip():
+            return v
+    return None
+
+
+def _snippet_allow_imports(s: Step) -> bool | None:
+    """Best-effort read of the snippet's import setting from its own args.
+
+    The connector config that ultimately governs imports lives on the live box,
+    but an author can also set the knob inline under ``arguments`` /
+    ``arguments.params`` (``allow_imports``). Return the bool if present, else
+    None (= unknown → the manifest default decides, and an import is a warning).
+    """
+    args = s.arguments or {}
+    for container in (args, args.get("params") if isinstance(args.get("params"), dict) else {}):
+        for key in ("allow_imports", "allowImports"):
+            v = container.get(key)
+            if isinstance(v, bool):
+                return v
+    return None
+
+
+def _check_code_snippet(s: Step, pi: int, si: int) -> list[CompileError]:
+    """B1 (syntax) + B2 (sandbox bans) for a code_snippet step.
+
+    Delegates the actual analysis to ``snippet_checks.check_snippet`` and maps
+    its findings onto ``CompileError`` rows pointed at the snippet body.
+    """
+    body = _snippet_body(s)
+    if body is None:
+        return []
+    args = s.arguments or {}
+    version = args.get("version")
+    if not isinstance(version, str):
+        version = None
+    findings = check_snippet(
+        body,
+        version=version,
+        allow_imports=_snippet_allow_imports(s),
+    )
+    out: list[CompileError] = []
+    for f in findings:
+        out.append(CompileError(
+            code=_SEVERITY_TO_CODE.get(f.severity, ErrorCode.BAD_VALUE),
+            severity=f.severity,
+            message=f"code_snippet {(s.name or s.id)!r}: {f.message}",
+            path=f"playbooks[{pi}].steps[{si}].arguments.code (snippet line {f.lineno})",
+            suggestion=f.suggestion,
+        ))
+    return out
+
+
+# NOTE: a Tier-1 `_check_input_namespace` check (warn when a notrigger playbook
+# reads `vars.input.params.*`, per pilot E6) was REMOVED after a live run on .205
+# (run 686525) contradicted its premise: an API-triggered notrigger run populated
+# `vars.input.params.first_name` correctly and had no `vars.inputs` key at all.
+# The `vars.inputs` (plural) form is specific to the designer "Run" button path,
+# which we can't distinguish statically — so the check was a false positive for
+# the common API/child-workflow case. See docs/plans/PILOT_STATIC_ANALYSIS_GAP_PLAN.md
+# (gap E) for the evidence and the open question.
+
+
 def lint(text: str, coll: Collection | None) -> list[CompileError]:
     """Run every linter rule. Pure - no DB, no live FSR."""
     errs: list[CompileError] = []
@@ -209,4 +296,5 @@ def lint(text: str, coll: Collection | None) -> list[CompileError]:
                 e = _check_mock_result(s, pi, si)
                 if e:
                     errs.append(e)
+                errs.extend(_check_code_snippet(s, pi, si))
     return errs

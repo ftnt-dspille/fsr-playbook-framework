@@ -304,6 +304,26 @@ def _shape_scalar(t: str = "any") -> Shape:
     return {"kind": "scalar", "type": t}
 
 
+def _code_snippet_envelope(probed: Shape) -> Shape:
+    """Keep a grounded code_snippet envelope but widen `data.code_output` to any.
+
+    The connector envelope keys are stable; the inner `code_output` is the
+    snippet author's payload (arbitrary). Widening it avoids false positives on
+    snippets that emit a structured code_output while preserving the envelope
+    membership check that catches a spurious `.output` (pilot E5).
+    """
+    if not isinstance(probed, dict) or probed.get("kind") != "object":
+        return probed
+    keys = dict(probed.get("keys") or {})
+    data = keys.get("data")
+    if isinstance(data, dict) and data.get("kind") == "object":
+        dkeys = dict(data.get("keys") or {})
+        if "code_output" in dkeys:
+            dkeys["code_output"] = _shape_scalar("any")
+            keys["data"] = {"kind": "object", "keys": dkeys}
+    return {"kind": "object", "keys": keys}
+
+
 def _module_record_shape(
     module: str | None, module_fields_fn: ModuleFieldsFn | None,
 ) -> Shape:
@@ -448,6 +468,44 @@ def _synth_set_variable_shape(step: Step) -> Shape:
     return _shape_object(keys)
 
 
+def _workflow_reference_output_shape(child: Playbook) -> Shape:
+    """Output shape of a SYNC `workflow_reference` to `child`.
+
+    Live ground truth (run 686622): a synchronous child's `set_variable` vars
+    merge into the *reference step's* result namespace — i.e. `vars.steps.<ref
+    step>.<childvar>` resolves to the child's var (NOT top-level `vars.<var>`).
+    So the reference step's shape is the union of every `set_variable` key the
+    child defines. Keys are typed `any` (the child's values are dynamic).
+    """
+    keys: dict[str, Shape] = {}
+    for s in child.steps:
+        if s.type == "set_variable":
+            # _set_variable_value_map handles BOTH the friendly/arg_list form
+            # and the resolver-flattened form (the resolved IR is what
+            # verify_playbook walks); _synth_set_variable_shape misses the flat
+            # form. Values are Jinja → typed `any`.
+            for name in _set_variable_value_map(s):
+                keys[name] = _shape_scalar("any")
+    return _shape_object(keys)
+
+
+def _child_wf_ref_shapes(coll: "Collection") -> dict[str, Shape]:
+    """Map both child playbook NAME and its resolved IRI → reference output shape.
+
+    The parsed IR carries `arguments.target: <name>`; the resolved IR carries
+    `arguments.workflowReference: /api/3/workflows/<uuid>`. We key by both so the
+    lookup works pre- and post-resolve. The uuid derivation mirrors the emitter
+    (`uuid5(_NS, "workflow|<collection>|<name>")`).
+    """
+    from .emitter import _u
+    out: dict[str, Shape] = {}
+    for child in coll.playbooks:
+        shape = _workflow_reference_output_shape(child)
+        out[child.name] = shape
+        out[f"/api/3/workflows/{_u('workflow', coll.name, child.name)}"] = shape
+    return out
+
+
 def _step_module(step: Step) -> str | None:
     a = step.arguments
     m = a.get("module") or a.get("resource")
@@ -473,6 +531,7 @@ def _synth_step_shape(
     probe: ProbeCallback | None,
     module_fields_fn: ModuleFieldsFn | None,
     op_safety_fn: OpSafetyFn | None,
+    wf_ref_shapes: dict[str, Shape] | None = None,
 ) -> Shape:
     """Return the *output* shape for one step, ignoring branching."""
     t = step.type
@@ -493,6 +552,26 @@ def _synth_step_shape(
     if t in {"create_record", "insert_record", "update_record"}:
         return _module_record_shape(_step_module(step), module_fields_fn)
     if t in {"code_snippet"}:
+        # The body returns arbitrary Python, so we can't infer the shape — but
+        # a grounded probe (measured from a real run via grounded_shapes) knows
+        # the connector's envelope: {data: {code_output: …}, status, message,
+        # operation}. Consult it so refs like `vars.steps.X.output` (which the
+        # envelope does NOT have — pilot E5) get flagged. The code-snippet
+        # connector/op are fixed regardless of authoring shape.
+        if probe:
+            try:
+                probed = probe("code-snippet", "python_inline_code_editor",
+                               dict(step.arguments))
+            except Exception:  # noqa: BLE001
+                probed = None
+            if probed is not None:
+                # The envelope ({data, status, message, operation}) is stable
+                # across snippets, but `data.code_output` is the user's payload
+                # (any shape). Keep the envelope check (catches `.output` and
+                # wrong top-level keys — pilot E5) without over-claiming the
+                # snippet-defined inner value, which would false-positive on a
+                # snippet that returns a structured code_output.
+                return _code_snippet_envelope(probed)
         return _shape_unknown("code_snippet returns arbitrary Python value")
     if t == "workflow_reference":
         # Async fire-and-forget → no output. Sync reference → caller's
@@ -500,6 +579,16 @@ def _synth_step_shape(
         # don't spuriously fail.
         if step.arguments.get("apply_async") is True:
             return _shape_none()
+        # Sync reference: the child's set_variable vars surface at
+        # `vars.steps.<this step>.<childvar>` (live-proven, run 686622). Look up
+        # the child by friendly `target` name (parsed IR) or `workflowReference`
+        # IRI (resolved IR) and synthesize its output shape.
+        if wf_ref_shapes:
+            tgt = (step.arguments.get("workflowReference")
+                   or step.arguments.get("target"))
+            shape = wf_ref_shapes.get(tgt) if isinstance(tgt, str) else None
+            if shape is not None:
+                return shape
         return _shape_unknown("workflow_reference outputs require recursion")
     if t in {"connector", "connector_op"}:
         connector, op = _connector_op(step)
@@ -1132,11 +1221,12 @@ def walk_playbook(
         if sh is not None:
             param_shapes[pname] = sh
 
+    wf_ref_shapes = _child_wf_ref_shapes(coll)
     per_step: dict[str, Shape] = {}
     for s in pb.steps:
         per_step[s.id] = _synth_step_shape(
             s, probe=probe, module_fields_fn=module_fields_fn,
-            op_safety_fn=op_safety_fn,
+            op_safety_fn=op_safety_fn, wf_ref_shapes=wf_ref_shapes,
         )
 
     branch_paths = _enumerate_branches(pb)

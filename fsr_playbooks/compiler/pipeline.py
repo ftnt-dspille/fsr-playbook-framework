@@ -11,12 +11,79 @@ from typing import Any, Optional
 from .arg_validator import ArgValidator
 from .corpus_validator import CorpusValidator
 from .emitter import emit
-from .errors import CompileError
+from .errors import CompileError, ErrorCode
 from .ir import Collection
 from .linter import lint
 from .parser import parse_yaml
 from .resolver import Resolver
 from .validator import validate
+
+
+# Step fields the compiler/parser/emitter rely on. If the loaded `ir.Step`
+# is missing any of these, an install is half-overwritten (a stale wheel
+# shadowing the editable repo — pilot E10) and compiles will crash with an
+# opaque `TypeError: Step.__init__() got an unexpected keyword argument …`
+# mid-run. We assert it loudly at the entrypoint instead.
+_EXPECTED_STEP_FIELDS = frozenset({
+    "id", "type", "name", "arguments", "next", "branches",
+    "unlabeled_next", "comment", "description", "for_each",
+})
+
+_self_check_error: Optional[str] = None
+_self_checked = False
+
+
+def _self_check() -> Optional[str]:
+    """Detect a half-overwritten / shadowed `fsr_playbooks` install (E10).
+
+    Two cheap probes, run once and cached:
+
+    1. The loaded `ir` and `parser` modules must come from the same package
+       directory. A stale wheel shadowing the editable repo splits them.
+    2. The loaded `ir.Step` dataclass must carry every field the compiler
+       passes to it. A stale `ir.py` missing (e.g.) `description` is the exact
+       corruption that crashed the pilot at compile time.
+
+    Returns a human-readable problem string, or None when healthy.
+    """
+    global _self_checked, _self_check_error
+    if _self_checked:
+        return _self_check_error
+
+    problem: Optional[str] = None
+    try:
+        from dataclasses import fields as _dc_fields
+
+        from . import ir as _ir_mod
+        from . import parser as _parser_mod
+        from .ir import Step as _Step
+
+        ir_dir = Path(getattr(_ir_mod, "__file__", "") or "").resolve().parent
+        parser_dir = Path(getattr(_parser_mod, "__file__", "") or "").resolve().parent
+        if ir_dir != parser_dir:
+            problem = (
+                "fsr_playbooks install looks split: ir.py loaded from "
+                f"{ir_dir} but parser.py from {parser_dir}. A stale "
+                "fsr_playbooks (e.g. an old wheel in site-packages) is "
+                "shadowing the editable repo — `pip uninstall fsr_playbooks` "
+                "the stale copy or reinstall `-e .`."
+            )
+        else:
+            have = {f.name for f in _dc_fields(_Step)}
+            missing = _EXPECTED_STEP_FIELDS - have
+            if missing:
+                problem = (
+                    f"loaded ir.Step is missing fields {sorted(missing)} that "
+                    f"the compiler depends on (loaded from {ir_dir}). This is a "
+                    "half-overwritten install — reinstall fsr_playbooks "
+                    "(`pip install -e .`) and remove any stale copy."
+                )
+    except Exception as e:  # pragma: no cover - defensive
+        problem = f"fsr_playbooks self-check failed to run: {e!r}"
+
+    _self_check_error = problem
+    _self_checked = True
+    return problem
 
 
 @dataclass
@@ -45,6 +112,14 @@ def compile_yaml(
     error → warning before blocking checks fire. Use for round-trip Path B
     where unknown_param / unknown_connector should not block emission.
     """
+    self_check_problem = _self_check()
+    if self_check_problem is not None:
+        return CompileResult(errors=[CompileError(
+            code=ErrorCode.INTERNAL,
+            message=self_check_problem,
+            path="<install>",
+        )])
+
     lax_set: set[str] = {str(c) for c in (lax_codes or set())}
 
     def _demote(errs: list[CompileError]) -> list[CompileError]:
