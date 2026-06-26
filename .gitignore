@@ -76,9 +76,7 @@ docs/plans/
 docs/research/
 docs/corpus_audit/
 scripts/internal/
-scripts/git-hooks/
 scripts/external/build_presentation.py
-scripts/publish_public.sh
 docs/build_deck.py
 *.pptx
 PRESENTATION_OUTLINE.md

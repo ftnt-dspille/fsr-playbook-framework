@@ -149,7 +149,7 @@ override it — the `env` block wins):
         "FSR_BASE_URL": "https://your-instance.fortisoar.example.com",
         "FSR_API_KEY":  "<scoped FortiSOAR API key>"
         // — OR username/password instead of FSR_API_KEY (not recommended):
-        // "FSR_USERNAME": "csadmin",
+        // "FSR_USERNAME": "<your-FortiSOAR-username>",
         // "FSR_PASSWORD": "<password>",
         // — packaged turn only (not needed for the native path):
         // "FSR_LLM_PROVIDER": "openai",

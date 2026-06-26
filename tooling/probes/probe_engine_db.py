@@ -156,9 +156,9 @@ def _bootstrap_creds(cfg: _env.Config) -> tuple[str, str]:
     """One-time fetch of (pg_user, pg_password) from the FSR box.
 
     Source of truth on FSR: the postgres password is the device UUID,
-    stored at /home/csadmin/device_uuid (readable by csadmin, no sudo).
-    The user is always `cyberpgsql`. Cached locally so we never re-pay
-    this cost.
+    stored at ~/device_uuid in the SSH user's home (readable by that
+    user, no sudo). The user is always `cyberpgsql`. Cached locally so
+    we never re-pay this cost.
     """
     if CRED_FILE.exists():
         env = {k.strip(): v.strip() for k, v in (
@@ -174,10 +174,10 @@ def _bootstrap_creds(cfg: _env.Config) -> tuple[str, str]:
             f"Provide creds manually in {CRED_FILE} as PGUSER=…/PGPASSWORD=…"
         )
 
-    pw = _run_ssh(cfg, "cat /home/csadmin/device_uuid").strip()
+    pw = _run_ssh(cfg, "cat ~/device_uuid").strip()
     if not pw:
         raise RuntimeError(
-            "could not read /home/csadmin/device_uuid from FSR — file empty "
+            "could not read ~/device_uuid from FSR — file empty "
             "or unreadable as the SSH user"
         )
     user = "cyberpgsql"

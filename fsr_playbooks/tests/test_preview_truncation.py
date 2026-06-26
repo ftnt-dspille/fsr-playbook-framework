@@ -41,9 +41,9 @@ def test_long_list_is_capped():
 
 
 def test_sensitive_keys_still_masked_after_truncation():
-    preview = _build_preview("auth", {"api_key": "x" * 5000, "user": "csadmin"})
+    preview = _build_preview("auth", {"api_key": "x" * 5000, "user": "admin"})
     assert preview["args"]["api_key"] == "***"
-    assert preview["args"]["user"] == "csadmin"
+    assert preview["args"]["user"] == "admin"
 
 
 def test_nested_dict_and_list_truncation():

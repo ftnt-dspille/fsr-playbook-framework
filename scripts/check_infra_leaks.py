@@ -31,11 +31,19 @@ DENY = [
     re.compile(r"\b10\.99\.\d{1,3}\.\d{1,3}\b"),
     re.compile(r"\b[a-z0-9][a-z0-9.-]*\.fortinet\.(?:com|net)\b", re.IGNORECASE),
     re.compile(r"\b[a-z0-9][a-z0-9.-]*\.forticloud\.com\b", re.IGNORECASE),
+    # Internal lab admin account — never ship as an example credential.
+    re.compile(r"\bcsadmin\b", re.IGNORECASE),
 ]
 # Known-public strings that match a DENY pattern but are intentionally shipped.
 ALLOW = [
     re.compile(r"repo\.fortisoar\.fortinet\.com", re.IGNORECASE),
 ]
+# Files that legitimately *define* the deny patterns (this guard + the hook that
+# runs it). Scanning them would self-match; skip them in both modes.
+SKIP = {
+    "scripts/check_infra_leaks.py",
+    ".pre-commit-config.yaml",
+}
 
 
 def _is_leak(text: str) -> str | None:
@@ -81,6 +89,8 @@ def main() -> int:
             ["git", "ls-files"], capture_output=True, text=True, check=True
         ).stdout.splitlines()
         for path in files:
+            if path in SKIP:
+                continue
             try:
                 with open(path, encoding="utf-8") as fh:
                     for i, line in enumerate(fh, 1):
@@ -91,6 +101,8 @@ def main() -> int:
                 continue  # binary / unreadable
     else:
         for path in _staged_files():
+            if path in SKIP:
+                continue
             try:
                 for lineno, text in _added_lines(path):
                     leak = _is_leak(text)

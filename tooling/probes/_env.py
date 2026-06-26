@@ -62,7 +62,7 @@ class EnvConfig:
         # SSH access to the appliance (for reading connector source files)
         _ssh_host_default = self.base_url.replace("https://", "").replace("http://", "").split(":")[0]
         self.ssh_host: str = os.environ.get("FSR_SSH_HOST", _ssh_host_default).strip()
-        self.ssh_user: str = os.environ.get("FSR_SSH_USER", self.username or "csadmin").strip()
+        self.ssh_user: str = os.environ.get("FSR_SSH_USER", self.username or "admin").strip()
         self.ssh_password: str = os.environ.get("FSR_SSH_PASSWORD", self.password).strip()
         self.ssh_key_path: str = os.environ.get("FSR_SSH_KEY_PATH", "").strip()
         self.ssh_port: int = int(os.environ.get("FSR_SSH_PORT", "22"))

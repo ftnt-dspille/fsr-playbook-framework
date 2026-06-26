@@ -284,8 +284,8 @@
           <p class="mb-3">LLM provider credentials are managed in the Settings tab. FSR credentials live in <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">.env</code>:</p>
           <pre class="mt-3 overflow-auto rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] p-4 font-mono text-xs leading-tight text-[var(--text-muted)]">{`# fsr-playbook-framework/.env
 FSR_BASE_URL=https://198.51.100.10
-FSR_USERNAME=csadmin
-FSR_PASSWORD=fortinet
+FSR_USERNAME=<your-username>
+FSR_PASSWORD=<your-password>
 FSR_ALLOW_E2E=true
 
 # Optional — provider keys are also configurable from the Settings tab
