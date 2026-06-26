@@ -1,6 +1,7 @@
 """NormalizerMixin — step argument normalization and step type dispatching."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
@@ -138,8 +139,14 @@ class NormalizerMixin:
             a.setdefault("params", {})
             step.arguments = a
 
+        # `delete_record` synthesizes the cyops_utilities make_cyops_request
+        # DELETE call, then falls through to connector arg resolution.
+        if step.type == "delete_record":
+            self._normalize_delete_record_args(step, path, errors)
+
         # Per-step-type argument validation
-        if step.type == "connector" or step.type in ("stop", "end"):
+        if step.type == "connector" or step.type in (
+                "stop", "end", "delete_record"):
             self._resolve_connector_args(step, path, errors)
             # message block still applies to connector steps — fall through.
         elif step.type == "workflow_reference":
@@ -335,6 +342,102 @@ class NormalizerMixin:
         # field may legitimately exist on only some of them, so a finding is
         # emitted only when it holds for *every* module (invalid everywhere).
         self._validate_trigger_fields(a, modules, path, errors)
+        step.arguments = a
+
+    def _normalize_delete_record_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """delete_record → cyops_utilities.make_cyops_request (method DELETE).
+
+        FortiSOAR has no first-class delete step type; deletion is performed by
+        a connector step hitting the internal API. Grounded on real corpus
+        playbooks (4 DELETE-method cyops_utilities steps).
+
+        Friendly inputs (exactly one targeting mode required):
+          record:  a single record IRI ('/api/3/<module>/<uuid>') or '@id'
+                   jinja — deleted directly.
+          module + record_id:  build '/api/3/<module>/<record_id>'.
+          module + query:  bulk delete via '/api/3/delete-with-query/<module>';
+                   `query` is a filter dict {logic, filters:[…]} (json-encoded
+                   into the request body) or a raw jinja/string body.
+          show_deleted:  bool — append '?$showDeleted=true' (default true for the
+                   query form, false for single-record).
+          iri / method / body:  raw escape hatches (passed through verbatim).
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        _FRIENDLY = {"record", "record_id", "module", "modules", "query",
+                     "show_deleted"}
+        _CANONICAL = {"connector", "operation", "operationTitle", "config",
+                      "params", "iri", "method", "body"}
+        if self._check_unknown_keys(
+            a, step.type, _FRIENDLY, _CANONICAL, path, errors,
+        ):
+            return
+
+        record = a.pop("record", None)
+        record_id = a.pop("record_id", None)
+        query = a.pop("query", None)
+        module_raw = a.pop("module", None) or a.pop("modules", None)
+        module = (self.resolve_module_name(
+            module_raw, f"{path}.arguments.module", errors)
+            if isinstance(module_raw, str) and module_raw else module_raw)
+        show_deleted = a.pop("show_deleted", None)
+
+        # Build the existing params (raw escape hatch wins if fully specified).
+        params = a.get("params") if isinstance(a.get("params"), dict) else {}
+        iri = params.get("iri")
+        body = params.get("body", "")
+
+        targets = [t for t in (record, record_id and module, query) if t]
+        if iri is None and len(targets) != 1:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message=("delete_record needs exactly one target: `record:` (an "
+                         "IRI/@id), `module:`+`record_id:`, or `module:`+`query:`"),
+                path=f"{path}.arguments",
+            ))
+            return
+
+        if iri is None:
+            if record is not None:
+                iri = str(record)
+                if show_deleted:
+                    iri += ("&" if "?" in iri else "?") + "$showDeleted=true"
+            elif record_id is not None:
+                if not module:
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message="delete_record with `record_id:` also needs `module:`",
+                        path=f"{path}.arguments.module",
+                    ))
+                    return
+                iri = f"/api/3/{module}/{record_id}"
+                if show_deleted:
+                    iri += "?$showDeleted=true"
+            else:  # query form
+                if not module:
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message="delete_record with `query:` also needs `module:`",
+                        path=f"{path}.arguments.module",
+                    ))
+                    return
+                iri = f"/api/3/delete-with-query/{module}"
+                if show_deleted is not False:
+                    iri += "?$showDeleted=true"
+                if isinstance(query, (dict, list)):
+                    body = json.dumps(query)
+                elif query is not None:
+                    body = str(query)
+
+        params["iri"] = iri
+        params["method"] = params.get("method", "DELETE")
+        params["body"] = body
+        a["params"] = params
+        a.setdefault("connector", "cyops_utilities")
+        a.setdefault("operation", "make_cyops_request")
+        a.setdefault("operationTitle", "FSR: Make FortiSOAR API Call")
+        a.setdefault("config", "")
         step.arguments = a
 
     def _normalize_api_endpoint_args(

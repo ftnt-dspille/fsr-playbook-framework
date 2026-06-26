@@ -94,6 +94,7 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 | `decision` | `Decision` | `cond` | `conditions: [{option, condition}]` + `branches:` |
 | `connector` | `Connectors` | `connector` | `connector, operation, params, version, config, step_variables` |
 | `stop` / `end` | `Connectors` (cyops_utilities `no_op`) | `connector` | (no args — synthesized as Utils: No Operation) |
+| `delete_record` | `Connectors` (cyops_utilities `make_cyops_request`, `method: DELETE`) | `connector` | one of: `record:` (IRI/`@id`), `module:`+`record_id:`, or `module:`+`query:` (bulk `delete-with-query`); optional `show_deleted:` — FSR has no dedicated delete step type |
 | `find_record` | `FindRecords` | `find_data` | `module, query, partial` |
 | `create_record` | `InsertData` | `insert_data` | `module` (→ `collection`), `resource`, `operation` |
 | `update_record` | `UpdateRecord` | `update_data` | `collection` (record IRI), `module` (→ `collectionType`), `resource`, `operation` |
@@ -418,6 +419,7 @@ expose fields as `{{ vars.item.<field> }}`).
     item: "{{ vars.steps.fetch.records }}"   # required: Jinja list expression
     parallel: false                          # optional, default false
     condition: ""                            # optional Jinja filter; empty = run every iteration
+    # max_parallel: 5     # optional (FSR 8.0); cap concurrent iterations on a parallel loop
     # __bulk: true        # optional; bypasses on-create playbook triggers (use only for feeds)
     # batch_size: 100     # optional; only relevant with __bulk
     # break_loop: ""      # optional Jinja; truthy stops the loop early
@@ -438,6 +440,13 @@ Rules:
   *iterable*, FSR exposes each *element* under the fixed name `vars.item`).
 - `parallel: true` runs iterations concurrently — only safe if the body
   has no shared state. Default is sequential.
+- `max_parallel: N` (FSR 8.0; alias `concurrency_count`) caps how many
+  iterations run at once on a **parallel** loop. It compiles to the wire
+  pair `concurrency: true` + `concurrencyCount: N` (the designer's
+  "Configure concurrency level" / "maximum parallel limit"). The engine
+  minimum is 2. On a sequential loop the cap is ignored (the compiler
+  warns); on a pre-8.0 appliance the engine has no notion of it and the
+  loop fans out unbounded.
 - `__bulk: true` is the **trigger-bypass** flag — the body's writes do
   not fire on-create / on-update playbooks. Use it for high-volume
   threat-feed ingestion where per-record triggers would melt the system.
@@ -831,7 +840,7 @@ spaces → underscores).
 
 Editor-derived argument shapes for every step type, keyed by canonical FSR name with the friendly YAML alias(es). Editor-only/UI-state keys are omitted. Source of truth: `docs/STEP_WIRE_SHAPES.json`.
 
-#### Connectors — `connector`, `stop`, `end`
+#### Connectors — `connector`, `stop`, `end`, `delete_record`
 
 | Argument | Type | Required | Meaning |
 |----------|------|----------|---------|

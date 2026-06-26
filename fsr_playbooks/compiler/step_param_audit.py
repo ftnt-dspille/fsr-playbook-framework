@@ -38,7 +38,9 @@ TYPE_NAME_TO_RESOLVER: dict[str, str] = {
     "UpdateRecord": "update_record",
     "FindRecords": "find_records",
     "InsertData": "create_record",
-    "DeleteRecord": "delete_record",
+    # No "DeleteRecord" canonical step type exists — delete_record compiles to a
+    # Connectors step (cyops_utilities DELETE), so pulled deletes map via
+    # "Connectors" above.
     "cybersponse.post_create": "start_on_create",
     "cybersponse.post_update": "start_on_update",
     "cybersponse.post_delete": "start_on_delete",
@@ -106,11 +108,15 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "operation", "fieldOperation", "step_variables",
                       "__bulk", "__recommend", "_showJson", "useMockOutput"},
     },
+    # delete_record — _normalize_delete_record_args. Compiles to a
+    # cyops_utilities.make_cyops_request DELETE call (FSR has no dedicated
+    # delete step type), so the canonical keys are the connector ones.
     "delete_record": {
-        "friendly":  {"module", "mock_result", "condition"},
-        "canonical": {"collection", "collectionType", "resource",
-                      "operation", "fieldOperation", "step_variables",
-                      "__bulk", "__recommend", "_showJson", "useMockOutput"},
+        "friendly":  {"record", "record_id", "module", "modules", "query",
+                      "show_deleted", "mock_result", "condition"},
+        "canonical": {"connector", "operation", "operationTitle", "config",
+                      "params", "iri", "method", "body", "version",
+                      "step_variables"},
     },
 
     # code_snippet — resolver.py:1447

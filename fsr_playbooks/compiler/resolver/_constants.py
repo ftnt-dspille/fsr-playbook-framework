@@ -42,6 +42,13 @@ SHORT_TYPE_TO_FSR: dict[str, str] = {
     # an obvious YAML keyword instead of dangling or filler set_variable.
     "stop": "Connectors",
     "end": "Connectors",
+    # `delete_record` — FortiSOAR has no dedicated delete step type (the editor
+    # palette exposes Create/Update/Find only). Deletion is done with a
+    # connector step calling `cyops_utilities.make_cyops_request` and HTTP
+    # `method: DELETE` — verified against 4 real corpus playbooks. We surface it
+    # as a friendly short type that compiles to that connector call (single
+    # record via `/api/3/<module>/<id>`, or bulk via `delete-with-query`).
+    "delete_record": "Connectors",
     # Auto-fired record triggers (genuinely different from manual `start`):
     # event-driven, not invokable from the designer.
     "start_on_create": "cybersponse.post_create",

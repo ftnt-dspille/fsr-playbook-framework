@@ -545,6 +545,22 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                         path=f"{sp}.vars",
                     ))
 
+            if stype == "delete_record":
+                # Hoist the friendly delete targeting keys from step level into
+                # arguments (the resolver's _normalize_delete_record_args reads
+                # them there). `module` is already hoisted globally.
+                for hk in ("record", "record_id", "query", "show_deleted"):
+                    if hk in s_raw:
+                        if hk in args:
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(f"{hk!r} set both at step level and "
+                                         f"under arguments — keep one"),
+                                path=f"{sp}.{hk}",
+                            ))
+                        else:
+                            args[hk] = s_raw[hk]
+
             if stype == "connector":
                 # Step-level `connector:` / `operation:` siblings of
                 # `arguments:` are a recurring agent typo (session

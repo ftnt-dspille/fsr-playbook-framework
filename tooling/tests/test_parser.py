@@ -330,3 +330,73 @@ def test_priority_unknown_name_captured_at_parse():
     assert coll is not None
     assert coll.playbooks[0].priority == "Bogus"
     assert errs == []
+
+
+# --- for_each loop max-parallel cap (FSR 8.0 concurrency level) ---------------
+
+def _loop_for_each(max_parallel_line: str):
+    """Parse a one-step parallel loop carrying the given cap line; return (for_each, errs)."""
+    text = (
+        "collection: A\n"
+        "playbooks:\n"
+        "  - name: P\n"
+        "    steps:\n"
+        "      - name: loop\n"
+        "        type: create_record\n"
+        "        for_each:\n"
+        "          item: \"{{ vars.items }}\"\n"
+        "          parallel: true\n"
+        f"{max_parallel_line}"
+        "        arguments:\n"
+        "          module: alerts\n"
+    )
+    coll, errs = parse_yaml(text)
+    fe = coll.playbooks[0].steps[0].for_each if coll else None
+    return fe, errs
+
+
+def test_for_each_max_parallel_emits_concurrency_pair():
+    fe, errs = _loop_for_each("          max_parallel: 3\n")
+    assert not any(e.severity != "warning" for e in errs)
+    assert fe["concurrency"] is True
+    assert fe["concurrencyCount"] == 3
+    assert fe["parallel"] is True
+
+
+def test_for_each_concurrency_count_alias():
+    fe, errs = _loop_for_each("          concurrency_count: 4\n")
+    assert fe["concurrency"] is True
+    assert fe["concurrencyCount"] == 4
+
+
+def test_for_each_max_parallel_on_sequential_loop_warns():
+    text = (
+        "collection: A\n"
+        "playbooks:\n"
+        "  - name: P\n"
+        "    steps:\n"
+        "      - name: loop\n"
+        "        type: create_record\n"
+        "        for_each:\n"
+        "          item: \"{{ vars.items }}\"\n"
+        "          parallel: false\n"
+        "          max_parallel: 3\n"
+        "        arguments:\n"
+        "          module: alerts\n"
+    )
+    coll, errs = parse_yaml(text)
+    fe = coll.playbooks[0].steps[0].for_each
+    # still emitted, but a warning flags that the cap is ignored on a sequential loop
+    assert fe["concurrencyCount"] == 3
+    assert any(e.severity == "warning" and "parallel" in e.message for e in errs)
+
+
+def test_for_each_max_parallel_below_minimum_warns():
+    fe, errs = _loop_for_each("          max_parallel: 1\n")
+    assert fe["concurrencyCount"] == 1
+    assert any(e.severity == "warning" and "minimum" in e.message for e in errs)
+
+
+def test_for_each_max_parallel_non_integer_errors():
+    fe, errs = _loop_for_each("          max_parallel: abc\n")
+    assert any(e.code is ErrorCode.BAD_VALUE and e.severity != "warning" for e in errs)
