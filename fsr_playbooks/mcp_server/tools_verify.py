@@ -32,6 +32,100 @@ from fsr_playbooks.compiler.record_op_checks import (
     check_required_record_fields,
     check_unknown_record_fields,
 )
+from fsr_playbooks.compiler.jinja_checks import check_jinja
+
+
+# ---------------------------------------------------------------------------
+# Check toggles — let a caller (e.g. pyfsr) skip groups of compiler checks.
+# `verify_playbook(disable_checks=[...])` accepts either a GROUP name from this
+# map or an individual diagnostic `code`. Disabled diagnostics are removed from
+# `required_fixes`/`warnings` (so they no longer block `ready_to_push`) and
+# echoed under `evidence.suppressed` for transparency — skipping is never
+# silent. Codes that several checks share (notably `bad_value`) can only be
+# toggled as a coarse group; distinct codes toggle precisely.
+# ---------------------------------------------------------------------------
+CHECK_GROUPS: dict[str, frozenset[str]] = {
+    "jinja": frozenset({
+        "jinja_syntax_error", "unknown_jinja_filter", "bad_jinja_filter_chain"}),
+    "shape": frozenset({
+        "missing_field_on_step_output", "unknown_shape_downstream_reference",
+        "non_list_indexed"}),
+    "type": frozenset({"type_mismatch"}),
+    "record": frozenset({
+        "required_record_field_missing", "unknown_module",
+        "unknown_record_field"}),
+    "op": frozenset({
+        "op_param_unknown", "op_param_unknown_name", "required_op_param_missing",
+        "unknown_operation", "unknown_param"}),
+    "connector": frozenset({
+        "unknown_connector", "connector_config_missing",
+        "connector_config_no_default", "unknown_connector_config"}),
+    "graph": frozenset({
+        "unknown_step_reference", "unreachable_step_reference",
+        "branch_target_missing", "unknown_next_step",
+        "workflow_reference_unresolvable"}),
+    "vars": frozenset({
+        "var_read_before_definition", "var_defined_other_branch",
+        "loop_var_outside_for_each", "set_var_reserved_key"}),
+    # Coarse: `bad_value` is shared by picklist-drift, literal param-type,
+    # code-snippet sandbox bans, and reserved-key coercion. Skipping "value"
+    # turns off all of them.
+    "value": frozenset({"bad_value"}),
+    # Usually fatal structural problems; offered for completeness.
+    "structure": frozenset({
+        "parse_error", "missing_field", "unknown_step_type",
+        "duplicate_step_id", "no_trigger", "internal"}),
+}
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _db_override(db_path: str):
+    """Temporarily point the catalog DB at `db_path` for the enclosed call.
+
+    `_db()` (in `_shared`) and `compile_yaml` both read the DB path as a global
+    at call time, so swapping it here lets a caller verify against a warmed
+    catalog without the path being threaded through every helper. Restored on
+    exit; the swap window is the single synchronous verify call."""
+    from . import _shared
+    global DB_PATH
+    prev_shared, prev_local = _shared.DB_PATH, DB_PATH
+    _shared.DB_PATH = str(db_path)
+    DB_PATH = str(db_path)
+    try:
+        yield
+    finally:
+        _shared.DB_PATH = prev_shared
+        DB_PATH = prev_local
+
+
+def _resolve_disabled_codes(
+    disable_checks: list[str] | None,
+) -> tuple[frozenset[str], list[str]]:
+    """Expand a `disable_checks` list (group names and/or codes) into the set
+    of diagnostic codes to suppress. Returns (codes, unknown_tokens) — unknown
+    tokens are surfaced to the caller, never fatal."""
+    if not disable_checks:
+        return frozenset(), []
+    codes: set[str] = set()
+    unknown: list[str] = []
+    known_codes = {c for grp in CHECK_GROUPS.values() for c in grp}
+    for tok in disable_checks:
+        key = (tok or "").strip().lower()
+        if not key:
+            continue
+        if key in CHECK_GROUPS:
+            codes |= CHECK_GROUPS[key]
+        elif key in known_codes:
+            codes.add(key)
+        else:
+            # Accept an unrecognized token as a literal code (forward-compatible
+            # with codes not yet in any group) but report it.
+            codes.add(key)
+            unknown.append(tok)
+    return frozenset(codes), unknown
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +437,10 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
             t = s.type
             a = s.arguments
 
+            # Jinja syntax + unknown-filter checks apply to every step's
+            # arguments tree, regardless of step type.
+            fixes.extend(check_jinja(a, step_id=s.id, path=spath))
+
             if t in {"connector", "connector_op"}:
                 connector = a.get("connector") or a.get("connector_name")
                 op = a.get("operation") or a.get("op_name") or a.get("op")
@@ -476,12 +574,29 @@ def verify_playbook(
     simulated_inputs: dict | None = None,
     live_probe: bool = False,
     verbose: bool = False,
+    disable_checks: list[str] | None = None,
+    db_path: str | None = None,
 ) -> dict[str, Any]:
     """Single forcing-function pre-submit gate.
 
     Runs compile → typed walk → per-step schema checks (→ optional live
     probe). Returns one structured punch list. The agent must not show
     a playbook to the user until this returns `ready_to_push=True`.
+
+    `disable_checks` (optional): skip groups or individual checks the caller
+    doesn't want enforced. Each entry is a GROUP name or a diagnostic `code`.
+    Disabled diagnostics move from `required_fixes`/`warnings` into
+    `evidence.suppressed` (never silent) and stop blocking `ready_to_push`;
+    `suppressed_count` reports how many. Groups:
+      jinja | shape | type | record | op | connector | graph | vars |
+      value (coarse: all `bad_value` — picklist/literal-type/snippet-ban) |
+      structure (parse/missing-field/unknown-step-type/…)
+    Example: `disable_checks=["jinja", "type_mismatch"]`.
+
+    `db_path` (optional): verify against a specific reference catalog (e.g. a
+    pyfsr per-install warmed cache) instead of the packaged slim one. The
+    record/op/config checks only fire when the catalog carries those facts, so
+    a warmed DB is what makes them meaningful.
 
     Required-fix codes (any present → ready_to_push=False):
       - unknown_step_reference
@@ -497,8 +612,10 @@ def verify_playbook(
       - unknown_connector_config        (live_probe only — config: name unknown)
       - branch_target_missing
       - workflow_reference_unresolvable (error severity only)
+      - jinja_syntax_error              (un-parseable Jinja template)
 
     Warning codes (do not block):
+      - unknown_jinja_filter            (filter/test name outside the FSR catalog)
       - op_param_unknown_name           (unknown connector-op param name)
       - unknown_record_field            (resource key not a field of the module)
       - connector_config_no_default     (configs exist but none is default)
@@ -508,12 +625,24 @@ def verify_playbook(
       - var_defined_other_branch         (branch-scoped vars.<name>)
       - loop_var_outside_for_each        (vars.item outside a for_each step)
     """
+    # Optional catalog override: an SDK (pyfsr) compiles/verifies against a
+    # warmed per-install catalog, not the packaged slim one. `_db()` and the
+    # compile both read the module-level DB path at call time, so we swap it
+    # for the duration and re-enter the body once (with db_path cleared) rather
+    # than thread a path through every schema-check closure.
+    if db_path is not None:
+        with _db_override(db_path):
+            return verify_playbook(
+                yaml_text, playbook, simulated_inputs, live_probe,
+                verbose, disable_checks, db_path=None)
+
     try:
         from fsr_playbooks.compiler import compile_yaml as _compile, parse_yaml
         from fsr_playbooks.compiler.typed_walker import walk_playbook
     except ImportError as exc:
         return _err("compiler_unavailable", str(exc))
 
+    disabled_codes, unknown_tokens = _resolve_disabled_codes(disable_checks)
     checks_run: list[dict[str, Any]] = []
     required_fixes: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -537,9 +666,10 @@ def verify_playbook(
         checks_run.append({"name": "compile", "ok": False,
                            "summary": f"{len(compile_errors)} compiler issues"})
         evidence["compile"] = {"errors": compile_errors}
-        result = _finalize(checks_run, required_fixes, warnings, evidence)
+        result = _finalize(checks_run, required_fixes, warnings, evidence,
+                           disabled_codes, unknown_tokens)
         _record_history(yaml_text, playbook, result["ready_to_push"],
-                        required_fixes, warnings, live_probe)
+                        result["required_fixes"], result["warnings"], live_probe)
         return result
     checks_run.append({"name": "compile", "ok": True,
                        "summary": "compile clean"})
@@ -643,9 +773,10 @@ def verify_playbook(
                          for b in walk.branches],
         }
 
-    result = _finalize(checks_run, required_fixes, warnings, evidence)
+    result = _finalize(checks_run, required_fixes, warnings, evidence,
+                       disabled_codes, unknown_tokens)
     _record_history(yaml_text, playbook, result["ready_to_push"],
-                    required_fixes, warnings, live_probe)
+                    result["required_fixes"], result["warnings"], live_probe)
     return result
 
 
@@ -701,7 +832,28 @@ def _record_history(yaml_text: str, playbook: str | None, ready: bool,
         pass
 
 
-def _finalize(checks_run, required_fixes, warnings, evidence) -> dict[str, Any]:
+def _finalize(checks_run, required_fixes, warnings, evidence,
+              disabled_codes: frozenset[str] = frozenset(),
+              unknown_tokens: list[str] | None = None) -> dict[str, Any]:
+    # Apply check toggles: pull any disabled-code diagnostics out of the
+    # blocking/​warning lists into `suppressed` so they never block — but stay
+    # visible. `ready_to_push` is computed on what remains.
+    suppressed: list[dict[str, Any]] = []
+    if disabled_codes:
+        kept_fixes, kept_warnings = [], []
+        for fx in required_fixes:
+            (suppressed if fx.get("code") in disabled_codes
+             else kept_fixes).append(fx)
+        for w in warnings:
+            (suppressed if w.get("code") in disabled_codes
+             else kept_warnings).append(w)
+        required_fixes, warnings = kept_fixes, kept_warnings
+        evidence["suppressed"] = suppressed
+        evidence["disabled_checks"] = {
+            "codes": sorted(disabled_codes),
+            "suppressed_count": len(suppressed),
+            "unknown_tokens": unknown_tokens or [],
+        }
     ready = not required_fixes
     # Build a tiny ordered next-actions list so the agent doesn't have
     # to choose which fix to start with.
@@ -710,6 +862,7 @@ def _finalize(checks_run, required_fixes, warnings, evidence) -> dict[str, Any]:
     # Priority: compile errors first, then schema, then walker.
     priority_codes = (
         "parse_error", "missing_field", "unknown_step_type",
+        "jinja_syntax_error",
         "required_op_param_missing", "op_param_unknown",
         "required_record_field_missing", "connector_config_missing",
         "unknown_module", "unknown_connector_config",
@@ -741,6 +894,7 @@ def _finalize(checks_run, required_fixes, warnings, evidence) -> dict[str, Any]:
         "ready_to_push": ready,
         "required_fixes": required_fixes,
         "warnings": warnings,
+        "suppressed_count": len(suppressed),
         "checks_run": checks_run,
         "evidence": evidence,
         "next_actions": next_actions,

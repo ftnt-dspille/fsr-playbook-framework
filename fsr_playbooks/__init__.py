@@ -26,4 +26,27 @@ __all__ = [
     "compile_yaml", "parse_yaml", "validate", "emit",
     "CompileError", "ErrorCode",
     "Collection", "Playbook", "Step",
+    # Lazily-exposed (see __getattr__): the full pre-submit gate + its check
+    # catalog. Importing them pulls in the mcp_server package, so they're
+    # deferred — `compile_yaml` users (e.g. the connector runtime) don't pay
+    # for it unless they ask.
+    "verify", "CHECK_GROUPS",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy re-export of the verify gate so `from fsr_playbooks import verify`
+    works without eagerly importing the mcp_server package at module load.
+
+    `verify` is the single forcing-function gate (compile → typed walk →
+    per-step schema → optional live probe) with `disable_checks` toggles —
+    the method an SDK like pyfsr should call to validate a playbook before
+    pushing. `CHECK_GROUPS` is the toggle catalog (group → diagnostic codes).
+    """
+    if name == "verify":
+        from fsr_playbooks.mcp_server.tools_verify import verify_playbook
+        return verify_playbook
+    if name == "CHECK_GROUPS":
+        from fsr_playbooks.mcp_server.tools_verify import CHECK_GROUPS
+        return CHECK_GROUPS
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

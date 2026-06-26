@@ -172,6 +172,30 @@ def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict]:
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
+import contextlib
+
+
+@contextlib.contextmanager
+def catalog_override(db_path: str | None):
+    """Temporarily point the catalog DB at `db_path` for the enclosed call.
+
+    `_db()` reads the module-global `DB_PATH` at call time, so swapping it here
+    redirects every `_db()`-backed tool (verify, discovery, …) at a different
+    catalog without threading a path through each helper. An SDK (pyfsr) uses
+    this to run against a warmed per-install cache. Restored on exit; a no-op
+    when `db_path` is falsy."""
+    global DB_PATH
+    if not db_path:
+        yield
+        return
+    prev = DB_PATH
+    DB_PATH = str(db_path)
+    try:
+        yield
+    finally:
+        DB_PATH = prev
+
+
 def _validate_op_exists(connector: str, op: str) -> dict[str, Any] | None:
     """Confirm `op` is a real operation on `connector` per the reference store.
 

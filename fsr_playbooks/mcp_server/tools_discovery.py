@@ -15,6 +15,7 @@ from ._shared import (
     _rows,
     _verifications_for,
     REPO_ROOT,
+    catalog_override,
 )
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
@@ -51,7 +52,8 @@ def get_step_arg_schema(step_type: str) -> dict[str, Any]:
 
 @mcp.tool()
 def find_connector(q: str, limit: int = 15,
-                   verbose: bool = False) -> dict[str, Any]:
+                   verbose: bool = False,
+                   db_path: str | None = None) -> dict[str, Any]:
     """Fuzzy-search connectors by name, label, category, or description.
 
     Default response is terse (name/label/category only) to keep tool
@@ -59,7 +61,13 @@ def find_connector(q: str, limit: int = 15,
 
     Returns `{matches, suggestion?}`. When the query has zero hits we
     suggest a near-match instead of leaving the agent guessing.
+
+    `db_path` (optional): search a specific catalog (e.g. a pyfsr warmed cache)
+    instead of the packaged slim one.
     """
+    if db_path is not None:
+        with catalog_override(db_path):
+            return find_connector(q, limit, verbose, db_path=None)
     with _db() as conn:
         cols = ("name, label, category, description" if verbose
                 else "name, label, category")
@@ -138,7 +146,8 @@ def find_connector(q: str, limit: int = 15,
 
 @mcp.tool()
 def find_operation(connector: str, q: str = "", limit: int = 10,
-                   verbose: bool = False) -> dict[str, Any]:
+                   verbose: bool = False,
+                   db_path: str | None = None) -> dict[str, Any]:
     """List or search operations for a connector.
 
     Pass `connector` as the connector name (from find_connector).
@@ -152,7 +161,12 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
     slim `schema` — skip the follow-up `get_op_schema` call in that
     case. Multi-match responses stay terse so the agent can still
     disambiguate before pulling a schema.
+
+    `db_path` (optional): search a specific catalog (e.g. a pyfsr warmed cache).
     """
+    if db_path is not None:
+        with catalog_override(db_path):
+            return find_operation(connector, q, limit, verbose, db_path=None)
     with _db() as conn:
         cols = ("op_name, title, description, annotation" if verbose
                 else "op_name, title")
@@ -611,7 +625,8 @@ def _render_op_schema_md(
 
 @mcp.tool()
 def get_op_schema(connector: str, op: str,
-                  verbose: bool = False) -> dict[str, Any]:
+                  verbose: bool = False,
+                  db_path: str | None = None) -> dict[str, Any]:
     """Return the parameter schema for a connector operation.
 
     Slim by default (~1.5 KB): `op_name`, `title`, `description`, and a
@@ -626,7 +641,12 @@ def get_op_schema(connector: str, op: str,
       unknown — call `find_connector` first.
     - `code: "not_found"` when the connector exists but the op doesn't
       — the response includes a `near` list of close op names.
+
+    `db_path` (optional): read from a specific catalog (e.g. a pyfsr warmed cache).
     """
+    if db_path is not None:
+        with catalog_override(db_path):
+            return get_op_schema(connector, op, verbose, db_path=None)
     with _db() as conn:
         op_row = _rows(
             conn,
