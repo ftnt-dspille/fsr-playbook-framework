@@ -49,6 +49,7 @@ _FAMILY_BY_TYPE: dict[str, str] = {
     "start": "trigger",
     "start_on_create": "trigger",
     "start_on_update": "trigger",
+    "start_on_delete": "trigger",
     "manual_action": "trigger",
     "api_call": "trigger",
     "decision": "decision",

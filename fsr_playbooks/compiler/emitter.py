@@ -302,7 +302,8 @@ def emit(collection: Collection) -> dict[str, Any]:
                 group_iri=_group_iri(step_group[s.id]) if s.id in step_group else None,
             ))
             if pb.trigger_step_id is None and s.type in (
-                    "start", "start_on_create", "start_on_update"):
+                    "start", "start_on_create", "start_on_update",
+                    "start_on_delete", "api_endpoint"):
                 trigger_step_iri = _step_iri(su)
         if pb.trigger_step_id and pb.trigger_step_id in step_uuids:
             trigger_step_iri = _step_iri(step_uuids[pb.trigger_step_id])
@@ -415,8 +416,12 @@ def emit(collection: Collection) -> dict[str, Any]:
             "playbookOrigin": None,
             "isEditable": True,
             "uuid": wf_uuid,
-            "owners": [],
-            "isPrivate": False,
+            # Owner teams — IRI strings (`/api/3/teams/<uuid>`). The resolver
+            # converts authored team names to IRIs (owners_iris); IRIs authored
+            # directly pass through. Private playbooks require owners (enforced
+            # in the parser); a public playbook emits owners: [].
+            "owners": list(pb.owners_iris),
+            "isPrivate": pb.is_private,
         })
 
     return {
@@ -436,6 +441,56 @@ def emit(collection: Collection) -> dict[str, Any]:
     }
 
 
+def _is_blank(v: Any) -> bool:
+    """Editor's notion of an empty argument value (bundle line 34487)."""
+    return v is None or v == "" or v == {} or v == []
+
+
+def _clean_step_arguments(args: dict[str, Any]) -> None:
+    """Mirror the FortiSOAR editor's save-time argument cleanup so emitted JSON
+    matches what the editor actually POSTs.
+
+    Two editor rules, reverse-engineered from the 8.0 bundle (see
+    docs/STEP_WIRE_SHAPES.md):
+
+    1. Empty-field deletion (line 34487): drop `when`, `mock_result`, `do_until`
+       (empty condition), `message` (empty content), `for_each` (empty item).
+    2. for_each loop-mode normalization (lines 11581/11599 + connector rule at 31):
+       `__bulk` and `parallel` are mutually exclusive; bulk defaults batch_size to
+       100; non-bulk modes carry no batch_size; `break_loop` is incompatible with
+       async/agent execution.
+
+    Mutates `args` in place.
+    """
+    # 1. Empty-field deletion.
+    if _is_blank(args.get("when")):
+        args.pop("when", None)
+    if _is_blank(args.get("mock_result")):
+        args.pop("mock_result", None)
+    du = args.get("do_until")
+    if isinstance(du, dict) and _is_blank(du.get("condition")):
+        args.pop("do_until", None)
+    msg = args.get("message")
+    if isinstance(msg, dict) and _is_blank(msg.get("content")):
+        args.pop("message", None)
+    fe = args.get("for_each")
+    if isinstance(fe, dict) and _is_blank(fe.get("item")):
+        args.pop("for_each", None)
+        fe = None
+
+    # 2. for_each loop-mode normalization.
+    if isinstance(fe, dict):
+        # break_loop requires sync loop-state tracking, incompatible with
+        # fire-and-forget async or agent-routed execution.
+        if args.get("apply_async") is True or args.get("agent"):
+            fe.pop("break_loop", None)
+        if fe.get("__bulk"):
+            fe.pop("parallel", None)          # mutually exclusive with __bulk
+            fe.setdefault("batch_size", 100)  # editor default when bulk
+        else:
+            fe.pop("batch_size", None)        # batch_size is a bulk-only key
+
+
 def _emit_step(s: Step, step_uuid: str, top: int, left: int,
                group_iri: str | None = None) -> dict[str, Any]:
     args = dict(s.arguments or {})
@@ -444,10 +499,11 @@ def _emit_step(s: Step, step_uuid: str, top: int, left: int,
         # operation, etc). The IR keeps it as a sibling of `arguments` for
         # ergonomic YAML; we merge it in here.
         args["for_each"] = dict(s.for_each)
+    _clean_step_arguments(args)
     return {
         "@type": "WorkflowStep",
         "name": s.name or s.id,
-        "description": None,
+        "description": s.description or None,
         "arguments": args,
         "status": None,
         "top": str(top),

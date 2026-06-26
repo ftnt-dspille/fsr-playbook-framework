@@ -85,6 +85,29 @@ def _decompile_step(s) -> dict:
     args = dict(s.arguments) if isinstance(s.arguments, dict) else None
     branches_remaining = dict(s.branches)
 
+    # Universal step envelope (Phase 4): the parser hoists these wire keys
+    # out of `arguments:` to the step surface, so on pull we reverse that —
+    # otherwise a connector's `when`/`do_until`/`agent` round-trips back as
+    # raw `arguments.when`, which the editor never compiles to. Lift them
+    # back to the step top level verbatim (canonical spelling, lossless).
+    if isinstance(args, dict):
+        for env_key in ("when", "ignore_errors", "do_until", "apply_async",
+                        "agent", "agentId", "pickFromTenant", "step_variables",
+                        "mock_result", "module", "modules"):
+            if env_key in args:
+                out[env_key] = args.pop(env_key)
+        # Fold a pure `message: {content: "<text>"}` back to the friendlier
+        # `post_comment: "<text>"` sugar (parser accepts both). Keep the full
+        # `message:` block when it carries more than a plain content string.
+        msg = args.get("message")
+        if isinstance(msg, dict) and set(msg) == {"content"} \
+                and isinstance(msg["content"], str):
+            out["post_comment"] = args.pop("message")["content"]
+        elif "message" in args:
+            out["message"] = args.pop("message")
+    if isinstance(s.description, str) and s.description.strip():
+        out["description"] = s.description
+
     if s.type == "decision" and isinstance(args, dict):
         conds = args.pop("conditions", None) or []
         new_conds = []
@@ -275,6 +298,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
             id=sid,
             type=short_by_uuid.get(u, "") or "unknown",
             name=s.get("name", "") or sid,
+            description=s.get("description") or "",
             arguments=raw_args,
             next=nxt,
             branches=branches,

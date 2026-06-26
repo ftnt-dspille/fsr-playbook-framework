@@ -38,6 +38,11 @@ class Step:
     # explicit `playbook.annotations` entries.
     comment: Optional[str] = None
 
+    # FSR's per-step `description` field (distinct from `comment`, which is a
+    # canvas sticky-note). Free-form text shown in the step's detail pane.
+    # Round-tripped verbatim by the decompiler so a pulled playbook keeps it.
+    description: str = ""
+
     # Per-iteration loop config. Wire shape is a dict at the step level
     # (sibling of `arguments`). When set, the step body executes once per
     # element of `item` (a Jinja list expression), with the current element
@@ -82,12 +87,29 @@ class Playbook:
     name: str
     description: str = ""
     tag: str = ""
-    is_active: bool = False
+    # Defaults to active (matches FSR's UI + author intent: you don't usually
+    # deploy a playbook you want disabled). Set is_active=False for a draft.
+    is_active: bool = True
     # Verbose runtime tracing. FSR's workflow engine writes one log
     # line per step + a payload dump when this is true; keep off for
     # production but on for new visual-editor drafts so authors see
     # their step output without flipping a knob.
     debug: bool = False
+    # Playbook visibility. FSR's `isPrivate` flag: when true the playbook is
+    # hidden from the UI catalog and — per the documented ownership model —
+    # only executable by users/API keys whose owner teams intersect the
+    # playbook's `owners`. Authored as `is_private: true` in YAML.
+    is_private: bool = False
+    # Owner teams as authored — team NAMES (e.g. "TeamA") or IRIs
+    # (`/api/3/teams/<uuid>`). Names resolve to IRIs via the resolver's
+    # `teams` table (when the reference catalog carries one); IRIs pass
+    # through unchanged. An empty list (default) leaves the playbook
+    # unowned — FSR requires private playbooks to declare owners.
+    owners: list[str] = field(default_factory=list)
+    # Resolver-filled: owners as IRI strings (`/api/3/teams/<uuid>`). When
+    # the `teams` table is unsynced, this stays empty and `owners` is
+    # emitted verbatim so a deploy layer with a live client can resolve.
+    owners_iris: list[str] = field(default_factory=list)
     # Execution priority NAME as authored (e.g. "High"). None = engine default.
     # The agent-routed run_op wrap sets this to "High" so containment ops jump
     # the queue. Resolved to a picklist IRI by the resolver (see priority_iri).

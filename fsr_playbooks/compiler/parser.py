@@ -315,8 +315,18 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             #   step.set            → arguments.step_variables (sugar — same
             #                         spelling whether you're on set_variable
             #                         (`vars:`) or a connector/create step)
+            #   step.ignore_errors  → arguments.ignore_errors (universal: keep
+            #                         running the playbook even if this step
+            #                         raises)
+            #   step.do_until       → arguments.do_until (retry loop; `retry:`
+            #                         below is the friendly sugar for it)
+            #   step.apply_async    → arguments.apply_async (fire-and-forget
+            #                         connector / workflow_reference execution)
+            #   step.agent/agentId/pickFromTenant → the remote-agent envelope
+            #                         (`on_remote:` below is the friendly sugar)
             for hoist_key in ("mock_result", "when", "step_variables", "message",
-                              "module", "modules"):
+                              "module", "modules", "ignore_errors", "do_until",
+                              "apply_async", "agent", "agentId", "pickFromTenant"):
                 if hoist_key in s_raw:
                     if hoist_key in args:
                         errors.append(CompileError(
@@ -347,6 +357,103 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     ))
                 else:
                     args["step_variables"] = dict(s_raw["set"])
+
+            # Universal-envelope sugar — friendly spellings of the wire keys
+            # hoisted above, translated here so the resolver/emitter only ever
+            # see the canonical shape. Each guards against colliding with the
+            # canonical key it expands to.
+            #
+            #   retry: {times, delay, until} → do_until: {retries, delay, condition}
+            #     A retry loop re-runs the step until `until` is truthy (or the
+            #     retry budget is spent). `times`→`retries`, `until`→`condition`;
+            #     `delay` passes through (seconds between attempts).
+            if "retry" in s_raw:
+                if "do_until" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=("step.retry and do_until both set — they "
+                                 "compile to the same `do_until` block; pick one"),
+                        path=f"{sp}.retry",
+                    ))
+                elif not isinstance(s_raw["retry"], dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.retry must be a mapping (times/delay/until)",
+                        path=f"{sp}.retry",
+                    ))
+                else:
+                    rt = s_raw["retry"]
+                    unknown = set(rt) - {"times", "delay", "until", "condition",
+                                         "retries"}
+                    if unknown:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(f"step.retry has unknown keys: "
+                                     f"{sorted(unknown)}. Accepted: times, "
+                                     f"delay, until"),
+                            path=f"{sp}.retry",
+                        ))
+                    du: dict[str, Any] = {}
+                    if "until" in rt or "condition" in rt:
+                        du["condition"] = rt.get("until", rt.get("condition"))
+                    if "times" in rt or "retries" in rt:
+                        du["retries"] = rt.get("times", rt.get("retries"))
+                    if "delay" in rt:
+                        du["delay"] = rt["delay"]
+                    args["do_until"] = du
+
+            #   on_remote: <agent>            → agent: <agent>, pickFromTenant: false
+            #   on_remote: pick_from_record   → agent: "Pick From Record
+            #                                   Ownership", pickFromTenant: true
+            #     Routes step execution to a remote/tenant agent. The literal
+            #     "Pick From Record Ownership" is FSR's magic value for
+            #     record-ownership-based selection.
+            if "on_remote" in s_raw:
+                if "agent" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=("step.on_remote and agent both set — they "
+                                 "compile to the same `agent`; pick one"),
+                        path=f"{sp}.on_remote",
+                    ))
+                else:
+                    rem = s_raw["on_remote"]
+                    if not isinstance(rem, str) or not rem.strip():
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=("step.on_remote must be an agent name or "
+                                     "'pick_from_record'"),
+                            path=f"{sp}.on_remote",
+                        ))
+                    elif rem.strip().lower() in ("pick_from_record",
+                                                 "pick_from_record_ownership",
+                                                 "pick from record ownership"):
+                        args["agent"] = "Pick From Record Ownership"
+                        args["pickFromTenant"] = True
+                    else:
+                        args["agent"] = rem.strip()
+                        args.setdefault("pickFromTenant", False)
+
+            #   post_comment: "text"  → message: {content: "text"}
+            #     Friendly sugar for posting a collaboration comment on the
+            #     triggering record. `message:` (the canonical block) still works.
+            if "post_comment" in s_raw:
+                if "message" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=("step.post_comment and message both set — "
+                                 "they compile to the same `message` block; "
+                                 "pick one"),
+                        path=f"{sp}.post_comment",
+                    ))
+                elif not isinstance(s_raw["post_comment"], str):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.post_comment must be a string",
+                        path=f"{sp}.post_comment",
+                    ))
+                else:
+                    args["message"] = {"content": s_raw["post_comment"]}
 
             # Step-level shortcuts that hoist common nested shapes to the
             # surface so authors don't have to nest under `arguments:`. The
@@ -498,7 +605,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             # never appear). Looping a control-flow step would be a
             # nonsense or unsafe construct.
             _FOR_EACH_DISALLOWED_HOSTS = {
-                "start", "start_on_create", "start_on_update",
+                "start", "start_on_create", "start_on_update", "start_on_delete",
                 "decision", "end", "manual_input",
             }
             if fe_raw is not None:
@@ -527,7 +634,8 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     ))
                 else:
                     accepted = {"item", "parallel", "condition", "__bulk",
-                                "batch_size", "break_loop"}
+                                "batch_size", "break_loop",
+                                "max_parallel", "concurrency_count"}
                     unknown = set(fe_raw.keys()) - accepted
                     if unknown:
                         errors.append(CompileError(
@@ -564,6 +672,50 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                                 ))
                         if "break_loop" in fe_raw:
                             for_each["break_loop"] = str(fe_raw["break_loop"] or "")
+                        # Loop max-parallel cap (FSR 8.0). Author-friendly
+                        # `max_parallel: N` (alias `concurrency_count`) compiles
+                        # to the wire pair the designer emits: the
+                        # `concurrency: true` toggle + the `concurrencyCount: N`
+                        # limit. Only meaningful on a parallel loop, and the
+                        # engine's minimum is 2 (CONCURRENCY_CONFIG_MIN_INPUT).
+                        cap_key = ("max_parallel" if "max_parallel" in fe_raw
+                                   else "concurrency_count" if "concurrency_count" in fe_raw
+                                   else None)
+                        if cap_key is not None:
+                            try:
+                                cap = int(fe_raw[cap_key])
+                            except (TypeError, ValueError):
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message=f"for_each.{cap_key} must be an integer",
+                                    path=f"{sp}.for_each.{cap_key}",
+                                ))
+                            else:
+                                if not for_each["parallel"]:
+                                    errors.append(CompileError(
+                                        code=ErrorCode.BAD_VALUE,
+                                        severity="warning",
+                                        message=(
+                                            f"for_each.{cap_key} caps a *parallel* "
+                                            "loop; this loop is sequential "
+                                            "(parallel: false), so the cap is "
+                                            "ignored. Set parallel: true."
+                                        ),
+                                        path=f"{sp}.for_each.{cap_key}",
+                                    ))
+                                if cap < 2:
+                                    errors.append(CompileError(
+                                        code=ErrorCode.BAD_VALUE,
+                                        severity="warning",
+                                        message=(
+                                            f"for_each.{cap_key}={cap} is below the "
+                                            "FSR minimum of 2; the engine will "
+                                            "treat it as 2."
+                                        ),
+                                        path=f"{sp}.for_each.{cap_key}",
+                                    ))
+                                for_each["concurrency"] = True
+                                for_each["concurrencyCount"] = cap
 
             steps.append(Step(
                 id=sid,
@@ -573,6 +725,8 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 next=s_raw.get("next") if isinstance(s_raw.get("next"), str) else None,
                 branches={str(k): str(v) for k, v in branches.items()},
                 comment=cmt if isinstance(cmt, str) and cmt.strip() else None,
+                description=(s_raw["description"]
+                            if isinstance(s_raw.get("description"), str) else ""),
                 for_each=for_each,
             ))
 
@@ -730,12 +884,51 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 contains=[str(c) for c in contains],
             ))
 
+        # Owner teams + private visibility. `owners` accepts team NAMES (the
+        # author-friendly form — "TeamA") or IRIs (`/api/3/teams/<uuid>`); the
+        # resolver converts names to IRIs via the warmed `teams` table. Coerce
+        # to a list of strings.
+        owners_raw = pb_raw.get("owners", []) or []
+        if not isinstance(owners_raw, list):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="`owners` must be a list of team names or IRIs",
+                path=f"{pb_path}.owners",
+            ))
+            owners_raw = []
+        owners = [str(o) for o in owners_raw]
+
+        # Private visibility is DERIVED from owners, matching FSR's model: a
+        # playbook with owner teams is private to those teams; a playbook with
+        # no owners is public (any team can run it — the SOAR default).
+        # `is_private:` is an optional explicit override; when omitted it
+        # follows `bool(owners)`. The SOAR invariant is enforced: no owners
+        # => never private, even if `is_private: true` was written (warned).
+        explicit_private = "is_private" in pb_raw
+        is_private = bool(pb_raw.get("is_private", False)) if explicit_private else bool(owners)
+        if not owners:
+            if explicit_private and is_private:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=("`is_private: true` with no owners — a private "
+                             "playbook requires owner teams; emitting PUBLIC "
+                             "(any team can run it, the SOAR default)"),
+                    path=f"{pb_path}.is_private",
+                    severity="warning",
+                ))
+            is_private = False
+
         playbooks.append(Playbook(
             name=pb_name,
             description=pb_raw.get("description", "") or "",
             tag=pb_raw.get("tag", "") or "",
-            is_active=bool(pb_raw.get("is_active", False)),
+            # Defaults to active — authors almost never want to deploy an
+            # inactive playbook, and FSR's UI creates them active by default.
+            # Set `is_active: false` explicitly to ship a disabled draft.
+            is_active=bool(pb_raw.get("is_active", True)),
             debug=bool(pb_raw.get("debug", False)),
+            is_private=is_private,
+            owners=owners,
             priority=priority,
             trigger=str(pb_raw.get("trigger", "start") or "start"),
             parameters=list(params_raw),

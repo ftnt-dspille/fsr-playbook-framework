@@ -45,10 +45,11 @@ TYPE_NAME_TO_RESOLVER: dict[str, str] = {
     "cybersponse.api_call": "start_on_api_call",
     "cybersponse.action": "start",
     "cybersponse.abstract_trigger": "start",
-    "SendMail": "send_email",
+    "SendEmail": "send_email",
     "IngestBulkFeed": "ingest_bulk_feed",
     "RunScript": "run_script",
-    "ManualTask": "manual_task",
+    "ManualTask": "create_task",
+    "SetAPIKeys": "set_api_keys",
     "Approval": "approval",
 }
 
@@ -69,6 +70,21 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
         "canonical": {"resource", "resources", "step_variables",
                       "triggerOnSource", "triggerOnReplicate",
                       "__triggerLimit", "fieldbasedtrigger", "useMockOutput"},
+    },
+    "start_on_delete": {
+        "friendly":  {"module", "modules", "when", "mock_result", "condition"},
+        "canonical": {"resource", "resources", "step_variables",
+                      "triggerOnSource", "triggerOnReplicate",
+                      "__triggerLimit", "fieldbasedtrigger", "useMockOutput"},
+    },
+
+    # api_endpoint — _normalize_api_endpoint_args
+    # (cybersponse.api_call; token-based auth default `[""]`)
+    "start_on_api_call": {
+        "friendly":  {"route", "authentication_methods", "mock_result",
+                      "condition"},
+        "canonical": {"step_variables", "triggerOnSource", "triggerOnReplicate",
+                      "__triggerLimit", "useMockOutput", "version"},
     },
 
     # record CRUD — _normalize_record_crud_args  resolver.py:869
@@ -140,12 +156,47 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "pass_input_record", "pass_parent_env", "step_variables",
                       "ignore_errors"},
     },
+
+    # send_email — _normalize_send_email_args  (SMTP SendEmail)
+    "send_email": {
+        "friendly":  {"body", "from"},
+        "canonical": {"to", "from_str", "content", "cc", "bcc", "subject",
+                      "attachments", "config", "connector", "version",
+                      "params", "operation", "operationTitle", "step_variables"},
+    },
+
+    # create_task — _normalize_create_task_args  (ManualTask, collection=tasks)
+    "create_task": {
+        "friendly":  set(),
+        "canonical": {"collection", "resource", "step_variables", "message"},
+    },
+
+    # set_api_keys — _normalize_set_api_keys_args  (SetAPIKeys)
+    "set_api_keys": {
+        "friendly":  set(),
+        "canonical": {"public_key", "private_key"},
+    },
+
+    # approval — _normalize_approval_args  (Approval, collection=approvals)
+    "approval": {
+        "friendly":  set(),
+        "canonical": {"collection", "resource", "response_mapping", "timeout",
+                      "step_variables", "approvers"},
+    },
 }
 
 
-# Top-level keys every step accepts (for_each + step_variables sit
-# at the arguments root regardless of step type).
-GLOBAL_RESERVED = {"for_each", "step_variables"}
+# Top-level keys every step accepts. `for_each` + `step_variables` sit at
+# the arguments root regardless of step type; the rest are the universal
+# step envelope (WIRE_SHAPE_GAP_PLAN Phase 3) — control-flow / execution
+# metadata FSR layers over every step type. Authors write the friendly
+# spellings (`retry`, `on_remote`, `post_comment`); the parser expands them
+# into these canonical keys, so the audit must accept them everywhere.
+GLOBAL_RESERVED = {
+    "for_each", "step_variables", "when", "do_until", "ignore_errors",
+    "message", "agent", "agentId", "pickFromTenant", "apply_async",
+    "mock_result", "condition",
+}
 
 
 # Per-resolver-type "open key" markers — these step types accept

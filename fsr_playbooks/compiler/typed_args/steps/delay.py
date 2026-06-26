@@ -68,6 +68,15 @@ def expand_delay(
     # early return before any transform).
     if "rule" in args and "delay" in args:
         return None
+    # Author wrote the canonical nested `delay: {days,hours,minutes,seconds}`
+    # but omitted the `rule`. Don't re-derive from (absent) friendly top-level
+    # keys — that would zero the durations. Preserve them and just fill the
+    # event-resume rule + type defaults.
+    if isinstance(args.get("delay"), dict):
+        a = dict(args)
+        a["type"] = a.get("type", "TimeBased")
+        a.setdefault("rule", _resume_rule())
+        return a
 
     model = validate_args(DelayArgs, args, f"{path}.arguments", errors)
     if model is None:
@@ -85,12 +94,18 @@ def expand_delay(
         delay["seconds"] = 1  # avoid zero-delay edge cases
     a["type"] = a.get("type", "TimeBased")
     a["delay"] = delay
-    a.setdefault("rule", {
+    a.setdefault("rule", _resume_rule())
+    return a
+
+
+def _resume_rule() -> dict:
+    """The canonical event-source rule FSR attaches to a TimeBased delay so the
+    engine resumes the playbook when the timer fires."""
+    return {
         "actions": [{
             "type": "resume_playbook", "enabled": True,
             "channel_uuid": _RESUME_CHANNEL_UUID,
         }],
         "is_active": True,
         "event_source": "crudhub",
-    })
-    return a
+    }

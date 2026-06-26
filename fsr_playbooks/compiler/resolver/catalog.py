@@ -23,6 +23,7 @@ class CatalogLookupMixin:
         "when", "for_each", "do_until", "ignore_errors", "message", "name",
         "agent", "agentId", "apply_async", "pass_input_record",
         "pass_parent_env", "mock_result", "useMockOutput", "condition",
+        "pickFromTenant",
     }
 
     @staticmethod

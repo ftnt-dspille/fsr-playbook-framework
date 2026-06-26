@@ -27,6 +27,14 @@ SHORT_TYPE_TO_FSR: dict[str, str] = {
     "manual_input": "ManualInput",
     "code_snippet": "CodeSnippet",
     "approval": "Approval",
+    # SMTP SendEmail. Friendly `body`/`from` map to canonical `content`/
+    # `from_str`; to/cc/bcc/subject pass through (Phase-2 coverage).
+    "send_email": "SendEmail",
+    # ManualTask — editor hardcodes `collection: tasks` and wraps the task
+    # module fields into `resource`.
+    "create_task": "ManualTask",
+    # SetAPIKeys — niche; `public_key`/`private_key` (jinja-capable).
+    "set_api_keys": "SetAPIKeys",
     "workflow_reference": "WorkflowReference",
     # `stop` / `end` — first-class no-op terminals. Compile to a connector
     # step calling `cyops_utilities.no_op` (FSR's canonical "Utils: No
@@ -38,6 +46,20 @@ SHORT_TYPE_TO_FSR: dict[str, str] = {
     # event-driven, not invokable from the designer.
     "start_on_create": "cybersponse.post_create",
     "start_on_update": "cybersponse.post_update",
+    # Record-deletion trigger. Fires after a record is removed; the deleted
+    # record(s) arrive at `vars.input.records`. Field-based `when:` filters
+    # match the pre-delete record state.
+    "start_on_delete": "cybersponse.post_delete",
+    # API Endpoint trigger — the invokable trigger that exposes the playbook
+    # at `POST /api/triggers/1/<route>`. Its step `arguments` carry `route`
+    # (the endpoint name) and `authentication_methods` (Token Based = `[""]`,
+    # No Auth = `["anonymous"]`, Basic = `["Basic"]`). `[""]` is the sane
+    # default — it's the only mode that exposes the clean route (no
+    # `deferred/` prefix); the normalizer fills it when omitted. Live-grounded
+    # on the `cybersponse.api_call` step type (uuid df26c7a2-…, label "Custom
+    # API Endpoint"). Recognized as a trigger step by the emitter so the
+    # first `api_endpoint` step becomes `triggerStep`.
+    "api_endpoint": "cybersponse.api_call",
 }
 
 __all__ = ["_looks_like_uuid", "SHORT_TYPE_TO_FSR"]

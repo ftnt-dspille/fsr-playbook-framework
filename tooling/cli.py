@@ -3963,7 +3963,7 @@ def cmd_agent_stats(args: argparse.Namespace) -> int:
 # Registry of all runnable probes.  Each entry: (module_path, description).
 _PROBES: dict[str, tuple[str, str]] = {
     "connectors":    ("probes.probe_connectors",       "connectors / operations / operation_params"),
-    "modules":       ("probes.probe_modules",           "FSR modules, fields, and picklists"),
+    "modules":       ("probes.probe_modules",           "FSR modules, fields, picklists, and teams"),
     "playbooks":     ("probes.probe_playbooks",         "step types, playbook corpus, trigger recipes"),
     "jinja":         ("probes.probe_jinja",             "Jinja filter catalog (live render)"),
     "jinja-backend": ("probes.probe_jinja_backend",     "Jinja filter signatures (backend introspect)"),

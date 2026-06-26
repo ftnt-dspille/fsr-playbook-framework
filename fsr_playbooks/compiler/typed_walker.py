@@ -478,7 +478,7 @@ def _synth_step_shape(
     t = step.type
     if t in {"decision", "delay", "stop", "end"}:
         return _shape_none()
-    if t in {"start", "start_on_create", "start_on_update"}:
+    if t in {"start", "start_on_create", "start_on_update", "start_on_delete"}:
         module = _step_module(step)
         rec = _module_record_shape(module, module_fields_fn)
         return _shape_object({"input": _shape_object(
@@ -531,7 +531,7 @@ def _trigger_step(pb: Playbook) -> Step | None:
             if s.id == pb.trigger_step_id:
                 return s
     for s in pb.steps:
-        if s.type in {"start", "start_on_create", "start_on_update"}:
+        if s.type in {"start", "start_on_create", "start_on_update", "start_on_delete"}:
             return s
     return pb.steps[0] if pb.steps else None
 

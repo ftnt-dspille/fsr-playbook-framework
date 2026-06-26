@@ -81,6 +81,60 @@ class Resolver(
         ))
         pb.priority = None
 
+    def _resolve_owners(self, pb: Playbook, path: str,
+                        errors: list[CompileError]) -> None:
+        """Resolve owner team NAMES to ``/api/3/teams/<uuid>`` IRIs.
+
+        Authors write friendly team names (``owners: ["TeamA"]``); the compiler
+        converts them to the IRI wire shape via the warmed ``teams`` table
+        (populated by the modules probe from ``GET /api/3/teams``). Values that
+        are already IRIs pass through unchanged. No live lookup — a missing or
+        unsynced ``teams`` table surfaces as a clear ``CompileError`` (the
+        author must warmup, or use the team IRI directly).
+        """
+        if not pb.owners:
+            return
+        # Detect whether the `teams` table exists/is populated without
+        # crashing on a stale or slim DB that never created it.
+        try:
+            n = self.conn.execute("SELECT count(*) FROM teams").fetchone()[0]
+        except sqlite3.OperationalError:
+            n = 0
+        resolved: list[str] = []
+        for owner in pb.owners:
+            # IRI passthrough — no resolution needed (works offline).
+            if owner.startswith("/api/"):
+                resolved.append(owner)
+                continue
+            if n == 0:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"owner team {owner!r} can't be resolved — the "
+                             f"`teams` reference table is unsynced. Run warmup "
+                             f"against the target SOAR, or use the team IRI "
+                             f"(`/api/3/teams/<uuid>`) directly."),
+                    path=f"{path}.owners",
+                ))
+                continue
+            row = self.conn.execute(
+                "SELECT iri FROM teams WHERE name = ?", (owner,),
+            ).fetchone()
+            if row:
+                resolved.append(row[0])
+                continue
+            candidates = [r[0] for r in self.conn.execute(
+                "SELECT name FROM teams").fetchall()]
+            sug = difflib.get_close_matches(owner, candidates, n=1, cutoff=0.5)
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"unknown owner team {owner!r}; valid: "
+                         f"{', '.join(sorted(candidates))}"),
+                path=f"{path}.owners",
+                near=sug[0] if sug else None,
+                suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+            ))
+        pb.owners_iris = resolved
+
     def resolve(self, collection: Collection) -> list[CompileError]:
         errors: list[CompileError] = []
         # Multi-instance guard: if a target SOAR is configured (FSR_BASE_URL)
@@ -92,6 +146,7 @@ class Resolver(
         pb_by_name = {pb.name: pb for pb in collection.playbooks}
         for pi, pb in enumerate(collection.playbooks):
             self._resolve_priority(pb, f"playbooks[{pi}]", errors)
+            self._resolve_owners(pb, f"playbooks[{pi}]", errors)
             # Order matters: rename reserved keys first, capture the
             # rename map, then the step-ref rewriter uses BOTH the new
             # and old names so legacy `vars.steps.<S>.<old>` references

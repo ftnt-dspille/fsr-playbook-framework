@@ -805,9 +805,12 @@ def validate(collection: Collection) -> list[CompileError]:
                 step_seen_keys[jinja_key] = si
 
         # A playbook's trigger can be `start` (manual / abstract_trigger),
-        # `record_action`, `start_on_create`, or `start_on_update`. Exactly
-        # one trigger step required, of any of those flavours.
-        TRIGGER_TYPES = {"start", "start_on_create", "start_on_update"}
+        # `record_action`, `start_on_create`, `start_on_update`,
+        # `start_on_delete`, or `api_endpoint` (the invokable
+        # `POST /api/triggers/1/<route>` trigger). Exactly one trigger step
+        # required, of any of those flavours.
+        TRIGGER_TYPES = {"start", "start_on_create", "start_on_update",
+                         "start_on_delete", "api_endpoint"}
         starts = [s for s in pb.steps if s.type in TRIGGER_TYPES]
         if not starts:
             errors.append(CompileError(

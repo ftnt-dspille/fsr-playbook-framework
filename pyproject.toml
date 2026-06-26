@@ -31,6 +31,7 @@ packages = [
     "fsr_playbooks.mcp_server",
     "fsr_playbooks.llm",
     "fsr_playbooks.agent",
+    "fsr_playbooks.helpers",
 ]
 
 [tool.ruff]

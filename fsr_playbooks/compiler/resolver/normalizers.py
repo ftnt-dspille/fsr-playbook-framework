@@ -97,8 +97,11 @@ class NormalizerMixin:
                     step.handler = self.handler_for_step_type(action_row)
                 self._normalize_record_action_args(step, path, errors, pb_name)
 
-        if step.type in ("start_on_create", "start_on_update"):
+        if step.type in ("start_on_create", "start_on_update", "start_on_delete"):
             self._normalize_post_create_update_args(step, path, errors, pb_name)
+
+        if step.type == "api_endpoint":
+            self._normalize_api_endpoint_args(step, path, errors)
 
         if step.type in ("create_record", "insert_record", "update_record"):
             self._normalize_record_crud_args(step, path, errors)
@@ -116,6 +119,14 @@ class NormalizerMixin:
             self._normalize_manual_input_args(step, path, errors)
         if step.type == "decision":
             self._normalize_decision_args(step, path, errors)
+        if step.type == "send_email":
+            self._normalize_send_email_args(step, path, errors)
+        if step.type == "create_task":
+            self._normalize_create_task_args(step, path, errors)
+        if step.type == "set_api_keys":
+            self._normalize_set_api_keys_args(step, path, errors)
+        if step.type == "approval":
+            self._normalize_approval_args(step, path, errors)
 
         # `stop` / `end` synthesize the canonical Utils: No Operation call,
         # then fall through to connector arg resolution.
@@ -144,7 +155,7 @@ class NormalizerMixin:
         # which the FSR engine doesn't wire a post_message call for.
         _NO_MESSAGE_TYPES = {
             "delay", "set_api_keys",
-            "start", "start_on_create", "start_on_update",
+            "start", "start_on_create", "start_on_update", "start_on_delete",
         }
         if (step.type not in _NO_MESSAGE_TYPES
                 and isinstance(step.arguments, dict)
@@ -218,7 +229,17 @@ class NormalizerMixin:
             seed = (button_label or step.name or "") + "|" + ",".join(sorted(modules))
             a["route"] = str(_uuidmod.uuid5(_uuidmod.NAMESPACE_OID, seed))
         a.setdefault("inputVariables", [])
-        a.setdefault("step_variables", {"input": {"params": [],
+        # ACTION_TRIGGER input shape (bundle lines 34560-34564): one
+        # `{{vars.request.data["<name>"]}}` entry per declared input variable,
+        # plus the record list. With no input variables, params stays the empty
+        # array the live corpus uses.
+        input_vars = a.get("inputVariables") or []
+        params_shape: Any = {
+            iv["name"]: '{{vars.request.data["%s"]}}' % iv["name"]
+            for iv in input_vars
+            if isinstance(iv, dict) and iv.get("name")
+        } or []
+        a.setdefault("step_variables", {"input": {"params": params_shape,
                                                   "records": "{{vars.input.records}}"}})
         a.setdefault("triggerOnSource", True)
         a.setdefault("triggerOnReplicate", False)
@@ -240,13 +261,14 @@ class NormalizerMixin:
         self, step: Step, path: str, errors: list[CompileError],
         pb_name: str | None = None,
     ) -> None:
-        """Canonical args for cybersponse.post_create / post_update.
+        """Canonical args for cybersponse.post_create / post_update / post_delete.
 
         Friendly inputs:
           module:  single module name (or modules: [list]).
           when:    optional fieldbasedtrigger filter — fires only when the
-                   query matches the post-write record state, OR (for
-                   post_update) when the listed fields *changed*.
+                   query matches the post-write record state (the pre-delete
+                   state for post_delete), OR (for post_update) when the listed
+                   fields *changed*.
                    Shape: {logic: AND|OR, filters: [{field, op, value?}]}
                    `op: changed` needs no value (post_update only).
 
@@ -313,6 +335,71 @@ class NormalizerMixin:
         # field may legitimately exist on only some of them, so a finding is
         # emitted only when it holds for *every* module (invalid everywhere).
         self._validate_trigger_fields(a, modules, path, errors)
+        step.arguments = a
+
+    def _normalize_api_endpoint_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Canonical args for ``cybersponse.api_call`` (the API-Endpoint trigger).
+
+        Friendly inputs:
+          route:                  the endpoint name — becomes the URL path
+                                  segment exposed at
+                                  ``POST /api/triggers/1/<route>``.
+          authentication_methods: optional. Defaults to **token-based**
+                                  (``[""]``) — the only mode that exposes
+                                  the route at ``/api/triggers/1/<route>``
+                                  (no ``deferred/`` prefix). The empty-string
+                                  wire value is awkward to write and read, so
+                                  it's the default; authors never need to spell
+                                  ``authentication_methods: [""]``. Set
+                                  ``["anonymous"]`` for No-Auth or ``["Basic"]``
+                                  for HTTP Basic (both route at
+                                  ``deferred/<route>``).
+
+        Trigger infrastructure fields (``__triggerLimit``, ``triggerOnSource``,
+        ``triggerOnReplicate``, ``step_variables``) are auto-filled to the
+        canonical shape FSR's designer emits, mirroring the other trigger step
+        types — so the minimal clean form
+
+            - name: Start
+              type: api_endpoint
+              arguments:
+                route: lookup_ip
+
+        compiles to the same wire shape as a fully-specified token-based
+        trigger. Live-grounded on an exported private playbook (see
+        ``tests/test_owners_private_api_trigger.py``).
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        _FRIENDLY = {"route", "authentication_methods", "mock_result", "condition"}
+        _CANONICAL = {
+            "step_variables", "triggerOnSource", "triggerOnReplicate",
+            "__triggerLimit", "useMockOutput", "version",
+        }
+        if self._check_unknown_keys(
+            a, step.type, _FRIENDLY, _CANONICAL, path, errors,
+        ):
+            return
+        # Token-based is the sane default — it's the only auth mode that
+        # exposes the playbook at `POST /api/triggers/1/<route>` (the
+        # `deferred/`-prefixed modes aren't invokable that way). The wire
+        # value is the awkward empty-string `[""]`; fill it so authors never
+        # have to write `authentication_methods: [""]`.
+        a.setdefault("authentication_methods", [""])
+        # Expose the inbound HTTP request body + query params to the playbook
+        # at `vars.steps.<name>.input.params.{api_body,api_params}`.
+        a.setdefault("step_variables", {
+            "input": {
+                "params": {
+                    "api_body": "{{vars.request.data}}",
+                    "api_params": "{{vars.request.params}}",
+                },
+            },
+        })
+        a.setdefault("triggerOnSource", True)
+        a.setdefault("triggerOnReplicate", False)
+        a.setdefault("__triggerLimit", True)
         step.arguments = a
 
     def _validate_trigger_fields(
@@ -426,6 +513,98 @@ class NormalizerMixin:
         self._check_unknown_keys(
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         )
+        # Editor rule (bundle line 34498): query.__selectFields only persists
+        # when checkboxFields is truthy; otherwise the editor deletes it before
+        # POST so a stale field projection doesn't ship.
+        q = a.get("query")
+        if isinstance(q, dict) and not a.get("checkboxFields"):
+            q.pop("__selectFields", None)
+
+    def _normalize_send_email_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Friendly SMTP SendEmail.
+
+        Maps `body` → `content` and `from` → `from_str`; `to`/`cc`/`bcc`/
+        `subject` pass through. Canonical keys mirror the editor's SendEmail
+        wire shape (docs/STEP_WIRE_SHAPES SendEmail). `timeout` is excluded by
+        the editor (excludes=['timeout']); we never emit it.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        _FRIENDLY = {"body", "from"}
+        _CANONICAL = {
+            "to", "from_str", "content", "cc", "bcc", "subject", "attachments",
+            "config", "connector", "version", "params", "operation",
+            "operationTitle", "step_variables",
+        }
+        if self._check_unknown_keys(
+            a, step.type, _FRIENDLY, _CANONICAL, path, errors,
+        ):
+            return
+        if "body" in a:
+            a.setdefault("content", a.pop("body"))
+        if "from" in a:
+            a.setdefault("from_str", a.pop("from"))
+        # `from_str` is a required handler arg, but the editor fills it from the
+        # SMTP config's default-from at compile (bundle line 38148) — a value we
+        # don't have offline. Default to empty so the step compiles; the FSR
+        # engine substitutes the SMTP default-from at runtime.
+        a.setdefault("from_str", "")
+        step.arguments = a
+
+    def _normalize_create_task_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Friendly ManualTask (CreateTask).
+
+        The editor hardcodes `collection: tasks` (bundle line 37569) and wraps
+        the task module form fields into `resource`. We accept an authored
+        `resource:` and fill the collection; the resource is POSTed as-is.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        _CANONICAL = {"collection", "resource", "step_variables", "message"}
+        if self._check_unknown_keys(
+            a, step.type, set(), _CANONICAL, path, errors,
+        ):
+            return
+        a.setdefault("collection", "tasks")
+        a.setdefault("resource", {})
+        step.arguments = a
+
+    def _normalize_set_api_keys_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """SetAPIKeys — `public_key`/`private_key` (both jinja-capable). No
+        compile-time transform; the controller only validates UI state."""
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        _CANONICAL = {"public_key", "private_key"}
+        self._check_unknown_keys(a, step.type, set(), _CANONICAL, path, errors)
+        step.arguments = a
+
+    def _normalize_approval_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Friendly Approval.
+
+        The editor hardcodes `collection: approvals` (bundle line 37501) and
+        builds an `approvals` record under `resource` (assignedTo / owners /
+        userOwners / approvaldescription / status). We fill the collection and
+        pass the author's `resource` / `response_mapping` / `timeout` through.
+        Legacy `approvers` is accepted but not synthesized (the editor migrates
+        it into `resource.assignedTo`/`owners` on save).
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        _CANONICAL = {
+            "collection", "resource", "response_mapping", "timeout",
+            "step_variables", "approvers",
+        }
+        if self._check_unknown_keys(
+            a, step.type, set(), _CANONICAL, path, errors,
+        ):
+            return
+        a.setdefault("collection", "approvals")
+        a.setdefault("resource", {})
+        step.arguments = a
 
     def _expand_input_variables(
         self, raw: Any, path: str, errors: list[CompileError],

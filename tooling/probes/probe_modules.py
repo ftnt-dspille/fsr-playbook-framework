@@ -43,6 +43,7 @@ PICKLISTS_URL = (
     "?$export=false&$limit=2147483647&$orderby=name&$relationships=true"
 )
 TAGS_URL = "/api/3/tags?$limit=2147483647&$orderby=name"
+TEAMS_URL = "/api/3/teams?$limit=2147483647&$orderby=name"
 
 
 def _scalarize(v: Any) -> Any:
@@ -237,6 +238,37 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     except Exception as e:  # noqa: BLE001
         errors.append(f"tags: {e!r}")
 
+    # Owner teams — populate the `teams` table so the resolver can map
+    # playbook `owners:` friendly names to /api/3/teams/<uuid> IRIs.
+    try:
+        teams_resp = client.session.get(
+            client.base_url + TEAMS_URL,
+            verify=client.verify_ssl,
+        )
+        teams_resp.raise_for_status()
+        tr = teams_resp.json()
+        team_rows: list[tuple[str, str]] = []
+        for m in tr.get("hydra:member") or []:
+            if not isinstance(m, dict):
+                continue
+            name = m.get("name")
+            iri = m.get("@id")
+            if name and iri:
+                team_rows.append((str(name), str(iri)))
+        conn.execute("DELETE FROM teams")
+        conn.executemany(
+            "INSERT OR REPLACE INTO teams (name, iri) VALUES (?, ?)",
+            team_rows,
+        )
+        record_verification(
+            conn, kind="api_endpoint",
+            key="GET /api/3/teams",
+            method="live_api_get", status="tested_pass",
+            notes=f"teams={len(team_rows)}",
+        )
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"teams: {e!r}")
+
     metadata_etag = None
     try:
         metadata_resp = client.session.get(
@@ -410,6 +442,14 @@ def main() -> int:
         )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tags ("
+            "  name TEXT PRIMARY KEY,"
+            "  iri  TEXT NOT NULL)"
+        )
+        # Owner teams — drives compile-time resolution of playbook `owners:`
+        # team names to /api/3/teams/<uuid> IRIs (so a private playbook can
+        # be authored by team name, not raw UUID).
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS teams ("
             "  name TEXT PRIMARY KEY,"
             "  iri  TEXT NOT NULL)"
         )
