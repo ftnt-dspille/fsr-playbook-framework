@@ -167,3 +167,59 @@ def test_to_dict_carries_type_decisions():
     res = walk_playbook(coll, param_type_fn=_ptf("ipv4"))
     d = res.to_dict()
     assert "type_decisions" in d["branches"][0]
+
+
+# ---- #3: LITERAL param values are owned by the RESOLVER, not the walker ----
+# The resolver's Tier-1/2.3 passes (connector_args.py) validate literal param
+# values against the widget type at *compile* time — more precisely than the
+# walker could (it models the real int()/float() coercion: `[1,2,3]`/`{a:1}`/
+# `"abc"`/`true`/`5.5` into an integer param all error as `bad_value`, while
+# `"007"`/`"123"` pass). These tests pin that the resolver owns literal #3 so a
+# future walker refactor doesn't wrongly try to re-add it.
+
+import pytest
+
+
+def _lit_compile_codes(value):
+    from fsr_playbooks.compiler import compile_yaml
+    from fsr_playbooks._db import default_db_path
+    yaml_text = f"""
+collection: P
+playbooks:
+  - name: P1
+    steps:
+      - name: start
+        type: start
+        next: S
+      - name: S
+        type: connector
+        arguments:
+          connector: nist-nvd
+          operation: cve_search
+          config: ""
+          params:
+            resultsPerPage: {value}
+"""
+    res = compile_yaml(yaml_text, str(default_db_path()))
+    codes = [e.code.value for e in (res.errors or [])]
+    # The slim CI DB lacks nist-nvd; the widget-type pass can't run, so these
+    # literal checks are only meaningful against the warmed reference DB.
+    if "unknown_connector" in codes or "unknown_operation" in codes:
+        pytest.skip("nist-nvd cve_search not in this DB (slim/offline)")
+    return codes
+
+
+def test_resolver_flags_literal_list_into_int():
+    assert "bad_value" in _lit_compile_codes("[1, 2, 3]")
+
+
+def test_resolver_flags_literal_dict_into_int():
+    assert "bad_value" in _lit_compile_codes("{a: 1}")
+
+
+def test_resolver_flags_noncoercible_string_into_int():
+    assert "bad_value" in _lit_compile_codes('"abc"')
+
+
+def test_resolver_allows_coercible_string_into_int():
+    assert "bad_value" not in _lit_compile_codes('"123"')

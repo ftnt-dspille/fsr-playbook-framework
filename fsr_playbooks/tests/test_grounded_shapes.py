@@ -260,3 +260,74 @@ def test_async_workflow_reference_does_not_expose_child_vars():
     # the child's vars are not available from a fire-and-forget call.
     assert any(d.code == "missing_field_on_step_output"
                for b in res.branches for d in b.diagnostics)
+
+
+# --------------------------------------------------------------------------- #
+# for_each output is a LIST of per-iteration results (live-grounded on .205: a
+# looped code_snippet yields `[{data:{code_output:…},status,…}, …]`, and a bare
+# `.data` on it resolves to "" at runtime). The walker models the loop step's
+# output as list-of(per-iteration shape) and hard-errors a bare `.attr` read.
+# --------------------------------------------------------------------------- #
+
+_FOR_EACH_YAML = """
+collection: C
+playbooks:
+  - name: P
+    steps:
+      - name: start
+        type: start
+        next: Build list
+      - name: Build list
+        type: set_variable
+        next: Loop snippet
+        vars:
+          nums: [1, 2, 3]
+      - name: Loop snippet
+        type: code_snippet
+        next: Read
+        for_each:
+          item: "{{ vars.steps.Build_list.nums }}"
+          parallel: false
+        arguments:
+          code: |
+            print({'doubled': 1})
+      - name: Read
+        type: set_variable
+        vars:
+          seen: "READ_PLACEHOLDER"
+"""
+
+
+def _for_each_diags(read_expr: str):
+    from fsr_playbooks.compiler.parser import parse_yaml
+    from fsr_playbooks.compiler.typed_walker import walk_playbook
+    snip = shape_from_value({
+        "data": {"code_output": {"doubled": 2}}, "status": "Success",
+        "message": "", "operation": None})
+    store = GroundedShapeStore({"code-snippet:python_inline_code_editor": snip})
+    y = _FOR_EACH_YAML.replace("READ_PLACEHOLDER", read_expr)
+    coll, _ = parse_yaml(y)
+    res = walk_playbook(coll, None, probe=grounded_probe(store))
+    return [d for b in res.branches for d in b.diagnostics]
+
+
+def test_for_each_bare_attr_on_loop_step_is_hard_error():
+    hits = [d for d in _for_each_diags("{{ vars.steps.Loop_snippet.data }}")
+            if d.code == "missing_field_on_step_output"]
+    assert hits and "for_each loop" in hits[0].message
+
+
+def test_for_each_indexed_iteration_access_is_clean():
+    # Indexing an iteration first (`[0].data`) is the correct access — the list
+    # element is the per-iteration envelope, so `.data` resolves on the object.
+    hits = [d for d in _for_each_diags(
+        "{{ vars.steps.Loop_snippet[0].data }}")
+        if d.code in ("missing_field_on_step_output", "non_list_indexed")]
+    assert hits == []
+
+
+def test_for_each_whole_list_read_is_clean():
+    # Reading the whole list (no attr access) is fine — e.g. to pass to a filter.
+    hits = [d for d in _for_each_diags("{{ vars.steps.Loop_snippet }}")
+            if d.code == "missing_field_on_step_output"]
+    assert hits == []

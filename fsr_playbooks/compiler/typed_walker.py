@@ -534,6 +534,24 @@ def _synth_step_shape(
     wf_ref_shapes: dict[str, Shape] | None = None,
 ) -> Shape:
     """Return the *output* shape for one step, ignoring branching."""
+    # A `for_each` step runs its body once per element and FSR collects the
+    # per-iteration results into a LIST — `vars.steps.<loop step>` is a list of
+    # the normal per-iteration envelopes, NOT a bare envelope (live-grounded:
+    # run on .205 — a looped code_snippet yields
+    # `[{data:{code_output:…},status,…}, …]`, and reading `.data` on it
+    # resolves to "" at runtime). Compute the per-iteration shape with
+    # for_each cleared, then wrap. `__bulk` loops (IngestBulkFeed) aggregate
+    # differently and aren't grounded, so leave those to the base shape.
+    fe = getattr(step, "for_each", None)
+    if (isinstance(fe, dict) and fe.get("item")
+            and fe.get("__bulk") not in (True, "true")):
+        import dataclasses
+        inner = _synth_step_shape(
+            dataclasses.replace(step, for_each=None),
+            probe=probe, module_fields_fn=module_fields_fn,
+            op_safety_fn=op_safety_fn, wf_ref_shapes=wf_ref_shapes)
+        return _shape_list(inner)
+
     t = step.type
     if t in {"decision", "delay", "stop", "end"}:
         return _shape_none()
@@ -971,6 +989,32 @@ def _validate_branch_jinja(
                             step=s.id, branch=branch_name,
                             path=f"arguments.{sub}",
                         ))
+                    elif (shape and shape.get("kind") == "unknown"
+                          and shape.get("reason") == "attr access on list"
+                          and isinstance(getattr(
+                              jinja_key_lookup.get(key), "for_each", None),
+                              dict)):
+                        # The producer is a `for_each` step → its output is a
+                        # LIST (one envelope per iteration, live-grounded). A
+                        # bare `.attr` on it resolves to "" at runtime, so this
+                        # is a confident bug, not a soft unknown. Tell the
+                        # author to index an iteration or aggregate the list.
+                        bad_attr = (rest.lstrip(".").split(".", 1)[0]
+                                    .split("[", 1)[0] if rest.startswith(".")
+                                    else rest)
+                        diags.append(Diagnostic(
+                            code="missing_field_on_step_output",
+                            message=(
+                                f"vars.steps.{key}{rest} in step {s.id!r}: "
+                                f"{key!r} is a for_each loop, so its output is "
+                                f"a LIST of per-iteration results — `.{bad_attr}`"
+                                f" on the list resolves to empty at runtime. "
+                                f"Index an iteration "
+                                f"(`vars.steps.{key}[0]{rest}`) or map over the "
+                                f"list with a Jinja filter."),
+                            step=s.id, branch=branch_name,
+                            path=f"arguments.{sub}",
+                        ))
                     elif shape and shape.get("kind") == "unknown":
                         diags.append(Diagnostic(
                             code="unknown_shape_downstream_reference",
@@ -1085,6 +1129,12 @@ def _check_connector_param_types(
     for p_name, p_val in params.items():
         ref = _pure_single_ref(p_val)
         if ref is None:
+            # A literal value (not a reference) is validated against the param
+            # widget type by the resolver's Tier-1/2.3 passes
+            # (connector_args.py) at *compile* time — more precisely than this
+            # walker could (it models the actual `int()`/`float()` coercion,
+            # e.g. flags `"abc"`→int but allows `"007"`). Compile errors
+            # short-circuit before the walk, so there's nothing to add here.
             continue
         kind, key, rest = ref
         if kind == "step":
