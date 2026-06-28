@@ -455,10 +455,11 @@ def _clean_step_arguments(args: dict[str, Any]) -> None:
 
     1. Empty-field deletion (line 34487): drop `when`, `mock_result`, `do_until`
        (empty condition), `message` (empty content), `for_each` (empty item).
-    2. for_each loop-mode normalization (lines 11581/11599 + connector rule at 31):
-       `__bulk` and `parallel` are mutually exclusive; bulk defaults batch_size to
-       100; non-bulk modes carry no batch_size; `break_loop` is incompatible with
-       async/agent execution.
+    2. for_each `break_loop` is incompatible with async/agent execution and is
+       dropped. NOTE: loop-mode *defaulting* (bulk `batch_size`, `parallel`/
+       `batch_size` pruning) is NOT done here — it lives in the authoring parser
+       so the emitter stays a faithful serializer and decompiled for_each shapes
+       round-trip byte-for-byte (the corpus carries inconsistent bulk shapes).
 
     Mutates `args` in place.
     """
@@ -471,24 +472,28 @@ def _clean_step_arguments(args: dict[str, Any]) -> None:
     if isinstance(du, dict) and _is_blank(du.get("condition")):
         args.pop("do_until", None)
     msg = args.get("message")
-    if isinstance(msg, dict) and _is_blank(msg.get("content")):
+    if (isinstance(msg, dict) and _is_blank(msg.get("content"))
+            and _is_blank(msg.get("records"))):
+        # The editor drops a message only when it carries no user payload.
+        # A blank `content` with a non-blank `records` (related-record links)
+        # is kept on the wire (corpus-grounded), so guard on records too.
         args.pop("message", None)
     fe = args.get("for_each")
     if isinstance(fe, dict) and _is_blank(fe.get("item")):
         args.pop("for_each", None)
         fe = None
 
-    # 2. for_each loop-mode normalization.
+    # 2. for_each: only the cross-argument compatibility guard lives here.
+    # Loop-mode defaulting (bulk batch_size, parallel/batch_size pruning) is
+    # applied in the authoring parser, NOT here — the emitter stays a faithful
+    # serializer so a decompiled for_each round-trips byte-for-byte. The corpus
+    # carries inconsistent bulk shapes that no emit-time normalization could
+    # reproduce (some bulk loops omit batch_size, some keep parallel).
     if isinstance(fe, dict):
         # break_loop requires sync loop-state tracking, incompatible with
         # fire-and-forget async or agent-routed execution.
         if args.get("apply_async") is True or args.get("agent"):
             fe.pop("break_loop", None)
-        if fe.get("__bulk"):
-            fe.pop("parallel", None)          # mutually exclusive with __bulk
-            fe.setdefault("batch_size", 100)  # editor default when bulk
-        else:
-            fe.pop("batch_size", None)        # batch_size is a bulk-only key
 
 
 def _emit_step(s: Step, step_uuid: str, top: int, left: int,

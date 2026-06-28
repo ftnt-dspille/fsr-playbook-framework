@@ -733,6 +733,21 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                                 for_each["concurrency"] = True
                                 for_each["concurrencyCount"] = cap
 
+            # Loop-mode defaulting (authoring path only). The editor injects
+            # these when you build a loop in the UI, so the friendly authoring
+            # surface must produce the same wire shape. The shared emitter is a
+            # faithful serializer and no longer normalizes for_each, so that a
+            # decompiled (already-canonical) for_each round-trips byte-for-byte
+            # — the corpus carries inconsistent bulk shapes (some bulk loops
+            # have no batch_size, some keep parallel) that no emit-time rule
+            # could reproduce. See `_clean_step_arguments` + the round-trip gate.
+            if isinstance(for_each, dict):
+                if for_each.get("__bulk"):
+                    for_each.pop("parallel", None)        # bulk implies sequential batches
+                    for_each.setdefault("batch_size", 100)  # editor default when bulk
+                else:
+                    for_each.pop("batch_size", None)      # batch_size is a bulk-only key
+
             steps.append(Step(
                 id=sid,
                 type=stype,

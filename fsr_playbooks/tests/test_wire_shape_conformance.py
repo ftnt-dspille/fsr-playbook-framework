@@ -66,26 +66,64 @@ def test_for_each_deleted_when_item_empty():
     assert "for_each" not in _clean({"for_each": {"item": "", "condition": "true"}})
 
 
+# for_each loop-mode defaulting moved from the emitter to the AUTHORING parser
+# (so the emitter stays a faithful serializer and decompiled for_each shapes
+# round-trip byte-for-byte — see the corpus round-trip gate). These compile a
+# minimal authored loop and assert the emitted for_each, which is the same wire
+# shape the editor produces.
+def _emit_authored_for_each(fe_body: str) -> dict:
+    yaml_text = (
+        "collection: c\n"
+        "playbooks:\n"
+        "  - name: P\n"
+        "    steps:\n"
+        "      - {name: Start, type: start}\n"
+        "      - name: Loop\n"
+        "        type: set_variable\n"
+        "        vars: {y: 1}\n"
+        "        for_each:\n" + fe_body
+    )
+    for name, _iri, args in _emitted_steps(yaml_text):
+        if name == "Loop":
+            return args.get("for_each", {})
+    raise AssertionError("Loop step was not emitted")
+
+
 def test_for_each_bulk_deletes_parallel_and_defaults_batch_size():
-    out = _clean({"for_each": {"item": "{{ vars.l }}", "__bulk": True, "parallel": False}})
-    fe = out["for_each"]
-    assert "parallel" not in fe          # mutually exclusive with __bulk
+    fe = _emit_authored_for_each(
+        "          item: '{{ vars.l }}'\n"
+        "          __bulk: true\n"
+        "          parallel: false\n"
+    )
+    assert "parallel" not in fe          # bulk implies sequential batches
     assert fe["batch_size"] == 100       # editor default
 
 
 def test_for_each_bulk_keeps_explicit_batch_size():
-    out = _clean({"for_each": {"item": "{{ vars.l }}", "__bulk": True, "batch_size": 25}})
-    assert out["for_each"]["batch_size"] == 25
+    fe = _emit_authored_for_each(
+        "          item: '{{ vars.l }}'\n"
+        "          __bulk: true\n"
+        "          batch_size: 25\n"
+    )
+    assert fe["batch_size"] == 25
 
 
 def test_for_each_sequential_drops_batch_size():
-    out = _clean({"for_each": {"item": "{{ vars.l }}", "parallel": False, "batch_size": 50}})
-    assert "batch_size" not in out["for_each"]
+    fe = _emit_authored_for_each(
+        "          item: '{{ vars.l }}'\n"
+        "          parallel: false\n"
+        "          batch_size: 50\n"
+    )
+    assert "batch_size" not in fe
 
 
 def test_for_each_parallel_drops_batch_size():
-    out = _clean({"for_each": {"item": "{{ vars.l }}", "parallel": True, "batch_size": 50}})
-    assert "batch_size" not in out["for_each"]
+    fe = _emit_authored_for_each(
+        "          item: '{{ vars.l }}'\n"
+        "          parallel: true\n"
+        "          batch_size: 50\n"
+    )
+    assert "batch_size" not in fe
 
 
 def test_break_loop_deleted_when_apply_async():
