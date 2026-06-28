@@ -1,7 +1,6 @@
 """NormalizerMixin — step argument normalization and step type dispatching."""
 from __future__ import annotations
 
-import json
 import sqlite3
 from typing import Any
 
@@ -30,6 +29,8 @@ from ..typed_args.steps import expand_delay as _expand_delay_typed
 from ..typed_args.steps import expand_code_snippet as _expand_code_snippet_typed
 # find_record scalar-field type validation (validation-only; Phase 2 model).
 from ..typed_args.steps import expand_find_record as _expand_find_record_typed
+# friendly delete_record -> canonical cyops_utilities DELETE expansion (Phase 2).
+from ..typed_args.steps import expand_delete_record as _expand_delete_record_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
 
@@ -375,72 +376,16 @@ class NormalizerMixin:
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
-
-        record = a.pop("record", None)
-        record_id = a.pop("record_id", None)
-        query = a.pop("query", None)
-        module_raw = a.pop("module", None) or a.pop("modules", None)
-        module = (self.resolve_module_name(
-            module_raw, f"{path}.arguments.module", errors)
-            if isinstance(module_raw, str) and module_raw else module_raw)
-        show_deleted = a.pop("show_deleted", None)
-
-        # Build the existing params (raw escape hatch wins if fully specified).
-        params = a.get("params") if isinstance(a.get("params"), dict) else {}
-        iri = params.get("iri")
-        body = params.get("body", "")
-
-        targets = [t for t in (record, record_id and module, query) if t]
-        if iri is None and len(targets) != 1:
-            errors.append(CompileError(
-                code=ErrorCode.MISSING_FIELD,
-                message=("delete_record needs exactly one target: `record:` (an "
-                         "IRI/@id), `module:`+`record_id:`, or `module:`+`query:`"),
-                path=f"{path}.arguments",
-            ))
-            return
-
-        if iri is None:
-            if record is not None:
-                iri = str(record)
-                if show_deleted:
-                    iri += ("&" if "?" in iri else "?") + "$showDeleted=true"
-            elif record_id is not None:
-                if not module:
-                    errors.append(CompileError(
-                        code=ErrorCode.MISSING_FIELD,
-                        message="delete_record with `record_id:` also needs `module:`",
-                        path=f"{path}.arguments.module",
-                    ))
-                    return
-                iri = f"/api/3/{module}/{record_id}"
-                if show_deleted:
-                    iri += "?$showDeleted=true"
-            else:  # query form
-                if not module:
-                    errors.append(CompileError(
-                        code=ErrorCode.MISSING_FIELD,
-                        message="delete_record with `query:` also needs `module:`",
-                        path=f"{path}.arguments.module",
-                    ))
-                    return
-                iri = f"/api/3/delete-with-query/{module}"
-                if show_deleted is not False:
-                    iri += "?$showDeleted=true"
-                if isinstance(query, (dict, list)):
-                    body = json.dumps(query)
-                elif query is not None:
-                    body = str(query)
-
-        params["iri"] = iri
-        params["method"] = params.get("method", "DELETE")
-        params["body"] = body
-        a["params"] = params
-        a.setdefault("connector", "cyops_utilities")
-        a.setdefault("operation", "make_cyops_request")
-        a.setdefault("operationTitle", "FSR: Make FortiSOAR API Call")
-        a.setdefault("config", "")
-        step.arguments = a
+        # Delegate the friendly→canonical transform to the typed-args layer
+        # (`typed_args.steps.expand_delete_record`), which owns the
+        # `DeleteRecordArgs` model. `resolve_module_name` is threaded in because
+        # module canonicalization needs the catalog. A ``None`` return means
+        # "leave unchanged" (not a dict, or a hard targeting error was appended).
+        new = _expand_delete_record_typed(
+            a, path, errors, self.resolve_module_name,
+        )
+        if new is not None:
+            step.arguments = new
 
     def _normalize_api_endpoint_args(
         self, step: Step, path: str, errors: list[CompileError],

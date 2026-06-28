@@ -20,6 +20,7 @@ from .decision import DecisionArgs, DecisionCondition, expand_decision
 from .delay import DelayArgs, expand_delay
 from .code_snippet import CodeSnippetArgs, expand_code_snippet
 from .find_record import FindRecordArgs, expand_find_record
+from .delete_record import DeleteRecordArgs, expand_delete_record
 
 # Step type → typed argument model. Grows incrementally through Phase 2.
 STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
@@ -28,6 +29,7 @@ STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     "delay": DelayArgs,
     "code_snippet": CodeSnippetArgs,
     "find_record": FindRecordArgs,
+    "delete_record": DeleteRecordArgs,
 }
 
 
@@ -51,4 +53,6 @@ __all__ = [
     "expand_code_snippet",
     "FindRecordArgs",
     "expand_find_record",
+    "DeleteRecordArgs",
+    "expand_delete_record",
 ]
