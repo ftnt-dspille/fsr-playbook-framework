@@ -28,6 +28,8 @@ from ..typed_args.steps import expand_decision as _expand_decision_typed
 from ..typed_args.steps import expand_delay as _expand_delay_typed
 # friendly code/config -> canonical CodeSnippet expansion (Phase 2 model).
 from ..typed_args.steps import expand_code_snippet as _expand_code_snippet_typed
+# find_record scalar-field type validation (validation-only; Phase 2 model).
+from ..typed_args.steps import expand_find_record as _expand_find_record_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
 
@@ -616,6 +618,12 @@ class NormalizerMixin:
         self._check_unknown_keys(
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         )
+        # Scalar-field type validation via the typed-args layer
+        # (`typed_args.steps.expand_find_record`), which owns the `FindRecordArgs`
+        # model (module:str, partial/checkboxFields:bool). Validation-only — it
+        # never mutates `a` (find_record has no friendly→canonical transform), so
+        # the `__selectFields` cleanup below and `step.arguments` are untouched.
+        _expand_find_record_typed(a, path, errors)
         # Editor rule (bundle line 34498): query.__selectFields only persists
         # when checkboxFields is truthy; otherwise the editor deletes it before
         # POST so a stale field projection doesn't ship.
