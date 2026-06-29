@@ -29,8 +29,9 @@ DB_PATH = _shared.DB_PATH
 def get_step_arg_schema(step_type: str) -> dict[str, Any]:
     """JSON Schema for a step type's `arguments`, for pre-compile validation.
 
-    Returns `{step_type, json_schema}` when the type is modeled (today:
-    set_variable, decision — coverage grows over time), else
+    Returns `{step_type, json_schema}` when the type is modeled (coverage grows
+    over time as Phase 2 lands more step models; the live set is always returned
+    in `modeled_types`), else
     `{step_type, json_schema: null, modeled: false, note, modeled_types}` so the
     caller can tell "not modeled yet" from an empty schema and discover what IS
     available.

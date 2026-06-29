@@ -32,6 +32,8 @@ from typing import Any
 from jinja2 import Environment, nodes
 from jinja2.exceptions import TemplateSyntaxError
 
+from fsr_playbooks.compiler.errors import CompileError, ErrorCode
+
 _ENV = Environment(autoescape=False)
 
 _DATA_PATH = os.path.join(
@@ -139,4 +141,37 @@ def _check_filter_names(ast: nodes.Node, step_id: str, path: str,
                            else f"check the {kind} name against the FSR catalog"),
             "severity": "warning",
         })
+    return out
+
+
+# Code string → ErrorCode member. ``check_jinja`` emits the two codes below;
+# the fallback keeps the bridge forward-compatible if a new code is added.
+_CODE_TO_ENUM = {
+    "jinja_syntax_error": ErrorCode.JINJA_SYNTAX_ERROR,
+    "unknown_jinja_filter": ErrorCode.UNKNOWN_JINJA_FILTER,
+}
+
+
+def to_compile_errors(findings: list[dict[str, Any]]) -> list[CompileError]:
+    """Convert ``check_jinja`` dict findings into ``CompileError`` objects.
+
+    ``check_jinja`` returns the per-step-schema finding shape (plain dicts);
+    the compile path works in ``CompileError`` objects. This bridges the two,
+    mapping each code string to its ``ErrorCode`` member and reconstructing the
+    precise dotted ``path`` — ``<step_path>.<location>`` (e.g.
+    ``playbooks[0].steps[3].arguments.params.code``) — so the diagnostic points
+    at the exact argument, matching the location precision the old brace-count
+    check emitted.
+    """
+    out: list[CompileError] = []
+    for f in findings:
+        loc = f.get("location", "")
+        path = f"{f['path']}.{loc}" if loc else f.get("path", "")
+        out.append(CompileError(
+            code=_CODE_TO_ENUM.get(f["code"], ErrorCode.BAD_VALUE),
+            message=f["message"],
+            path=path,
+            suggestion=f.get("suggestion"),
+            severity=f.get("severity", "error"),
+        ))
     return out

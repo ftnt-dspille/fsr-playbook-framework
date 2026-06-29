@@ -31,6 +31,10 @@ from ..typed_args.steps import expand_code_snippet as _expand_code_snippet_typed
 from ..typed_args.steps import expand_find_record as _expand_find_record_typed
 # friendly delete_record -> canonical cyops_utilities DELETE expansion (Phase 2).
 from ..typed_args.steps import expand_delete_record as _expand_delete_record_typed
+# friendly module -> canonical collection IRI for record-write steps (Phase 2).
+from ..typed_args.steps import expand_record_crud as _expand_record_crud_typed
+# scalar-flag validation for the record-action trigger (start + module) (Phase 2).
+from ..typed_args.steps import expand_record_action as _expand_record_action_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
 
@@ -197,6 +201,13 @@ class NormalizerMixin:
         """
         import uuid as _uuidmod
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Scalar-flag type validation via the typed-args layer
+        # (`typed_args.steps.expand_record_action`, model `RecordActionArgs`).
+        # Validation-only — it never mutates `a`; the canonical transform below
+        # (route uuid5, displayConditions, the noRecordExecution/
+        # singleRecordExecution flag pair) stays here. Catches a mistyped
+        # `run_mode`/`requires_record` that would otherwise silently mis-route.
+        _expand_record_action_typed(a, path, errors)
         # Trigger Button Label — separate from step.name. Empty means
         # FSR will show the playbook name in the Execute menu.
         button_label = a.pop("button_label", None) or a.pop("title", None) or ""
@@ -526,15 +537,17 @@ class NormalizerMixin:
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
-        module = a.pop("module", None)
-        if module and isinstance(module, str):
-            module = self.resolve_module_name(
-                module, f"{path}.arguments.module", errors)
-            iri = f"/api/3/{module}" if not module.startswith("/api/") else module
-            if step.type in ("create_record", "insert_record"):
-                a.setdefault("collection", iri)
-            elif step.type == "update_record":
-                a.setdefault("collectionType", iri)
+        # Delegate the friendly module->IRI transform to the typed-args layer
+        # (`typed_args.steps.expand_record_crud`), which owns `RecordCrudArgs`.
+        # `resolve_module_name` is threaded in because module canonicalization
+        # needs the catalog. A ``None`` return means "leave unchanged" (input
+        # wasn't a dict). The picklist-token rewrite below stays in the resolver
+        # (catalog-bound), running on the rewritten arguments.
+        new = _expand_record_crud_typed(
+            a, step.type, path, errors, self.resolve_module_name,
+        )
+        if new is not None:
+            a = new
         step.arguments = a
 
         # Friendly picklist tokens → IRIs. If the resource payload sets a

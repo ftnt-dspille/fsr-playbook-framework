@@ -13,6 +13,7 @@ import sqlite3
 from .._db import default_db_path
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Playbook, Step
+from .jinja_checks import check_jinja, to_compile_errors
 
 _DB_PATH = default_db_path()
 
@@ -336,35 +337,28 @@ def _check_jinja_paths(pb: Playbook, pi: int,
                     ))
 
 
-def _check_malformed_jinja(pb: Playbook, pi: int,
+def _check_jinja_templates(pb: Playbook, pi: int,
                            errors: list[CompileError]) -> None:
-    """Catch syntactically broken Jinja delimiters — an unclosed `{{` (or a
-    stray `}}`, `{%`/`%}` mismatch). These compile clean today (the
-    `{{ ... }}` extractor simply doesn't match an unterminated expression),
-    so the only signal is a runtime template error. A delimiter-balance scan
-    has effectively no false positives on playbook args (literal `}}` inside
-    a value is vanishingly rare) and turns that runtime failure into an
-    authoring-time error."""
-    path = f"playbooks[{pi}]"
+    """Parse every Jinja template in each step's arguments with the real
+    jinja2 engine — the same parser FortiSOAR renders through at runtime —
+    and surface ``jinja_syntax_error`` (blocks) when a template won't parse,
+    plus an ``unknown_jinja_filter`` warning when a filter/test name isn't in
+    the known (built-in union FortiSOAR custom) catalog.
+
+    This replaces a naive ``{{``/``}}`` substring-balance scan, which
+    false-positived on code steps: a Python nested-dict close
+    (``{"text": "x"}}``) produces an adjacent ``}}`` the count mistook for a
+    Jinja delimiter. The parse has zero false positives — jinja2 only treats
+    ``{{``/``{%``/``{#`` as block opens, so a standalone stray ``}}`` is plain
+    literal text — and is a strict superset of the balance scan (an unclosed
+    ``{{`` or ``{%``/``%}`` mismatch both fail to parse). See
+    ``jinja_checks.check_jinja`` / ``to_compile_errors``.
+    """
     for si, s in enumerate(pb.steps):
-        for sub, val in _walk_strings(s.arguments):
-            for open_tok, close_tok, label in (
-                ("{{", "}}", "expression"), ("{%", "%}", "statement")):
-                n_open = val.count(open_tok)
-                n_close = val.count(close_tok)
-                if n_open == n_close:
-                    continue
-                errors.append(CompileError(
-                    code=ErrorCode.BAD_VALUE,
-                    message=(f"malformed Jinja {label} in step {s.id!r}: "
-                             f"{n_open} {open_tok!r} but {n_close} "
-                             f"{close_tok!r} — the template is unbalanced and "
-                             f"will fail at runtime"),
-                    path=f"{path}.steps[{si}].arguments.{sub}",
-                    suggestion=(f"close every {open_tok} with a matching "
-                                f"{close_tok}"),
-                    severity="error",
-                ))
+        findings = check_jinja(
+            s.arguments, step_id=s.id,
+            path=f"playbooks[{pi}].steps[{si}]")
+        errors.extend(to_compile_errors(findings))
 
 
 # `vars.<name>` top-level reference. Captures the first segment only.
@@ -765,7 +759,7 @@ def validate(collection: Collection) -> list[CompileError]:
         _check_graph(pb, pi, errors)
         _check_reserved_names(pb, pi, errors)
         _check_jinja_paths(pb, pi, errors)
-        _check_malformed_jinja(pb, pi, errors)
+        _check_jinja_templates(pb, pi, errors)
         _check_undefined_vars(pb, pi, errors)
 
         # Step names must be unique within a playbook. FSR's Jinja runtime

@@ -32,7 +32,6 @@ from fsr_playbooks.compiler.record_op_checks import (
     check_required_record_fields,
     check_unknown_record_fields,
 )
-from fsr_playbooks.compiler.jinja_checks import check_jinja
 
 
 # ---------------------------------------------------------------------------
@@ -437,9 +436,9 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
             t = s.type
             a = s.arguments
 
-            # Jinja syntax + unknown-filter checks apply to every step's
-            # arguments tree, regardless of step type.
-            fixes.extend(check_jinja(a, step_id=s.id, path=spath))
+            # Jinja syntax + unknown-filter checks run in the compile stage
+            # (validator._check_jinja_templates -> check_jinja) and are surfaced
+            # here as compile findings, so they are not re-run per step.
 
             if t in {"connector", "connector_op"}:
                 connector = a.get("connector") or a.get("connector_name")
@@ -612,7 +611,8 @@ def verify_playbook(
       - unknown_connector_config        (live_probe only — config: name unknown)
       - branch_target_missing
       - workflow_reference_unresolvable (error severity only)
-      - jinja_syntax_error              (un-parseable Jinja template)
+      - jinja_syntax_error              (un-parseable Jinja template; emitted
+                                         by the compile stage)
 
     Warning codes (do not block):
       - unknown_jinja_filter            (filter/test name outside the FSR catalog)
@@ -673,6 +673,13 @@ def verify_playbook(
         return result
     checks_run.append({"name": "compile", "ok": True,
                        "summary": "compile clean"})
+    # Compile may have succeeded with non-blocking warnings (e.g. an unknown
+    # Jinja filter name). These were previously dropped on the success path
+    # because the per-step check_jinja re-run masked them; now that Jinja
+    # checking lives in the compile stage, surface them here so they reach the
+    # caller's `warnings`.
+    for w in cres.warnings:
+        warnings.append(w.to_dict())
 
     # 2. Two IR views:
     #  - `walk_coll` = the *resolved* IR (`cres.ir`): the resolver mutates

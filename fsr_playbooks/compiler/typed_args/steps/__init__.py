@@ -21,8 +21,17 @@ from .delay import DelayArgs, expand_delay
 from .code_snippet import CodeSnippetArgs, expand_code_snippet
 from .find_record import FindRecordArgs, expand_find_record
 from .delete_record import DeleteRecordArgs, expand_delete_record
+from .record_crud import RecordCrudArgs, expand_record_crud
+from .record_action import RecordActionArgs, expand_record_action
 
 # Step type → typed argument model. Grows incrementally through Phase 2.
+#
+# Keys are FSR-friendly step types. `record_action` is the one entry that is not
+# a distinct *authoring* type — it is authored as `type: start` with a `module:`
+# (the manual record-action trigger; see `validator.py` TRIGGER_TYPES and the
+# `cybersponse.action` mapping). It is keyed here so its schema is discoverable
+# via `get_step_arg_schema("record_action")`; the resolver wires its validation
+# into the `start`+`module` normalizer, not by a type-map lookup.
 STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     "set_variable": SetVariableArgs,
     "decision": DecisionArgs,
@@ -30,6 +39,10 @@ STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     "code_snippet": CodeSnippetArgs,
     "find_record": FindRecordArgs,
     "delete_record": DeleteRecordArgs,
+    "create_record": RecordCrudArgs,
+    "insert_record": RecordCrudArgs,
+    "update_record": RecordCrudArgs,
+    "record_action": RecordActionArgs,
 }
 
 
@@ -55,4 +68,8 @@ __all__ = [
     "expand_find_record",
     "DeleteRecordArgs",
     "expand_delete_record",
+    "RecordCrudArgs",
+    "expand_record_crud",
+    "RecordActionArgs",
+    "expand_record_action",
 ]

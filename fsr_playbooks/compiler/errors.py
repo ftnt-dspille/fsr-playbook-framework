@@ -22,6 +22,11 @@ class ErrorCode(str, Enum):
     DUPLICATE_STEP_ID = "duplicate_step_id"
     NO_TRIGGER = "no_trigger"
     BAD_VALUE = "bad_value"
+    # Jinja diagnostics — emitted by the compile-path jinja check (the real
+    # jinja2 parser, via jinja_checks.check_jinja). Syntax errors block; an
+    # unknown filter/test name is a warning (the catalog is a curated subset).
+    JINJA_SYNTAX_ERROR = "jinja_syntax_error"
+    UNKNOWN_JINJA_FILTER = "unknown_jinja_filter"
     INSTANCE_MISMATCH = "instance_mismatch"  # catalog warmed from a different SOAR
     STALE_CATALOG = "stale_catalog"          # catalog is behind the live SOAR
     INTERNAL = "internal"                    # tooling/install fault, not the YAML

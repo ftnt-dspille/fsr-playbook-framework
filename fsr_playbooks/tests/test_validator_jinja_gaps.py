@@ -69,19 +69,73 @@ playbooks:
 
 def test_unclosed_expression_is_error():
     errs = _errs(_UNCLOSED_EXPR)
-    hits = [e for e in errs if "malformed Jinja expression" in e.message]
+    hits = [e for e in errs if e.code.value == "jinja_syntax_error"]
     assert hits and all(e.severity == "error" for e in hits)
 
 
 def test_statement_delimiter_mismatch_is_error():
     errs = _errs(_STMT_MISMATCH)
-    assert any("malformed Jinja statement" in e.message
+    assert any(e.code.value == "jinja_syntax_error"
                and e.severity == "error" for e in errs)
 
 
 def test_balanced_jinja_is_clean():
     errs = _errs(_BALANCED)
-    assert not [e for e in errs if "malformed Jinja" in e.message]
+    assert not [e for e in errs if e.code.value == "jinja_syntax_error"]
+
+
+# A code-step body that injects two real Jinja refs AND builds a Python
+# nested-dict literal whose adjacent `}}` the old brace-count mistook for Jinja
+# (the archetype_pilot_reconcile_and_report false positive). The real parser
+# treats the stray `}}` as literal text, so this must compile clean.
+_CODE_STEP_DICT_BRACES = '''
+collection: t
+playbooks:
+  - name: g
+    steps:
+      - name: Start
+        type: start
+        next: Set
+      - name: Set
+        type: set_variable
+        vars:
+          code: |
+            fc = {{ vars.steps.Start.data.x }}
+            sn = {{ vars.steps.Start.data.y }}
+            blocks = [{"type": "header", "text": {"type": "plain_text", "text": "CMDB Reconciliation"}}]
+            return blocks
+'''
+
+
+def test_code_step_dict_braces_not_flagged():
+    errs = _errs(_CODE_STEP_DICT_BRACES)
+    jinja = [e for e in errs if e.code.value == "jinja_syntax_error"]
+    bad = [e for e in errs if e.code.value == "bad_value"
+           and "Jinja" in e.message]
+    assert not jinja, [e.message for e in jinja]
+    assert not bad, [e.message for e in bad]
+
+
+# An unknown filter name on a compiling playbook -> warning, never a block.
+_UNKNOWN_FILTER = '''
+collection: t
+playbooks:
+  - name: g
+    steps:
+      - name: Start
+        type: start
+        next: Set
+      - name: Set
+        type: set_variable
+        vars: {foo: "{{ vars.bar | defualt('x') }}", bar: "ok"}
+'''
+
+
+def test_unknown_filter_is_warning_not_blocking():
+    errs = _errs(_UNKNOWN_FILTER)
+    hits = [e for e in errs if e.code.value == "unknown_jinja_filter"]
+    assert hits and all(e.severity == "warning" for e in hits)
+    assert not [e for e in errs if e.severity == "error"]
 
 
 # ---- #2 undefined vars.<name> ---------------------------------------------
