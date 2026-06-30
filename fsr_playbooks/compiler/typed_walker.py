@@ -338,11 +338,21 @@ def _module_record_shape(
 
 def _synth_manual_input_shape(step: Step) -> Shape:
     """`manual_input` exposes the collected inputs at
-    `vars.steps.<step>.input.<name>`."""
-    iv = step.arguments.get("inputVariables") or []
-    # Friendly form may stash as `inputs:`.
-    if not iv:
-        iv = step.arguments.get("inputs") or []
+    `vars.steps.<step>.input.<name>`.
+
+    Read the canonical resolved location first
+    (`arguments.input.schema.inputVariables`) — by the time the reference lint
+    runs, the resolver has moved the declared fields there and popped the
+    friendly `inputs:`/top-level `inputVariables`. Falling through to those
+    keeps any pre-resolve caller working. With this populated, a downstream read
+    of an *undeclared* `input.<x>` is caught as missing_field_on_step_output; a
+    prompt that declares nothing yields an empty (open) object, so button-only
+    reads degrade to a warning rather than a false error."""
+    args = step.arguments or {}
+    iv = (((args.get("input") or {}).get("schema") or {}).get("inputVariables")
+          or args.get("inputVariables")
+          or args.get("inputs")
+          or [])
     keys: dict[str, Shape] = {}
     for entry in iv:
         if not isinstance(entry, dict):
@@ -724,9 +734,17 @@ def _branch_label(pb: Playbook, ids: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 def _resolve_path(env_key: str, attr_chain: str,
-                  typed_env: dict[str, Shape]) -> tuple[Shape | None, str]:
+                  typed_env: dict[str, Shape],
+                  fail_info: dict[str, Any] | None = None,
+                  ) -> tuple[Shape | None, str]:
     """Walk `attr_chain` against `typed_env[env_key]`. Return (final_shape
-    or None, error-code or '' if ok)."""
+    or None, error-code or '' if ok).
+
+    When the walk fails on a missing object key, the *actual* failing segment
+    can be deeper than the first attribute (e.g. `input.<undeclared>` fails on
+    the second hop, not on `input`). Pass a mutable `fail_info` dict to capture
+    `{"bad_attr", "valid"}` at the point of failure so callers can report the
+    right field instead of guessing the first segment."""
     cur = typed_env.get(env_key)
     if cur is None:
         return None, "unreachable_step_reference"
@@ -761,6 +779,9 @@ def _resolve_path(env_key: str, attr_chain: str,
                     if not keys:
                         # Empty/unknown object: degrade to warning, not error.
                         return _shape_unknown("no known keys"), ""
+                    if fail_info is not None:
+                        fail_info["bad_attr"] = val
+                        fail_info["valid"] = sorted(keys.keys())
                     return None, "missing_field_on_step_output"
                 cur = keys[val]
             elif cur.get("kind") == "list":
@@ -897,16 +918,22 @@ def _validate_branch_jinja(
                                 path=f"arguments.{sub}",
                             ))
                         continue
-                    shape, err = _resolve_path(key, rest, typed_env)
+                    fail_info: dict[str, Any] = {}
+                    shape, err = _resolve_path(key, rest, typed_env, fail_info)
                     if err == "missing_field_on_step_output":
                         target = jinja_key_lookup.get(key)
-                        valid = (sorted((typed_env[key].get("keys") or {}).keys())
-                                 if typed_env[key].get("kind") == "object" else [])
-                        # The first `.<attr>` after the step key is the
-                        # missing field. Find it so we can suggest a
-                        # close match instead of just listing valid keys.
-                        bad_attr = ""
-                        if rest.startswith("."):
+                        # Prefer the actual failing segment + its container's
+                        # keys (captured by `_resolve_path`); the failure can be
+                        # deeper than the first attribute (e.g.
+                        # `input.<undeclared>` fails on the second hop). Fall
+                        # back to the first-attr heuristic + top-level keys when
+                        # no fail_info was captured.
+                        bad_attr = fail_info.get("bad_attr") or ""
+                        valid = fail_info.get("valid")
+                        if valid is None:
+                            valid = (sorted((typed_env[key].get("keys") or {}).keys())
+                                     if typed_env[key].get("kind") == "object" else [])
+                        if not bad_attr and rest.startswith("."):
                             bad_attr = rest.lstrip(".").split(".", 1)[0].split("[", 1)[0]
                         # Case-insensitive exact match → typo; else
                         # difflib top-3 for fuzzy "did you mean".

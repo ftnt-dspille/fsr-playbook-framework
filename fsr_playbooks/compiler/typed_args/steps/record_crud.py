@@ -40,12 +40,17 @@ class RecordCrudArgs(StrictArgs):
     """Typed view of a record-write step's arguments.
 
     `module` is the target module type name (a string, or a Jinja string that
-    renders to one). `is_upsert` toggles InsertData's upsert mode (pydantic
-    coerces the usual ``true``/``1``/``"true"`` forms). `resource` (the record
-    payload) and the canonical IRI keys ride through via ``extra="allow"`` — the
-    resolver's `_check_unknown_keys` has already rejected anything genuinely
-    unknown, and `_resolve_picklist_friendly_tokens` rewrites payload labels
-    after this walk.
+    renders to one). `is_upsert` toggles upsert mode for create/insert: it is
+    compiled away (never reaches the wire) and routes the step at
+    ``/api/3/upsert/<module>`` with ``operation: Overwrite`` so a re-run updates
+    the existing record by its natural key instead of appending a duplicate
+    (pydantic coerces the usual ``true``/``1``/``"true"`` forms; ``"yes"`` is a
+    clean BAD_VALUE). The natural key itself is carried on the ``resource`` as
+    ``sourceId`` (or ``externalId``) — the data-ingest convention. `resource`
+    (the record payload) and the canonical IRI keys ride through via
+    ``extra="allow"`` — the resolver's `_check_unknown_keys` has already rejected
+    anything genuinely unknown, and `_resolve_picklist_friendly_tokens` rewrites
+    payload labels after this walk.
     """
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
@@ -85,4 +90,23 @@ def expand_record_crud(
             a.setdefault("collection", iri)
         elif step_type == "update_record":
             a.setdefault("collectionType", iri)
+
+    # `is_upsert` is a friendly YAML lever, NOT a real InsertData wire arg —
+    # pop it unconditionally so it never reaches the runtime. For create/insert
+    # it routes the step at FortiSOAR's upsert endpoint so a re-run updates the
+    # existing record by its natural key instead of appending a duplicate:
+    #   collection `/api/3/<m>` -> `/api/3/upsert/<m>`
+    #   operation defaults to `Overwrite` (the idempotent write op)
+    # The natural key itself is carried on the resource as `sourceId`
+    # (or `externalId`) — the data-ingest convention (see the `data_ingest`
+    # ruleset). An already-`/api/3/upsert/...` collection (or any non-`/api/3/`
+    # collection) is left untouched. `update_record` is already a partial patch
+    # by IRI/query, so `is_upsert` has no effect there beyond being dropped.
+    is_upsert = a.pop("is_upsert", None)
+    if is_upsert and step_type in ("create_record", "insert_record"):
+        coll = a.get("collection")
+        if (isinstance(coll, str) and coll.startswith("/api/3/")
+                and not coll.startswith("/api/3/upsert/")):
+            a["collection"] = "/api/3/upsert/" + coll[len("/api/3/"):]
+        a.setdefault("operation", "Overwrite")
     return a

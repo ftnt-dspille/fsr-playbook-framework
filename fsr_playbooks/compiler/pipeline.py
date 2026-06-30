@@ -15,7 +15,9 @@ from .errors import CompileError, ErrorCode
 from .ir import Collection
 from .linter import lint
 from .parser import parse_yaml
+from .reference_lint import reference_lint
 from .resolver import Resolver
+from .teaching import enrich_diagnostics
 from .validator import validate
 
 
@@ -105,12 +107,17 @@ class CompileResult:
 def compile_yaml(
     text: str, db_path: Path,
     lax_codes: Optional[set[str]] = None,
+    reference_lint_enabled: bool = True,
 ) -> CompileResult:
     """Compile YAML to FSR JSON.
 
     lax_codes: iterable of ErrorCode values (or their str) to demote from
     error → warning before blocking checks fire. Use for round-trip Path B
     where unknown_param / unknown_connector should not block emission.
+
+    reference_lint_enabled: run the compile-time reference lint (default on),
+    which adds *warnings* for unresolvable `vars.steps.X.foo` references. Pass
+    False for round-trip / decompile paths where producer shapes are partial.
     """
     self_check_problem = _self_check()
     if self_check_problem is not None:
@@ -141,9 +148,15 @@ def compile_yaml(
         return CompileResult(errors=errs + lint_errs, ir=coll)
 
     all_warnings: list[CompileError] = [e for e in errs if e.severity == "warning"]
+
+    def _blocked(errs: list[CompileError]) -> CompileResult:
+        # Attach teaching examples to errors on high-foot-gun step types (0b).
+        enrich_diagnostics(coll, errs)
+        return CompileResult(errors=errs, ir=coll)
+
     lint_errs = _demote(lint(text, coll))
     if any(e.severity != "warning" for e in lint_errs):
-        return CompileResult(errors=lint_errs, ir=coll)
+        return _blocked(lint_errs)
     all_warnings.extend(lint_errs)
 
     def _has_blocking(errs: list[CompileError]) -> bool:
@@ -156,17 +169,23 @@ def compile_yaml(
     try:
         errs = resolver.resolve(coll)
         if _has_blocking(errs):
-            return CompileResult(errors=errs, ir=coll)
+            return _blocked(errs)
         errs = ArgValidator(resolver.conn).validate(coll)
         if not _has_blocking(errs):
             errs = CorpusValidator(resolver.conn).validate(coll)
     finally:
         resolver.close()
     if _has_blocking(errs):
-        return CompileResult(errors=errs, ir=coll)
+        return _blocked(errs)
 
     errs = _demote(validate(coll))
     if _has_blocking(errs):
-        return CompileResult(errors=errs, ir=coll)
+        return _blocked(errs)
+
+    # Reference lint (warning-only): catch a bad `vars.steps.X.foo` offline.
+    # Runs last, on a fully-resolved IR, and never blocks — see reference_lint.
+    if reference_lint_enabled:
+        all_warnings.extend(reference_lint(coll, existing=all_warnings))
+    enrich_diagnostics(coll, all_warnings)
 
     return CompileResult(fsr_json=emit(coll), errors=all_warnings, ir=coll)

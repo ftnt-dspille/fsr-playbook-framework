@@ -27,6 +27,11 @@ class ErrorCode(str, Enum):
     # unknown filter/test name is a warning (the catalog is a curated subset).
     JINJA_SYNTAX_ERROR = "jinja_syntax_error"
     UNKNOWN_JINJA_FILTER = "unknown_jinja_filter"
+    # A `vars.steps.X.foo` reference the static typed walk resolves to a
+    # non-existent step / unreachable producer / missing output key. Emitted as a
+    # *warning* by the compile-time reference lint (typed_walker) so a wrong
+    # cross-step reference is caught offline instead of only on a live run.
+    BAD_VAR_REFERENCE = "bad_var_reference"
     INSTANCE_MISMATCH = "instance_mismatch"  # catalog warmed from a different SOAR
     STALE_CATALOG = "stale_catalog"          # catalog is behind the live SOAR
     INTERNAL = "internal"                    # tooling/install fault, not the YAML

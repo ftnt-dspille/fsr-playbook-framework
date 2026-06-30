@@ -178,3 +178,137 @@ def test_stage4_manual_input_resume(env_configured):
                          "finished_with_error"):
                 break
     assert final == "finished", f"expected finished, got {final}"
+
+
+# ---------------------------------------------------------------------------
+# Stage 5 — manual_input authored in the FRIENDLY form (the F3 path): a
+# MULTI-field prompt with a REQUIRED field. Asserts (a) the rendered form on
+# the appliance is non-empty and carries every declared field with the right
+# type + required flag (the exact regression F3 shipped silently), and (b) the
+# responder's values flow into a downstream set_variable, read back out of the
+# finished run's historical-steps. Pushes via the same friendly authoring that
+# the parser hoist + resolver transform process end-to-end.
+# ---------------------------------------------------------------------------
+
+
+def _retrieve_wfinput(client, pending_id: int) -> dict:
+    """Fetch the rendered pending-input record (schema + options) off the box."""
+    r = client.session.post(
+        client.base_url
+        + f"/api/wf/api/manual-wf-input/{pending_id}/retrieve_wfinput/?format=json",
+        json={}, verify=client.verify_ssl,
+    )
+    assert r.status_code == 200, f"retrieve_wfinput HTTP {r.status_code}: {r.text[:200]}"
+    return r.json()
+
+
+def test_stage5_manual_input_multi_field(env_configured):
+    """Friendly multi-field prompt: form renders correctly + values flow through."""
+    import time
+    from probes import _env  # type: ignore  # noqa: PLC0415
+
+    client = _env.get_client()
+    # Step (b) below reads the set_variable result back out of the run record.
+    # FortiSOAR only persists set_variable / jinja values when GLOBAL playbook
+    # debug logging is on; ensure it so the value assertions are meaningful
+    # regardless of the box's prior state.
+    client.system_settings.set_playbook_debug_logging(True)
+
+    yaml = EXAMPLES / "test_manual_input_multi_e2e.yaml"
+    # `replace` purges-then-posts; on a fresh box the collection doesn't exist
+    # yet so the purge DELETE 404s and aborts. Fall back to `create` the first
+    # time, then `replace` keeps subsequent runs clean.
+    rc, out, err = fsrpb("push", str(yaml), "--mode", "replace")
+    if rc != 0 and "purge aborted" in err:
+        rc, out, err = fsrpb("push", str(yaml), "--mode", "create")
+    assert rc == 0, f"push failed:\nstdout={out}\nstderr={err}"
+
+    rc, out, err = fsrpb("run-playbook", "E2E - Manual Input Multi")
+    assert rc == 0, f"fire failed: {err}"
+    m = re.search(r'"task_id":\s*"([0-9a-f-]+)"', out)
+    assert m, f"no task_id in run-playbook output: {out!r}"
+    task_id = m.group(1)
+
+    # Wait for the manual_input pause.
+    pending_id = None
+    for _ in range(8):
+        time.sleep(2)
+        rc2, out2, _ = fsrpb("inputs", "list", "--json")
+        items = json.loads(out2 or "[]")
+        match = next((i for i in items if i.get("title") == "E2E multi gate"), None)
+        if match:
+            pending_id = match["id"]
+            break
+    assert pending_id is not None, "manual_input never paused (no 'E2E multi gate')"
+
+    # (a) The rendered form on the appliance must carry all three declared
+    # fields with the right type + required flag — the F3 assertion. A dropped
+    # `inputs:` would surface here as an empty/short inputVariables list.
+    rec = _retrieve_wfinput(client, pending_id)
+    ivars = ((rec.get("input") or {}).get("schema") or {}).get("inputVariables") or []
+    by_name = {v.get("name"): v for v in ivars}
+    assert set(by_name) == {"comment", "severity", "ticket_id"}, \
+        f"rendered form fields wrong: {sorted(by_name)} (raw={ivars!r})"
+    assert by_name["comment"].get("required") is True, "comment should be required"
+    assert by_name["severity"].get("required") is True, "severity should be required"
+    assert by_name["ticket_id"].get("required") in (False, None), \
+        "ticket_id should be optional"
+    assert by_name["severity"].get("formType") == "dynamicList", \
+        f"severity should render as a select: {by_name['severity']!r}"
+    assert by_name["ticket_id"].get("required") in (False, None)
+
+    # Respond with values for every field, including the required ones.
+    sentinel = "TKT-E2E-7788"
+    rc3, _, err3 = fsrpb(
+        "inputs", "respond", str(pending_id),
+        "--option", "Continue", "--task-id", task_id,
+        "--vars", json.dumps(
+            {"comment": "looks good", "severity": "High", "ticket_id": sentinel}),
+    )
+    assert rc3 == 0, f"respond failed: {err3}"
+
+    # (b) The responder's data must have reached the downstream set_variable.
+    # With debug logging on, the run record persists each step's result. Resolve
+    # the run pk from the task_id (the by-task listing), then read the detail
+    # with step_detail=true and pull the `Capture` step's result. Poll until the
+    # run is terminal AND the Capture result has populated (it lags the status
+    # flip by a beat).
+    final = "?"
+    cap_result = None
+    for _ in range(20):
+        time.sleep(2)
+        lr = client.session.get(
+            client.base_url
+            + f"/api/wf/api/workflows/?task_id={task_id}&format=json&limit=1",
+            verify=client.verify_ssl,
+        )
+        recs = lr.json().get("hydra:member", [])
+        if not recs:
+            continue
+        final = recs[0].get("status") or final
+        pk = recs[0]["@id"].rstrip("/").rsplit("/", 1)[-1]
+        dr = client.session.get(
+            client.base_url
+            + f"/api/wf/api/workflows/{pk}/?format=json&step_detail=true",
+            verify=client.verify_ssl,
+        )
+        if dr.status_code == 200:
+            cap = next((s for s in (dr.json().get("steps") or [])
+                        if s.get("name") == "Capture"), None)
+            if cap and isinstance(cap.get("result"), dict) \
+                    and cap["result"].get("got_severity"):
+                cap_result = cap["result"]
+                break
+        if final in ("failed", "terminated", "rejected", "finished_with_error"):
+            break
+    assert final == "finished", f"expected finished, got {final}"
+    assert cap_result is not None, (
+        "Capture step result never populated — is global playbook debug logging "
+        "enabled? (the test sets it, but the appliance may override)")
+    # The captured variables must equal exactly what the responder submitted.
+    assert cap_result.get("got_severity") == "High", \
+        f"got_severity mismatch: {cap_result!r}"
+    assert cap_result.get("got_ticket") == sentinel, \
+        f"got_ticket mismatch: {cap_result!r}"
+    assert cap_result.get("got_comment") == "looks good", \
+        f"got_comment mismatch: {cap_result!r}"

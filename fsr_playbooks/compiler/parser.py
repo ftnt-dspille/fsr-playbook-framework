@@ -532,6 +532,26 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                             path=f"{sp}.options",
                         ))
                     _norway_warnings.clear()
+                # The prompt's form fields + heading are documented as
+                # step-level keys (guides/playbook-yaml-reference.md), same as
+                # `options:`. Hoist them into `arguments:` so the resolver's
+                # `_normalize_manual_input_args` (which reads `a.pop("inputs")`
+                # etc.) actually sees them — otherwise step-level `inputs:` is
+                # silently dropped and the prompt ships with an empty form
+                # (`inputVariables: []`), `title`/`description` falling back to
+                # the step name. Conflict-guard mirrors the global hoist.
+                for hk in ("inputs", "title", "description"):
+                    if hk in s_raw:
+                        if hk in args:
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(f"manual_input: {hk!r} set both at "
+                                         f"step level and under arguments — "
+                                         f"keep one"),
+                                path=f"{sp}.{hk}",
+                            ))
+                        else:
+                            args[hk] = s_raw[hk]
             if stype == "set_variable":
                 top_vars = s_raw.get("vars")
                 if isinstance(top_vars, dict):

@@ -302,6 +302,115 @@ playbooks:
     assert iris[0] != iris[1]
 
 
+def _step_level_inputs_pb(extra_step_keys: str) -> str:
+    """A manual_input whose form fields/title/description are written at the
+    STEP level (the shape the YAML reference guide documents), not under
+    `arguments:`. `extra_step_keys` is 8-space-indented step-level YAML."""
+    return f"""
+collection: T
+visible: true
+playbooks:
+  - name: P
+    is_active: false
+    steps:
+      - name: start
+        type: start
+        next: ask
+      - name: ask
+        type: manual_input
+{extra_step_keys}        options:
+          - display: Submit
+            primary: true
+            next: stop
+      - name: stop
+        type: end
+"""
+
+
+def test_step_level_inputs_title_description_hoisted(db_path):
+    """Step-level `inputs:`/`title:`/`description:` must reach the wire schema.
+
+    Regression: the parser hoisted step-level `options:` but not `inputs:`/
+    `title:`/`description:`, so a prompt authored in the documented step-level
+    shape shipped with an empty form (`inputVariables: []`) and title/description
+    falling back to the step name. They must now hoist like `options:`."""
+    text = _step_level_inputs_pb(
+        "        title: Enter a six digit number\n"
+        "        description: Exactly 6 digits please.\n"
+        "        inputs:\n"
+        "          - {name: my_number, kind: integer, label: My Number, required: true}\n"
+    )
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+    schema = r.fsr_json["data"][0]["workflows"][0]["steps"][1]["arguments"]\
+        ["input"]["schema"]
+    assert schema["title"] == "Enter a six digit number"
+    assert schema["description"] == "Exactly 6 digits please."
+    iv = schema["inputVariables"]
+    assert len(iv) == 1 and iv[0]["name"] == "my_number"
+    assert iv[0]["formType"] == "integer"
+
+
+def test_step_level_inputs_match_live_playbook_wire_shape(db_path):
+    """Grounded in a live FortiSOAR prompt (step_examples provenance
+    `step:00c8a0b4-6633-4bd6-89d5-bf0abb6230d5`): an InputBased manual_input
+    declaring one "Dynamic List" field. Authoring it in the documented
+    step-level friendly form (`kind: select`) must reproduce the captured wire
+    tuple — formType/dataType `dynamicList`, type `array` — proving the hoist
+    fix yields the real platform shape, not an empty form."""
+    text = _step_level_inputs_pb(
+        "        title: test\n"
+        "        description: test\n"
+        "        inputs:\n"
+        "          - {name: test, kind: select, label: test, "
+        'options: "{{ vars.dyn_list }}"}\n'
+    )
+    r = compile_yaml(text, db_path)
+    assert r.ok, [str(e) for e in r.errors]
+    iv = r.fsr_json["data"][0]["workflows"][0]["steps"][1]["arguments"]\
+        ["input"]["schema"]["inputVariables"]
+    assert len(iv) == 1
+    f = iv[0]
+    # Field tuple captured from the live appliance playbook.
+    assert f["name"] == "test"
+    assert f["formType"] == "dynamicList"
+    assert f["dataType"] == "dynamicList"
+    assert f["type"] == "array"
+    assert f["templateUrl"].endswith("/dynamicList.html")
+    assert f["options"] == "{{ vars.dyn_list }}"
+
+
+def test_step_level_and_arguments_inputs_conflict_errors(db_path):
+    """Same key at step level and under `arguments:` is a hard error, not a
+    silent winner (mirrors the global hoist conflict guard)."""
+    text = """
+collection: T
+visible: true
+playbooks:
+  - name: P
+    is_active: false
+    steps:
+      - name: start
+        type: start
+        next: ask
+      - name: ask
+        type: manual_input
+        title: Step Level Title
+        arguments:
+          title: Arguments Title
+        options:
+          - display: Submit
+            primary: true
+            next: stop
+      - name: stop
+        type: end
+"""
+    r = compile_yaml(text, db_path)
+    assert not r.ok
+    assert any(e.code is ErrorCode.BAD_VALUE and "both at" in e.message
+               for e in r.errors)
+
+
 def test_mode_record_linked_requires_record(db_path):
     """I20 — Context mode coherence: isRecordLinked=true ⟹ record set."""
     text = _wrap(
