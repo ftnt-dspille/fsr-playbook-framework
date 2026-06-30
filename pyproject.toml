@@ -20,6 +20,10 @@ dependencies = [
 # cli.main — cli.py is NOT an installed package so it can't be the entry directly.
 fsrpb = "fsrpb_main:main"
 
+[dependency-groups]
+# Typing audit tooling (TYPING_GAP_IDENTIFICATION_PLAN). `uv sync --group typing`.
+typing = ["mypy>=2.1"]
+
 [tool.setuptools]
 # fsr_playbooks lives at the repo root; non-shipped tooling lives under tooling/.
 package-dir = {"" = ".", "probes" = "tooling/probes", "store" = "tooling/store", "e2e" = "tooling/e2e"}
@@ -50,3 +54,16 @@ select = ["F"]
 # import tool modules purely to register their @mcp.tool decorators). The
 # "unused import" is the intended public surface / registration side effect.
 "**/__init__.py" = ["F401"]
+
+# Typing audit (TYPING_GAP_IDENTIFICATION_PLAN). REPORT-ONLY for now — run
+# `mypy fsr_playbooks/compiler/` to regenerate docs/typing/mypy_baseline.md.
+# Not a CI gate (decision recorded in the plan): the enforced gate is the
+# shape-contract ratchet; mypy graduates to fail-on-new once NormalizerMixin
+# gets a Protocol and clears the 45 attr-defined baseline errors.
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "silent"
+# Deliberately NOT strict yet — default checks surface the high-signal
+# union-attr / index / arg-type bugs without drowning in `Any` noise.
+files = ["fsr_playbooks/compiler"]
