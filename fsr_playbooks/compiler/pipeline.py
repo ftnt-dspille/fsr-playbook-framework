@@ -127,13 +127,29 @@ def compile_yaml(
             path="<install>",
         )])
 
-    lax_set: set[str] = {str(c) for c in (lax_codes or set())}
+    # Accept every spelling of a code: the ErrorCode enum, its ``str()``
+    # (``"ErrorCode.UNKNOWN_PARAM"``), its ``.value`` (``"unknown_param"``), and
+    # its ``.name`` (``"UNKNOWN_PARAM"``). A caller passing the friendly
+    # ``.value`` string used to silently never match (the scan only compared
+    # ``str(e.code)``), so a lax request was quietly ignored.
+    def _code_forms(c: Any) -> set[str]:
+        forms = {str(c)}
+        val, name = getattr(c, "value", None), getattr(c, "name", None)
+        if val is not None:
+            forms.add(str(val))
+        if name is not None:
+            forms.add(str(name))
+        return forms
+
+    lax_set: set[str] = set()
+    for c in lax_codes or set():
+        lax_set |= _code_forms(c)
 
     def _demote(errs: list[CompileError]) -> list[CompileError]:
         if not lax_set:
             return errs
         for e in errs:
-            if str(e.code) in lax_set and e.severity == "error":
+            if e.severity == "error" and _code_forms(e.code) & lax_set:
                 e.severity = "warning"
         return errs
 
