@@ -129,8 +129,14 @@ def test_stage3_input_param_jinja(env_configured):
 
 
 def test_stage4_manual_input_resume(env_configured):
-    """Manual input pause/resume cycle finishes cleanly."""
-    import time
+    """Button-only manual input pause/resume cycle finishes cleanly.
+
+    Drives the input cycle through pyfsr's typed ``manual_input`` / ``playbooks``
+    APIs (list → answer → run_env), not hand-built URLs.
+    """
+    from probes import _env  # type: ignore  # noqa: PLC0415
+    client = _env.get_client()
+
     yaml = EXAMPLES / "test_manual_input_e2e.yaml"
     _push(yaml)
 
@@ -140,44 +146,15 @@ def test_stage4_manual_input_resume(env_configured):
     assert m, f"no task_id in run-playbook output: {out!r}"
     task_id = m.group(1)
 
-    # Wait briefly for the manual_input pause to register
-    pending_id = None
-    for _ in range(8):
-        time.sleep(2)
-        rc2, out2, _ = fsrpb("inputs", "list", "--json")
-        items = json.loads(out2 or "[]")
-        match = next((i for i in items if i.get("title") == "E2E test gate"), None)
-        if match:
-            pending_id = match["id"]
-            break
-    assert pending_id is not None, "manual_input never paused (no 'E2E test gate' in pendings)"
+    pending_id = _wait_pending(client, "E2E test gate")
+    assert pending_id is not None, "manual_input never paused (no 'E2E test gate')"
 
-    rc3, _, err3 = fsrpb(
-        "inputs", "respond", str(pending_id),
-        "--option", "Continue", "--task-id", task_id,
-    )
-    assert rc3 == 0, f"respond failed: {err3}"
+    # Button-only prompt: select the primary option, no input values.
+    client.manual_input.answer(input_id=pending_id, option="Continue")
 
-    # Poll until terminal
-    final = "?"
-    for _ in range(15):
-        time.sleep(2)
-        rc4, out4, _ = fsrpb("steps", task_id, "--json")
-        # Use the workflows endpoint instead — steps endpoint shows audit
-        # records that may lag; the run record is the source of truth.
-        from probes import _env  # type: ignore  # noqa: PLC0415
-        client = _env.get_client()
-        r = client.session.get(
-            client.base_url + f"/api/wf/api/workflows/?task_id={task_id}&format=json&limit=1",
-            verify=client.verify_ssl,
-        )
-        recs = r.json().get("hydra:member", [])
-        if recs:
-            final = recs[0]["status"]
-            if final in ("finished", "failed", "terminated", "rejected", "skipped",
-                         "finished_with_error"):
-                break
-    assert final == "finished", f"expected finished, got {final}"
+    env = _wait_finished(client, task_id)
+    assert env is not None and env.status == "finished", \
+        f"expected finished, got {env.status if env else None}"
 
 
 # ---------------------------------------------------------------------------
@@ -191,15 +168,40 @@ def test_stage4_manual_input_resume(env_configured):
 # ---------------------------------------------------------------------------
 
 
-def _retrieve_wfinput(client, pending_id: int) -> dict:
-    """Fetch the rendered pending-input record (schema + options) off the box."""
-    r = client.session.post(
-        client.base_url
-        + f"/api/wf/api/manual-wf-input/{pending_id}/retrieve_wfinput/?format=json",
-        json={}, verify=client.verify_ssl,
-    )
-    assert r.status_code == 200, f"retrieve_wfinput HTTP {r.status_code}: {r.text[:200]}"
-    return r.json()
+def _wait_pending(client, gate: str, *, tries: int = 8):
+    """Poll pyfsr for the pending manual input whose prompt title is ``gate``.
+
+    Returns the input ``id`` (or ``None``). Scope ``all`` because the prompt may
+    be assigned to a team rather than the calling user.
+    """
+    import time
+    for _ in range(tries):
+        time.sleep(2)
+        for mi in client.manual_input.list(assigned_to="all"):
+            if mi.title == gate:
+                return mi.id
+    return None
+
+
+def _wait_finished(client, task_id: str, *, tries: int = 20):
+    """Poll ``playbooks.run_env(task_id)`` until the run is terminal.
+
+    Returns the terminal :class:`~pyfsr.models.RunEnv` (status + per-step
+    results), tolerating the transient 5xx the detail endpoint can throw right
+    after a resume.
+    """
+    import time
+    last = None
+    for _ in range(tries):
+        time.sleep(2)
+        try:
+            last = client.playbooks.run_env(task_id)
+        except Exception:  # noqa: BLE001 - transient right after resume
+            continue
+        if last.status in ("finished", "failed", "terminated", "rejected",
+                           "skipped", "finished_with_error"):
+            return last
+    return last
 
 
 def test_stage5_manual_input_multi_field(env_configured):
@@ -229,79 +231,57 @@ def test_stage5_manual_input_multi_field(env_configured):
     assert m, f"no task_id in run-playbook output: {out!r}"
     task_id = m.group(1)
 
-    # Wait for the manual_input pause.
-    pending_id = None
-    for _ in range(8):
-        time.sleep(2)
-        rc2, out2, _ = fsrpb("inputs", "list", "--json")
-        items = json.loads(out2 or "[]")
-        match = next((i for i in items if i.get("title") == "E2E multi gate"), None)
-        if match:
-            pending_id = match["id"]
-            break
+    # Wait for the manual_input pause (pyfsr typed listing).
+    pending_id = _wait_pending(client, "E2E multi gate")
     assert pending_id is not None, "manual_input never paused (no 'E2E multi gate')"
 
-    # (a) The rendered form on the appliance must carry all three declared
-    # fields with the right type + required flag — the F3 assertion. A dropped
-    # `inputs:` would surface here as an empty/short inputVariables list.
-    rec = _retrieve_wfinput(client, pending_id)
-    ivars = ((rec.get("input") or {}).get("schema") or {}).get("inputVariables") or []
-    by_name = {v.get("name"): v for v in ivars}
+    # (a) The rendered form on the appliance must carry all three declared fields
+    # with the right type + required flag — the F3 assertion. A dropped `inputs:`
+    # would surface here as an empty/short inputVariables list. Read it through
+    # the typed pyfsr model: input["schema"] is a ManualInputSchema, its
+    # inputVariables are ManualInputVariable objects.
+    mi = client.manual_input.retrieve(pending_id)
+    ivars = mi.input["schema"].inputVariables
+    by_name = {v.name: v for v in ivars}
     assert set(by_name) == {"comment", "severity", "ticket_id"}, \
-        f"rendered form fields wrong: {sorted(by_name)} (raw={ivars!r})"
-    assert by_name["comment"].get("required") is True, "comment should be required"
-    assert by_name["severity"].get("required") is True, "severity should be required"
-    assert by_name["ticket_id"].get("required") in (False, None), \
-        "ticket_id should be optional"
-    assert by_name["severity"].get("formType") == "dynamicList", \
+        f"rendered form fields wrong: {sorted(by_name)}"
+    assert by_name["comment"].required is True, "comment should be required"
+    assert by_name["comment"].formType == "textarea"
+    assert by_name["severity"].required is True, "severity should be required"
+    assert by_name["severity"].formType == "dynamicList", \
         f"severity should render as a select: {by_name['severity']!r}"
-    assert by_name["ticket_id"].get("required") in (False, None)
+    assert by_name["severity"].options == ["Low", "Medium", "High"]
+    assert by_name["ticket_id"].required is False, "ticket_id should be optional"
 
-    # Respond with values for every field, including the required ones.
+    # Respond with values for every field, including the required ones, through
+    # the typed pyfsr API (resolves the option + numeric run id itself).
     sentinel = "TKT-E2E-7788"
-    rc3, _, err3 = fsrpb(
-        "inputs", "respond", str(pending_id),
-        "--option", "Continue", "--task-id", task_id,
-        "--vars", json.dumps(
-            {"comment": "looks good", "severity": "High", "ticket_id": sentinel}),
+    client.manual_input.answer(
+        input_id=pending_id, option="Continue",
+        inputs={"comment": "looks good", "severity": "High", "ticket_id": sentinel},
     )
-    assert rc3 == 0, f"respond failed: {err3}"
 
     # (b) The responder's data must have reached the downstream set_variable.
-    # With debug logging on, the run record persists each step's result. Resolve
-    # the run pk from the task_id (the by-task listing), then read the detail
-    # with step_detail=true and pull the `Capture` step's result. Poll until the
+    # With debug logging on, the run record persists each step's result; read it
+    # via the typed run_env (Capture is the set_variable step). Poll until the
     # run is terminal AND the Capture result has populated (it lags the status
     # flip by a beat).
-    final = "?"
     cap_result = None
+    env = None
     for _ in range(20):
         time.sleep(2)
-        lr = client.session.get(
-            client.base_url
-            + f"/api/wf/api/workflows/?task_id={task_id}&format=json&limit=1",
-            verify=client.verify_ssl,
-        )
-        recs = lr.json().get("hydra:member", [])
-        if not recs:
+        try:
+            env = client.playbooks.run_env(task_id)
+        except Exception:  # noqa: BLE001 - transient right after resume
             continue
-        final = recs[0].get("status") or final
-        pk = recs[0]["@id"].rstrip("/").rsplit("/", 1)[-1]
-        dr = client.session.get(
-            client.base_url
-            + f"/api/wf/api/workflows/{pk}/?format=json&step_detail=true",
-            verify=client.verify_ssl,
-        )
-        if dr.status_code == 200:
-            cap = next((s for s in (dr.json().get("steps") or [])
-                        if s.get("name") == "Capture"), None)
-            if cap and isinstance(cap.get("result"), dict) \
-                    and cap["result"].get("got_severity"):
-                cap_result = cap["result"]
-                break
-        if final in ("failed", "terminated", "rejected", "finished_with_error"):
+        step = env.steps.get("Capture")
+        if step and isinstance(step.result, dict) and step.result.get("got_severity"):
+            cap_result = step.result
             break
-    assert final == "finished", f"expected finished, got {final}"
+        if env.status in ("failed", "terminated", "rejected", "finished_with_error"):
+            break
+    assert env is not None and env.status == "finished", \
+        f"expected finished, got {env.status if env else None}"
     assert cap_result is not None, (
         "Capture step result never populated — is global playbook debug logging "
         "enabled? (the test sets it, but the appliance may override)")
