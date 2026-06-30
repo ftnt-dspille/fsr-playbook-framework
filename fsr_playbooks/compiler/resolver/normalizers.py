@@ -35,6 +35,8 @@ from ..typed_args.steps import expand_delete_record as _expand_delete_record_typ
 from ..typed_args.steps import expand_record_crud as _expand_record_crud_typed
 # scalar-flag validation for the record-action trigger (start + module) (Phase 2).
 from ..typed_args.steps import expand_record_action as _expand_record_action_typed
+# scalar-field validation for manual_input (transform stays imperative) (Phase 2).
+from ..typed_args.steps import expand_manual_input as _expand_manual_input_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
 
@@ -914,6 +916,12 @@ class NormalizerMixin:
         pass through untouched.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Typed scalar-field validation (Phase 2, validation-only): catches a
+        # wrong-typed title/flag/timeout as a clean BAD_VALUE before the
+        # friendly→canonical transform below. The transform itself stays here —
+        # `expand_manual_input` never mutates and returns None. Model also backs
+        # `emit_step_arg_schema("manual_input")`.
+        _expand_manual_input_typed(a, path, errors)
         # Hard rule: if `input` is provided, it MUST be a dict. FSR's
         # runtime calls .get() on it. Producing a string here is a common
         # LLM failure mode that previously slipped through to a runtime

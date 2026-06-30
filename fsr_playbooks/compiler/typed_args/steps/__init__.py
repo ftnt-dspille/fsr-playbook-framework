@@ -23,6 +23,7 @@ from .find_record import FindRecordArgs, expand_find_record
 from .delete_record import DeleteRecordArgs, expand_delete_record
 from .record_crud import RecordCrudArgs, expand_record_crud
 from .record_action import RecordActionArgs, expand_record_action
+from .manual_input import ManualInputArgs, expand_manual_input
 
 # Step type → typed argument model. Grows incrementally through Phase 2.
 #
@@ -43,6 +44,10 @@ STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     "insert_record": RecordCrudArgs,
     "update_record": RecordCrudArgs,
     "record_action": RecordActionArgs,
+    # Validation-only model (the friendly→canonical transform stays in the
+    # imperative normalizer; see manual_input.py). Registered for the JSON-schema
+    # introspection surface + typed scalar validation.
+    "manual_input": ManualInputArgs,
 }
 
 
@@ -72,4 +77,6 @@ __all__ = [
     "expand_record_crud",
     "RecordActionArgs",
     "expand_record_action",
+    "ManualInputArgs",
+    "expand_manual_input",
 ]
