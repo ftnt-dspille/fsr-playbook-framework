@@ -11,10 +11,17 @@ for the extraction plan and the protocols that consumers must supply.
 """
 from __future__ import annotations
 
-# Single source of truth for the published version. The packaging dist
-# (packaging/fsr_playbooks/pyproject.toml) reads this via dynamic version, and
-# the FortiSOAR connector asserts the worker imported exactly this build.
-__version__ = "0.4.10"
+# Version comes from the git tag, stamped into the wheel metadata at build time
+# by hatch-vcs (packaging/fsr_playbooks/pyproject.toml). We read it back from the
+# installed distribution metadata — there is no hardcoded version in the tree, so
+# the tag is the single source of truth and can never drift. A raw source checkout
+# that was never installed has no metadata; fall back to a sentinel.
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    __version__ = _pkg_version("fsr_playbooks")
+except PackageNotFoundError:  # pragma: no cover - source checkout without an install
+    __version__ = "0.0.0+unknown"
 
 from fsr_playbooks.compiler import (
     compile_yaml, parse_yaml, validate, emit,

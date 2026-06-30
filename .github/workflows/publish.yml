@@ -12,9 +12,14 @@ name: Publish to PyPI
 #     Workflow name:      publish.yml
 #     Environment name:   pypi
 #
-# To release: bump `version` in packaging/fsr_playbooks/pyproject.toml (PyPI
-# rejects re-uploading an existing version), then either publish a GitHub
-# Release or run this workflow manually (Actions -> Publish to PyPI -> Run).
+# To release: tag the commit `vX.Y.Z` and publish a GitHub Release on it. The
+# version is derived from that tag by hatch-vcs — there is NO version string to
+# bump in any file (see packaging/fsr_playbooks/pyproject.toml + RELEASING.md).
+# `git tag vX.Y.Z && git push origin vX.Y.Z`, then cut the Release. PyPI rejects
+# re-uploading an existing version, so each release needs a fresh, higher tag.
+#
+# `workflow_dispatch` off a branch with no tag at HEAD builds a dev version
+# (e.g. 0.4.11.devN) — useful for a dry run, but don't publish those to PyPI.
 
 on:
   release:
@@ -33,11 +38,16 @@ jobs:
       id-token: write   # required for Trusted Publishing (OIDC)
     steps:
       - uses: actions/checkout@v6
+        with:
+          # hatch-vcs derives the version from the git tag, so the full history
+          # (and the tags) must be fetched — the default depth-1 clone has none.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
 
       - name: Build wheel
-        # Wheel only — the relative ../.. package-dir makes a valid in-place
-        # wheel off the clone but cannot produce a correct sdist.
+        # Wheel only — the external ../../fsr_playbooks source (grafted via
+        # force-include) makes a valid in-place wheel but cannot produce a
+        # correct sdist.
         run: cd packaging/fsr_playbooks && uv build --wheel --out-dir dist
 
       - name: Validate metadata

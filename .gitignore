@@ -42,6 +42,8 @@ e2e/playwright-report/
 
 # build artifacts
 *.egg-info/
+# wheel/sdist output (release builds drop here; nothing here is tracked)
+dist/
 
 # eval run artifacts (flat logs/summaries; structured run dirs stay tracked)
 /data/eval_runs/calibrate_*.log
