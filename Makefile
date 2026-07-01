@@ -125,7 +125,7 @@ lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
 # (Do NOT use `uv run --extra test` in the connector: it builds an isolated env
 #  without fsr_playbooks, so its whole suite errors on ModuleNotFound.)
 VENV_PY  := $(CURDIR)/.venv/bin/python
-CONNECTOR_DIR := /Users/dylanspille/PycharmProjects/ConnectorsV2/fsr-playbook-builder
+CONNECTOR_DIR := ../ConnectorsV2/fsr-playbook-builder
 
 verify: ## green-check for the fsr_playbooks + connector axis (offline)
 	@echo "→ [1/2] fsr_playbooks tests"

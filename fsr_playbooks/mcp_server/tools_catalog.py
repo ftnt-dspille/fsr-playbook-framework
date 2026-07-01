@@ -141,7 +141,7 @@ def _no_catalog_err() -> dict[str, Any]:
         "FSRPB_API_CATALOG to its path or download via `fsrpb train "
         "--with-api-catalog` (planned).",
         suggestions=[
-            "Confirm $HOME/PycharmProjects/Miscellaneous/fortisoar/corpus_builder/catalog.sqlite exists (moved 2026-05 from api_examples_catalog/)",
+            "Confirm <fortisoar-docs>/corpus_builder/catalog.sqlite exists (moved 2026-05 from api_examples_catalog/)",
             "Run `python -c \"from probes.common import CATALOG_DB_PATH; print(CATALOG_DB_PATH, CATALOG_DB_PATH.exists())\"`",
         ],
     )

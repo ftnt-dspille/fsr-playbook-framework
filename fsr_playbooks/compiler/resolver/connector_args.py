@@ -603,10 +603,18 @@ class ConnectorArgsMixin:
         # None`. Trace-built steps carry the config id run_op resolved at
         # execution time (set in skills._compile_run_connector_action from the
         # recorded trace), which is what agent-bound connectors require. For
-        # hand-authored steps that omit it, default to the `""` sentinel ("use
-        # the connector's default config"), matching every example playbook.
-        if "config" not in a:
-            a["config"] = ""
+        # hand-authored steps that omit it (or explicitly pass `config: ""` to
+        # mean "use the default"), fill the connector's default config UUID from
+        # the warmed `connector_configs` catalog table — so the step opens in
+        # the SOAR UI with a concrete configuration pinned and the playbook's
+        # step state doesn't change on save. When the catalog has no config
+        # for the connector (unwarmed slim DB, or the connector isn't configured
+        # on the box), fall back to the `""` sentinel ("use the connector's
+        # default config") — the original behavior — so a portable/library
+        # playbook compiled offline stays config-free.
+        if not a.get("config"):
+            cid = self.resolve_config_id(connector)
+            a["config"] = cid if cid else ""
 
     def _resolve_workflow_reference_args(
         self, step: Step, path: str, errors: list[CompileError],

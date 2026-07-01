@@ -105,13 +105,13 @@ confidence **high**
 
 <details><summary>evidence</summary>
 
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:33868-33871 (widget registration)
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:38184-38191 (SetVariableCtrl definition)
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:34499-34502 (input validation)
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:34487 (general cleanup transform)
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:25491-25493 (step variable generation)
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:1708-1710 (RESERVED_KEYWORDS constant)
-- /Users/dylanspille/PycharmProjects/FSRPlaybookConversion/fsr-schema.ts:314-337 (inferred schema - cross-check)
+- <editor-bundle>/800_app.beautified.js:33868-33871 (widget registration)
+- <editor-bundle>/800_app.beautified.js:38184-38191 (SetVariableCtrl definition)
+- <editor-bundle>/800_app.beautified.js:34499-34502 (input validation)
+- <editor-bundle>/800_app.beautified.js:34487 (general cleanup transform)
+- <editor-bundle>/800_app.beautified.js:25491-25493 (step variable generation)
+- <editor-bundle>/800_app.beautified.js:1708-1710 (RESERVED_KEYWORDS constant)
+- fsr-schema.ts:314-337 (inferred schema - cross-check)
 - Editor differential: 'timeout' added to excludes in newer build (line 38189 vs 36607 in older app.beautified.js)
 
 </details>
@@ -271,7 +271,7 @@ editor: DECISION: "Decision" (line 621); stepTypeWidget("Decision", {...}) at li
 - Lines 34489-34490: Compile-time step_name injection from step_iri
 - Lines 33441-33442: Reference block step_iri transformation to API URL format
 - Lines 48770-48771, 48779-48780: condition field usage with Jinja expressions
-- /Users/dylanspille/PycharmProjects/FSRPlaybookConversion/fsr-schema.ts lines 506-515: DecisionArgs interface with inferred schema
+- fsr-schema.ts lines 506-515: DecisionArgs interface with inferred schema
 
 </details>
 
@@ -442,7 +442,7 @@ editor: ea155646-3821-4542-9702-b246da430a8d (OnCreate/POST_CREATE_TRIGGER at li
 - Line 23754: resource to resources conversion: o.arguments.resources = [o.arguments.resource]
 - Lines 33947-33948: stepTypeWidget registration for 'cybersponse.post_create' using trigger.html template
 - Line 1709: displayConditions listed as reserved keyword (present in ACTION_TRIGGER but not confirmed in OnCreate arguments)
-- Schema file /Users/dylanspille/PycharmProjects/FSRPlaybookConversion/fsr-schema.ts lines 145-152, 957-965: Inferred OnCreateArgs type confirming fieldbasedtrigger, resource, step_variables as system keys
+- Schema file fsr-schema.ts lines 145-152, 957-965: Inferred OnCreateArgs type confirming fieldbasedtrigger, resource, step_variables as system keys
 
 </details>
 
@@ -474,7 +474,7 @@ confidence **high**
 
 <details><summary>evidence</summary>
 
-- Bundle: /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js
+- Bundle: <editor-bundle>/800_app.beautified.js
 - Widget registration line 33881: stepTypeWidget('IngestBulkFeed', {templateUrl:'insertData.html', controller:'IngestBulkFeedCtrl'})
 - Controller line 37013: angular.module('cybersponse').controller('IngestBulkFeedCtrl', e), e.$inject=['$scope','$controller','$filter']
 - Implementation lines 36999-37012: IngestBulkFeedCtrl inherits InsertDataCtrl, sets loopExecutionModes, initializes for_each, sets collection, deletes operation/fieldOperation
@@ -487,7 +487,7 @@ confidence **high**
 - Batch enforcement line 11599: ensures batch_size=100 if __bulk=true
 - Mode transforms line 11581: __bulk/__parallel/sequential logic
 - Break-loop deletion line 34487 (agent) and 34489 (apply_async)
-- Schema cross-check: /Users/dylanspille/PycharmProjects/FSRPlaybookConversion/fsr-schema.ts lines 154-161, 973-987
+- Schema cross-check: fsr-schema.ts lines 154-161, 973-987
 
 </details>
 
@@ -612,11 +612,11 @@ confidence **high**
 
 <details><summary>evidence</summary>
 
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:618
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:33911-33914
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:33447-33449
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:34547-34551
-- /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:37478-37565
+- <editor-bundle>/800_app.beautified.js:618
+- <editor-bundle>/800_app.beautified.js:33911-33914
+- <editor-bundle>/800_app.beautified.js:33447-33449
+- <editor-bundle>/800_app.beautified.js:34547-34551
+- <editor-bundle>/800_app.beautified.js:37478-37565
 
 </details>
 

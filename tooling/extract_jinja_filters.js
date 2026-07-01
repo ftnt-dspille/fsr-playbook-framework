@@ -22,7 +22,7 @@ const path = require("path");
 const vm = require("vm");
 
 const DEFAULT_SRC =
-  "/Users/dylanspille/WebstormProjects/fsr_all_widgets/widgets-src/" +
+  "fsr_all_widgets/widgets-src/" +
   "widget-jinja-editor/widget/widgetAssets/js/constants/" +
   "jinjaFilters.constants.js";
 const DEFAULT_OUT = path.join(
