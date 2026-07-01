@@ -19,7 +19,7 @@ summary: 'Working guide for simplified YAML syntax the compiler accepts: playboo
 This is the working guide for writing FortiSOAR playbooks in the simplified
 YAML the compiler accepts. For the bigger picture (compiler internals,
 roadmap, MCP integration) see `ARCHITECTURE.md`. For source-of-truth API
-details see `~/PycharmProjects/soar-reporting-dashboard-cl/docs/FORTISOAR_API.md`.
+details see `soar-reporting-dashboard-cl/docs/FORTISOAR_API.md`.
 
 ## Quick orientation
 

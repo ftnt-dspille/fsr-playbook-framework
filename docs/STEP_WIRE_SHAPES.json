@@ -345,13 +345,13 @@
       "compile_transforms": "SetVariable compile-time cleanup (line 34487): removes empty/undefined when, do_until, for_each, message fields. Validation (lines 34499-34502): rejects if arguments has 'input' key. Step variable generation (lines 25491-25493): excludes for_each and do_until from step variables. UI controller excludes these from editing: condition, mock_result, ignore_errors, variables, timeout (line 38189).\"",
       "confidence": "high",
       "evidence": [
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:33868-33871 (widget registration)",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:38184-38191 (SetVariableCtrl definition)",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:34499-34502 (input validation)",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:34487 (general cleanup transform)",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:25491-25493 (step variable generation)",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:1708-1710 (RESERVED_KEYWORDS constant)",
-        "/Users/dylanspille/PycharmProjects/FSRPlaybookConversion/fsr-schema.ts:314-337 (inferred schema - cross-check)",
+        "<editor-bundle>/800_app.beautified.js:33868-33871 (widget registration)",
+        "<editor-bundle>/800_app.beautified.js:38184-38191 (SetVariableCtrl definition)",
+        "<editor-bundle>/800_app.beautified.js:34499-34502 (input validation)",
+        "<editor-bundle>/800_app.beautified.js:34487 (general cleanup transform)",
+        "<editor-bundle>/800_app.beautified.js:25491-25493 (step variable generation)",
+        "<editor-bundle>/800_app.beautified.js:1708-1710 (RESERVED_KEYWORDS constant)",
+        "fsr-schema.ts:314-337 (inferred schema - cross-check)",
         "Editor differential: 'timeout' added to excludes in newer build (line 38189 vs 36607 in older app.beautified.js)"
       ]
     },
@@ -764,7 +764,7 @@
         "Lines 34489-34490: Compile-time step_name injection from step_iri",
         "Lines 33441-33442: Reference block step_iri transformation to API URL format",
         "Lines 48770-48771, 48779-48780: condition field usage with Jinja expressions",
-        "/Users/dylanspille/PycharmProjects/FSRPlaybookConversion/fsr-schema.ts lines 506-515: DecisionArgs interface with inferred schema"
+        "fsr-schema.ts lines 506-515: DecisionArgs interface with inferred schema"
       ]
     },
     {
@@ -1322,7 +1322,7 @@
         "Line 23754: resource to resources conversion: o.arguments.resources = [o.arguments.resource]",
         "Lines 33947-33948: stepTypeWidget registration for 'cybersponse.post_create' using trigger.html template",
         "Line 1709: displayConditions listed as reserved keyword (present in ACTION_TRIGGER but not confirmed in OnCreate arguments)",
-        "Schema file /Users/dylanspille/PycharmProjects/FSRPlaybookConversion/fsr-schema.ts lines 145-152, 957-965: Inferred OnCreateArgs type confirming fieldbasedtrigger, resource, step_variables as system keys"
+        "Schema file fsr-schema.ts lines 145-152, 957-965: Inferred OnCreateArgs type confirming fieldbasedtrigger, resource, step_variables as system keys"
       ]
     },
     {
@@ -1449,7 +1449,7 @@
       "compile_transforms": "For-each deletion validation (line 34487): DELETE for_each if for_each.item === ''. Ensures loop only exists with a defined iteration variable.\\n\\nBulk mode initialization (line 11542): IF loopExecutionModes.bulk=true AND for_each.parallel=undefined AND for_each.__bulk=undefined, THEN set __bulk=true and batch_size=100. IngestBulkFeed has bulk=true, so this always applies on first-time for_each creation.\\n\\nExecution mode transforms (line 11581): Mutually exclusive mode logic:\\n- '__bulk' mode: __bulk=true, delete parallel, batch_size=100 (or keep if set)\\n- 'sequential' mode: parallel=false, __bulk=false, delete batch_size\\n- 'parallel' mode: parallel=true, __bulk=false, delete batch_size\\n\\nBatch size enforcement (line 11599): If __bulk=true and batch_size undefined, set to 100.\\n\\nBreak-loop conditional deletion (lines 34487, 34489):\\n- IF agent mode ON: delete for_each.break_loop\\n- IF apply_async=false: delete for_each.break_loop\\n\\nEmpty field cleanup (line 34487): DELETE when if empty string.\"",
       "confidence": "high",
       "evidence": [
-        "Bundle: /private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js",
+        "Bundle: <editor-bundle>/800_app.beautified.js",
         "Widget registration line 33881: stepTypeWidget('IngestBulkFeed', {templateUrl:'insertData.html', controller:'IngestBulkFeedCtrl'})",
         "Controller line 37013: angular.module('cybersponse').controller('IngestBulkFeedCtrl', e), e.$inject=['$scope','$controller','$filter']",
         "Implementation lines 36999-37012: IngestBulkFeedCtrl inherits InsertDataCtrl, sets loopExecutionModes, initializes for_each, sets collection, deletes operation/fieldOperation",
@@ -1462,7 +1462,7 @@
         "Batch enforcement line 11599: ensures batch_size=100 if __bulk=true",
         "Mode transforms line 11581: __bulk/__parallel/sequential logic",
         "Break-loop deletion line 34487 (agent) and 34489 (apply_async)",
-        "Schema cross-check: /Users/dylanspille/PycharmProjects/FSRPlaybookConversion/fsr-schema.ts lines 154-161, 973-987"
+        "Schema cross-check: fsr-schema.ts lines 154-161, 973-987"
       ]
     },
     {
@@ -2157,11 +2157,11 @@
       ],
       "compile_transforms": "RESPONSE_MAPPING (line 33448): Each option's step_iri transformed from relative to full API path: 'workflow_steps/abc123' becomes '/api/3/workflow_steps/abc123' | TIMEOUT (line 33449): If timeout.step_iri exists, transforms to full API path | BACKWARD_COMPAT_APPROVERS (line 37513): Legacy approvers array parsed (filtering by type User/Team) and deleted after migration to resource.assignedTo/resource.owners | BACKWARD_COMPAT_MESSAGE (line 37517): Legacy message field moved to resource.approvaldescription, then deleted",
       "evidence": [
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:618",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:33911-33914",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:33447-33449",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:34547-34551",
-        "/private/tmp/claude-501/-Users-dylanspille-PycharmProjects-pyfsr/3cd13171-5e17-4044-b46c-18bf50474813/scratchpad/800_app.beautified.js:37478-37565"
+        "<editor-bundle>/800_app.beautified.js:618",
+        "<editor-bundle>/800_app.beautified.js:33911-33914",
+        "<editor-bundle>/800_app.beautified.js:33447-33449",
+        "<editor-bundle>/800_app.beautified.js:34547-34551",
+        "<editor-bundle>/800_app.beautified.js:37478-37565"
       ],
       "confidence": "high"
     },
