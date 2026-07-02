@@ -314,3 +314,97 @@ def test_is_error_result_guards_not_errors():
     assert _is_error_result("just a string") is False
     assert _is_error_result(None) is False
     assert _is_error_result([]) is False
+
+
+# ───────────────────── capability facts (§E / spine P3) ─────────────────────
+
+def _caps():
+    from fsr_playbooks.agent.case_state import Capabilities
+    return Capabilities()
+
+
+def test_capability_guard_short_circuits_known_unavailable():
+    """A run_op against a connector already recorded unavailable is blocked
+    with a guard_redirect — no live re-probe (design item 4)."""
+    caps = _caps()
+    caps.unavailable["whois-rdap"] = "connector_not_configured"
+    d = TriageDiscipline(capabilities=caps)
+    g = d.evaluate("run_op", {"connector": "whois-rdap", "op": "whois_ip"})
+    assert g is not None
+    assert g["kind"] == "guard_redirect"
+    assert g.get("capability_guard") is True
+    assert g["connector"] == "whois-rdap"
+    assert "NOT re-attempted" in g["error"]
+
+
+def test_capability_guard_other_connectors_unaffected():
+    caps = _caps()
+    caps.unavailable["whois-rdap"] = "connector_unhealthy"
+    d = TriageDiscipline(capabilities=caps)
+    assert d.evaluate("run_op", {"connector": "virustotal", "op": "ip_report"}) is None
+
+
+def test_note_result_records_not_configured():
+    """A connector_not_configured failure is learned; the second attempt
+    short-circuits (the §E live-observed defect)."""
+    caps = _caps()
+    d = TriageDiscipline(capabilities=caps)
+    args = {"connector": "whois-rdap", "op": "whois_ip"}
+    assert d.evaluate("run_op", args) is None
+    d.note_result("run_op", args, {
+        "ok": False, "code": "connector_not_configured", "message": "x"})
+    assert caps.unavailable == {"whois-rdap": "connector_not_configured"}
+    assert caps.noted_at is not None
+    g = d.evaluate("run_op", args)
+    assert g is not None and g.get("capability_guard") is True
+
+
+def test_note_result_records_unhealthy():
+    caps = _caps()
+    d = TriageDiscipline(capabilities=caps)
+    d.note_result("run_op", {"connector": "fortisiem"}, {
+        "ok": False, "code": "connector_unhealthy", "message": "x"})
+    assert caps.unavailable == {"fortisiem": "connector_unhealthy"}
+
+
+def test_note_result_success_confirms_and_clears():
+    """A successful run_op confirms the connector and clears a stale
+    unavailable entry (fixed mid-session)."""
+    caps = _caps()
+    caps.unavailable["virustotal"] = "connector_unhealthy"
+    d = TriageDiscipline(capabilities=caps)
+    d.note_result("run_op", {"connector": "virustotal"}, {"ok": True, "data": {}})
+    assert "virustotal" not in caps.unavailable
+    assert caps.confirmed == ["virustotal"]
+
+
+def test_recheck_clears_unavailable():
+    """list_configured_connectors success clears ALL unavailable entries —
+    the capability-gap 'Re-check & continue' gesture (design item 4)."""
+    caps = _caps()
+    caps.unavailable.update({
+        "whois-rdap": "connector_not_configured",
+        "fortisiem": "connector_unhealthy",
+    })
+    d = TriageDiscipline(capabilities=caps)
+    d.note_result("list_configured_connectors", {}, {"ok": True, "connectors": []})
+    assert caps.unavailable == {}
+    # and the previously-blocked call now proceeds
+    assert d.evaluate("run_op", {"connector": "whois-rdap", "op": "x"}) is None
+
+
+def test_note_result_other_failures_not_recorded():
+    """Ordinary op failures (bad params, upstream 400s) are NOT capability facts."""
+    caps = _caps()
+    d = TriageDiscipline(capabilities=caps)
+    d.note_result("run_op", {"connector": "virustotal"}, {
+        "ok": False, "code": "op_failed", "message": "400"})
+    assert caps.unavailable == {}
+
+
+def test_no_capabilities_note_result_noop():
+    """Without capabilities state, note_result is a safe no-op (backward compat)."""
+    d = TriageDiscipline()
+    d.note_result("run_op", {"connector": "x"}, {
+        "ok": False, "code": "connector_not_configured"})
+    assert d.evaluate("run_op", {"connector": "x"}) is None

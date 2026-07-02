@@ -332,17 +332,25 @@ class TriageDiscipline:
 
     When initialized with an optional ``state`` (Investigation instance), the
     discipline seeds its counters from the state and mutates the shared state
-    object as the turn progresses so the caller can persist it afterwards."""
+    object as the turn progresses so the caller can persist it afterwards.
+
+    ``capabilities`` (a Capabilities instance) adds the §E capability guard:
+    a ``run_op`` against a connector already recorded unavailable this session
+    short-circuits with a ``guard_redirect`` instead of re-probing; call
+    ``note_result`` after each dispatched tool so outcomes keep the shared
+    capabilities object current (the caller persists it post-turn)."""
 
     def __init__(
         self,
         *,
         floor: int = MIN_INVESTIGATION_BEFORE_CONTAINMENT,
         state: Any = None,  # Investigation | None
+        capabilities: Any = None,  # Capabilities | None
     ):
         import threading
         self.floor = floor
         self._shared_state = state  # None or an Investigation instance
+        self._capabilities = capabilities  # None or a Capabilities instance
         # Seed invest_attempts from state if provided
         if state is not None and hasattr(state, "invest_attempts"):
             self.invest_attempts = state.invest_attempts
@@ -359,6 +367,36 @@ class TriageDiscipline:
         self._lock = threading.Lock()
 
     def _check_locked(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        # 0. Capability guard (§E) — this session already learned the connector
+        # is unavailable (not configured / unhealthy); don't burn a live
+        # re-probe on it. `list_configured_connectors` success (the analyst's
+        # "Re-check & continue") clears the entry via note_result.
+        if name == "run_op" and self._capabilities is not None:
+            connector = str((args or {}).get("connector") or "")
+            unavailable = getattr(self._capabilities, "unavailable", None) or {}
+            reason = unavailable.get(connector)
+            if reason:
+                why = ("has no active configuration"
+                       if reason == "connector_not_configured"
+                       else "is failing its healthcheck"
+                       if reason == "connector_unhealthy"
+                       else f"is unavailable ({reason})")
+                return {
+                    "ok": False,
+                    "kind": "guard_redirect",
+                    "capability_guard": True,
+                    "connector": connector,
+                    "reason": reason,
+                    "error": (
+                        f"Skipped: `{connector}` {why} — you already learned "
+                        f"this earlier in the session, so the call was NOT "
+                        f"re-attempted. Do not retry it. Either pick a "
+                        f"configured alternative (`list_configured_connectors` "
+                        f"shows what IS available), or surface the gap to the "
+                        f"analyst via `emit_capability_gap_card` so they can "
+                        f"fix the connector and resume."
+                    ),
+                }
         # 1. Forbidden pivot — external TI on an internal-only IP.
         if name == "run_op":
             connector = str((args or {}).get("connector") or "").lower()
@@ -462,6 +500,46 @@ class TriageDiscipline:
                 # Keep called_once_sigs in sync
                 self._shared_state.called_once_sigs = list(self._called)
             return None
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Record capability facts (§E) from a dispatched tool's result into the
+        shared Capabilities object. Call after every successful dispatch; no-op
+        when the discipline has no capabilities state.
+
+        - ``run_op`` failing with ``connector_not_configured`` /
+          ``connector_unhealthy`` marks the connector unavailable — the next
+          ``run_op`` against it short-circuits instead of re-probing.
+        - ``run_op`` succeeding confirms the connector (and clears any stale
+          unavailable entry — a connector fixed mid-session works again).
+        - ``list_configured_connectors`` succeeding clears ALL unavailable
+          entries: it's the re-check gesture (capability-gap "Re-check &
+          continue"), and a still-broken connector re-records itself on the
+          next attempt anyway.
+        """
+        caps = self._capabilities
+        if caps is None or not isinstance(result, dict):
+            return
+        import time
+        with self._lock:
+            if name == "run_op":
+                connector = str((args or {}).get("connector") or "")
+                if not connector:
+                    return
+                code = result.get("code")
+                if (result.get("ok") is False
+                        and code in ("connector_not_configured",
+                                     "connector_unhealthy")):
+                    caps.unavailable[connector] = code
+                    caps.noted_at = time.time()
+                elif result.get("ok") is True:
+                    caps.unavailable.pop(connector, None)
+                    if connector not in caps.confirmed:
+                        caps.confirmed.append(connector)
+                    caps.noted_at = time.time()
+            elif name == "list_configured_connectors":
+                if result.get("ok") is not False and caps.unavailable:
+                    caps.unavailable.clear()
+                    caps.noted_at = time.time()
 
 
 def extract_yaml_block(text: str) -> str | None:

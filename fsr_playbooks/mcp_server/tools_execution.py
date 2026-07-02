@@ -86,6 +86,29 @@ def _cached_health(connector: str, version: str,
     return {"status": status, "message": message, "checked_ts": ts}
 
 
+def forget_connector_availability(connector: str | None = None) -> None:
+    """Drop cached availability verdicts so the next preflight re-probes live.
+
+    The capability-gap card's "Re-check & continue" means the analyst just
+    fixed the connector (configured it / repaired its health). Without this,
+    the unhealthy-verdict TTL (5 min) and the configured-rows cache (2 min)
+    keep serving the stale failure and the re-check LOOKS like a no-op.
+    `connector=None` clears all health rows (used when the caller can't name
+    the connector from the card)."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            _health_table(conn)
+            if connector:
+                conn.execute("DELETE FROM connector_health WHERE connector=?",
+                             (connector,))
+            else:
+                conn.execute("DELETE FROM connector_health")
+    except Exception:  # noqa: BLE001
+        pass
+    _CONFIGURED_CACHE["rows"] = None
+    _CONFIGURED_CACHE["ts"] = 0.0
+
+
 def _store_health(connector: str, version: str, status: Any, message: str,
                   config: str = "") -> None:
     import time

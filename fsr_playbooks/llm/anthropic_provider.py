@@ -315,7 +315,11 @@ class AnthropicProvider:
             getattr(case_state, "investigation", None)
             if case_state is not None else None
         )
-        _discipline = TriageDiscipline(state=investigation_state)
+        _discipline = TriageDiscipline(
+            state=investigation_state,
+            capabilities=(getattr(case_state, "capabilities", None)
+                          if case_state is not None else None),
+        )
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:
             try:
@@ -356,6 +360,7 @@ class AnthropicProvider:
                     failed_signatures.add(sig)
                 return guard
             result = dispatch(nm, ar)
+            _discipline.note_result(nm, ar, result)
             if _is_error_result(result):
                 failed_signatures.add(sig)
             return result
