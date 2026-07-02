@@ -169,3 +169,58 @@ def test_emit_playbook_offer_validates_required_fields():
 def test_emit_playbook_offer_available_to_triage_agent():
     names = {t["name"] for t in tools_for_intent("triage")}
     assert "emit_playbook_offer" in names
+
+
+# --- direct-build mode (§A — yaml-carrying offer, no trace needed) ----------
+
+_BUILD_YAML = """\
+playbooks:
+  - name: Block bad IP
+    parameters: []
+    steps:
+      - name: Start
+        type: start
+        module: alerts
+        next: Block IP
+      - name: Block IP
+        type: connector
+"""
+
+
+def test_yaml_offer_needs_no_trace():
+    clear_active_trace()
+    res = emit_playbook_offer(id="o1", summary="Deploy this?",
+                              title_suggestion="Block bad IP",
+                              yaml=_BUILD_YAML)
+    assert res["ok"] is True
+    card = res["card"]
+    assert card["type"] == "playbook_offer"
+    assert card["final_yaml"] == _BUILD_YAML
+    assert card["title_suggestion"] == "Block bad IP"
+    # display summary parsed from the YAML steps
+    assert [(o["label"], o["step_type"]) for o in card["ops_summary"]] == [
+        ("Start", "start"), ("Block IP", "connector")]
+    assert "review the steps" in card["advisory"]
+
+
+def test_yaml_offer_unparseable_yaml_still_offers():
+    # The YAML already passed verify before the model offers it; the step
+    # summary is display-only and must never block the affordance.
+    res = emit_playbook_offer(id="o2", summary="Deploy?",
+                              yaml="{{ not: [valid yaml")
+    assert res["ok"] is True
+    assert res["card"]["ops_summary"] == []
+    assert res["card"]["final_yaml"] == "{{ not: [valid yaml"
+
+
+def test_yaml_offer_empty_yaml_rejected():
+    res = emit_playbook_offer(id="o3", summary="Deploy?", yaml="   ")
+    assert res["ok"] is False
+    assert res["code"] == "missing_field"
+
+
+def test_no_yaml_still_requires_trace():
+    clear_active_trace()
+    res = emit_playbook_offer(id="o4", summary="Deploy?")
+    assert res["ok"] is False
+    assert res["code"] == "empty_trace"

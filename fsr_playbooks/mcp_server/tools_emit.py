@@ -375,12 +375,24 @@ def emit_playbook_offer(
     summary: str,
     title_suggestion: str | None = None,
     editable_title: bool = True,
+    yaml: str | None = None,
 ) -> dict[str, Any]:
-    """Emit a `playbook_offer` card at the CLOSE of a triage session, after
-    you have approved & executed at least one containment action — offering
-    the analyst a one-click "Save as Playbook" CTA (contract §5,
-    `awaiting_playbook_offer`). Only call this when the triage is
-    substantially complete; do NOT offer after every single action.
+    """Emit a `playbook_offer` card offering the analyst a one-click
+    "Save as Playbook" CTA (contract §5, `awaiting_playbook_offer`).
+
+    Two modes, one terminal affordance:
+
+    - **Triage close (no `yaml`).** Call at the CLOSE of a triage session,
+      after you have approved & executed at least one containment action.
+      The card's draft body is compiled from the recorded session trace.
+      Only call this when the triage is substantially complete; do NOT
+      offer after every single action.
+    - **Direct build (`yaml=<final YAML>`).** A hand-authored build turn has
+      no trace; once `verify_playbook` passes, calling this with the final
+      validated YAML is the MANDATORY terminal action — the card carries the
+      YAML and accept compiles + pushes it deterministically. Never end a
+      successful build turn by telling the user to call `push_playbook`
+      themselves.
 
     You supply only the conversational framing (`summary`, optional
     `title_suggestion`). The card's reviewable-draft body — the per-step
@@ -407,6 +419,11 @@ def emit_playbook_offer(
     for label, val in (("id", id), ("summary", summary)):
         if not isinstance(val, str) or not val.strip():
             return _err("missing_field", f"{label} must be a non-empty string")
+
+    if yaml is not None:
+        return _offer_from_yaml(id, summary, yaml,
+                                title_suggestion=title_suggestion,
+                                editable_title=editable_title)
 
     from fsr_playbooks.agent import skill_trace as _skill_trace
     from fsr_playbooks.agent.skill_trace import SkillTrace
@@ -481,6 +498,48 @@ def emit_playbook_offer(
         card["title_suggestion"] = title_suggestion.strip()
     if draft.get("draft_steps"):
         card["draft_steps"] = draft["draft_steps"]
+    return {"ok": True, "card": card}
+
+
+def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
+                     title_suggestion: str | None,
+                     editable_title: bool) -> dict[str, Any]:
+    """Direct-build mode of `emit_playbook_offer` (§A): the card carries the
+    final validated YAML; accept compiles + pushes THAT text deterministically
+    (no trace involved). The steps list is a display summary parsed from the
+    YAML — best-effort, never a gate (the YAML already passed validate/verify
+    before the model offers it)."""
+    if not isinstance(yaml_text, str) or not yaml_text.strip():
+        return _err("missing_field", "yaml must be a non-empty string")
+
+    ops_summary: list[dict[str, Any]] = []
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text)
+        pbs = (doc or {}).get("playbooks") or []
+        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
+        for s in steps:
+            if isinstance(s, dict) and s.get("name"):
+                ops_summary.append({"label": str(s["name"]),
+                                    "step_type": str(s.get("type") or "")})
+    except Exception:  # noqa: BLE001 — display summary only, never block
+        ops_summary = []
+
+    card: dict[str, Any] = {
+        "type": "playbook_offer",
+        "id": id,
+        "summary": summary,
+        "ops_summary": ops_summary,
+        "editable_title": bool(editable_title),
+        # Hand-authored YAML: step risk isn't trace-classified, so flag for
+        # review rather than asserting safety either way.
+        "has_mutating_action": False,
+        "advisory": ("Built from the YAML above (not a recorded triage trace) "
+                     "— review the steps before saving."),
+        "final_yaml": yaml_text,
+    }
+    if title_suggestion and title_suggestion.strip():
+        card["title_suggestion"] = title_suggestion.strip()
     return {"ok": True, "card": card}
 
 
