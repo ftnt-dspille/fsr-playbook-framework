@@ -621,3 +621,67 @@ def test_code_snippet_without_python_function_passes_through():
     out = _decompile_step(s)
     assert out["arguments"]["connector"] == "code-snippet"   # envelope intact
     assert "code" not in out["arguments"]
+
+
+def test_send_email_minified_reverses_body_rename():
+    """The forward normalizer renames `body`->`content` and defaults `from_str`
+    to "" (the SMTP default-from the FSR engine fills at runtime). On decompile,
+    reverse `content`->`body` and drop the empty `from_str` default so the
+    round-trip is byte-stable (an original step with no `from:` doesn't gain
+    `from_str: ""` on first recompile). This is the G10 Tier-2 send_email
+    minimification. NOTE: orthogonal to the send_email->SendEmail (dead) vs
+    SendMail (live) forward-map wart -- that's a compiler concern (which
+    canonical send_email targets), not a decompiler one."""
+    by_name = _roundtrip_steps(
+        """
+collection: T
+playbooks:
+  - name: PB
+    steps:
+      - name: Start
+        type: start
+        next: Mail
+      - name: Mail
+        type: send_email
+        arguments:
+          to: [admin@example.com]
+          subject: hello
+          body: |
+            hi there
+"""
+    )
+    s = by_name["Mail"]
+    args = s.get("arguments") or {}
+    # body recovered (canonical `content` reversed to friendly `body`)
+    assert args.get("body", "").strip() == "hi there", args
+    assert "content" not in args, args           # canonical name dropped
+    assert "from_str" not in args, args           # empty default dropped
+
+
+def test_send_email_minified_restores_real_from():
+    """A real sender (`from_str` set to a non-empty address) is restored to the
+    friendly `from:` -- not dropped (only the empty default is dropped)."""
+    by_name = _roundtrip_steps(
+        """
+collection: T
+playbooks:
+  - name: PB
+    steps:
+      - name: Start
+        type: start
+        next: Mail
+      - name: Mail
+        type: send_email
+        arguments:
+          to: [admin@example.com]
+          subject: hello
+          body: |
+            hi there
+          from: bot@example.com
+"""
+    )
+    s = by_name["Mail"]
+    args = s.get("arguments") or {}
+    assert args.get("from") == "bot@example.com", args   # friendly `from:` restored
+    assert "from_str" not in args, args                  # canonical name dropped
+    assert args.get("body", "").strip() == "hi there", args

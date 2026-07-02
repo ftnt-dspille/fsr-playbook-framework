@@ -462,6 +462,31 @@ def _decompile_step(s, pb_name: str | None = None) -> dict:
                 out.pop("step_variables", None)
         if args:
             out["arguments"] = args
+    elif s.type == "send_email" and isinstance(args, dict):
+        # send_email minimification. The forward normalizer
+        # (`_normalize_send_email_args`) renames the friendly `body` -> canonical
+        # `content` and `from` -> `from_str`, then defaults `from_str` to "" (the
+        # FSR engine substitutes the SMTP config's default-from at runtime -- a
+        # value we don't have offline). Unlike code_snippet/connector, send_email
+        # does NOT synthesize a full connector envelope -- the compiled step
+        # carries only the email fields + content + from_str. So the
+        # minimification is small: reverse `content` -> `body` and `from_str` ->
+        # `from`, and drop the empty `from_str: ""` default so the round-trip is
+        # byte-stable (an original step authored with no `from:` would otherwise
+        # gain `from_str: ""` on the first recompile and drift). Recompile
+        # re-applies the rename + default (round-trip stable).
+        #
+        # Reverse ONLY when the friendly key isn't already present -- a step a
+        # user hand-edited to keep the canonical form (or a future author who
+        # set both) isn't clobbered.
+        if "content" in args and "body" not in args:
+            args["body"] = args.pop("content")
+        if args.get("from_str") == "":
+            args.pop("from_str", None)        # default -- dropped (recompile re-adds)
+        elif "from_str" in args and "from" not in args:
+            args["from"] = args.pop("from_str")  # a real sender -- restore friendly
+        if args:
+            out["arguments"] = args
     elif args:
         out["arguments"] = args
 

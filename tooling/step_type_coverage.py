@@ -177,16 +177,20 @@ COVERAGE: dict[str, StepCoverage] = {
              "value since the Referenced variant takes no friendly scalars."),
     # --- action/notify steps (P5 DONE: envelope-schema typed) ---
     "send_email": StepCoverage(
-        typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_MED,
+        typed=True, schema=True, read=READ_MINIMIFIED, priority=PRI_DONE,
         note="CONNECTOR-FAMILY (SendMail, dispatcher /tasks/connector). P5 DONE: "
              "SendEmailArgs validation-only envelope (to/cc/bcc list-or-str, "
              "subject str, content=body rename, from_str=from rename). The "
              "normalizer owns the body->content / from->from_str transform + "
              "from_str default (SMTP default-from substituted at runtime). "
-             "Residual wart: friendly `send_email` maps to the dead SendEmail "
-             "label (occ=0), not the live SendMail (occ=22) -- latent "
-             "forward-map issue, separate from this model. Params are the smtp "
-             "connector's send_email_new op (catalog layer, stays Any)."),
+             "G10 Tier-2 DONE: decompiler minimification reverses content->body "
+             "and from_str->from, dropping the empty from_str default so the "
+             "round-trip is byte-stable. Residual wart: friendly `send_email` "
+             "maps to the dead SendEmail label (occ=0), not the live SendMail "
+             "(occ=22) -- latent forward-map (compiler) issue, separate from "
+             "the model + decompiler; needs live verification before flipping. "
+             "Params are the smtp connector's send_email_new op (catalog layer, "
+             "stays Any)."),
     "create_task": StepCoverage(
         typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_MED,
         note="ManualTask. P5 DONE: CreateTaskArgs validation-only envelope "
