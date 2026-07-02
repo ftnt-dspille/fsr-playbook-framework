@@ -552,3 +552,72 @@ playbooks:
     assert "triggerOnReplicate" not in args, args
     assert "__triggerLimit" not in args, args
     assert "step_variables" not in s, s
+
+
+def test_code_snippet_minified_to_code_surface():
+    """The forward normalizer expands the friendly `code:` surface into the
+    full canonical connector envelope (connector=code-snippet, operation=
+    python_inline_code_editor, operationTitle, version, params.python_function,
+    config, step_variables). On decompile, reverse to just `code:` -- recompile
+    re-adds the envelope via the same defaults (round-trip stable). This is the
+    G10 Tier-2 code_snippet minimification."""
+    by_name = _roundtrip_steps(
+        """
+collection: T
+playbooks:
+  - name: PB
+    steps:
+      - name: Start
+        type: start
+        next: CS
+      - name: CS
+        type: code_snippet
+        arguments:
+          code: |
+            print("hi")
+"""
+    )
+    s = by_name["CS"]
+    assert s["type"] == "code_snippet"
+    args = s.get("arguments") or {}
+    # The code body is recovered to the friendly `code:` surface.
+    assert args.get("code", "").strip() == 'print("hi")', args
+    # The re-derived envelope keys are dropped (not surfaced as boilerplate).
+    for env_k in ("connector", "operation", "operationTitle", "version",
+                  "params", "config"):
+        assert env_k not in args, (env_k, args)
+    # step_variables is hoisted to step level; the empty default is dropped.
+    assert "step_variables" not in s, s
+
+
+def test_code_snippet_minified_preserves_real_config_uuid():
+    """A real config UUID (a specific chosen connector configuration) is
+    load-bearing -- the minimification must PRESERVE it (can't reverse-resolve
+    to the name without the catalog; round-trip stable as a UUID). Only the
+    empty default `config: ""` is dropped."""
+    from fsr_playbooks.compiler.ir import Step
+    from fsr_playbooks.compiler.decompiler import _decompile_step
+    s = Step(id="cs", type="code_snippet", name="cs", arguments={
+        "connector": "code-snippet", "operation": "python_inline_code_editor",
+        "operationTitle": "Execute Python Code", "version": "2.1.4",
+        "config": "abc-123-uuid", "params": {"python_function": "x"},
+    })
+    out = _decompile_step(s)
+    assert out["arguments"]["config"] == "abc-123-uuid"   # preserved
+    assert out["arguments"]["code"] == "x"
+
+
+def test_code_snippet_without_python_function_passes_through():
+    """A canonical code_snippet step with NO `params.python_function` (no code
+    body to recover) falls through to the generic pass-through -- its envelope
+    is preserved, not stripped (the minimification only fires when there is a
+    code body to extract)."""
+    from fsr_playbooks.compiler.ir import Step
+    from fsr_playbooks.compiler.decompiler import _decompile_step
+    s = Step(id="cs", type="code_snippet", name="cs", arguments={
+        "connector": "code-snippet", "operation": "python_inline_code_editor",
+        "version": "2.1.4",
+    })
+    out = _decompile_step(s)
+    assert out["arguments"]["connector"] == "code-snippet"   # envelope intact
+    assert "code" not in out["arguments"]

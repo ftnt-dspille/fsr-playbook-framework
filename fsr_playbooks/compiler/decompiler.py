@@ -434,6 +434,34 @@ def _decompile_step(s, pb_name: str | None = None) -> dict:
             out.pop("step_variables", None)
         if args:
             out["arguments"] = args
+    elif s.type == "code_snippet" and isinstance(args, dict):
+        # code_snippet (CodeSnippet) minimification. The forward normalizer
+        # (`_normalize_code_snippet_args` -> `expand_code_snippet`) expands the
+        # friendly `code:` surface into the canonical connector-envelope shape:
+        # connector=code-snippet, operation=python_inline_code_editor,
+        # operationTitle="Execute Python Code", version, params.python_function,
+        # config (UUID), step_variables=[]. On decompile, reverse to the
+        # friendly `code:` surface, dropping the re-derived envelope keys
+        # (recompile re-adds them via the same setdefaults/defaults -- round-
+        # trip stable). `config: ""` (the default-config sentinel) is dropped;
+        # a real config UUID is kept (can't reverse-resolve to the name without
+        # the connector_configs catalog -- round-trip stable as a UUID, like the
+        # connector branch's `operationTitle`). Only minimize when the canonical
+        # `params.python_function` is present -- a hand-authored canonical step
+        # without it falls through to the generic pass-through.
+        params = args.get("params")
+        if isinstance(params, dict) and "python_function" in params:
+            args["code"] = params.pop("python_function")
+            if not params:
+                args.pop("params", None)
+            for _env_k in ("connector", "operation", "operationTitle", "version"):
+                args.pop(_env_k, None)
+            if args.get("config") == "":
+                args.pop("config", None)
+            if out.get("step_variables") == []:
+                out.pop("step_variables", None)
+        if args:
+            out["arguments"] = args
     elif args:
         out["arguments"] = args
 

@@ -112,9 +112,15 @@ COVERAGE: dict[str, StepCoverage] = {
         typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_DONE,
         note="friendly duration->TimeBased."),
     "code_snippet": StepCoverage(
-        typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_MED,
-        note="python_function/config expansion. read pass-through leaves the "
-             "full canonical block; a minimification branch would help agents."),
+        typed=True, schema=True, read=READ_MINIMIFIED, priority=PRI_DONE,
+        note="python_function/config expansion. G10 Tier-2 DONE: decompiler "
+             "minimification reverses the canonical connector envelope "
+             "(connector/operation/operationTitle/version/params.python_function/"
+             "config/step_variables) back to the friendly `code:` surface; "
+             "recompile re-adds the envelope via the same defaults (round-trip "
+             "stable). A real config UUID is preserved (can't reverse-resolve to "
+             "the name without the catalog); a step with no python_function "
+             "falls through to pass-through (no code body to recover)."),
     "manual_input": StepCoverage(
         typed=True, schema=True, read=READ_MINIMIFIED, priority=PRI_MED,
         note="scalars typed + schema surface. P2 DONE: nested InputVariableArgs "
