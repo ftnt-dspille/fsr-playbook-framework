@@ -47,6 +47,9 @@ from ..typed_args.steps import expand_send_email as _expand_send_email_typed
 from ..typed_args.steps import expand_create_task as _expand_create_task_typed
 from ..typed_args.steps import expand_set_api_keys as _expand_set_api_keys_typed
 from ..typed_args.steps import expand_approval as _expand_approval_typed
+# ingest_bulk_feed envelope validation (IngestBulkFeed; for_each mode logic
+# owned by the emitter, collection/operation checks owned by the lint layer).
+from ..typed_args.steps import expand_ingest_bulk_feed as _expand_ingest_bulk_feed_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
 
@@ -147,6 +150,8 @@ class NormalizerMixin:
             self._normalize_set_api_keys_args(step, path, errors)
         if step.type == "approval":
             self._normalize_approval_args(step, path, errors)
+        if step.type == "ingest_bulk_feed":
+            self._normalize_ingest_bulk_feed_args(step, path, errors)
 
         # `stop` / `end` synthesize the canonical Utils: No Operation call,
         # then fall through to connector arg resolution. `utilities` (the
@@ -693,6 +698,31 @@ class NormalizerMixin:
         # wrong-typed resource/timeout (e.g. `timeout: "soon"`) that would
         # otherwise ride through.
         _expand_approval_typed(a, path, errors)
+        step.arguments = a
+
+    def _normalize_ingest_bulk_feed_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Friendly IngestBulkFeed -- bulk-ingest sibling of Create Record.
+
+        Inherits InsertDataCtrl (renders insertData.html); POSTs to
+        /api/ingest-feeds/<module> and deletes operation/fieldOperation
+        (implicitly upsert). The author writes canonical-shaped ``collection``
+        + ``resource`` + ``for_each`` directly -- there is no friendly->canonical
+        rename here, so this is validation-only. The semantic invariants the
+        editor enforces (collection must start /api/ingest-feeds/, no
+        operation/fieldOperation) are owned by the lint layer
+        (rulesets/_shared.py), and the for_each loop-mode normalization
+        (parallel/batch_size pruning, batch_size defaulting) is owned by the
+        emitter's _clean_step_arguments -- so this layer neither mutates nor
+        duplicates either.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Scalar type-validation via the typed-args layer (`typed_args.steps.
+        # expand_ingest_bulk_feed`, model `IngestBulkFeedArgs`). Validation-only
+        # -- never mutates `a`. Catches a wrong-typed collection/resource (e.g.
+        # `collection: 123`, `resource: "x"`) that would otherwise ride through.
+        _expand_ingest_bulk_feed_typed(a, path, errors)
         step.arguments = a
 
     def _expand_input_variables(

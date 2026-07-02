@@ -25,11 +25,13 @@ from fsr_playbooks.compiler.typed_args.steps import (
     SetApiKeysArgs,
     ApprovalArgs,
     WorkflowReferenceArgs,
+    IngestBulkFeedArgs,
     expand_send_email,
     expand_create_task,
     expand_set_api_keys,
     expand_approval,
     expand_workflow_reference,
+    expand_ingest_bulk_feed,
     is_modeled,
 )
 
@@ -210,8 +212,72 @@ def test_workflow_reference_valid_target_passes():
 
 
 # ---------------------------------------------------------------------------
-# end-to-end: the resolver's richer messages still own presence checks.
+# ingest_bulk_feed
 # ---------------------------------------------------------------------------
+
+def _ibf(args, errs=None):
+    return expand_ingest_bulk_feed(args, "p.steps[0]", errs if errs is not None else [])
+
+
+def test_ingest_bulk_feed_registry_and_schema():
+    assert STEP_ARG_MODELS.get("ingest_bulk_feed") is IngestBulkFeedArgs
+    assert is_modeled("ingest_bulk_feed") is True
+    s = emit_step_arg_schema("ingest_bulk_feed")
+    assert s is not None
+    props = set(s.get("properties", {}))
+    # The two arguments-dict scalars. for_each is a step-level IR field, NOT an
+    # arguments key, so it is intentionally absent from the schema.
+    assert {"collection", "resource"} <= props
+    assert "for_each" not in props
+
+
+def test_ingest_bulk_feed_validation_only_no_mutation():
+    args = {"collection": "/api/ingest-feeds/threat_intel_feeds",
+            "resource": {"value": "{{ vars.item.value }}"}}
+    snap = dict(args)
+    assert _ibf(args) is None
+    assert args == snap
+
+
+def test_ingest_bulk_feed_wrong_typed_collection_is_bad_value():
+    errs = []
+    _ibf({"collection": 123, "resource": {}}, errs)
+    assert any(e.code is ErrorCode.BAD_VALUE
+               and "arguments.collection" in (e.path or "") for e in errs)
+
+
+def test_ingest_bulk_feed_resource_is_any_accepts_freeform():
+    # resource is Any -- the field mappings are free-form (incl. __replace).
+    errs = []
+    _ibf({"collection": "/api/ingest-feeds/x", "resource": {"value": "v"}}, errs)
+    assert not [e for e in errs if e.code is ErrorCode.BAD_VALUE]
+
+
+def test_ingest_bulk_feed_e2e_compiles(db_path):
+    # for_each is a step-level sibling of arguments (not inside it); the
+    # emitter owns moving it into the wire args + its mode cleanup.
+    text = """
+collection: T
+playbooks:
+  - name: P
+    steps:
+      - name: start
+        type: start
+        next: ing
+      - name: ing
+        type: ingest_bulk_feed
+        for_each:
+          item: '{{ vars.items }}'
+          __bulk: true
+          batch_size: 1000
+        arguments:
+          collection: /api/ingest-feeds/threat_intel_feeds
+          resource:
+            value: '{{ vars.item.value }}'
+"""
+    r = compile_yaml(text, db_path)
+    assert not [e for e in r.errors if e.severity == "error"], \
+        [e.to_dict() for e in r.errors]
 
 def test_send_email_e2e_compiles(db_path):
     text = """

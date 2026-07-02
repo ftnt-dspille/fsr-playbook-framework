@@ -26,12 +26,12 @@ def test_registry_models_set_variable():
 
 def test_registry_unmodeled_type_falls_back():
     # Unmodeled step types must report no model so the resolver keeps using
-    # the imperative path — the migration's incremental contract. (After P5,
-    # send_email/create_task/set_api_keys/approval/workflow_reference are
-    # modeled; ingest_bulk_feed remains unmodeled -- it has no normalizer
-    # wiring point and was deferred.)
-    assert is_modeled("ingest_bulk_feed") is False
-    assert STEP_ARG_MODELS.get("ingest_bulk_feed") is None
+    # the imperative path — the migration's incremental contract. (After the
+    # P5 batch + ingest_bulk_feed, only the one-way authoring sugars stop/end
+    # remain unmodeled -- they compile down to a connector call and carry no
+    # distinct envelope to type.)
+    assert is_modeled("stop") is False
+    assert STEP_ARG_MODELS.get("stop") is None
 
 
 # ── unwrap parity ─────────────────────────────────────────────────────────

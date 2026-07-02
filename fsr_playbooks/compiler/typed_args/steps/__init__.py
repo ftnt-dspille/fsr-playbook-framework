@@ -44,6 +44,7 @@ from .create_task import CreateTaskArgs, expand_create_task
 from .set_api_keys import SetApiKeysArgs, expand_set_api_keys
 from .approval import ApprovalArgs, expand_approval
 from .workflow_reference import WorkflowReferenceArgs, expand_workflow_reference
+from .ingest_bulk_feed import IngestBulkFeedArgs, expand_ingest_bulk_feed
 
 # Step type → typed argument model. Grows incrementally through Phase 2.
 #
@@ -118,6 +119,13 @@ STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     # workflowReference declared Optional so pydantic doesn't shadow the
     # resolver's MISSING_FIELD. (Cross-tenant sibling = trigger_tenant_playbook.)
     "workflow_reference": WorkflowReferenceArgs,
+    # Ingest Bulk Feed (IngestBulkFeed) -- the bulk-ingest sibling of Create
+    # Record (inherits InsertDataCtrl; POSTs to /api/ingest-feeds/<module>,
+    # deletes operation/fieldOperation). Validation-only; the lint layer
+    # (rulesets/_shared.py) owns the collection-prefix + no-operation checks,
+    # and the emitter (_clean_step_arguments) owns the for_each loop-mode
+    # normalization, so for_each stays Any here.
+    "ingest_bulk_feed": IngestBulkFeedArgs,
 }
 
 
@@ -169,4 +177,6 @@ __all__ = [
     "expand_approval",
     "WorkflowReferenceArgs",
     "expand_workflow_reference",
+    "IngestBulkFeedArgs",
+    "expand_ingest_bulk_feed",
 ]

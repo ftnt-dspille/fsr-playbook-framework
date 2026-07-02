@@ -76,6 +76,12 @@ ACCEPTED_PHANTOM: set[str] = {
     "modules",
     "op",
     "op_name",
+    # code_snippet's authored code: the YAML author writes
+    # `arguments.params.python_function:` (a hand-authored canonical step per
+    # decompiler.py); read by decompiler/linter/normalizers/snippet_checks but
+    # never produced by a compiler stage — same author-supplied class as
+    # module/op/target/when. Pre-existing at HEAD; accepted here.
+    "python_function",
     "target",
     "vars",
     "when",

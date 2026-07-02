@@ -356,7 +356,7 @@ def test_final_flush_after_text_without_terminal_usage():
 class _ExplodingProvider:
     name = "exploding"
 
-    async def stream(self, *, system, messages, tools, tags=None):
+    async def stream(self, *, system, messages, tools, tags=None, case_state=None):
         yield _usage()
         raise RuntimeError("simulated outage")
 
@@ -389,7 +389,7 @@ def test_error_event_in_stream_sets_error_field():
 class _NoResumeProvider:
     name = "no-resume"
 
-    async def stream(self, *, system, messages, tools, tags=None):
+    async def stream(self, *, system, messages, tools, tags=None, case_state=None):
         yield _usage()
 
 
@@ -421,7 +421,7 @@ class _ScriptedResumeProvider:
     def __init__(self, events: list[Event]):
         self._events = events
 
-    async def stream(self, *, system, messages, tools, tags=None):
+    async def stream(self, *, system, messages, tools, tags=None, case_state=None):
         yield _usage()
 
     async def resume(self, *, suspended, decision):

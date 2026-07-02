@@ -763,7 +763,18 @@ def _resolve_path(env_key: str, attr_chain: str,
             i = j
         elif c == "[":
             end = attr_chain.index("]", i)
-            tokens.append(("index", attr_chain[i + 1:end].strip()))
+            inner = attr_chain[i + 1:end].strip()
+            # `obj['key']` / `obj["key"]` is bracket attribute access --
+            # equivalent to `obj.key` in Jinja -- NOT a numeric list index.
+            # Emit it as an attr so the object-key / universal-key path applies
+            # (otherwise a record's `['@id']` is misclassified as indexing a
+            # non-list, firing a spurious non_list_indexed; live-verified that
+            # find_record returns a list of records whose `@id` is reached via
+            # `vars.steps.X[0]['@id']`). Only a bare numeric `[0]` is an index.
+            if len(inner) >= 2 and inner[0] in ("'", '"') and inner[-1] == inner[0]:
+                tokens.append(("attr", inner[1:-1]))
+            else:
+                tokens.append(("index", inner))
             i = end + 1
         else:
             i += 1

@@ -101,7 +101,10 @@ def test_readonly_gated_when_disabled(fake_tier2_tool):
 
 def test_disabled_still_lets_approved_calls_through(fake_tier2_tool):
     _tools.set_readonly_auto_approve(False)
-    out = _tools.dispatch(_FAKE, {"x": 1, "_approved": True})
+    # The resume path (post human-approval) re-dispatches with `_internal=True`
+    # so the `_approved` sentinel is honored rather than rejected as a
+    # wire-supplied gate-bypass (see tools.py reserved-key guard).
+    out = _tools.dispatch(_FAKE, {"x": 1, "_approved": True}, _internal=True)
     assert "pending_approval" not in out
     assert out == {"ok": True, "ran": True}
     assert fake_tier2_tool == [{"x": 1}]

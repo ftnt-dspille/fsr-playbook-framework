@@ -1,7 +1,5 @@
 """Tests for case_state.py: round-trip, fail-open, FIFO cap, record-key reset."""
 
-import pytest
-
 from fsr_playbooks.agent.case_state import (
     CaseState,
     Capabilities,
