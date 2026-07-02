@@ -387,6 +387,47 @@ def _active_eval_policy() -> str | None:
     return os.environ.get("EVAL_APPROVAL_POLICY") or None
 
 
+# --- Read-only auto-approve policy ----------------------------------------
+#
+# Read-only actions (tier 1–2: FSR/third-party queries) auto-run without an
+# approval card. This is the intended default — a SOC analyst shouldn't have to
+# click "approve" to let the agent *look* at a record. The behavior used to be
+# implicit in the `tier >= 3` gate; this flag makes it an explicit, documented,
+# operator-toggleable policy.
+#
+#   FSR_AUTO_APPROVE_READONLY=1  (default) — tier 1–2 auto-run, tier 3+ gated.
+#   FSR_AUTO_APPROVE_READONLY=0            — paranoid mode: tier 1+ all gated;
+#                                            only tier-0 local tools auto-run.
+#
+# Deferred (not built here): "allow-once / always-allow this specific tool"
+# — a per-(tool[,connector,op]) grant that survives one approval. This flag is
+# the coarse read-only switch, not that per-tool machinery.
+_READONLY_AUTO_APPROVE_OVERRIDE: bool | None = None  # test/host override
+
+
+def set_readonly_auto_approve(enabled: bool | None) -> None:
+    """Programmatic override for the read-only auto-approve flag. `None`
+    reverts to the env default. Mirrors `set_eval_policy`."""
+    global _READONLY_AUTO_APPROVE_OVERRIDE
+    _READONLY_AUTO_APPROVE_OVERRIDE = enabled
+
+
+def _readonly_auto_approve() -> bool:
+    if _READONLY_AUTO_APPROVE_OVERRIDE is not None:
+        return _READONLY_AUTO_APPROVE_OVERRIDE
+    raw = os.environ.get("FSR_AUTO_APPROVE_READONLY")
+    if raw is None:
+        return True  # default: read-only auto-runs
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def _approval_floor() -> int:
+    """Minimum tier that requires human approval. Default 3 (read-only
+    tier 1–2 auto-runs). With read-only auto-approve disabled, everything
+    above tier 0 (local, side-effect-free tools) is gated."""
+    return 3 if _readonly_auto_approve() else 1
+
+
 def _apply_eval_policy(policy: str, tier: int) -> str:
     """Return 'approve' | 'deny' for a given policy + tier. Anything
     unknown returns 'suspend' so production behavior is the safe
@@ -739,9 +780,30 @@ def dispatch(name: str, arguments: dict[str, Any]) -> Any:
     # whitelist enforced one frame up).
     approved = bool(raw_args.pop("_approved", False))
     summary = raw_args.pop("_summary", None)
+
+    # Validate tool arguments using pydantic models if available.
+    # Validation errors don't fail the dispatch — they're surfaced as
+    # tool results so the model can see and potentially fix bad args.
+    try:
+        from .tool_models import TOOL_MODELS
+        if name in TOOL_MODELS:
+            try:
+                TOOL_MODELS[name](**raw_args)
+            except Exception as e:
+                from pydantic import ValidationError
+                if isinstance(e, ValidationError):
+                    errors = "; ".join(
+                        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
+                        for err in e.errors()
+                    )
+                    return {"error": f"invalid arguments for {name}: {errors}"}
+                raise
+    except ImportError:
+        pass  # tool_models not available; skip validation
     tier = _resolve_tier(name, raw_args)
 
-    if tier >= 3 and not approved:
+    floor = _approval_floor()
+    if tier >= floor and not approved:
         # Phase 3: eval-mode policy short-circuit. Production callers
         # (the chat loop) leave the policy unset, fall through to the
         # pending_approval envelope, and the chat layer suspends.
