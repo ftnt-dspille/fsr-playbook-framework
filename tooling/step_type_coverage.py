@@ -185,12 +185,15 @@ COVERAGE: dict[str, StepCoverage] = {
              "from_str default (SMTP default-from substituted at runtime). "
              "G10 Tier-2 DONE: decompiler minimification reverses content->body "
              "and from_str->from, dropping the empty from_str default so the "
-             "round-trip is byte-stable. Residual wart: friendly `send_email` "
-             "maps to the dead SendEmail label (occ=0), not the live SendMail "
-             "(occ=22) -- latent forward-map (compiler) issue, separate from "
-             "the model + decompiler; needs live verification before flipping. "
-             "Params are the smtp connector's send_email_new op (catalog layer, "
-             "stays Any)."),
+             "round-trip is byte-stable. Forward-map note (live-verified "
+             "2026-07-02 on 8.0): FortiSOAR has TWO 'Send Email' step types -- "
+             "SendEmail (dedicated /wf/workflow/tasks/send_email, occ=0) AND "
+             "SendMail (connector dispatcher, occ=22, what the editor palette "
+             "emits). The compiler targets SendEmail; BOTH are registered + "
+             "valid on 8.0, so this is editor-alignment, NOT a correctness bug "
+             "(the dedicated handler still exists). Flipping to SendMail is "
+             "optional cleanup, not urgent. Params are the smtp connector's "
+             "send_email_new op (catalog layer, stays Any)."),
     "create_task": StepCoverage(
         typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_MED,
         note="ManualTask. P5 DONE: CreateTaskArgs validation-only envelope "
@@ -363,11 +366,13 @@ def _build_canonical_to_friendly() -> None:
     # start+module -> cybersponse.action is covered by `start` (decompiler
     # overlay agrees), so action counts as covered.
     _CANONICAL_TO_FRIENDLY.setdefault("cybersponse.action", "start")
-    # The live "Send Email" canonical is SendMail (occ=22, connector-dispatcher).
-    # `send_email` maps to SendEmail (occ=0, a dead duplicate label) in
-    # SHORT_TYPE_TO_FSR -- a latent forward-map wart. For the *coverage* question
-    # ("is Send Email authorable from YAML?"), both labels are covered by
-    # `send_email`; flag the wart separately, don't let it read as a palette gap.
+    # The editor palette's "Send Email" canonical is SendMail (occ=22,
+    # connector-dispatcher). `send_email` maps to SendEmail (occ=0, the dedicated
+    # /wf/workflow/tasks/send_email handler) in SHORT_TYPE_TO_FSR -- a
+    # forward-map wart (editor-alignment, NOT a correctness bug: live-verified
+    # 2026-07-02 on 8.0 that BOTH step types are registered + valid). For the
+    # *coverage* question ("is Send Email authorable from YAML?"), both labels
+    # are covered by `send_email`; don't let the label split read as a palette gap.
     _CANONICAL_TO_FRIENDLY.setdefault("SendMail", "send_email")
     # The editor palette's "Utilities" entry is canonical `CyopsUtilices` (the
     # widget name), but `utilities` compiles to `Connectors` (it routes through
