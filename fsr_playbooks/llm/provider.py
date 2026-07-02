@@ -148,6 +148,7 @@ class LLMProvider(Protocol):
         messages: list[Message],
         tools: list[dict[str, Any]],
         tags: dict[str, Any] | None = None,
+        case_state: Any | None = None,
     ) -> AsyncIterator[Event]:
         """Stream events for one user turn. Implementations MUST emit
         a `UsageEvent` after each LLM round-trip (before any tool
@@ -156,5 +157,9 @@ class LLMProvider(Protocol):
 
         `tags` is opaque to the provider — it just round-trips it on
         the UsageEvent so the route handler can stamp e.g. the active
-        playbook collection name."""
+        playbook collection name.
+
+        `case_state` is optional CaseState for guard seeding (P2). When
+        provided, the provider's discipline seeds from case_state.investigation
+        and mutates it during the turn so the caller can persist it afterwards."""
         ...

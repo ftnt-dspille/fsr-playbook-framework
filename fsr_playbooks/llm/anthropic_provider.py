@@ -157,6 +157,7 @@ class AnthropicProvider:
             resolved = dispatch(
                 suspended.tool,
                 {**suspended.args, "_approved": True},
+                _internal=True,
             )
             decision_event_result: Any = resolved
         else:
@@ -270,6 +271,7 @@ class AnthropicProvider:
         messages: list[Message],
         tools: list[dict[str, Any]],
         tags: dict[str, Any] | None = None,
+        case_state: Any = None,  # CaseState | None, kept as Any to avoid import
     ) -> AsyncIterator[Event]:
         import uuid as _uuid
 
@@ -308,7 +310,12 @@ class AnthropicProvider:
         failed_signatures: set[str] = set()
         # Triage discipline (hunt floor + forbidden pivot + call-once) — see
         # _loop_helpers.TriageDiscipline. Fires only on triage tool names.
-        _discipline = TriageDiscipline()
+        # If case_state is provided, pass its investigation to seed counters.
+        investigation_state = (
+            getattr(case_state, "investigation", None)
+            if case_state is not None else None
+        )
+        _discipline = TriageDiscipline(state=investigation_state)
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:
             try:
@@ -767,9 +774,16 @@ class AnthropicProvider:
 def _is_error_result(result: Any) -> bool:
     """True if a tool result represents a failure, for the wire
     `is_error` flag. Recognizes the canonical `{ok: false}` envelope
-    (from `_err`) and a bare `{error: ...}` dict."""
-    return isinstance(result, dict) and (
-        result.get("ok") is False or "error" in result)
+    (from `_err`) and a bare `{error: ...}` dict.
+
+    Guard-redirect results (kind=='guard_redirect') are steering, not errors,
+    so they don't get flagged."""
+    if not isinstance(result, dict):
+        return False
+    # Guard redirects are steering, not errors
+    if result.get("kind") == "guard_redirect":
+        return False
+    return result.get("ok") is False or "error" in result
 
 
 def _stringify(result: Any) -> str:

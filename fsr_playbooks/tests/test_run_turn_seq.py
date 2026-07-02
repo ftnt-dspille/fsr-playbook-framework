@@ -50,7 +50,7 @@ class _FakeProvider:
     def __init__(self, events):
         self._events = events
 
-    async def stream(self, *, system, messages, tools, tags=None) -> AsyncIterator:
+    async def stream(self, *, system, messages, tools, tags=None, case_state=None) -> AsyncIterator:
         for ev in self._events:
             yield ev
 
@@ -164,7 +164,7 @@ def test_run_turn_timeout_surfaces_error_event():
     """A stream that hangs past timeout_secs emits ErrorEvent + stream_error."""
 
     class _HangProvider:
-        async def stream(self, *, system, messages, tools, tags=None):
+        async def stream(self, *, system, messages, tools, tags=None, case_state=None):
             await asyncio.sleep(9999)
             return
             yield  # make it an async generator

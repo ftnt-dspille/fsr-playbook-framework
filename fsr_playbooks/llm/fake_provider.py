@@ -49,6 +49,7 @@ class FakeProvider:
         messages: list[Message],
         tools: list[dict[str, Any]],
         tags: dict[str, Any] | None = None,
+        case_state: Any | None = None,
     ) -> AsyncIterator[Event]:
         self.last_system = system
         self.last_messages = list(messages)

@@ -270,11 +270,22 @@ _INVESTIGATION_TOOLS: frozenset[str] = frozenset({
     "get_device_info", "get_incident_details", "get_associated_events_new",
     "faz_get_alerts", "faz_search_ip", "faz_raw_query",
 })
-# Discovery tools that return their full set in one shot — a second call is
-# pure waste (and the prompt says "call find_containment_actions once").
+# Discovery tools that return their full set in one shot FOR A GIVEN INDICATOR
+# TYPE — a second call with the SAME target_type is pure waste, but these tools
+# are `target_type`-scoped (ip/domain/hash/endpoint/…) and filter their result
+# by it, so a call for `ip` and a call for `endpoint` are DISTINCT and both
+# legitimate. The call-once guard therefore keys on (name, target_type), not
+# name alone (which used to wrongly block the second indicator type).
 _CALL_ONCE_DISCOVERY: frozenset[str] = frozenset({
     "find_containment_actions", "find_enrichment_actions",
 })
+
+
+def _call_once_sig(name: str, args: Any) -> str:
+    """Dedup key for the call-once discovery guard: name + normalized
+    target_type, so each indicator type gets its own single call."""
+    tt = str((args or {}).get("target_type") or "").strip().lower()
+    return f"{name}\x00{tt}"
 # External threat-intel connectors that should never be pointed at an internal
 # (RFC1918 / loopback / link-local) IP — enriching a private source IP against
 # public TI is the forbidden pivot the eval fixtures encode.
@@ -317,13 +328,32 @@ class TriageDiscipline:
 
     Attempts — not successes — count toward the hunt floor, so a config gap or a
     failing enrichment can't deadlock the floor (the model still gets credit for
-    trying to investigate, and MAX_TOOL_TURNS bounds the loop)."""
+    trying to investigate, and MAX_TOOL_TURNS bounds the loop).
 
-    def __init__(self, *, floor: int = MIN_INVESTIGATION_BEFORE_CONTAINMENT):
+    When initialized with an optional ``state`` (Investigation instance), the
+    discipline seeds its counters from the state and mutates the shared state
+    object as the turn progresses so the caller can persist it afterwards."""
+
+    def __init__(
+        self,
+        *,
+        floor: int = MIN_INVESTIGATION_BEFORE_CONTAINMENT,
+        state: Any = None,  # Investigation | None
+    ):
         import threading
         self.floor = floor
-        self.invest_attempts = 0
+        self._shared_state = state  # None or an Investigation instance
+        # Seed invest_attempts from state if provided
+        if state is not None and hasattr(state, "invest_attempts"):
+            self.invest_attempts = state.invest_attempts
+        else:
+            self.invest_attempts = 0
+        # Pre-populate _called from state if provided
         self._called: set[str] = set()
+        if state is not None and hasattr(state, "called_once_sigs"):
+            self._called.update(state.called_once_sigs)
+        # Hunt floor is permanently satisfied if state says so
+        self._hunt_floor_met = state is not None and getattr(state, "hunt_floor_met", False)
         # How many distinct evidence tools remain before the floor lifts —
         # surfaced in the block message so the model knows it's making progress.
         self._lock = threading.Lock()
@@ -337,6 +367,7 @@ class TriageDiscipline:
                 if internal and not external:
                     return {
                         "ok": False,
+                        "kind": "guard_redirect",
                         "forbidden_pivot_guard": True,
                         "error": (
                             f"Skipped: {connector} is an EXTERNAL threat-intel "
@@ -349,22 +380,30 @@ class TriageDiscipline:
                             f"connectors for EXTERNAL, routable indicators."
                         ),
                     }
-        # 2. Call-once discovery — the set is returned in one shot.
-        if name in _CALL_ONCE_DISCOVERY and name in self._called:
+        # 2. Call-once discovery — the set is returned in one shot PER
+        # target_type. Block only a repeat of the SAME (name, target_type);
+        # a different indicator type is a distinct, legitimate call.
+        if (name in _CALL_ONCE_DISCOVERY
+                and _call_once_sig(name, args) in self._called):
+            tt = str((args or {}).get("target_type") or "").strip().lower()
+            scope = f" for target_type `{tt}`" if tt else ""
             return {
                 "ok": False,
+                "kind": "guard_redirect",
                 "call_once_guard": True,
                 "error": (
-                    f"STOP calling `{name}` — you already called it this session "
-                    f"and it returns the FULL set in one shot. Do not call it "
-                    f"again. Act on the result you already have: pick an op from "
-                    f"it and proceed."
+                    f"STOP calling `{name}`{scope} — you already called it this "
+                    f"session{scope} and it returns the FULL set for that "
+                    f"indicator type in one shot. Do not repeat it{scope}. Act on "
+                    f"the result you already have: pick an op from it and proceed. "
+                    f"(A DIFFERENT target_type is allowed.)"
                 ),
             }
         # 3. Hunt floor — no containment before real investigation. Prescriptive:
         # weak models re-spam a blocked tool when told "retry later", so name the
         # ONE next call to make and forbid re-calling the blocked tool.
         if (name in _CONTAINMENT_STAGING_TOOLS
+                and not self._hunt_floor_met
                 and self.invest_attempts < self.floor):
             remaining = self.floor - self.invest_attempts
             if "search_module_records" not in self._called:
@@ -380,6 +419,7 @@ class TriageDiscipline:
                 )
             return {
                 "ok": False,
+                "kind": "guard_redirect",
                 "hunt_floor_guard": True,
                 "investigation_calls": self.invest_attempts,
                 "required": self.floor,
@@ -401,9 +441,26 @@ class TriageDiscipline:
             guard = self._check_locked(name, args or {})
             if guard is not None:
                 return guard
+            # Record the call. Call-once discovery tools are recorded under their
+            # (name, target_type) signature so a different indicator type isn't
+            # blocked; every other tool records by bare name (the hunt-floor and
+            # `search_module_records`-seen checks key on bare names).
             self._called.add(name)
+            if name in _CALL_ONCE_DISCOVERY:
+                self._called.add(_call_once_sig(name, args))
             if name in _INVESTIGATION_TOOLS:
                 self.invest_attempts += 1
+                # Once floor is met, mark it in the shared state
+                if (self._shared_state is not None and
+                        self.invest_attempts >= self.floor and
+                        not self._hunt_floor_met):
+                    self._hunt_floor_met = True
+                    self._shared_state.hunt_floor_met = True
+            # Mutate the shared state to keep invest_attempts in sync
+            if self._shared_state is not None:
+                self._shared_state.invest_attempts = self.invest_attempts
+                # Keep called_once_sigs in sync
+                self._shared_state.called_once_sigs = list(self._called)
             return None
 
 

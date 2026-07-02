@@ -104,6 +104,7 @@ class LMStudioProvider:
         messages: list[Message],
         tools: list[dict[str, Any]],
         tags: dict[str, Any] | None = None,
+        case_state: Any = None,  # CaseState | None, kept as Any to avoid import
     ) -> AsyncIterator[Event]:
         if not self.model:
             yield ErrorEvent(message="No LM Studio model selected — pick one in Settings.")

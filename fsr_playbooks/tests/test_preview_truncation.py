@@ -46,6 +46,24 @@ def test_sensitive_keys_still_masked_after_truncation():
     assert preview["args"]["user"] == "admin"
 
 
+def test_broadened_credential_key_spellings_are_masked():
+    # S4 — credential fields under alternate spellings must not leak into a
+    # preview / approval card. Non-secret fields with "key" in the name still
+    # pass through.
+    secret_keys = [
+        "password", "passwd", "pwd", "client_secret", "credential",
+        "private_key", "access-key", "session_key", "signing_key", "apikey",
+    ]
+    args = {k: "s3kr3t" for k in secret_keys}
+    args["idempotency_key"] = "req-123"  # not a credential — should survive
+    args["public_key_id"] = "kid-1"      # not a credential — should survive
+    preview = _build_preview("auth", args)["args"]
+    for k in secret_keys:
+        assert preview[k] == "***", f"{k} was not masked"
+    assert preview["idempotency_key"] == "req-123"
+    assert preview["public_key_id"] == "kid-1"
+
+
 def test_nested_dict_and_list_truncation():
     preview = _build_preview(
         "x", {"outer": {"yaml": "y" * 5000, "items": list(range(100))}}

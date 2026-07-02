@@ -205,6 +205,7 @@ async def run_agent_turn(
     user_message_seq_base: int = -100,
     coalesce_text: bool = True,
     timeout_secs: float = 600,
+    case_state: Any = None,              # CaseState | None, kept as Any to keep this file's imports cheap
 ) -> TurnResult:
     """Drive one user turn through the provider and return the transcript.
 
@@ -245,6 +246,10 @@ async def run_agent_turn(
       timeout_secs: hard deadline on the provider stream. Default 600 s
         (10 min). On expiry, emits an ErrorEvent and returns with
         stop_reason="stream_error". Set lower in tests to keep them fast.
+      case_state: optional CaseState instance for guard seeding. When
+        provided, the provider's discipline seeds from case_state.investigation
+        (invest_attempts, hunt_floor_met, called_once_sigs) and mutates it
+        during the turn so the caller can persist it afterwards.
 
     Returns: TurnResult with the full transcript, stop_reason, captured
     session_id (from the first UsageEvent), and last_assistant_yaml
@@ -268,6 +273,7 @@ async def run_agent_turn(
         async with _total_timeout(timeout_secs):
             async for ev in provider.stream(
                 system=system, messages=messages, tools=tools, tags=tags,
+                case_state=case_state,
             ):
                 await _fire_event_callback(on_event, ev)
                 result.transcript.append(ev)

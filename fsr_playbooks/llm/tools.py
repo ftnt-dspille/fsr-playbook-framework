@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -147,7 +148,23 @@ _REMEDIATION_CATEGORIES = {"remediation", "containment"}
 _MANAGEMENT_CATEGORIES = {"management"}
 _SAFE_CATEGORIES = {"investigation", "query", "utilities", "enrichment", "verification"}
 
-_SENSITIVE_KEY_RE = re.compile(r"(?i)(password|token|api[_-]?key|secret|authorization|bearer)")
+# Keys whose values are masked to `***` in any human-facing preview / audit
+# surface (S4). Covers common credential-field spellings so a tool that names
+# its secret `passwd` / `client_credential` / `private_key` doesn't leak it into
+# an approval card. `secret` also catches `client_secret`; `api[_-]?key` catches
+# `apikey`/`api-key`; `key` is scoped to *_key / private/access/session variants
+# rather than matching every field containing "key".
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?i)("
+    r"passw(or)?d|passwd|pwd"
+    r"|token"
+    r"|api[_-]?key"
+    r"|secret"
+    r"|authorization|bearer"
+    r"|credential"
+    r"|(private|access|session|secret|signing)[_-]?key"
+    r")"
+)
 
 
 _DB_PATH = default_db_path()
@@ -757,7 +774,9 @@ def openai_tools() -> list[dict[str, Any]]:
     ]
 
 
-def dispatch(name: str, arguments: dict[str, Any]) -> Any:
+def dispatch(
+    name: str, arguments: dict[str, Any], *, _internal: bool = False
+) -> Any:
     """Tier-aware dispatch (HITL_GUARDRAILS_PLAN Phase 0).
 
     Tier 0–2: execute immediately, append an audit row.
@@ -772,13 +791,27 @@ def dispatch(name: str, arguments: dict[str, Any]) -> Any:
         return {"error": f"unknown tool: {name}"}
 
     raw_args = dict(arguments or {})
-    # `_approved` sentinel is set by the chat backend when it has
-    # already validated the human approval against its session-auth
-    # surface. We don't mint HMAC tokens — auth is the existing app
-    # auth; this flag is internal-only and the chat layer guarantees
-    # it can't originate from the LLM (tool-use args pass through a
-    # whitelist enforced one frame up).
-    approved = bool(raw_args.pop("_approved", False))
+    # `_approved` is an internal-only sentinel: it bypasses the HITL tier
+    # gate and may ONLY be set by the resume path (post human-approval),
+    # which calls dispatch with `_internal=True`. Any `_approved` arriving
+    # on a normal dispatch originates from untrusted input — the LLM's
+    # tool-use args or a compromised/MITM'd wire frame — and is a gate-
+    # bypass injection attempt (S1). Reject it loudly rather than honor it.
+    if "_approved" in raw_args and not _internal:
+        logging.getLogger(__name__).error(
+            "rejected wire-supplied _approved on tool '%s' "
+            "(tier-gate bypass attempt)",
+            name,
+        )
+        return {
+            "ok": False,
+            "code": "reserved_key_rejected",
+            "error": (
+                "The '_approved' flag is internal-only and cannot be supplied "
+                "in tool arguments. The action was NOT executed."
+            ),
+        }
+    approved = bool(raw_args.pop("_approved", False)) if _internal else False
     summary = raw_args.pop("_summary", None)
 
     # Validate tool arguments using pydantic models if available.

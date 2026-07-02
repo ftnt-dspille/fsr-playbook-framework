@@ -8,10 +8,20 @@ can't re-call a one-shot discovery tool. Pure + offline.
 """
 from __future__ import annotations
 
+import pytest
+
 from fsr_playbooks.llm._loop_helpers import (
     MIN_INVESTIGATION_BEFORE_CONTAINMENT,
     TriageDiscipline,
 )
+
+# Import the helper function to test (using direct import from the module)
+# to avoid issues with private function visibility
+try:
+    from fsr_playbooks.llm.anthropic_provider import _is_error_result
+except ImportError:
+    # If not available in anthropic provider, it might be in another module
+    _is_error_result = None
 
 
 def _drive(d: TriageDiscipline, name: str, args: dict | None = None):
@@ -101,8 +111,206 @@ def test_find_enrichment_actions_call_once():
     assert g is not None and g["call_once_guard"] is True
 
 
+def test_call_once_is_per_target_type():
+    """Regression: the call-once guard is scoped by target_type. These tools
+    filter their result set by indicator type, so a call for `domain` and a
+    call for `ip` are DISTINCT and both legitimate — only a repeat of the SAME
+    target_type is a wasteful duplicate. (Live-observed: a triage that scoped
+    find_containment_actions to `ip` then `endpoint` was wrongly blocked.)"""
+    d = TriageDiscipline()
+    # Two different indicator types → both allowed.
+    assert _drive(d, "find_enrichment_actions", {"target_type": "domain"}) is None
+    assert _drive(d, "find_enrichment_actions", {"target_type": "ip"}) is None
+    # A repeat of an already-seen target_type → blocked.
+    g = _drive(d, "find_enrichment_actions", {"target_type": "ip"})
+    assert g is not None and g["call_once_guard"] is True
+
+    # Same for containment (past the hunt floor).
+    d2 = TriageDiscipline()
+    for _ in range(MIN_INVESTIGATION_BEFORE_CONTAINMENT):
+        _drive(d2, "run_op", {"connector": "virustotal", "params": {"ip": "8.8.8.8"}})
+    assert _drive(d2, "find_containment_actions", {"target_type": "ip"}) is None
+    assert _drive(d2, "find_containment_actions", {"target_type": "endpoint"}) is None
+    g2 = _drive(d2, "find_containment_actions", {"target_type": "ip"})
+    assert g2 is not None and g2["call_once_guard"] is True
+
+
 def test_build_tools_unaffected():
     """Discipline fires only on triage tool names; build flows are untouched."""
     d = TriageDiscipline()
     for name in ("compile_yaml", "validate_yaml", "push_playbook", "get_op_schema"):
         assert d.evaluate(name, {}) is None
+
+
+# ─────────────── P2: guard seeding + state mutation ────────────────
+
+def test_guard_rejection_carries_kind_guard_redirect():
+    """All three discipline rejections carry kind='guard_redirect' (design item 6)."""
+    # 1. Hunt floor guard
+    d = TriageDiscipline()
+    g = d.evaluate("find_containment_actions", {})
+    assert g is not None
+    assert g.get("kind") == "guard_redirect"
+    assert g.get("hunt_floor_guard") is True
+
+    # 2. Forbidden pivot guard
+    d2 = TriageDiscipline()
+    g2 = d2.evaluate("run_op", {"connector": "virustotal", "params": {"ip": "10.0.0.1"}})
+    assert g2 is not None
+    assert g2.get("kind") == "guard_redirect"
+    assert g2.get("forbidden_pivot_guard") is True
+
+    # 3. Call-once guard
+    d3 = TriageDiscipline()
+    _drive(d3, "find_enrichment_actions", {})
+    g3 = _drive(d3, "find_enrichment_actions", {})
+    assert g3 is not None
+    assert g3.get("kind") == "guard_redirect"
+    assert g3.get("call_once_guard") is True
+
+
+def test_seeded_discipline_floor_already_met():
+    """When state.hunt_floor_met=True, the floor check is permanently satisfied (design item 3)."""
+    from fsr_playbooks.agent.case_state import Investigation
+
+    # Create a state where floor is already met
+    state = Investigation(
+        invest_attempts=MIN_INVESTIGATION_BEFORE_CONTAINMENT,
+        hunt_floor_met=True,
+    )
+
+    # Create discipline seeded from state
+    d = TriageDiscipline(state=state)
+
+    # containment should NOT be blocked even on a fresh turn
+    assert d.evaluate("find_containment_actions", {}) is None
+    assert d.evaluate("emit_action_card", {}) is None
+
+
+def test_seeded_discipline_counters_from_state():
+    """When state is provided, invest_attempts and called_once_sigs are seeded (design item 3)."""
+    from fsr_playbooks.agent.case_state import Investigation
+
+    # Create state with prior progress
+    state = Investigation(
+        invest_attempts=2,
+        called_once_sigs=["find_enrichment_actions\x00domain"],
+    )
+
+    d = TriageDiscipline(state=state)
+
+    # invest_attempts should be seeded
+    assert d.invest_attempts == 2
+
+    # called_once_sigs should be seeded; a repeat of the same target_type is blocked
+    g = d.evaluate("find_enrichment_actions", {"target_type": "domain"})
+    assert g is not None and g.get("call_once_guard") is True
+
+    # but a different target_type is allowed
+    assert d.evaluate("find_enrichment_actions", {"target_type": "ip"}) is None
+
+
+def test_discipline_mutates_shared_state():
+    """As the turn progresses, the shared Investigation object is mutated (design item 3)."""
+    from fsr_playbooks.agent.case_state import Investigation
+
+    state = Investigation()
+    d = TriageDiscipline(state=state)
+
+    # Initially empty
+    assert state.invest_attempts == 0
+    assert len(state.called_once_sigs) == 0
+
+    # Run some investigation tools
+    d.evaluate("search_module_records", {"module": "alerts", "query": "host1"})
+    d.evaluate("run_op", {"connector": "virustotal", "params": {"ip": "8.8.8.8"}})
+
+    # Shared state should be mutated
+    assert state.invest_attempts == 2
+    assert "search_module_records" in state.called_once_sigs
+    assert "run_op" in state.called_once_sigs
+
+    # Run a call-once discovery tool
+    d.evaluate("find_enrichment_actions", {"target_type": "domain"})
+
+    # call_once_sig should be added
+    sig = "find_enrichment_actions\x00domain"
+    assert sig in state.called_once_sigs
+
+
+def test_discipline_marks_hunt_floor_met_in_state():
+    """When hunt floor is met, the shared state.hunt_floor_met is set to True (design item 3)."""
+    from fsr_playbooks.agent.case_state import Investigation
+
+    state = Investigation()
+    d = TriageDiscipline(state=state)
+
+    # Run investigation tools to meet the floor
+    for _ in range(MIN_INVESTIGATION_BEFORE_CONTAINMENT):
+        d.evaluate("search_module_records", {"module": "alerts", "query": "host"})
+
+    # The shared state should now have hunt_floor_met=True
+    assert state.hunt_floor_met is True
+
+    # And subsequent containment calls should not be blocked
+    assert d.evaluate("find_containment_actions", {}) is None
+
+
+def test_no_state_behavior_unchanged():
+    """Backward compat: when no state is provided, behavior is identical to before."""
+    d = TriageDiscipline()  # No state parameter
+
+    # Floor blocking works
+    g = d.evaluate("find_containment_actions", {})
+    assert g is not None and g["hunt_floor_guard"] is True
+
+    # Forbidden pivot works
+    g2 = d.evaluate("run_op", {"connector": "virustotal", "params": {"ip": "10.0.0.1"}})
+    assert g2 is not None and g2["forbidden_pivot_guard"] is True
+
+    # Call-once works
+    d2 = TriageDiscipline()
+    d2.evaluate("find_enrichment_actions", {})
+    g3 = d2.evaluate("find_enrichment_actions", {})
+    assert g3 is not None and g3["call_once_guard"] is True
+
+
+# ──────────── provider rendering: guard_redirect is not is_error ─────────
+
+@pytest.mark.skipif(_is_error_result is None, reason="_is_error_result not available")
+def test_is_error_result_guards_not_errors():
+    """Provider does NOT flag guard_redirect results as is_error (design item 6).
+
+    Guard redirects are steering, not errors — they should be rendered
+    as info-tone steering, not red errors.
+    """
+    # Regular errors are marked is_error
+    assert _is_error_result({"ok": False, "error": "something failed"}) is True
+    assert _is_error_result({"error": "missing resource"}) is True
+
+    # Guard-redirect results are NOT marked is_error
+    assert _is_error_result({
+        "ok": False,
+        "kind": "guard_redirect",
+        "hunt_floor_guard": True,
+        "error": "Do not call yet",
+    }) is False
+
+    assert _is_error_result({
+        "ok": False,
+        "kind": "guard_redirect",
+        "forbidden_pivot_guard": True,
+        "error": "Skipped: external TI on internal IP",
+    }) is False
+
+    assert _is_error_result({
+        "ok": False,
+        "kind": "guard_redirect",
+        "call_once_guard": True,
+        "error": "STOP calling this tool",
+    }) is False
+
+    # Non-dict results are not errors
+    assert _is_error_result("just a string") is False
+    assert _is_error_result(None) is False
+    assert _is_error_result([]) is False

@@ -229,7 +229,8 @@ class OpenAIProvider:
 
         if decision == "approve":
             resolved = dispatch(
-                suspended.tool, {**suspended.args, "_approved": True}
+                suspended.tool, {**suspended.args, "_approved": True},
+                _internal=True,
             )
         else:
             resolved = {"ok": False, "code": "user_denied",
@@ -334,6 +335,7 @@ class OpenAIProvider:
         messages: list[Message],
         tools: list[dict[str, Any]],
         tags: dict[str, Any] | None = None,
+        case_state: Any = None,  # CaseState | None, kept as Any to avoid import
     ) -> AsyncIterator[Event]:
         if not self.model:
             yield ErrorEvent(message="No OpenAI model selected — set one in Settings.")
@@ -366,7 +368,12 @@ class OpenAIProvider:
         failed_signatures: set[str] = set()
         # Triage discipline (hunt floor + forbidden pivot + call-once) — see
         # _loop_helpers.TriageDiscipline. Fires only on triage tool names.
-        _discipline = TriageDiscipline()
+        # If case_state is provided, pass its investigation to seed counters.
+        investigation_state = (
+            getattr(case_state, "investigation", None)
+            if case_state is not None else None
+        )
+        _discipline = TriageDiscipline(state=investigation_state)
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:
             try:
