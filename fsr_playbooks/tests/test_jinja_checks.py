@@ -66,7 +66,7 @@ def test_unknown_filter_with_did_you_mean():
     assert f["severity"] == "warning"
     assert "defualt" in f["message"]
     assert "Did you mean 'default'?" in f["message"]
-    assert f["suggestion"] == "replace with 'default'"
+    assert "replace with 'default'" in f["suggestion"]
 
 
 def test_did_you_mean_fires_for_real_typo_below_strict_cutoff():
@@ -102,3 +102,34 @@ def test_nested_args_locations():
         {"params": {"items": ["{{ x | nope }}"]}},
         step_id="s", path="p")
     assert issues[0]["location"] == "arguments.params.items[0]"
+
+
+# --- Ansible namespace (§G — false-positive fix) ---------------------------
+
+def test_ansible_filters_validate_clean():
+    # FSR playbooks run through an Ansible-based engine: the Ansible filter
+    # namespace is valid and must NOT raise unknown_jinja_filter (§G).
+    assert check_jinja(
+        {"a": "{{ vars.rec | json_query('a.b[0]') }}",
+         "b": "{{ vars.ok | ternary('yes', 'no') }}",
+         "c": "{{ vars.d | to_json }}",
+         "d": "{{ vars.d | combine(vars.e) }}",
+         "e": "{{ vars.l1 | zip(vars.l2) | list }}",
+         "f": "{{ vars.d | to_nice_json }}"},
+        step_id="s", path="p") == []
+
+
+def test_ansible_tests_validate_clean():
+    assert "match" in _KNOWN_TESTS or "regex" in _KNOWN_TESTS
+    assert check_jinja(
+        {"x": "{% if vars.host is match('web.*') %}y{% endif %}"},
+        step_id="s", path="p") == []
+
+
+def test_unknown_filter_message_is_advisory():
+    issues = check_jinja({"x": "{{ vars.a | zzz_not_a_filter_qq }}"},
+                         step_id="s", path="p")
+    (w,) = issues
+    assert w["code"] == "unknown_jinja_filter"
+    assert w["severity"] == "warning"
+    assert "may still be valid" in w["message"]

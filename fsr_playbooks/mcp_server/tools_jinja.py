@@ -59,7 +59,28 @@ def find_jinja_filter(q: str, limit: int = 15,
         if not verbose:
             for r in rows:
                 r.pop("curated_doc", None)
-        return rows
+        if rows:
+            return rows
+    # Never return a bare [] (AGENT_HARDENING_PLAN §H): fall back to the
+    # authoritative name catalog (jinja2 builtins ∪ FSR ∪ Ansible — the same
+    # set validate_yaml checks against) so a real-but-uncorpused filter like
+    # json_query is still discoverable, with near-name suggestions on a typo.
+    return _catalog_fallback(q, limit)
+
+
+def _catalog_fallback(q: str, limit: int) -> list[dict[str, Any]]:
+    import difflib
+
+    from fsr_playbooks.compiler.jinja_checks import _KNOWN_FILTERS
+
+    ql = q.lower()
+    hits = sorted(n for n in _KNOWN_FILTERS if ql in n.lower())
+    if not hits:
+        hits = difflib.get_close_matches(q, _KNOWN_FILTERS, n=limit, cutoff=0.5)
+    note = ("no corpus entry — matched against the known-filter catalog "
+            "(jinja2 builtins + FSR + Ansible); the filter is valid but has "
+            "no curated doc/examples here")
+    return [{"name": n, "source": "catalog", "note": note} for n in hits[:limit]]
 
 @mcp.tool()
 def find_jinja_pattern(q: str, kind: str | None = None,

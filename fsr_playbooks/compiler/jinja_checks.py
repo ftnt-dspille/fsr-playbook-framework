@@ -41,21 +41,27 @@ _DATA_PATH = os.path.join(
 
 
 def _load_known() -> tuple[frozenset[str], frozenset[str]]:
-    """Known filter and test names = jinja2 built-ins ∪ FortiSOAR custom catalog.
+    """Known names = jinja2 built-ins ∪ FSR widget catalog ∪ Ansible namespace.
 
     Unioning with the built-ins keeps the check false-positive-free for stock
     jinja2 filters the widget catalog happens not to list (``tojson``, ``map``,
     ``select``…). The FSR custom catalog adds the ``fortisoar*`` filters the
-    runtime registers that jinja2 doesn't know about.
+    runtime registers that jinja2 doesn't know about. The ``ansible_filters``/
+    ``ansible_tests`` keys carry the Ansible plugin namespace (ansible.builtin
+    + community.general, from ``tooling/extract_ansible_filters.py``) — FSR
+    playbooks execute through an Ansible-based engine, so ``json_query``,
+    ``ternary``, ``combine``… are valid even though the widget palette omits
+    them (AGENT_HARDENING_PLAN §G false-positive fix).
     """
     filters = set(_ENV.filters)
     tests = set(_ENV.tests)
     try:
         with open(_DATA_PATH, encoding="utf-8") as fh:
             cat = json.load(fh)
-        # The catalog lists filters (it's a filter palette); fold them into the
-        # filter set. They are not jinja tests.
+        # "filters" is the widget filter palette; it lists filters only.
         filters.update(cat.get("filters", {}))
+        filters.update(cat.get("ansible_filters", {}))
+        tests.update(cat.get("ansible_tests", {}))
     except (OSError, ValueError):
         pass
     return frozenset(filters), frozenset(tests)
@@ -133,12 +139,16 @@ def _check_filter_names(ast: nodes.Node, step_id: str, path: str,
         did = f" Did you mean {sug!r}?" if sug else ""
         out.append({
             "code": "unknown_jinja_filter",
-            "message": (f"unknown Jinja {kind} {name!r} at {loc} — not a "
-                        f"built-in or a known FortiSOAR {kind}.{did}"),
+            "message": (f"Jinja {kind} {name!r} at {loc} is not in the local "
+                        f"catalog (jinja2 built-ins + FSR + Ansible) — it may "
+                        f"still be valid on the target system.{did}"),
             "step": step_id, "path": path,
             "location": loc,
-            "suggestion": (f"replace with {sug!r}" if sug
-                           else f"check the {kind} name against the FSR catalog"),
+            "suggestion": (f"if {name!r} was a typo, replace with {sug!r}; "
+                           f"if it is a real {kind}, keep it — this is advisory"
+                           if sug else
+                           f"advisory only — verify the {kind} name; do not "
+                           f"rewrite a working template to silence this"),
             "severity": "warning",
         })
     return out
