@@ -4,7 +4,7 @@ These guard against silent offset drift when the regexes get tweaked —
 the editor relies on the ranges matching exactly so `executeEdits` lands
 the patch where the user expects.
 """
-from fsr_playbooks.compiler.source_fixer import collect_fixes
+from fsr_playbooks.compiler.source_fixer import apply_fixes, collect_fixes
 
 
 def _by_code(text: str) -> dict:
@@ -150,6 +150,41 @@ def test_set_var_step_namespace_post_rename_uses_new_key():
     )
     ns = [f for f in collect_fixes(text) if f.code == "set_var_step_namespace"]
     assert len(ns) == 1 and ns[0].replacement == "vars.message_var"
+
+
+def test_apply_fixes_produces_corrected_source():
+    text = (
+        "playbooks:\n"
+        "  - name: P\n"
+        "    parameters: [severity]\n"
+        "    steps:\n"
+        "      - type: set_variable\n"
+        "        name: Set Variable\n"
+        "        vars:\n"
+        "          greeting: \"{{ vars.input.severity }}\"\n"
+        "      - type: manual_input\n"
+        "        name: Show\n"
+        "        arguments:\n"
+        '          description: "{{ vars.steps.Set_Variable.greeting }}"\n'
+        "      - name: bye\n"
+        "        type: stop\n"
+    )
+    fixed = apply_fixes(text, collect_fixes(text))
+    assert "vars.steps.Set_Variable" not in fixed
+    assert "{{ vars.greeting }}" in fixed
+    assert "vars.input.params.severity" in fixed
+    assert "type: stop" not in fixed and "type: end" in fixed
+    # corrected text is fix-clean: a second pass finds nothing
+    assert collect_fixes(fixed) == []
+
+
+def test_apply_fixes_skips_stale_ranges():
+    text = "playbooks:\n  - name: P\n    steps:\n      - name: bye\n        type: stop\n"
+    fixes = collect_fixes(text)
+    assert fixes
+    # Mutate the text so the recorded range no longer matches `original`.
+    mutated = text.replace("type: stop", "type: xstop")
+    assert apply_fixes(mutated, fixes) == mutated
 
 
 def test_collect_fixes_is_sorted_by_position():

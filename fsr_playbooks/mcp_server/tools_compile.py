@@ -380,6 +380,39 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
         return _err("compiler_unavailable", f"compiler not available: {exc}")
 
     result = _compile(yaml_text, _shared.DB_PATH)
+
+    # §F: the compiler auto-corrects known foot-guns (set_variable
+    # namespace refs, `vars.input.<p>` missing `.params.`, `stop`→`end`,
+    # …) on its internal IR, but the agent only got a warning describing
+    # each rewrite — re-authoring the YAML by hand cost a full
+    # validate→fix→validate round-trip per foot-gun in live sessions.
+    # Hand back the corrected source text instead.
+    corrected: dict[str, Any] = {}
+    try:
+        from fsr_playbooks.compiler.source_fixer import (
+            apply_fixes as _apply_fixes, collect_fixes as _collect_fixes,
+        )
+        fixes = _collect_fixes(yaml_text)
+        if fixes:
+            fixed_text = _apply_fixes(yaml_text, fixes)
+            if fixed_text != yaml_text:
+                corrected = {
+                    "corrected_yaml": fixed_text,
+                    "auto_fixes": [
+                        {"code": f.code, "line": f.line, "message": f.message}
+                        for f in fixes
+                    ],
+                    "auto_fix_note": (
+                        "Known foot-guns were auto-corrected in "
+                        "`corrected_yaml` — adopt it as your working copy "
+                        "instead of re-applying each warning by hand. It "
+                        "fixes only the listed items; any other errors "
+                        "still need your attention."
+                    ),
+                }
+    except Exception:  # noqa: BLE001 — advisory affordance, never block validation
+        corrected = {}
+
     if result.ok:
         warnings = [_serialize_compiler_error(w) for w in result.warnings]
         if warnings:
@@ -387,14 +420,16 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
                 "ok": True,
                 "warnings": warnings,
                 "next_fix": _pick_next_fix(warnings),
+                **corrected,
             }
-        return {"ok": True}
+        return {"ok": True, **corrected}
     errs = [_serialize_compiler_error(e) for e in result.errors]
     return _err(
         "validation_failed",
         f"{len(result.errors)} compiler error(s); see `errors` for codes "
         "and suggestions",
         errors=errs,
+        **corrected,
         # Single most-actionable next fix. Picks the first error of the
         # highest-priority code so the agent has a clear next move
         # instead of staring at a 9-error wall. Saves several

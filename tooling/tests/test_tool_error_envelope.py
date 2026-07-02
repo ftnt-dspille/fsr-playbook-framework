@@ -84,6 +84,41 @@ def test_validate_yaml_envelope_on_failure():
     assert "suggestion" in e0
 
 
+FOOTGUN_YAML = """
+collection: Footgun Test
+playbooks:
+  - name: pb
+    trigger: { type: manual }
+    steps:
+      - type: set_variable
+        name: Set Variable
+        vars:
+          greeting: hi
+      - type: manual_input
+        name: Show
+        arguments:
+          description: "{{ vars.steps.Set_Variable.greeting }}"
+"""
+
+
+def test_validate_yaml_returns_corrected_yaml_for_footguns():
+    out = mcp_server.validate_yaml(FOOTGUN_YAML)
+    # §F: the known set_variable-namespace foot-gun must come back as
+    # ready-to-adopt corrected source, not just a warning to hand-apply.
+    assert "corrected_yaml" in out
+    assert "vars.steps.Set_Variable" not in out["corrected_yaml"]
+    assert "{{ vars.greeting }}" in out["corrected_yaml"]
+    assert any(f["code"] == "set_var_step_namespace"
+               for f in out["auto_fixes"])
+    assert out["auto_fix_note"]
+
+
+def test_validate_yaml_clean_input_has_no_corrected_yaml():
+    out = mcp_server.validate_yaml(GOOD_YAML)
+    assert out["ok"] is True
+    assert "corrected_yaml" not in out
+
+
 def test_compile_yaml_envelope_on_failure():
     out = mcp_server.compile_yaml(BAD_YAML)
     _check_error_envelope(out)

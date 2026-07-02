@@ -665,7 +665,9 @@ def verify_playbook(
                 warnings.append(ce)
         checks_run.append({"name": "compile", "ok": False,
                            "summary": f"{len(compile_errors)} compiler issues"})
-        evidence["compile"] = {"errors": compile_errors}
+        # §B: the full error list already lives in required_fixes/warnings —
+        # repeating it under evidence doubled the model-facing payload.
+        evidence["compile"] = {"error_count": len(compile_errors)}
         result = _finalize(checks_run, required_fixes, warnings, evidence,
                            disabled_codes, unknown_tokens)
         _record_history(yaml_text, playbook, result["ready_to_push"],
@@ -774,8 +776,13 @@ def verify_playbook(
                     jinja_shapes[jkey] = walk.per_step_shapes[s.id]
         evidence["per_step_jinja_shapes"] = jinja_shapes
     else:
+        # §B: lean mode carries counts, not the per-branch step-id lists —
+        # on a large playbook those lists were pure token burn (the live
+        # session's verify result was 47KB for 4 warnings). The full
+        # trace is on disk at `type_trace_path`; `verbose=True` inlines it.
         evidence["typed_walk"] = {
-            "branches": [{"name": b.name, "step_ids": b.step_ids,
+            "branch_count": len(walk.branches),
+            "branches": [{"name": b.name, "step_count": len(b.step_ids),
                           "diagnostic_count": len(b.diagnostics)}
                          for b in walk.branches],
         }
@@ -839,6 +846,28 @@ def _record_history(yaml_text: str, playbook: str | None, ready: bool,
         pass
 
 
+def _dedupe_diagnostics(diags: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse diagnostics that share (code, message) into one entry with a
+    `count` (§B: 4 identical `unknown_shape_downstream_reference` warnings on
+    the same reference told the model nothing 1 didn't). First occurrence's
+    path/suggestion is kept; `paths` collects the extra locations."""
+    seen: dict[tuple[Any, Any], dict[str, Any]] = {}
+    out: list[dict[str, Any]] = []
+    for d in diags:
+        key = (d.get("code"), d.get("message"))
+        kept = seen.get(key)
+        if kept is None:
+            kept = dict(d)
+            seen[key] = kept
+            out.append(kept)
+        else:
+            kept["count"] = kept.get("count", 1) + 1
+            p = d.get("path")
+            if p and p != kept.get("path"):
+                kept.setdefault("paths", []).append(p)
+    return out
+
+
 def _finalize(checks_run, required_fixes, warnings, evidence,
               disabled_codes: frozenset[str] = frozenset(),
               unknown_tokens: list[str] | None = None) -> dict[str, Any]:
@@ -861,6 +890,8 @@ def _finalize(checks_run, required_fixes, warnings, evidence,
             "suppressed_count": len(suppressed),
             "unknown_tokens": unknown_tokens or [],
         }
+    required_fixes = _dedupe_diagnostics(required_fixes)
+    warnings = _dedupe_diagnostics(warnings)
     ready = not required_fixes
     # Build a tiny ordered next-actions list so the agent doesn't have
     # to choose which fix to start with.

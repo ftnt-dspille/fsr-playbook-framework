@@ -492,3 +492,30 @@ def collect_fixes(text: str) -> list[Fix]:
     fixes.extend(_fix_set_var_step_namespace(text, sv_steps))
     fixes.sort(key=lambda f: (f.line, f.col))
     return fixes
+
+
+def apply_fixes(text: str, fixes: list[Fix]) -> str:
+    """Apply fixes to the source text, bottom-up so earlier offsets stay
+    valid. A fix whose `original` no longer matches the text at its range
+    is skipped (stale position) rather than corrupting the source."""
+    # Absolute offset of the start of each 1-based line.
+    line_starts = [0]
+    for ln in text.splitlines(keepends=True):
+        line_starts.append(line_starts[-1] + len(ln))
+
+    def _offset(line: int, col: int) -> int | None:
+        # `line` may be one past the last line: a fix that consumes a
+        # trailing newline ends at (last_line + 1, col 1) == len(text).
+        if not 1 <= line <= len(line_starts):
+            return None
+        return min(line_starts[line - 1] + (col - 1), len(text))
+
+    for f in sorted(fixes, key=lambda f: (f.line, f.col), reverse=True):
+        start = _offset(f.line, f.col)
+        end = _offset(f.end_line, f.end_col)
+        if start is None or end is None or start > end:
+            continue
+        if text[start:end] != f.original:
+            continue
+        text = text[:start] + f.replacement + text[end:]
+    return text

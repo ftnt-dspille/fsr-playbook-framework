@@ -73,6 +73,50 @@ def test_parser_unknown_type_warns_not_blocks():
     assert coll.playbooks[0].parameter_types == {}
 
 
+# ---- bad-shape error carries an example + recovery hint (§F) ---------------
+
+_LIST_OF_DICTS = """
+collection: t
+playbooks:
+  - name: P
+    parameters:
+      - name: ip
+        type: string
+        description: address to block
+      - name: reason
+    steps:
+      - name: start
+        type: start
+"""
+
+_UNRECOVERABLE = """
+collection: t
+playbooks:
+  - name: P
+    parameters: 42
+    steps:
+      - name: start
+        type: start
+"""
+
+
+def test_parser_list_of_dicts_error_suggests_mapping():
+    _, errs = parse_yaml(_LIST_OF_DICTS)
+    err = next(e for e in errs if "parameters must be" in e.message)
+    # rule + concrete example of both shapes
+    assert "parameters: [ip, reason]" in err.message
+    assert "{ip: string, reason: string}" in err.message
+    # the exact mapping equivalent of what the author wrote
+    assert "parameters: {ip: string, reason: any}" in err.message
+
+
+def test_parser_bad_scalar_error_still_carries_example():
+    _, errs = parse_yaml(_UNRECOVERABLE)
+    err = next(e for e in errs if "parameters must be" in e.message)
+    assert "parameters: [ip, reason]" in err.message
+    assert "list-of-dicts" not in err.message
+
+
 # ---- type → shape mapping --------------------------------------------------
 
 def test_param_type_to_shape():

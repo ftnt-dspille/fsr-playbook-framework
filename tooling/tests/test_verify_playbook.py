@@ -162,3 +162,53 @@ def test_type_trace_written_and_pathed():
     res2 = verify_playbook(yaml_text=yaml, verbose=False)
     assert res2["evidence"].get("type_trace_path")
     assert "type_trace" not in res2["evidence"]
+
+
+def test_lean_typed_walk_carries_counts_not_step_ids():
+    """§B — lean evidence must not inline per-branch step-id lists."""
+    yaml = _yaml("""
+        collection: TestCol
+        playbooks:
+          - name: TP
+            steps:
+              - name: Start
+                type: start
+                next: set
+              - name: set
+                type: set_variable
+                vars:
+                  x: "1"
+    """)
+    res = verify_playbook(yaml_text=yaml, verbose=False)
+    tw = res["evidence"]["typed_walk"]
+    assert tw["branch_count"] == len(tw["branches"])
+    for b in tw["branches"]:
+        assert "step_ids" not in b
+        assert isinstance(b["step_count"], int)
+
+
+def test_duplicate_warnings_are_deduped_with_count():
+    """§B — identical (code, message) diagnostics collapse to one + count."""
+    from fsr_playbooks.mcp_server.tools_verify import _dedupe_diagnostics
+
+    warnings = [
+        {"code": "w1", "message": "same", "path": "p1"},
+        {"code": "w1", "message": "same", "path": "p2"},
+        {"code": "w1", "message": "same", "path": "p3"},
+        {"code": "w1", "message": "other", "path": "p4"},
+    ]
+    out = _dedupe_diagnostics(warnings)
+    assert len(out) == 2
+    dup = next(w for w in out if w["message"] == "same")
+    assert dup["count"] == 3
+    assert dup["path"] == "p1" and dup["paths"] == ["p2", "p3"]
+    assert "count" not in next(w for w in out if w["message"] == "other")
+
+
+def test_compile_failure_evidence_is_count_only():
+    """§B — the compile error list lives in required_fixes; evidence must
+    not repeat it."""
+    res = verify_playbook(yaml_text="collection: X\nplaybooks:\n  - name: P\n")
+    assert res["ready_to_push"] is False
+    assert "errors" not in res["evidence"].get("compile", {})
+    assert isinstance(res["evidence"]["compile"]["error_count"], int)

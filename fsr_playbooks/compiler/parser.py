@@ -856,10 +856,27 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 isinstance(p, str) for p in params_in):
             params_raw = list(params_in)
         else:
+            # LLM authors commonly write a rich list-of-dicts here
+            # (`- name: ip\n  type: string\n  description: …`). The rule alone
+            # cost a full authoring round-trip in live sessions, so the error
+            # carries a correct example — and, when the entries are
+            # recoverable, the exact mapping equivalent of what was written.
+            msg = ("parameters must be a list of strings or a mapping "
+                   "{name: type} — e.g. `parameters: [ip, reason]` or "
+                   "`parameters: {ip: string, reason: string}`")
+            if isinstance(params_in, list):
+                recovered = {
+                    str(p["name"]): str(p.get("type") or "any")
+                    for p in params_in
+                    if isinstance(p, dict) and isinstance(p.get("name"), str)
+                }
+                if recovered:
+                    pairs = ", ".join(f"{n}: {t}" for n, t in recovered.items())
+                    msg += (f". Your list-of-dicts form is not accepted; "
+                            f"write it as: parameters: {{{pairs}}}")
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
-                message=("parameters must be a list of strings or a mapping "
-                         "{name: type}"),
+                message=msg,
                 path=f"{pb_path}.parameters",
             ))
 
