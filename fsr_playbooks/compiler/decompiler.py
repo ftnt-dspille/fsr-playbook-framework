@@ -98,6 +98,20 @@ _ACTION_TRIGGER_CANONICAL_MARKERS = frozenset({
     "route", "__triggerLimit", "triggerOnSource",
 })
 
+# The default `step_variables` the api_endpoint normalizer setdefaults
+# (`_normalize_api_endpoint_args`) to bind the inbound HTTP request body + query
+# params at `vars.steps.<name>.input.params.{api_body,api_params}`. On decompile,
+# drop it when it equals this default so a pulled api_endpoint step surfaces just
+# `route` (+ non-default auth); recompile re-adds it via the same setdefault.
+_API_ENDPOINT_DEFAULT_STEP_VARS = {
+    "input": {
+        "params": {
+            "api_body": "{{vars.request.data}}",
+            "api_params": "{{vars.request.params}}",
+        },
+    },
+}
+
 
 def _step_modules(out: dict) -> list[str]:
     """The module list a decompiled step is bound to, from its hoisted
@@ -387,6 +401,37 @@ def _decompile_step(s, pb_name: str | None = None) -> dict:
             out.pop("step_variables", None)
         if args.get("config") == "":
             args.pop("config", None)
+        if args:
+            out["arguments"] = args
+    elif s.type == "api_endpoint" and isinstance(args, dict):
+        # api_endpoint (Custom API Endpoint trigger) minimification. The forward
+        # normalizer (`_normalize_api_endpoint_args`) setdefaults five
+        # trigger-infra fields to the canonical shape FSR's designer emits, so
+        # the minimal clean form
+        #
+        #     - name: Start
+        #       type: api_endpoint
+        #       arguments:
+        #         route: lookup_ip
+        #
+        # compiles to a fully-specified token-based trigger. On decompile, drop
+        # those re-derived defaults so a pulled api_endpoint step surfaces just
+        # `route` (+ non-default `authentication_methods`); recompile re-adds
+        # them via the same setdefaults (round-trip stable). Drop ONLY when the
+        # value equals the default -- an author who customized
+        # `triggerOnSource: false` or set a non-token auth mode owns that value.
+        # `step_variables` was already hoisted to `out` by the universal envelope
+        # loop above, so drop the default there; the other four stay in `args`.
+        if args.get("authentication_methods") == [""]:
+            args.pop("authentication_methods", None)
+        if args.get("triggerOnSource") is True:
+            args.pop("triggerOnSource", None)
+        if args.get("triggerOnReplicate") is False:
+            args.pop("triggerOnReplicate", None)
+        if args.get("__triggerLimit") is True:
+            args.pop("__triggerLimit", None)
+        if out.get("step_variables") == _API_ENDPOINT_DEFAULT_STEP_VARS:
+            out.pop("step_variables", None)
         if args:
             out["arguments"] = args
     elif args:

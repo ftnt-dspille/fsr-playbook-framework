@@ -201,12 +201,17 @@ COVERAGE: dict[str, StepCoverage] = {
              "resource={} default (editor hardcodes collection: approvals, "
              "bundle line 37501). Legacy `approvers` accepted (not synthesized)."),
     "api_endpoint": StepCoverage(
-        typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_MED,
+        typed=True, schema=True, read=READ_MINIMIFIED, priority=PRI_DONE,
         note="TRIGGER: Custom API Endpoint (1 of 6, cybersponse.api_call). "
              "P1 DONE: ApiEndpointArgs validation-only model (route:str, "
              "authentication_methods:list). Token-based auth default + "
              "trigger-infra setdefaults stay imperative. NOT a drag-in step -- "
-             "it is the 6th start variant. Schema now introspectable."),
+             "it is the 6th start variant. Schema now introspectable. G10 "
+             "Tier-2 DONE: decompiler minimification drops the 5 re-derived "
+             "trigger-infra defaults (authentication_methods=[''], step_variables "
+             "default, triggerOnSource=True, triggerOnReplicate=False, "
+             "__triggerLimit=True) so a pulled step surfaces just route (+ "
+             "non-default auth); recompile re-adds them via the setdefaults."),
     "workflow_reference": StepCoverage(
         typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_MED,
         note="calls another playbook (WorkflowReference). P5 DONE: "
@@ -234,8 +239,19 @@ COVERAGE: dict[str, StepCoverage] = {
         "not a same-collection IRI); arg_validator independently enforces it "
         "against the live signature. extra='allow' rides the **kwargs envelope."),
     "ingest_bulk_feed": StepCoverage(
-        typed=False, schema=False, read=READ_PASS_THROUGH, priority=PRI_LOW,
-        note="IngestBulkFeed; no model. Niche."),
+        typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_MED,
+        note="IngestBulkFeed -- bulk-ingest sibling of Create Record (inherits "
+             "InsertDataCtrl; POSTs to /api/ingest-feeds/<module>, deletes "
+             "operation/fieldOperation = implicitly upsert). P5 DONE: "
+             "IngestBulkFeedArgs validation-only envelope (collection str, "
+             "resource Any, for_each Any). DESIGN SPLIT (3-way): the typed "
+             "model owns the envelope schema (the discover win) + scalar "
+             "validation; the LINT layer (rulesets/_shared.py) owns the "
+             "collection-prefix + no-operation checks; the EMITTER "
+             "(_clean_step_arguments) owns the for_each loop-mode normalization "
+             "(parallel/batch_size pruning, batch_size default). Validation-only "
+             "here never mutates, so it cannot collide with either. Niche but a "
+             "distinct authoring pattern (bulk feed ingest; occ=10)."),
     # --- one-way authoring sugars (compile to Connectors) ---
     "stop": StepCoverage(
         typed=False, schema=False, read=READ_SUGAR_NOT_RECOVERED, priority=PRI_LOW,

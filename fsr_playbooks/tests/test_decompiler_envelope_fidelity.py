@@ -481,3 +481,74 @@ playbooks:
     assert s["arguments"]["tenant_id"] == "tenant-acme"
 
 
+
+
+def test_api_endpoint_minified_drops_trigger_boilerplate():
+    """The forward normalizer setdefaults five trigger-infra fields
+    (`authentication_methods`->[''], `step_variables`->default, `triggerOnSource`
+    ->True, `triggerOnReplicate`->False, `__triggerLimit`->True) so the minimal
+    `route:`-only form compiles to a fully-specified token-based trigger. On
+    decompile, drop those re-derived defaults so a pulled api_endpoint step
+    surfaces just `route` -- recompile re-adds them via the same setdefaults
+    (round-trip stable). This is the G10 Tier-2 api_endpoint minimification."""
+    by_name = _roundtrip_steps(
+        """
+collection: T
+playbooks:
+  - name: PB
+    steps:
+      - name: Start
+        type: api_endpoint
+        arguments:
+          route: lookup_ip
+      - name: Do
+        type: set_variable
+        vars: {x: 1}
+"""
+    )
+    s = by_name["Start"]
+    assert s["type"] == "api_endpoint"
+    args = s.get("arguments") or {}
+    # route is the one friendly scalar -- always preserved.
+    assert args.get("route") == "lookup_ip", args
+    # The five re-derived defaults must be dropped (not surfaced as boilerplate).
+    assert "authentication_methods" not in args, args
+    assert "triggerOnSource" not in args, args
+    assert "triggerOnReplicate" not in args, args
+    assert "__triggerLimit" not in args, args
+    # step_variables is hoisted to the step level by the universal envelope loop;
+    # the default shape is dropped there too.
+    assert "step_variables" not in s, s
+
+
+def test_api_endpoint_minified_preserves_non_default_auth():
+    """A non-default `authentication_methods` (e.g. ['anonymous'] for No-Auth)
+    and a customized `triggerOnSource` are author-owned values -- the
+    minimification must PRESERVE them (drop only values that equal the
+    setdefault default)."""
+    by_name = _roundtrip_steps(
+        """
+collection: T
+playbooks:
+  - name: PB
+    steps:
+      - name: Start
+        type: api_endpoint
+        arguments:
+          route: webhook_in
+          authentication_methods: [anonymous]
+          triggerOnSource: false
+      - name: Do
+        type: set_variable
+        vars: {x: 1}
+"""
+    )
+    s = by_name["Start"]
+    args = s.get("arguments") or {}
+    assert args.get("route") == "webhook_in"
+    assert args.get("authentication_methods") == ["anonymous"], args   # preserved
+    assert args.get("triggerOnSource") is False, args                  # preserved
+    # The still-default infra keys are dropped.
+    assert "triggerOnReplicate" not in args, args
+    assert "__triggerLimit" not in args, args
+    assert "step_variables" not in s, s
