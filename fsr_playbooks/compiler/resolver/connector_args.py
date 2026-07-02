@@ -10,6 +10,13 @@ from datetime import datetime
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
+from ..typed_args.steps import expand_connector as _expand_connector_typed
+from ..typed_args.steps import (
+    expand_trigger_tenant_playbook as _expand_trigger_tenant_playbook_typed,
+)
+from ..typed_args.steps import (
+    expand_workflow_reference as _expand_workflow_reference_typed,
+)
 
 
 # Observed-type validators (Tier 2.3). Each returns True iff the value
@@ -229,6 +236,17 @@ class ConnectorArgsMixin:
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
         a = step.arguments
+        # Envelope-scalar type-validation via the typed-args layer
+        # (`typed_args.steps.expand_connector`, model `ConnectorArgs`). Runs
+        # before the required-field checks below so a present-but-wrong-typed
+        # `connector`/`operation` (e.g. `connector: 123`) is a clean BAD_VALUE
+        # rather than a confusing MISSING_FIELD. Validation-only -- it never
+        # mutates `a`; the catalog checks below (missing connector/op -> the
+        # precise MISSING_FIELD message, unknown op/param, enum, visibility,
+        # required, auto-lift) own the richer runtime messages. `params` stays
+        # Any (per-op catalog); the model types the static envelope only.
+        if isinstance(a, dict):
+            _expand_connector_typed(a, path, errors)
         connector = a.get("connector")
         operation = a.get("operation")
         if not connector:
@@ -245,6 +263,17 @@ class ConnectorArgsMixin:
                 path=f"{path}.arguments.operation",
             ))
             return
+
+        # A present-but-wrong-TYPED connector/operation (e.g. `connector: 123`)
+        # was already flagged BAD_VALUE by the typed-args layer above. Don't
+        # feed the non-str value into the catalog lookup -- difflib's
+        # get_close_matches chokes on a non-str needle and would crash the
+        # whole compile. The catalog path can't add anything useful here, so
+        # bail (the BAD_VALUE already tells the author what to fix).
+        if not isinstance(connector, str) or not isinstance(operation, str):
+            return
+
+        crow = self.connector(connector)
 
         crow = self.connector(connector)
         if crow is None:
@@ -633,6 +662,15 @@ class ConnectorArgsMixin:
         target playbook's `parameters: [...]` list when target is local.
         """
         a = step.arguments
+        # Envelope-scalar type-validation via the typed-args layer
+        # (`expand_workflow_reference`, model `WorkflowReferenceArgs`). Runs
+        # before the required-field check so a wrong-typed `target` (e.g. 123)
+        # is a clean BAD_VALUE rather than a confusing MISSING_FIELD.
+        # `target`/`workflowReference` are declared Optional in the model so
+        # pydantic's generic "Field required" does NOT shadow the
+        # MISSING_FIELD emitted below (the manual_input / connector lesson).
+        if isinstance(a, dict):
+            _expand_workflow_reference_typed(a, path, errors)
         target_name = a.get("target")
         ref_iri = a.get("workflowReference")
 
@@ -676,6 +714,66 @@ class ConnectorArgsMixin:
                         near=sug[0] if sug else None,
                         suggestion=f"did you mean {sug[0]!r}?" if sug else None,
                     ))
+
+    def _resolve_trigger_tenant_playbook_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Validate trigger_tenant_playbook (cross-tenant call) arguments.
+
+        ``RemotePlaybookReference`` starts execution of a workflow on a
+        *peer* FortiSOAR instance -- unlike the local ``workflow_reference``,
+        which targets a same-collection playbook by name/IRI. The remote
+        handler's live signature is::
+
+            remote_workflow_reference(playbook_alias_id, tenant_id=None, ...)
+
+        so the friendly inputs are:
+
+            playbook_alias_id:   required. A playbook alias pointing to the
+                                 remote workflow to run.
+            tenant_id:           optional. The peer tenant to run it in.
+
+        The caller's ``arguments: {key: value}`` map is left untouched --
+        cross-tenant the target's parameters aren't reachable for validation,
+        and the handler accepts ``**kwargs`` (unknown keys are warnings, owned
+        by ``arg_validator`` against the live signature).
+
+        Envelope scalars (``playbook_alias_id``, ``tenant_id``) are type-checked
+        by the typed-args layer (``expand_trigger_tenant_playbook``, model
+        ``TriggerTenantPlaybookArgs``) before the required-field check below --
+        a present-but-wrong-typed value (e.g. ``playbook_alias_id: 123``) is a
+        clean ``BAD_VALUE``; ``playbook_alias_id`` is declared Optional in the
+        model so pydantic's generic "Field required" does NOT shadow the
+        ``MISSING_FIELD`` emitted here (the manual_input / connector lesson).
+        The live ``arg_validator`` pass independently enforces the same
+        required arg against the ``step_handlers`` signature.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Envelope-scalar type-validation via the typed-args layer. Runs
+        # before the required-field check so a wrong-typed `playbook_alias_id`
+        # (e.g. 123) is a clean BAD_VALUE rather than a confusing MISSING_FIELD.
+        _expand_trigger_tenant_playbook_typed(a, path, errors)
+
+        alias = a.get("playbook_alias_id")
+        if not alias:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message=(
+                    "trigger_tenant_playbook step requires 'playbook_alias_id' "
+                    "(a playbook alias pointing to the remote workflow to run) "
+                    "-- the local-name 'target:' form can't cross tenants"
+                ),
+                path=f"{path}.arguments.playbook_alias_id",
+            ))
+            return
+
+        provided_args = a.get("arguments")
+        if provided_args is not None and not isinstance(provided_args, dict):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="trigger_tenant_playbook.arguments must be a mapping",
+                path=f"{path}.arguments.arguments",
+            ))
 
     def _check_routing(
         self, step: Step, seen_ids: set[str], path: str,

@@ -45,8 +45,11 @@ def test_decision_condition_forbids_extra_keys():
 
 
 def test_unmodeled_type_returns_none():
-    # connector is catalog-validated imperatively — not modeled yet.
-    assert emit_step_arg_schema("connector") is None
+    # ingest_bulk_feed is still unmodeled (the P5 lighter envelopes landed
+    # send_email/create_task/set_api_keys/approval/workflow_reference; only
+    # ingest_bulk_feed remains without a model); an unmodeled type returns
+    # None, distinct from an empty-schema model.
+    assert emit_step_arg_schema("ingest_bulk_feed") is None
     assert emit_step_arg_schema("does_not_exist") is None
 
 

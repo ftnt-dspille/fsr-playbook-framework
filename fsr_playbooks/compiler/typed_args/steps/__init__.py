@@ -23,7 +23,27 @@ from .find_record import FindRecordArgs, expand_find_record
 from .delete_record import DeleteRecordArgs, expand_delete_record
 from .record_crud import RecordCrudArgs, expand_record_crud
 from .record_action import RecordActionArgs, expand_record_action
-from .manual_input import ManualInputArgs, expand_manual_input
+from .post_create_update import (
+    PostCreateUpdateArgs,
+    expand_post_create_update,
+)
+from .api_endpoint import ApiEndpointArgs, expand_api_endpoint
+from .connector import ConnectorArgs, expand_connector
+from .manual_input import (
+    ManualInputArgs,
+    InputVariableArgs,
+    InputFieldKind,
+    expand_manual_input,
+)
+from .trigger_tenant_playbook import (
+    TriggerTenantPlaybookArgs,
+    expand_trigger_tenant_playbook,
+)
+from .send_email import SendEmailArgs, expand_send_email
+from .create_task import CreateTaskArgs, expand_create_task
+from .set_api_keys import SetApiKeysArgs, expand_set_api_keys
+from .approval import ApprovalArgs, expand_approval
+from .workflow_reference import WorkflowReferenceArgs, expand_workflow_reference
 
 # Step type → typed argument model. Grows incrementally through Phase 2.
 #
@@ -44,10 +64,60 @@ STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     "insert_record": RecordCrudArgs,
     "update_record": RecordCrudArgs,
     "record_action": RecordActionArgs,
+    # `start` covers TWO of the 6 trigger variants: Manual (start + module ->
+    # cybersponse.action, validated via the `record_action` call site in the
+    # resolver) and Referenced (plain start -> cybersponse.abstract_trigger,
+    # no friendly scalars). RecordActionArgs is the Manual-variant contract;
+    # its all-Optional fields let the plain Referenced form validate clean too.
+    # Registered under the real step type `start` so `get_step_arg_schema("start")`
+    # surfaces the Manual contract (the docstring scopes it to start+module).
+    "start": RecordActionArgs,
+    "start_on_create": PostCreateUpdateArgs,
+    "start_on_update": PostCreateUpdateArgs,
+    "start_on_delete": PostCreateUpdateArgs,
+    # Custom API Endpoint trigger (cybersponse.api_call). Validation-only --
+    # the token-based auth default + trigger-infra setdefaults stay imperative.
+    "api_endpoint": ApiEndpointArgs,
+    # The connector envelope (the keystone -- shared backbone for the whole
+    # connector family: Connector/Code Snippet/Utilities/Send Email). Static
+    # envelope typed; params stays Any (per-op catalog). Validation-only --
+    # the resolver's catalog checks (op/param/enum/visibility/required) own
+    # the richer runtime messages.
+    "connector": ConnectorArgs,
+    # `utilities` — the editor's "Utilities" palette entry (CyopsUtilices). A
+    # connector-family alias: it routes through ConnectorStepCtrl + connector.html,
+    # so its wire shape IS the connector envelope; the normalizer defaults
+    # `connector: cyops_utilities` (one of 55 utility ops) and falls through to
+    # `_resolve_connector_args`. Reuses the P3 ConnectorArgs model (the way
+    # create/insert/update share RecordCrudArgs). Read = sugar-not-recovered
+    # (a pulled Utilities step round-trips as `connector`, like stop/end).
+    "utilities": ConnectorArgs,
     # Validation-only model (the friendly→canonical transform stays in the
     # imperative normalizer; see manual_input.py). Registered for the JSON-schema
     # introspection surface + typed scalar validation.
     "manual_input": ManualInputArgs,
+    # Trigger Tenant Playbook (RemotePlaybookReference) — cross-tenant call to
+    # a playbook in another FortiSOAR tenant. Owns a distinct script handler
+    # (`/wf/workflow/tasks/remote_workflow_reference`), so a real step type
+    # (not a connector alias). Validation-only envelope; the resolver owns the
+    # required-`workflowReference` MISSING_FIELD check.
+    "trigger_tenant_playbook": TriggerTenantPlaybookArgs,
+    # P5 lighter envelope models (validation-only; the friendly->canonical
+    # transform stays in the imperative normalizer). Registered for the JSON-
+    # schema introspection surface + typed scalar validation. Each mirrors the
+    # connector design split: the typed model owns the envelope schema + scalar
+    # checks; the normalizer/resolver owns the runtime transform + richer
+    # messages.
+    "send_email": SendEmailArgs,
+    "create_task": CreateTaskArgs,
+    "set_api_keys": SetApiKeysArgs,
+    "approval": ApprovalArgs,
+    # Local same-collection playbook call (WorkflowReference). Validation-only;
+    # the resolver's _resolve_workflow_reference_args owns the target/name
+    # lookup + required-field check + parameter validation. target/
+    # workflowReference declared Optional so pydantic doesn't shadow the
+    # resolver's MISSING_FIELD. (Cross-tenant sibling = trigger_tenant_playbook.)
+    "workflow_reference": WorkflowReferenceArgs,
 }
 
 
@@ -77,6 +147,26 @@ __all__ = [
     "expand_record_crud",
     "RecordActionArgs",
     "expand_record_action",
+    "PostCreateUpdateArgs",
+    "expand_post_create_update",
+    "ApiEndpointArgs",
+    "expand_api_endpoint",
+    "ConnectorArgs",
+    "expand_connector",
     "ManualInputArgs",
+    "InputVariableArgs",
+    "InputFieldKind",
     "expand_manual_input",
+    "TriggerTenantPlaybookArgs",
+    "expand_trigger_tenant_playbook",
+    "SendEmailArgs",
+    "expand_send_email",
+    "CreateTaskArgs",
+    "expand_create_task",
+    "SetApiKeysArgs",
+    "expand_set_api_keys",
+    "ApprovalArgs",
+    "expand_approval",
+    "WorkflowReferenceArgs",
+    "expand_workflow_reference",
 ]

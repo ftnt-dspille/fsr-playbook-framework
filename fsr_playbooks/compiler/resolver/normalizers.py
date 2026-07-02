@@ -35,8 +35,18 @@ from ..typed_args.steps import expand_delete_record as _expand_delete_record_typ
 from ..typed_args.steps import expand_record_crud as _expand_record_crud_typed
 # scalar-flag validation for the record-action trigger (start + module) (Phase 2).
 from ..typed_args.steps import expand_record_action as _expand_record_action_typed
+# post-write record-trigger (start_on_create/update/delete) module→resource +
+# when→fieldbasedtrigger expansion, catalog-bound via a resolve_module callback.
+from ..typed_args.steps import expand_post_create_update as _expand_post_create_update_typed
+# scalar-field validation for the api_endpoint (Custom API Endpoint) trigger.
+from ..typed_args.steps import expand_api_endpoint as _expand_api_endpoint_typed
 # scalar-field validation for manual_input (transform stays imperative) (Phase 2).
 from ..typed_args.steps import expand_manual_input as _expand_manual_input_typed
+# P5 lighter envelope validation-only models (transform stays imperative).
+from ..typed_args.steps import expand_send_email as _expand_send_email_typed
+from ..typed_args.steps import expand_create_task as _expand_create_task_typed
+from ..typed_args.steps import expand_set_api_keys as _expand_set_api_keys_typed
+from ..typed_args.steps import expand_approval as _expand_approval_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
 
@@ -139,13 +149,18 @@ class NormalizerMixin:
             self._normalize_approval_args(step, path, errors)
 
         # `stop` / `end` synthesize the canonical Utils: No Operation call,
-        # then fall through to connector arg resolution.
-        if step.type in ("stop", "end"):
+        # then fall through to connector arg resolution. `utilities` (the
+        # editor's "Utilities" palette entry) is the same connector-family
+        # alias, but defaults ONLY `connector` — the author picks the utility
+        # op (convert_json_to_csv, make_cyops_request, …); it then falls
+        # through to connector arg resolution like the rest.
+        if step.type in ("stop", "end", "utilities"):
             a = step.arguments if isinstance(step.arguments, dict) else {}
             a.setdefault("connector", "cyops_utilities")
-            a.setdefault("operation", "no_op")
-            a.setdefault("config", "")
-            a.setdefault("params", {})
+            if step.type in ("stop", "end"):  # no-op terminals only
+                a.setdefault("operation", "no_op")
+                a.setdefault("config", "")
+                a.setdefault("params", {})
             step.arguments = a
 
         # `delete_record` synthesizes the cyops_utilities make_cyops_request
@@ -155,11 +170,13 @@ class NormalizerMixin:
 
         # Per-step-type argument validation
         if step.type == "connector" or step.type in (
-                "stop", "end", "delete_record"):
+                "stop", "end", "delete_record", "utilities"):
             self._resolve_connector_args(step, path, errors)
             # message block still applies to connector steps — fall through.
         elif step.type == "workflow_reference":
             self._resolve_workflow_reference_args(step, path, errors, pb_by_name or {})
+        elif step.type == "trigger_tenant_playbook":
+            self._resolve_trigger_tenant_playbook_args(step, path, errors)
         elif step.type == "set_variable":
             self._normalize_set_variable_args(step, path, errors)
         elif step.type == "start":
@@ -311,54 +328,26 @@ class NormalizerMixin:
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
-        modules_raw = a.pop("module", None) or a.pop("modules", None) \
-            or a.get("resources") or a.get("resource")
-        if isinstance(modules_raw, str):
-            modules = [modules_raw]
-        elif isinstance(modules_raw, list):
-            modules = [str(m) for m in modules_raw]
-        else:
-            modules = []
-        if not modules:
-            modules = ["alerts", "incidents"]
-            errors.append(CompileError(
-                code=ErrorCode.MISSING_FIELD,
-                message=(f"`module:` not set on {step.type} — defaulting to "
-                         "[alerts, incidents]; set `module:` explicitly to "
-                         "override"),
-                path=f"{path}.arguments.module",
-                severity="warning",
-            ))
-        # Canonicalize each module name against the catalog (case-fix
-        # 'Alerts' → 'alerts', warn on unknowns). Silent no-op when the
-        # modules table is unwarmed/empty.
-        modules = [
-            self.resolve_module_name(m, f"{path}.arguments.module", errors)
-            for m in modules
-        ]
-        a["resource"] = modules[0]
-        a["resources"] = modules
-        a.setdefault("step_variables",
-                     {"input": {"records": ["{{vars.input.records[0]}}"]}})
-        a.setdefault("triggerOnSource", True)
-        a.setdefault("triggerOnReplicate", False)
-        a.setdefault("__triggerLimit", True)
-
-        when = a.pop("when", None)
-        if when is not None:
-            fbt = self._expand_when(when, step.type, path, errors)
-            if fbt is not None:
-                a["fieldbasedtrigger"] = fbt
-        elif "fieldbasedtrigger" not in a:
-            a["fieldbasedtrigger"] = {
-                "sort": [], "limit": 30, "logic": "AND", "filters": [],
-            }
+        # Delegate the friendly→canonical transform to the typed-args layer
+        # (`typed_args.steps.expand_post_create_update`), which owns
+        # `PostCreateUpdateArgs` and the module→resource/resources + when→
+        # fieldbasedtrigger transform, byte-for-byte with the body it replaces
+        # (same setdefaults, same empty-default-to-[alerts, incidents] +
+        # warning). `resolve_module_name` is threaded in as a callback because
+        # module canonicalization needs the catalog. Already-set canonical
+        # keys win — the transform uses `setdefault`, never clobbering.
+        new = _expand_post_create_update_typed(
+            a, step.type, path, errors, self.resolve_module_name,
+        )
+        if new is None:
+            return  # not a dict — leave step.arguments untouched
         # Field/value validation against the warmed catalog. Runs after the
         # filter tree is structurally valid. With multiple resolved modules a
         # field may legitimately exist on only some of them, so a finding is
         # emitted only when it holds for *every* module (invalid everywhere).
-        self._validate_trigger_fields(a, modules, path, errors)
-        step.arguments = a
+        modules = new.get("resources", []) or [new.get("resource", "alerts")]
+        self._validate_trigger_fields(new, modules, path, errors)
+        step.arguments = new
 
     def _normalize_delete_record_args(
         self, step: Step, path: str, errors: list[CompileError],
@@ -435,6 +424,12 @@ class NormalizerMixin:
         ``tests/test_owners_private_api_trigger.py``).
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Scalar type-validation via the typed-args layer (`typed_args.steps.
+        # expand_api_endpoint`, model `ApiEndpointArgs`). Validation-only -- it
+        # never mutates `a`; the token-based auth default + trigger-infra
+        # setdefaults below stay here. Catches a wrong-typed `route`/auth list
+        # that would otherwise silently produce a malformed trigger.
+        _expand_api_endpoint_typed(a, path, errors)
         _FRIENDLY = {"route", "authentication_methods", "mock_result", "condition"}
         _CANONICAL = {
             "step_variables", "triggerOnSource", "triggerOnReplicate",
@@ -617,10 +612,16 @@ class NormalizerMixin:
         if "from" in a:
             a.setdefault("from_str", a.pop("from"))
         # `from_str` is a required handler arg, but the editor fills it from the
-        # SMTP config's default-from at compile (bundle line 38148) — a value we
+        # SMTP config's default-from at compile (bundle line 38148) -- a value we
         # don't have offline. Default to empty so the step compiles; the FSR
         # engine substitutes the SMTP default-from at runtime.
         a.setdefault("from_str", "")
+        # Scalar type-validation via the typed-args layer (`typed_args.steps.
+        # expand_send_email`, model `SendEmailArgs`). Validation-only -- never
+        # mutates `a`; runs after the body->content / from->from_str rename so it
+        # validates the canonical form. Catches a wrong-typed to/cc/subject that
+        # would otherwise ride through.
+        _expand_send_email_typed(a, path, errors)
         step.arguments = a
 
     def _normalize_create_task_args(
@@ -640,6 +641,12 @@ class NormalizerMixin:
             return
         a.setdefault("collection", "tasks")
         a.setdefault("resource", {})
+        # Scalar type-validation via the typed-args layer (`typed_args.steps.
+        # expand_create_task`, model `CreateTaskArgs`). Validation-only --
+        # never mutates `a`; runs after the collection/resource setdefaults.
+        # Catches a wrong-typed resource (e.g. a string) that would otherwise
+        # ride through.
+        _expand_create_task_typed(a, path, errors)
         step.arguments = a
 
     def _normalize_set_api_keys_args(
@@ -650,6 +657,11 @@ class NormalizerMixin:
         a = step.arguments if isinstance(step.arguments, dict) else {}
         _CANONICAL = {"public_key", "private_key"}
         self._check_unknown_keys(a, step.type, set(), _CANONICAL, path, errors)
+        # Scalar type-validation via the typed-args layer (`typed_args.steps.
+        # expand_set_api_keys`, model `SetApiKeysArgs`). Validation-only -- never
+        # mutates `a`. Catches a wrong-typed public_key/private_key (e.g. a
+        # list) that would otherwise ride through.
+        _expand_set_api_keys_typed(a, path, errors)
         step.arguments = a
 
     def _normalize_approval_args(
@@ -675,6 +687,12 @@ class NormalizerMixin:
             return
         a.setdefault("collection", "approvals")
         a.setdefault("resource", {})
+        # Scalar type-validation via the typed-args layer (`typed_args.steps.
+        # expand_approval`, model `ApprovalArgs`). Validation-only -- never
+        # mutates `a`; runs after the collection/resource setdefaults. Catches a
+        # wrong-typed resource/timeout (e.g. `timeout: "soon"`) that would
+        # otherwise ride through.
+        _expand_approval_typed(a, path, errors)
         step.arguments = a
 
     def _expand_input_variables(

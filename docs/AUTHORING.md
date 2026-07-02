@@ -840,7 +840,7 @@ spaces → underscores).
 
 Editor-derived argument shapes for every step type, keyed by canonical FSR name with the friendly YAML alias(es). Editor-only/UI-state keys are omitted. Source of truth: `docs/STEP_WIRE_SHAPES.json`.
 
-#### Connectors — `connector`, `stop`, `end`, `delete_record`
+#### Connectors — `connector`, `stop`, `end`, `utilities`, `delete_record`
 
 | Argument | Type | Required | Meaning |
 |----------|------|----------|---------|

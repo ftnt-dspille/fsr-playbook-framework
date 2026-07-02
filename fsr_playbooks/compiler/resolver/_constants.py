@@ -36,12 +36,31 @@ SHORT_TYPE_TO_FSR: dict[str, str] = {
     # SetAPIKeys — niche; `public_key`/`private_key` (jinja-capable).
     "set_api_keys": "SetAPIKeys",
     "workflow_reference": "WorkflowReference",
+    # Trigger Tenant Playbook (RemotePlaybookReference) — cross-tenant call to
+    # a playbook in another FortiSOAR tenant. Owns a distinct script handler
+    # (`/wf/workflow/tasks/remote_workflow_reference`, uuid ab3b2e02-…), so it
+    # is a real step type, not a connector-family alias. The local sibling is
+    # `workflow_reference` (WorkflowReference, same-collection). Remote
+    # requires a `workflowReference:` IRI — the local-name `target:` form
+    # can't cross tenants — and carries `pickFromTenant` for dynamic tenant
+    # selection.
+    "trigger_tenant_playbook": "RemotePlaybookReference",
     # `stop` / `end` — first-class no-op terminals. Compile to a connector
     # step calling `cyops_utilities.no_op` (FSR's canonical "Utils: No
     # Operation" idiom), so a decision branch that should do nothing has
     # an obvious YAML keyword instead of dangling or filler set_variable.
     "stop": "Connectors",
     "end": "Connectors",
+    # `utilities` — the editor's "Utilities" palette entry (canonical
+    # `CyopsUtilices`). It routes through `ConnectorStepCtrl` + `connector.html`,
+    # so its wire shape IS the connector envelope; the only thing that makes
+    # it "Utilities" is `connector: cyops_utilities` + one of the 55 utility
+    # ops (convert_json_to_csv, make_cyops_request, no_op, compute_hash, …).
+    # A connector-family alias: the normalizer defaults `connector` and falls
+    # through to `_resolve_connector_args`; reuses the P3 `ConnectorArgs`
+    # envelope model. Read is sugar-not-recovered (a pulled Utilities step
+    # round-trips as `connector`, same contract as stop/end/delete_record).
+    "utilities": "Connectors",
     # `delete_record` — FortiSOAR has no dedicated delete step type (the editor
     # palette exposes Create/Update/Find only). Deletion is done with a
     # connector step calling `cyops_utilities.make_cyops_request` and HTTP

@@ -449,3 +449,35 @@ def _trigger_args(res):
                     return s["arguments"]
     raise AssertionError("no action-trigger step in compiled result")
 
+
+def test_trigger_tenant_playbook_round_trips():
+    """RemotePlaybookReference is a clean 1:1 canonical mapping (only
+    `trigger_tenant_playbook` compiles to it, unlike the Connectors collision),
+    so a pulled remote-reference step decompiles to `trigger_tenant_playbook`
+    (not raw canonical) and recompiles losslessly. This is the P4 read-loop win:
+    the editor's "Trigger Tenant Playbook" palette entry now has a friendly
+    surface on BOTH directions."""
+    by_name = _roundtrip_steps(
+        """
+collection: T
+playbooks:
+  - name: PB
+    steps:
+      - name: Start
+        type: start
+        next: TTP
+      - name: TTP
+        type: trigger_tenant_playbook
+        arguments:
+          playbook_alias_id: remote-ir-playbook
+          tenant_id: tenant-acme
+"""
+    )
+    s = by_name["TTP"]
+    assert s["type"] == "trigger_tenant_playbook", (
+        f"RemotePlaybookReference should decompile to trigger_tenant_playbook, "
+        f"got {s.get('type')!r}")
+    assert s["arguments"]["playbook_alias_id"] == "remote-ir-playbook"
+    assert s["arguments"]["tenant_id"] == "tenant-acme"
+
+

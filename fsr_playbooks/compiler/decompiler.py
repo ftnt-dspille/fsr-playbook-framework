@@ -78,6 +78,17 @@ _EXTRA_CANONICAL_TO_SHORT: dict[str, str] = {
 }
 _FSR_TO_SHORT.update(_EXTRA_CANONICAL_TO_SHORT)
 
+# NOTE: `RemotePlaybookReference` (Trigger Tenant Playbook) needs NO overlay
+# here. Unlike `Connectors` (a many-to-one forward collision: connector/stop/
+# end/delete_record/utilities all compile TO `Connectors`, so the last-wins
+# reverse comprehension mislabels every plain connector step), `RemotePlaybookReference`
+# is a clean 1:1 mapping -- only `trigger_tenant_playbook` compiles to it -- so
+# `_FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}` already resolves
+# it correctly, the same way `WorkflowReference -> workflow_reference` and
+# `ManualTask -> create_task` resolve with no overlay. A pulled remote-reference
+# step decompiles to `trigger_tenant_playbook` (not raw canonical) and recompiles
+# losslessly.
+
 # Canonical argument keys only an action-trigger (start + module ->
 # cybersponse.action) carries. Used to scope the start-step minimification to
 # action-triggers — a plain `cybersponse.abstract_trigger` start has none of
