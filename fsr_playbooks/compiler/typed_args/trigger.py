@@ -87,10 +87,17 @@ _TRIGGER_OP_REWRITE: dict[str, tuple[str, str]] = {
 
 def _wrap_like_value(val, mode: str):
     """Wrap a plain substring for SQL LIKE. Returns (new_value, changed).
-    Leaves values that already contain `%`/`_` wildcards untouched."""
+    Leaves values that already contain a ``%`` wildcard untouched (the author
+    wrote their own pattern). A literal ``_`` in the value is NOT treated as
+    an intentional wildcard -- it is data the author wants matched literally,
+    and SQL LIKE ``_`` matches any single char *including* a literal ``_``, so
+    wrapping is still correct. (Treating ``_`` as "already wildcarded" silently
+    skipped the wrap for any underscored value -- markers, slugs, dotted
+    names -- producing a no-wildcard LIKE that never fires; live-regressed
+    2026-07-02 by the all-step-types validation trigger.)"""
     if not isinstance(val, str) or not val:
         return val, False
-    if "%" in val or "_" in val:
+    if "%" in val:
         return val, False
     if mode == "prefix":
         return f"{val}%", True

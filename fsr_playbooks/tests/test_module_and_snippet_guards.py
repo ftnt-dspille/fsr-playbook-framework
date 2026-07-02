@@ -147,6 +147,46 @@ def test_contains_rewrites_to_like_with_wildcards():
                for e in res.errors)
 
 
+def test_contains_value_with_underscore_is_still_wrapped():
+    # Regression (live-found 2026-07-02): a `contains` value containing `_`
+    # (markers, slugs, dotted names) used to skip the `%…%` wrap because the
+    # wrapper treated a literal `_` as an intentional LIKE wildcard. The
+    # resulting no-wildcard LIKE never matched a substring -> the trigger
+    # silently never fired. The value MUST still wrap with `%…%`.
+    import json
+    yaml_text = """
+collection: 00-test
+playbooks:
+  - name: Trigger
+    steps:
+      - name: On Create
+        type: start_on_create
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - {field: description, op: contains, value: fsrpb_all_step_types_}
+        next: Done
+      - name: Done
+        type: set_variable
+        vars: {x: 1}
+"""
+    res, blocking = _errs(yaml_text)
+    assert res.ok, blocking
+    assert '"%fsrpb_all_step_types_%"' in json.dumps(res.fsr_json)
+
+
+def test_startswith_value_with_underscore_is_still_anchored():
+    # Same regression class for `startswith` (prefix wrap): a value with `_`
+    # must still get its trailing `%`.
+    import json
+    yaml_text = _trigger_with_op("startswith").replace(
+        "value: malware", "value: repro_test")
+    res, blocking = _errs(yaml_text)
+    assert res.ok, blocking
+    assert '"value": "repro_test%"' in json.dumps(res.fsr_json)
+
+
 def test_notcontains_rewrites_to_notlike_with_wildcards():
     import json
     res, blocking = _errs(_trigger_with_op("notcontains"))
