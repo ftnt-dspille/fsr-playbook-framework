@@ -68,9 +68,10 @@ repos:
         language: system
         pass_filenames: false
         # Only re-run when something the suite covers actually changed.
-        # fsr_playbooks/ holds the compiler + MCP tools the suite exercises, so a
-        # change there must trigger it too (was missing before).
-        files: '^(python/|fsr_playbooks/|store/schema\.sql|examples/|pytest\.ini)'
+        # fsr_playbooks/ holds the compiler + MCP tools the suite exercises, and
+        # tooling/ holds the chat-intelligence code that tooling/tests covers — a
+        # change in either must trigger the suite (tooling/ was missing before).
+        files: '^(python/|fsr_playbooks/|tooling/|store/schema\.sql|examples/|pytest\.ini)'
         # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
         # a `--no-verify` commit that bypassed pre-commit — same hole the ruff
         # hook's pre-push stage exists for). ~14s on a code push; the safety net
