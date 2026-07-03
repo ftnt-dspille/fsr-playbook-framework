@@ -1,4 +1,6 @@
-# Pre-commit hooks. Install with: pre-commit install
+# Pre-commit hooks. Install BOTH gate points:
+#   pre-commit install            # pre-commit (runs on `git commit`)
+#   pre-commit install --hook-type pre-push   # pre-push (catches --no-verify)
 # Run all hooks manually with: pre-commit run --all-files
 repos:
   # Ruff lint (pyflakes-class errors: unused imports/vars, undefined names,
@@ -6,12 +8,18 @@ repos:
   # pinned ruff, so it doesn't depend on a venv having ruff installed. Config
   # (target-version, select, per-file-ignores) lives in pyproject.toml.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.13
+    rev: v0.15.20
     hooks:
       - id: ruff
         name: ruff (lint)
         # No --fix: fail fast and let the dev decide, matching the pytest hook.
         files: '^(python/|fsr_playbooks/)'
+        # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
+        # a `--no-verify` commit that bypassed the pre-commit gate — the actual
+        # root cause of the 0.4.15 CI ruff break). The push-time pass is a ~1s
+        # redundant re-check for a clean flow; the safety net is the point.
+        # Requires `pre-commit install --hook-type pre-push` to be active.
+        stages: [pre-commit, pre-push]
 
   - repo: local
     hooks:
