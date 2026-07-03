@@ -192,6 +192,20 @@ def conditional_refetch(
 
     Pure protocol/bookkeeping — the caller owns per-collection table writes,
     which differ by shape (picklists vs connector_configs vs …).
+
+    **Live behavior on FortiSOAR 8.0 (probed 2026-07-02 on .159):** the 304
+    ``unchanged`` path is effectively dead. FSR's Hydra collections
+    (``picklist_names`` / ``teams`` / ``staging_model_metadatas``) return an
+    ``ETag`` but **do not honor ``If-None-Match``** — a conditional GET always
+    comes back 200 with the full body, so this helper records the (re-)fetched
+    ETag + bumps ``data_warmed_at`` and returns ``"refreshed"``. The non-Hydra
+    endpoints (``/api/integration/connectors/`` / ``/api/3/``) return no ETag at
+    all. So on FSR today the only working arm is the TTL ``fresh``
+    short-circuit, which trades freshness (a catalog warmed again within the TTL
+    window skips the fetch and may miss a just-published picklist value / field)
+    for fewer requests — which is why the wiring stays **opt-in / default OFF**.
+    If a future FSR version honors ``If-None-Match``, the 304 arm revives with no
+    code change.
     """
     from fsr_playbooks import _catalog_meta
 
