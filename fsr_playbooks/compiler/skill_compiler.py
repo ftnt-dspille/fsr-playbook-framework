@@ -254,7 +254,7 @@ def wire_record_inputs(
     gaps: Dict[str, List[str]],
     record_fields: Optional[Dict[str, Any]],
     first_step: Optional[str],
-) -> Tuple[Dict[str, str], List[str], Optional[str]]:
+) -> Tuple[Dict[str, str], List[Dict[str, Any]], Optional[str]]:
     """Parameterize one-off triage IOCs to the trigger record.
 
     For every gap param (a value with no earlier producer that would
@@ -309,7 +309,7 @@ def wire_record_inputs(
                 val_to_var[key] = var
                 record_vars[var] = "{{ vars.input.records[0]" + suffix + " }}"
             staged = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) + "." + var + " }}"
-            if embed_spans:
+            if embed_spans and isinstance(literal, str):
                 container[param] = _apply_spans(
                     literal, [(s, e, staged) for s, e in embed_spans])
             else:
@@ -406,7 +406,8 @@ def insert_containment_guard(
     for s in reversed(steps[:ci]):            # closest enrichment first
         if s.get("type") != "connector":
             continue
-        call = by_name.get(s.get("name"))
+        sname = s.get("name")
+        call = by_name.get(sname) if isinstance(sname, str) else None
         if call is None:
             continue
         v = _find_verdict(call.observed_output)

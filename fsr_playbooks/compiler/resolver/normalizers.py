@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
@@ -58,6 +58,57 @@ class NormalizerMixin:
     """Methods for normalizing step arguments and dispatching by step type."""
 
     conn: sqlite3.Connection
+
+    # The Resolver (resolver/__init__.py) composes this mixin with
+    # CatalogLookupMixin (catalog.py), PicklistMixin (picklists.py), and
+    # ConnectorArgsMixin (connector_args.py). The attrs/methods below are
+    # provided by those siblings at runtime; declared here under TYPE_CHECKING
+    # only so mypy can resolve them while checking this mixin in isolation.
+    # Keep these signatures in sync with their real definitions.
+    if TYPE_CHECKING:
+        # from CatalogLookupMixin (catalog.py)
+        _UNIVERSAL_STEP_KEYS: set[str]
+        def step_type(self, short_or_canonical: str) -> sqlite3.Row | None: ...
+        def suggest_step_type(self, name: str) -> str | None: ...
+        def handler_for_step_type(self, step_type_row: sqlite3.Row) -> str | None: ...
+        def resolve_module_name(
+            self, raw: str, path: str, errors: list[CompileError],
+        ) -> str: ...
+        def resolve_config_id(
+            self, connector: str, config_name: str | None = None,
+        ) -> str | None: ...
+        def operation_param_rules(
+            self, connector: str, op: str,
+        ) -> list[tuple[str, str | None, str | None]]: ...
+        def operation_param_required_rules(
+            self, connector: str, op: str,
+        ) -> list[tuple[str, str | None, str | None, bool, str | None]]: ...
+
+        @staticmethod
+        def _check_unknown_keys(
+            a: dict, kind: str, friendly: set[str], canonical: set[str],
+            path: str, errors: list[CompileError],
+        ) -> bool: ...
+
+        # from PicklistMixin (picklists.py)
+        _INPUT_FIELD_KINDS: dict[str, dict[str, Any]]
+        _INPUT_FIELD_TITLE: dict[str, str]
+        def _resolve_picklist_friendly_tokens(
+            self, step: Step, path: str, errors: list[CompileError],
+        ) -> None: ...
+        def _suggest_specific_kind(self, name: str, label: str) -> str | None: ...
+
+        # from ConnectorArgsMixin (connector_args.py)
+        def _resolve_connector_args(
+            self, step: Step, path: str, errors: list[CompileError],
+        ) -> None: ...
+        def _resolve_workflow_reference_args(
+            self, step: Step, path: str, errors: list[CompileError],
+            pb_by_name: dict[str, Playbook],
+        ) -> None: ...
+        def _resolve_trigger_tenant_playbook_args(
+            self, step: Step, path: str, errors: list[CompileError],
+        ) -> None: ...
 
     def _resolve_step(
         self, step: Step, path: str, errors: list[CompileError],
@@ -1055,7 +1106,7 @@ class NormalizerMixin:
         # non-empty) so a description-less prompt still runs. See AGENT_DX_PLAN D1.
         description = a.pop("description", None) or title
         raw_options = a.pop("options", None) or [{"option": "Continue", "primary": True}]
-        options = []
+        options: list[dict[str, Any]] = []
         # Per-option `next:` — promote into the step's branch map so the
         # emitter can resolve label → step_iri the same way it does for
         # decision steps. Previously the key was silently stripped, leaving
@@ -1178,7 +1229,8 @@ class NormalizerMixin:
                 severity="warning",
             ))
         # Assignment — owner_detail.isAssigned ↔ exactly-one-target.
-        od = a.get("owner_detail") if isinstance(a.get("owner_detail"), dict) else {}
+        raw_od = a.get("owner_detail")
+        od = raw_od if isinstance(raw_od, dict) else {}
         is_assigned = bool(od.get("isAssigned"))
         targets = {
             "assignedToPerson": od.get("assignedToPerson"),
@@ -1618,7 +1670,8 @@ class NormalizerMixin:
             # grouping; visibility cascades, so the top-of-chain parent
             # gives the agent the most actionable feasible-set view.
             gating = entries[0][0]
-            conflicts_by_parent.setdefault(gating, []).append(p_name)
+            if gating is not None:
+                conflicts_by_parent.setdefault(gating, []).append(p_name)
 
         # One consolidated diagnostic per gating select — lists the full
         # feasible param neighborhood under each option so the agent can

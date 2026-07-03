@@ -156,10 +156,11 @@ def _shape_to_src_tag(shape: Shape | None) -> str | None:
     if kind == "object":
         return "dict"
     if kind == "scalar":
+        stype = shape.get("type")
         return {
             "integer": "int", "float": "float", "boolean": "bool",
             "string": "str", "null": "null",
-        }.get(shape.get("type"))
+        }.get(stype) if isinstance(stype, str) else None
     return None
 
 
@@ -992,14 +993,14 @@ def _validate_branch_jinja(
                         # `.attr`, scalar → drop the index, common FSR
                         # envelope `{hydra:member: [...]}` → recommend
                         # the right key).
-                        st = typed_env.get(key) or {}
-                        kind = st.get("kind", "unknown")
+                        env_shape = typed_env.get(key) or {}
+                        kind = env_shape.get("kind", "unknown")
                         suggestion = ""
                         if kind == "object":
-                            obj_keys = list((st.get("keys") or {}).keys())
+                            obj_keys = list((env_shape.get("keys") or {}).keys())
                             list_keys = [
                                 k for k in obj_keys
-                                if (st["keys"][k] or {}).get("kind") == "list"
+                                if (env_shape["keys"][k] or {}).get("kind") == "list"
                             ]
                             if "hydra:member" in obj_keys:
                                 suggestion = (
@@ -1328,10 +1329,10 @@ def walk_playbook(
     for ids in branch_paths:
         typed_env: dict[str, Shape] = {}
         for sid in ids:
-            s = by_id.get(sid)
-            if s is None:
+            step = by_id.get(sid)
+            if step is None:
                 continue
-            typed_env[_jinja_key(s)] = per_step[s.id]
+            typed_env[_jinja_key(step)] = per_step[step.id]
         label = _branch_label(pb, ids)
         diags, var_env, type_decisions = _validate_branch_jinja(
             pb, ids, typed_env, label, param_type_fn, param_shapes)

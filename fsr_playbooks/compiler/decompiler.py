@@ -325,7 +325,7 @@ def _decompile_step(s, pb_name: str | None = None) -> dict:
             out["arguments"] = args
     elif s.type == "manual_input" and isinstance(args, dict):
         rmap = args.pop("response_mapping", None)
-        opts = []
+        opts: list = []
         if isinstance(rmap, dict):
             opts = rmap.get("options") or []
         new_opts = []
@@ -407,13 +407,12 @@ def _decompile_step(s, pb_name: str | None = None) -> dict:
         # api_endpoint (Custom API Endpoint trigger) minimification. The forward
         # normalizer (`_normalize_api_endpoint_args`) setdefaults five
         # trigger-infra fields to the canonical shape FSR's designer emits, so
-        # the minimal clean form
-        #
-        #     - name: Start
-        #       type: api_endpoint
-        #       arguments:
-        #         route: lookup_ip
-        #
+        # the minimal clean form -- a step like:
+        # - name: Start
+        # - type: api_endpoint
+        # - arguments.route: lookup_ip
+        # (kept flat: mypy 2.1.0's parser false-positives "Expected an indented
+        # block" on a comment-only body carrying a deeply-indented YAML sketch.)
         # compiles to a fully-specified token-based trigger. On decompile, drop
         # those re-derived defaults so a pulled api_endpoint step surfaces just
         # `route` (+ non-default `authentication_methods`); recompile re-adds

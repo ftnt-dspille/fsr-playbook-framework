@@ -232,7 +232,8 @@ def _snippet_allow_imports(s: Step) -> bool | None:
     None (= unknown → the manifest default decides, and an import is a warning).
     """
     args = s.arguments or {}
-    for container in (args, args.get("params") if isinstance(args.get("params"), dict) else {}):
+    raw_params = args.get("params")
+    for container in (args, raw_params if isinstance(raw_params, dict) else {}):
         for key in ("allow_imports", "allowImports"):
             v = container.get(key)
             if isinstance(v, bool):

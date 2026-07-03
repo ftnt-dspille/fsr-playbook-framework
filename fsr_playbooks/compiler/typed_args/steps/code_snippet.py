@@ -94,7 +94,8 @@ def expand_code_snippet(
     a.setdefault("step_variables", [])
 
     # Build params dict with the code as python_function.
-    params = a.get("params") if isinstance(a.get("params"), dict) else {}
+    raw_params = a.get("params")
+    params = raw_params if isinstance(raw_params, dict) else {}
     params.setdefault("python_function", code)
     a["params"] = params
 

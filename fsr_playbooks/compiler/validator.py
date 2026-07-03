@@ -475,10 +475,10 @@ def _check_reserved_names(pb: Playbook, pi: int,
                     if isinstance(item, dict) and "name" in item:
                         names.append((item["name"], f"arg_list[{k}].name"))
             else:
-                for k in s.arguments:
-                    if k in {"step_variables"}:  # framework key, not a var
+                for var_name in s.arguments:
+                    if var_name in {"step_variables"}:  # framework key, not a var
                         continue
-                    names.append((k, k))
+                    names.append((var_name, var_name))
             # Reserved-name collisions are auto-renamed in resolver
             # (_auto_rename_reserved_set_var_keys) which emits a warning.
             # No re-check here — the auto-renamer guarantees they're gone.
@@ -510,10 +510,10 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
         if sid in reachable:
             continue
         reachable.add(sid)
-        s = by_id.get(sid)
-        if s is None:
+        step = by_id.get(sid)
+        if step is None:
             continue
-        for nxt in _step_outgoing(s):
+        for nxt in _step_outgoing(step):
             if nxt not in reachable and nxt in by_id:
                 frontier.append(nxt)
     for si, s in enumerate(pb.steps):
@@ -689,8 +689,8 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
             if not isinstance(o, dict):
                 continue
             opath = f"{path}.steps[{si}].arguments.response_mapping.options[{oi}]"
-            label = o.get("option")
-            if not label:
+            opt_label = o.get("option")
+            if not opt_label:
                 errors.append(CompileError(
                     code=ErrorCode.MISSING_FIELD,
                     message=(f"manual_input {s.id!r}: option is missing "
@@ -699,21 +699,21 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
                     severity="error",
                 ))
                 continue
-            labels.append(label)
+            labels.append(opt_label)
             if o.get("primary"):
                 n_primary += 1
-            has_target = bool(o.get("step_iri")) or label in s.branches or bool(s.next)
+            has_target = bool(o.get("step_iri")) or opt_label in s.branches or bool(s.next)
             if not has_target and len(opts) > 1:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message=(f"manual_input {s.id!r}: option {label!r} "
+                    message=(f"manual_input {s.id!r}: option {opt_label!r} "
                              f"has no target — multi-button prompts where "
                              f"≥2 options end the run usually indicate "
                              f"forgotten wiring"),
                     path=f"{opath}.step_iri",
                     severity="warning",
                     suggestion=(f"add `next: <step_id>` on this option, "
-                                f"or branches: {{{label}: <step_id>}} on the step"),
+                                f"or branches: {{{opt_label}: <step_id>}} on the step"),
                 ))
         if n_primary > 1:
             errors.append(CompileError(

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from fsr_playbooks.compiler.mi_output_catalog import (
     MI_OUTPUT_KEYS,
@@ -63,7 +63,7 @@ class Diagnostic:
 def analyze(trace: list[dict[str, Any]],
             playbook: dict[str, Any] | None = None,
             *,
-            picklist_validator: "callable | None" = None,
+            picklist_validator: Callable[..., Any] | None = None,
             ) -> list[Diagnostic]:
     """Run all heuristic checks against a step-through trace.
 

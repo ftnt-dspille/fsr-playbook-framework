@@ -94,7 +94,8 @@ def expand_delete_record(
     show_deleted = a.pop("show_deleted", None)
 
     # Build the existing params (raw escape hatch wins if fully specified).
-    params = a.get("params") if isinstance(a.get("params"), dict) else {}
+    raw_params = a.get("params")
+    params = raw_params if isinstance(raw_params, dict) else {}
     iri = params.get("iri")
     body = params.get("body", "")
 

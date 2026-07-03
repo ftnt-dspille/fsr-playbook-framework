@@ -114,12 +114,12 @@ def _step_edges(step: ir.Step) -> list[_Edge]:
             for c in items:
                 if not isinstance(c, dict):
                     continue
-                target = c.get("next")
-                if not isinstance(target, str):
+                nxt = c.get("next")
+                if not isinstance(nxt, str):
                     continue
-                label = (c.get("option") or c.get("display") or c.get("label")
-                         or ("default" if c.get("default") else None))
-                edges.append(_Edge(step.id, target, label, "branch"))
+                lbl = (c.get("option") or c.get("display") or c.get("label")
+                       or ("default" if c.get("default") else None))
+                edges.append(_Edge(step.id, nxt, lbl, "branch"))
     return edges
 
 
@@ -372,7 +372,7 @@ class _PlaybookDiff:
     removed: list[str]           # original ids that aren't in the graph
     edits: dict[str, _NodeEdit]  # id -> mutation
     edges_changed: bool
-    new_edges: list[dict] = None  # edges introduced by this diff (touch added)
+    new_edges: list[dict] | None = None  # edges introduced by this diff (touch added)
 
     def __post_init__(self):
         if self.new_edges is None:
@@ -538,7 +538,7 @@ def _apply_structural_edits(body: str, diff: _GraphDiff, graph: dict[str, Any]) 
             steps.append(_default_step_doc(new_n))
 
         # 4) Wire the edges that touch the newly-added nodes.
-        for e in pd.new_edges:
+        for e in (pd.new_edges or []):
             src_id, tgt_id = e["source"], e["target"]
             if tgt_id in new_node_by_id:
                 tgt_name = new_node_by_id[tgt_id].get("name") or tgt_id
@@ -727,7 +727,7 @@ def _apply_edge_rewiring(steps: list, graph_pb: dict, pd: _PlaybookDiff,
         for label, tgt_name in new_by_label.items():
             if label in consumed:
                 continue
-            new_row = {"next": tgt_name}
+            new_row: dict[str, Any] = {"next": tgt_name}
             if label and label != "default":
                 new_row["option"] = label
             else:

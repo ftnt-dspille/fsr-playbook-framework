@@ -127,10 +127,15 @@ lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
 VENV_PY  := $(CURDIR)/.venv/bin/python
 CONNECTOR_DIR := ../ConnectorsV2/fsr-playbook-builder
 
+mypy: ## mypy type-check over fsr_playbooks/compiler (default config; not --strict)
+	$(VENV_PY) -m mypy
+
 verify: ## green-check for the fsr_playbooks + connector axis (offline)
-	@echo "→ [1/2] fsr_playbooks tests"
+	@echo "→ [1/3] mypy (fsr_playbooks/compiler)"
+	$(VENV_PY) -m mypy
+	@echo "→ [2/3] fsr_playbooks tests"
 	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q
-	@echo "→ [2/2] connector suite (offline; live tests self-skip)"
+	@echo "→ [3/3] connector suite (offline; live tests self-skip)"
 	cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q
 	@echo "✓ verify passed"
 	@echo "  (Angular widget has its own toolchain in WebStorm — not verifiable here.)"

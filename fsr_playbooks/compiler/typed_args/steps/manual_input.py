@@ -38,7 +38,7 @@ an `options` entry is a bare string *or* a dict).
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, TypeAlias
 
 from pydantic import ConfigDict
 
@@ -54,11 +54,10 @@ from .._bridge import validate_args
 # and the JSON Schema it emits track it automatically.
 from ...resolver.picklists import PicklistMixin
 
-InputFieldKind = Literal  # type: ignore[valid-type]
 # Build the Literal[...] from the dict keys at import time. `Literal.__getitem__`
 # accepts the tuple of kind strings and returns the parametrized type.
 _KIND_KEYS = tuple(sorted(PicklistMixin._INPUT_FIELD_KINDS))
-InputFieldKind = Literal[_KIND_KEYS]  # type: ignore[valid-type,assignment]
+InputFieldKind: TypeAlias = Literal[_KIND_KEYS]  # type: ignore[valid-type]
 
 
 class InputVariableArgs(StrictArgs):

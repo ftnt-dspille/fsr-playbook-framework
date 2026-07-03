@@ -44,6 +44,19 @@ repos:
         pass_filenames: false
         files: '^fsr_playbooks/compiler/'
 
+      - id: mypy
+        name: mypy (fsr_playbooks/compiler)
+        # Type-check the compiler at the configured (non-strict) level — the
+        # same gate as `make mypy`. Runs the full configured scope (mypy needs
+        # whole-program context, so pass_filenames: false and it reads files=
+        # from pyproject [tool.mypy]). Uses the venv interpreter (fsr_playbooks
+        # + deps installed editable); run `make sync` to create it. ~3s.
+        entry: .venv/bin/python -m mypy
+        language: system
+        pass_filenames: false
+        files: '^fsr_playbooks/compiler/'
+        stages: [pre-commit, pre-push]
+
       - id: pytest-fast
         name: pytest (fast subset, skips corpus)
         # Use this repo's venv interpreter, NOT a bare `python3` — the system

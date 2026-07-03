@@ -7,6 +7,7 @@ import json as _json
 import re
 import sqlite3
 from datetime import datetime
+from typing import TYPE_CHECKING, Any, Callable
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
@@ -106,7 +107,7 @@ def _is_json_array(v) -> bool:
 # Tier 1 widget pass already covers `int` / `float` / `bool` / `picklist`
 # / `str` (str is permissive). We only register here the *additional*
 # types Tier 2 unlocks.
-_OBSERVED_VALIDATORS: dict[str, tuple[str, "callable", str]] = {
+_OBSERVED_VALIDATORS: dict[str, tuple[str, Callable[[Any], bool], str]] = {
     "ipv4": ("IPv4 address", _is_ipv4,
              "pass a dotted-quad address like '10.0.0.1'"),
     "url":  ("URL", _is_url,
@@ -231,6 +232,41 @@ class ConnectorArgsMixin:
     """Methods for resolving connector args and checking routing."""
 
     conn: sqlite3.Connection
+
+    # The Resolver (resolver/__init__.py) composes this mixin with
+    # CatalogLookupMixin (catalog.py) and NormalizerMixin (normalizers.py).
+    # The methods below are provided by those siblings at runtime; declared
+    # here under TYPE_CHECKING only so mypy can resolve them while checking
+    # this mixin in isolation. Keep in sync with the real definitions.
+    if TYPE_CHECKING:
+        # from CatalogLookupMixin (catalog.py)
+        def connector(self, name: str) -> sqlite3.Row | None: ...
+        def suggest_connector(self, name: str) -> str | None: ...
+        def operation(self, connector: str, op: str) -> sqlite3.Row | None: ...
+        def suggest_operation(self, connector: str, op: str) -> str | None: ...
+        def suggest_operations_topn(
+            self, connector: str, op: str, n: int = 5,
+        ) -> list[str]: ...
+        def operation_params(self, connector: str, op: str) -> list[str]: ...
+        def operation_param_enum(
+            self, connector: str, op: str, param: str,
+        ) -> tuple[str | None, list[str] | None]: ...
+        def operation_param_observed_type(
+            self, connector: str, op: str, param: str,
+        ) -> tuple[str | None, str | None]: ...
+        def resolve_config_id(
+            self, connector: str, config_name: str | None = None,
+        ) -> str | None: ...
+
+        # from NormalizerMixin (normalizers.py)
+        def _check_param_visibility(
+            self, connector: str, operation: str, provided: dict,
+            path: str, errors: list[CompileError],
+        ) -> None: ...
+        def _check_conditional_required(
+            self, connector: str, operation: str, provided: dict,
+            path: str, errors: list[CompileError],
+        ) -> None: ...
 
     def _resolve_connector_args(
         self, step: Step, path: str, errors: list[CompileError],

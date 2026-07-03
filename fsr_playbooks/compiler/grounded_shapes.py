@@ -176,7 +176,8 @@ class GroundedShapeStore:
         return cls(data, path=p)
 
     def save(self, path: Optional[Path] = None) -> None:
-        target = Path(path or self._path) if (path or self._path) else None
+        src = path or self._path
+        target = Path(src) if src else None
         if target is None:
             raise ValueError("no path to save GroundedShapeStore")
         target.parent.mkdir(parents=True, exist_ok=True)
