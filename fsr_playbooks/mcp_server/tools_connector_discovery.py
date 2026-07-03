@@ -917,6 +917,25 @@ def list_configured_connectors(probe: bool = False,
     try:
         # Use pyfsr wrapper for configured connectors list
         configured_objs = client.connectors.list_configured()
+        # pyfsr's list_configured() returns any connector with a config RECORD,
+        # including ones whose config is INACTIVE. run_op's preflight
+        # (_configured_rows → connector_details?configured=true&active=true) then
+        # rejects those as `connector_not_configured`, so advertising them here as
+        # "Available" is a false positive — the agent calls them and wastes a turn
+        # on a guaranteed failure (run 9 P1: whois-rdap listed Available, then
+        # run_op rejected it). Filter through the SAME active-config source the
+        # preflight uses so the listing only shows connectors that can actually
+        # run. Fail open: if that source didn't resolve (returned nothing), keep
+        # the unfiltered pyfsr list rather than blanking the whole listing — the
+        # preflight itself fails open on the same lookup, so we stay consistent.
+        try:
+            from .tools_execution import _configured_rows
+            _active_names = {x.get("name") for x in _configured_rows(client)}
+            if _active_names:
+                configured_objs = [c for c in configured_objs
+                                   if c.name in _active_names]
+        except Exception:  # noqa: BLE001
+            pass  # never let the active-filter wipe the listing on a lookup error
         rows = [
             {
                 "name": c.name,
