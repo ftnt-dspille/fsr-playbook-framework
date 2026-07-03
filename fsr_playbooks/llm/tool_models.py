@@ -7,16 +7,39 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
 class GetRecordArgs(BaseModel):
-    """Arguments for the get_record tool."""
-    model_config = ConfigDict(extra="allow")
+    """Arguments for the get_record tool.
 
-    module: str
-    record_id: str = Field(...)
+    Mirrors the REAL registered signature: get_record(iri="", module="",
+    uuid="", relationships=True, full=False, record_id=""). The old model
+    here required module+record_id(str) — a stale gate that rejected every
+    legitimate form the agent tried on a live matrix run (iri-only,
+    module+uuid, integer record_id), 3 tool errors in one turn.
+    `coerce_numbers_to_str` accepts an integer id instead of bouncing it.
+    """
+    model_config = ConfigDict(extra="allow", coerce_numbers_to_str=True)
+
+    iri: Optional[str] = None
+    module: Optional[str] = None
+    uuid: Optional[str] = None
+    record_id: Optional[str] = None
+    relationships: Optional[bool] = None
+    full: Optional[bool] = None
     include: Optional[list[str]] = None
+
+    @model_validator(mode="after")
+    def _one_identifier(self) -> "GetRecordArgs":
+        if not (self.iri or (self.module and (self.uuid or self.record_id))):
+            raise ValueError(
+                "identify the record via `iri` alone, or `module` plus "
+                "`uuid`/`record_id` — e.g. "
+                'get_record(iri="/api/3/alerts/<uuid>") or '
+                'get_record(module="alerts", uuid="<uuid>")'
+            )
+        return self
 
 
 class SearchModuleRecordsArgs(BaseModel):
