@@ -1014,31 +1014,6 @@ Editor-derived argument shapes for every step type, keyed by canonical FSR name 
 | `step_type_uuid` | iri |  | APPROVAL_STEP_TYPE constant defined; appears in compile transforms |
 | `timeout` | object |  | Optional timeout config; if present has: days, hours, minutes, step_iri |
 
-#### SendEmail — `send_email`
-
-| Argument | Type | Required | Meaning |
-|----------|------|----------|---------|
-| `attachments` | array |  | Email attachments. Not exposed in SendEmailCtrl; could be in params per inferred schema. Form handling not visible in bundle |
-| `bcc` | array(string) |  | Blind carbon copy recipients. Not directly exposed in SendEmailCtrl; present in inferred params schema as optional bcc_recipients field. Possible implementation gap |
-| `cc` | array(string) |  | Carbon copy recipients. Not directly exposed in SendEmailCtrl in bundle; present in inferred params schema as optional cc_recipients field. Possible implementation gap or hidden in template |
-| `config` | string | yes |  |
-| `connector` | string | yes |  |
-| `content` | string |  | Email body content. Handled via richtext editor with Field({name: 'content', formType: 'richtext', title: 'Content'}). Set via getMarkDown callback |
-| `for_each` | object |  | Loop iteration. Optional system key. If set with __bulk=true, batch_size defaults to 100. Deleted if item is empty at compile-time |
-| `from_str` | string | yes | Sender email address. Defaults to SMTP settings defaultFrom or DEFAULT_FROM_EMAIL injection |
-| `ignore_errors` | boolean |  | Optional system key (inferred schema). Error handling flag |
-| `message` | object |  | Optional system key (inferred schema). Deleted if content is empty at compile-time |
-| `mock_result` | string |  | Optional (inferred schema). Deleted if empty at compile-time |
-| `operation` | string |  | Optional system key |
-| `operationTitle` | string |  | Optional |
-| `params` | object |  | Optional system key |
-| `step_variables` | unknown | yes |  |
-| `subject` | string |  | Email subject line. Not exposed in SendEmailCtrl controller; present in inferred schema params as required iri_list+subject. Possible implementation gap or stored differently |
-| `timeout` | object |  | Excluded from arguments via excludes=['timeout']. Not permitted for SendEmail steps |
-| `to` | array(string) |  | Email recipient addresses. Converted from/to jinja tags format via convertVarsToTag/convertTagsToVar filters. In editor, joined with commas for display |
-| `version` | string | yes |  |
-| `when` | string |  | Execution condition. Optional (inferred schema) |
-
 #### ManualTask — `create_task`
 
 | Argument | Type | Required | Meaning |
@@ -1136,5 +1111,30 @@ Editor-derived argument shapes for every step type, keyed by canonical FSR name 
 | `title` | string |  | Display title for this action trigger. Used in execution logs and action menus. Falls back to step name if not set |
 | `triggerOnReplicate` | boolean |  | Whether to trigger when record replicated. Only applies if __triggerLimit=true |
 | `triggerOnSource` | boolean |  | Whether to trigger when record created on source. Only applies if __triggerLimit=true |
+
+#### SendEmail — _(no alias)_
+
+| Argument | Type | Required | Meaning |
+|----------|------|----------|---------|
+| `attachments` | array |  | Email attachments. Not exposed in SendEmailCtrl; could be in params per inferred schema. Form handling not visible in bundle |
+| `bcc` | array(string) |  | Blind carbon copy recipients. Not directly exposed in SendEmailCtrl; present in inferred params schema as optional bcc_recipients field. Possible implementation gap |
+| `cc` | array(string) |  | Carbon copy recipients. Not directly exposed in SendEmailCtrl in bundle; present in inferred params schema as optional cc_recipients field. Possible implementation gap or hidden in template |
+| `config` | string | yes |  |
+| `connector` | string | yes |  |
+| `content` | string |  | Email body content. Handled via richtext editor with Field({name: 'content', formType: 'richtext', title: 'Content'}). Set via getMarkDown callback |
+| `for_each` | object |  | Loop iteration. Optional system key. If set with __bulk=true, batch_size defaults to 100. Deleted if item is empty at compile-time |
+| `from_str` | string | yes | Sender email address. Defaults to SMTP settings defaultFrom or DEFAULT_FROM_EMAIL injection |
+| `ignore_errors` | boolean |  | Optional system key (inferred schema). Error handling flag |
+| `message` | object |  | Optional system key (inferred schema). Deleted if content is empty at compile-time |
+| `mock_result` | string |  | Optional (inferred schema). Deleted if empty at compile-time |
+| `operation` | string |  | Optional system key |
+| `operationTitle` | string |  | Optional |
+| `params` | object |  | Optional system key |
+| `step_variables` | unknown | yes |  |
+| `subject` | string |  | Email subject line. Not exposed in SendEmailCtrl controller; present in inferred schema params as required iri_list+subject. Possible implementation gap or stored differently |
+| `timeout` | object |  | Excluded from arguments via excludes=['timeout']. Not permitted for SendEmail steps |
+| `to` | array(string) |  | Email recipient addresses. Converted from/to jinja tags format via convertVarsToTag/convertTagsToVar filters. In editor, joined with commas for display |
+| `version` | string | yes |  |
+| `when` | string |  | Execution condition. Optional (inferred schema) |
 
 <!-- END GENERATED STEP REFERENCE -->
