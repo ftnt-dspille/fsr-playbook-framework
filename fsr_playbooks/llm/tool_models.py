@@ -62,23 +62,41 @@ class RunOpArgs(BaseModel):
 
 
 class EmitActionCardArgs(BaseModel):
-    """Arguments for the emit_action_card tool."""
+    """Arguments for the emit_action_card tool.
+
+    Mirrors the REAL registered signature: emit_action_card(id, connector,
+    operation, summary, args, editable_fields). The old model here required
+    `title` — a field the registered tool does not accept — while omitting
+    id/connector/args/editable_fields entirely. So every live containment card
+    the agent staged (correctly passing summary/operation/args) bounced with
+    "title: Field required" and the turn ended with no action card (matrix
+    run 7 T1). Same drift class as GetRecordArgs (run 5).
+    """
     model_config = ConfigDict(extra="allow")
 
-    title: str
-    summary: Optional[str] = None
-    description: Optional[str] = None
-    operation: Optional[str] = None
-    recommended_values: Optional[dict[str, Any]] = None
+    id: str
+    connector: str
+    operation: str
+    summary: str
+    args: dict[str, Any]
+    editable_fields: list[str]
 
 
 class EmitChoiceCardArgs(BaseModel):
-    """Arguments for the emit_choice_card tool."""
+    """Arguments for the emit_choice_card tool.
+
+    Mirrors the REAL registered signature: emit_choice_card(id, prompt,
+    options, multi, min_select, max_select). The old model required `title`
+    (not a real param) and omitted id/prompt/multi/min_select/max_select.
+    """
     model_config = ConfigDict(extra="allow")
 
-    title: str
-    options: list[dict[str, Any]] = Field(...)
-    description: Optional[str] = None
+    id: str
+    prompt: str
+    options: list[dict[str, Any]]
+    multi: Optional[bool] = None
+    min_select: Optional[int] = None
+    max_select: Optional[int] = None
 
 
 class ValidateYamlArgs(BaseModel):
