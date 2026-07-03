@@ -310,7 +310,7 @@ playbooks:
         type: send_email
         next: Store playbook keys
         ignore_errors: true
-        comment: ignore_errors because SMTP delivery depends on the smtp connector config on the box; the step TYPE still executes.
+        comment: send_email now targets the SendMail connector path (smtp/send_email), which SUCCEEDS on 8.0. ignore_errors kept as a safety net in case a lab box has no smtp config (localhost-postfix absent).
         arguments:
           to: [soc@example.com]
           subject: "Threat feed ingest complete - {{ vars.feed_source_name }}"

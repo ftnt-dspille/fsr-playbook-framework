@@ -623,15 +623,13 @@ def test_code_snippet_without_python_function_passes_through():
     assert "code" not in out["arguments"]
 
 
-def test_send_email_minified_reverses_body_rename():
-    """The forward normalizer renames `body`->`content` and defaults `from_str`
-    to "" (the SMTP default-from the FSR engine fills at runtime). On decompile,
-    reverse `content`->`body` and drop the empty `from_str` default so the
-    round-trip is byte-stable (an original step with no `from:` doesn't gain
-    `from_str: ""` on first recompile). This is the G10 Tier-2 send_email
-    minimification. NOTE: orthogonal to the send_email->SendEmail (dead) vs
-    SendMail (live) forward-map wart -- that's a compiler concern (which
-    canonical send_email targets), not a decompiler one."""
+def test_send_email_minified_strips_connector_envelope():
+    """`send_email` compiles to a `SendMail` connector-family call (connector:
+    smtp / operation: send_email / params: {to, subject, body, ...} / version /
+    operationTitle / config). On decompile, strip the re-derived envelope and
+    unwrap `params` back to the flat friendly email fields. The smtp op takes
+    `body` natively (no `content`/`from_str` rename), so the friendly surface is
+    just the email fields."""
     by_name = _roundtrip_steps(
         """
 collection: T
@@ -652,15 +650,20 @@ playbooks:
     )
     s = by_name["Mail"]
     args = s.get("arguments") or {}
-    # body recovered (canonical `content` reversed to friendly `body`)
+    # email fields recovered flat (params unwrapped)
     assert args.get("body", "").strip() == "hi there", args
-    assert "content" not in args, args           # canonical name dropped
-    assert "from_str" not in args, args           # empty default dropped
+    assert args.get("subject") == "hello", args
+    assert args.get("to") == ["admin@example.com"], args
+    # re-derived connector envelope dropped (recompile re-adds)
+    for env_k in ("connector", "operation", "operationTitle", "version", "params"):
+        assert env_k not in args, (env_k, args)
+    assert "content" not in args and "from_str" not in args, args  # no rename
 
 
-def test_send_email_minified_restores_real_from():
-    """A real sender (`from_str` set to a non-empty address) is restored to the
-    friendly `from:` -- not dropped (only the empty default is dropped)."""
+def test_send_email_minified_keeps_real_from():
+    """A real sender (`from:`) round-trips flat through the smtp op's `params`
+    -- the minimification keeps it (it's an author value, not a re-derived
+    default)."""
     by_name = _roundtrip_steps(
         """
 collection: T
@@ -682,6 +685,6 @@ playbooks:
     )
     s = by_name["Mail"]
     args = s.get("arguments") or {}
-    assert args.get("from") == "bot@example.com", args   # friendly `from:` restored
-    assert "from_str" not in args, args                  # canonical name dropped
+    assert args.get("from") == "bot@example.com", args   # friendly `from:` kept
+    assert "from_str" not in args, args                  # no canonical rename
     assert args.get("body", "").strip() == "hi there", args

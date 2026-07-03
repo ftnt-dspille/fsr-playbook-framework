@@ -463,28 +463,37 @@ def _decompile_step(s, pb_name: str | None = None) -> dict:
         if args:
             out["arguments"] = args
     elif s.type == "send_email" and isinstance(args, dict):
-        # send_email minimification. The forward normalizer
-        # (`_normalize_send_email_args`) renames the friendly `body` -> canonical
-        # `content` and `from` -> `from_str`, then defaults `from_str` to "" (the
-        # FSR engine substitutes the SMTP config's default-from at runtime -- a
-        # value we don't have offline). Unlike code_snippet/connector, send_email
-        # does NOT synthesize a full connector envelope -- the compiled step
-        # carries only the email fields + content + from_str. So the
-        # minimification is small: reverse `content` -> `body` and `from_str` ->
-        # `from`, and drop the empty `from_str: ""` default so the round-trip is
-        # byte-stable (an original step authored with no `from:` would otherwise
-        # gain `from_str: ""` on the first recompile and drift). Recompile
-        # re-applies the rename + default (round-trip stable).
-        #
-        # Reverse ONLY when the friendly key isn't already present -- a step a
-        # user hand-edited to keep the canonical form (or a future author who
-        # set both) isn't clobbered.
-        if "content" in args and "body" not in args:
-            args["body"] = args.pop("content")
-        if args.get("from_str") == "":
-            args.pop("from_str", None)        # default -- dropped (recompile re-adds)
-        elif "from_str" in args and "from" not in args:
-            args["from"] = args.pop("from_str")  # a real sender -- restore friendly
+        # send_email minimification. The forward normalizer turns the friendly
+        # `send_email` step into a `SendMail` connector-family call: it defaults
+        # `connector: smtp` + `operation: send_email`, and `_resolve_connector_args`
+        # auto-lifts the flat email fields into `params:` + stamps `version`/
+        # `operationTitle` from the catalog (mirror of `code_snippet`). On
+        # decompile, reverse to the friendly surface: unwrap `params` back to
+        # flat email fields and drop the re-derived envelope keys (recompile
+        # re-adds them via the same setdefaults -- round-trip stable). The smtp
+        # connector's `send_email` op takes `body` natively, so there is NO
+        # `content`<->`body` / `from_str`<->`from` rename (the dedicated-handler
+        # path is gone). `config: ""` (default-config sentinel) is dropped; a
+        # real config UUID is kept (can't reverse-resolve to a name without the
+        # connector_configs catalog -- round-trip stable as a UUID). Only
+        # minimize when the canonical `params` is present and this is the
+        # smtp/send_email signature -- a hand-authored canonical step without
+        # `params` falls through to the generic pass-through.
+        params = args.get("params")
+        if (
+            isinstance(params, dict)
+            and args.get("connector") == "smtp"
+            and args.get("operation") == "send_email"
+        ):
+            for k, v in params.items():
+                args.setdefault(k, v)
+            args.pop("params", None)
+            for _env_k in ("connector", "operation", "operationTitle", "version"):
+                args.pop(_env_k, None)
+            if args.get("config") == "":
+                args.pop("config", None)
+            if out.get("step_variables") == []:
+                out.pop("step_variables", None)
         if args:
             out["arguments"] = args
     elif args:

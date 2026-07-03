@@ -158,7 +158,9 @@ class NormalizerMixin:
         # editor's "Utilities" palette entry) is the same connector-family
         # alias, but defaults ONLY `connector` — the author picks the utility
         # op (convert_json_to_csv, make_cyops_request, …); it then falls
-        # through to connector arg resolution like the rest.
+        # through to connector arg resolution like the rest. `send_email` is
+        # the same kind of alias, but defaults BOTH `connector: smtp` and
+        # `operation: send_email` (the friendly author never spells either).
         if step.type in ("stop", "end", "utilities"):
             a = step.arguments if isinstance(step.arguments, dict) else {}
             a.setdefault("connector", "cyops_utilities")
@@ -166,6 +168,11 @@ class NormalizerMixin:
                 a.setdefault("operation", "no_op")
                 a.setdefault("config", "")
                 a.setdefault("params", {})
+            step.arguments = a
+        if step.type == "send_email":
+            a = step.arguments if isinstance(step.arguments, dict) else {}
+            a.setdefault("connector", "smtp")
+            a.setdefault("operation", "send_email")
             step.arguments = a
 
         # `delete_record` synthesizes the cyops_utilities make_cyops_request
@@ -175,7 +182,7 @@ class NormalizerMixin:
 
         # Per-step-type argument validation
         if step.type == "connector" or step.type in (
-                "stop", "end", "delete_record", "utilities"):
+                "stop", "end", "delete_record", "utilities", "send_email"):
             self._resolve_connector_args(step, path, errors)
             # message block still applies to connector steps — fall through.
         elif step.type == "workflow_reference":
@@ -594,17 +601,21 @@ class NormalizerMixin:
     def _normalize_send_email_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
-        """Friendly SMTP SendEmail.
+        """Friendly SMTP email step — a `SendMail` connector-family alias.
 
-        Maps `body` → `content` and `from` → `from_str`; `to`/`cc`/`bcc`/
-        `subject` pass through. Canonical keys mirror the editor's SendEmail
-        wire shape (docs/STEP_WIRE_SHAPES SendEmail). `timeout` is excluded by
-        the editor (excludes=['timeout']); we never emit it.
+        The connector/op defaults (`connector: smtp`, `operation: send_email`)
+        are applied in the caller's connector-family defaulting block; this
+        method owns only the unknown-key check + scalar type-validation. The
+        smtp connector's `send_email` op takes `body`/`from` natively (no
+        rename — verified live on 8.0), so the friendly author surface is the
+        flat email fields (`to`/`subject`/`body`/`from`/`cc`/`bcc`/
+        `attachments`); `_resolve_connector_args` auto-lifts them into `params:`
+        + stamps `version`/`operationTitle` from the catalog.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
         _FRIENDLY = {"body", "from"}
         _CANONICAL = {
-            "to", "from_str", "content", "cc", "bcc", "subject", "attachments",
+            "to", "body", "from", "cc", "bcc", "subject", "attachments",
             "config", "connector", "version", "params", "operation",
             "operationTitle", "step_variables",
         }
@@ -612,20 +623,10 @@ class NormalizerMixin:
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
-        if "body" in a:
-            a.setdefault("content", a.pop("body"))
-        if "from" in a:
-            a.setdefault("from_str", a.pop("from"))
-        # `from_str` is a required handler arg, but the editor fills it from the
-        # SMTP config's default-from at compile (bundle line 38148) -- a value we
-        # don't have offline. Default to empty so the step compiles; the FSR
-        # engine substitutes the SMTP default-from at runtime.
-        a.setdefault("from_str", "")
         # Scalar type-validation via the typed-args layer (`typed_args.steps.
         # expand_send_email`, model `SendEmailArgs`). Validation-only -- never
-        # mutates `a`; runs after the body->content / from->from_str rename so it
-        # validates the canonical form. Catches a wrong-typed to/cc/subject that
-        # would otherwise ride through.
+        # mutates `a`. Catches a wrong-typed to/cc/subject that would otherwise
+        # ride through.
         _expand_send_email_typed(a, path, errors)
         step.arguments = a
 

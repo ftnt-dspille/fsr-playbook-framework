@@ -27,9 +27,16 @@ SHORT_TYPE_TO_FSR: dict[str, str] = {
     "manual_input": "ManualInput",
     "code_snippet": "CodeSnippet",
     "approval": "Approval",
-    # SMTP SendEmail. Friendly `body`/`from` map to canonical `content`/
-    # `from_str`; to/cc/bcc/subject pass through (Phase-2 coverage).
-    "send_email": "SendEmail",
+    # SMTP SendMail — the connector-dispatcher "Send Email" step (occ=22, live on
+    # 8.0). A connector-family alias: the normalizer defaults `connector: smtp` +
+    # `operation: send_email` and falls through to `_resolve_connector_args`, so
+    # the friendly surface is the email fields (to/subject/body/from/cc/bcc/...),
+    # flat ��� the connector resolver auto-lifts them into `params:`. The smtp
+    # connector's send_email op takes `body` natively (no rename). NOTE: the
+    # dedicated `SendEmail` handler (/wf/workflow/tasks/send_email, occ=0) is
+    # also registered on 8.0 but RUNS BUT FAILS ("'smtp'" — can't resolve the
+    # configured SMTP connector), so we target SendMail (the working path).
+    "send_email": "SendMail",
     # ManualTask — editor hardcodes `collection: tasks` and wraps the task
     # module fields into `resource`.
     "create_task": "ManualTask",

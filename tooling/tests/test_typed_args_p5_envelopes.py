@@ -50,12 +50,12 @@ def test_send_email_registry_and_schema():
     s = emit_step_arg_schema("send_email")
     assert s is not None
     props = set(s.get("properties", {}))
-    for k in ("to", "cc", "bcc", "subject", "content", "from_str", "attachments"):
+    for k in ("to", "cc", "bcc", "subject", "body", "from", "attachments"):
         assert k in props, k
 
 
 def test_send_email_validation_only_no_mutation():
-    args = {"to": ["a@x.com"], "subject": "hi", "content": "body"}
+    args = {"to": ["a@x.com"], "subject": "hi", "body": "body"}
     snap = dict(args)
     assert _se(args) is None
     assert args == snap
