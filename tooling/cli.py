@@ -51,7 +51,9 @@ def _print_errors(errors) -> None:
         print(line, file=sys.stderr)
 
 
-def cmd_refresh(_args: argparse.Namespace) -> int:
+def cmd_refresh(args: argparse.Namespace) -> int:
+    if getattr(args, "conditional_refetch", False):
+        os.environ["FSR_CONDITIONAL_REFETCH"] = "1"
     from store.export import build_reference_json
     out = build_reference_json()
     print(f"reference json: {out}")
@@ -4194,6 +4196,8 @@ def cmd_probe(args: argparse.Namespace) -> int:
             mod = importlib.import_module(module_path)
             if getattr(args, "live", False):
                 os.environ["FSRPB_PROBE_LIVE"] = "1"
+            if getattr(args, "conditional_refetch", False):
+                os.environ["FSR_CONDITIONAL_REFETCH"] = "1"
             rc = mod.main()
             if rc:
                 print(f"[{name}] exited with code {rc}", file=sys.stderr)
@@ -4215,6 +4219,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("refresh", help="rebuild reference store JSON")
+    sp.add_argument("--conditional-refetch", action="store_true",
+                    help="opt-in Tier-2 freshness: probes fetch via "
+                         "conditional_refetch (TTL + If-None-Match) and only "
+                         "rewrite changed collections. Default off = always "
+                         "re-pull. Live-validate ETags on a box before relying "
+                         "on this.")
     sp.set_defaults(func=cmd_refresh)
 
     sp = sub.add_parser("compile", help="YAML -> FSR JSON")
@@ -4869,6 +4879,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--live", action="store_true",
                     help="pass through to probes that support a live-FSR mode "
                          "(currently: playbook-steps)")
+    sp.add_argument("--conditional-refetch", action="store_true",
+                    help="opt-in Tier-2 freshness: the wired probes fetch via "
+                         "conditional_refetch (TTL + If-None-Match) and only "
+                         "rewrite changed collections. Default off = always "
+                         "re-pull. Live-validate ETags on a box before relying "
+                         "on this.")
     sp.set_defaults(func=cmd_probe)
 
     from recover import add_parser as _add_recover_parser

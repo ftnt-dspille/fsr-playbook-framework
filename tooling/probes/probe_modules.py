@@ -27,6 +27,7 @@ from typing import Any
 from . import _env
 from .common import (
     SCHEMA_JSON_PATH,
+    conditional_refetch,
     probe_session,
     record_verification,
     wipe_probe_tables,
@@ -140,22 +141,13 @@ def _insert_field(
 
 # ----------------------- live -----------------------
 
-def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]],
-                                      list[tuple[str, str, str]], int, str | None]:
-    """Returns (item_id_to_value, list_name_to_options, items_rows, totalItems, etag).
-
-    `items_rows` is a list of (list_name, item_value, item_iri) tuples,
-    ready for bulk-insertion into the `picklists` table. `etag` is the
-    ETag response header (if present), for use in Tier-2 freshness checks.
+def _parse_picklists(body: Any) -> tuple[dict[str, str], dict[str, list[str]],
+                                          list[tuple[str, str, str]], int]:
+    """Parse a picklist_names JSON body into (item_id_to_value,
+    list_name_to_options, items_rows, totalItems). Fetch-agnostic so the
+    conditional-refetch path can reuse it without a double-GET.
     """
-    resp = client.session.get(
-        client.base_url + PICKLISTS_URL,
-        verify=client.verify_ssl,
-    )
-    resp.raise_for_status()
-    r = resp.json()
-    etag = resp.headers.get("ETag")
-    members = r.get("hydra:member", [])
+    members = body.get("hydra:member", []) if isinstance(body, dict) else []
     item_id_to_value: dict[str, str] = {}
     list_name_to_options: dict[str, list[str]] = {}
     items_rows: list[tuple[str, str, str]] = []
@@ -174,7 +166,23 @@ def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]],
                 items_rows.append((name, iv, iid))
         if name:
             list_name_to_options[name] = opts
-    return item_id_to_value, list_name_to_options, items_rows, len(members), etag
+    return item_id_to_value, list_name_to_options, items_rows, len(members)
+
+
+def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]],
+                                      list[tuple[str, str, str]], int, str | None]:
+    """Returns (item_id_to_value, list_name_to_options, items_rows, totalItems, etag).
+
+    `items_rows` is a list of (list_name, item_value, item_iri) tuples,
+    ready for bulk-insertion into the `picklists` table. `etag` is the
+    ETag response header (if present), for use in Tier-2 freshness checks.
+    """
+    resp = client.session.get(
+        client.base_url + PICKLISTS_URL,
+        verify=client.verify_ssl,
+    )
+    resp.raise_for_status()
+    return (*_parse_picklists(resp.json()), resp.headers.get("ETag"))
 
 
 def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
@@ -183,11 +191,40 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         return 0, 0, ["env not configured"]
     errors: list[str] = []
 
-    picklists_etag = None
-    try:
-        picklist_items, picklist_lists, items_rows, n_pl, picklists_etag = _load_picklists(client)
-    except Exception as e:  # noqa: BLE001
-        return 0, 0, [f"picklists: {e!r}"]
+    # Tier-2 conditional refetch (opt-in via FSR_CONDITIONAL_REFETCH), keyed on
+    # the picklists collection. Coarse-grained: a fresh/unchanged picklists
+    # response skips the whole re-derive (all collections current); a refreshed
+    # 200 wipes + re-derives everything (tags/teams/metadata are re-fetched on
+    # the refreshed path — the rare case). Per-collection ETags (tags /
+    # model_metadatas) are still recorded on the refreshed path; conditional_refetch
+    # owns the picklists ETag + data_warmed_at, so the legacy recording below is
+    # skipped for picklists on this path. The non-conditional path leaves the wipe
+    # to main() (current behavior).
+    conditional = _env.is_conditional_enabled()
+    picklists_etag: str | None = None
+    if conditional:
+        outcome, payload = conditional_refetch(
+            client, url=PICKLISTS_URL, conn=conn, collection="picklists",
+        )
+        if outcome in ("fresh", "unchanged"):
+            print(f"[{PROBE_NAME}] conditional_refetch: {outcome} "
+                  f"(catalog current; skipped rewrite)")
+            return 0, 0, []
+        if outcome == "error":
+            return 0, 0, [str(payload)]
+        # refreshed: wipe + clear module verifications before re-deriving.
+        wipe_probe_tables(conn, PROBE_NAME)
+        conn.execute(
+            "DELETE FROM verifications WHERE kind IN ('module','module_field') "
+            "AND method IN ('live_api_get','schema_json')"
+        )
+        picklist_items, picklist_lists, items_rows, n_pl = _parse_picklists(payload)
+        # picklists_etag stays None — conditional_refetch recorded it.
+    else:
+        try:
+            picklist_items, picklist_lists, items_rows, n_pl, picklists_etag = _load_picklists(client)
+        except Exception as e:  # noqa: BLE001
+            return 0, 0, [f"picklists: {e!r}"]
     # Persist (list_name, item_value, item_iri) so the resolver can map
     # friendly picklist tokens in record-write payloads to IRIs without
     # an online lookup.
@@ -459,11 +496,15 @@ def main() -> int:
             conn.execute(
                 "ALTER TABLE module_fields ADD COLUMN picklist_name TEXT"
             )
-        wipe_probe_tables(conn, PROBE_NAME)
-        conn.execute(
-            "DELETE FROM verifications WHERE kind IN ('module','module_field') "
-            "AND method IN ('live_api_get','schema_json')"
-        )
+        # Default (always-re-pull) path wipes before _live rewrites. When
+        # FSR_CONDITIONAL_REFETCH is on, _live owns the wipe (only on a refreshed
+        # 200) so a fresh/unchanged outcome leaves existing rows intact.
+        if not _env.is_conditional_enabled():
+            wipe_probe_tables(conn, PROBE_NAME)
+            conn.execute(
+                "DELETE FROM verifications WHERE kind IN ('module','module_field') "
+                "AND method IN ('live_api_get','schema_json')"
+            )
 
         n_mod = n_fld = 0
         live_errs: list[str] = []

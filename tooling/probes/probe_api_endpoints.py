@@ -25,6 +25,7 @@ from pathlib import Path
 
 from . import _env
 from .common import (
+    conditional_refetch,
     probe_session,
     record_verification,
     wipe_probe_tables,
@@ -95,11 +96,36 @@ def _live_hydra(conn: sqlite3.Connection) -> tuple[int, list[str]]:
         return 0, ["env not configured for live access"]
     errors: list[str] = []
     count = 0
-    try:
-        # pyfsr's client.get() prepends base_url.
-        root = client.get("/api/3/")
-    except Exception as e:  # noqa: BLE001 — capture for the audit row
-        return 0, [f"GET /api/3/ failed: {e!r}"]
+
+    # Tier-2 conditional refetch (opt-in via FSR_CONDITIONAL_REFETCH). On
+    # fresh/unchanged the live-derived endpoints are kept as-is (the local
+    # MD seed still upserts idempotently on top). On a refreshed 200, wipe the
+    # probe's tables + api_endpoint verifications before re-deriving. The
+    # non-conditional path leaves the wipe to main() (current behavior).
+    conditional = _env.is_conditional_enabled()
+    if conditional:
+        outcome, payload = conditional_refetch(
+            client, url="/api/3/", conn=conn, collection="api_root",
+        )
+        if outcome in ("fresh", "unchanged"):
+            print(f"[{PROBE_NAME}] conditional_refetch: {outcome} "
+                  f"(live endpoints current; skipped re-derive)")
+            return 0, []  # keep existing live rows; local MD seed still runs
+        if outcome == "error":
+            return 0, [str(payload)]
+        # outcome == "refreshed": payload is the Hydra root JSON body.
+        wipe_probe_tables(conn, PROBE_NAME)
+        conn.execute(
+            "DELETE FROM verifications WHERE kind IN "
+            "('api_endpoint', 'api_endpoint_param')"
+        )
+        root = payload
+    else:
+        try:
+            # pyfsr's client.get() prepends base_url.
+            root = client.get("/api/3/")
+        except Exception as e:  # noqa: BLE001 — capture for the audit row
+            return 0, [f"GET /api/3/ failed: {e!r}"]
 
     # API Platform Hydra root is a hydra:Documentation-ish object; the simplest
     # signal of "this collection exists" is that the root response itself maps
@@ -286,11 +312,15 @@ def main() -> int:
         sources.append(Path(cfg.base_url + "/api/3/"))
 
     with probe_session(PROBE_NAME, sources) as conn:
-        wipe_probe_tables(conn, PROBE_NAME)
-        # Also wipe our verification rows for these kinds — re-derive from scratch.
-        conn.execute(
-            "DELETE FROM verifications WHERE kind IN ('api_endpoint', 'api_endpoint_param')"
-        )
+        # Default (always-re-pull) path wipes before re-deriving. When
+        # FSR_CONDITIONAL_REFETCH is on, _live_hydra owns the wipe (only on a
+        # refreshed 200) so a fresh/unchanged outcome keeps existing rows.
+        if not _env.is_conditional_enabled():
+            wipe_probe_tables(conn, PROBE_NAME)
+            # Also wipe our verification rows for these kinds — re-derive from scratch.
+            conn.execute(
+                "DELETE FROM verifications WHERE kind IN ('api_endpoint', 'api_endpoint_param')"
+            )
         live_count, live_errs = _live_hydra(conn)
         md_count, md_errs = _seed_from_md(conn)
 

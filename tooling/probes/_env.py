@@ -90,6 +90,20 @@ def get_config() -> EnvConfig:
     return _cached_cfg
 
 
+def is_conditional_enabled() -> bool:
+    """Tier-2 conditional-refetch opt-in (``FSR_CONDITIONAL_REFETCH``).
+
+    When truthy, the warmup probes fetch via
+    :func:`probes.common.conditional_refetch` (TTL short-circuit +
+    ``If-None-Match`` 304) and only wipe+rewrite a collection when it actually
+    changed. Default **False** = today's always-re-pull behavior, so existing
+    idempotency (wipe-before-fetch, rewrite unconditionally) is unchanged until
+    a box is live-validated to honor ETags. See G3 / STEP_MINIMIFICATION +
+    the freshness plan.
+    """
+    return _bool("FSR_CONDITIONAL_REFETCH", False)
+
+
 def get_client():
     """Return a pyfsr `FortiSOAR` client, or None if env is incomplete."""
     cfg = get_config()

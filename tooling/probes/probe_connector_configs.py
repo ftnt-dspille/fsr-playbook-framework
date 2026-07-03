@@ -23,7 +23,12 @@ import warnings
 from pathlib import Path
 
 from . import _env
-from .common import probe_session, record_verification, wipe_probe_tables
+from .common import (
+    conditional_refetch,
+    probe_session,
+    record_verification,
+    wipe_probe_tables,
+)
 
 PROBE_NAME = "probe_connector_configs"
 CONNECTORS_URL = "/api/integration/connectors/"
@@ -69,10 +74,37 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     client = _env.get_client()
     if client is None:
         return 0, 0, ["env not configured"]
-    try:
-        members, etag = _fetch(client)
-    except Exception as e:  # noqa: BLE001
-        return 0, 0, [f"connectors: {e!r}"]
+
+    # Tier-2 conditional refetch (opt-in via FSR_CONDITIONAL_REFETCH). When on,
+    # fetch via conditional_refetch: within TTL -> skip (catalog current); 304 ->
+    # skip (unchanged); 200 -> wipe + rewrite; error -> keep catalog. The wipe
+    # moves HERE (only on a refreshed 200) so a fresh/unchanged outcome never
+    # empties the table. conditional_refetch owns ETag + data_warmed_at recording,
+    # so the legacy recording below is skipped on this path.
+    conditional = _env.is_conditional_enabled()
+    etag: str | None = None
+    if conditional:
+        outcome, payload = conditional_refetch(
+            client,
+            url=CONNECTORS_URL,
+            conn=conn,
+            collection="connector_configs",
+            params={"page_size": 1000},
+        )
+        if outcome in ("fresh", "unchanged"):
+            print(f"[{PROBE_NAME}] conditional_refetch: {outcome} "
+                  f"(catalog current; skipped rewrite)")
+            return 0, 0, []  # catalog current; no wipe, no rewrite
+        if outcome == "error":
+            return 0, 0, [str(payload)]
+        # outcome == "refreshed": payload is the decoded JSON body.
+        members = (payload or {}).get("data") or []
+        wipe_probe_tables(conn, PROBE_NAME)
+    else:
+        try:
+            members, etag = _fetch(client)
+        except Exception as e:  # noqa: BLE001
+            return 0, 0, [f"connectors: {e!r}"]
 
     n_conn = 0
     all_rows: list[tuple] = []
@@ -96,13 +128,13 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         method="live_api_get", status="tested_pass",
         notes=f"connectors_with_config={n_conn}, rows={len(all_rows)}",
     )
-    # Record the ETag for a future Tier-2 conditional-refetch (Level-2 freshness
-    # check) and stamp the Tier-2 warm time — symmetric with probe_modules so a
-    # connector_configs-only warmup still advances data_warmed_at (the TTL clock).
-    from fsr_playbooks import _catalog_meta
-    if etag:
-        _catalog_meta.record_etag(conn, "connector_configs", etag)
-    _catalog_meta.record_data_warmed_at(conn)
+    if not conditional:
+        # Legacy path records the ETag + Tier-2 warm time (conditional_refetch
+        # already did both on the refreshed 200 / unchanged 304).
+        from fsr_playbooks import _catalog_meta
+        if etag:
+            _catalog_meta.record_etag(conn, "connector_configs", etag)
+        _catalog_meta.record_data_warmed_at(conn)
     return n_conn, len(all_rows), []
 
 
@@ -122,7 +154,11 @@ def main() -> int:
             "  is_default INTEGER DEFAULT 0,"
             "  PRIMARY KEY (connector, config_name))"
         )
-        wipe_probe_tables(conn, PROBE_NAME)
+        # Default (always-re-pull) path wipes before _live rewrites. When
+        # FSR_CONDITIONAL_REFETCH is on, _live owns the wipe (only on a refreshed
+        # 200) so a fresh/unchanged outcome leaves existing rows intact.
+        if not _env.is_conditional_enabled():
+            wipe_probe_tables(conn, PROBE_NAME)
         n_conn = n_rows = 0
         errs: list[str] = []
         if cfg.is_live():
