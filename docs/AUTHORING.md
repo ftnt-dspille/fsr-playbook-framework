@@ -1127,6 +1127,7 @@ Editor-derived argument shapes for every step type, keyed by canonical FSR name 
 | `ignore_errors` | boolean |  | Optional system key (inferred schema). Error handling flag |
 | `message` | object |  | Optional system key (inferred schema). Deleted if content is empty at compile-time |
 | `mock_result` | string |  | Optional (inferred schema). Deleted if empty at compile-time |
+| `name` | string |  | Display name from connector label; set. Emitted by the compiler into arguments (e.g. 'SMTP') alongside connector/config |
 | `operation` | string |  | Optional system key |
 | `operationTitle` | string |  | Optional |
 | `params` | object |  | Optional system key |

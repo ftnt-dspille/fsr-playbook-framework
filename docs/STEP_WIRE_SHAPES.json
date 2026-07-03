@@ -1549,6 +1549,14 @@
           "enum": []
         },
         {
+          "key": "name",
+          "type": "string",
+          "required": false,
+          "default": "",
+          "notes": "Display name from connector label; set at line 37276. Emitted by the compiler into arguments (e.g. 'SMTP') alongside connector/config.",
+          "enum": []
+        },
+        {
           "key": "version",
           "type": "string",
           "required": true,

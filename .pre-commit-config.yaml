@@ -71,3 +71,8 @@ repos:
         # fsr_playbooks/ holds the compiler + MCP tools the suite exercises, so a
         # change there must trigger it too (was missing before).
         files: '^(python/|fsr_playbooks/|store/schema\.sql|examples/|pytest\.ini)'
+        # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
+        # a `--no-verify` commit that bypassed pre-commit — same hole the ruff
+        # hook's pre-push stage exists for). ~14s on a code push; the safety net
+        # is the point. Requires `pre-commit install --hook-type pre-push`.
+        stages: [pre-commit, pre-push]
