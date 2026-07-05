@@ -445,6 +445,65 @@ def _approval_floor() -> int:
     return 3 if _readonly_auto_approve() else 1
 
 
+# --- Per-session approval grants -------------------------------------------
+#
+# Once a human approves a tool/action, the grant store tracks future approvals:
+#   - "once": auto-approve exactly the next matching call, then consume the grant.
+#   - "always": auto-approve all matching future calls (until session ends).
+#
+# Key: (session_id, tool_name, op_key) where op_key is None for regular tools
+# or f"{connector}:{operation}" for run_op-style dynamic dispatch.
+# Value: "once" | "always"
+#
+# In-memory only; persistence is out of scope for this phase.
+
+_APPROVAL_GRANTS: dict[tuple[str, str, str | None], str] = {}
+
+
+def grant_tool_approval(
+    session_id: str, tool_name: str, *, op_key: str | None = None, mode: str = "once"
+) -> None:
+    """Grant a tool approval for a session. Mode is 'once' (consume after next
+    matching call) or 'always' (persist until session ends).
+
+    Args:
+        session_id: Session identifier (e.g., chat session UUID).
+        tool_name: Name of the tool being granted (e.g., 'run_op').
+        op_key: Optional operation key for tools with dynamic tier (e.g.,
+            'fortigate:block_ip' for run_op). None for tools with static tier.
+        mode: 'once' or 'always'. Defaults to 'once'.
+    """
+    if mode not in ("once", "always"):
+        raise ValueError(f"Invalid grant mode {mode!r}; must be 'once' or 'always'")
+    key = (session_id, tool_name, op_key)
+    _APPROVAL_GRANTS[key] = mode
+
+
+def _consume_grant(
+    session_id: str, tool_name: str, op_key: str | None = None
+) -> bool:
+    """Check if a matching grant exists and consume it if mode == 'once'.
+
+    Returns True if a grant was found (and consumed for 'once' mode),
+    False otherwise. After this returns True, dispatch() treats the call
+    as if a human approved it."""
+    key = (session_id, tool_name, op_key)
+    mode = _APPROVAL_GRANTS.get(key)
+    if mode is None:
+        return False
+    if mode == "once":
+        del _APPROVAL_GRANTS[key]
+    return True
+
+
+def clear_session_grants(session_id: str) -> None:
+    """Clear all grants (both 'once' and 'always') for a session. Call this
+    when the session ends or on logout."""
+    to_delete = [k for k in _APPROVAL_GRANTS if k[0] == session_id]
+    for k in to_delete:
+        del _APPROVAL_GRANTS[k]
+
+
 def _apply_eval_policy(policy: str, tier: int) -> str:
     """Return 'approve' | 'deny' for a given policy + tier. Anything
     unknown returns 'suspend' so production behavior is the safe
@@ -775,7 +834,8 @@ def openai_tools() -> list[dict[str, Any]]:
 
 
 def dispatch(
-    name: str, arguments: dict[str, Any], *, _internal: bool = False
+    name: str, arguments: dict[str, Any], *, _internal: bool = False,
+    session_id: str | None = None
 ) -> Any:
     """Tier-aware dispatch (HITL_GUARDRAILS_PLAN Phase 0).
 
@@ -785,6 +845,11 @@ def dispatch(
               underlying tool. The chat-app loop (Phase 1) suspends on
               this envelope and renders the approval card; on approve,
               the loop re-dispatches with `_approval_token` set.
+
+    Approval grants: if a matching grant exists for (session_id, tool_name),
+    the pending_approval envelope is skipped and the action auto-runs,
+    audited as 'auto_allow_grant'. Grants can be 'once' (consumed on match)
+    or 'always' (persistent until session ends).
     """
     spec = REGISTRY.get(name)
     if spec is None:
@@ -837,6 +902,26 @@ def dispatch(
 
     floor = _approval_floor()
     if tier >= floor and not approved:
+        # Check for approval grants before policy/pending_approval.
+        # Build op_key for tools with dynamic tier (run_op, etc.).
+        op_key: str | None = None
+        if name == "run_op":
+            connector = (raw_args or {}).get("connector") or ""
+            op = (raw_args or {}).get("op") or ""
+            op_key = f"{connector}:{op}" if connector and op else None
+
+        if session_id and _consume_grant(session_id, name, op_key):
+            # Grant exists (and 'once' grants are consumed). Execute with the
+            # grant decision, bypassing the approval envelope.
+            try:
+                result = spec.fn(**raw_args)
+            except TypeError as e:
+                return {"error": f"bad arguments for {name}: {e}"}
+            except Exception as e:
+                return {"error": f"{type(e).__name__}: {e}"}
+            _record_audit(name, raw_args, tier, "auto_allow_grant")
+            return result
+
         # Phase 3: eval-mode policy short-circuit. Production callers
         # (the chat loop) leave the policy unset, fall through to the
         # pending_approval envelope, and the chat layer suspends.
