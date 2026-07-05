@@ -629,6 +629,47 @@ def _invalidate_live_client() -> None:
     _LIVE_CLIENT_CACHE.pop("client", None)
 
 
+def live_request_with_reauth(method: str, client: Any, url: str, **kwargs):
+    """`client.session.<method>(url, **kwargs)`, transparently
+    re-authenticating once on a 401/403.
+
+    Centralizes the fix for the staleness class described in
+    `_invalidate_live_client`'s docstring: any live tool that makes its own
+    request (rather than going through `run_op`) should route it through
+    here instead of calling `client.session.get/post` directly, so a
+    process that's been up long enough for the FSR session to expire
+    self-heals on the next call instead of failing every subsequent call
+    `http_401` forever.
+
+    `kwargs` is whatever the caller would pass to `client.session.<method>`
+    besides `verify` (e.g. `json=body` for a POST) — `verify` is resolved
+    against whichever client actually makes the call, since a refreshed
+    client could in principle carry a different `verify_ssl`.
+
+    Returns the `requests.Response`. On a non-auth error, returns it
+    unchanged for the caller to inspect (404/500/etc. are real answers,
+    not staleness).
+    """
+    fn = getattr(client.session, method)
+    r = fn(url, verify=client.verify_ssl, **kwargs)
+    if r.status_code in (401, 403):
+        _invalidate_live_client()
+        fresh = _live_client()
+        if fresh is not None:
+            r = getattr(fresh.session, method)(url, verify=fresh.verify_ssl, **kwargs)
+    return r
+
+
+def live_get_with_reauth(client: Any, url: str):
+    """GET variant of `live_request_with_reauth` — see its docstring."""
+    return live_request_with_reauth("get", client, url)
+
+
+def live_post_with_reauth(client: Any, url: str, **kwargs):
+    """POST variant of `live_request_with_reauth` — see its docstring."""
+    return live_request_with_reauth("post", client, url, **kwargs)
+
+
 def _safe_op_category(connector: str, op: str) -> str:
     """Look up operation category to determine risk level for execution."""
     conn = _db()
