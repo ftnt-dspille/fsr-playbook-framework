@@ -614,6 +614,21 @@ def _live_client():
     return c
 
 
+def _invalidate_live_client() -> None:
+    """Drop the memoised client so the next `_live_client()` call re-authenticates.
+
+    A long-running process (the local-dev sidecar, or a box worker that
+    doesn't recycle for days) holds the cached session past the FSR token's
+    TTL — every live call then fails `http_401` forever with no recovery,
+    which reads to the agent as "this record doesn't exist" and burns a
+    tool-call budget retrying every arg permutation before giving up
+    (see LOCAL_DEV P3 triage-quality investigation, 2026-07-05). Callers
+    that see a 401/403 from a live request should call this then retry
+    once via a fresh `_live_client()`.
+    """
+    _LIVE_CLIENT_CACHE.pop("client", None)
+
+
 def _safe_op_category(connector: str, op: str) -> str:
     """Look up operation category to determine risk level for execution."""
     conn = _db()
