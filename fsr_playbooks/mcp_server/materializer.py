@@ -65,7 +65,12 @@ def configure(
     """Set the per-session allow-list (and optional client factory).
 
     Called by the connector at session setup, from its config record. Safe to
-    call repeatedly (last call wins); :func:`reset` clears it for tests.
+    call repeatedly: each kwarg that is passed is applied, and one that is
+    omitted is preserved (merge, not replace) — so the connector's two-phase
+    wiring works: ``register_mcp_materializer()`` sets ``client_factory`` at
+    import time, then ``_apply_mcp_allowlist(config)`` sets ``mcp_allowlist``
+    per turn without clobbering the factory. :func:`reset` clears everything
+    for tests.
 
     ``mcp_allowlist`` maps a server (built-in name or ``"connector:<name>"``)
     to ``{"tools": ["t1", "t2"] | "*", "tier": "read_only" | "mutating"}``.
@@ -75,8 +80,10 @@ def configure(
     client from env.
     """
     global _allowlist, _client_factory, _initialized
-    _allowlist = dict(mcp_allowlist or {})
-    _client_factory = client_factory
+    if mcp_allowlist is not None:
+        _allowlist = dict(mcp_allowlist)
+    if client_factory is not None:
+        _client_factory = client_factory
     _initialized = False  # re-configure ⟹ re-initialize on next ensure
 
 

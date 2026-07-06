@@ -200,3 +200,17 @@ def test_env_var_invalid_json_ignored(monkeypatch):
     monkeypatch.setenv("FSRPB_MCP_ALLOWLIST", "{not json")
     M.ensure_initialized()  # must not raise
     assert not M.SERVER_MAP
+
+
+def test_two_phase_configure_preserves_client_factory():
+    """The connector wires in two phases: ``register_mcp_materializer()``
+    sets ``client_factory`` at import time, then ``_apply_mcp_allowlist(config)``
+    sets ``mcp_allowlist`` per turn. The second ``configure()`` call MUST NOT
+    clobber the factory set by the first — otherwise ensure_initialized builds
+    the client from env (None on-box) and the materializer stays dormant even
+    with the allowlist set. Regression for the config-field path going live."""
+    M.configure(client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
+    M.configure(mcp_allowlist={"soc": {"tools": "*", "tier": "read_only"}})
+    M.ensure_initialized()
+    assert "mcp_soc__get_alert" in T.REGISTRY
+    assert "mcp_soc__enrich_indicator" in T.REGISTRY
