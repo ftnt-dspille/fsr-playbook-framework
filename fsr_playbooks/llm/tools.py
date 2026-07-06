@@ -809,8 +809,22 @@ def build_registry() -> dict[str, ToolSpec]:
 REGISTRY = build_registry()
 
 
+def _ensure_mcp_materialized() -> None:
+    """Lazy hook: materialize FortiSOAR native-MCP-gateway tools into REGISTRY
+    before the tool list is sent to the LLM. No-op unless the connector called
+    ``materializer.configure(mcp_allowlist=...)`` at session setup; default
+    empty allow-list → nothing materialized. See
+    :mod:`fsr_playbooks.mcp_server.materializer`."""
+    try:
+        from ..mcp_server import materializer
+    except ImportError:
+        return
+    materializer.ensure_initialized()
+
+
 def anthropic_tools() -> list[dict[str, Any]]:
     """Anthropic's tool-use schema shape."""
+    _ensure_mcp_materialized()
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in REGISTRY.values()
@@ -820,6 +834,7 @@ def anthropic_tools() -> list[dict[str, Any]]:
 def openai_tools() -> list[dict[str, Any]]:
     """OpenAI / LM Studio function-calling schema shape. Same registry,
     different envelope: `{type:"function", function:{name, description, parameters}}`."""
+    _ensure_mcp_materialized()
     return [
         {
             "type": "function",
