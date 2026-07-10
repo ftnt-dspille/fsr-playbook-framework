@@ -78,6 +78,21 @@ _EXTRA_CANONICAL_TO_SHORT: dict[str, str] = {
 }
 _FSR_TO_SHORT.update(_EXTRA_CANONICAL_TO_SHORT)
 
+# Pure editor-only UI-state keys the FSR designer auto-adds to a step's
+# `arguments:` but which carry NO runtime meaning: `__recommend` (the schema-
+# derived field-name suggestions the form shows) and `_showJson` (the JSON-vs-
+# form toggle). The wire oracle lists both in `EDITOR_ONLY_KEYS` ("never emit —
+# editor-only or layout noise"); no compiler branch reads them and no ruleset
+# requires them (`rulesets/_shared.py` gates only `operation`, noting these two
+# are "auto-added by the FSR designer to both step types"). On pull they ride
+# through the record-write whitelist verbatim as boilerplate (~2 lines/step
+# across the record-write corpus). Strip them so a pulled step surfaces only the
+# load-bearing wire; recompile never re-adds them, so decompile->recompile stays
+# idempotent once the library is regenerated. NOT stripped: keys a branch DOES
+# consume to derive a friendly field (`displayConditions`/`singleRecordExecution`/
+# `noRecordExecution` -> start trigger; `__triggerLimit` -> api_endpoint).
+_EDITOR_NOISE_KEYS: tuple[str, ...] = ("__recommend", "_showJson")
+
 # NOTE: `RemotePlaybookReference` (Trigger Tenant Playbook) needs NO overlay
 # here. Unlike `Connectors` (a many-to-one forward collision: connector/stop/
 # end/delete_record/utilities all compile TO `Connectors`, so the last-wins
@@ -217,6 +232,12 @@ def _decompile_step(s, pb_name: str | None = None) -> dict:
             out["post_comment"] = args.pop("message")["content"]
         elif "message" in args:
             out["message"] = args.pop("message")
+
+        # Drop pure editor-only UI-state noise (see `_EDITOR_NOISE_KEYS`). Safe
+        # for every step type: no branch below consumes these keys and no
+        # ruleset requires them, so removing them is lossless for the runtime.
+        for _noise_key in _EDITOR_NOISE_KEYS:
+            args.pop(_noise_key, None)
 
     # Action-trigger module binding (start + module -> cybersponse.action). The
     # parser hoists a friendly step-level `module:`/`modules:` into

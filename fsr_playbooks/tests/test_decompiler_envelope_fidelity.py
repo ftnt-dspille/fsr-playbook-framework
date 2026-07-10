@@ -119,6 +119,58 @@ def test_enriched_message_kept_as_block():
     assert out["message"]["content"] == "<p>hi</p>"
 
 
+def test_editor_noise_keys_stripped_on_decompile():
+    """`__recommend` / `_showJson` are pure editor UI-state noise the FSR
+    designer auto-adds to record-write steps. They carry no runtime meaning
+    (no branch reads them, no ruleset requires them), so the decompiler drops
+    them instead of leaking them as boilerplate into the friendly YAML."""
+    step = Step(id="w", type="insert_record", name="Create",
+                arguments={"collection": "/api/3/alerts",
+                           "operation": "Overwrite",
+                           "resource": {"name": "x"},
+                           "__recommend": [], "_showJson": False})
+    out = _decompile_step(step)
+    args = out.get("arguments") or {}
+    assert "__recommend" not in args
+    assert "_showJson" not in args
+    # Load-bearing wire is untouched.
+    assert args["operation"] == "Overwrite"
+    assert args["collection"] == "/api/3/alerts"
+    assert args["resource"] == {"name": "x"}
+
+
+def test_editor_noise_strip_is_lossless_round_trip():
+    """A record-write step authored with the editor-noise keys compiles to a
+    wire that carries them (they ride the record-write whitelist); on pull the
+    decompiler strips them, and the resulting friendly YAML recompiles clean —
+    i.e. dropping them never breaks the round-trip."""
+    by_name = _roundtrip_steps(
+        """
+collection: T
+playbooks:
+  - name: PB
+    steps:
+      - name: Start
+        type: start_on_create
+        module: alerts
+        next: Create
+      - name: Create
+        type: insert_record
+        module: alerts
+        arguments:
+          operation: Overwrite
+          __recommend: []
+          _showJson: false
+          resource:
+            name: hi
+"""
+    )
+    args = by_name["Create"].get("arguments") or {}
+    assert "__recommend" not in args
+    assert "_showJson" not in args
+    assert args["operation"] == "Overwrite"
+
+
 def test_action_trigger_decompiles_to_start():
     """A `start` step bound to a module compiles to the `cybersponse.action`
     canonical (ManualStart / Execute-menu trigger, uuid f414d039). The live box
