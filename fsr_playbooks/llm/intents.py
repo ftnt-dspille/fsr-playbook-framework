@@ -37,6 +37,27 @@ BUILD_ONLY_TOOLS = frozenset({
     "push_playbook", "run_playbook",
 })
 
+# Triage-only tools dropped from the build slice (ROADMAP §4, three-pillar
+# plan Track C5): the live alert/incident investigation + containment-staging
+# surface. Build mode authors playbooks — it discovers ops with
+# find_connector/find_operation/get_op_schema and offers them via
+# emit_playbook_offer; it must NOT stage live containment action-cards
+# (emit_action_card) or run connector ops directly (run_op). find_containment_actions /
+# find_enrichment_actions are connector-AWARENESS (authoring) and stay in build.
+#
+# This set is MUTABLE on purpose: the connector's
+# fsr_soc_triage.registry.register_triage_tools() re-injects the alert/incident
+# hunt tools (get_record, search_module_records, siem_*, faz_*, fmg_*) into the
+# global REGISTRY at import, and extends THIS set with those same names so the
+# build slice excludes them too — mirroring how it already mutates SAFE_TOOLS /
+# TOOL_TIERS / REGISTRY (Option-A posture). tools_for_intent reads this global
+# at call time, so the connector's additions are visible without a code path
+# fork. Framework-standalone (no connector) keeps just the two base names.
+TRIAGE_ONLY_TOOLS: set[str] = {
+    "emit_action_card",
+    "run_op",
+}
+
 # Inline fallbacks used only when the vendored markdown can't be read (keeps
 # the agent functional even if packaging drops the .md files).
 _FALLBACK_BUILD_PROMPT = (
@@ -184,17 +205,22 @@ def load_intent_prompt(intent: str) -> str:
 
 
 def tools_for_intent(intent: str) -> list[dict[str, Any]]:
-    """The tool slice advertised to the model for this intent. ``build``
-    returns ``[]`` (the provider self-fills the full registry); ``triage``
-    returns the full registry minus the build-only tools."""
-    if resolve_intent(intent) != "triage":
-        return []
+    """The tool slice advertised to the model for this intent.
+
+    - ``triage`` — the full registry minus the build-only (YAML-authoring +
+      playbook-mutation) tools.
+    - ``build``  — the full registry minus the triage-only (containment-staging
+      ``emit_action_card``, direct ``run_op``, alert/incident investigation)
+      tools, so authoring mode never stages containment action-cards.
+    """
     from fsr_playbooks.llm.tools import anthropic_tools
-    return [t for t in anthropic_tools() if t["name"] not in BUILD_ONLY_TOOLS]
+    if resolve_intent(intent) == "triage":
+        return [t for t in anthropic_tools() if t["name"] not in BUILD_ONLY_TOOLS]
+    return [t for t in anthropic_tools() if t["name"] not in TRIAGE_ONLY_TOOLS]
 
 
 __all__ = [
-    "INTENTS", "DEFAULT_INTENT", "BUILD_ONLY_TOOLS",
+    "INTENTS", "DEFAULT_INTENT", "BUILD_ONLY_TOOLS", "TRIAGE_ONLY_TOOLS",
     "resolve_intent", "load_intent_prompt", "tools_for_intent",
     "classify_message", "gate_directive",
     "TRIVIAL", "CONTINUE", "DIRECTIVE",
