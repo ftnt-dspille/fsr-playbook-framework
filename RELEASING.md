@@ -7,15 +7,35 @@ gone. Tag, push, release. That's it.
 
 ## Cut a release
 
+**Standard path — one command:**
+
 ```sh
-git tag v0.4.11            # next free version — see "Version floor" below
-git push origin v0.4.11
+make release VERSION=0.4.23 NOTES="what changed"
 ```
 
-Then on GitHub: **Releases → Draft a new release → choose tag `v0.4.11` →
-Publish**. The `Publish to PyPI` workflow (`.github/workflows/publish.yml`)
-fires on the published release, builds the wheel, and uploads it to PyPI via
-Trusted Publishing (OIDC — no stored token).
+`scripts/release.sh` guards the steps that drifted in the past: it refuses to run
+off `main` or with a dirty tree, refuses a `VERSION` that isn't strictly greater
+than PyPI's latest (PyPI rejects re-uploads), refuses an existing tag, runs the
+fast tests, then tags `vX.Y.Z`, pushes `main`+tag, and cuts the GitHub Release —
+which triggers the `Publish to PyPI` workflow (`.github/workflows/publish.yml`,
+Trusted Publishing / OIDC — no stored token).
+
+> **Why a command, not manual steps:** the release once drifted — `v0.4.21` was
+> tagged locally but never turned into a GitHub Release, so PyPI stalled at
+> `0.4.20` while the connector kept importing symbols only present in later
+> source. The connector's own build (`scripts/build.sh` →
+> `scripts/preflight_framework.py`) now hard-fails if its pinned `fsr-playbooks`
+> version doesn't provide the symbols it imports — so **publish the framework
+> first, then bump the connector pin.**
+
+Manual fallback (if `gh`/tooling is unavailable):
+
+```sh
+git tag v0.4.23 && git push origin v0.4.23
+```
+
+Then on GitHub: **Releases → Draft a new release → choose tag `v0.4.23` →
+Publish**.
 
 - The wheel's version is derived from the tag: `v0.4.11` → `0.4.11`. The `v`
   prefix is stripped automatically.

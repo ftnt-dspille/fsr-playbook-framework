@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -68,6 +68,10 @@ e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
 
 tests: ## fast pytest (excludes live + slow); incl. the offline golden-trace pin
 	$(PY) -m pytest tooling/tests/ -q -m "not live and not slow"
+
+release: ## cut a PyPI release: make release VERSION=0.4.23 [NOTES="..."] (see RELEASING.md)
+	@[ -n "$(VERSION)" ] || { echo "usage: make release VERSION=X.Y.Z [NOTES=\"...\"]"; exit 2; }
+	@bash scripts/release.sh "$(VERSION)" "$(NOTES)"
 
 # ── Chat Intelligence tuning loop (docs/plans/CHAT_INTELLIGENCE_PLAN.md) ──
 # chat-fast   = A4 cheap loop: offline STRUCTURE/contract guards (no API, secs).
