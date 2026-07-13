@@ -19,3 +19,29 @@ def test_skeleton_does_not_use_step_id():
 def test_skeleton_identifies_steps_by_name_and_wires_with_next():
     assert "- name: Start" in _PROMPT
     assert "next: Set Inputs" in _PROMPT
+
+
+# --- Quick-action modes (Track C1) -------------------------------------
+# The 5 build quick-action chips each route to a distinct toolset via a
+# `quick_action` key the connector threads onto the turn. The prompt must
+# document every mode so the connector's `# Active quick-action` marker has a
+# branch to land on. See PLAN_demoable_three_pillars.md (Track C / C1).
+
+_QUICK_ACTION_MODES = [
+    "explain",
+    "add_step",
+    "find_issues",
+    "add_error_handling",
+    "optimize",
+]
+
+
+def test_quick_action_modes_section_present():
+    assert "# Quick-action modes" in _PROMPT
+    assert "# Active quick-action" in _PROMPT  # referenced marker name
+
+
+def test_every_quick_action_mode_documented():
+    for key in _QUICK_ACTION_MODES:
+        # Each mode is a bolded **`key`** bullet.
+        assert f"**`{key}`**" in _PROMPT, f"missing quick-action mode: {key}"
