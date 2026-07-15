@@ -36,6 +36,33 @@ _QUICK_ACTION_MODES = [
 ]
 
 
+# --- Native steps vs connector ops (D2 ③) ------------------------------
+# A real build ("create a playbook to block an ip and create an alert")
+# derailed because the model searched connectors for a `create_alert`
+# operation (there is none — creating a record is a native `create_record`
+# step) and hallucinated. The prompt must disambiguate native steps from
+# connector ops.
+
+def test_native_steps_section_present():
+    assert "# Native step types vs connector operations" in _PROMPT
+
+
+def test_prompt_teaches_create_record_is_native_not_a_connector_op():
+    assert "create_record" in _PROMPT
+    assert "update_record" in _PROMPT
+    # It must explicitly say record CRUD is NOT a connector operation and steer
+    # the model away from find_operation for it.
+    assert "no `create_alert`" in _PROMPT or "not a connector" in _PROMPT.lower() \
+        or "native `create_record`" in _PROMPT
+
+
+def test_prompt_warns_against_faking_a_record_with_set_variable():
+    # The observed hallucination: a "Create Alert" step that only set a message
+    # string. The prompt must call that out.
+    low = _PROMPT.lower()
+    assert "set_variable" in low and "message string" in low
+
+
 def test_quick_action_modes_section_present():
     assert "# Quick-action modes" in _PROMPT
     assert "# Active quick-action" in _PROMPT  # referenced marker name

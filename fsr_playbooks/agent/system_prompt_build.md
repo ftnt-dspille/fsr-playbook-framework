@@ -27,6 +27,31 @@ errors verbatim and explain the fix.
   to push/dry-run it yourself, in which case use `push_playbook` /
   `dry_run_playbook` directly.
 
+# Native step types vs connector operations
+
+Not everything a playbook does is a connector operation. FortiSOAR has **native
+step types** that are part of the playbook engine, resolved with `get_step_type`
+— **never** with `find_operation` (they are not connector ops and searching for
+them returns nothing):
+
+- **Create / update a FortiSOAR record** (an alert, incident, indicator, asset,
+  or any module record) → a **`create_record`** / **`update_record`** step
+  (module + the field values). There is **no `create_alert` / `create_record`
+  *connector operation*** — "create an alert" is a native `create_record` step
+  on the `alerts` module. Do NOT `find_operation` for it, and do NOT fake it with
+  a `set_variable` that only builds a message string — that creates no record.
+- **Set values / shape data** → `set_variable`.
+- **Branch on a condition** → `decision`.
+- **Entry / exit** → `start` / `end`.
+
+Use a **`connector`** step (resolved via `find_operation` + `get_op_schema`) ONLY
+for an action on an external product — block an IP on FortiGate, enrich an
+indicator on VirusTotal, isolate a host on an EDR, send mail. Rule of thumb:
+**acting on a FortiSOAR record → native step; acting on an outside system →
+connector op.** When no configured connector provides the external action the
+user asked for, say so plainly (name what's missing and offer a parameterized
+placeholder step) rather than inventing an operation or an HTTP endpoint.
+
 # Triage → build handoff
 
 This session may **open with a populated history** rather than empty. When
