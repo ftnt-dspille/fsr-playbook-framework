@@ -740,3 +740,160 @@ playbooks:
     assert args.get("from") == "bot@example.com", args   # friendly `from:` kept
     assert "from_str" not in args, args                  # no canonical rename
     assert args.get("body", "").strip() == "hi there", args
+
+
+def test_connector_strips_default_name_and_operationTitle():
+    """G10 Tier-2 connector minimification: the forward path stamps
+    `arguments.name`=`crow["label"]` and `arguments.operationTitle`=
+    `orow["title"]` from catalog rows (connector_args.py:653-656). On decompile,
+    drop them when they equal the catalog default (recompile re-stamps from the
+    same rows -- round-trip stable). A `stop` step compiles to a `Connectors`
+    call on `cyops_utilities.no_op` (label "Utilities" / title "Utils: No
+    Operation"), so its decompiled `connector` step should surface neither
+    `name` nor `operationTitle`."""
+    by_name = _roundtrip_steps(
+        """
+collection: T
+playbooks:
+  - name: PB
+    steps:
+      - name: Start
+        type: start
+        next: Done
+      - name: Done
+        type: stop
+"""
+    )
+    s = by_name["Done"]
+    assert s["type"] == "connector"
+    args = s.get("arguments") or {}
+    # load-bearing wire preserved
+    assert args.get("connector") == "cyops_utilities", args
+    assert args.get("operation") == "no_op", args
+    # re-derived display labels dropped (they matched catalog defaults)
+    assert "name" not in args, args
+    assert "operationTitle" not in args, args
+    assert "version" not in args, args
+
+
+def test_connector_preserves_customized_name_and_operationTitle():
+    """A connector step whose `name`/`operationTitle` do NOT match the catalog
+    default is an author customization -- the catalog-gated strip must PRESERVE
+    it. Requires the `db` connection (threaded from `decompile_to_yaml`); a
+    direct call without it falls through (see next test)."""
+    import sqlite3
+    from fsr_playbooks.compiler.ir import Step
+    from fsr_playbooks.compiler.decompiler import _decompile_step
+    conn = sqlite3.connect(PACKAGED_SLIM_DB)
+    conn.row_factory = sqlite3.Row
+    try:
+        s = Step(id="c", type="connector", name="Call AbuseIPDB", arguments={
+            "connector": "abuseipdb", "operation": "get_ip_blacklist",
+            "name": "My Custom Label",            # != "AbuseIPDB"
+            "operationTitle": "Custom Op Title",   # != "Get IP Blacklist"
+            "version": "2.0.0", "params": {"limit": 10},
+        })
+        out = _decompile_step(s, db=conn)
+        args = out["arguments"]
+        # custom labels preserved (don't match catalog defaults)
+        assert args["name"] == "My Custom Label", args
+        assert args["operationTitle"] == "Custom Op Title", args
+        # version is ALWAYS re-derived -- stripped unconditionally
+        assert "version" not in args, args
+        # load-bearing wire preserved
+        assert args["connector"] == "abuseipdb"
+        assert args["operation"] == "get_ip_blacklist"
+        assert args["params"] == {"limit": 10}
+    finally:
+        conn.close()
+
+
+def test_connector_without_db_preserves_name_and_operationTitle():
+    """Without a catalog (`db=None`, e.g. a direct `_decompile_step` unit-test
+    call), the decompiler can't tell a re-derived default label from a custom
+    one, so `name`/`operationTitle` pass through untouched -- round-trip stable
+    as-is (the values are present, just not minimized). Backward-compatible
+    contract: existing direct-call tests are unaffected by the catalog-gated
+    strip."""
+    from fsr_playbooks.compiler.ir import Step
+    from fsr_playbooks.compiler.decompiler import _decompile_step
+    s = Step(id="c", type="connector", name="Call", arguments={
+        "connector": "abuseipdb", "operation": "get_ip_blacklist",
+        "name": "AbuseIPDB", "operationTitle": "Get IP Blacklist",
+        "version": "2.0.0",
+    })
+    out = _decompile_step(s)  # no db -> catalog-gated strip skipped
+    args = out["arguments"]
+    # no catalog -> name/operationTitle preserved (safe fall-through)
+    assert args["name"] == "AbuseIPDB", args
+    assert args["operationTitle"] == "Get IP Blacklist", args
+    # version is unconditionally stripped (always a re-derived default)
+    assert "version" not in args, args
+
+
+def test_cyops_utilities_canonical_decompiles_to_connector():
+    """G10 Tier-2 `CyopsUtilites` minimification (LIVE-VERIFY PENDING on the
+    recompile direction -- see the overlay note in decompiler.py).
+
+    The live box emits `CyopsUtilites` (uuid 0109f35d) for the built-in
+    cyops_utilities no-op terminal -- a DISTINCT canonical from `Connectors`.
+    Without an overlay it falls through as `type: CyopsUtilites` (raw) with the
+    full re-derived envelope passed through verbatim. The overlay maps it to
+    `connector` (consistent with `stop`/`end`/`delete_record`, which all
+    collapse to `connector` via `Connectors`), so it hits the connector branch
+    and gets its envelope stripped. This test proves the DECOMPILE direction;
+    the RECOMPILE direction (canonical `Connectors` vs original `CyopsUtilites`
+    -- runtime-equivalent?) is what live verification must confirm before ship.
+    """
+    import sqlite3
+    # Build minimal raw FSR JSON with a CyopsUtilites step, then decompile.
+    # The overlay fires in _decompile_workflow (Step.type from _FSR_TO_SHORT),
+    # NOT in _decompile_step, so we must go through decompile_to_yaml.
+    conn = sqlite3.connect(PACKAGED_SLIM_DB)
+    conn.row_factory = sqlite3.Row
+    cyops_uuid = conn.execute(
+        "SELECT uuid FROM step_types WHERE name = 'CyopsUtilites'"
+    ).fetchone()
+    conn.close()
+    if cyops_uuid is None:
+        import pytest
+        pytest.skip("CyopsUtilites step type not in slim DB")
+    cyops_type_iri = f"/api/3/workflow_step_types/{cyops_uuid[0]}"
+    raw_json = {
+        "data": [{
+            "name": "T",
+            "description": "",
+            "visible": True,
+            "workflows": [{
+                "name": "PB",
+                "description": "",
+                "isActive": True,
+                "steps": [{
+                    "uuid": "step1",
+                    "name": "No Op",
+                    "stepType": cyops_type_iri,
+                    "arguments": {
+                        "connector": "cyops_utilities",
+                        "operation": "no_op",
+                        "name": "Utilities",
+                        "operationTitle": "Utils: No Operation",
+                        "version": "3.7.0",
+                        "config": "",
+                        "params": {},
+                    },
+                    "next": [],
+                }],
+                "routes": [],
+            }],
+        }]
+    }
+    doc = yaml.safe_load(decompile_to_yaml(raw_json, PACKAGED_SLIM_DB))
+    s = doc["playbooks"][0]["steps"][0]
+    # The overlay routes the raw canonical to friendly `connector`.
+    assert s["type"] == "connector", s
+    args = s.get("arguments") or {}
+    # load-bearing wire preserved
+    assert args.get("connector") == "cyops_utilities", args
+    assert args.get("operation") == "no_op", args
+    # version always stripped (re-derived default)
+    assert "version" not in args, args

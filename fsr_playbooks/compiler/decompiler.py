@@ -75,6 +75,31 @@ _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 _EXTRA_CANONICAL_TO_SHORT: dict[str, str] = {
     "cybersponse.action": "start",
     "Connectors": "connector",
+    # `CyopsUtilites` (uuid 0109f35d) is the live-box canonical the FortiSOAR
+    # editor emits for the built-in cyops_utilities no-op terminal (the editor's
+    # "Utility No-Op" palette item; the wire-shape oracle pairs it with `stop`).
+    # It is a DISTINCT canonical from `Connectors` (0bfed618), so without this
+    # entry a pulled `CyopsUtilites` step falls through as `type: CyopsUtilites`
+    # (raw) with its full re-derived envelope (version/name/operationTitle/...)
+    # passed through verbatim -- boilerplate, and `type: CyopsUtilites` fails
+    # friendly revalidation. Mapping it to `connector` collapses it into the
+    # connector family the same way `stop`/`end`/`delete_record` already do
+    # (they all compile to `Connectors` -> `connector` on pull), so it hits the
+    # `connector` branch below and gets its envelope stripped (recompile re-adds
+    # it via the `utilities`/connector re-add path -- normalizers.py:215-237).
+    #
+    # LIVE-VERIFY PENDING (do not ship unverified): the recompile emits
+    # canonical `Connectors` (0bfed618), NOT the original `CyopsUtilites`
+    # (0109f35d). The two are editor-distinct (the wire-shape oracle keeps them
+    # separate), so this is a canonical step-type change on pull->push. It is
+    # very likely runtime-equivalent (both invoke cyops_utilities ops and the
+    # envelope is re-stamped), but that must be proven by a live round-trip on a
+    # real 8.0 box (pull a `CyopsUtilites` playbook -> decompile -> recompile ->
+    # push -> run -> confirm the step executes + the playbook saves clean in the
+    # editor) before this entry is relied on. Rare in the corpus (~1 step), so
+    # the blast radius of leaving it un-mapped is small; the entry is prepared
+    # here behind that verification gate.
+    "CyopsUtilites": "connector",
 }
 _FSR_TO_SHORT.update(_EXTRA_CANONICAL_TO_SHORT)
 
@@ -151,11 +176,16 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
     import yaml
 
     ir = decompile(fsr_json, db_path)
-    out = {
-        "collection": ir.name,
-        "description": ir.description,
-        "visible": ir.visible,
-        "playbooks": [
+    # A read connection for catalog-gated envelope minimification: stripping
+    # re-derived `name`/`operationTitle` only when they equal the catalog
+    # default (see the `connector` branch in `_decompile_step`). Separate from
+    # `decompile()`'s connection (which it closes after building the IR).
+    # Direct `_decompile_step` calls (e.g. unit tests) pass db=None and the
+    # catalog-gated strips fall through (safe).
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        playbooks = [
             {
                 "name": pb.name,
                 "description": pb.description or None,
@@ -163,7 +193,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
                 "is_active": pb.is_active,
                 "trigger_step_id": pb.trigger_step_id,
                 "parameters": list(pb.parameters) or None,
-                "steps": [_decompile_step(s, pb_name=pb.name) for s in pb.steps],
+                "steps": [_decompile_step(s, pb_name=pb.name, db=conn) for s in pb.steps],
                 "annotations": [
                     {
                         "id": a.id,
@@ -183,7 +213,15 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
                 ] or None,
             }
             for pb in ir.playbooks
-        ],
+        ]
+    finally:
+        conn.close()
+
+    out = {
+        "collection": ir.name,
+        "description": ir.description,
+        "visible": ir.visible,
+        "playbooks": playbooks,
     }
 
     def _clean(o):
@@ -196,7 +234,8 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
     return yaml.safe_dump(_clean(out), sort_keys=False, allow_unicode=True)
 
 
-def _decompile_step(s, pb_name: str | None = None) -> dict:
+def _decompile_step(s, pb_name: str | None = None,
+                     db: "sqlite3.Connection | None" = None) -> dict:
     """Emit a step in the canonical authoring surface:
     `name:` only (no `id:`); `conditions:` / `options:` / `vars:` hoisted
     to step level; legacy `arguments.{conditions,options,arg_list}` and
@@ -399,29 +438,54 @@ def _decompile_step(s, pb_name: str | None = None) -> dict:
         # `Connectors -> connector` overlay above, pulled delete-shaped steps
         # arrive here as `connector` too, so this single branch retires
         # `fix_delete_record_mistype`'s envelope strip (the recipe becomes a
-        # no-op). NOT stripped here: `name`/`operationTitle` (also re-derived
-        # from catalog rows) — the decompiler has no connector catalog at hand
-        # to tell a re-derived default label from an author-customized one, so
-        # they pass through untouched (a follow-up could strip them given the
-        # catalog). `connector`/`operation`/`params` are load-bearing wire the
-        # author/source owns — never touched.
+        # no-op). `name`/`operationTitle` (also re-derived from catalog rows —
+        # `crow["label"]`/`orow["title"]`, connector_args.py:653-656) are
+        # stripped ONLY when a catalog (the `db` connection threaded from
+        # `decompile_to_yaml`) confirms the value equals the re-derived
+        # default; an author-customized label is preserved. When `db` is None
+        # (direct `_decompile_step` call / unwarmed catalog) they pass through
+        # untouched — safe, round-trip stable as-is. `connector`/`operation`/
+        # `params` are load-bearing wire the author/source owns — never touched.
         #
         # SCOPE: friendly `connector` only. The raw-canonical `CyopsUtilites`
         # step type (uuid 0109f35d, the built-in cyops_utilities no_op terminal)
-        # is deliberately NOT touched here: the compiler's connector re-add path
-        # (`normalizers.py:157`) only covers `connector`/`stop`/`end`/
-        # `delete_record`, NOT `CyopsUtilites`, so stripping `version` from a
-        # CyopsUtilites step would change the wire (no re-add) — an unverified
-        # runtime change. CyopsUtilites steps carry no `config` anyway (the
-        # built-in utility needs none), and they're rare (1 in the tutorial
-        # corpus), so leaving their envelope verbatim is safe and needs no live
-        # verification. `scratch/promote_library.py::fix_delete_record_mistype`
-        # never touched them either, so excluding them doesn't block retiring it.
+        # is mapped to `connector` via `_EXTRA_CANONICAL_TO_SHORT` above, so a
+        # pulled `CyopsUtilites` step arrives here as `type: connector` and its
+        # envelope is stripped by this branch (recompile re-adds it via the
+        # `utilities` re-add path, normalizers.py:215-237). That mapping is a
+        # canonical step-type change on recompile (`CyopsUtilites` -> `Connectors`)
+        # — see the LIVE-VERIFY PENDING note on the overlay entry.
         args.pop("version", None)
         if out.get("step_variables") == []:
             out.pop("step_variables", None)
         if args.get("config") == "":
             args.pop("config", None)
+        # Catalog-gated strip of the re-derived display labels `name`/
+        # `operationTitle`. The forward path stamps them from catalog rows
+        # only when absent (`if "name" not in a and crow["label"]` etc.), so
+        # a value that matches the catalog default is provably re-derived and
+        # safe to drop (recompile re-stamps it). A mismatch is an author
+        # customization — keep it. Skipped entirely without a catalog (db is
+        # None on direct calls / unwarmed slim DB) — round-trip stable as-is.
+        if db is not None:
+            _c = args.get("connector")
+            _o = args.get("operation")
+            if isinstance(_c, str):
+                _crow = db.execute(
+                    "SELECT label FROM connectors WHERE name = ?", (_c,)
+                ).fetchone()
+                if (_crow and _crow["label"]
+                        and args.get("name") == _crow["label"]):
+                    args.pop("name", None)
+                if isinstance(_o, str):
+                    _orow = db.execute(
+                        "SELECT title FROM operations "
+                        "WHERE connector_name = ? AND op_name = ?",
+                        (_c, _o),
+                    ).fetchone()
+                    if (_orow and _orow["title"]
+                            and args.get("operationTitle") == _orow["title"]):
+                        args.pop("operationTitle", None)
         if args:
             out["arguments"] = args
     elif s.type == "api_endpoint" and isinstance(args, dict):
