@@ -55,6 +55,37 @@ def test_containment_allowed_after_floor():
     assert _drive(d, "emit_action_card", {}) is None
 
 
+# ─────────────────── authoring/build exemption ───────────────────
+
+def test_authoring_exempts_containment_discovery_from_floor():
+    """In build/authoring the hunt-floor gate must NOT block
+    find_containment_actions / find_enrichment_actions DISCOVERY — there is no
+    live alert to investigate, and the build agent legitimately uses them to
+    learn which ops exist (e.g. which connector op blocks an IP)."""
+    d = TriageDiscipline(authoring=True)
+    # Zero investigation done, yet discovery is allowed immediately.
+    assert d.invest_attempts == 0
+    assert _drive(d, "find_containment_actions", {"target_type": "ip"}) is None
+    assert _drive(d, "find_enrichment_actions", {"target_type": "ip"}) is None
+
+
+def test_authoring_still_gates_emit_action_card():
+    """Belt-and-suspenders: even in authoring the actual STAGING tool stays
+    floor-gated. It should never be in a build slice, but if it leaks in, the
+    exemption is discovery-only — staging is still blocked."""
+    d = TriageDiscipline(authoring=True)
+    g = _drive(d, "emit_action_card", {})
+    assert g is not None and g["hunt_floor_guard"] is True
+
+
+def test_triage_default_still_gates_containment_discovery():
+    """Regression: authoring defaults False, so triage is byte-unchanged —
+    find_containment_actions is still floor-gated before investigation."""
+    d = TriageDiscipline()  # authoring defaults False
+    g = _drive(d, "find_containment_actions", {})
+    assert g is not None and g["hunt_floor_guard"] is True
+
+
 def test_failed_investigation_attempts_still_count():
     """Attempts, not successes — a config gap can't deadlock the floor."""
     d = TriageDiscipline()

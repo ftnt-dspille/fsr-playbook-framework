@@ -373,10 +373,15 @@ class OpenAIProvider:
             getattr(case_state, "investigation", None)
             if case_state is not None else None
         )
+        # Authoring/build turns lack the triage-only staging tool
+        # `emit_action_card`; the hunt-floor gate must not block
+        # find_containment_actions DISCOVERY there. Fully in force for triage.
+        _authoring = "emit_action_card" not in allowed_names
         _discipline = TriageDiscipline(
             state=investigation_state,
             capabilities=(getattr(case_state, "capabilities", None)
                           if case_state is not None else None),
+            authoring=_authoring,
         )
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:

@@ -346,11 +346,20 @@ class TriageDiscipline:
         floor: int = MIN_INVESTIGATION_BEFORE_CONTAINMENT,
         state: Any = None,  # Investigation | None
         capabilities: Any = None,  # Capabilities | None
+        authoring: bool = False,
     ):
         import threading
         self.floor = floor
         self._shared_state = state  # None or an Investigation instance
         self._capabilities = capabilities  # None or a Capabilities instance
+        # Authoring/build turns don't triage a live alert. `find_containment_actions`
+        # is DISCOVERY ("which ops could block an IP?") that a build agent
+        # legitimately uses while authoring — so the hunt-floor investigation gate
+        # (no containment before N evidence calls) must not fire on it here. The
+        # gate stays fully intact for triage (authoring=False). Actual staging
+        # (`emit_action_card`) isn't in the build tool-slice at all, so nothing
+        # containment is being STAGED — only discovered.
+        self._authoring = authoring
         # Seed invest_attempts from state if provided
         if state is not None and hasattr(state, "invest_attempts"):
             self.invest_attempts = state.invest_attempts
@@ -441,6 +450,7 @@ class TriageDiscipline:
         # weak models re-spam a blocked tool when told "retry later", so name the
         # ONE next call to make and forbid re-calling the blocked tool.
         if (name in _CONTAINMENT_STAGING_TOOLS
+                and not (self._authoring and name == "find_containment_actions")
                 and not self._hunt_floor_met
                 and self.invest_attempts < self.floor):
             remaining = self.floor - self.invest_attempts

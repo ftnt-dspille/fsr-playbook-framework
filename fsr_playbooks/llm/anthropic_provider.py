@@ -315,10 +315,17 @@ class AnthropicProvider:
             getattr(case_state, "investigation", None)
             if case_state is not None else None
         )
+        # Authoring/build turns are detected by the absence of the triage-only
+        # staging tool `emit_action_card` from the advertised slice — build never
+        # stages containment, so the hunt-floor gate must not block
+        # find_containment_actions DISCOVERY there (it stays fully in force for
+        # triage, whose slice includes emit_action_card).
+        _authoring = "emit_action_card" not in allowed_names
         _discipline = TriageDiscipline(
             state=investigation_state,
             capabilities=(getattr(case_state, "capabilities", None)
                           if case_state is not None else None),
+            authoring=_authoring,
         )
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:
