@@ -407,6 +407,7 @@ async def resume_agent_turn(
     history_sink: Any = None,
     turn_for_history: int = 0,
     coalesce_text: bool = True,
+    session_id: Optional[str] = None,
 ) -> TurnResult:
     """Resume a HITL-suspended turn after the user approves or denies.
 
@@ -416,11 +417,19 @@ async def resume_agent_turn(
     consumes the resulting event stream with the same side-effect
     rules as `run_agent_turn`.
 
+    `session_id` is the caller's real session id for history keying. A
+    provider's `stream()` mints a fresh synthetic session id per call and
+    stamps it into `SuspendedSession.session_id`, so keying the resume turn's
+    recorded messages on `suspended.session_id` would file them under an id
+    that threads onto nothing. When the caller supplies `session_id`, every
+    `record_chat_message` below keys on it so the resume turn joins the real
+    session's history; falls back to `suspended.session_id` when unset.
+
     Returns a TurnResult. If the provider doesn't implement `resume`,
     returns a result with `error` set and a synthetic ErrorEvent in
     `transcript`.
     """
-    result = TurnResult(session_id=suspended.session_id)
+    result = TurnResult(session_id=session_id or suspended.session_id)
     coalescer = _TextCoalescer()
     seq_in_turn = 0
 
@@ -456,13 +465,13 @@ async def resume_agent_turn(
             await _fire_event_callback(on_event, ev)
         if history_sink is not None:
             history_sink.record_chat_message(
-                suspended.session_id, turn_for_history, seq_in_turn,
+                result.session_id, turn_for_history, seq_in_turn,
                 kind=KIND_TOOL_USE, name=skipped.name,
                 content=json.dumps(skipped.args, default=str),
             )
             seq_in_turn += 1
             history_sink.record_chat_message(
-                suspended.session_id, turn_for_history, seq_in_turn,
+                result.session_id, turn_for_history, seq_in_turn,
                 kind=KIND_TOOL_RESULT, name=skipped.call_id,
                 content=json.dumps(
                     {"ok": False, "code": "superseded_by_approval"}, default=str,

@@ -187,3 +187,55 @@ def test_run_turn_timeout_surfaces_error_event():
     assert result.stop_reason == "stream_error"
     assert result.error is not None and "timed out" in result.error.lower()
     assert any(isinstance(ev, ErrorEvent) for ev in events_seen)
+
+
+# ---------------------------------------------------------------------------
+# resume_agent_turn — history keys on the caller's real session_id, not the
+# provider's synthetic SuspendedSession.session_id.
+# ---------------------------------------------------------------------------
+
+def test_resume_history_keys_on_supplied_session_id():
+    """A provider's stream() mints a synthetic session id and stamps it into
+    SuspendedSession.session_id. When the caller passes the real session_id,
+    every recorded resume-turn message (incl. superseded skipped tools) must be
+    keyed on the real id so the turn threads onto the real session's history."""
+    from types import SimpleNamespace
+    from fsr_playbooks.llm.run_turn import resume_agent_turn
+
+    synthetic = "a1b2c3d4"        # provider-internal uuid4().hex[:8]
+    real = "rt-widget-1234"       # the caller's actual session id
+
+    suspended = SimpleNamespace(
+        session_id=synthetic,
+        remaining_tool_calls=[
+            SimpleNamespace(name="skipped_tool", call_id="call_skip", args={"x": 1}),
+        ],
+    )
+
+    class _ResumeProvider:
+        async def resume(self, *, suspended, decision):
+            yield TextEvent(text="done")
+            yield ToolUseEvent(name="update_record", arguments={"a": 1}, call_id="c1")
+            yield ToolResultEvent(call_id="c1", result={"ok": True})
+            yield _usage(session_id=synthetic, stop_reason="end_turn")
+            yield DoneEvent(stop_reason="end_turn")
+
+    sink = _FakeSink()
+    result = asyncio.run(resume_agent_turn(
+        provider=_ResumeProvider(), suspended=suspended, decision="approve",
+        history_sink=sink, turn_for_history=3, session_id=real,
+    ))
+
+    assert result.session_id == real
+    assert sink.rows, "expected recorded resume-turn history rows"
+    # EVERY row keys on the real session id — none leak the synthetic id.
+    assert {r.session_id for r in sink.rows} == {real}, \
+        [r.session_id for r in sink.rows]
+
+    # Fallback: no session_id supplied → keys on suspended.session_id (back-compat).
+    sink2 = _FakeSink()
+    asyncio.run(resume_agent_turn(
+        provider=_ResumeProvider(), suspended=suspended, decision="approve",
+        history_sink=sink2, turn_for_history=3,
+    ))
+    assert {r.session_id for r in sink2.rows} == {synthetic}
