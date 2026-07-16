@@ -848,6 +848,15 @@ def openai_tools() -> list[dict[str, Any]]:
     ]
 
 
+def _finalize_tool_output(name: str, result: Any) -> Any:
+    """Route a tool fn's return through the P4 envelope contract (fail-open by
+    default; strict under ``FSRPB_STRICT_TOOL_OUTPUT``). Dispatch-created
+    envelopes (error dicts, pending_approval) don't pass through here — the
+    contract governs *tool* outputs, and those are already well-formed dicts."""
+    from .tool_result import validate_tool_output
+    return validate_tool_output(name, result)
+
+
 def dispatch(
     name: str, arguments: dict[str, Any], *, _internal: bool = False,
     session_id: str | None = None
@@ -935,7 +944,7 @@ def dispatch(
             except Exception as e:
                 return {"error": f"{type(e).__name__}: {e}"}
             _record_audit(name, raw_args, tier, "auto_allow_grant")
-            return result
+            return _finalize_tool_output(name, result)
 
         # Phase 3: eval-mode policy short-circuit. Production callers
         # (the chat loop) leave the policy unset, fall through to the
@@ -950,7 +959,7 @@ def dispatch(
             except Exception as e:
                 return {"error": f"{type(e).__name__}: {e}"}
             _record_audit(name, raw_args, tier, "approved")
-            return result
+            return _finalize_tool_output(name, result)
         if policy_decision == "deny":
             _record_audit(name, raw_args, tier, "denied")
             return {"ok": False, "code": "user_denied",
@@ -979,4 +988,4 @@ def dispatch(
 
     decision = "approved" if approved else ("auto_allow" if tier <= 2 else "approved")
     _record_audit(name, raw_args, tier, decision)
-    return result
+    return _finalize_tool_output(name, result)
