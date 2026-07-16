@@ -59,18 +59,71 @@ _TTL_SECONDS = 600
 # at resume and `compare_digest`s it. Tampered args change `args_hash`, so
 # the token no longer matches and resume fails closed.
 #
-# The secret comes from `FSR_APPROVAL_HMAC_KEY` when set; otherwise a
-# per-process random key. A persisted gateway that must survive worker
-# restarts (3.2) therefore REQUIRES the env key — with the random fallback,
-# tokens minted before a restart fail verification afterward (fail-closed:
-# the human just re-triggers the action).
+# Secret resolution, in order:
+#   1. `FSR_APPROVAL_HMAC_KEY` env var — explicit, deployment-controlled.
+#   2. A per-host key FILE (default ~/.fsr_approval_hmac_key, 0600), created once
+#      and read by every worker. This is what makes the persisted gateway work
+#      across FortiSOAR's MULTIPLE worker processes: chat_turn stashes a session
+#      on one worker and chat_resume pops it on another, so the token must verify
+#      under a secret ALL workers agree on. A per-process random key cannot do
+#      that — cross-worker resume fails closed with approval_not_found — which is
+#      exactly the bug this replaces. The file also survives worker restarts.
+#   3. Per-process random key — last resort, only if the file can't be read or
+#      created (e.g. a read-only FS). Degrades to the old cross-worker behavior
+#      rather than crashing.
 _SECRET_ENV = "FSR_APPROVAL_HMAC_KEY"
+_SECRET_FILE_ENV = "FSR_APPROVAL_HMAC_KEY_FILE"
 _RUNTIME_SECRET = _secrets.token_bytes(32)
+_PERSISTENT_SECRET: bytes | None = None
+
+
+def _default_key_file():
+    from pathlib import Path
+    return Path.home() / ".fsr_approval_hmac_key"
+
+
+def _persistent_secret() -> bytes:
+    """A stable 32-byte secret shared by every worker on the host.
+
+    Provisioned once into a 0600 key file; concurrent workers race to create it
+    via O_CREAT|O_EXCL and the losers read the winner's key, so every worker ends
+    up with the same secret. Cached after the first resolution. Falls back to the
+    per-process key if the filesystem is unavailable."""
+    global _PERSISTENT_SECRET
+    if _PERSISTENT_SECRET is not None:
+        return _PERSISTENT_SECRET
+    from pathlib import Path
+    path = Path(os.environ.get(_SECRET_FILE_ENV) or _default_key_file())
+    try:
+        if path.exists():
+            key = bytes.fromhex(path.read_text().strip())
+            if len(key) >= 16:
+                _PERSISTENT_SECRET = key
+                return key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        key = _secrets.token_bytes(32)
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                os.write(fd, key.hex().encode("ascii"))
+            finally:
+                os.close(fd)
+        except FileExistsError:
+            # Another worker created it first — adopt its key.
+            key = bytes.fromhex(path.read_text().strip())
+        _PERSISTENT_SECRET = key
+        return key
+    except Exception:
+        # Read-only / unavailable FS: keep working with the per-process key.
+        _PERSISTENT_SECRET = _RUNTIME_SECRET
+        return _PERSISTENT_SECRET
 
 
 def _secret() -> bytes:
     env = os.environ.get(_SECRET_ENV)
-    return env.encode("utf-8") if env else _RUNTIME_SECRET
+    if env:
+        return env.encode("utf-8")
+    return _persistent_secret()
 
 
 def _canonical_args_hash(tool: str, args: dict[str, Any] | None) -> str:

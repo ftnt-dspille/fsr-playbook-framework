@@ -10,6 +10,8 @@ Covers the binding logic directly + the provider's resume() rejection path.
 from __future__ import annotations
 
 import asyncio
+import secrets
+import stat
 
 
 from fsr_playbooks.llm import approvals as A
@@ -83,6 +85,59 @@ def test_secret_from_env_is_stable_across_processes(monkeypatch):
     tok = s.token
     # Recompute independently (simulating a fresh process with same env).
     assert A._bind_token(s.approval_id, s.tool, s.args, s.created_at) == tok
+
+
+# --- persistent per-host key (cross-worker resume) -------------------------
+
+def _use_key_file(monkeypatch, key_file):
+    monkeypatch.delenv(A._SECRET_ENV, raising=False)          # no explicit env key
+    monkeypatch.setenv(A._SECRET_FILE_ENV, str(key_file))
+    monkeypatch.setattr(A, "_PERSISTENT_SECRET", None)         # clear the cache
+
+
+def test_persistent_key_shared_across_workers(tmp_path, monkeypatch):
+    # The core fix: a session stashed by one worker (random per-process key)
+    # verifies on ANOTHER worker, because both read the same key file. Without
+    # it, cross-worker resume fails closed → approval_not_found.
+    kf = tmp_path / "hmac.key"
+    _use_key_file(monkeypatch, kf)
+    monkeypatch.setattr(A, "_RUNTIME_SECRET", secrets.token_bytes(32))  # worker A
+    s = _session()
+    A.bind(s)
+    assert A.verify(s) is True
+    assert kf.exists()
+
+    # Worker B: different per-process key + cold cache, SAME key file.
+    monkeypatch.setattr(A, "_PERSISTENT_SECRET", None)
+    monkeypatch.setattr(A, "_RUNTIME_SECRET", secrets.token_bytes(32))
+    assert A.verify(s) is True
+
+
+def test_persistent_key_file_is_0600(tmp_path, monkeypatch):
+    kf = tmp_path / "k.key"
+    _use_key_file(monkeypatch, kf)
+    A._persistent_secret()
+    assert stat.S_IMODE(kf.stat().st_mode) == 0o600
+
+
+def test_env_key_takes_precedence_over_file(tmp_path, monkeypatch):
+    kf = tmp_path / "k.key"
+    _use_key_file(monkeypatch, kf)
+    A._persistent_secret()  # provision the file
+    monkeypatch.setenv(A._SECRET_ENV, "env-secret")
+    assert A._secret() == b"env-secret"
+
+
+def test_unwritable_key_file_falls_back_to_runtime(tmp_path, monkeypatch):
+    # A read-only / bad path must degrade to the per-process key, never crash.
+    not_a_dir = tmp_path / "not_a_dir"
+    not_a_dir.write_text("x")
+    monkeypatch.delenv(A._SECRET_ENV, raising=False)
+    monkeypatch.setenv(A._SECRET_FILE_ENV, str(not_a_dir / "k.key"))  # parent is a file
+    rt = secrets.token_bytes(32)
+    monkeypatch.setattr(A, "_RUNTIME_SECRET", rt)
+    monkeypatch.setattr(A, "_PERSISTENT_SECRET", None)
+    assert A._persistent_secret() == rt
 
 
 # --- provider resume() fail-closed -----------------------------------------
