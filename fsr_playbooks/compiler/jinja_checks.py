@@ -48,7 +48,8 @@ _DATA_PATH = os.path.join(
 
 
 def _load_known() -> tuple[frozenset[str], frozenset[str]]:
-    """Known names = jinja2 built-ins ∪ FSR widget catalog ∪ Ansible namespace.
+    """Known names = jinja2 built-ins ∪ FSR widget catalog ∪ Ansible namespace
+    ∪ curated jinja_macros table.
 
     Unioning with the built-ins keeps the check false-positive-free for stock
     jinja2 filters the widget catalog happens not to list (``tojson``, ``map``,
@@ -59,6 +60,12 @@ def _load_known() -> tuple[frozenset[str], frozenset[str]]:
     playbooks execute through an Ansible-based engine, so ``json_query``,
     ``ternary``, ``combine``… are valid even though the widget palette omits
     them (AGENT_HARDENING_PLAN §G false-positive fix).
+
+    The ``jinja_macros`` table (curated, in the packaged DB) carries filter
+    names mined from the live corpus + Ansible + FSR runtime — 43 filters the
+    JSON catalog doesn't list (``picklist``, ``ipaddr``, ``resolveRange``…).
+    Loading from it catches the FSR-custom filters the widget palette omits
+    without needing a JSON catalog rebuild for every new filter discovered.
     """
     filters = set(_ENV.filters)
     tests = set(_ENV.tests)
@@ -70,6 +77,15 @@ def _load_known() -> tuple[frozenset[str], frozenset[str]]:
         filters.update(cat.get("ansible_filters", {}))
         tests.update(cat.get("ansible_tests", {}))
     except (OSError, ValueError):
+        pass
+    # The curated jinja_macros table is the superset of known filter names.
+    try:
+        import sqlite3
+        from fsr_playbooks._db import PACKAGED_SLIM_DB
+        with sqlite3.connect(str(PACKAGED_SLIM_DB)) as conn:
+            rows = conn.execute("SELECT name FROM jinja_macros").fetchall()
+        filters.update(r[0] for r in rows if r[0])
+    except Exception:  # noqa: BLE001 — DB is optional; fall back to JSON
         pass
     return frozenset(filters), frozenset(tests)
 
