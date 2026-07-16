@@ -832,8 +832,8 @@ def test_connector_without_db_preserves_name_and_operationTitle():
 
 
 def test_cyops_utilities_canonical_decompiles_to_connector():
-    """G10 Tier-2 `CyopsUtilites` minimification (LIVE-VERIFY PENDING on the
-    recompile direction -- see the overlay note in decompiler.py).
+    """G10 Tier-2 `CyopsUtilites` minimification -- see the overlay note in
+    decompiler.py.
 
     The live box emits `CyopsUtilites` (uuid 0109f35d) for the built-in
     cyops_utilities no-op terminal -- a DISTINCT canonical from `Connectors`.
@@ -841,9 +841,14 @@ def test_cyops_utilities_canonical_decompiles_to_connector():
     full re-derived envelope passed through verbatim. The overlay maps it to
     `connector` (consistent with `stop`/`end`/`delete_record`, which all
     collapse to `connector` via `Connectors`), so it hits the connector branch
-    and gets its envelope stripped. This test proves the DECOMPILE direction;
-    the RECOMPILE direction (canonical `Connectors` vs original `CyopsUtilites`
-    -- runtime-equivalent?) is what live verification must confirm before ship.
+    and gets its envelope stripped.
+
+    This test proves the DECOMPILE direction. The RECOMPILE direction (emitting
+    canonical `Connectors` where the pull saw `CyopsUtilites`) is live-verified
+    on 8.0.0: the two step types share one dispatcher script and differ only by
+    a redundant `connector: cyops_utilities` default-arg seed, and an A/B live
+    run executed the utilities step to `finished` under both canonicals. See the
+    decompiler.py overlay note for the full evidence.
     """
     import sqlite3
     # Build minimal raw FSR JSON with a CyopsUtilites step, then decompile.

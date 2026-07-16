@@ -88,17 +88,29 @@ _EXTRA_CANONICAL_TO_SHORT: dict[str, str] = {
     # `connector` branch below and gets its envelope stripped (recompile re-adds
     # it via the `utilities`/connector re-add path -- normalizers.py:215-237).
     #
-    # LIVE-VERIFY PENDING (do not ship unverified): the recompile emits
-    # canonical `Connectors` (0bfed618), NOT the original `CyopsUtilites`
-    # (0109f35d). The two are editor-distinct (the wire-shape oracle keeps them
-    # separate), so this is a canonical step-type change on pull->push. It is
-    # very likely runtime-equivalent (both invoke cyops_utilities ops and the
-    # envelope is re-stamped), but that must be proven by a live round-trip on a
-    # real 8.0 box (pull a `CyopsUtilites` playbook -> decompile -> recompile ->
-    # push -> run -> confirm the step executes + the playbook saves clean in the
-    # editor) before this entry is relied on. Rare in the corpus (~1 step), so
-    # the blast radius of leaving it un-mapped is small; the entry is prepared
-    # here behind that verification gate.
+    # LIVE-VERIFIED on 8.0.0: the recompile emits canonical `Connectors`
+    # (0bfed618), NOT the original `CyopsUtilites` (0109f35d). The two are
+    # editor-distinct (the wire-shape oracle keeps them separate), so this is a
+    # canonical step-type change on pull->push -- but it is runtime-equivalent,
+    # proven on a live appliance two ways:
+    #
+    #   1. STRUCTURAL -- the two step types differ ONLY by a default arg seed:
+    #        Connectors.arguments    == {"script": "/wf/workflow/tasks/connector"}
+    #        CyopsUtilites.arguments == {"script": "/wf/workflow/tasks/connector",
+    #                                    "arguments": {"connector": "cyops_utilities"}}
+    #      Same dispatcher script, same `RunScript` parent. `CyopsUtilites` is a
+    #      palette prefill seeding `connector: cyops_utilities` into a new step's
+    #      form -- exactly as `CodeSnippet` seeds `code-snippet` and `SendMail`
+    #      seeds `smtp`. It is a connector step against the utilities connector,
+    #      not a distinct runtime path. A decompiled step always carries
+    #      `connector: cyops_utilities` EXPLICITLY in its own arguments, so the
+    #      seed is redundant and the swap changes nothing the engine reads.
+    #   2. BEHAVIOURAL -- a controlled A/B: two playbooks identical but for the
+    #      utilities step's canonical, byte-identical arguments, both pushed and
+    #      triggered. Both reached `status=finished` with the utilities step
+    #      itself `status=finished` under BOTH canonicals.
+    #
+    # Rare in the corpus (~1 step), so the blast radius was small either way.
     "CyopsUtilites": "connector",
 }
 _FSR_TO_SHORT.update(_EXTRA_CANONICAL_TO_SHORT)
