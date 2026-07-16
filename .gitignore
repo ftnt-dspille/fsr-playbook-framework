@@ -45,6 +45,10 @@ e2e/playwright-report/
 # wheel/sdist output (release builds drop here; nothing here is tracked)
 dist/
 
+# round-trip audit probe + its run outputs (local diagnostic; never committed)
+/data/round_trip_audit_*.json
+/tooling/probes/probe_round_trip_audit.py
+
 # eval run artifacts (flat logs/summaries; structured run dirs stay tracked)
 /data/eval_runs/calibrate_*.log
 /data/eval_runs/calibrate_*.summary.json
