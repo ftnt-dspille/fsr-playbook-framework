@@ -37,7 +37,8 @@ class ConsumedPath:
     location: str  # arguments.<...> dotted location of the template
 
 
-_ENV = Environment(autoescape=False)
+_ENV = Environment(autoescape=False,
+                   extensions=["jinja2.ext.do", "jinja2.ext.loopcontrols"])
 
 
 def _node_to_path(node: nodes.Node) -> tuple[str, ...] | None:

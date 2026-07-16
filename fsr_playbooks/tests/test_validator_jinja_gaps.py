@@ -84,6 +84,65 @@ def test_balanced_jinja_is_clean():
     assert not [e for e in errs if e.code.value == "jinja_syntax_error"]
 
 
+# Jinja2 extension tags that FortiSOAR's runtime supports but the stock
+# jinja2 Environment doesn't enable by default. Without the extensions
+# the parser raises a false-positive syntax error on valid templates.
+# System playbooks use {% do %} to mutate variables inside loops and
+# {% break %} / {% continue %} for loop control flow.
+_DO_EXTENSION = """
+collection: t
+playbooks:
+  - name: g
+    steps:
+      - name: Start
+        type: start
+        next: Set
+      - name: Set
+        type: set_variable
+        vars:
+          result: |
+            {%- set ret = {} -%}
+            {%- for i in range(3) -%}
+              {%- do ret.update({i: i * 2}) -%}
+            {%- endfor -%}
+            {{ ret }}
+"""
+
+_LOOPCONTROLS_EXTENSION = """
+collection: t
+playbooks:
+  - name: g
+    steps:
+      - name: Start
+        type: start
+        next: Set
+      - name: Set
+        type: set_variable
+        vars:
+          result: |
+            {%- set found = [] -%}
+            {%- for i in range(10) -%}
+              {%- if i == 5 -%}
+                {%- break -%}
+              {%- endif -%}
+              {%- do found.append(i) -%}
+            {%- endfor -%}
+            {{ found }}
+"""
+
+
+def test_do_extension_not_flagged():
+    errs = _errs(_DO_EXTENSION)
+    jinja = [e for e in errs if e.code.value == "jinja_syntax_error"]
+    assert not jinja, [e.message for e in jinja]
+
+
+def test_loopcontrols_extension_not_flagged():
+    errs = _errs(_LOOPCONTROLS_EXTENSION)
+    jinja = [e for e in errs if e.code.value == "jinja_syntax_error"]
+    assert not jinja, [e.message for e in jinja]
+
+
 # A code-step body that injects two real Jinja refs AND builds a Python
 # nested-dict literal whose adjacent `}}` the old brace-count mistook for Jinja
 # (the archetype_pilot_reconcile_and_report false positive). The real parser

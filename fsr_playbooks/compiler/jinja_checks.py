@@ -34,7 +34,14 @@ from jinja2.exceptions import TemplateSyntaxError
 
 from fsr_playbooks.compiler.errors import CompileError, ErrorCode
 
-_ENV = Environment(autoescape=False)
+# FortiSOAR's runtime Jinja engine enables the `do` extension
+# ({% do x.append(y) %} — expression statements for mutating variables
+# inside loops, heavily used by system playbooks) and `loopcontrols`
+# ({% break %} / {% continue %} inside {% for %}). Without these
+# extensions the parser raises false-positive syntax errors on valid
+# templates. Live-verified on 8.0.0-6034.
+_ENV = Environment(autoescape=False,
+                   extensions=["jinja2.ext.do", "jinja2.ext.loopcontrols"])
 
 _DATA_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "_data", "jinja_filters.json")

@@ -45,7 +45,8 @@ def _local_render(template: str, context: Optional[Dict[str, Any]] = None,
         from jinja2.exceptions import UndefinedError, TemplateError
     except ImportError:  # pragma: no cover - jinja2 is a runtime dep
         return {"error": "jinja2 not available"}
-    env = Environment(undefined=StrictUndefined)
+    env = Environment(undefined=StrictUndefined,
+                      extensions=["jinja2.ext.do", "jinja2.ext.loopcontrols"])
     try:
         out = env.from_string(template).render(**(context or {}))
         return {"output": out}
