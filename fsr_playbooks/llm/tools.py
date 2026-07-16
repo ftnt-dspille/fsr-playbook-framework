@@ -291,6 +291,22 @@ def _tier_for_simulator(args: dict[str, Any]) -> int:
     return 1
 
 
+# A host (the connector) can lower `run_playbook` from the default tier-3
+# approval card to tier-2 auto-run for playbooks it has explicitly designated
+# safe — e.g. a persona whose `run_playbook.auto` allowlist names a read-only
+# validation playbook. The framework can't see connector-owned persona state, so
+# it consults this optional resolver: `fn(args) -> bool`, True ⇒ auto-run (tier
+# 2). Absent/raises/False ⇒ the safe default (tier 3, carded). Registered via
+# `set_run_playbook_auto_resolver`.
+_RUN_PLAYBOOK_AUTO_RESOLVER: "Callable[[dict], bool] | None" = None
+
+
+def set_run_playbook_auto_resolver(fn: "Callable[[dict], bool] | None") -> None:
+    """Install (or clear with ``None``) the run_playbook auto-run resolver."""
+    global _RUN_PLAYBOOK_AUTO_RESOLVER
+    _RUN_PLAYBOOK_AUTO_RESOLVER = fn
+
+
 def _resolve_tier(name: str, args: dict[str, Any]) -> int:
     static = TOOL_TIERS.get(name, 0)
     if static >= 0:
@@ -302,7 +318,15 @@ def _resolve_tier(name: str, args: dict[str, Any]) -> int:
     if name == "push_playbook":
         return 3  # writes to FSR — always require approval
     if name == "run_playbook":
-        return 3  # triggers live execution — always require approval
+        # Default: triggers live execution → tier 3 (approval card). A host may
+        # designate specific playbooks auto-runnable (persona `run_playbook.auto`)
+        # via the resolver; those drop to tier 2 (no card). Fail-safe on any error.
+        try:
+            if _RUN_PLAYBOOK_AUTO_RESOLVER and _RUN_PLAYBOOK_AUTO_RESOLVER(args or {}):
+                return 2
+        except Exception:  # noqa: BLE001 — resolver must never harden into a crash.
+            pass
+        return 3
     return 0
 
 
