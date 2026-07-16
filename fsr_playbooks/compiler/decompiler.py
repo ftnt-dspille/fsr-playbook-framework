@@ -376,6 +376,8 @@ def _decompile_step(s, pb_name: str | None = None,
             if cond is not None and not c.get("default"):
                 entry["when"] = cond
             tgt = branches_remaining.pop(label, None) if label else None
+            if tgt is None and c.get("__resolved_next"):
+                tgt = c.pop("__resolved_next")
             if tgt:
                 entry["next"] = tgt
             new_conds.append(entry)
@@ -399,6 +401,8 @@ def _decompile_step(s, pb_name: str | None = None,
             if o.get("primary"):
                 entry["primary"] = True
             tgt = branches_remaining.pop(label, None) if label else None
+            if tgt is None and o.get("__resolved_next"):
+                tgt = o.pop("__resolved_next")
             if tgt:
                 entry["next"] = tgt
             new_opts.append(entry)
@@ -715,6 +719,33 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
         raw_args = dict(s.get("arguments") or {})
         fe_raw = raw_args.pop("for_each", None)
         for_each = dict(fe_raw) if isinstance(fe_raw, dict) and fe_raw else None
+
+        # Resolve step_iri → step id in decision conditions and manual_input
+        # options. The emitter stamps step_iri on each condition/option as a
+        # direct UUID pointer to the target step (more reliable than the route
+        # label, which is often None). Without this, branches lose their `next`
+        # targets when routes are unlabeled — steps become "unreachable from
+        # the trigger" on recompile.
+        for _key in ("conditions",):
+            _list = raw_args.get(_key)
+            if isinstance(_list, list):
+                for _c in _list:
+                    if isinstance(_c, dict) and _c.get("step_iri"):
+                        _tu = _to_uuid(_c["step_iri"])
+                        _ti = id_by_uuid.get(_tu)
+                        if _ti:
+                            _c["__resolved_next"] = _ti
+        _rmap = raw_args.get("response_mapping")
+        if isinstance(_rmap, dict):
+            _opts = _rmap.get("options")
+            if isinstance(_opts, list):
+                for _o in _opts:
+                    if isinstance(_o, dict) and _o.get("step_iri"):
+                        _tu = _to_uuid(_o["step_iri"])
+                        _ti = id_by_uuid.get(_tu)
+                        if _ti:
+                            _o["__resolved_next"] = _ti
+
         steps_out.append(Step(
             id=sid,
             type=short_by_uuid.get(u, "") or "unknown",

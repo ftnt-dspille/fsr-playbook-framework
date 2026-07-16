@@ -263,6 +263,33 @@ def test_self_reference_non_universal_key_fails():
     assert any(d.code == "missing_field_on_step_output" for d in res.diagnostics)
 
 
+def test_self_reference_in_step_variables_non_universal_key_ok():
+    """step_variables runs AFTER the step executes, so self-references to
+    non-universal keys (like `data`) are legitimate — the step's full
+    result is available for extraction. System playbooks use this idiom
+    (e.g. Fetch Threat Intel Feed Modules details reads its own .data)."""
+    coll = _coll(
+        Step(id="start", type="start", name="Start", next="fetch"),
+        Step(id="fetch", type="connector", name="fetch",
+             arguments={
+                 "step_variables": {
+                     "module_exists": '{{ vars.steps.fetch.data["hydra:totalItems"] }}',
+                 },
+                 "connector": "cyops_utilities",
+                 "operation": "make_cyops_request",
+                 "params": {"iri": "/api/3/modules", "method": "GET"},
+             },
+             next="use"),
+        Step(id="use", type="set_variable", name="use",
+             arguments={"arg_list": [
+                 {"key": "count", "value": "{{ vars.module_exists }}"},
+             ]}),
+    )
+    res = walk_playbook(coll)
+    assert not [d for d in res.diagnostics
+                if d.code == "missing_field_on_step_output"]
+
+
 def test_find_record_shape_is_list_with_module_fields():
     def module_fields(m):
         return ["id", "name", "severity"] if m == "alerts" else []

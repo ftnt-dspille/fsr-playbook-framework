@@ -874,8 +874,13 @@ def _validate_branch_jinja(
                     key = m.group(1)
                     rest = m.group(2) or ""
                     if key == _jinja_key(s):
-                        # self-reference: only universal keys are valid
-                        if rest.startswith("."):
+                        # self-reference: only universal keys are valid, EXCEPT
+                        # inside step_variables — that mapping runs AFTER the
+                        # step executes, so the full result (including non-
+                        # universal keys like `data`) is available for
+                        # extraction. System playbooks use this idiom to pull
+                        # fields from a connector step's own HTTP response.
+                        if rest.startswith(".") and not sub.startswith("step_variables"):
                             first = rest.lstrip(".").split(".", 1)[0].split("[", 1)[0]
                             if first and first not in _UNIVERSAL_OUTPUT_KEYS:
                                 diags.append(Diagnostic(

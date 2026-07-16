@@ -381,13 +381,24 @@ def _check_undefined_vars(pb: Playbook, pi: int,
     defined: set[str] = set(_RESERVED_VARS_KEYS)
     # `vars.item` (+ `vars.item.<field>`) is the per-iteration loop binding.
     defined.add("item")
-    # Every SetVariable-defined name, gathered across the whole playbook
-    # (vars are global; definition can lexically follow the read).
+    # Every var name defined in the playbook, gathered across the whole
+    # playbook (vars are global; definition can lexically follow the read).
+    # Two definition mechanisms:
+    #   1. set_variable steps — output keys are the var names themselves.
+    #   2. step_variables on ANY step — a {var_name: jinja} dict that maps
+    #      the step's post-execution result into named vars. Connector steps
+    #      use this to expose computed values (e.g. ttl_config, module_exists)
+    #      that downstream steps read as vars.<name>.
     for s in pb.steps:
-        if s.type == "set_variable" and isinstance(s.arguments, dict):
+        if not isinstance(s.arguments, dict):
+            continue
+        if s.type == "set_variable":
             keys = _step_output_top_keys(s)
             if keys:
                 defined |= keys
+        sv = s.arguments.get("step_variables")
+        if isinstance(sv, dict):
+            defined |= {k for k in sv if isinstance(k, str)}
     for si, s in enumerate(pb.steps):
         for sub, val in _walk_strings(s.arguments):
             for jm in _JINJA_EXPR_RE.finditer(val):
@@ -401,13 +412,15 @@ def _check_undefined_vars(pb: Playbook, pi: int,
                         code=ErrorCode.BAD_VALUE,
                         message=(f"Jinja reference vars.{name} in step "
                                  f"{s.id!r}: {name!r} is never defined by a "
-                                 f"SetVariable and is not a runtime key; it "
-                                 f"will evaluate empty at runtime"),
+                                 f"SetVariable or step_variables and is not a "
+                                 f"runtime key; it will evaluate empty at "
+                                 f"runtime"),
                         path=f"{path}.steps[{si}].arguments.{sub}",
                         near=suggestion,
                         suggestion=(f"did you mean vars.{suggestion}?"
                                     if suggestion else
-                                    "define it with a set_variable step first"),
+                                    "define it with a set_variable step or "
+                                    "step_variables first"),
                         severity="warning",
                     ))
 

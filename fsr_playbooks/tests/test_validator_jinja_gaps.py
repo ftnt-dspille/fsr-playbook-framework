@@ -198,3 +198,42 @@ def test_runtime_keys_and_loop_item_not_flagged():
     # vars.input / vars.item are runtime-provided, never authored.
     errs = _errs(_RUNTIME_KEYS_OK)
     assert not [e for e in errs if "is never defined" in e.message]
+
+
+# A connector step's step_variables mapping defines vars.<name> just like a
+# SetVariable does. System playbooks (e.g. Recycle Bin Cleanup, AuditLog
+# Cleanup) use this to extract fields from the connector's HTTP response.
+_STEP_VARIABLES_DEFINED = """
+collection: t
+playbooks:
+  - name: g
+    steps:
+      - name: Start
+        type: start
+        next: fetch
+      - name: fetch
+        type: connector
+        connector: cyops_utilities
+        operation: make_cyops_request
+        step_variables:
+          ttl_config: '{{ vars.result.data["hydra:member"][0]["publicValues"]["ttl_config"] }}'
+        arguments:
+          params:
+            iri: /api/3/system_settings
+            method: GET
+        next: use
+      - name: use
+        type: connector
+        connector: cyops_utilities
+        operation: make_cyops_request
+        arguments:
+          params:
+            iri: /api/wf/api/workflows/delete/
+            body: '{{ vars.ttl_config }}'
+            method: DELETE
+"""
+
+
+def test_step_variables_defined_var_not_flagged():
+    errs = _errs(_STEP_VARIABLES_DEFINED)
+    assert not [e for e in errs if "is never defined" in e.message]

@@ -92,6 +92,14 @@ def expand_decision(
         validate_args(DecisionCondition, c, f"{apath}.conditions[{i}]", errors)
         opt_next = c.get("next")
         opt_label = c.get("option")
+        if opt_next and not opt_label:
+            # Pulled/system playbooks often carry step_iri without an option
+            # label; the decompiler reverse-translates to `next:` without
+            # `option:`. Synthesize a label so the branch gets promoted into
+            # step.branches (required for reachability + emitter wiring).
+            # FSR's editor always assigns labels; this mirrors it.
+            opt_label = c.get("when") or f"Branch {i + 1}"
+            c["option"] = opt_label
         if opt_next and opt_label:
             branches.setdefault(opt_label, opt_next)
         cleaned.append({k: v for k, v in c.items() if k != "next"})
