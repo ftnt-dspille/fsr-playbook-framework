@@ -60,7 +60,8 @@ steps:
   - {option: Submit, primary: true}
   next: Validate
 # the submitted value is exposed at vars.steps.AskNumber.input.my_number
-# drive it from the SDK with: client.manual_input.answer(654321, by_title="AskNumber")""",
+# drive it from the SDK with: client.manual_input.answer(654321, by_title="Enter a six digit number")
+# NOTE: by_title matches the prompt's schema title (the step's `title:`), NOT the step name.""",
     "workflow_reference": """\
 steps:
 - name: CallChild
