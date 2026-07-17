@@ -45,3 +45,39 @@ def default_db_path() -> Path:
     if REPO_PROBED_DB.exists():
         return REPO_PROBED_DB
     return PACKAGED_SLIM_DB
+
+
+class WarmupClobberGuard(RuntimeError):
+    """Raised when a warmup/box-sync write would clobber the dev cache."""
+
+
+def warmup_write_path() -> Path:
+    """Resolve where a *warmup* (box-catalog sync) may write, with a guard.
+
+    Warmup replaces the reference DB's connector/operation tables with a target
+    SOAR's *installed* catalog. Run in a source checkout with ``$FSRPB_DB``
+    unset, that write lands on ``REPO_PROBED_DB`` — the full dev corpus — and a
+    small box (e.g. 21 connectors) silently overwrites hundreds, reddening the
+    tooling gate and degrading the compiler's grounding. This has bitten us.
+
+    So warmup must NOT default to the canonical dev cache. Callers that sync a
+    box catalog should resolve their write target through this function instead
+    of ``default_db_path()``:
+
+      * ``$FSRPB_DB`` set  → write there (a scratch/instance DB — the right habit);
+      * otherwise          → refuse, unless ``$FSRPB_ALLOW_DEV_DB_CLOBBER=1`` is
+        set to deliberately rebuild the dev cache in place.
+
+    Read paths are unaffected — they keep using ``default_db_path()``.
+    """
+    env = os.environ.get("FSRPB_DB")
+    if env:
+        return Path(env)
+    if os.environ.get("FSRPB_ALLOW_DEV_DB_CLOBBER") == "1":
+        return REPO_PROBED_DB
+    raise WarmupClobberGuard(
+        "refusing to warmup-write the dev cache "
+        f"({REPO_PROBED_DB}): a box sync would clobber the full reference "
+        "corpus. Set FSRPB_DB to a scratch copy first (recommended), or "
+        "FSRPB_ALLOW_DEV_DB_CLOBBER=1 to rebuild the dev cache in place."
+    )

@@ -40,7 +40,13 @@ try:
 except Exception:
     pass
 
-DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "fsr_reference.db"
+# Honor the same DB resolution as the rest of the codebase: $FSRPB_DB wins,
+# then the dev cache `data/fsr_reference.db`, then the packaged slim catalog.
+# Without this, the CLI ignored $FSRPB_DB and always opened the dev cache, so
+# the tooling gate couldn't point it at the committed test fixture.
+from fsr_playbooks._db import default_db_path  # noqa: E402
+
+DEFAULT_DB = default_db_path()
 
 
 def _print_errors(errors) -> None:
@@ -4239,14 +4245,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="audit per-step-type params — writes Markdown reports")
     sp.add_argument("--out", default="docs/step_params",
                     help="output directory (default: docs/step_params)")
-    sp.add_argument("--db", default="data/fsr_reference.db",
+    sp.add_argument("--db", default=str(DEFAULT_DB),
                     help="reference DB path")
     sp.set_defaults(func=cmd_dump_step_params)
 
     sp = sub.add_parser("audit-shapes",
         help="diff resolver whitelists vs playbook_steps corpus")
     sp.add_argument("--out", default="docs/corpus_audit")
-    sp.add_argument("--db", default="data/fsr_reference.db")
+    sp.add_argument("--db", default=str(DEFAULT_DB))
     sp.add_argument("--type", default=None,
                     help="filter to one step_type_name (e.g. ManualInput)")
     sp.set_defaults(func=cmd_audit_shapes)
