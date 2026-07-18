@@ -74,6 +74,33 @@ def test_every_quick_action_mode_documented():
         assert f"**`{key}`**" in _PROMPT, f"missing quick-action mode: {key}"
 
 
+# --- S6: diagnose-before-fix must be ALWAYS-ON, not chip-gated -----------------
+#
+# S6 (apply the fix so a failed playbook runs) found the build persona, on a
+# free-text "the last run failed, fix it" turn, skipping `why_did_playbook_fail`
+# and guessing a cosmetic edit — because the only instruction to diagnose a
+# runtime failure lived inside `# Quick-action modes`, which the prompt tells the
+# model to IGNORE when no `# Active quick-action` marker is present. The fix moved
+# the rule into `# The open playbook` (always in effect while a playbook is open).
+# Pin it there so it cannot regress back behind the chip gate.
+
+def _open_playbook_section() -> str:
+    start = _PROMPT.index("# The open playbook")
+    end = _PROMPT.index("# Native step types vs connector operations")
+    return _PROMPT[start:end]
+
+
+def test_runtime_failure_triggers_why_did_playbook_fail_outside_quick_actions():
+    section = _open_playbook_section()
+    # The diagnose-first rule must live in the always-on open-playbook section,
+    # not only in the chip-gated quick-action modes.
+    assert "why_did_playbook_fail" in section
+    low = section.lower()
+    assert "failed" in low and ("diagnose" in low or "diagnosis" in low)
+    # And it must not re-gate itself on a quick-action chip.
+    assert "not gated" in low or "free-text" in low or "free text" in low
+
+
 # --- P4: the prompt may only promise tools the build persona actually has -----
 #
 # The failure this pins is not hypothetical and not a typo — it is a whole class,
