@@ -400,3 +400,103 @@ def test_for_each_max_parallel_below_minimum_warns():
 def test_for_each_max_parallel_non_integer_errors():
     fe, errs = _loop_for_each("          max_parallel: abc\n")
     assert any(e.code is ErrorCode.BAD_VALUE and e.severity != "warning" for e in errs)
+
+
+# --- unknown top-level step keys (the create_record `resource:`-outside-
+# `arguments:` gap: validates clean, drops the key, crashes at runtime) ---
+
+def _make_step(step_lines: str):
+    text = (
+        "collection: A\n"
+        "playbooks:\n"
+        "  - name: P\n"
+        "    steps:\n"
+        f"{step_lines}"
+    )
+    return parse_yaml(text)
+
+
+def test_create_record_args_outside_arguments_flagged():
+    # `module`/`resource` written as siblings of `type:` (not under
+    # `arguments:`). `module` is a globally-hoisted key so it is NOT flagged;
+    # `resource` is unknown and must warn — that is the key silently dropped.
+    coll, errs = _make_step(
+        "      - name: mk\n"
+        "        type: create_record\n"
+        "        resource:\n"
+        "          name: x\n"
+        "        arguments:\n"
+        "          module: alerts\n"
+    )
+    assert coll is not None  # compile does not hard-fail
+    hits = [e for e in errs if e.code is ErrorCode.UNKNOWN_PARAM
+            and e.path.endswith(".resource")]
+    assert len(hits) == 1
+    assert hits[0].severity == "warning"
+    assert "arguments" in hits[0].message
+
+
+def test_create_record_correctly_nested_not_flagged():
+    coll, errs = _make_step(
+        "      - name: mk\n"
+        "        type: create_record\n"
+        "        arguments:\n"
+        "          module: alerts\n"
+        "          resource:\n"
+        "            name: x\n"
+    )
+    assert coll is not None
+    assert not any(e.code is ErrorCode.UNKNOWN_PARAM for e in errs)
+
+
+def test_type_specific_key_on_correct_type_not_flagged():
+    # `vars` is valid at step level ONLY for set_variable; `conditions` only for
+    # decision. Neither should be flagged on its own type.
+    coll, errs = _make_step(
+        "      - name: sv\n"
+        "        type: set_variable\n"
+        "        vars:\n"
+        "          a: 1\n"
+    )
+    assert coll is not None
+    assert not any(e.code is ErrorCode.UNKNOWN_PARAM for e in errs)
+
+
+def test_type_specific_key_on_wrong_type_flagged():
+    # `vars` on a start step is not consumed → silently dropped → warn.
+    coll, errs = _make_step(
+        "      - name: s\n"
+        "        type: start\n"
+        "        vars:\n"
+        "          a: 1\n"
+    )
+    assert coll is not None
+    assert any(e.code is ErrorCode.UNKNOWN_PARAM and e.path.endswith(".vars")
+               for e in errs)
+
+
+def test_unknown_step_key_is_warning_only():
+    # A bare typo'd key must not hard-fail the compile.
+    coll, errs = _make_step(
+        "      - name: s\n"
+        "        type: start\n"
+        "        typpo: 1\n"
+    )
+    assert coll is not None
+    assert all(e.severity == "warning" for e in errs
+               if e.code is ErrorCode.UNKNOWN_PARAM)
+    assert any(e.path.endswith(".typpo") for e in errs)
+
+
+def test_decompiler_escape_keys_not_flagged():
+    # `unlabeled_next` is the decompiler's lossy escape hatch — decompiled YAML
+    # carries it, so the new check must never fire on it. (`branches` has its
+    # own dedicated rejection, exercised elsewhere.)
+    coll, errs = _make_step(
+        "      - name: s\n"
+        "        type: start\n"
+        "        unlabeled_next:\n"
+        "          - t\n"
+    )
+    assert not any(e.code is ErrorCode.UNKNOWN_PARAM and e.path.endswith(".unlabeled_next")
+                   for e in errs)

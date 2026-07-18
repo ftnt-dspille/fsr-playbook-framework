@@ -24,6 +24,36 @@ _PARAM_TYPE_VOCAB = {
     "list", "array", "datetime", "ipv4", "url", "email", "any",
 }
 
+# Top-level step keys the parser actually consumes. Anything else on a step
+# mapping is silently dropped by the parse below — which is how a `create_record`
+# authored with `module:`/`resource:`/`data:` written as *siblings* of `type:`
+# (instead of under `arguments:`) compiles clean yet runs with empty arguments
+# and crashes at runtime (`insert_data() takes at least 2 positional arguments`).
+# The check at the bottom of the step loop flags any leftover key against this
+# set so the drop is visible before a push, not a runtime surprise.
+#
+# `branches`/`id` have their own dedicated rejections earlier in the loop;
+# `unlabeled_next` is the decompiler's lossy escape hatch — both are listed here
+# so the generic check never double-reports or fires on decompiled YAML.
+_UNIVERSAL_STEP_KEYS = frozenset({
+    "name", "type", "arguments", "next", "comment", "description",
+    "for_each", "post_comment", "message",
+    "mock_result", "when", "step_variables", "set",
+    "ignore_errors", "do_until", "apply_async",
+    "agent", "agentId", "pickFromTenant", "retry", "on_remote",
+    "module", "modules",
+    "branches", "id", "unlabeled_next",
+})
+# Keys the parser consumes only for a specific step type (hoisted into
+# `arguments:` by the type-specific blocks above). Mirrors those blocks exactly.
+_STEP_KEYS_BY_TYPE = {
+    "decision": frozenset({"conditions", "default"}),
+    "manual_input": frozenset({"options", "inputs", "title"}),
+    "set_variable": frozenset({"vars"}),
+    "delete_record": frozenset({"record", "record_id", "query", "show_deleted"}),
+    "connector": frozenset({"connector", "operation"}),
+}
+
 
 def _coerce_label(v: Any) -> tuple[Any, bool]:
     """YAML 1.1 'Norway problem': bare `yes`/`no`/`on`/`off` are parsed as
@@ -767,6 +797,26 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     for_each.setdefault("batch_size", 100)  # editor default when bulk
                 else:
                     for_each.pop("batch_size", None)      # batch_size is a bulk-only key
+
+            # Flag top-level step keys the parse never reads. These are
+            # silently dropped otherwise — the create_record `resource:`-outside-
+            # `arguments:` class of bug that validates clean and fails only at
+            # runtime. Warning (not error) so a genuinely-harmless extra key
+            # doesn't hard-fail a compile; the message points the author at the
+            # fix. `arguments`'s own contents are validated downstream.
+            allowed_keys = _UNIVERSAL_STEP_KEYS | _STEP_KEYS_BY_TYPE.get(stype, frozenset())
+            for k in sorted(set(s_raw) - allowed_keys):
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    severity="warning",
+                    message=(
+                        f"step-level key {k!r} on step type {stype!r} is not "
+                        f"recognized and was ignored — if it is an argument for "
+                        f"the step, nest it under `arguments:`"
+                    ),
+                    path=f"{sp}.{k}",
+                    suggestion=f"move it under arguments: {{ {k}: ... }}",
+                ))
 
             steps.append(Step(
                 id=sid,
