@@ -139,6 +139,7 @@ from .tools_recipe import (
     diagnose_yaml_against_pb_execution,
     find_recipe,
     generate_recipe,
+    set_failed_run_provider,
     why_did_playbook_fail,
 )
 
@@ -238,6 +239,7 @@ __all__ = [
     "generate_recipe",
     "diagnose_yaml_against_pb_execution",
     "why_did_playbook_fail",
+    "set_failed_run_provider",
     # Verify
     "verify_playbook",
     # Catalog (Phase 0 + 0.5)

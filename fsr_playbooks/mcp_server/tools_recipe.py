@@ -37,6 +37,32 @@ def _tools_triage_or_err():
         )
     return tools_triage, None
 
+
+# --- failed-run provider hook ---------------------------------------------
+# Finding a recent FAILED run is connector-owned: it queries the live
+# workflow-run tables through the connector's FSR client, and different
+# connectors keep that function in different modules (here it is
+# `fsr_soc_triage.tools_triage.list_recent_failed_runs`, NOT a
+# `fsr_playbooks.mcp_server.tools_triage` the library can import, and it is not
+# registered in the library REGISTRY by name). So the library's one-shot
+# troubleshooter cannot import it directly — the connector injects it here at
+# import time, exactly as it does for the run_playbook auto-resolver
+# (`llm.tools.set_run_playbook_auto_resolver`). Absent a connector (bare
+# library), the troubleshooter degrades cleanly to `no_failed_run_provider`.
+_FAILED_RUN_PROVIDER: "Any" = None
+
+
+def set_failed_run_provider(fn: "Any") -> None:
+    """Register the connector callable that lists recent failed runs.
+
+    Signature: ``fn(limit: int = ..., playbook: str | None = ...) ->
+    list[dict]`` where each dict carries at least ``task_id``/``pk``, ``name``,
+    ``status`` and ``error_message`` (the shape of
+    ``list_recent_failed_runs``)."""
+    global _FAILED_RUN_PROVIDER
+    _FAILED_RUN_PROVIDER = fn
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -310,10 +336,13 @@ def diagnose_yaml_against_pb_execution(
         pb_execution: workflow PK (digits, e.g. "676747") OR task_id UUID
             of the failed (or completed) run to use as the env source.
     """
-    tools_triage, _miss = _tools_triage_or_err()
-    if _miss is not None:
-        return _miss
-    env_out = tools_triage.get_run_env(pb_execution)
+    # get_run_env is the library's OWN connector-agnostic run-env reader
+    # (tools_connector_discovery) — NOT the connector's tools_triage, which in
+    # some connectors (fsr_soc_triage) does not export it, so the old
+    # `tools_triage.get_run_env` path returned no_investigation_tools even on a
+    # live box. This tool needs only the run env, never the triage module.
+    from .tools_connector_discovery import get_run_env as _get_run_env
+    env_out = _get_run_env(pb_execution)
     if "error" in env_out or env_out.get("ok") is False:
         return _err(
             "run_env_unavailable",
@@ -457,15 +486,21 @@ def why_did_playbook_fail(
         on resolution failure.
     """
     # Step 1 — resolve playbook_or_id to a concrete run.
-    tools_triage, _miss = _tools_triage_or_err()
-    if _miss is not None:
-        return _miss
     run_match: dict[str, Any] | None = None
     error_message: str | None = None
     if _looks_like_run_id(playbook_or_id):
         pb_execution = playbook_or_id
     else:
-        runs = tools_triage.list_recent_failed_runs(
+        if _FAILED_RUN_PROVIDER is None:
+            return _err(
+                "no_failed_run_provider",
+                "finding a failed run by playbook name needs the connector's "
+                "failed-run provider, which is not registered (bare library, or "
+                "the connector did not call set_failed_run_provider). Pass a "
+                "workflow PK or task_id UUID as playbook_or_id instead.",
+                playbook_or_id=playbook_or_id,
+            )
+        runs = _FAILED_RUN_PROVIDER(
             limit=1, playbook=playbook_or_id,
         )
         if not runs or runs[0].get("error"):
@@ -504,8 +539,12 @@ def why_did_playbook_fail(
             return _err("fsr_not_configured",
                         "live FSR not configured; pass yaml_text= explicitly")
         client = _env_mod.get_client()
-        # We have a run; get the playbook name to pull the live YAML.
-        env_peek = tools_triage.get_run_env(pb_execution)
+        # We have a run; get the playbook name to pull the live YAML. Use the
+        # library's OWN get_run_env (tools_connector_discovery) — it is
+        # connector-agnostic and always present, unlike a connector tools_triage
+        # module that may not export it.
+        from .tools_connector_discovery import get_run_env as _get_run_env
+        env_peek = _get_run_env(pb_execution)
         pb_name = env_peek.get("name") if isinstance(env_peek, dict) else None
         if not pb_name:
             return _err(
@@ -526,9 +565,38 @@ def why_did_playbook_fail(
         except Exception as exc:  # noqa: BLE001
             return _err("decompile_failed", repr(exc), playbook=pb_name)
 
-    # Step 3 — diagnose.
+    # Step 3 — diagnose. `diagnose_yaml_against_pb_execution` finds JINJA render
+    # failures; it says nothing about a RUNTIME step error (e.g. a create_record
+    # that ran with no data → `insert_data() takes at least 2 positional
+    # arguments`), which is exactly the class the linter-gap fixtures pin. So
+    # also pull the run's typed failure projection (failing step + error
+    # message) straight from the run record via pyfsr, and surface both.
     result = diagnose_yaml_against_pb_execution(yaml_text, pb_execution)
-    if isinstance(result, dict) and error_message and "error_message" not in result:
+    if isinstance(result, dict):
+        # pyfsr `why_failed(playbook)` returns the most recent run's typed failure
+        # projection (status/failing_step/error_message) read from the full run
+        # record, where the runtime error IS populated (the provider row's
+        # error_message is often None for a just-failed live run). Enrichment
+        # only — guarded so an older pyfsr without it degrades to no enrichment,
+        # never a tool failure. Keyed by playbook name (what we have); a bare
+        # run-id input skips this (rare — the model troubleshoots by name).
+        pb_for_failure = (playbook_or_id if not _looks_like_run_id(playbook_or_id)
+                          else (run_match or {}).get("name"))
+        rf = None
+        if pb_for_failure:
+            try:
+                from probes._env import get_client as _get_client
+                rf = _get_client().playbooks.why_failed(playbook=pb_for_failure)
+            except Exception:  # noqa: BLE001 — enrichment only; never fail the tool
+                rf = None
+        if rf is not None:
+            if rf.failing_step and not result.get("failing_step"):
+                result["failing_step"] = rf.failing_step
+            if rf.error_message and not error_message:
+                error_message = rf.error_message
+            if rf.status and not result.get("run_status"):
+                result["run_status"] = rf.status
+    if isinstance(result, dict) and error_message and not result.get("error_message"):
         result["error_message"] = error_message
     if isinstance(result, dict) and run_match:
         result["matched_run"] = {

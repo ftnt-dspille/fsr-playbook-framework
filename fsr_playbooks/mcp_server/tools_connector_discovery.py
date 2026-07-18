@@ -60,57 +60,31 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
         return {"error": "FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)"}
     client = get_client()
 
-    # task_id (UUID) → workflow PK. Use pyfsr wrapper if possible.
-    # For UUID resolution, fall back to raw session calls since playbooks API
-    # doesn't expose task_id→PK lookup directly.
-    is_uuid = "-" in pb_execution and not pb_execution.isdigit()
-    pk_url = None
-    data = None
-    if is_uuid:
-        # No pyfsr wrapper for task_id lookup; use raw session.
-        for path in ("/api/wf/api/workflows/", "/api/wf/api/historical-workflows/"):
-            try:
-                pr = client.session.get(
-                    client.base_url + path
-                    + f"?task_id={pb_execution}&parent_wf__isnull=True&format=json&limit=1",
-                    verify=client.verify_ssl,
-                )
-                members = (pr.json() or {}).get("hydra:member") or []
-            except Exception:  # noqa: BLE001
-                continue
-            if members:
-                pk_url = members[0].get("@id") or ""
-                break
-        if not pk_url:
-            return {"error": f"no workflow run found for task_id {pb_execution!r} (checked live + historical)"}
-        try:
-            data = client.playbooks.get_execution(pk_url.rstrip("/").rsplit("/", 1)[-1], step_detail=True)
-        except Exception as e:  # noqa: BLE001
-            return {"error": f"fetch failed: {e!r}"}
-    else:
-        # Use pyfsr wrapper for numeric PK lookup with step_detail.
-        try:
-            data = client.playbooks.get_execution(pb_execution, step_detail=True)
-        except ValueError:
-            # PK not found in live table; get_execution already tries historical internally.
-            return {"error": f"workflow run {pb_execution!r} not found (checked live + historical)"}
-        except Exception as e:  # noqa: BLE001
-            return {"error": f"fetch failed: {e!r}"}
+    # Delegate to pyfsr's typed run_env(): it resolves pk / @id / task_id, hits
+    # the run endpoint with step_detail, and returns a validated RunEnv
+    # (name/env/status + steps keyed by display name). We only reshape it into
+    # this tool's `vars.steps.<underscored name>` view. Do NOT reimplement the
+    # fetch with raw session calls — pyfsr owns the run API (typed + tested), and
+    # `get_execution()` alone returns a RunSummary without env/steps.
+    try:
+        re = client.playbooks.run_env(pb_execution)
+    except ValueError as e:
+        return {"error": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"fetch failed: {e!r}"}
 
-    if not isinstance(data, dict):
-        return {"error": "fetch failed: unexpected response type"}
-
-    env_obj = data.get("env") or {}
-    steps_arr = data.get("steps") or []
-    steps_map: dict = {}
-    for s in steps_arr:
-        name = s.get("name")
-        if isinstance(name, str):
-            steps_map[name.replace(" ", "_")] = s.get("result") or {}
+    steps_map = {
+        name.replace(" ", "_"): (step.result or {})
+        for name, step in (re.steps or {}).items()
+        if isinstance(name, str)
+    }
     return {
-        "status": data.get("status"),
-        "name": data.get("name"),
-        "vars": dict(env_obj, steps=steps_map),
+        "status": re.status,
+        # getattr: `RunEnv.name` is newer than the floor pyfsr; degrade to None
+        # on an older wheel (name is only used by the decompile fallback, which
+        # the model path skips by supplying yaml_text).
+        "name": getattr(re, "name", None),
+        "vars": dict(re.env or {}, steps=steps_map),
     }
 
 

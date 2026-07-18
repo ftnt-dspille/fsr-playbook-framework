@@ -83,6 +83,14 @@ SAFE_TOOLS: list[str] = [
     "list_playbook_runs",
     "find_containment_actions",
     "find_enrichment_actions",
+    # Troubleshooting orchestrator (S5). Given a playbook name/uuid it already
+    # holds (the designer entity block carries the open playbook's identity),
+    # this chains list_recent_failed_runs → get_run_env →
+    # diagnose_yaml_against_pb_execution in one call — the build slice already
+    # has the last link but NO way to discover which run failed, so without
+    # this a "why did my run fail?" turn dead-ends the same way S2 did with no
+    # read channel. Read-only (renders jinja against a past run's vars); tier 1.
+    "why_did_playbook_fail",
 ]
 
 
@@ -139,6 +147,8 @@ TOOL_TIERS: dict[str, int] = {
     "list_playbook_runs": 1,
     "find_containment_actions": 1,
     "find_enrichment_actions": 1,
+    # Read-only troubleshooting chain (reads run env + renders jinja; no write).
+    "why_did_playbook_fail": 1,
 }
 
 # Op-name / category classifiers used as fallback when op_safety has no

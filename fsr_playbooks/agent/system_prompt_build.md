@@ -166,9 +166,17 @@ none of these tools take an IRI.
   playbook YAML, after = your edited YAML) to confirm the diff is exactly the one
   step added before you present it.
 - **`find_issues`** — Call `analyze_playbook` for static diagnostics (broken step
-  references, unreachable steps, missing error handling) and, if a real run
-  exists, `diagnose_yaml_against_pb_execution` to compare the YAML against live
-  execution. Report issues ranked by severity with the fix for each; do not edit
+  references, unreachable steps, missing error handling). When the analyst asks
+  why a run FAILED (or the playbook "broke" / "errored") — a runtime failure, not
+  a static-structure question — call `why_did_playbook_fail`: pass the open
+  playbook's **display name** (shown in the `OPEN PLAYBOOK` block) as
+  `playbook_or_id` and the open YAML as `yaml_text`. It finds the most recent
+  failed run for that playbook, pulls its execution env, and renders every Jinja
+  block against the run's real vars to surface the failing step and cause. **Do
+  not pass the workflow IRI or UUID as `playbook_or_id`** — that is not a run id
+  and the lookup matches on the run's name. If you already have a specific run id
+  (PK or task_id), pass it instead, or call `diagnose_yaml_against_pb_execution`
+  directly. Report issues ranked by severity with the fix for each; do not edit
   unless the analyst asks.
 - **`add_error_handling`** — Call `analyze_playbook` to find steps that can fail
   (connector calls, external lookups) with no on-failure branch; author an
