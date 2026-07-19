@@ -40,6 +40,19 @@ _IDEMPOTENT_TOOLS: frozenset[str] = frozenset({
 _YAML_BODY_TOOLS: frozenset[str] = frozenset({"validate_yaml", "compile_yaml"})
 _YAML_BODY_KEEP_LATEST = 1
 
+# §2.3 output budgeting — cap oversized tool *result* bodies. A single large
+# result (e.g. verify_playbook ~47KB, duplicate-enrichment ~40KB) is neither an
+# idempotent dup nor a yaml arg body, so the two passes above never touch it; a
+# short chain of them blows the context window. We keep the most recent
+# `_RESULT_KEEP_LATEST` oversized results in full (the agent repairs/reasons from
+# the freshest data) and clip older ones to a head+tail preview. Deterministic:
+# a clipped body is under the threshold, so re-running shrink is a fixed point
+# and the block stays byte-stable across turns.
+_RESULT_CAP_CHARS = 8000
+_RESULT_KEEP_LATEST = 1
+_RESULT_HEAD_CHARS = 5000
+_RESULT_TAIL_CHARS = 1500
+
 
 def _args_hash(args: Any) -> str:
     try:
@@ -154,6 +167,35 @@ def shrink_history(history: list[Any]) -> int:
                 stub = "<elided — superseded by a later validate_yaml call>"
                 saved += len(body) - len(stub)
                 inp["yaml_text"] = stub
+
+    # Pass 3 — §2.3 cap oversized tool_result bodies. Collect every
+    # tool_result with an over-threshold string body, in history order, then
+    # clip all but the most recent `_RESULT_KEEP_LATEST` of them. Already-clipped
+    # bodies are under the threshold so they're skipped (fixed point).
+    oversized: list[tuple[Any, str]] = []  # (block, content) in encounter order
+    for msg in history:
+        content = getattr(msg, "content", None)
+        if msg.role != "user" or not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            body = block.get("content")
+            if isinstance(body, str) and len(body) > _RESULT_CAP_CHARS:
+                oversized.append((block, body))
+
+    to_clip = (oversized[:-_RESULT_KEEP_LATEST]
+               if _RESULT_KEEP_LATEST > 0 else oversized)
+    for block, body in to_clip:
+        clipped = len(body) - _RESULT_HEAD_CHARS - _RESULT_TAIL_CHARS
+        new_body = (
+            body[:_RESULT_HEAD_CHARS]
+            + f"\n… [+{clipped} chars capped by the output budgeter — "
+              f"a later turn superseded this result] …\n"
+            + body[-_RESULT_TAIL_CHARS:]
+        )
+        saved += len(body) - len(new_body)
+        block["content"] = new_body
 
     return saved
 
