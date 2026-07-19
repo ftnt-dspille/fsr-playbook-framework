@@ -51,6 +51,31 @@ def get_step_arg_schema(step_type: str) -> dict[str, Any]:
     return {"step_type": step_type, "json_schema": schema, "modeled": True}
 
 
+def _connector_config_required(config_schema_json: Any) -> bool:
+    """Does this connector need a saved configuration to run its ops?
+
+    False for a config-LESS connector (utilities like cyops_utilities), whose
+    ops execute with `config: ''`. Derived from the connector's config schema:
+    an absent/empty schema, or one with no `fields`, means no config is needed.
+    """
+    if not config_schema_json:
+        return False
+    try:
+        schema = json.loads(config_schema_json) if isinstance(config_schema_json, str) \
+            else config_schema_json
+    except Exception:  # noqa: BLE001
+        return False
+    if not schema:
+        return False
+    if isinstance(schema, dict):
+        # FSR config schemas are `{"fields": [...]}`. `{}` or `{"fields": []}`
+        # → nothing to configure.
+        return bool(schema.get("fields"))
+    if isinstance(schema, list):
+        return bool(schema)
+    return False
+
+
 @mcp.tool()
 def find_connector(q: str, limit: int = 15,
                    verbose: bool = False,
@@ -70,8 +95,15 @@ def find_connector(q: str, limit: int = 15,
         with catalog_override(db_path):
             return find_connector(q, limit, verbose, db_path=None)
     with _db() as conn:
-        cols = ("name, label, category, description" if verbose
-                else "name, label, category")
+        # `config_schema_json` is fetched internally (never returned raw) so we
+        # can tell the agent whether the connector needs a configuration. A
+        # config-LESS connector (utilities like cyops_utilities) never appears in
+        # `list_configured_connectors`, and the build model has read that absence
+        # as "connector unavailable" and bailed to a skeleton (S3 run-3). The
+        # `config_required` flag + guidance stops that: a config-less op runs with
+        # `config: ''`, no configuration needed.
+        cols = ("name, label, category, description, config_schema_json" if verbose
+                else "name, label, category, config_schema_json")
         rows = _rows(
             conn,
             f"""SELECT {cols}
@@ -99,6 +131,15 @@ def find_connector(q: str, limit: int = 15,
                        ORDER BY name LIMIT ?""",
                     (w, w, limit),
                 )
+        # Derive config_required from the (internal) schema blob, then drop the
+        # blob so it never bloats the tool result.
+        config_less: list[str] = []
+        for r in rows:
+            required = _connector_config_required(r.pop("config_schema_json", None))
+            r["config_required"] = required
+            if not required:
+                config_less.append(r["name"])
+
         failed: list[str] = []
         if rows:
             verifs = _verifications_for(
@@ -115,6 +156,14 @@ def find_connector(q: str, limit: int = 15,
                 2 if (r.get("verification") or {}).get("status") == "tested_fail" else 1
             ))
         out: dict[str, Any] = {"matches": rows}
+        if config_less:
+            out["note"] = (
+                f"{config_less} need NO configuration — they are usable as-is; "
+                "author the connector step with `config: ''`. They will NOT "
+                "appear in list_configured_connectors (that lists only "
+                "connectors with a saved config); absence there does NOT mean "
+                "unavailable."
+            )
         if failed:
             out["warning"] = (
                 f"connector(s) {failed} have a tested_fail verification "

@@ -968,7 +968,19 @@ def list_configured_connectors(probe: bool = False,
     # `ok: True` so the connector's result classifier doesn't read a
     # successful payload that happens to omit `ok` as a failure (it was
     # mislabeling this tool `(error)` despite returning valid data).
-    return {"ok": True, "configured": out, "probed": probe, "count": len(out)}
+    return {
+        "ok": True, "configured": out, "probed": probe, "count": len(out),
+        # This lists only connectors with a SAVED configuration. Config-less
+        # connectors (utilities such as cyops_utilities) run without one and do
+        # NOT appear here — their absence is NOT unavailability. Author their
+        # steps with `config: ''`; use find_connector to see `config_required`.
+        "note": (
+            "Only connectors with a saved configuration are listed. Config-less "
+            "connectors (e.g. cyops_utilities and other utilities) are usable "
+            "without a config and won't appear here — author them with "
+            "`config: ''`. Absence here does not mean a connector is unavailable."
+        ),
+    }
 
 
 def _build_run_filter_qs(*, modified_after: str | None,
