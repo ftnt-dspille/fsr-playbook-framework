@@ -110,3 +110,21 @@ def test_end_to_end_writes_rows(tmp_path, monkeypatch):
     # Neutral name + firewall category bias → unsafe
     assert rows[("fortigate", "do_thing")] == "unsafe"
     assert counts["unsafe"] >= 1 and counts["safe"] >= 1
+
+
+def test_pure_compute_transform_verbs_are_safe():
+    # Added for the S3 safe live-probe path: pure-compute transforms (no
+    # external side effect) classify safe so their real output envelope can be
+    # grounded. cyops_utilities' convert_periodic_time_to_minutes is the anchor.
+    for op in ("convert_periodic_time_to_minutes", "extract_artifacts",
+               "parse_cef", "format_richtext", "hash_string", "decode_base64"):
+        safety, _, _ = ps.classify(op, [], "utilities")
+        assert safety == "safe", f"{op} should be safe (pure transform)"
+
+
+def test_mutating_verbs_stay_unsafe_after_transform_additions():
+    # Guard: broadening safe prefixes must not let a state-changer through.
+    for op in ("create_record", "update_record", "delete_record", "run_op",
+               "send_email", "push_config", "set_variable_value"):
+        safety, _, _ = ps.classify(op, [], "utilities")
+        assert safety == "unsafe", f"{op} must remain unsafe"

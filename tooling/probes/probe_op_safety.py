@@ -32,7 +32,10 @@ from . import _env  # noqa: F401  (loads .env)
 from .common import probe_session, wipe_probe_tables, SCHEMA_PATH
 
 PROBE_NAME = "probe_op_safety"
-CLASSIFIER_VERSION = 1
+# v2: added pure-compute transform verbs (convert/parse/format/extract/…) to
+# SAFE_PREFIXES so those ops classify 'safe' and the verify live-probe can
+# ground their real output shape. Bump signals a re-classify is due.
+CLASSIFIER_VERSION = 2
 
 
 # Verbs that *read* state. Trailing _details/_info/_status are also safe.
@@ -40,6 +43,15 @@ SAFE_PREFIXES = (
     "get", "list", "search", "find", "fetch", "lookup", "describe",
     "read", "check", "test", "status", "count", "enumerate", "query",
     "show", "export",
+    # Pure-compute / in-memory transforms — read-only by nature: they take a
+    # value and return a derived value with no external side effect (e.g.
+    # cyops_utilities convert_/parse_/format_/extract_). Added so the safe
+    # live-probe can ground their real output envelope; a pure op with an
+    # incomplete static output_schema is exactly where a measured shape helps.
+    # UNSAFE_PREFIXES still wins first, so a mutating verb is never captured.
+    "convert", "parse", "format", "encode", "decode", "extract", "compute",
+    "calculate", "normalize", "render", "compare", "diff", "hash",
+    "serialize", "deserialize", "tokenize",
 )
 SAFE_SUFFIXES = ("_details", "_info", "_status")
 

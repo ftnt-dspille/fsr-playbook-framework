@@ -15,6 +15,7 @@ from .errors import CompileError, ErrorCode
 from .ir import Collection
 from .linter import lint
 from .parser import parse_yaml
+from .connector_output_refs import rewrite_connector_output_refs
 from .reference_lint import reference_lint
 from .resolver import Resolver
 from .teaching import enrich_diagnostics
@@ -193,6 +194,13 @@ def compile_yaml(
         resolver.close()
     if _has_blocking(errs):
         return _blocked(errs)
+
+    # Connector-output ref repair (warn-and-fix): rewrite
+    # `vars.steps.<connstep>.<x>` → `.data.<field>` so a connector op's output
+    # actually flows onward. Runs on the resolved IR BEFORE validate() and the
+    # reference lint so they see the CORRECTED refs (no double-report), and
+    # mutates the IR so `emit()` ships the fixed reference.
+    all_warnings.extend(rewrite_connector_output_refs(coll, db_path))
 
     errs = _demote(validate(coll))
     if _has_blocking(errs):

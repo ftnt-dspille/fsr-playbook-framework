@@ -991,6 +991,18 @@ def dispatch(
                 raise
     except ImportError:
         pass  # tool_models not available; skip validation
+
+    # Build-persona verify grounds connector-op output shapes from a real
+    # execution so `vars.steps.<step>.data.<field>` is validated against the
+    # MEASURED envelope (static output_schema is often incomplete). Safe by
+    # construction: the walker probes ONLY op_safety=='safe' steps, and run_op
+    # independently refuses non-safe categories unless confirm=True (the probe
+    # never sets it) — so no mutating op can execute. verify_playbook is a
+    # build-only tool; default the flag on so the model needn't know it. An
+    # explicit live_probe in the LLM's args still wins.
+    if name == "verify_playbook" and "live_probe" not in raw_args:
+        raw_args["live_probe"] = True
+
     tier = _resolve_tier(name, raw_args)
 
     floor = _approval_floor()
