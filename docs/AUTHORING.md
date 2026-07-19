@@ -776,8 +776,15 @@ python_inline_code_editor` step. Config UUID resolved live + cached at
 
 Friendly form (compiler expands to FSR's canonical InputBased shape).
 **Top-level keys are strictly whitelisted**: `title`, `description`,
-`options`, `inputs`. Anything else is a hard error — silent-drop trap
-verified in the field.
+`options`, `inputs`, `is_approval`. Anything else is a hard error —
+silent-drop trap verified in the field. Each whitelisted key may be written
+at the step level (next to `type:`) or under `arguments:`, but not both
+(setting one in both places is a conflict error).
+
+Set `is_approval: true` to make the prompt an **approval gate** — the
+compiler re-points the step to the distinct `ApprovalManualInput` step type
+(sharing the ManualInput dispatcher + `InputBased` render mode). Without the
+flag the step ships as a plain `ManualInput` and FSR renders a plain prompt.
 
 ```yaml
 - type: manual_input
@@ -972,7 +979,7 @@ Editor-derived argument shapes for every step type, keyed by canonical FSR name 
 | `internal_email_attachments` | array|null |  | Attachments for internal emails. Managed, 37806 |
 | `internal_email_subject` | string|null |  | Subject for internal user emails |
 | `isRecordLinked` | boolean |  | Track whether step is linked to a record context. Logic. When false, disables unauthenticated mode |
-| `is_approval` | boolean |  | Set to true for ApprovalManualInput variant. Controls approval-style options (Approve/Reject) |
+| `is_approval` | boolean |  | Set to true for the ApprovalManualInput variant (Approve/Reject gate). Authorable at the step level or under arguments:; the compiler re-points the step type to ApprovalManualInput when true |
 | `message` | object |  | Message/logging metadata (system key). Not usually set for ManualInput |
 | `owner_detail` | object | yes | Specifies who receives the manual input request. Initialized |
 | `record` | string | yes | IRI/reference to the record being worked on |
@@ -980,7 +987,7 @@ Editor-derived argument shapes for every step type, keyed by canonical FSR name 
 | `response_mapping` | object | yes | Maps response options to next steps. Initialized. connecteStepsLength is DELETED before POST |
 | `step_variables` | object|array | yes |  |
 | `timeout` | object |  | Timeout configuration for awaiting response. Validated (max 7 days, 168 hours, 10080 minutes) |
-| `type` | enum | yes | Always 'InputBased' for ManualInput steps (set in editor). ManualInput and ApprovalManualInput both use this step type with different is_approval flags |
+| `type` | enum | yes | Render mode: 'InputBased' (form) or 'DecisionBased' (button-only). Distinct from the step type: ManualInput and ApprovalManualInput are two different workflow_step_types that both use InputBased re… |
 | `unauthenticated_input` | boolean |  | Allows external/unauthenticated users to respond. Initialized. When true, triggers agent mode logic |
 
 #### CodeSnippet — `code_snippet`

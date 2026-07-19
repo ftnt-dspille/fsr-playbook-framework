@@ -48,7 +48,7 @@ _UNIVERSAL_STEP_KEYS = frozenset({
 # `arguments:` by the type-specific blocks above). Mirrors those blocks exactly.
 _STEP_KEYS_BY_TYPE = {
     "decision": frozenset({"conditions", "default"}),
-    "manual_input": frozenset({"options", "inputs", "title"}),
+    "manual_input": frozenset({"options", "inputs", "title", "is_approval"}),
     "set_variable": frozenset({"vars"}),
     "delete_record": frozenset({"record", "record_id", "query", "show_deleted"}),
     "connector": frozenset({"connector", "operation", "params", "config"}),
@@ -569,8 +569,12 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 # etc.) actually sees them — otherwise step-level `inputs:` is
                 # silently dropped and the prompt ships with an empty form
                 # (`inputVariables: []`), `title`/`description` falling back to
-                # the step name. Conflict-guard mirrors the global hoist.
-                for hk in ("inputs", "title", "description"):
+                # the step name. `is_approval` rides along too so the approval
+                # gate can be flagged next to the step (the normalizer reads it
+                # off arguments to re-point the step type — see
+                # `_normalize_manual_input_args`). Conflict-guard mirrors the
+                # global hoist.
+                for hk in ("inputs", "title", "description", "is_approval"):
                     if hk in s_raw:
                         if hk in args:
                             errors.append(CompileError(

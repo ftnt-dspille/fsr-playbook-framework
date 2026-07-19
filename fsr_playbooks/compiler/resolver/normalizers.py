@@ -1157,6 +1157,23 @@ class NormalizerMixin:
         # form is in place so we test the same shape that ships to FSR.
         self._check_manual_input_modes(a, path, errors)
         step.arguments = a
+        # An approval gate is a DISTINCT FSR step type (`ApprovalManualInput`),
+        # not merely an `is_approval` flag on a plain `ManualInput`. The two
+        # share one dispatcher (`/wf/workflow/tasks/manual_input`) and render
+        # mode (`InputBased` + the is_approval overlay — see mi_output_catalog
+        # APPROVAL_MI_STEP_TYPES), differing only by the workflow_step_type the
+        # step points at. Authors set `is_approval: true`; without ALSO swapping
+        # the resolved step type, FSR keeps the ManualInput type and renders a
+        # plain input prompt — the flag ships but the row never becomes an
+        # approval gate (the accepted-then-discarded failure mode). Mirror the
+        # `start`→`cybersponse.action` swap above: re-point the step type when
+        # the flag is on. See MASTER_TRACKER 2026-07-17 follow-up (a).
+        if a.get("is_approval"):
+            approval_row = self.step_type("ApprovalManualInput")
+            if approval_row is not None:
+                step.step_type_uuid = approval_row["uuid"]
+                step.step_type_name = approval_row["name"]
+                step.handler = self.handler_for_step_type(approval_row)
 
     # External-distribution keys gated by audience=external. Internal-only
     # prompts shouldn't carry these; flag if they do.

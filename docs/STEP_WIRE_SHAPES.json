@@ -1661,7 +1661,7 @@
           "enum": [
             "InputBased"
           ],
-          "notes": "Always 'InputBased' for ManualInput steps (set at line 37898 in editor). ManualInput and ApprovalManualInput both use this step type with different is_approval flags."
+          "notes": "Render mode: 'InputBased' (form) or 'DecisionBased' (button-only). Distinct from the step type: ManualInput and ApprovalManualInput are two different workflow_step_types that both use InputBased render mode; the is_approval flag drives which step type ships (not this type field)."
         },
         {
           "key": "input",
@@ -1812,7 +1812,7 @@
           "type": "boolean",
           "required": false,
           "default": "false",
-          "notes": "Set to true for ApprovalManualInput variant (line 38012). Controls approval-style options (Approve/Reject)."
+          "notes": "Set to true for the ApprovalManualInput variant (Approve/Reject gate) (line 38012). Authorable at the step level or under arguments:; the compiler re-points the step type to ApprovalManualInput when true."
         },
         {
           "key": "unauthenticated_input",

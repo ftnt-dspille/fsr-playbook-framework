@@ -75,6 +75,18 @@ _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 _EXTRA_CANONICAL_TO_SHORT: dict[str, str] = {
     "cybersponse.action": "start",
     "Connectors": "connector",
+    # `ApprovalManualInput` (uuid a19333c2) is the DISTINCT canonical the
+    # normalizer now stamps for an approval gate (`is_approval: true`), sharing
+    # the `manual_input` dispatcher + InputBased render mode with plain
+    # `ManualInput` (uuid fc04082a) — see resolver/normalizers.py and
+    # mi_output_catalog.APPROVAL_MI_STEP_TYPES. `SHORT_TYPE_TO_FSR` is 1:1
+    # (`manual_input -> ManualInput`), so `_FSR_TO_SHORT` misses this variant
+    # and a pulled approval step would fall through as raw
+    # `type: ApprovalManualInput` (fails friendly revalidation). Map it back to
+    # `manual_input`; the `is_approval: true` flag rides in `arguments`, so the
+    # forward path re-derives the ApprovalManualInput step type on recompile —
+    # a clean round-trip.
+    "ApprovalManualInput": "manual_input",
     # `CyopsUtilites` (uuid 0109f35d) is the live-box canonical the FortiSOAR
     # editor emits for the built-in cyops_utilities no-op terminal (the editor's
     # "Utility No-Op" palette item; the wire-shape oracle pairs it with `stop`).
