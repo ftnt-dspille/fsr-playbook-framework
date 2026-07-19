@@ -152,6 +152,7 @@ from .tools_emit import (
     emit_choice_card,
     emit_decision_step,
     emit_manual_input,
+    emit_patch_proposal,
     emit_playbook_offer,
 )
 

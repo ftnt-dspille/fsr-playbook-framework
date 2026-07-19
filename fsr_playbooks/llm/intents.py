@@ -35,6 +35,9 @@ BUILD_ONLY_TOOLS = frozenset({
     "step_through_playbook", "dry_run_playbook",
     "diagnose_yaml_against_pb_execution",
     "push_playbook", "run_playbook",
+    # Value-level fix card for the OPEN playbook — meaningless in triage (there
+    # is no playbook open to patch), so keep it out of the triage slice.
+    "emit_patch_proposal",
 })
 
 # Triage-only tools dropped from the build slice (ROADMAP §4, three-pillar

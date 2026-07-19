@@ -62,6 +62,10 @@ SAFE_TOOLS: list[str] = [
     "emit_manual_input",
     "emit_capability_gap_card",
     "emit_playbook_offer",
+    # Value-level fix card: a before→after patch to one step/field of the OPEN
+    # playbook, accepted/rejected inline. Build-only (the widget renders it via
+    # its patch_proposal card; the connector applies it on accept via reply_tool).
+    "emit_patch_proposal",
     # Phase 1.1 — HTTP fallback authoring helper.
     "propose_http_fallback",
     # Phase 1.2 — live triage (read-only FSR).
@@ -133,6 +137,9 @@ TOOL_TIERS: dict[str, int] = {
     "emit_manual_input": 0,
     "emit_capability_gap_card": 0,
     "emit_playbook_offer": 0,
+    # Emitting the card is tier 0 (pure local shaping); the card's own `tier`
+    # field is what gates the Apply button client-side, mirroring action_card.
+    "emit_patch_proposal": 0,
     "propose_http_fallback": 0,
     # Phase 1.2 — read-only FSR API.
     # Tier-dynamic. Resolved per call.
@@ -715,6 +722,34 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                 "items": {"type": "string"},
                 "description": "Args keys the user is allowed to edit before confirm.",
             },
+        },
+    },
+    "emit_patch_proposal": {
+        "type": "object",
+        "required": ["id", "title", "before_yaml", "after_yaml"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1,
+                   "description": "Stable card id; echoed on resume."},
+            "title": {"type": "string", "minLength": 1,
+                      "description": "One-line summary of the fix."},
+            "before_yaml": {"type": "string", "minLength": 1,
+                            "description": "Current snippet being replaced "
+                                           "(minimal — just the changing lines)."},
+            "after_yaml": {"type": "string", "minLength": 1,
+                           "description": "Proposed replacement snippet."},
+            "rationale": {"type": "string",
+                          "description": "Optional one line on why."},
+            "target_step": {"type": "string",
+                            "description": "Optional step name the patch targets."},
+            "target_path": {"type": "string",
+                            "description": "Optional dotted path within the step "
+                                           "(e.g. arguments.ip)."},
+            "tier": {"type": "integer", "minimum": 0,
+                     "description": "Approval tier; >=3 gates Apply behind step-up."},
+            "reply_tool": {"type": "string",
+                           "description": "Tool the connector calls on accept "
+                                          "(default apply_patch)."},
         },
     },
     "emit_manual_input": {
