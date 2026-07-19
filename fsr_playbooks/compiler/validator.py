@@ -6,16 +6,11 @@ linear paths terminate, etc.
 """
 from __future__ import annotations
 
-import json
 import re
-import sqlite3
 
-from .._db import default_db_path
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Playbook, Step
 from .jinja_checks import check_jinja, to_compile_errors
-
-_DB_PATH = default_db_path()
 
 # Find every Jinja expression. Non-greedy; tolerates whitespace.
 _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
@@ -116,31 +111,20 @@ def _step_output_top_keys(s: Step) -> set[str] | None:
         return keys
 
     if s.type == "connector" and isinstance(s.arguments, dict):
-        connector = s.arguments.get("connector")
-        op = s.arguments.get("operation")
-        if not connector or not op:
-            return None
-        try:
-            with sqlite3.connect(_DB_PATH) as conn:
-                row = conn.execute(
-                    "SELECT output_schema_json, output_schema_observed "
-                    "FROM operations WHERE connector_name=? AND op_name=?",
-                    (connector, op),
-                ).fetchone()
-        except Exception:  # noqa: BLE001
-            return None
-        if not row:
-            return None
-        for blob in (row[1], row[0]):  # observed wins
-            if not blob:
-                continue
-            try:
-                shape = json.loads(blob)
-            except Exception:  # noqa: BLE001
-                continue
-            if isinstance(shape, dict) and shape:
-                return set(shape.keys())
-        return None
+        # A connector result is an ENVELOPE. The op's `output_schema` describes
+        # what sits UNDER `data` — it is NOT the top-level shape. At runtime
+        # `vars.steps.<name>` is `{data: <op output>, status, message,
+        # operation}` (live-verified: convert_periodic_time_to_minutes ->
+        # `{"data": {"minutes": 180}, "status": "Success", ...}`). So the
+        # top-level keys are the envelope keys, and an op field like `minutes`
+        # is reached as `vars.steps.<name>.data.minutes`. Returning the
+        # output_schema keys here was the bug that flagged the *correct*
+        # `.data.<field>` path and blessed the broken `.<field>` one — the
+        # exact miss S3 caught on the box (build model authored
+        # `vars.steps.Convert.minutes` -> empty record field). Mirrors the
+        # `.data` envelope the grounded typed_walker already models for
+        # code_snippet, and the corrected `get_step_type('connector')` grounding.
+        return {"data", "status", "message", "operation"}
 
     if s.type == "find_record":
         # FindRecords returns a hydra:Collection-shaped envelope. Top-level

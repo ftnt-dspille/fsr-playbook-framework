@@ -1357,9 +1357,16 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "selects the default connector configuration."
         ),
         "step_outputs": (
-            "Reference results as `vars.steps.<step_name>.<key>` where "
-            "<step_name> is the step's display NAME with spaces → "
-            "underscores (NOT the YAML id:)."
+            "A connector result is an ENVELOPE: the operation's output "
+            "sits under `data`, with `status`/`message` as siblings. So "
+            "reference an output field as "
+            "`vars.steps.<step_name>.data.<key>` — NOT "
+            "`vars.steps.<step_name>.<key>` (that reads the envelope, "
+            "which has no <key> and renders empty). <key> is a field from "
+            "the op's `output_schema` (get_op_schema). <step_name> is the "
+            "step's display NAME with spaces → underscores (NOT the YAML "
+            "id:). E.g. a step named `Convert Time` whose op returns "
+            "`{minutes: 180}` → `vars.steps.Convert_Time.data.minutes`."
         ),
         "example": {
             "type": "connector",
@@ -1370,6 +1377,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
                 "config": "",
                 "params": {"ip": "{{ vars.input.params.ip }}"},
             },
+            "output_ref_example": "{{ vars.steps.Query_VirusTotal.data.reputation }}",
         },
     },
     "stop": {

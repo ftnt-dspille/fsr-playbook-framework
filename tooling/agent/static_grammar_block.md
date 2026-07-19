@@ -139,6 +139,8 @@ type: decision
 
 Always look up the operation first via find_operation/get_op_schema — `params` keys are validated against the operation_params catalog. `config: ""` selects the default connector configuration.
 
+Output is an ENVELOPE: the op's result sits under `data`, with `status`/`message` as siblings. Reference an output field as `vars.steps.<name>.data.<key>` (NOT `vars.steps.<name>.<key>`, which reads the envelope and renders empty). E.g. a step `Convert Time` whose op returns `{minutes: 180}` → `{{ vars.steps.Convert_Time.data.minutes }}`.
+
 Example:
 ```yaml
 type: connector
@@ -149,6 +151,7 @@ type: connector
       config: ''
       params:
         ip: '{{ vars.input.params.ip }}'
+      # output referenced elsewhere as: {{ vars.steps.Query_VirusTotal.data.reputation }}
 ```
 
 ### `find_record`

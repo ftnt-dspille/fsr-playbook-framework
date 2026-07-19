@@ -51,7 +51,7 @@ _STEP_KEYS_BY_TYPE = {
     "manual_input": frozenset({"options", "inputs", "title"}),
     "set_variable": frozenset({"vars"}),
     "delete_record": frozenset({"record", "record_id", "query", "show_deleted"}),
-    "connector": frozenset({"connector", "operation"}),
+    "connector": frozenset({"connector", "operation", "params", "config"}),
 }
 
 
@@ -612,12 +612,18 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                             args[hk] = s_raw[hk]
 
             if stype == "connector":
-                # Step-level `connector:` / `operation:` siblings of
-                # `arguments:` are a recurring agent typo (session
-                # 0eb8c6a6 burned a validate round on this). FSR's wire
-                # format keeps them under arguments; auto-hoist with a
-                # warning so the agent learns instead of cycling.
-                for hk in ("connector", "operation"):
+                # Step-level `connector:` / `operation:` / `params:` /
+                # `config:` siblings of `arguments:` are a recurring agent
+                # typo (session 0eb8c6a6 burned a validate round on this;
+                # S3 eval saw the box model drop `params:` at the top level
+                # 2/3 runs -> a hard `missing_field` on the required param
+                # because the resolver only reads `arguments.params`). FSR's
+                # wire format keeps them all under arguments; auto-hoist with
+                # a warning so the agent learns instead of cycling. `params`
+                # was the asymmetric gap: `connector`/`operation` were already
+                # hoisted, so a step with those top-level but `params:` also
+                # top-level compiled the op with no inputs.
+                for hk in ("connector", "operation", "params", "config"):
                     if hk in s_raw and hk not in args:
                         args[hk] = s_raw[hk]
                         errors.append(CompileError(
