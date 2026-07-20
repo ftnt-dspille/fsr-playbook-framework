@@ -180,10 +180,13 @@ def _initialize_impl() -> None:
 
     specs: dict[str, ToolSpec] = {}
     tiers: dict[str, int] = {}
-    for server, rule in _allowlist.items():
-        tier_label = (rule or {}).get("tier", "read_only")
+    for server, raw_rule in _allowlist.items():
+        rule = _normalize_rule(raw_rule)
+        if rule is None:
+            continue  # server explicitly disabled (False / None / empty)
+        tier_label = rule.get("tier", "read_only")
         tier = 3 if tier_label == "mutating" else 1
-        allowed_tools = (rule or {}).get("tools", "*")
+        allowed_tools = rule.get("tools", "*")
         try:
             tools = mcp.list_tools(server)
         except Exception as exc:  # noqa: BLE001 - one bad server shouldn't abort the rest
@@ -192,9 +195,13 @@ def _initialize_impl() -> None:
         if not isinstance(tools, list):
             continue
         for tool in tools:
-            if not isinstance(tool, dict) or "name" not in tool:
+            # pyfsr's native client returns MCPTool pydantic models (dict-style
+            # access via _Lenient), while the built-in servers / tests hand back
+            # plain dicts. Accept either — a strict ``isinstance(tool, dict)``
+            # gate silently skipped every live tool (bridge never materialized).
+            tname = _tool_field(tool, "name")
+            if not tname:
                 continue
-            tname = tool["name"]
             if isinstance(allowed_tools, list) and tname not in allowed_tools:
                 continue
             full = _make_name(server, tname)
@@ -208,8 +215,10 @@ def _initialize_impl() -> None:
                 break
             specs[full] = ToolSpec(
                 name=full,
-                description=tool.get("description") or f"{tname} on {server}",
-                input_schema=tool.get("input_schema") or {"type": "object", "properties": {}},
+                description=_tool_field(tool, "description") or f"{tname} on {server}",
+                input_schema=(_tool_field(tool, "input_schema")
+                              or _tool_field(tool, "inputSchema")
+                              or {"type": "object", "properties": {}}),
                 fn=_make_fn(client, server, tname),
                 tier=tier,
                 confirm_mode="auto" if tier <= 1 else ("approve" if tier <= 3 else "step_up"),
@@ -223,6 +232,54 @@ def _initialize_impl() -> None:
         _materialized_names.update(specs)
         log.info("MCP materializer: registered %d tool(s) across %d server(s)",
                  len(specs), len({s for s, _ in SERVER_MAP.values()}))
+
+
+def _tool_field(tool: Any, key: str) -> Any:
+    """Read ``key`` from an advertised tool that may be a plain dict OR a
+    pydantic model (pyfsr's ``MCPTool``). Both support ``.get``; models also
+    expose attributes, so fall back to ``getattr`` for property-only fields
+    (e.g. ``input_schema`` derived from ``inputSchema``)."""
+    getter = getattr(tool, "get", None)
+    if callable(getter):
+        val = getter(key)
+        if val is not None:
+            return val
+    return getattr(tool, key, None)
+
+
+def _normalize_rule(rule: Any) -> dict[str, Any] | None:
+    """Coerce a per-server allowlist value into the canonical
+    ``{"tools": ..., "tier": ...}`` dict the loop expects.
+
+    Admins write the allowlist by hand in the connector config, so accept the
+    natural shorthands instead of failing (a raw ``True`` used to raise
+    ``'bool' object has no attribute 'get'`` and silently disable *all*
+    materialization):
+
+    - ``True`` / ``"*"`` / ``"read_only"`` / ``"all"`` → ``{}`` (all tools, read-only)
+    - ``"mutating"`` → ``{"tier": "mutating"}``
+    - ``["t1", "t2"]`` → ``{"tools": ["t1", "t2"]}`` (subset, read-only)
+    - a dict → returned as-is
+    - ``False`` / ``None`` / ``""`` → ``None`` (server disabled, skipped)
+    """
+    if rule is None or rule is False or rule == "":
+        return None
+    if rule is True:
+        return {}
+    if isinstance(rule, str):
+        val = rule.strip().lower()
+        if val in ("*", "read_only", "all"):
+            return {}
+        if val == "mutating":
+            return {"tier": "mutating"}
+        # a bare tool name → single-tool allowlist
+        return {"tools": [rule]}
+    if isinstance(rule, list):
+        return {"tools": rule}
+    if isinstance(rule, dict):
+        return rule
+    # unknown scalar → treat as "enabled, defaults" rather than aborting
+    return {}
 
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")

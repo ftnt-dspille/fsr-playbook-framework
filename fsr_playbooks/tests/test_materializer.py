@@ -214,3 +214,91 @@ def test_two_phase_configure_preserves_client_factory():
     M.ensure_initialized()
     assert "mcp_soc__get_alert" in T.REGISTRY
     assert "mcp_soc__enrich_indicator" in T.REGISTRY
+
+
+# --- live-shape regressions (found box-proving against 8.0 box 159) ----------
+
+class _MCPToolModel:
+    """Mimics pyfsr's ``MCPTool`` pydantic model: attribute access + dict-style
+    ``.get``/``in``/``[]`` (via ``_Lenient``), and ``input_schema`` exposed as a
+    read-only property derived from the wire's ``inputSchema``. The materializer
+    used to gate on ``isinstance(tool, dict)`` and silently skip every one of
+    these — so the live gateway materialized zero tools."""
+    def __init__(self, name, description=None, input_schema=None):
+        self.name = name
+        self.description = description
+        self._schema = input_schema
+    @property
+    def input_schema(self):
+        return self._schema
+    def get(self, key, default=None):
+        # _Lenient.get exposes model fields but NOT the input_schema property
+        return {"name": self.name, "description": self.description}.get(key, default)
+    def __contains__(self, key):
+        return key in ("name", "description")
+    def __getitem__(self, key):
+        return {"name": self.name, "description": self.description}[key]
+
+
+def test_materializes_pydantic_model_tools():
+    """pyfsr's native client returns MCPTool models, not dicts — the materializer
+    must read name/description/input_schema off the model. Regression: the live
+    bridge registered 0 tools until this was fixed."""
+    models = [
+        _MCPToolModel("get_alert", "get an alert",
+                      {"type": "object", "properties": {"uuid": {"type": "string"}}, "required": ["uuid"]}),
+        _MCPToolModel("enrich_indicator", "enrich an IOC",
+                      {"type": "object", "properties": {"indicator": {"type": "string"}}}),
+    ]
+    M.configure(mcp_allowlist={"soc": {"tools": "*", "tier": "read_only"}},
+                client_factory=lambda: _stub_client({"soc": models}))
+    M.ensure_initialized()
+    assert "mcp_soc__get_alert" in T.REGISTRY
+    spec = T.REGISTRY["mcp_soc__get_alert"]
+    assert spec.description == "get an alert"
+    assert spec.input_schema["required"] == ["uuid"]   # read off the property, not .get
+
+
+@pytest.mark.parametrize("rule, should_register", [
+    (True, True),            # {"soc": true} → all tools, read-only
+    ("*", True),             # {"soc": "*"}
+    ("read_only", True),     # {"soc": "read_only"}
+    ("all", True),           # {"soc": "all"}
+    (False, False),          # explicitly disabled
+    (None, False),           # explicitly disabled
+    ("", False),             # empty
+])
+def test_shorthand_allowlist_rules(rule, should_register):
+    """Admins write the allowlist by hand — a bare ``true``/``"*"`` used to raise
+    ``'bool' object has no attribute 'get'`` and silently disable ALL
+    materialization. Each shorthand now normalizes; falsey values skip the server."""
+    M.configure(mcp_allowlist={"soc": rule},
+                client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
+    M.ensure_initialized()
+    assert ("mcp_soc__get_alert" in T.REGISTRY) is should_register
+
+
+def test_shorthand_mutating_rule_is_tier_3():
+    M.configure(mcp_allowlist={"soc": "mutating"},
+                client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
+    M.ensure_initialized()
+    assert T.TOOL_TIERS["mcp_soc__get_alert"] == 3
+
+
+def test_shorthand_list_rule_filters_tools():
+    """A bare list value → tool-name allowlist (read-only)."""
+    M.configure(mcp_allowlist={"soc": ["get_alert"]},
+                client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
+    M.ensure_initialized()
+    assert "mcp_soc__get_alert" in T.REGISTRY
+    assert "mcp_soc__enrich_indicator" not in T.REGISTRY
+
+
+def test_bad_rule_does_not_abort_other_servers():
+    """One malformed rule must not take down materialization for other servers."""
+    M.configure(mcp_allowlist={"soc": True, "utility": {"tools": "*"}},
+                client_factory=lambda: _stub_client(
+                    {"soc": SOC_TOOLS, "utility": [{"name": "now", "description": "clock"}]}))
+    M.ensure_initialized()
+    assert "mcp_soc__get_alert" in T.REGISTRY
+    assert "mcp_utility__now" in T.REGISTRY
