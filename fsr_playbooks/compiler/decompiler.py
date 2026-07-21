@@ -611,6 +611,16 @@ def _decompile_step(s, pb_name: str | None = None,
     elif args:
         out["arguments"] = args
 
+    # `for_each` is lifted OUT of `arguments:` when the IR is built from the
+    # wire, so it must be put back on the step surface here or the loop is
+    # simply gone. This is data loss with teeth: the widget saves the agent's
+    # last ```yaml fence back OVER the open record, so a pull -> edit -> push of
+    # a looping playbook silently turns "run this for every incident" into "run
+    # it once". The parser accepts `for_each:` at step level, so emitting it
+    # here round-trips.
+    if getattr(s, "for_each", None):
+        out["for_each"] = dict(s.for_each)
+
     if s.next:
         out["next"] = s.next
     # Any leftover branches (no matching condition/option) — surface as

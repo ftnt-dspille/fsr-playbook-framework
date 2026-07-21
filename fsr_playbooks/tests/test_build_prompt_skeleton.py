@@ -245,3 +245,21 @@ def test_prompt_does_not_offer_a_duplicate_when_a_playbook_is_open():
     # open record untouched, so the terminal rule has to be conditional.
     assert "do not call `emit_playbook_offer` here" in _FLAT
     assert "duplicate" in _FLAT
+
+
+# --- Read-only turns (T1 §6g.2 F2) -------------------------------------
+# Two read-only scenarios ("Don't change anything" / "Just explain it") came
+# back with a full 1846- and 4812-char playbook. That is not chattiness: the
+# widget saves the LAST ```yaml fence over the open record, so an unrequested
+# fence is an unrequested WRITE. The terminal-action rule used to say "end the
+# turn with the complete revised playbook" unconditionally whenever a playbook
+# was open, with nothing scoping it to a CHANGE request.
+
+def test_prompt_forbids_a_yaml_fence_on_a_read_only_turn():
+    assert "```yaml fence is a write" in _PROMPT.lower()
+    assert "don't change anything" in _PROMPT.lower()
+
+
+def test_terminal_action_rule_is_scoped_to_change_requests():
+    """The fence-required rule must not read as unconditional."""
+    assert "Terminal action — hard rule for a CHANGE request" in _PROMPT
