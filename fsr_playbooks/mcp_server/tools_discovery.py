@@ -118,19 +118,46 @@ def find_connector(q: str, limit: int = 15,
                LIMIT ?""",
             (q, q, q, q, q, limit),
         )
-        if not rows:
-            # Broaden: word-by-word
-            words = q.split()
-            if words:
-                w = words[0]
-                rows = _rows(
+        # Broaden word-by-word and UNION with the whole-phrase hits.
+        #
+        # Two defects this replaces, both live-caught by the S3 eval against a
+        # real appliance (the ask named "FortiSOAR Utilities"; the right answer
+        # is `cyops_utilities`, whose label is exactly "Utilities"):
+        #
+        #  1. Broadening searched `words[0]` ONLY. "FortiSOAR Utilities" got zero
+        #     whole-phrase hits, broadened on "FortiSOAR" alone, and returned
+        #     `fortisoar-ml-engine` — a confident WRONG match. The word that
+        #     would have found the right connector was never searched. The model
+        #     then correctly reported "only FortiSOAR ML Engine is found
+        #     similarly named" and declined to author: a right answer to a wrong
+        #     tool result. S3 scored 0/5.
+        #  2. Broadening ran only `if not rows`, so a single spurious
+        #     whole-phrase hit SUPPRESSED it entirely. One bad hit was worse
+        #     than no hits.
+        #
+        # So: always broaden, and merge. Whole-phrase matches keep their rank
+        # (they are the stronger signal); word matches append, deduped by name.
+        # Multi-word queries are the human default ("FortiSOAR Utilities",
+        # "Convert String Time to Minutes") — every word gets a look.
+        words = [w for w in q.split() if len(w) > 2]  # skip "to"/"of"/"a" noise
+        if words:
+            seen = {r["name"] for r in rows}
+            for w in words:
+                if len(rows) >= limit:
+                    break
+                for r in _rows(
                     conn,
                     f"""SELECT {cols}
                        FROM connectors
                        WHERE name LIKE '%'||?||'%' OR label LIKE '%'||?||'%'
                        ORDER BY name LIMIT ?""",
                     (w, w, limit),
-                )
+                ):
+                    if len(rows) >= limit:
+                        break
+                    if r["name"] not in seen:
+                        seen.add(r["name"])
+                        rows.append(r)
         # Derive config_required from the (internal) schema blob, then drop the
         # blob so it never bloats the tool result.
         config_less: list[str] = []
