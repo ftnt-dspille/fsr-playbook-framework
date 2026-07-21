@@ -158,3 +158,40 @@ def test_post_comment_conflicts_with_message():
     ))
     assert not res.ok
     assert any("post_comment" in m and "pick one" in m for m in _errs(res))
+
+
+# ---- message block: `tenant` (MSSP content) --------------------------------
+
+def test_message_block_accepts_tenant():
+    """Shipped Fortinet content addresses a comment at a tenant.
+
+    The allowlist rejected `tenant` outright, so MSSP-aware stock playbooks
+    could not compile at all — and an agent asked to edit one could not return
+    a compiling result no matter how good its edit was. Confirmed against 400
+    stock playbooks pulled from a live appliance: `tenant` is the ONLY message
+    key real content uses outside the original allowlist, and it appears in 9
+    of them. Widened on that evidence, not on a remembered error string.
+    """
+    res, steps = _emit(_upd(
+        '        message: {content: "escalated", '
+        'tenant: "/api/3/tenants/abc-123"}\n'
+    ))
+    assert res.ok, _errs(res)
+    # Accepting the key but dropping it on the way out would trade a loud
+    # error for silent data loss, which is the worse of the two.
+    assert steps["Upd"]["message"]["tenant"] == "/api/3/tenants/abc-123"
+
+
+def test_message_block_omits_tenant_when_absent():
+    """The wire shape must not grow a key the product did not send."""
+    res, steps = _emit(_upd('        message: {content: "plain"}\n'))
+    assert res.ok, _errs(res)
+    assert "tenant" not in steps["Upd"]["message"]
+
+
+def test_message_block_still_rejects_a_genuinely_unknown_key():
+    """Widening for `tenant` must not turn the allowlist into a free-for-all."""
+    res, _ = _emit(_upd(
+        '        message: {content: "x", bogusKey: "y"}\n'))
+    assert not res.ok
+    assert any("bogusKey" in m for m in _errs(res))

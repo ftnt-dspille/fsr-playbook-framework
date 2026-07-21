@@ -691,10 +691,15 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
     id_by_uuid: dict[str, str] = {}
     canonical_by_uuid: dict[str, str] = {}
     short_by_uuid: dict[str, str] = {}
+    # Raw arguments per step uuid — the trigger's `inputVariables` are read back
+    # out of this to recover the playbook's declared parameters (see below).
+    _step_args_by_uuid: dict[str, dict[str, Any]] = {}
     for s in raw_steps:
         u = s.get("uuid") or ""
         sid = _slugify(s.get("name", ""), taken)
         id_by_uuid[u] = sid
+        if isinstance(s.get("arguments"), dict):
+            _step_args_by_uuid[u] = s["arguments"]
         # `stepType` is an IRI string in export JSON, but a nested dict
         # when fetched via /api/3/workflows?$relationships=true. Handle both.
         st_field = s.get("stepType")
@@ -904,6 +909,32 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
         params = [p for p in raw_params if isinstance(p, str)]
     else:
         params = []
+
+    # …but that field is only HALF the declaration. The manual-trigger form is
+    # built from the TRIGGER step's `arguments.inputVariables[]`, and on real
+    # appliance content the two sources disagree: some playbooks have an empty
+    # top-level `parameters` with everything declared on the trigger, and some
+    # have a non-empty one that still OMITS parameters the trigger declares.
+    # Reading only the top-level field therefore lost declarations, and a
+    # pulled playbook came back referencing `vars.input.params.X` with nothing
+    # declaring X — the compiler (correctly) rejecting its own decompiler's
+    # output.
+    #
+    # So union the two rather than treating either as authoritative. Same
+    # silent-data-loss class as the dropped `for_each`, and destructive the
+    # same way: the widget saves the agent's last fence back OVER the record,
+    # so pull -> one-field edit -> save would strip the playbook's input form.
+    # Found by pulling 400 stock playbooks from a live appliance, where this
+    # single bug accounted for 42 of 122 hard compile failures.
+    _seen_p = set(params)
+    trigger_args = _step_args_by_uuid.get(trigger_uuid) or {}
+    for iv in (trigger_args.get("inputVariables") or []):
+        if not isinstance(iv, dict):
+            continue
+        pname = iv.get("name")
+        if isinstance(pname, str) and pname and pname not in _seen_p:
+            _seen_p.add(pname)
+            params.append(pname)
 
     # priority IRI → name via the live-synced picklists map.
     raw_priority = wf.get("priority")

@@ -1454,7 +1454,14 @@ class NormalizerMixin:
         a = step.arguments
         msg = a["message"]
         mpath = f"{path}.arguments.message"
-        _ALLOWED = {"content", "tags", "type", "thread", "record", "records"}
+        # `tenant` is emitted by shipped Fortinet content (MSSP-aware comment
+        # steps address the comment at a tenant). Confirmed against 400 stock
+        # playbooks pulled from a live appliance: `tenant` is the ONLY key in
+        # real content outside this set, and it appears in 9 of them — so this
+        # was compiler strictness rejecting valid product output, not a content
+        # bug. Widened on that evidence rather than on a remembered error.
+        _ALLOWED = {"content", "tags", "type", "thread", "record", "records",
+                    "tenant"}
         unknown = sorted(set(msg) - _ALLOWED)
         if unknown:
             errors.append(CompileError(
@@ -1587,6 +1594,12 @@ class NormalizerMixin:
             "content": content,
             "records": rec_value if rec_value is not None else "",
         }
+        # Only emitted when present: accepting `tenant` in the allowlist but
+        # dropping it here would turn a hard error into silent data loss, which
+        # is the worse of the two failures. Absent on non-MSSP content, and the
+        # wire shape must not grow a key the product did not send.
+        if msg.get("tenant") is not None:
+            wire["tenant"] = msg["tenant"]
         a["message"] = wire
 
     def _summarize_visible_set(
