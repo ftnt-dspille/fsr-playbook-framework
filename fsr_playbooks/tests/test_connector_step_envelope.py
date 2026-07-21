@@ -22,6 +22,8 @@ Live-verified envelope: `convert_periodic_time_to_minutes("3 hours")` returns
 `{"data": {"minutes": 180}, "status": "Success", "message": "", "operation": null}`
 as the step's `vars.steps.<name>` value.
 """
+import re
+
 from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
 
@@ -193,3 +195,51 @@ def test_envelope_status_key_is_left_untouched():
     blob = _emit("{{ vars.steps.Convert_Time.status }}")
     assert "vars.steps.Convert_Time.status" in blob
     assert "data.status" not in blob
+
+
+# --------------------------------------------------------------------------
+# Missing `vars.` prefix — the third broken form, and the one that was SILENT.
+#
+# `{{ steps.Convert_Time.result }}` was observed in a live S3 run. FSR exposes
+# step output only under `vars`, so a bare `steps.` renders EMPTY at runtime —
+# the same silent-blank failure as a dropped `.data`.
+#
+# It was invisible to every existing check because the whole reference lint
+# anchors on `\bvars\.steps\.` (validator.py), so the one error that consists of
+# NOT matching the anchor slipped past the machinery built to catch it. Verified
+# on the pre-fix code: this form produced zero errors and zero warnings.
+# --------------------------------------------------------------------------
+
+
+def test_bare_steps_prefix_is_repaired():
+    blob = _emit("{{ steps.Convert_Time.result }}")
+    # Repaired all the way: prefix AND envelope, in one compile.
+    assert "vars.steps.Convert_Time.data.minutes" in blob
+    assert not re.search(r"(?<![\w.])steps\.", blob), "a bare `steps.` leaked"
+
+
+def test_bare_steps_prefix_with_bare_field_is_repaired():
+    blob = _emit("{{ steps.Convert_Time.minutes }}")
+    assert "vars.steps.Convert_Time.data.minutes" in blob
+    assert not re.search(r"(?<![\w.])steps\.", blob)
+
+
+def test_bare_steps_prefix_warns():
+    warns = _warns(_errs(_nested("{{ steps.Convert.result }}")))
+    assert any("`steps.Convert`" in str(w.message) and "vars.steps" in str(w.message)
+               for w in warns), [str(w.message) for w in warns]
+
+
+def test_bare_steps_prefix_for_unknown_step_is_left_alone():
+    """Only a REAL connector step is repaired. An unresolvable name is left for
+    the reference lint's hard error — silently inventing a `vars.` prefix for a
+    step that does not exist would turn a caught error into a runtime blank."""
+    blob = _emit("{{ steps.Unknown_Step.result }}")
+    assert "vars.steps.Unknown_Step" not in blob
+
+
+def test_vars_steps_is_not_double_prefixed():
+    """The lookbehind must keep the prefix pass off already-correct refs."""
+    blob = _emit("{{ vars.steps.Convert_Time.data.minutes }}")
+    assert "vars.vars.steps" not in blob
+    assert blob.count("Convert_Time.data.minutes") == 1

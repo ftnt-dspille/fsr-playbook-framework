@@ -179,7 +179,10 @@ def _rewrite_in_node(node: Any, step, steps_map, cache, db_path, conn, fixes) ->
         for i, v in enumerate(node):
             node[i] = _rewrite_in_node(v, step, steps_map, cache, db_path, conn, fixes)
         return node
-    if isinstance(node, str) and "vars.steps." in node:
+    # `steps.` not `vars.steps.`: the bare form (a missing `vars.` prefix) is
+    # itself one of the broken references this pass repairs, so gating on the
+    # correct prefix would skip exactly the strings that need fixing.
+    if isinstance(node, str) and "steps." in node:
         return _rewrite_string(node, step, steps_map, cache, db_path, conn, fixes)
     return node
 
@@ -194,6 +197,34 @@ def _subkeys(cache, db_path, conn, connector, op) -> Optional[set[str]]:
 def _rewrite_string(text, step, steps_map, cache, db_path, conn, fixes) -> str:
     for sname, (connector, op) in steps_map.items():
         s_re = re.escape(sname)
+
+        # PREFIX form first: `steps.<step>...` with the `vars.` dropped. FSR
+        # exposes step output only under `vars`, so a bare `steps.` renders
+        # EMPTY — the same silent-blank failure as a missing `.data`, and an
+        # observed S3 authoring error.
+        #
+        # It must be normalized BEFORE the alias/bare-field passes below, both
+        # because those anchor on `vars.steps.` and because the repaired
+        # reference may ALSO need a `.data` fix (`steps.X.result` needs both).
+        #
+        # This is also why the reference lint never flagged it: every check in
+        # validator.py anchors on `\bvars\.steps\.`, so omitting `vars.` makes
+        # the mistake invisible to the machinery built to catch it — the one
+        # error that consists of not matching the anchor.
+        def _prefix_sub(mobj):
+            fixes.append(CompileError(
+                code=ErrorCode.BAD_VALUE, severity="warning",
+                message=(f"rewrote `steps.{sname}` → `vars.steps.{sname}`: "
+                         f"step output is exposed under `vars`, so a bare "
+                         f"`steps.` reference renders empty at runtime"),
+                path=f"{step.id}",
+            ))
+            return f"vars.steps.{sname}"
+
+        # The lookbehind keeps this off `vars.steps.` (already correct) and off
+        # any `<word>steps.` / `<x>.steps.` that is not the bare form.
+        text = re.sub(rf"(?<![\w.])steps\.{s_re}(?![A-Za-z0-9_])",
+                      _prefix_sub, text)
 
         # Alias forms first: `.result`, `.outputs.result`, etc. → `.data.<sole>`
         # only when the op has exactly one output field (unambiguous).
