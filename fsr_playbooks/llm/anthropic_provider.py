@@ -76,6 +76,50 @@ def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
     return out
 
 
+def _with_history_breakpoint(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add a rolling cache breakpoint on the last block of the last message.
+
+    Without this we cache only the (tools + system) prefix — 2 of the 4
+    breakpoints Anthropic allows — and re-send the whole conversation uncached
+    on every iteration. That is the expensive half of an agentic turn: `history`
+    grows by an assistant block plus a tool_result block per tool call, so a
+    10-tool turn pays full input price on a transcript that is mostly identical
+    to the previous request's.
+
+    Anthropic's cache is prefix-based, so a breakpoint at the END of history
+    makes each request read everything up to the previous request's breakpoint
+    and write only the new increment. Reads bill at 0.1x input; writes at 1.25x
+    for the default 5-minute TTL, which refreshes free on every hit — so a write
+    repays itself after roughly three reads.
+
+    Placement follows the documented rule: mark the last block that is identical
+    across requests. The final block of the current history is exactly that — on
+    the next request it is unchanged and everything after it is new.
+    """
+    if not msgs:
+        return msgs
+    out = list(msgs)
+    last = dict(out[-1])
+    content = last.get("content")
+    # cache_control lives on a content BLOCK, so a bare string must be widened
+    # to a one-element text block first.
+    if isinstance(content, str):
+        if not content:
+            return msgs
+        blocks: list[Any] = [{"type": "text", "text": content}]
+    elif isinstance(content, list) and content:
+        blocks = list(content)
+    else:
+        return msgs
+    tail = blocks[-1]
+    if not isinstance(tail, dict):
+        return msgs
+    blocks[-1] = {**tail, "cache_control": {"type": "ephemeral"}}
+    last["content"] = blocks
+    out[-1] = last
+    return out
+
+
 class AnthropicProvider:
     name = "anthropic"
 
@@ -240,7 +284,7 @@ class AnthropicProvider:
                 model=self.model,
                 max_tokens=max_tokens,
                 system=cached_system,
-                messages=_to_anthropic_messages(history),
+                messages=_with_history_breakpoint(_to_anthropic_messages(history)),
             ) as stream:
                 async for event in stream:
                     if event.type == "content_block_delta" and getattr(
@@ -419,7 +463,7 @@ class AnthropicProvider:
                     model=self.model,
                     max_tokens=4096,
                     system=cached_system,
-                    messages=_to_anthropic_messages(history),
+                    messages=_with_history_breakpoint(_to_anthropic_messages(history)),
                     tools=cached_tools,
                 ) as _stream:
                     async for _ev in _stream:

@@ -194,6 +194,13 @@ def _initialize_impl() -> None:
             continue
         if not isinstance(tools, list):
             continue
+        # Sort by name before registering. The gateway's list_tools() ordering is
+        # not contractual, and REGISTRY insertion order IS the order the tool
+        # array goes on the wire — which is part of the provider prompt-cache
+        # prefix. An ordering wobble between two turns rewrites those bytes and
+        # busts the cache (OpenAI matches the prefix exactly; reads are 90% off,
+        # so a silent miss is a ~10x input-cost regression that raises no error).
+        tools = sorted(tools, key=lambda t: _tool_field(t, "name") or "")
         for tool in tools:
             # pyfsr's native client returns MCPTool pydantic models (dict-style
             # access via _Lenient), while the built-in servers / tests hand back

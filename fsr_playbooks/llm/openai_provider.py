@@ -120,6 +120,57 @@ _ASSESSMENT_DIRECTIVE = (
 )
 
 
+def _max_tokens_param(model: str, value: int) -> dict[str, int]:
+    """The output-cap kwarg for `model`, under its correct name.
+
+    GPT-5 and later reject `max_tokens` outright ("Unsupported parameter:
+    'max_tokens' is not supported with this model. Use 'max_completion_tokens'
+    instead.", HTTP 400) — so sending the old name makes every call to those
+    models fail. Older models (gpt-4o, gpt-4.1*) accept `max_tokens`; some do not
+    yet accept the new name, so we cannot simply always send the new one.
+    """
+    name = "max_completion_tokens" if _is_gpt5_plus(model) else "max_tokens"
+    return {name: value}
+
+
+def _is_gpt5_plus(model: str) -> bool:
+    """True for GPT-5+ ids (``gpt-5``, ``gpt-5.4-nano``, ``gpt-5.6-terra``, …).
+
+    Deliberately prefix-based rather than an allow-list: OpenAI ships new
+    point-releases and named variants continuously, and an allow-list would
+    silently fall back to the old parameter name — i.e. a 400 on every call —
+    for any id we hadn't enumerated yet. Gateways serving non-OpenAI models
+    (GLM via the frank endpoint) don't match and keep the legacy name.
+    """
+    m = (model or "").lower().lstrip("openai/")
+    if not m.startswith("gpt-"):
+        return False
+    ver = m[4:].split("-")[0]           # "5.4" from "gpt-5.4-nano"
+    try:
+        return float(ver) >= 5
+    except ValueError:
+        return False
+
+
+def _cached_tokens(usage: Any) -> int:
+    """Tokens served from OpenAI's prompt cache, or 0 if unreported.
+
+    Chat Completions reports this at ``usage.prompt_tokens_details.cached_tokens``
+    (the Responses API uses ``input_tokens_details`` — we are on the former).
+    Caching is automatic for prompts >=1024 tokens and needs no opt-in; cache
+    reads bill at 90% off. The value is a SUBSET of ``prompt_tokens``, not an
+    addition to it, so cost math must subtract before applying the discount.
+
+    There is no cache-WRITE counterpart on the models we default to: writes are
+    free and unreported pre-GPT-5.6. GPT-5.6+ does report ``cache_write_tokens``
+    (billed 1.25x input) — wire that up here if we ever default to one.
+    """
+    try:
+        return getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
+    except Exception:
+        return 0
+
+
 def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, Any]]:
     """Translate normalized Messages into OpenAI chat shape.
 
@@ -295,19 +346,20 @@ class OpenAIProvider:
             history_chars = len(json.dumps(history, default=str))
         except Exception:
             history_chars = 0
-        input_tok = output_tok = 0
+        input_tok = output_tok = cached_tok = 0
         try:
             stream = await self._client.chat.completions.create(
                 model=self.model,
                 messages=history,
                 stream=True,
-                max_tokens=max_tokens,
+                **_max_tokens_param(self.model, max_tokens),
                 stream_options={"include_usage": True},
             )
             async for chunk in stream:
                 if chunk.usage is not None:
                     input_tok = chunk.usage.prompt_tokens or 0
                     output_tok = chunk.usage.completion_tokens or 0
+                    cached_tok = _cached_tokens(chunk.usage)
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
@@ -316,7 +368,7 @@ class OpenAIProvider:
             yield UsageEvent(
                 session_id=session_id, turn=turn_idx, model=self.model,
                 input_tokens=input_tok, output_tokens=output_tok,
-                cache_read=0, cache_write=0,
+                cache_read=cached_tok, cache_write=0,
                 history_chars=history_chars,
                 stop_reason=stop_reason_label,
                 self_repair_turn=self_repair_turns,
@@ -446,19 +498,20 @@ class OpenAIProvider:
                 text_acc = ""
                 tool_buf: dict[int, dict[str, Any]] = {}
                 finish_reason: str | None = None
-                input_tok = output_tok = 0
+                input_tok = output_tok = cached_tok = 0
                 stream = await self._client.chat.completions.create(
                     model=self.model,
                     messages=history,
                     tools=tools,
                     stream=True,
-                    max_tokens=4096,
+                    **_max_tokens_param(self.model, 4096),
                     stream_options={"include_usage": True},
                 )
                 async for chunk in stream:
                     if chunk.usage is not None:
                         input_tok = chunk.usage.prompt_tokens or 0
                         output_tok = chunk.usage.completion_tokens or 0
+                        cached_tok = _cached_tokens(chunk.usage)
                     if not chunk.choices:
                         continue
                     choice = chunk.choices[0]
@@ -481,12 +534,12 @@ class OpenAIProvider:
                     if choice.finish_reason:
                         finish_reason = choice.finish_reason
                 yield ("final", (text_acc, tool_buf, finish_reason,
-                                 input_tok, output_tok))
+                                 input_tok, output_tok, cached_tok))
 
             text_buf = ""
             tool_buf: dict[int, dict[str, Any]] = {}
             finish_reason = None
-            input_tok = output_tok = 0
+            input_tok = output_tok = cached_tok = 0
             try:
                 async for _kind, _payload in drain_with_idle_timeout(
                     _pump(), timeout=STREAM_TIMEOUT_SECS
@@ -495,7 +548,7 @@ class OpenAIProvider:
                         yield TextEvent(text=_payload)   # live delta
                     else:  # "final"
                         (text_buf, tool_buf, finish_reason,
-                         input_tok, output_tok) = _payload
+                         input_tok, output_tok, cached_tok) = _payload
             except asyncio.TimeoutError:
                 import logging
                 logging.warning("openai stream timed out after %ss", STREAM_TIMEOUT_SECS)
@@ -541,7 +594,7 @@ class OpenAIProvider:
                 return UsageEvent(
                     session_id=session_id, turn=turn_idx, model=self.model,
                     input_tokens=input_tok, output_tokens=output_tok,
-                    cache_read=0, cache_write=0,
+                    cache_read=cached_tok, cache_write=0,
                     history_chars=history_chars,
                     stop_reason=stop_reason,
                     self_repair_turn=self_repair_turns - repair_delta,
