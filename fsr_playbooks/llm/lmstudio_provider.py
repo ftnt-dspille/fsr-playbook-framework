@@ -32,6 +32,7 @@ from openai import (
 )
 
 from ._loop_helpers import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     compile_errors as _compile_errors,
@@ -82,6 +83,10 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, 
 class LMStudioProvider:
     name = "lmstudio"
 
+    # Class-level default so the loop reads a sane cap even on an instance
+    # built without __init__ (tests use `__new__` to drive `_pump` directly).
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+
     def __init__(
         self,
         *,
@@ -89,10 +94,14 @@ class LMStudioProvider:
         api_key: str | None = None,
         model: str | None = None,
         client: AsyncOpenAI | None = None,
+        max_output_tokens: int | None = None,
     ):
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key or DEFAULT_API_KEY
         self.model = model or DEFAULT_MODEL
+        # Shared ceiling — see `_loop_helpers.DEFAULT_MAX_OUTPUT_TOKENS`. A
+        # local model with a smaller context will want this lowered.
+        self.max_output_tokens = max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS
         self._client = client or AsyncOpenAI(
             base_url=self.base_url, api_key=self.api_key, timeout=120.0
         )
@@ -141,7 +150,7 @@ class LMStudioProvider:
                     messages=history,
                     tools=tools,
                     stream=True,
-                    max_tokens=4096,
+                    max_tokens=self.max_output_tokens,
                     stream_options={"include_usage": True},
                 )
                 async for chunk in stream:

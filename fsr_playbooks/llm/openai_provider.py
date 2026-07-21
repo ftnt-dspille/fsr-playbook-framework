@@ -49,6 +49,7 @@ from openai import (
 
 from . import approvals as _approvals
 from ._loop_helpers import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
@@ -94,7 +95,16 @@ DEFAULT_MODEL = (
 # Map the OpenAI tokens onto the same vocabulary Anthropic emits.
 _FINISH_TO_CONTRACT = {
     "stop": "end_turn",
-    "length": "max_turns",
+    # The OUTPUT-TOKEN CAP, and nothing else. This used to map onto
+    # "max_turns", a name that reads as the tool-loop budget — so a build turn
+    # truncated mid-playbook looked like the benign "ran out of steps, send
+    # another message" stop instead of a half-written document. The tool-loop
+    # budget has always had its OWN reason (`max_tool_turns`, emitted by the
+    # loop below), so "max_turns" never meant anything but the token cap; the
+    # collision was purely in the name. Consumers that must treat a cut-off
+    # turn as incomplete (the widget's fence guard, the T1 harness's
+    # DriveError) already accept "max_tokens" alongside the old token.
+    "length": "max_tokens",
     "content_filter": "error",
     "function_call": "end_turn",
     "tool_calls": "end_turn",  # only reached when the tool loop already closed
@@ -224,6 +234,10 @@ def _normalize_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class OpenAIProvider:
     name = "openai"
 
+    # Class-level default so the loop reads a sane cap even on an instance
+    # built without __init__ (tests use `__new__` to drive `_pump` directly).
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+
     def __init__(
         self,
         *,
@@ -232,10 +246,14 @@ class OpenAIProvider:
         model: str | None = None,
         client: AsyncOpenAI | None = None,
         approval_gateway: Any = None,
+        max_output_tokens: int | None = None,
     ):
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key
         self.model = model or DEFAULT_MODEL
+        # Overridable so a deployment pinned to a model with a lower output
+        # limit can lower it without a release. See DEFAULT_MAX_OUTPUT_TOKENS.
+        self.max_output_tokens = max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS
         # max_retries=5 (SDK default is 2). Same rationale as Anthropic:
         # the SDK exponentially backs off on 429/5xx and only successful
         # generations are billed, so a higher ceiling is robust at no cost.
@@ -504,7 +522,7 @@ class OpenAIProvider:
                     messages=history,
                     tools=tools,
                     stream=True,
-                    **_max_tokens_param(self.model, 4096),
+                    **_max_tokens_param(self.model, self.max_output_tokens),
                     stream_options={"include_usage": True},
                 )
                 async for chunk in stream:

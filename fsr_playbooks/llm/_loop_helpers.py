@@ -13,6 +13,29 @@ import re
 from typing import Any
 
 
+# Per-turn OUTPUT-token ceiling, shared by every provider loop.
+#
+# This was a hardcoded 4096 in all three providers — not configurable, not
+# per-intent. A whole real playbook plus the prose that introduces it does not
+# fit in 4096 output tokens, so a build turn physically could not return its
+# document intact: the reply came back cut off mid-word with the token-cap stop
+# reason, and the widget then had to defend against saving the fragment. That
+# is a product limit, not a test artifact.
+#
+# Raised UNIFORMLY rather than per-intent because a cap is a ceiling, not an
+# allocation — you are billed on the tokens actually emitted, so a triage turn
+# that answers in 300 tokens costs exactly the same under a 16k ceiling as
+# under a 4k one. A per-intent budget would buy nothing, and would require
+# plumbing `intent` down into the provider, which is deliberately unaware of it.
+#
+# 16384 is the smallest ceiling that comfortably fits a real playbook while
+# staying within the output limit of every model on this path (gpt-4o caps at
+# exactly 16384; gpt-4.1-mini at 32768). Each provider takes a
+# `max_output_tokens` ctor override so a deployment pinned to a model with a
+# lower limit can drop it without a release.
+DEFAULT_MAX_OUTPUT_TOKENS = 16384
+
+
 # Read-only reference tools: results are deterministic for the same
 # args, so we can replace duplicate tool_results with a stub pointing
 # back at the first call. Excludes anything that mutates remote state

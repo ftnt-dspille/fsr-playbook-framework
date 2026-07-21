@@ -38,6 +38,7 @@ from .provider import (
 )
 from . import approvals as _approvals
 from ._loop_helpers import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
@@ -123,6 +124,10 @@ def _with_history_breakpoint(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]
 class AnthropicProvider:
     name = "anthropic"
 
+    # Class-level default so the loop reads a sane cap even on an instance
+    # built without __init__ (tests use `__new__` to drive `_pump` directly).
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+
     def __init__(
         self,
         *,
@@ -131,8 +136,13 @@ class AnthropicProvider:
         base_url: str | None = None,
         client: AsyncAnthropic | None = None,
         approval_gateway: Any = None,
+        max_output_tokens: int | None = None,
     ):
         self.model = model or DEFAULT_MODEL
+        # Shared ceiling — see `openai_provider.DEFAULT_MAX_OUTPUT_TOKENS` for
+        # why it is uniform rather than per-intent (a cap is a ceiling, not a
+        # spend: you are billed on tokens emitted, not on the limit).
+        self.max_output_tokens = max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS
         # base_url override: point at an Anthropic-compatible gateway/proxy
         # (corporate egress proxy, Bedrock/Vertex-compat shim, a local mock).
         # None → the SDK's default (https://api.anthropic.com). Only forwarded
@@ -461,7 +471,7 @@ class AnthropicProvider:
             async def _pump():
                 async with self._client.messages.stream(
                     model=self.model,
-                    max_tokens=4096,
+                    max_tokens=self.max_output_tokens,
                     system=cached_system,
                     messages=_with_history_breakpoint(_to_anthropic_messages(history)),
                     tools=cached_tools,

@@ -245,10 +245,36 @@ def test_contract_stop_reason_normalizes_openai_finish_reasons():
     # A missing/empty finish_reason is a clean completion → end_turn.
     assert _contract_stop_reason(None) == "end_turn"
     assert _contract_stop_reason("") == "end_turn"
-    # Token-limit truncation maps onto the contract's "max_turns".
-    assert _contract_stop_reason("length") == "max_turns"
+    # Token-limit truncation gets its OWN reason. It used to map onto
+    # "max_turns", which reads as the tool-loop budget — so a build turn cut off
+    # mid-playbook was indistinguishable from the benign "out of tool turns,
+    # send another message" stop. The tool loop emits `max_tool_turns`, so the
+    # two must never share a token again.
+    assert _contract_stop_reason("length") == "max_tokens"
+    assert _contract_stop_reason("length") != "max_turns"
     # Content filter is a terminal error per the contract.
     assert _contract_stop_reason("content_filter") == "error"
     # Already-contract / unknown values pass through unchanged (forward-safe).
     assert _contract_stop_reason("end_turn") == "end_turn"
     assert _contract_stop_reason("awaiting_choice") == "awaiting_choice"
+
+
+def test_output_cap_is_configurable_and_no_longer_4096():
+    """A whole playbook plus its prose does not fit in 4096 output tokens.
+
+    The cap was hardcoded in all three provider loops, so a build turn could
+    not physically return its document intact — it came back truncated with the
+    token-cap stop reason. Pin the raised default and the per-instance override
+    so the limit can never silently drift back to a value a playbook outgrows.
+    """
+    from fsr_playbooks.llm._loop_helpers import DEFAULT_MAX_OUTPUT_TOKENS
+    from fsr_playbooks.llm.lmstudio_provider import LMStudioProvider
+    from fsr_playbooks.llm.openai_provider import OpenAIProvider
+
+    assert DEFAULT_MAX_OUTPUT_TOKENS > 4096
+    # gpt-4o's own output ceiling is exactly 16384 — going above it would 400.
+    assert DEFAULT_MAX_OUTPUT_TOKENS <= 16384
+
+    assert OpenAIProvider(api_key="x").max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS
+    assert OpenAIProvider(api_key="x", max_output_tokens=2048).max_output_tokens == 2048
+    assert LMStudioProvider().max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS
