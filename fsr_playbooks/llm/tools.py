@@ -62,6 +62,12 @@ SAFE_TOOLS: list[str] = [
     "emit_manual_input",
     "emit_capability_gap_card",
     "emit_playbook_offer",
+    # Enhance mode's terminal action — applies a verified edit to the OPEN
+    # playbook. Its sibling emit_playbook_offer CREATES; this one UPDATES.
+    # Without it in the registry the enhance path has no write channel at all,
+    # and the model falls back to printing YAML at the analyst — which is how
+    # edits silently failed to land in live sessions.
+    "emit_enhancement_offer",
     # Value-level fix card: a before→after patch to one step/field of the OPEN
     # playbook, accepted/rejected inline. Build-only (the widget renders it via
     # its patch_proposal card; the connector applies it on accept via reply_tool).
@@ -137,6 +143,10 @@ TOOL_TIERS: dict[str, int] = {
     "emit_manual_input": 0,
     "emit_capability_gap_card": 0,
     "emit_playbook_offer": 0,
+    # Tier 0: emitting the card only shapes local text. The WRITE happens on
+    # the analyst's accept, in the connector, through update_playbook's
+    # snapshot-then-PUT — a human gate, not an agent one.
+    "emit_enhancement_offer": 0,
     # Emitting the card is tier 0 (pure local shaping); the card's own `tier`
     # field is what gates the Apply button client-side, mirroring action_card.
     "emit_patch_proposal": 0,

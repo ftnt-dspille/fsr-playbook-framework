@@ -305,13 +305,39 @@ def _fmg_json_rpc_get(params: dict) -> Any:
     return _fmg_jsonrpc([_fmg_device_row(down=True)], url)
 
 
+def _faz_device_identity(params: dict) -> str:
+    """The single device a bulk-log query is scoped to, or "".
+
+    NOT `devid` — that param is a device-TYPE bucket (All_FortiGate, …) and the
+    real op rejects a hostname there. A per-device scope is expressed in
+    `filter`, as `devname=<host>` (or `devid=<serial>`, which on FAZ log ROWS is
+    the serial). The wrappers were corrected to send that wire shape; this
+    fixture has to match it, or the sim would only agree with a call the
+    appliance rejects — which is how the broken wrapper stayed green offline
+    while failing 100% of the time live.
+    """
+    p = params or {}
+    flt = str(p.get("filter") or "")
+    for key in ("devname=", "devid="):
+        if key in flt:
+            tail = flt.split(key, 1)[1]
+            for sep in (" and ", " or ", " "):
+                if sep in tail:
+                    tail = tail.split(sep, 1)[0]
+            if tail:
+                return tail
+    devid = str(p.get("devid") or "")
+    # A bare bucket names no device; anything else is a legacy/hand-built call.
+    return "" if devid.startswith("All_") else devid
+
+
 def _faz_device_logs(params: dict) -> Any:
-    """FAZ device logs. For a manifest NOC scenario (matched on the queried
-    ``devid``) return that scenario's canned ``faz_logs``; otherwise the default
-    FGT-BRANCH-04 device-down story (WAN1 link-down at 03:11, last keepalive
+    """FAZ device logs. For a manifest NOC scenario (matched on the device the
+    query is scoped to) return that scenario's canned ``faz_logs``; otherwise
+    the default device-down story (WAN1 link-down at 03:11, last keepalive
     03:13:55, then silence)."""
     _noc = _noc_scenarios_or_none()
-    sc = _noc.by_device(str((params or {}).get("devid") or "")) if _noc else None
+    sc = _noc.by_device(_faz_device_identity(params)) if _noc else None
     if sc and sc.get("faz_logs"):
         return {"data": list(sc["faz_logs"])}
     rows = [

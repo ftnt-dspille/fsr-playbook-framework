@@ -18,6 +18,33 @@ DB_PATH = _shared.DB_PATH
 # Constants
 # ---------------------------------------------------------------------------
 
+
+# ── Build the inputs_shape text dynamically from the single source of truth ──
+def _build_inputs_shape_text() -> str:
+    """Generate the inputs_shape docstring from the validator's actual kind set.
+
+    This ensures the taught enum can never drift from the enforcing one. The
+    PicklistMixin._INPUT_FIELD_KINDS dict is the single source of truth;
+    this function builds prose from its keys.
+    """
+    from ..compiler.resolver.picklists import PicklistMixin
+
+    kinds = sorted(PicklistMixin._INPUT_FIELD_KINDS.keys())
+    kinds_str = ", ".join(kinds)
+    return (
+        f"list of {{name, kind, label?, tooltip?, required?, default?, "
+        f"options?}} — kind is one of: {kinds_str}. After "
+        "the operator submits, fields are read at "
+        "`vars.steps.<step_name>.input.<name>`. `kind: select` "
+        "requires `options:` (list of strings or jinja that resolves "
+        "to a list). Prefer the most specific kind for typed values "
+        "(ipv4 over text for IP addresses, etc.)."
+    )
+
+
+_INPUTS_SHAPE_TEXT = _build_inputs_shape_text()
+
+
 _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
     "start": {
         "accepted_keys": ["module", "modules", "button_label",
@@ -269,20 +296,12 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         ),
         "type_value": "InputBased (only valid value; omit to let compiler fill)",
         "options_shape": (
-            "list of {display, next, primary?} dicts. The first option "
+            "list of {display, next, primary?} dicts (`option:` is accepted as "
+            "a synonym — the parser rewrites the surface key `display` to "
+            "the wire key `option`). The first option "
             "is treated as primary unless another carries `primary: true`."
         ),
-        "inputs_shape": (
-            "list of {name, kind, label?, tooltip?, required?, default?, "
-            "options?} — kind is one of: text, textarea, richtext, email, "
-            "url, password, ipv4, ipv6, domain, filehash, integer, "
-            "checkbox, select, datetime, json, picklist, lookup. After "
-            "the operator submits, fields are read at "
-            "`vars.steps.<step_name>.input.<name>`. `kind: select` "
-            "requires `options:` (list of strings or jinja that resolves "
-            "to a list). Prefer the most specific kind for typed values "
-            "(ipv4 over text for IP addresses, etc.)."
-        ),
+        "inputs_shape": _INPUTS_SHAPE_TEXT,
         "example": {
             "type": "manual_input",
             "name": "Triage Decision",

@@ -231,12 +231,22 @@ def test_prompt_grounds_the_designer_in_the_open_playbook_block():
     assert "never ask the analyst to paste" in _FLAT
 
 
-def test_prompt_warns_that_the_last_yaml_fence_wins():
-    # The widget takes the LAST ```yaml fence as the playbook to save and Save
-    # compiles it back over the open record, so a trailing snippet silently
-    # deletes every step it omits (view.controller.js, _extract fence loop).
-    assert "last ```yaml fence" in _FLAT
-    assert "complete revised playbook" in _FLAT
+def test_prompt_delivers_an_edit_through_the_offer_card_not_a_fence():
+    """An edit to the OPEN playbook is delivered by `emit_enhancement_offer`.
+
+    This test used to assert the OPPOSITE — that the prompt tells the model to
+    end with "the complete revised playbook as the last ```yaml fence" —
+    because a prose fence scraped by the widget was the only write path
+    enhance mode had. Live, that path lost the edit: the model verified one
+    document, then re-typed three different ones into chat, and the widget
+    applied the last of them. The fence is no longer the contract; the card
+    is, and it carries the verified bytes so the re-typing cannot happen.
+    """
+    assert "emit_enhancement_offer" in _FLAT
+    assert "verified_id" in _FLAT
+    # The old instruction must be GONE, not merely outvoted by a newer one
+    # further down the prompt.
+    assert "complete revised playbook as the last" not in _FLAT
 
 
 def test_prompt_does_not_offer_a_duplicate_when_a_playbook_is_open():

@@ -1,0 +1,10 @@
+{
+  "name": "e6_broken_edit_is_not_delivered",
+  "prompt": "add a manual input step with a field of kind ip_address",
+  "before_yaml": "collection: 00 - FSR Studio\nplaybooks:\n- name: Suspicious IP Response\n  is_active: true\n  trigger_step_id: start\n  parameters:\n  - ip_to_investigate\n  steps:\n  - type: start\n    name: Start\n    module: alerts\n    button_label: Respond\n    next: Enrich IP\n  - type: connector\n    name: Enrich IP\n    arguments:\n      connector: cyops_utilities\n      operation: no_op\n      params: {}\n    next: Block IP\n  - type: connector\n    name: Block IP\n    arguments:\n      connector: fortigate-firewall\n      operation: block_ip\n      params:\n        method: Quarantine Based\n        ip_addresses: '{{ vars.input.params.ip_to_investigate }}'\n    next: End\n  - type: connector\n    name: End\n    arguments:\n      connector: cyops_utilities\n      operation: no_op\n      params: {}\n",
+  "expect": {
+    "delivery": "none_or_corrected",
+    "must_not_deliver_unverified": true
+  },
+  "notes": "kind: ip_address is not in the validator's enum. Correct outcomes are (a) author ipv4 from the start, or (b) author it, fail verify, fix, deliver. The FAILURE is delivering anyway, or printing the rejected YAML at the analyst as though it were done."
+}

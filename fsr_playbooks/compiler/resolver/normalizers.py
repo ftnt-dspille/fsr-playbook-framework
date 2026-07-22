@@ -1652,6 +1652,10 @@ class NormalizerMixin:
         author provides a conditional param without satisfying its rule,
         FSR still ships the value but the field is hidden in the UI and
         the operation typically rejects it at runtime — silent failures.
+
+        On first report, we emit the ROOT choice and complete feasible
+        parameter sets (not layer-by-layer individual warnings), with
+        severity="error" so FSR cannot hide the conflict behind a warning.
         """
         rules = self.operation_param_rules(connector, operation)
         if not rules:
@@ -1662,9 +1666,59 @@ class NormalizerMixin:
         rules_by_name: dict[str, list[tuple[str | None, str | None]]] = defaultdict(list)
         for name, parent, cond in rules:
             rules_by_name[name].append((parent, cond))
-        # Track conflicts grouped by their *gating* parent param so we can
-        # emit one consolidated `param_set_conflict` summary at the end.
+        # Track conflicts grouped by their ROOT gating parent so we can emit one
+        # consolidated `param_set_conflict` summary at the end. When a param's
+        # parent is itself not visible, we must walk up to find the true root.
+        # This consolidation means the agent sees the full picture in one message
+        # and can fix all incompatible params in one pass, not layer-by-layer.
         conflicts_by_parent: dict[str, list[str]] = {}
+
+        def root_gating_param(p_name: str,
+                              _seen: frozenset[str] = frozenset()) -> str | None:
+            """Walk up the parent chain to the ROOT unsatisfied ancestor.
+
+            A param is visible only if EVERY ancestor is satisfied, so the
+            useful thing to report is the highest unsatisfied one — the actual
+            choice the author has to make. Reporting the immediate parent
+            instead is what made `block_ip` take two rounds to fix: `ip` needs
+            `ip_type`, which needs `method`, and naming `ip_type` first just
+            moved the author one rung up a ladder they couldn't see.
+
+            `_seen` threads down the recursion (a per-call local can't guard a
+            cycle) so a self-referential rule set returns None instead of
+            blowing the stack. Catalogued rules come from vendor metadata, so
+            a malformed cycle is possible and must not crash a compile.
+            """
+            if p_name in _seen:
+                return None
+            _seen = _seen | {p_name}
+            entries = rules_by_name.get(p_name)
+            if not entries:
+                return None
+            # Top-level param → no gating.
+            if any(parent is None for parent, _ in entries):
+                return None
+            parent_param = entries[0][0]
+            if parent_param is None:
+                return None
+            # Parent absent entirely → keep climbing; the root is whatever the
+            # parent itself is waiting on, or the parent when it waits on
+            # nothing.
+            if parent_param not in provided:
+                return root_gating_param(parent_param, _seen) or parent_param
+            # Parent present but itself invisible → report ITS root.
+            parent_root = root_gating_param(parent_param, _seen)
+            if parent_root is not None:
+                return parent_root
+            # Parent visible: is this param's condition on it satisfied?
+            for parent, cond in entries:
+                if parent in provided and str(provided[parent]) == str(cond):
+                    return None  # visible
+            # Parent is visible but holds the WRONG value for this param —
+            # the author picked a branch and then set a param from a different
+            # one. The parent is the gating choice.
+            return parent_param
+
         for p_name, p_value in provided.items():
             entries = rules_by_name.get(p_name)
             if not entries:
@@ -1681,10 +1735,20 @@ class NormalizerMixin:
                     break
             if satisfied:
                 continue
-            # Build a "valid only when …" hint from all the rules.
-            conds = ", ".join(
-                f"{parent}={cond!r}" for parent, cond in entries
-            )
+            # This param is not visible. Walk up to find the root gating param.
+            gating = root_gating_param(p_name)
+            if gating is not None:
+                conflicts_by_parent.setdefault(gating, []).append(p_name)
+
+            # Name the offending param specifically, alongside the consolidated
+            # root-choice message below. The two answer different questions —
+            # "which of my params is wrong" vs "what choice do I have to make"
+            # — and the consolidated one alone cannot say which param triggered
+            # it when several are in play. This is the ONLY diagnostic that
+            # fires when the gating parent IS provided but with a value from
+            # another branch (method='Quarantine Based' + ip_block_policy),
+            # since that case has no missing root to report.
+            conds = ", ".join(f"{parent}={cond!r}" for parent, cond in entries)
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(
@@ -1694,14 +1758,8 @@ class NormalizerMixin:
                 ),
                 path=f"{path}.arguments.params.{p_name}",
                 suggestion=f"set the parent param to match, or remove {p_name!r}",
-                severity="warning",
+                severity="error",
             ))
-            # Pick the first parent listed as the gating select for
-            # grouping; visibility cascades, so the top-of-chain parent
-            # gives the agent the most actionable feasible-set view.
-            gating = entries[0][0]
-            if gating is not None:
-                conflicts_by_parent.setdefault(gating, []).append(p_name)
 
         # One consolidated diagnostic per gating select — lists the full
         # feasible param neighborhood under each option so the agent can
@@ -1725,6 +1783,13 @@ class NormalizerMixin:
                 f"{gating}={opt!r} → {sets_by_option[opt]}"
                 for opt in option_values
             )
+            # Severity: a param-set conflict means FSR will hide the conflicting
+            # params at runtime and likely reject the operation call. This is a
+            # fatal error from the authoring perspective — the code won't work.
+            # We promote to severity="error" so ready_to_push accurately reflects
+            # whether the playbook can execute. This is safe because
+            # operation_param_rules already guards against false positives
+            # (empty-string parent/condition coercion in catalog.py:324-326).
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(
@@ -1737,7 +1802,7 @@ class NormalizerMixin:
                     f"pick one option for {gating!r} and use ONLY the "
                     f"params under it. Feasible sets: {valid_sets_blob}"
                 ),
-                severity="warning",
+                severity="error",
             ))
 
     def _check_conditional_required(

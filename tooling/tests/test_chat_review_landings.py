@@ -181,7 +181,14 @@ playbooks:
 
 def test_visibility_warns_on_inactive_branch_param(db_path):
     """block_ip_new.ip_block_policy is only valid when method='Policy
-    Based'. Setting it under method='Quarantine Based' should warn."""
+    Based'. Setting it under method='Quarantine Based' must be reported.
+
+    Reported as an ERROR rather than a warning: FSR hides the field at
+    runtime and the operation rejects the call, so letting it through as a
+    warning made `verify_playbook` answer ready_to_push=True for a step that
+    cannot execute. A live session shipped exactly that — a green verdict on
+    a containment step the firewall would refuse.
+    """
     text = """
 collection: T
 playbooks:
@@ -203,8 +210,10 @@ playbooks:
         name: End
 """
     r = compile_yaml(text, db_path)
-    msgs = " | ".join(w.message for w in r.warnings)
+    msgs = " | ".join(e.message for e in r.errors)
     assert "ip_block_policy" in msgs and "Policy Based" in msgs
+    # ...and it must actually block, or the promotion bought nothing.
+    assert not r.ok
 
 
 def test_visibility_silent_when_branch_matches(db_path):

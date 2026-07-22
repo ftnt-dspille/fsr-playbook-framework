@@ -621,6 +621,109 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
 
 
 @mcp.tool()
+def emit_enhancement_offer(
+    id: str,
+    summary: str,
+    verified_id: str,
+) -> dict[str, Any]:
+    """Apply a verified edit to the playbook the analyst has OPEN. This is the
+    MANDATORY terminal action of an enhance turn — the only thing that makes an
+    edit real.
+
+    Enhance mode's counterpart to `emit_playbook_offer`. That one CREATES a new
+    playbook; this one UPDATES the open one in place (the connector routes
+    accept through the designer's own snapshot-then-PUT path, so the analyst
+    keeps a restore point in the Versions tab).
+
+    **You do not pass YAML.** You pass the `verified_id` that
+    `verify_enhancement` handed back when it returned `ready_to_push: True`,
+    and the card carries those exact bytes. This is deliberate and it is the
+    whole point of the tool: a live session verified one document and then
+    re-typed a subtly different one into chat three times, the widget scraped
+    the last prose fence, and the analyst's playbook got YAML no gate had ever
+    seen — while the transcript showed a green verify. Removing the parameter
+    removes the failure mode.
+
+    So the enhance turn is exactly:
+        verify_enhancement(before, after, user_message)  ->  verified_id
+        emit_enhancement_offer(id, summary, verified_id) ->  card, turn halts
+
+    Never end an enhance turn by printing the revised playbook and hoping the
+    analyst pastes or saves it. If the verify did not pass, do not call this —
+    fix the findings and re-verify.
+
+    Args:
+      id: stable card id; echoed back on accept/decline.
+      summary: what the analyst reads — one or two plain-English lines on what
+        this edit changes and why (e.g. "Adds a manual-input approval gate
+        before the block, wired Confirm -> Block IP and Cancel -> Manual
+        Review."). Describe the change, not the YAML.
+      verified_id: the handle from the passing `verify_enhancement` call.
+
+    Returns {ok: True, card:{type:"enhancement_offer", ...}} — the card carries
+    `final_yaml` (the verified bytes), `diff_summary`, and any non-blocking
+    `warnings` so the analyst reviews them before applying. On a bad handle
+    returns {ok: False, code: "unknown_verified_id"} — re-run
+    verify_enhancement and use the fresh id; do NOT work around it by
+    presenting YAML in chat."""
+    for label, val in (("id", id), ("summary", summary),
+                       ("verified_id", verified_id)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+
+    from . import _verified_yaml
+    entry = _verified_yaml.lookup(verified_id.strip())
+    if entry is None:
+        return _err(
+            "unknown_verified_id",
+            f"no verified enhancement is registered under {verified_id!r}. A "
+            "verified_id is only valid within the turn that produced it.",
+            suggestions=[
+                "call verify_enhancement(before_yaml, after_yaml, user_message) "
+                "again and pass the verified_id it returns",
+                "do NOT fall back to pasting the YAML into your reply — the "
+                "analyst's playbook is only updated through this card",
+            ],
+        )
+
+    yaml_text = entry["yaml"]
+    ops_summary: list[dict[str, Any]] = []
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text)
+        pbs = (doc or {}).get("playbooks") or []
+        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
+        for s in steps:
+            if isinstance(s, dict) and s.get("name"):
+                ops_summary.append({"label": str(s["name"]),
+                                    "step_type": str(s.get("type") or "")})
+    except Exception:  # noqa: BLE001 — display summary only, never block
+        ops_summary = []
+
+    diff = entry.get("diff_summary") or {}
+    card: dict[str, Any] = {
+        "type": "enhancement_offer",
+        "id": id,
+        "summary": summary,
+        "verified_id": verified_id.strip(),
+        "final_yaml": yaml_text,
+        "ops_summary": ops_summary,
+        "diff_summary": diff,
+        "steps_added": list(diff.get("steps_added") or []),
+        "steps_removed": list(diff.get("steps_removed") or []),
+        "steps_modified": list(diff.get("steps_modified") or []),
+    }
+    # Non-blocking findings still reach the human. verify_enhancement lets
+    # warnings through to ready_to_push, so this card is the last place an
+    # analyst can see "this will compile but the connector will reject it at
+    # runtime" before it becomes their saved playbook.
+    warnings = entry.get("warnings") or []
+    if warnings:
+        card["warnings"] = warnings
+    return {"ok": True, "card": card}
+
+
+@mcp.tool()
 def emit_manual_input(
     id: str,
     workflow_run_iri: str,

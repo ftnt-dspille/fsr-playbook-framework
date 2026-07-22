@@ -794,6 +794,103 @@ def score_offer_timing(trace: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def score_enhance_delivery(trace: list[dict[str, Any]],
+                           assistant_text: str = "") -> dict[str, Any]:
+    """Eval dimension: did the agent actually DELIVER the edit it was asked for?
+
+    The enhance bucket exists because this failed silently and repeatedly on a
+    live appliance. Asked to add a manual_input step, the agent called
+    `verify_enhancement`, got `ready_to_push: True`, then printed the revised
+    playbook into chat — three times, each rendering slightly different from the
+    verified one. Nothing was ever written. From the analyst's seat the agent
+    "kept trying and couldn't"; from the transcript it looked fine, because
+    every tool call returned ok.
+
+    That is exactly the shape a pass/fail on tool ERRORS cannot see, so grade
+    the DELIVERY instead:
+
+    - verified, then `emit_enhancement_offer` with that verify's `verified_id`
+      → pass. The edit reaches the open playbook.
+    - verified, but the turn ended with a YAML fence and no offer
+      → fail (`printed_instead_of_applied`). The original defect, exactly.
+    - offered with a `verified_id` no verify in this trace issued
+      → fail (`unverified_delivery`). Structurally impossible through the tool,
+      so it means a bypass was reintroduced.
+    - never verified → fail (`no_verify`).
+    - verify never passed and nothing was offered → pass. Declining to deliver
+      a broken edit is correct, not a missed delivery.
+
+    Read-only turns have neither call and skip.
+    """
+    verifies = [c for c in trace if c.get("name") == "verify_enhancement"]
+    offers = [c for c in trace if c.get("name") == "emit_enhancement_offer"]
+    has_fence = "```yaml" in (assistant_text or "").lower()
+
+    if not verifies and not offers:
+        return {"passed": True, "skipped": True,
+                "detail": "no enhancement attempted (read-only turn)"}
+
+    # The ids this turn is entitled to deliver. A result may or may not be
+    # threaded onto the call record depending on the harness, so accept either
+    # shape and degrade to "some verify passed" when results aren't present.
+    issued: set[str] = set()
+    any_passed = False
+    for c in verifies:
+        res = c.get("result") if isinstance(c.get("result"), dict) else {}
+        vid = res.get("verified_id")
+        if vid:
+            issued.add(str(vid))
+        if res.get("ready_to_push"):
+            any_passed = True
+
+    if not verifies:
+        return {"passed": False, "skipped": False, "code": "no_verify",
+                "detail": "delivered an edit that was never verified"}
+
+    if not offers:
+        if has_fence:
+            return {
+                "passed": False, "skipped": False,
+                "code": "printed_instead_of_applied",
+                "detail": ("ended with a YAML fence and no emit_enhancement_offer "
+                           "— the analyst's playbook is unchanged"),
+            }
+        if any_passed:
+            return {
+                "passed": False, "skipped": False, "code": "verified_not_applied",
+                "detail": "verify passed but the edit was never delivered",
+            }
+        return {"passed": True, "skipped": False,
+                "detail": "verify did not pass; correctly declined to deliver"}
+
+    if len(offers) > 1:
+        return {"passed": False, "skipped": False, "code": "offered_twice",
+                "detail": f"delivered {len(offers)} times (bar: once)"}
+
+    used = str(_call_args(offers[0]).get("verified_id") or "")
+    if not used:
+        return {"passed": False, "skipped": False, "code": "unverified_delivery",
+                "detail": "offered with no verified_id"}
+    if issued and used not in issued:
+        return {
+            "passed": False, "skipped": False, "code": "unverified_delivery",
+            "detail": (f"offered verified_id {used!r}, which no verify in this "
+                       f"turn issued (issued: {sorted(issued)})"),
+        }
+
+    out: dict[str, Any] = {
+        "passed": True, "skipped": False,
+        "detail": "verified, then delivered those exact bytes",
+    }
+    if has_fence:
+        # Not a failure on its own — showing the CHANGED STEP is encouraged —
+        # but a whole playbook in prose is what the old bug looked like, so
+        # flag it for a human rather than silently passing it.
+        out["needs_review"] = True
+        out["detail"] += " (also printed a YAML fence — confirm it's a snippet)"
+    return out
+
+
 def score(
     yaml_text: str,
     *,

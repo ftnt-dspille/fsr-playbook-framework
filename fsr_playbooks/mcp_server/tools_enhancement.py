@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import _verified_yaml
 from ._shared import mcp
 from .tools_verify import verify_playbook
 
@@ -335,6 +336,13 @@ def verify_enhancement(
       - annotation_modified    (warning)
       - ui_metadata_lost       (warning)
       - behavior_changed_outside_diff (warning) — only when user_message given
+
+    When the verdict passes, the result also carries **`verified_id`** — an
+    opaque handle to the exact `after_yaml` bytes that just cleared the gate.
+    Pass it to `emit_enhancement_offer(verified_id=…)` to apply the edit. That
+    tool takes no YAML, so the document you verified is the document that
+    lands; re-typing the playbook into chat instead is the one way to lose the
+    edit (see `_verified_yaml` for the live failure this closes).
     """
     # 1. Shape check on the after YAML.
     after_result = verify_playbook(after_yaml, live_probe=live_probe)
@@ -356,7 +364,7 @@ def verify_enhancement(
             "note": ("before_yaml did not parse — skipping regression diff; "
                      "treating this as a build-mode verify of after_yaml only"),
         }
-        return out
+        return _issue_verified_id(out, after_yaml, before_yaml)
 
     if after_coll is None:
         # After is broken at parse time. verify_playbook already captured
@@ -365,7 +373,7 @@ def verify_enhancement(
         out["regressions"] = []
         out["diff_summary"] = {"steps_added": [], "steps_removed": [],
                                "steps_modified": [], "unchanged": 0}
-        return out
+        return _issue_verified_id(out, after_yaml, before_yaml)
 
     # 3. Diff.
     regressions, diff_summary = _diff_collections(
@@ -389,4 +397,40 @@ def verify_enhancement(
         )
         out["next_actions"] = next_actions[:5]
 
+    return _issue_verified_id(out, after_yaml, before_yaml)
+
+
+def _issue_verified_id(out: dict[str, Any], after_yaml: str,
+                       before_yaml: str) -> dict[str, Any]:
+    """Bind the verdict to the bytes it blessed, on the way out.
+
+    Only a PASSING verdict gets a handle: `verified_id` is a claim that these
+    exact bytes cleared the gate, so minting one for a failing verify would let
+    `emit_enhancement_offer` apply a document the gate rejected. On a failure we
+    instead say — in the envelope the model actually reads — that the next move
+    is to fix and re-verify, not to paste YAML into chat. The live regression
+    was a model that treated a green verify as permission to free-hand the
+    document; the symmetric risk is treating a red one as advisory.
+    """
+    if not out.get("ready_to_push"):
+        out["verified_id"] = None
+        out["how_to_apply"] = (
+            "NOT ready. Fix the required_fixes/regressions above and call "
+            "verify_enhancement again. Do not present this YAML as final and "
+            "do not ask the analyst to apply it by hand."
+        )
+        return out
+
+    out["verified_id"] = _verified_yaml.remember(
+        after_yaml,
+        before_fingerprint=_verified_yaml.fingerprint(before_yaml),
+        diff_summary=out.get("diff_summary") or {},
+        warnings=out.get("warnings") or [],
+    )
+    out["how_to_apply"] = (
+        "Call emit_enhancement_offer(verified_id=…) to apply this edit. That "
+        "is the ONLY way the edit reaches the analyst's playbook. Do not "
+        "re-type the YAML into your reply — the offer card carries the exact "
+        "text verified here."
+    )
     return out

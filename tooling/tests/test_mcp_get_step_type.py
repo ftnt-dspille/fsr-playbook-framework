@@ -135,3 +135,121 @@ def test_step_type_without_friendly_form_still_returns_examples():
     has something to anchor on."""
     r = mcp_server.get_step_type("ManualTask")
     assert "examples" in r
+
+
+# ---- regression: parallel name lists drift --------------------------------
+
+def test_manual_input_kinds_match_validator():
+    """Regression test for parallel-name-list drift bug.
+
+    The teaching copy (friendly_form.inputs_shape) and the enforcing copy
+    (compiler/typed_args/steps/manual_input.py via PicklistMixin._INPUT_FIELD_KINDS)
+    must stay in sync. This test ensures that the kinds named in get_step_type's
+    response are EXACTLY the ones the validator enforces, so a model authoring
+    a step with a missing-or-new kind fails with the same enum the discovery
+    tool taught.
+    """
+    import re
+    from fsr_playbooks.compiler.resolver.picklists import PicklistMixin
+
+    # Get the taught list from the discovery tool
+    r = mcp_server.get_step_type("manual_input")
+    markdown = r.get("markdown", "")
+    assert markdown, "manual_input should return markdown in slim response"
+
+    # Extract the kinds from the taught text. The format is:
+    # "kind is one of: kind1, kind2, kind3, ... ."
+    kinds_match = re.search(r"kind is one of: ([^.]+)\.", markdown)
+    assert kinds_match, (
+        f"Could not find 'kind is one of:' pattern in markdown; "
+        f"taught text: {markdown[:500]!r}"
+    )
+    taught_kinds = set(k.strip() for k in kinds_match.group(1).split(","))
+
+    # Get the enforced set from the validator
+    enforced_kinds = set(PicklistMixin._INPUT_FIELD_KINDS.keys())
+
+    # They must be identical
+    assert taught_kinds == enforced_kinds, (
+        f"manual_input inputs_shape teaches a different kind set than the "
+        f"validator enforces:\n"
+        f"  Taught: {sorted(taught_kinds)}\n"
+        f"  Enforced: {sorted(enforced_kinds)}\n"
+        f"  Missing from taught: {sorted(enforced_kinds - taught_kinds)}\n"
+        f"  Extra in taught: {sorted(taught_kinds - enforced_kinds)}\n"
+    )
+
+
+def test_manual_input_option_key_taught_is_the_authoring_key():
+    """`display:` is the SURFACE key; `option:` is the WIRE key.
+
+    `parser.py` rewrites `display` → `option` on the way in (same rewrite it
+    does for decision `display`/`when`), so BOTH spellings route correctly and
+    emit byte-identical FSR JSON. This test exists because that equivalence is
+    invisible from the resolver — `normalizers.py` reads only `o.get("option")`,
+    which reads like `display` is unsupported and invites someone to "fix" the
+    docs by teaching the wire key.
+
+    Teaching `option:` here would be a real regression: `decision` steps teach
+    `display:`, so the two branch-bearing step types would disagree on the name
+    of the same concept — exactly the parallel-list drift this suite guards.
+    Assert the taught key, and prove the synonym is genuinely accepted rather
+    than trusting either doc string.
+    """
+    from fsr_playbooks._db import default_db_path
+    from fsr_playbooks.compiler import compile_yaml as _compile
+
+    r = mcp_server.get_step_type("manual_input")
+    markdown = r.get("markdown", "")
+    assert "{display, next, primary?}" in markdown, (
+        "manual_input must teach the surface key `display:` for parity with "
+        f"decision steps; got: {markdown[:400]!r}"
+    )
+
+    pb = """collection: C
+playbooks:
+- name: PB
+  trigger_step_id: start
+  steps:
+  - type: start
+    name: Start
+    module: alerts
+    next: Ask
+  - type: manual_input
+    name: Ask
+    arguments:
+      title: T
+      inputs:
+      - {name: f, kind: text, label: F}
+    options:
+    - {KEY: Approve, primary: true, next: Done}
+    - {KEY: Reject, next: Other}
+  - type: connector
+    name: Done
+    arguments: {connector: cyops_utilities, operation: no_op, params: {}}
+  - type: connector
+    name: Other
+    arguments: {connector: cyops_utilities, operation: no_op, params: {}}
+"""
+
+    def _routes(key: str):
+        res = _compile(pb.replace("KEY", key), default_db_path())
+        assert res.ok, f"{key}: {[e.message for e in res.errors]}"
+        wf = res.fsr_json["data"][0]["workflows"][0]
+        names = {s["uuid"]: s.get("name") for s in wf.get("steps") or []}
+        return sorted(
+            (str(rt.get("label")),
+             names.get(str(rt.get("sourceStep", "")).rsplit("/", 1)[-1]),
+             names.get(str(rt.get("targetStep", "")).rsplit("/", 1)[-1]))
+            for rt in wf.get("routes") or []
+        )
+
+    by_display, by_option = _routes("display"), _routes("option")
+    assert by_display == by_option, (
+        "display/option are documented as synonyms but route differently:\n"
+        f"  display: {by_display}\n  option:  {by_option}"
+    )
+    # Both buttons must actually reach their targets — a dropped `next:` would
+    # leave a prompt whose buttons go nowhere, which still compiles clean.
+    assert ("Approve", "Ask", "Done") in by_display
+    assert ("Reject", "Ask", "Other") in by_display

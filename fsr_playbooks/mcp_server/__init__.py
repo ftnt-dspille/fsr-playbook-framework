@@ -151,6 +151,7 @@ from .tools_emit import (
     emit_capability_gap_card,
     emit_choice_card,
     emit_decision_step,
+    emit_enhancement_offer,
     emit_manual_input,
     emit_patch_proposal,
     emit_playbook_offer,

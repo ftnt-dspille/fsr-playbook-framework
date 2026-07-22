@@ -38,6 +38,9 @@ BUILD_ONLY_TOOLS = frozenset({
     # Value-level fix card for the OPEN playbook — meaningless in triage (there
     # is no playbook open to patch), so keep it out of the triage slice.
     "emit_patch_proposal",
+    # Enhance mode's write path — same reasoning: triage has no open playbook
+    # to update.
+    "emit_enhancement_offer",
 })
 
 # Triage-only tools dropped from the build slice (ROADMAP §4, three-pillar

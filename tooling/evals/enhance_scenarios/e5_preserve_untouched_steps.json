@@ -1,0 +1,15 @@
+{
+  "name": "e5_preserve_untouched_steps",
+  "prompt": "rename the Enrich IP step to Reputation Lookup",
+  "before_yaml": "collection: 00 - FSR Studio\nplaybooks:\n- name: Suspicious IP Response\n  is_active: true\n  trigger_step_id: start\n  parameters:\n  - ip_to_investigate\n  steps:\n  - type: start\n    name: Start\n    module: alerts\n    button_label: Respond\n    next: Enrich IP\n  - type: connector\n    name: Enrich IP\n    arguments:\n      connector: cyops_utilities\n      operation: no_op\n      params: {}\n    next: Block IP\n  - type: connector\n    name: Block IP\n    arguments:\n      connector: fortigate-firewall\n      operation: block_ip\n      params:\n        method: Quarantine Based\n        ip_addresses: '{{ vars.input.params.ip_to_investigate }}'\n    next: End\n  - type: connector\n    name: End\n    arguments:\n      connector: cyops_utilities\n      operation: no_op\n      params: {}\n",
+  "expect": {
+    "delivery": "emit_enhancement_offer",
+    "must_preserve": [
+      "Start",
+      "Block IP",
+      "End"
+    ],
+    "expect_regression_warning": "step_renamed_silently"
+  },
+  "notes": "An EXPLICITLY requested rename. verify_enhancement flags renames as an error-severity regression because they break external vars.steps.<slug>.* consumers \u2014 so the agent must surface that consequence rather than either silently doing it or refusing."
+}

@@ -96,6 +96,8 @@ CHAT_FAST_TESTS := \
 	fsr_playbooks/tests/test_intent_slice_and_params.py \
 	fsr_playbooks/tests/test_build_prompt_skeleton.py \
 	fsr_playbooks/tests/test_playbook_offer.py \
+	fsr_playbooks/tests/test_enhancement_offer.py \
+	tooling/tests/test_evals_enhance_delivery.py \
 	tooling/tests/test_run_turn.py \
 	tooling/tests/test_catalog_tools.py \
 	tooling/tests/test_emitter.py \

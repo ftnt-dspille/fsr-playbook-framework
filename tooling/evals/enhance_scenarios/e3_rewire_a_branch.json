@@ -1,0 +1,16 @@
+{
+  "name": "e3_rewire_a_branch",
+  "prompt": "only block the IP if the reputation came back malicious \u2014 otherwise just end",
+  "before_yaml": "collection: 00 - FSR Studio\nplaybooks:\n- name: Suspicious IP Response\n  is_active: true\n  trigger_step_id: start\n  parameters:\n  - ip_to_investigate\n  steps:\n  - type: start\n    name: Start\n    module: alerts\n    button_label: Respond\n    next: Enrich IP\n  - type: connector\n    name: Enrich IP\n    arguments:\n      connector: cyops_utilities\n      operation: no_op\n      params: {}\n    next: Block IP\n  - type: connector\n    name: Block IP\n    arguments:\n      connector: fortigate-firewall\n      operation: block_ip\n      params:\n        method: Quarantine Based\n        ip_addresses: '{{ vars.input.params.ip_to_investigate }}'\n    next: End\n  - type: connector\n    name: End\n    arguments:\n      connector: cyops_utilities\n      operation: no_op\n      params: {}\n",
+  "expect": {
+    "delivery": "emit_enhancement_offer",
+    "steps_added": 1,
+    "must_preserve": [
+      "Start",
+      "Enrich IP",
+      "Block IP",
+      "End"
+    ]
+  },
+  "notes": "Rewiring, not appending: a decision step is inserted and Enrich IP's next: is repointed. The byte-identical rule still binds on every step the analyst did not name \u2014 a gratuitous rename of Block IP detaches its run history."
+}
