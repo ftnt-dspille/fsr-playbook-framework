@@ -676,3 +676,79 @@ def compile_errors(yaml_text: str) -> str | None:
             line += f"  → {e.suggestion}"
         lines.append(line)
     return "\n".join(lines)
+
+
+# ─────────────────────── enhance-delivery guard ──────────────────────
+#
+# The enhance turn's terminal action — `emit_enhancement_offer` — is the ONLY
+# thing that applies a verified edit to the playbook the analyst has open.
+# System-prompt prose calls it "the MANDATORY terminal action", but a weak
+# model routinely VERIFIES the edit (gets `ready_to_push: True` + a
+# `verified_id`) and then, instead of calling the tool, writes a sentence like
+# "Call emit_enhancement_offer with verified_id abc… to apply this" and ends
+# the turn. From the analyst's seat nothing changed — the exact live failure
+# the offer tool was built to remove, resurfacing one layer up (narrated, not
+# fenced). Grading it offline (`score_enhance_delivery`) catches it after the
+# fact; this guard catches it structurally, in the loop, the same way the P1
+# forced-assessment guard guarantees a written close.
+#
+# This is a DETECTOR only — model-agnostic, no I/O. Each provider feeds it every
+# executed tool result via `note_result`, and at the terminal exit asks
+# `outstanding()` whether a verify passed with no offer to follow. If so the
+# provider runs ONE `tool_choice`-pinned round forcing the call (and overrides
+# `verified_id` with the handle recorded here, so a forced round can't deliver
+# the wrong bytes). Capped at one force via `mark_forced()` so it can't loop.
+
+_ENHANCE_VERIFY_TOOL = "verify_enhancement"
+_ENHANCE_OFFER_TOOL = "emit_enhancement_offer"
+
+
+class EnhanceDeliveryGuard:
+    """Tracks whether an enhance turn verified an edit but never delivered it.
+
+    Fires only when the offer tool is in the advertised slice (enhance mode) —
+    build-new-playbook and triage turns never advertise it, so the guard is
+    inert there.
+    """
+
+    def __init__(self) -> None:
+        # The most recent PASSING verify's handle + a summary hint from its
+        # diff. Latest wins: a turn may verify several times while iterating,
+        # and only the last blessed bytes are what the analyst should get.
+        self._verified_id: str | None = None
+        self._summary_hint: str = ""
+        self._delivered = False
+        self._forced = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Fold one executed tool result into the delivery state."""
+        if name == _ENHANCE_OFFER_TOOL:
+            # An offer was attempted. Only a genuinely successful one counts as
+            # delivery; a rejected handle (`unknown_verified_id`) still needs a
+            # forced re-delivery, so leave `_delivered` False in that case.
+            if not (isinstance(result, dict) and result.get("ok") is False):
+                self._delivered = True
+            return
+        if name != _ENHANCE_VERIFY_TOOL or not isinstance(result, dict):
+            return
+        if result.get("ready_to_push") and result.get("verified_id"):
+            self._verified_id = str(result["verified_id"])
+            diff = result.get("diff_summary")
+            if isinstance(diff, dict) and diff.get("summary"):
+                self._summary_hint = str(diff["summary"])
+
+    def outstanding(self, allowed_names: set[str]) -> str | None:
+        """The verified_id that a passing verify blessed but no offer applied,
+        or None. Returns None once forced, so the guard fires at most once."""
+        if _ENHANCE_OFFER_TOOL not in allowed_names:
+            return None
+        if self._forced or self._delivered or not self._verified_id:
+            return None
+        return self._verified_id
+
+    @property
+    def summary_hint(self) -> str:
+        return self._summary_hint
+
+    def mark_forced(self) -> None:
+        self._forced = True

@@ -43,7 +43,9 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    EnhanceDeliveryGuard,
     TriageDiscipline,
+    _ENHANCE_OFFER_TOOL,
     compile_errors as _compile_errors,
     drain_with_idle_timeout,
     extract_yaml_block as _extract_yaml_block,
@@ -64,6 +66,18 @@ _ASSESSMENT_DIRECTIVE = (
     "calling tools. In a short written assessment, tell the analyst: "
     "(1) what you found, (2) your severity / disposition verdict, and "
     "(3) the single recommended next action. Be concise and do not call tools."
+)
+
+# Forced enhance-delivery round (mirrors OpenAIProvider._DELIVERY_DIRECTIVE).
+# A verify passed but no emit_enhancement_offer followed — force the call via
+# tool_choice and override verified_id afterward so the forced round can only
+# apply the blessed bytes.
+_DELIVERY_DIRECTIVE = (
+    "You verified an edit to the open playbook and it is ready to apply, but "
+    "you have not delivered it. Call `emit_enhancement_offer` now with "
+    "verified_id {vid!r} to apply it — a written description is NOT a "
+    "substitute for the call. Write the `summary` as one or two plain-English "
+    "lines describing what the edit changes."
 )
 
 
@@ -336,6 +350,10 @@ class AnthropicProvider:
         # caps the guarantee at one extra round so it can't loop.
         any_tools_run = False
         assessment_forced = False
+        # Enhance mode: guarantees a passing verify is delivered via
+        # emit_enhancement_offer rather than narrated. Inert unless the offer
+        # tool is in the advertised slice (see EnhanceDeliveryGuard).
+        _delivery = EnhanceDeliveryGuard()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
@@ -608,6 +626,60 @@ class AnthropicProvider:
                                 tool_calls=tool_call_usage, tags=tags,
                             )
                             continue
+                # Enhance-delivery guard — a verify passed but no offer
+                # followed. Force ONE round pinned to emit_enhancement_offer so
+                # the delivery is a real tool call, then override verified_id
+                # with the blessed handle so the forced call can only apply the
+                # bytes the gate actually cleared.
+                _vid = _delivery.outstanding(allowed_names)
+                if _vid is not None:
+                    _delivery.mark_forced()
+                    yield UsageEvent(
+                        session_id=session_id, turn=turn_idx, model=self.model,
+                        input_tokens=input_tok, output_tokens=output_tok,
+                        cache_read=cache_hit, cache_write=cache_write,
+                        history_chars=history_chars,
+                        stop_reason="enhance_delivery_forced",
+                        self_repair_turn=self_repair_turns,
+                        tool_calls=tool_call_usage, tags=tags,
+                    )
+                    offer_schema = next(
+                        (t for t in tools
+                         if t.get("name") == _ENHANCE_OFFER_TOOL), None)
+                    if offer_schema is not None:
+                        turn_idx += 1
+                        history.append(Message(
+                            role="user",
+                            content=_DELIVERY_DIRECTIVE.format(vid=_vid)))
+                        try:
+                            resp = await self._client.messages.create(
+                                model=self.model, max_tokens=512,
+                                system=cached_system,
+                                messages=_with_history_breakpoint(
+                                    _to_anthropic_messages(history)),
+                                tools=[offer_schema],
+                                tool_choice={"type": "tool",
+                                             "name": _ENHANCE_OFFER_TOOL},
+                            )
+                            tu = next((b for b in resp.content
+                                       if getattr(b, "type", None) == "tool_use"),
+                                      None)
+                            oargs = dict(getattr(tu, "input", {}) or {}) if tu else {}
+                            # Never trust a forced round to carry the handle.
+                            oargs["verified_id"] = _vid
+                            call_id = getattr(tu, "id", None) or _uuid.uuid4().hex[:8]
+                            yield ToolUseEvent(
+                                name=_ENHANCE_OFFER_TOOL, arguments=oargs,
+                                call_id=call_id,
+                                tier=_tier_for(_ENHANCE_OFFER_TOOL, oargs))
+                            oresult = _guarded_dispatch(_ENHANCE_OFFER_TOOL, oargs)
+                            yield ToolResultEvent(
+                                call_id=call_id, result=oresult)
+                        except Exception:
+                            import logging
+                            logging.exception("forced enhance delivery failed")
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
                 # P1 — forced-assessment guarantee. The turn ran tools but
                 # the final assistant block has no text (only tool_use /
                 # emitted cards). Emit the usage for the round we paid for,
@@ -664,6 +736,7 @@ class AnthropicProvider:
                 # Build the tool_result block + fold usage. Returns the block
                 # so callers can both append it and (for parallel calls) keep
                 # tool_use order intact.
+                _delivery.note_result(name, args, result)
                 content_str = _stringify(result)
                 block = {
                     "type": "tool_result",

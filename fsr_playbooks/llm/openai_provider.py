@@ -54,7 +54,9 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    EnhanceDeliveryGuard,
     TriageDiscipline,
+    _ENHANCE_OFFER_TOOL,
     compile_errors as _compile_errors,
     drain_with_idle_timeout,
     extract_yaml_block as _extract_yaml_block,
@@ -127,6 +129,19 @@ _ASSESSMENT_DIRECTIVE = (
     "calling tools. In a short written assessment, tell the analyst: "
     "(1) what you found, (2) your severity / disposition verdict, and "
     "(3) the single recommended next action. Be concise and do not call tools."
+)
+
+# Forced enhance-delivery round. The turn verified an edit (ready_to_push) but
+# ended without calling `emit_enhancement_offer` — usually narrating the call
+# instead of making it. We pin `tool_choice` to the offer tool so the CALL is
+# structural, and override `verified_id` afterward so a forced round can only
+# deliver the blessed bytes. Directive is belt-and-suspenders for the summary.
+_DELIVERY_DIRECTIVE = (
+    "You verified an edit to the open playbook and it is ready to apply, but "
+    "you have not delivered it. Call `emit_enhancement_offer` now with "
+    "verified_id {vid!r} to apply it — a written description is NOT a "
+    "substitute for the call. Write the `summary` as one or two plain-English "
+    "lines describing what the edit changes."
 )
 
 
@@ -415,6 +430,10 @@ class OpenAIProvider:
         self_repair_turns = 0
         any_tools_run = False
         assessment_forced = False
+        # Enhance mode: guarantees a passing verify is actually delivered via
+        # emit_enhancement_offer rather than narrated. Inert unless the offer
+        # tool is in the advertised slice (see EnhanceDeliveryGuard).
+        _delivery = EnhanceDeliveryGuard()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
@@ -638,6 +657,64 @@ class OpenAIProvider:
                             yield _emit_usage(finish_reason or "", repair_delta=1)
                             continue
 
+                # Enhance-delivery guard — a verify passed but no offer
+                # followed. Force ONE round pinned to emit_enhancement_offer so
+                # the delivery is a real tool call, then override verified_id
+                # with the blessed handle so the forced call can only apply the
+                # bytes the gate actually cleared.
+                _vid = _delivery.outstanding(allowed_names)
+                if _vid is not None:
+                    _delivery.mark_forced()
+                    yield _emit_usage("enhance_delivery_forced")
+                    offer_schema = next(
+                        (t for t in tools
+                         if (t.get("function") or {}).get("name")
+                         == _ENHANCE_OFFER_TOOL), None)
+                    if offer_schema is not None:
+                        turn_idx += 1
+                        history.append({
+                            "role": "user",
+                            "content": _DELIVERY_DIRECTIVE.format(vid=_vid),
+                        })
+                        try:
+                            resp = await self._client.chat.completions.create(
+                                model=self.model, messages=history,
+                                tools=[offer_schema],
+                                tool_choice={
+                                    "type": "function",
+                                    "function": {"name": _ENHANCE_OFFER_TOOL},
+                                },
+                                **_max_tokens_param(self.model, 512),
+                            )
+                            msg = resp.choices[0].message
+                            raw = (msg.tool_calls[0].function.arguments
+                                   if msg.tool_calls else "{}")
+                            try:
+                                oargs = json.loads(raw) if raw else {}
+                            except Exception:
+                                oargs = {}
+                            if not isinstance(oargs, dict):
+                                oargs = {}
+                            # The whole point of the guard: never trust a
+                            # forced round to carry the right handle.
+                            oargs["verified_id"] = _vid
+                            call_id = (msg.tool_calls[0].id
+                                       if msg.tool_calls else _uuid.uuid4().hex[:8])
+                            yield ToolUseEvent(
+                                name=_ENHANCE_OFFER_TOOL, arguments=oargs,
+                                call_id=call_id,
+                                tier=_tier_for(_ENHANCE_OFFER_TOOL, oargs))
+                            _t0 = time.perf_counter()
+                            oresult = _guarded_dispatch(_ENHANCE_OFFER_TOOL, oargs)
+                            _dur = int((time.perf_counter() - _t0) * 1000)
+                            yield ToolResultEvent(
+                                call_id=call_id, result=oresult, duration_ms=_dur)
+                        except Exception:
+                            import logging
+                            logging.exception("forced enhance delivery failed")
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
+
                 if not text_buf.strip() and any_tools_run and not assessment_forced:
                     assessment_forced = True
                     yield _emit_usage("assessment_forced")
@@ -698,6 +775,7 @@ class OpenAIProvider:
                 for (call_id, name, args), (result, dur_ms) in zip(parallel_batch, batch_results):
                     yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
                     content_str = _record(name, args, result, dur_ms)
+                    _delivery.note_result(name, args, result)
                     tool_messages.append({
                         "role": "tool", "tool_call_id": call_id, "content": content_str,
                     })
@@ -756,6 +834,7 @@ class OpenAIProvider:
 
                 yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
                 content_str = _record(name, args, result, dur_ms)
+                _delivery.note_result(name, args, result)
                 tool_messages.append({
                     "role": "tool", "tool_call_id": call_id, "content": content_str,
                 })
