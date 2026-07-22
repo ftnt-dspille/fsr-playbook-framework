@@ -328,13 +328,38 @@ _CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
 # Evidence-gathering tools that count toward the floor. get_record (the alert
 # pull) and the find_* discovery meta-tools are deliberately EXCLUDED so the
 # floor forces real evidence beyond pulling the record + listing actions.
-_INVESTIGATION_TOOLS: frozenset[str] = frozenset({
+#
+# MUTABLE on purpose, same Option-A posture as `intents.TRIAGE_ONLY_TOOLS`: the
+# connector registers its own read-only hunt tools at import
+# (`fsr_soc_triage.registry`) and extends this set with them. An explicit list
+# alone silently under-counts every tool the framework doesn't know by name —
+# which is exactly how a real GA investigation that ran `fmg_get_device_status`,
+# `fmg_get_ha_status`, `fmg_get_policy_package_status` and
+# `faz_search_device_events` scored **0 of 3** evidence calls and left
+# containment locked on the analyst's follow-up "isolate that host" turn.
+_INVESTIGATION_TOOLS: set[str] = {
     "search_module_records", "run_op",
     "siem_events_for_incident", "siem_search_host", "siem_search_ip",
     "get_host_context", "get_user_context", "get_ip_context",
     "get_device_info", "get_incident_details", "get_associated_events_new",
     "faz_get_alerts", "faz_search_ip", "faz_raw_query",
-})
+}
+# Second line of defence against the same drift: whole read-only hunt FAMILIES
+# count even when an individual name was never registered here. These prefixes
+# are only ever used by SIEM / FortiAnalyzer / FortiManager query tools, all of
+# which are genuine evidence gathering.
+_INVESTIGATION_PREFIXES: tuple[str, ...] = ("siem_", "faz_", "fmg_")
+
+
+def counts_as_investigation(name: str) -> bool:
+    """True when `name` is evidence gathering and should credit the hunt floor."""
+    return name in _INVESTIGATION_TOOLS or name.startswith(_INVESTIGATION_PREFIXES)
+
+
+def credit_as_investigation(*names: str) -> None:
+    """Register extra tool names as hunt-floor evidence (used by the connector's
+    triage registry so its hunt tools aren't invisible to the floor)."""
+    _INVESTIGATION_TOOLS.update(n for n in names if n)
 # Discovery tools that return their full set in one shot FOR A GIVEN INDICATOR
 # TYPE — a second call with the SAME target_type is pure waste, but these tools
 # are `target_type`-scoped (ip/domain/hash/endpoint/…) and filter their result
@@ -561,7 +586,7 @@ class TriageDiscipline:
             self._called.add(name)
             if name in _CALL_ONCE_DISCOVERY:
                 self._called.add(_call_once_sig(name, args))
-            if name in _INVESTIGATION_TOOLS:
+            if counts_as_investigation(name):
                 self.invest_attempts += 1
                 # Once floor is met, mark it in the shared state
                 if (self._shared_state is not None and

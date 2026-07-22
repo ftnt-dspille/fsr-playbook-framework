@@ -439,3 +439,31 @@ def test_no_capabilities_note_result_noop():
     d.note_result("run_op", {"connector": "x"}, {
         "ok": False, "code": "connector_not_configured"})
     assert d.evaluate("run_op", {"connector": "x"}) is None
+
+
+# ───────────── hunt floor credits the connector's hunt families ─────────────
+
+def test_fmg_faz_hunt_tools_credit_the_floor():
+    """Regression (GA beat-5): an investigation driven entirely through the
+    connector-registered FortiManager/FortiAnalyzer hunt tools scored **0 of 3**
+    evidence calls, so the analyst's follow-up "isolate that host" was refused
+    as un-scoped and the assistant never staged containment. Those names were
+    never in the framework's hardcoded evidence list; the family prefixes are
+    the structural fix."""
+    d = TriageDiscipline()
+    for name in ("fmg_get_device_status", "fmg_get_ha_status",
+                 "faz_search_device_events"):
+        assert _drive(d, name, {}) is None
+    assert d.invest_attempts == MIN_INVESTIGATION_BEFORE_CONTAINMENT
+    # Floor met → containment discovery is allowed.
+    assert _drive(d, "find_containment_actions", {"target_type": "host"}) is None
+
+
+def test_credit_as_investigation_registers_extra_names():
+    from fsr_playbooks.llm import _loop_helpers as lh
+    assert not lh.counts_as_investigation("edr_list_processes")
+    lh.credit_as_investigation("edr_list_processes")
+    try:
+        assert lh.counts_as_investigation("edr_list_processes")
+    finally:
+        lh._INVESTIGATION_TOOLS.discard("edr_list_processes")
