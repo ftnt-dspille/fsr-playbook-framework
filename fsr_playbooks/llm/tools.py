@@ -254,6 +254,28 @@ def _op_presence(connector: str, op: str) -> tuple[bool, bool]:
         return False, False
 
 
+def _op_name_is_destructive(op: str) -> bool:
+    """True when an op NAME alone marks it as a containment/response action.
+
+    Reuses the exact verb + non-action-prefix lists
+    `find_containment_actions` classifies with, so discovery and the approval
+    gate can never disagree about what counts as containment. Imported lazily:
+    `tools_connector_discovery` lives under `mcp_server`, which this module
+    imports at load time.
+    """
+    nm = (op or "").lower()
+    if not nm:
+        return False
+    try:
+        from ..mcp_server.tools_connector_discovery import (
+            _CONTAINMENT_VERBS, _NON_ACTION_PREFIXES)
+    except Exception:  # noqa: BLE001 — never harden a tier lookup into a crash
+        return False
+    if nm.startswith(_NON_ACTION_PREFIXES):
+        return False
+    return any(v in nm for v in _CONTAINMENT_VERBS)
+
+
 def _tier_for_run_op(args: dict[str, Any]) -> int:
     """Resolve effective tier for a `run_op` call from op_safety + category.
 
@@ -278,6 +300,17 @@ def _tier_for_run_op(args: dict[str, Any]) -> int:
         # this ordering they auto-allow at tier 2 (no approval card) AND get
         # dropped from find_containment_actions' tier>=3 guard — so "isolate
         # this host" would execute ungated and the proper op wouldn't surface.
+        return 4
+    if _op_name_is_destructive(op):
+        # The op_safety probe is the PRIMARY signal above, but it is not always
+        # populated — on a live 8.0 box only 391 of 466 catalogued ops carried a
+        # safety verdict, and FortiEDR's `isolate_collector` was among the gaps.
+        # Category `investigation` then won and the op resolved to tier 2:
+        # `run_op` would have ISOLATED A HOST with no approval card, and
+        # find_containment_actions dropped it from the tier>=3 slice, so
+        # "isolate that host" was answered with `remediate_device` (Kill
+        # Process) instead. The op NAME carries the same information the probe
+        # was supposed to supply, so use it as the fail-safe.
         return 4
     if safety == "safe" or category in _SAFE_CATEGORIES:
         # Third-party query → tier 2; FSR-internal query → tier 1.

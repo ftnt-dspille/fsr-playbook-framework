@@ -467,3 +467,27 @@ def test_credit_as_investigation_registers_extra_names():
         assert lh.counts_as_investigation("edr_list_processes")
     finally:
         lh._INVESTIGATION_TOOLS.discard("edr_list_processes")
+
+
+# ───────── destructive-op-name fail-safe for the approval tier ─────────
+
+def test_containment_verb_in_op_name_escalates_tier():
+    """Regression (GA beat-5): FortiEDR's `isolate_collector` is categorized
+    `investigation` in the catalog and had NO op_safety verdict on the live box,
+    so it resolved to tier 2 — `run_op` would have isolated a host with no
+    approval card, and find_containment_actions dropped it from the tier>=3
+    slice. The op name is the fail-safe signal."""
+    from fsr_playbooks.llm.tools import _op_name_is_destructive, _tier_for_run_op
+
+    assert _op_name_is_destructive("isolate_collector")
+    assert _op_name_is_destructive("block_ip")
+    assert _op_name_is_destructive("quarantine_file")
+    # Un-doing containment and every read prefix stay non-destructive.
+    assert not _op_name_is_destructive("unisolate_collector")
+    assert not _op_name_is_destructive("get_blocked_ip")
+    assert not _op_name_is_destructive("list_quarantined_files")
+    assert not _op_name_is_destructive("ip_reputation")
+
+    # An unclassified op whose name says "isolate" must require approval.
+    assert _tier_for_run_op(
+        {"connector": "fortinet-fortiedr", "op": "isolate_collector"}) >= 3
