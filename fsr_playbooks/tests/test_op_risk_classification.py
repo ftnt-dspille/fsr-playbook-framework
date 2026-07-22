@@ -103,6 +103,9 @@ def test_edr_collector_inventory_is_host_enrichment():
     assert _is_enrichment_op("get_agent_group", "get agent groups", "host")
     # A collector op is NOT an IP enrichment — it names a different indicator.
     assert not _is_enrichment_op("get_collector_list", "get collector list", "ip")
+    # ...but widening the host family must not drag in mutations or self-plumbing.
+    assert not _is_enrichment_op("move_collectors", "move collectors", "host")
+    assert not _is_enrichment_op("list_agent_tools", "list agent tools", "host")
 
     # The two lists may diverge elsewhere on purpose (ip drops address/blacklist),
     # but every host/endpoint term the containment finder knows must be here too.

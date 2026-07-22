@@ -157,11 +157,17 @@ _ENRICHMENT_EXCLUDE_VERBS: tuple[str, ...] = (
     "re_analyze", "reanalyze", "re_scan", "rescan", "re-scan", "upload",
     "submit", "detonate", "create", "add_", "delete_", "remove_", "update_",
     "set_", "post_", "put_", "scan_", "_scan",
+    # `move_collectors` reassigns collector group membership — a mutation, and
+    # never something to present to the analyst as a read-only lookup.
+    "move_",
 )
 
 
 _ENRICHMENT_NOISE: frozenset = frozenset({
     "execute_an_api_request", "custom_endpoint",
+    # The assistant's OWN tool-listing op. It matches the host family via the
+    # `agent` token but is self-referential plumbing, not enrichment.
+    "list_agent_tools",
 })
 
 
