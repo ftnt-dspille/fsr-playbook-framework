@@ -107,3 +107,8 @@ CLAUDE.md
 
 # runtime logs (local only)
 logs/
+
+# Pulled-from-appliance playbook corpus (F4 / compiler fidelity gate).
+# 14MB, 1389 files. Local-only until the licensing/PII review in
+# docs/plans/playbook-compiler-fidelity-and-agent-surface.md R1 is done.
+scratch/f4_failing/
