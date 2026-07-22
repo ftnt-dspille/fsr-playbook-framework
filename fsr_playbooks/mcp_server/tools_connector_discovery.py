@@ -124,10 +124,21 @@ _INTEL_TOKENS: tuple[str, ...] = (
 )
 
 
+# Kept deliberately NARROWER than `_TARGET_KEYWORDS` in places ("address" /
+# "blacklist" are absent from `ip` on purpose — see _is_enrichment_op), but the
+# HOST family must name the same things both lists call a host. It didn't:
+# `collector` and `agent` were in the containment keywords and missing here, so
+# FortiEDR's `get_collector_list` was invisible to find_enrichment_actions. An
+# investigation therefore could not ask the obvious question — "does this host
+# even have an EDR agent, and what state is it in?" — and the host's absence
+# from EDR only surfaced when the containment action failed at execution time
+# with a 400.
 _INDICATOR_TOKENS: dict[str, tuple[str, ...]] = {
     "ip": ("ip",),
-    "host": ("host", "endpoint", "device", "machine", "asset"),
-    "endpoint": ("endpoint", "host", "device", "machine", "agent"),
+    "host": ("host", "endpoint", "device", "machine", "asset", "agent",
+             "collector"),
+    "endpoint": ("endpoint", "host", "device", "machine", "agent",
+                 "collector"),
     "user": ("user", "account", "identity", "credential", "login"),
     "url": ("url", "uri"),
     "domain": ("domain", "fqdn", "dns"),
