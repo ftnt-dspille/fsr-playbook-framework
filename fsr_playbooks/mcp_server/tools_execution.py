@@ -1629,6 +1629,18 @@ def run_op(
                 (f"%{connector}%",),
             ).fetchall()]
     if crow is None:
+        # Before declaring it nonexistent, ask the box. A connector installed
+        # after the last warmup is absent from the catalog but present on the
+        # appliance, and "not found in store" then reads as "doesn't exist" —
+        # sending the agent off to substitute some unrelated connector. See
+        # _shared.stale_catalog_hint.
+        stale = _shared.stale_catalog_hint(connector)
+        if stale is not None:
+            return _err(
+                stale["code"], stale["message"],
+                suggestions=stale["suggestions"],
+                connector=connector,
+            )
         return _err(
             "unknown_connector",
             f"connector '{connector}' not found in store",

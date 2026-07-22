@@ -4,6 +4,8 @@ from . import _shared
 
 import difflib
 import json
+import os
+import re
 import sqlite3
 import sys
 from typing import Any
@@ -74,6 +76,70 @@ def _connector_config_required(config_schema_json: Any) -> bool:
     if isinstance(schema, list):
         return bool(schema)
     return False
+
+
+def _plausible_name_matches(q: str, all_names: list[str],
+                            n: int = 3) -> list[str]:
+    """Catalog names close enough to ``q`` to be worth showing as a TYPO guess.
+
+    A near-match suggestion is only useful if it might genuinely be the same
+    thing spelled differently. Plain edit distance is not that test: at the old
+    cutoff (0.45) "siem" scored against "smtp"/"imap" and "crowdstrike" against
+    "cyops_utilities", and the tool presented those as "did you mean…?". The
+    model relayed them to the analyst as real findings — a wrong answer is far
+    more expensive here than no answer, because it sends the whole turn down a
+    false path (LIVE: sessions sess-ykhuxc3g / sess-x0csi5cf).
+
+    So require actual lexical evidence, not just a ratio:
+
+      * substring containment either way (>= 4 chars), or
+      * a shared prefix that is both >= 4 chars AND >= 70% of the LONGER of
+        the two, or
+      * a high difflib ratio (>= 0.85) against the name or one of its tokens.
+
+    The prefix rule needs that 70% floor because a whole vendor family shares a
+    stem: "fortianalyzer" and "fortigate-cloud" share "forti", which on a bare
+    >=4 test made every Fortinet connector a near match for every other one.
+    Measuring against the LONGER string additionally stops a short token from
+    being easy to match — "fortianalyzer" vs the token "fortiai" shares 6 chars,
+    which is 86% of "fortiai" but only 46% of the query, and they are unrelated
+    products. Real typos (fortgate → fortigate-firewall) still land via ratio.
+
+    The ratio floor is 0.85 rather than a conventional ~0.7 for the same
+    reason: a shared vendor stem alone drags unrelated names up. "fortianalyzer"
+    vs "fortimanager" and "fortiedr" vs "fortiai" both score ~0.72-0.80 while
+    being entirely different products, so anything under 0.85 reintroduces
+    exactly the confident-wrong-suggestion failure this function exists to
+    prevent. Genuine typos score far higher (fortgate/fortigate = 0.94).
+
+    Vendor-prefixed catalog names ("fortinet-fortianalyzer") are why tokens are
+    compared as well as whole names: the analyst types the product, not the
+    packaging.
+    """
+    ql = (q or "").strip().lower()
+    if len(ql) < 3:
+        return []
+    scored: list[tuple[float, str]] = []
+    for name in all_names:
+        nl = name.lower()
+        parts = [nl] + [p for p in re.split(r"[-_]", nl) if p]
+        best = 0.0
+        for p in parts:
+            if len(ql) >= 4 and len(p) >= 4:
+                if ql in p or p in ql:
+                    best = max(best, 0.95)
+                    continue
+                common = len(os.path.commonprefix([ql, p]))
+                if common >= 4 and common >= 0.7 * max(len(ql), len(p)):
+                    best = max(best, 0.85)
+                    continue
+            r = difflib.SequenceMatcher(None, ql, p).ratio()
+            if r >= 0.85:
+                best = max(best, r)
+        if best:
+            scored.append((best, name))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    return [name for _, name in scored[:n]]
 
 
 @mcp.tool()
@@ -197,22 +263,45 @@ def find_connector(q: str, limit: int = 15,
                 "in the reference store; investigate before authoring."
             )
         if not rows:
-            # Surface a near-match so the agent doesn't loop guessing
-            # connector names. Same difflib pass the resolver uses.
             all_names = [r["name"] for r in _rows(
                 conn, "SELECT name FROM connectors", ()
             )]
-            close = difflib.get_close_matches(q, all_names, n=3, cutoff=0.45)
+            # 1. The catalog may simply be STALE. A connector installed after
+            #    the last warmup is absent here while present on the box, and
+            #    answering "did you mean <something else>?" then actively steers
+            #    the agent onto the wrong vendor. Check the box before
+            #    suggesting. (LIVE: find_connector("fortianalyzer") answered
+            #    "did you mean fortinet-fortiedr?" while FortiAnalyzer WAS
+            #    installed — see _shared.stale_catalog_hint.)
+            stale = _shared.stale_catalog_hint(q.strip())
+            if stale is not None:
+                out["suggestion"] = stale["message"]
+                out["code"] = stale["code"]
+                out["stale_catalog"] = True
+                return out
+
+            # 2. Otherwise suggest — but only on real evidence, and never in a
+            #    voice that implies the guess is correct.
+            close = _plausible_name_matches(q, all_names)
             if close:
                 out["suggestion"] = (
-                    f"no exact matches for {q!r}; did you mean one of "
-                    f"{close}? Pass one of those as `q=` to retry."
+                    f"no connector matches {q!r} in the catalog. Names with a "
+                    f"similar SPELLING: {close} — these are spelling guesses, "
+                    f"not capability matches. Verify one is actually what you "
+                    f"want before using it."
                 )
                 out["near"] = close
             else:
+                # Saying nothing beats saying something wrong. The old difflib
+                # pass (cutoff 0.45, no token evidence) answered "siem" with
+                # ['smtp', 'imap'] and "crowdstrike" with ['cyops_utilities'] —
+                # confident nonsense that the model then faithfully relayed to
+                # the analyst as if it were a finding.
                 out["suggestion"] = (
-                    f"no matches and no close suggestions for {q!r}. "
-                    f"Try a broader keyword (vendor name, action verb)."
+                    f"no connector matching {q!r} is present in this "
+                    f"instance's catalog — it is most likely not installed. "
+                    f"Do NOT substitute a different vendor's connector; report "
+                    f"the capability as unavailable."
                 )
         return out
 

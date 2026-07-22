@@ -682,3 +682,90 @@ def _safe_op_category(connector: str, op: str) -> str:
         return (row["category"] if row else "") or ""
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Catalog freshness: is the reference store lying about what the box has?
+# ---------------------------------------------------------------------------
+#
+# The reference catalog is a SNAPSHOT, refreshed only by an explicit warmup.
+# Its staleness check is emptiness-only, so a connector installed AFTER the last
+# warm is invisible until someone re-ships — and every tool that resolves
+# through the store then tells the agent, with total confidence, that a
+# connector the box actually has "does not exist".
+#
+# LIVE REPRO (box 159): FortiAnalyzer was installed at 09:18; the last warmup
+# had run at 07:08. For the rest of the day every `faz_*` call returned
+# "connector 'fortinet-fortianalyzer' not found in store" and find_connector
+# answered "did you mean fortinet-fortiedr?". The agent looked incompetent
+# while behaving correctly on the information it was given.
+#
+# The fix is to verify ON MISS rather than poll: only when we are about to
+# report "no such connector" do we ask the box. Zero cost on the happy path,
+# and it converts a confident falsehood into an accurate, actionable one.
+#
+# The probe itself is connector-supplied (Option-A, same posture as
+# set_failed_run_provider): on-platform the box is reached through crudhub,
+# which the bare library cannot import. Absent a probe, behavior is exactly as
+# before.
+
+_LIVE_CATALOG_PROBE: "Any" = None
+
+
+def set_live_catalog_probe(fn: "Any") -> None:
+    """Register the connector callable that lists connector names live on the box.
+
+    Signature: ``fn() -> set[str] | list[str] | None``. Return ``None`` (or
+    raise) when the box can't be reached — callers then fall back to the
+    catalog's own answer rather than inventing one. Implementations are
+    expected to cache; this is called on the miss path of user-facing tools.
+    """
+    global _LIVE_CATALOG_PROBE
+    _LIVE_CATALOG_PROBE = fn
+
+
+def box_has_connector(connector: str) -> bool | None:
+    """Does the BOX have ``connector``, regardless of the catalog?
+
+    ``True``/``False`` when the box answered; ``None`` when we could not ask
+    (no probe registered, or the probe failed). ``None`` is not ``False`` — the
+    caller must not upgrade "couldn't check" into "isn't there".
+    """
+    if _LIVE_CATALOG_PROBE is None or not connector:
+        return None
+    try:
+        names = _LIVE_CATALOG_PROBE()
+    except Exception:  # noqa: BLE001 — a diagnostic must never raise
+        return None
+    if names is None:
+        return None
+    try:
+        return connector in set(names)
+    except TypeError:
+        return None
+
+
+def stale_catalog_hint(connector: str) -> dict[str, Any] | None:
+    """An error-envelope fragment when ``connector`` is on the box but NOT in
+    the catalog; ``None`` otherwise (including "couldn't check").
+
+    Callers merge this into their ``unknown_connector`` envelope so the agent —
+    and the analyst reading the transcript — see the real cause instead of a
+    phantom "doesn't exist".
+    """
+    if box_has_connector(connector) is not True:
+        return None
+    return {
+        "code": "stale_catalog",
+        "message": (
+            f"connector {connector!r} IS installed on this FortiSOAR instance "
+            f"but is missing from the reference catalog — the catalog was "
+            f"warmed before it was installed. This is a catalog staleness "
+            f"problem, NOT a missing connector."
+        ),
+        "suggestions": [
+            "Re-warm the catalog (warmup with force=True), then retry.",
+            f"Do NOT substitute a different connector for {connector!r}; the "
+            "one you asked for exists.",
+        ],
+    }
