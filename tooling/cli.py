@@ -4896,6 +4896,9 @@ def build_parser() -> argparse.ArgumentParser:
     from recover import add_parser as _add_recover_parser
     _add_recover_parser(sub)
 
+    from migrate import add_parser as _add_migrate_parser
+    _add_migrate_parser(sub)
+
     return p
 
 
