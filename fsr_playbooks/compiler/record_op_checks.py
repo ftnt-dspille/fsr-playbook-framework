@@ -26,6 +26,22 @@ from typing import Any, Iterable, Optional
 # requiring completeness on update would false-positive.
 RECORD_CREATE_TYPES = frozenset({"create_record", "insert_record"})
 
+# Config-LESS built-in connectors: their ops run with an empty `config: ''` and
+# they never carry a saved configuration, so a step that pins no config binds
+# fine. Without this, `connector_config_missing` fires as a *required fix* on
+# every such step (the connector has zero rows in `connector_configs`, which the
+# check otherwise reads as "unconfigured → empty config can't bind"). That is a
+# false positive that costs an authoring model several wasted turns fighting the
+# gate — observed live: a build turn burned ~6 tool calls (retrying verify,
+# mis-formatting `disable_checks`, tripping the repeated-call guard) before
+# abandoning verify for `dry_run`. `cyops_utilities` is the FortiSOAR built-in
+# Utilities connector — the same one that backs `no_op`/`stop`/`end` steps — and
+# is universally present and config-less. (The catalog's `config_schema_json` is
+# empty across the board even in warmed DBs, so it cannot distinguish config-less
+# from config-required; this authoritative set is the reliable signal. Broaden it
+# only for another connector proven config-less, and cover it with a test.)
+CONFIG_LESS_CONNECTORS = frozenset({"cyops_utilities"})
+
 
 def _is_dynamic(value: Any) -> bool:
     """A Jinja-templated value — we can't statically know what it renders to."""
@@ -247,6 +263,12 @@ def check_connector_config(
     value is trusted as-is (can't resolve statically).
     """
     if not connector or not configs_known:
+        return []
+    # A config-less built-in (e.g. cyops_utilities) binds fine with an empty
+    # `config:` and never carries a saved config — never flag it as missing one.
+    # A non-empty config *name* still falls through to name validation below.
+    if connector in CONFIG_LESS_CONNECTORS and not (
+            isinstance(config_value, str) and config_value.strip()):
         return []
     names = [n for n in (config_names or []) if n]
     # An explicit, non-empty config pin.

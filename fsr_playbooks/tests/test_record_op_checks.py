@@ -171,6 +171,26 @@ def test_no_config_at_all_is_error():
     assert issues[0]["severity"] == "error"
 
 
+def test_config_less_builtin_with_empty_config_passes():
+    # cyops_utilities is config-less: empty `config:` binds fine and it carries
+    # no saved config, so it must NOT flag connector_config_missing even when the
+    # catalog knows configs exist for other connectors (configs_known=True).
+    assert check_connector_config(
+        connector="cyops_utilities", config_value="", configs_known=True,
+        config_names=[], has_default=False, step_id="s", path="p",
+    ) == []
+
+
+def test_config_less_builtin_still_validates_a_named_pin():
+    # A non-empty config *name* on a config-less connector still gets name-checked
+    # (a typo'd pin is a real error), so the exemption is scoped to empty config.
+    issues = check_connector_config(
+        connector="cyops_utilities", config_value="bogus", configs_known=True,
+        config_names=["real-cfg"], has_default=True, step_id="s", path="p",
+    )
+    assert [i["code"] for i in issues] == ["unknown_connector_config"]
+
+
 def test_configs_but_no_default_is_warning():
     issues = check_connector_config(
         connector="smtp", config_value="", configs_known=True,
