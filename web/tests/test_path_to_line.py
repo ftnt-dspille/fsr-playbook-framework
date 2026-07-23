@@ -21,9 +21,8 @@ playbooks:
     type: star
   - name: second
     type: set_variable
-    arguments:
-      arg_list:
-      - name: x
+    arg_list:
+    - name: x
 """
 # Line numbers (1-based) within YAML_WITH_STEPS:
 # 1  collection
@@ -99,9 +98,8 @@ playbooks:
   steps:
   - name: a
     type: decision
-    arguments:
-      conditions:
-      - op: equals
+    conditions:
+    - op: equals
 """
     # The error targets a condition inside step 0 — still must
     # resolve based on steps[0], not conditions[0].
@@ -125,23 +123,21 @@ playbooks:
   steps:
   - name: Approve IP Block
     type: manual_input
-    arguments:
-      input:
-        title: "Approve IP Block"
-        options:
-        - display: Approve
-          primary: true
-          next: Block IP on FortiGate
-        - display: Reject
-          next: end
+    input:
+      title: "Approve IP Block"
+      options:
+      - display: Approve
+        primary: true
+        next: Block IP on FortiGate
+      - display: Reject
+        next: end
   - name: Find target
     type: find_record
-    arguments:
-      query:
-        logic: AND
-        filters:
-        - type: primitive
-          field: uuid
+    query:
+      logic: AND
+      filters:
+      - type: primitive
+        field: uuid
 """
     # steps[1] is the find_record step — its header is line 16.
     # Missing `module` falls back to the step header, not a nested

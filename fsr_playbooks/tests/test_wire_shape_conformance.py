@@ -203,7 +203,8 @@ playbooks:
       - {name: Start, type: start}
       - name: Ask
         type: manual_input
-        arguments: {title: "Approve?", description: ok}
+        title: "Approve?"
+        description: ok
         options:
           - {display: Yes, next: A}
       - {name: A, type: set_variable, vars: {y: 1}}
@@ -216,9 +217,8 @@ playbooks:
       - {name: Start, type: start}
       - name: Find
         type: find_record
-        arguments:
-          module: alerts
-          query: {logic: AND, filters: [], sort: [], limit: 30}
+        module: alerts
+        query: {logic: AND, filters: [], sort: [], limit: 30}
 """),
     "Delay": ("check", "Wait", """
 collection: c
@@ -236,9 +236,8 @@ playbooks:
       - {name: Start, type: start}
       - name: Upd
         type: update_record
-        arguments:
-          module: incidents
-          resource: {status: Closed}
+        module: incidents
+        resource: {status: Closed}
 """),
     "InsertData": ("check", "New", """
 collection: c
@@ -248,9 +247,8 @@ playbooks:
       - {name: Start, type: start}
       - name: New
         type: create_record
-        arguments:
-          module: alerts
-          resource: {name: a}
+        module: alerts
+        resource: {name: a}
 """),
     "cybersponse.post_create": ("check", "Trig", """
 collection: c
@@ -289,7 +287,7 @@ collection: c
 playbooks:
   - name: P
     steps:
-      - {name: Trig, type: api_endpoint, arguments: {route: /x}}
+      - {name: Trig, type: api_endpoint, route: /x}
       - {name: A, type: set_variable, vars: {y: 1}}
 """),
     "SetVariable": ("check", "SV", """
@@ -309,7 +307,7 @@ playbooks:
   - name: P
     steps:
       - {name: Start, type: start, next: Ref}
-      - {name: Ref, type: workflow_reference, arguments: {target: "Target"}}
+      - {name: Ref, type: workflow_reference, target: "Target"}
 """),
     "IngestBulkFeed": ("check", "Ing", """
 collection: c
@@ -319,7 +317,8 @@ playbooks:
       - {name: Start, type: start, next: Ing}
       - name: Ing
         type: ingest_bulk_feed
-        arguments: {collection: indicators, resource: {value: "{{ vars.x }}"}}
+        collection: indicators
+        resource: {value: "{{ vars.x }}"}
 """),
     "CodeSnippet": ("check", "Run", """
 collection: c
@@ -327,7 +326,7 @@ playbooks:
   - name: P
     steps:
       - {name: Start, type: start, next: Run}
-      - {name: Run, type: code_snippet, arguments: {code: "print(1)"}}
+      - {name: Run, type: code_snippet, code: "print(1)"}
 """),
     # Resolvable only against live connector metadata (slim DB ships none) —
     # the wire rules for these are pinned at the unit layer above.
@@ -343,10 +342,9 @@ playbooks:
       - {name: Start, type: start, next: Mail}
       - name: Mail
         type: send_email
-        arguments:
-          to: ["soc@example.com"]
-          subject: "Alert {{ vars.id }}"
-          body: "An alert fired."
+        to: ["soc@example.com"]
+        subject: "Alert {{ vars.id }}"
+        body: "An alert fired."
 """),
     "ManualTask": ("check", "Task", """
 collection: c
@@ -356,8 +354,7 @@ playbooks:
       - {name: Start, type: start, next: Task}
       - name: Task
         type: create_task
-        arguments:
-          resource: {name: "Investigate {{ vars.id }}"}
+        resource: {name: "Investigate {{ vars.id }}"}
 """),
     "SetAPIKeys": ("check", "Keys", """
 collection: c
@@ -367,7 +364,8 @@ playbooks:
       - {name: Start, type: start, next: Keys}
       - name: Keys
         type: set_api_keys
-        arguments: {public_key: "{{ vars.pub }}", private_key: "{{ vars.priv }}"}
+        public_key: "{{ vars.pub }}"
+        private_key: "{{ vars.priv }}"
 """),
     "Approval": ("check", "Approve", """
 collection: c
@@ -377,10 +375,9 @@ playbooks:
       - {name: Start, type: start, next: Approve}
       - name: Approve
         type: approval
-        arguments:
-          resource:
-            assignedTo: "/api/3/people/abc"
-            approvaldescription: "Please approve containment."
+        resource:
+          assignedTo: "/api/3/people/abc"
+          approvaldescription: "Please approve containment."
 """),
 }
 
@@ -437,10 +434,9 @@ playbooks:
       - name: Start
         type: start
         module: alerts
-        arguments:
-          inputVariables:
-            - {name: severity}
-            - {name: note}
+        inputVariables:
+          - {name: severity}
+          - {name: note}
       - {name: A, type: set_variable, vars: {y: 1}}
 """
     steps = {n: args for (n, _i, args) in _emitted_steps(yaml_text)}
@@ -474,10 +470,9 @@ playbooks:
       - {name: Start, type: start}
       - name: Find
         type: find_record
-        arguments:
-          module: alerts
-          checkboxFields: false
-          query: {logic: AND, filters: [], sort: [], limit: 30, __selectFields: [name]}
+        module: alerts
+        checkboxFields: false
+        query: {logic: AND, filters: [], sort: [], limit: 30, __selectFields: [name]}
 """
     steps = {n: args for (n, _i, args) in _emitted_steps(yaml_text)}
     assert "__selectFields" not in steps["Find"]["query"]
@@ -513,8 +508,7 @@ playbooks:
       - {name: Start, type: start}
       - name: Wait
         type: delay
-        arguments:
-          delay: {days: 0, hours: 2, minutes: 0, seconds: 0}
+        delay: {days: 0, hours: 2, minutes: 0, seconds: 0}
 """
     steps = {n: args for (n, _i, args) in _emitted_steps(yaml_text)}
     assert steps["Wait"]["delay"]["hours"] == 2

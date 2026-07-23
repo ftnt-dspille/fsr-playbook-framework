@@ -97,9 +97,8 @@ playbooks:
     steps:
       - name: start
         type: start
-        arguments:
-          module: alerts
-          run_mode: "per record"
+        module: alerts
+        run_mode: "per record"
 """
     r = compile_yaml(text, db_path)
     assert any(
@@ -116,9 +115,8 @@ playbooks:
     steps:
       - name: start
         type: start
-        arguments:
-          module: alerts
-          run_mode: once_for_all
+        module: alerts
+        run_mode: once_for_all
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

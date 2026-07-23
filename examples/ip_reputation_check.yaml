@@ -32,12 +32,11 @@ playbooks:
         comment: |
           Call the FortiSIEM connector to look up organization information.
           Step output is keyed by the step name: vars.steps.Get_Organization_Details.
-        arguments:
-          connector: fortinet-fortisiem
-          operation: get_org_name_by_org_id
-          config: ""
-          params:
-            domain_id: "{{ vars.source_domain }}"
+        connector: fortinet-fortisiem
+        operation: get_org_name_by_org_id
+        config: ""
+        params:
+          domain_id: "{{ vars.source_domain }}"
 
       - name: Extract organization result
         type: set_variable
@@ -87,7 +86,6 @@ playbooks:
         comment: |
           Update the alert record with the new severity level.
           The picklist filter converts the string to the proper picklist reference.
-        arguments:
-          collection: alerts
-          resource:
-            severity: "{{ vars.new_severity | picklist('severity') }}"
+        collection: alerts
+        resource:
+          severity: "{{ vars.new_severity | picklist('severity') }}"

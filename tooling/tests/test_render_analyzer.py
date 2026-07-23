@@ -50,10 +50,9 @@ def test_c1_flags_reference_to_nonexistent_step():
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "{{ vars.steps.does_not_exist.id }}"
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.does_not_exist.id }}"
                 next: stop
               - id: stop
                 type: stop
@@ -80,18 +79,16 @@ def test_c1_flags_reference_to_later_step():
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "{{ vars.steps.later.value }}"
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.later.value }}"
                 next: later
               - id: later
                 type: set_variable
                 name: Later
-                arguments:
-                  arg_list:
-                    - name: value
-                      value: 42
+                arg_list:
+                  - name: value
+                    value: 42
                 next: stop
               - id: stop
                 type: stop
@@ -117,18 +114,16 @@ def test_c1_does_not_flag_valid_predecessor():
               - id: producer
                 type: set_variable
                 name: Producer
-                arguments:
-                  arg_list:
-                    - name: value
-                      value: 1
+                arg_list:
+                  - name: value
+                    value: 1
                 next: consumer
               - id: consumer
                 type: set_variable
                 name: Consumer
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "{{ vars.steps.Producer.value }}"
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.Producer.value }}"
                 next: stop
               - id: stop
                 type: stop
@@ -152,20 +147,18 @@ def test_c2_flags_typo_in_known_output_shape():
               - id: fetch
                 type: connector
                 name: Fetch
-                arguments:
-                  connector: jira
-                  operation: get_ticket_details
-                  mock_result:
-                    summary: "ok"
-                    status: "open"
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  summary: "ok"
+                  status: "open"
                 next: emit
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: s
-                      value: "{{ vars.steps.Fetch.statuss }}"
+                arg_list:
+                  - name: s
+                    value: "{{ vars.steps.Fetch.statuss }}"
                 next: stop
               - id: stop
                 type: stop
@@ -192,19 +185,17 @@ def test_c2_passes_when_key_exists():
               - id: fetch
                 type: connector
                 name: Fetch
-                arguments:
-                  connector: jira
-                  operation: get_ticket_details
-                  mock_result:
-                    summary: "ok"
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  summary: "ok"
                 next: emit
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: s
-                      value: "{{ vars.steps.Fetch.summary }}"
+                arg_list:
+                  - name: s
+                    value: "{{ vars.steps.Fetch.summary }}"
                 next: stop
               - id: stop
                 type: stop
@@ -226,19 +217,17 @@ def test_c2_downgrades_when_producer_was_conditionally_skipped():
               - id: gated
                 type: set_variable
                 name: Gated
-                arguments:
-                  condition: "false"
-                  arg_list:
-                    - name: value
-                      value: 1
+                condition: "false"
+                arg_list:
+                  - name: value
+                    value: 1
                 next: emit
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: s
-                      value: "{{ vars.steps.Gated.missing_field }}"
+                arg_list:
+                  - name: s
+                    value: "{{ vars.steps.Gated.missing_field }}"
                 next: stop
               - id: stop
                 type: stop
@@ -266,8 +255,7 @@ def test_c3_flags_empty_module_on_create_record():
               - id: rc
                 type: create_record
                 name: RC
-                arguments:
-                  module: ""
+                module: ""
                 next: stop
               - id: stop
                 type: stop
@@ -291,10 +279,9 @@ def test_c3_flags_empty_connector_on_connector_step():
               - id: c
                 type: connector
                 name: C
-                arguments:
-                  connector: ""
-                  operation: get_ticket_details
-                  mock_result: {}
+                connector: ""
+                operation: get_ticket_details
+                mock_result: {}
                 next: stop
               - id: stop
                 type: stop
@@ -321,11 +308,10 @@ def test_step_condition_falsy_marks_conditionally_executed():
               - id: gated
                 type: set_variable
                 name: Gated
-                arguments:
-                  condition: "false"
-                  arg_list:
-                    - name: value
-                      value: 1
+                condition: "false"
+                arg_list:
+                  - name: value
+                    value: 1
                 next: stop
               - id: stop
                 type: stop
@@ -349,11 +335,10 @@ def test_step_condition_truthy_runs_normally():
               - id: gated
                 type: set_variable
                 name: Gated
-                arguments:
-                  condition: "true"
-                  arg_list:
-                    - name: value
-                      value: 1
+                condition: "true"
+                arg_list:
+                  - name: value
+                    value: 1
                 next: stop
               - id: stop
                 type: stop
@@ -382,10 +367,9 @@ def test_c4_picklist_drift_fires_with_validator():
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: status
-                      value: "{{ 'AlertStatus' | picklist('In Progress') }}"
+                arg_list:
+                  - name: status
+                    value: "{{ 'AlertStatus' | picklist('In Progress') }}"
                 next: stop
               - id: stop
                 type: stop
@@ -422,10 +406,9 @@ def test_c4_skipped_when_no_validator():
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: status
-                      value: "{{ 'AlertStatus' | picklist('Bogus') }}"
+                arg_list:
+                  - name: status
+                    value: "{{ 'AlertStatus' | picklist('Bogus') }}"
                 next: stop
               - id: stop
                 type: stop
@@ -447,10 +430,9 @@ def test_c4_skips_when_validator_cannot_reach_fsr():
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: status
-                      value: "{{ 'AlertStatus' | picklist('X') }}"
+                arg_list:
+                  - name: status
+                    value: "{{ 'AlertStatus' | picklist('X') }}"
                 next: stop
               - id: stop
                 type: stop
@@ -478,18 +460,16 @@ def test_c4_caches_repeated_picklist_value_pairs():
               - id: e1
                 type: set_variable
                 name: E1
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "{{ 'AlertStatus' | picklist('Open') }}"
+                arg_list:
+                  - name: x
+                    value: "{{ 'AlertStatus' | picklist('Open') }}"
                 next: e2
               - id: e2
                 type: set_variable
                 name: E2
-                arguments:
-                  arg_list:
-                    - name: y
-                      value: "{{ 'AlertStatus' | picklist('Open') }}"
+                arg_list:
+                  - name: y
+                    value: "{{ 'AlertStatus' | picklist('Open') }}"
                 next: stop
               - id: stop
                 type: stop
@@ -518,10 +498,9 @@ def test_analyze_playbook_mcp_tool_returns_diagnostics():
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "{{ vars.steps.missing.id }}"
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.missing.id }}"
                 next: stop
               - id: stop
                 type: stop
@@ -545,18 +524,16 @@ def test_analyze_playbook_clean_returns_ok():
               - id: producer
                 type: set_variable
                 name: Producer
-                arguments:
-                  arg_list:
-                    - name: value
-                      value: 1
+                arg_list:
+                  - name: value
+                    value: 1
                 next: consumer
               - id: consumer
                 type: set_variable
                 name: Consumer
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "{{ vars.steps.Producer.value }}"
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.Producer.value }}"
                 next: stop
               - id: stop
                 type: stop
@@ -579,10 +556,9 @@ def test_diagnostics_dict_is_jsonable():
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "{{ vars.steps.missing.id }}"
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.missing.id }}"
                 next: stop
               - id: stop
                 type: stop
@@ -610,18 +586,16 @@ def test_c6_flags_index_into_dict_attr():
               - id: produce
                 type: set_variable
                 name: Produce
-                arguments:
-                  arg_list:
-                    - name: meta
-                      value: '{"author": "alice", "tag": "phish"}'
+                arg_list:
+                  - name: meta
+                    value: '{"author": "alice", "tag": "phish"}'
                 next: consume
               - id: consume
                 type: set_variable
                 name: Consume
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "{{ vars.steps.Produce.meta[0] }}"
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.Produce.meta[0] }}"
                 next: stop
               - id: stop
                 type: stop
@@ -655,18 +629,16 @@ def test_c9_flags_vars_item_outside_loop():
                 for_each:
                   item: "[1, 2, 3]"
                   parallel: false
-                arguments:
-                  arg_list:
-                    - name: in_loop
-                      value: "{{ vars.item }}"
+                arg_list:
+                  - name: in_loop
+                    value: "{{ vars.item }}"
                 next: after
               - id: after
                 type: set_variable
                 name: After
-                arguments:
-                  arg_list:
-                    - name: oops
-                      value: "{{ vars.item }}"
+                arg_list:
+                  - name: oops
+                    value: "{{ vars.item }}"
                 next: stop
               - id: stop
                 type: stop
@@ -697,10 +669,9 @@ def test_c9_silent_when_vars_item_inside_loop():
                 for_each:
                   item: "[1, 2, 3]"
                   parallel: false
-                arguments:
-                  arg_list:
-                    - name: in_loop
-                      value: "{{ vars.item }}"
+                arg_list:
+                  - name: in_loop
+                    value: "{{ vars.item }}"
                 next: stop
               - id: stop
                 type: stop
@@ -727,10 +698,9 @@ def test_c10_flags_unreferenced_set_variable():
               - id: dead
                 type: set_variable
                 name: Dead
-                arguments:
-                  arg_list:
-                    - name: useless
-                      value: "42"
+                arg_list:
+                  - name: useless
+                    value: "42"
                 next: stop
               - id: stop
                 type: stop
@@ -754,18 +724,16 @@ def test_c10_silent_when_step_is_referenced():
               - id: prod
                 type: set_variable
                 name: Prod
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: "42"
+                arg_list:
+                  - name: x
+                    value: "42"
                 next: cons
               - id: cons
                 type: set_variable
                 name: Cons
-                arguments:
-                  arg_list:
-                    - name: y
-                      value: "{{ vars.steps.Prod.x }}"
+                arg_list:
+                  - name: y
+                    value: "{{ vars.steps.Prod.x }}"
                 next: stop
               - id: stop
                 type: stop
@@ -797,33 +765,30 @@ def test_c7_flags_sibling_branch_reference():
               - id: outer
                 type: decision
                 name: Outer
-                arguments:
-                  conditions:
-                    - display: "A"
-                      when: "true"
-                      next: prod_a
-                    - display: "B"
-                      default: true
-                      next: inner
+                conditions:
+                  - display: "A"
+                    when: "true"
+                    next: prod_a
+                  - display: "B"
+                    default: true
+                    next: inner
               - id: prod_a
                 type: set_variable
                 name: ProdA
-                arguments:
-                  arg_list:
-                    - name: hits
-                      value: 5
+                arg_list:
+                  - name: hits
+                    value: 5
                 next: stop
               - id: inner
                 type: decision
                 name: Inner
-                arguments:
-                  conditions:
-                    - display: "Yes"
-                      when: "{{ vars.steps.ProdA.hits > 0 }}"
-                      next: stop
-                    - display: "Else"
-                      default: true
-                      next: stop
+                conditions:
+                  - display: "Yes"
+                    when: "{{ vars.steps.ProdA.hits > 0 }}"
+                    next: stop
+                  - display: "Else"
+                    default: true
+                    next: stop
               - id: stop
                 type: stop
                 name: Stop
@@ -853,22 +818,20 @@ def test_c7_silent_when_producer_is_predecessor():
               - id: prod
                 type: set_variable
                 name: Prod
-                arguments:
-                  arg_list:
-                    - name: hits
-                      value: 5
+                arg_list:
+                  - name: hits
+                    value: 5
                 next: d
               - id: d
                 type: decision
                 name: D
-                arguments:
-                  conditions:
-                    - display: "Yes"
-                      when: "{{ vars.steps.Prod.hits > 0 }}"
-                      next: stop
-                    - display: "Else"
-                      default: true
-                      next: stop
+                conditions:
+                  - display: "Yes"
+                    when: "{{ vars.steps.Prod.hits > 0 }}"
+                    next: stop
+                  - display: "Else"
+                    default: true
+                    next: stop
               - id: stop
                 type: stop
                 name: Stop
@@ -899,10 +862,9 @@ def _mi_yaml(mi_block, read_value):
               - id: read
                 type: set_variable
                 name: Read
-                arguments:
-                  arg_list:
-                    - name: r
-                      value: "{read_value}"
+                arg_list:
+                  - name: r
+                    value: "{read_value}"
                 next: stop
               - id: stop
                 type: stop
@@ -912,15 +874,10 @@ def _mi_yaml(mi_block, read_value):
 
 def test_c8_flags_undeclared_input_field_on_inputbased():
     yaml = _mi_yaml(
-        """arguments:
-                  type: InputBased
-                  input:
-                    schema:
-                      inputVariables:
-                        - {name: reason, type: text}
-                  response_mapping:
-                    options:
-                      - {option: OK, step_iri: null}""",
+        """inputs:
+                  - {name: reason, kind: text}
+                options:
+                  - {option: OK}""",
         "{{ vars.steps.MI.input.notdeclared }}",
     )
     import yaml as _yaml
@@ -936,15 +893,10 @@ def test_c8_flags_undeclared_input_field_on_inputbased():
 
 def test_c8_silent_when_declared_input_field_used():
     yaml = _mi_yaml(
-        """arguments:
-                  type: InputBased
-                  input:
-                    schema:
-                      inputVariables:
-                        - {name: reason, type: text}
-                  response_mapping:
-                    options:
-                      - {option: OK, step_iri: null}""",
+        """inputs:
+                  - {name: reason, kind: text}
+                options:
+                  - {option: OK}""",
         "{{ vars.steps.MI.input.reason }}",
     )
     import yaml as _yaml
@@ -956,11 +908,8 @@ def test_c8_silent_when_declared_input_field_used():
 
 def test_c8_flags_input_read_on_decisionbased():
     yaml = _mi_yaml(
-        """arguments:
-                  type: DecisionBased
-                  response_mapping:
-                    options:
-                      - {option: OK, step_iri: null}""",
+        """options:
+                  - {option: OK}""",
         "{{ vars.steps.MI.input.anything }}",
     )
     import yaml as _yaml
@@ -975,15 +924,10 @@ def test_c8_flags_input_read_on_decisionbased():
 
 def test_c8_allows_system_metadata_keys():
     yaml = _mi_yaml(
-        """arguments:
-                  type: InputBased
-                  input:
-                    schema:
-                      inputVariables:
-                        - {name: reason, type: text}
-                  response_mapping:
-                    options:
-                      - {option: OK, step_iri: null}""",
+        """inputs:
+                  - {name: reason, kind: text}
+                options:
+                  - {option: OK}""",
         "{{ vars.steps.MI.userid }}",
     )
     import yaml as _yaml
@@ -994,14 +938,12 @@ def test_c8_allows_system_metadata_keys():
 
 
 def test_c8_warns_on_buttononly_inputbased_when_input_read():
-    """InputBased MI with no declared inputVariables — can't prove
-    mismatch, so warn instead of error."""
+    """DecisionBased (no inputs) reading input.* — now an error, not
+    a warning. The old InputBased-with-no-inputVariables scenario is
+    no longer expressible: inputs: [] infers DecisionBased."""
     yaml = _mi_yaml(
-        """arguments:
-                  type: InputBased
-                  response_mapping:
-                    options:
-                      - {option: OK, step_iri: null}""",
+        """options:
+                  - {option: OK}""",
         "{{ vars.steps.MI.input.something }}",
     )
     import yaml as _yaml
@@ -1009,4 +951,4 @@ def test_c8_warns_on_buttononly_inputbased_when_input_read():
     diags = analyze(_trace(yaml), playbook=pb)
     by = _by_kind(diags)
     assert "mi_mode_mismatch" in by, by
-    assert by["mi_mode_mismatch"][0].severity == "warning"
+    assert by["mi_mode_mismatch"][0].severity == "error"

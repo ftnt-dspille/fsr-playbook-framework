@@ -40,10 +40,9 @@ playbooks:
           item: "{{ vars.steps.Build_alerts.alerts_to_create }}"
           parallel: false
           condition: ""
-        arguments:
-          module: alerts
-          operation: Replace
-          resource:
-            name: "{{ vars.item.name }}"
-            severity: "{{ vars.item.severity }}"
-            description: "{{ vars.item.description }}"
+        module: alerts
+        operation: Replace
+        resource:
+          name: "{{ vars.item.name }}"
+          severity: "{{ vars.item.severity }}"
+          description: "{{ vars.item.description }}"

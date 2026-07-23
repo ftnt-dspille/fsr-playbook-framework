@@ -107,9 +107,8 @@ playbooks:
       - name: Build greeting
         type: code_snippet
         next: Stamp greeting
-        arguments:
-          code: |
-            print("hi")
+        code: |
+          print("hi")
       - name: Stamp greeting
         type: set_variable
         vars:
@@ -158,7 +157,9 @@ playbooks:
         next: Query VirusTotal
       - name: Query VirusTotal
         type: connector
-        arguments: {{connector: virustotal, operation: query_ip, params: {{ip: x}}}}
+        connector: virustotal
+        operation: query_ip
+        params: {{ip: x}}
         next: Read
       - name: Read
         type: set_variable
@@ -216,10 +217,9 @@ playbooks:
       - name: Call child
         type: workflow_reference
         next: Stamp
-        arguments:
-          target: Child
-          arguments: {base: "{{ vars.input.params.base }}"}
-          apply_async: false
+        target: Child
+        base: "{{ vars.input.params.base }}"
+        apply_async: false
       - name: Stamp
         type: set_variable
         vars:
@@ -288,9 +288,8 @@ playbooks:
         for_each:
           item: "{{ vars.steps.Build_list.nums }}"
           parallel: false
-        arguments:
-          code: |
-            print({'doubled': 1})
+        code: |
+          print({'doubled': 1})
       - name: Read
         type: set_variable
         vars:

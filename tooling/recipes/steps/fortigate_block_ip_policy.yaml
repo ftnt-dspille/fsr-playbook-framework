@@ -21,12 +21,11 @@ notes: |
 steps_yaml: |
   - type: connector
     name: Block IP on FortiGate
-    arguments:
-      connector: fortigate-firewall
-      operation: block_ip_new
-      params:
-        method: Policy Based
-        ip_block_policy: <POLICY_NAME>
-        ip_group_name: <ADDRESS_GROUP>
-        ip_type: IPv4
-        ip: "{{ vars.steps.Collect_Input.input.target_value }}"
+    connector: fortigate-firewall
+    operation: block_ip_new
+    params:
+      method: Policy Based
+      ip_block_policy: <POLICY_NAME>
+      ip_group_name: <ADDRESS_GROUP>
+      ip_type: IPv4
+      ip: "{{ vars.steps.Collect_Input.input.target_value }}"

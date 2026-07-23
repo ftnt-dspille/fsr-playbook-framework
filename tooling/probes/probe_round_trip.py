@@ -232,10 +232,9 @@ def _yaml_two_triggers(coll: str) -> str:
                 next: "Note It"
               - name: "On New Alert"
                 type: start_on_create
-                arguments:
-                  resource: alerts
-                  resources: [alerts]
-                  triggerOnSource: true
+                resource: alerts
+                resources: [alerts]
+                triggerOnSource: true
                 next: "Note It"
               - name: "Note It"
                 type: set_variable
@@ -265,29 +264,28 @@ def _yaml_on_create_nested_filter(coll: str) -> str:
             steps:
               - name: "On New Alert"
                 type: start_on_create
-                arguments:
-                  resource: alerts
-                  resources: [alerts]
-                  triggerOnSource: true
-                  fieldbasedtrigger:
-                    logic: AND
-                    limit: 30
-                    sort: []
-                    filters:
-                      - logic: OR
-                        filters:
-                          - field: severity
-                            operator: eq
-                            type: primitive
-                            value: "high"
-                          - field: severity
-                            operator: eq
-                            type: primitive
-                            value: "critical"
-                      - field: name
-                        operator: like
-                        type: primitive
-                        value: "%phish%"
+                resource: alerts
+                resources: [alerts]
+                triggerOnSource: true
+                fieldbasedtrigger:
+                  logic: AND
+                  limit: 30
+                  sort: []
+                  filters:
+                    - logic: OR
+                      filters:
+                        - field: severity
+                          operator: eq
+                          type: primitive
+                          value: "high"
+                        - field: severity
+                          operator: eq
+                          type: primitive
+                          value: "critical"
+                    - field: name
+                      operator: like
+                      type: primitive
+                      value: "%phish%"
                 next: "Note It"
               - name: "Note It"
                 type: set_variable
@@ -335,18 +333,17 @@ def _yaml_on_update_changed(coll: str) -> str:
             steps:
               - name: "On Status Change"
                 type: start_on_update
-                arguments:
-                  resource: alerts
-                  resources: [alerts]
-                  triggerOnSource: true
-                  fieldbasedtrigger:
-                    logic: AND
-                    limit: 30
-                    sort: []
-                    filters:
-                      - field: status
-                        operator: changed
-                        type: primitive
+                resource: alerts
+                resources: [alerts]
+                triggerOnSource: true
+                fieldbasedtrigger:
+                  logic: AND
+                  limit: 30
+                  sort: []
+                  filters:
+                    - field: status
+                      operator: changed
+                      type: primitive
                 next: "Note It"
               - name: "Note It"
                 type: set_variable
@@ -386,17 +383,16 @@ def _yaml_find_record_correlated(coll: str) -> str:
                 next: "Find Alerts"
               - name: "Find Alerts"
                 type: find_record
-                arguments:
-                  module: "alerts?$limit=10&$relationships=true&$fsr_max_relation_count=5"
-                  query:
-                    logic: AND
-                    limit: 10
-                    sort: []
-                    filters:
-                      - field: severity
-                        operator: eq
-                        type: primitive
-                        value: "high"
+                module: "alerts?$limit=10&$relationships=true&$fsr_max_relation_count=5"
+                query:
+                  logic: AND
+                  limit: 10
+                  sort: []
+                  filters:
+                    - field: severity
+                      operator: eq
+                      type: primitive
+                      value: "high"
         """)
 
 
@@ -472,20 +468,19 @@ def _yaml_on_create_fires(coll: str, marker: str) -> str:
             steps:
               - name: "On New Alert"
                 type: start_on_create
-                arguments:
-                  resource: alerts
-                  resources: [alerts]
-                  triggerOnSource: true
-                  triggerOnReplicate: false
-                  fieldbasedtrigger:
-                    logic: AND
-                    limit: 30
-                    sort: []
-                    filters:
-                      - field: name
-                        operator: eq
-                        type: primitive
-                        value: "{marker}"
+                resource: alerts
+                resources: [alerts]
+                triggerOnSource: true
+                triggerOnReplicate: false
+                fieldbasedtrigger:
+                  logic: AND
+                  limit: 30
+                  sort: []
+                  filters:
+                    - field: name
+                      operator: eq
+                      type: primitive
+                      value: "{marker}"
                 next: "Note It"
               - name: "Note It"
                 type: set_variable
@@ -588,9 +583,8 @@ def _yaml_manual_input(coll: str) -> str:
                     next: "Stamp Approved"
                   - display: reject
                     next: "Stamp Rejected"
-                arguments:
-                  title: "Triage this alert?"
-                  description: "Capture analyst notes before deciding."
+                title: "Triage this alert?"
+                description: "Capture analyst notes before deciding."
 
               - name: "Stamp Approved"
                 type: set_variable
@@ -655,14 +649,12 @@ def _yaml_workflow_reference(coll: str) -> str:
               - name: "Call Child"
                 type: workflow_reference
                 next: "Stamp"
-                arguments:
-                  target: "rt_wfref_child"
-                  arguments:
-                    base: "{{{{ vars.input.params.base }}}}"
-                  apply_async: false
-                  pass_parent_env: false
-                  pass_input_record: false
-                  step_variables: []
+                target: "rt_wfref_child"
+                base: "{{{{ vars.input.params.base }}}}"
+                apply_async: false
+                pass_parent_env: false
+                pass_input_record: false
+                step_variables: []
               - name: "Stamp"
                 type: set_variable
                 vars:
@@ -721,16 +713,15 @@ def _yaml_ingest_bulk_feed(coll: str) -> str:
                   condition: ""
                   __bulk: true
                   batch_size: 100
-                arguments:
-                  collection: "/api/ingest-feeds/threat_intel_feeds"
-                  resource:
-                    __replace: ""
-                    value: "{{{{ vars.item.value }}}}"
-                    sourceId: "{{{{ vars.item.id }}}}"
-                  __recommend: []
-                  step_variables: []
-                  mock_result: |
-                    {{"status": "ok", "ingested": 0, "mock": true}}
+                collection: "/api/ingest-feeds/threat_intel_feeds"
+                resource:
+                  __replace: ""
+                  value: "{{{{ vars.item.value }}}}"
+                  sourceId: "{{{{ vars.item.id }}}}"
+                __recommend: []
+                step_variables: []
+                mock_result: |
+                  {{"status": "ok", "ingested": 0, "mock": true}}
         """)
 
 
@@ -774,32 +765,30 @@ def _yaml_update_record_picklist(coll: str) -> str:
               - name: "Find"
                 type: find_record
                 next: "Update"
-                arguments:
-                  module: alerts
-                  query:
-                    logic: AND
-                    filters:
-                      - type: primitive
-                        field: name
-                        value: "{{{{ vars.input.params.target_name }}}}"
-                        operator: eq
-                        _operator: eq
-                    __selectFields: [uuid, name, status]
-                  step_variables: []
+                module: alerts
+                query:
+                  logic: AND
+                  filters:
+                    - type: primitive
+                      field: name
+                      value: "{{{{ vars.input.params.target_name }}}}"
+                      operator: eq
+                      _operator: eq
+                  __selectFields: [uuid, name, status]
+                step_variables: []
               - name: "Update"
                 type: update_record
-                arguments:
-                  collection: "{{{{ vars.steps.Find[0]['@id'] }}}}"
-                  collectionType: /api/3/alerts
-                  resource:
-                    # Friendly token — the resolver rewrites to the
-                    # canonical /api/3/picklists/<uuid> IRI.
-                    status: "Closed"
-                    recordTags: ["fsrpb-rt"]
-                  fieldOperation:
-                    recordTags: "Append"
-                  operation: Append
-                  step_variables: []
+                collection: "{{{{ vars.steps.Find[0]['@id'] }}}}"
+                collectionType: /api/3/alerts
+                resource:
+                  # Friendly token — the resolver rewrites to the
+                  # canonical /api/3/picklists/<uuid> IRI.
+                  status: "Closed"
+                  recordTags: ["fsrpb-rt"]
+                fieldOperation:
+                  recordTags: "Append"
+                operation: Append
+                step_variables: []
         """)
 
 
@@ -848,18 +837,17 @@ def _yaml_find_record_sort(coll: str) -> str:
                 next: "Find"
               - name: "Find"
                 type: find_record
-                arguments:
-                  module: "alerts?$limit=5&$sort=-modifyDate"
-                  query:
-                    logic: AND
-                    filters:
-                      - type: primitive
-                        field: severity
-                        value: high
-                        operator: eq
-                        _operator: eq
-                    __selectFields: [uuid, name, severity, modifyDate]
-                  step_variables: []
+                module: "alerts?$limit=5&$sort=-modifyDate"
+                query:
+                  logic: AND
+                  filters:
+                    - type: primitive
+                      field: severity
+                      value: high
+                      operator: eq
+                      _operator: eq
+                  __selectFields: [uuid, name, severity, modifyDate]
+                step_variables: []
         """)
 
 
@@ -1042,11 +1030,10 @@ def _yaml_neg_unknown_picklist(coll: str) -> str:
                 next: "Update"
               - name: "Update"
                 type: update_record
-                arguments:
-                  collection: "/api/3/alerts/00000000-0000-0000-0000-000000000000"
-                  collectionType: /api/3/alerts
-                  resource:
-                    status: "Klosed"
+                collection: "/api/3/alerts/00000000-0000-0000-0000-000000000000"
+                collectionType: /api/3/alerts
+                resource:
+                  status: "Klosed"
         """)
 
 

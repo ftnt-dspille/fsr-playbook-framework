@@ -2,10 +2,9 @@
 
 A friendly code_snippet step is authored as::
 
-    arguments:
-      code: |
-        print("hello")
-      config: my_config    # optional connector-config name or UUID
+    code: |
+      print("hello")
+    config: my_config    # optional connector-config name or UUID
 
 and expands to FSR's canonical CodeSnippet step shape with defaults for
 connector, operation, version, and params.python_function. Already-canonical

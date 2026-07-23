@@ -38,9 +38,8 @@ playbooks:
         next: c
       - name: c
         type: workflow_reference
-        arguments:
-          target: Chld
-          arguments: {x: 1}
+        target: Chld
+        x: 1
 """
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -64,10 +63,8 @@ playbooks:
         next: c
       - name: c
         type: workflow_reference
-        arguments:
-          target: Child
-          arguments:
-            hostnaem: x
+        target: Child
+        hostnaem: x
 """
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -109,9 +106,8 @@ playbooks:
         next: c
       - name: c
         type: workflow_reference
-        arguments:
-          workflowReference: /api/3/workflows/00000000-0000-0000-0000-000000000000
-          arguments: {anything: goes}
+        workflowReference: /api/3/workflows/00000000-0000-0000-0000-000000000000
+        anything: goes
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]

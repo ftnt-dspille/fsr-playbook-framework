@@ -44,26 +44,23 @@ def _linear_yaml() -> str:
               - id: a
                 type: set_variable
                 name: A
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: 1
+                arg_list:
+                  - name: x
+                    value: 1
                 next: b
               - id: b
                 type: set_variable
                 name: B
-                arguments:
-                  arg_list:
-                    - name: y
-                      value: 2
+                arg_list:
+                  - name: y
+                    value: 2
                 next: c
               - id: c
                 type: set_variable
                 name: C
-                arguments:
-                  arg_list:
-                    - name: z
-                      value: 3
+                arg_list:
+                  - name: z
+                    value: 3
                 next: stop
               - id: stop
                 type: stop
@@ -173,32 +170,29 @@ def test_branch_choice_override_per_step():
               - id: d
                 type: decision
                 name: D
-                arguments:
-                  conditions:
-                    - display: "A"
-                      when: "false"
-                      next: a_branch
-                    - display: "B"
-                      default: true
-                      next: b_branch
+                conditions:
+                  - display: "A"
+                    when: "false"
+                    next: a_branch
+                  - display: "B"
+                    default: true
+                    next: b_branch
                 branches:
                   A: a_branch
                   B: b_branch
               - id: a_branch
                 type: set_variable
                 name: ABranch
-                arguments:
-                  arg_list:
-                    - name: which
-                      value: a
+                arg_list:
+                  - name: which
+                    value: a
                 next: stop
               - id: b_branch
                 type: set_variable
                 name: BBranch
-                arguments:
-                  arg_list:
-                    - name: which
-                      value: b
+                arg_list:
+                  - name: which
+                    value: b
                 next: stop
               - id: stop
                 type: stop

@@ -144,11 +144,10 @@ def test_arg_edit_keeps_nested_keys_under_arguments() -> None:
                 next: Block IP
               - type: connector
                 name: Block IP
-                arguments:
-                  connector: fortigate-firewall
-                  operation: block_ip_new
-                  params:
-                    method: Quarantine Based
+                connector: fortigate-firewall
+                operation: block_ip_new
+                params:
+                  method: Quarantine Based
                 next: End
               - type: end
                 name: End
@@ -160,20 +159,15 @@ def test_arg_edit_keeps_nested_keys_under_arguments() -> None:
     # existing nested args.
     block["arguments"] = {**block["arguments"], "mock_result": {"already_blocked": ["1.1.1.1"]}}
     out = from_visual(g, text)
-    # connector / operation / params must remain under `arguments:`,
-    # not at the step level (which is what triggered the duplicate-keys
-    # bug). Re-parse and check structural location rather than matching
-    # whitespace fragility.
+    # Phase G: connector args are at step level (no `arguments:` wrapper).
+    # Re-parse and check structural location.
     import yaml as _yaml
     doc = _yaml.safe_load(out)
     step = next(s for s in doc["playbooks"][0]["steps"] if s.get("name") == "Block IP")
-    assert "connector" not in step, step    # not hoisted to step level
-    assert "operation" not in step, step
-    assert "params" not in step, step
-    assert step["arguments"]["connector"] == "fortigate-firewall"
-    assert step["arguments"]["operation"] == "block_ip_new"
-    assert step["arguments"]["params"]["method"] == "Quarantine Based"
-    assert step["arguments"]["mock_result"]["already_blocked"] == ["1.1.1.1"]
+    assert step["connector"] == "fortigate-firewall"
+    assert step["operation"] == "block_ip_new"
+    assert step["params"]["method"] == "Quarantine Based"
+    assert step["mock_result"]["already_blocked"] == ["1.1.1.1"]
 
 
 def test_linear_next_retarget_round_trips() -> None:

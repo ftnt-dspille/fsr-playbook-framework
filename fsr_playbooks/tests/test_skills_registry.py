@@ -90,8 +90,8 @@ def test_run_connector_action_wiring_overrides_literal():
         {"host": "{{ vars.steps.Enrich.ip }}"},
         "Isolate Host",
     )
-    assert step["arguments"]["host"] == "{{ vars.steps.Enrich.ip }}"
-    assert step["arguments"]["connector"] == "fortiedr"
+    assert step["host"] == "{{ vars.steps.Enrich.ip }}"
+    assert step["connector"] == "fortiedr"
 
 
 def test_set_variable_emits_top_level_vars_not_arguments():

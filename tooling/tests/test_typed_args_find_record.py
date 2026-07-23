@@ -92,15 +92,14 @@ playbooks:
         next: find
       - name: find
         type: find_record
-        arguments:
-          module: indicators
-          query:
-            logic: AND
-            filters:
-              - field: value
-                operator: eq
-                value: "x"
-          partial: true
+        module: indicators
+        query:
+          logic: AND
+          filters:
+            - field: value
+              operator: eq
+              value: "x"
+        partial: true
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -118,9 +117,8 @@ playbooks:
         next: find
       - name: find
         type: find_record
-        arguments:
-          module: indicators
-          partial: maybe
+        module: indicators
+        partial: maybe
 """
     r = compile_yaml(text, db_path)
     codes = [e.code for e in r.errors if e.severity == "error"]

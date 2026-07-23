@@ -273,11 +273,11 @@ def _ops_from_yaml(yaml_text: str) -> set[tuple[str, str]]:
         for s in (pb.get("steps") or []):
             if not isinstance(s, dict) or s.get("type") != "connector":
                 continue
+            # Phase G: connector/operation at step level (no arguments: wrapper).
+            # Fall back to arguments for legacy YAML.
             a = s.get("arguments") or {}
-            if not isinstance(a, dict):
-                continue
-            conn = str(a.get("connector", "")).lower()
-            op = str(a.get("operation", "")).lower()
+            conn = str(a.get("connector") or s.get("connector") or "").lower()
+            op = str(a.get("operation") or s.get("operation") or "").lower()
             if conn and op:
                 ops.add((conn, op))
     return ops

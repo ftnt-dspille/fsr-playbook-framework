@@ -46,10 +46,9 @@ def test_set_variable_provenance_is_computed():
               - id: sv
                 type: set_variable
                 name: SV
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: hello
+                arg_list:
+                  - name: x
+                    value: hello
                 next: stop
               - id: stop
                 type: stop
@@ -76,13 +75,12 @@ def test_mock_result_short_circuits_connector_execution():
               - id: c
                 type: connector
                 name: C
-                arguments:
-                  connector: jira
-                  operation: get_ticket_details
-                  mock_result:
-                    data:
-                      key: JIR-7
-                      summary: mocked
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    key: JIR-7
+                    summary: mocked
                 next: stop
               - id: stop
                 type: stop
@@ -106,11 +104,10 @@ def test_mock_result_on_record_crud():
               - id: rc
                 type: create_record
                 name: Create
-                arguments:
-                  module: alerts
-                  mock_result:
-                    id: 42
-                    status: open
+                module: alerts
+                mock_result:
+                  id: 42
+                  status: open
                 next: stop
               - id: stop
                 type: stop
@@ -136,32 +133,29 @@ def test_decision_auto_picks_first_truthy_branch():
               - id: d
                 type: decision
                 name: D
-                arguments:
-                  conditions:
-                    - display: "Hot"
-                      when: "true"
-                      next: hot
-                    - display: "Cold"
-                      when: "false"
-                      next: cold
+                conditions:
+                  - display: "Hot"
+                    when: "true"
+                    next: hot
+                  - display: "Cold"
+                    when: "false"
+                    next: cold
                 branches:
                   Hot: hot
                   Cold: cold
               - id: hot
                 type: set_variable
                 name: Hot
-                arguments:
-                  arg_list:
-                    - name: path
-                      value: hot_path
+                arg_list:
+                  - name: path
+                    value: hot_path
                 next: stop
               - id: cold
                 type: set_variable
                 name: Cold
-                arguments:
-                  arg_list:
-                    - name: path
-                      value: cold_path
+                arg_list:
+                  - name: path
+                    value: cold_path
                 next: stop
               - id: stop
                 type: stop
@@ -187,14 +181,13 @@ def test_decision_honors_default_when_all_false():
               - id: d
                 type: decision
                 name: D
-                arguments:
-                  conditions:
-                    - display: "Maybe"
-                      when: "false"
-                      next: maybe
-                    - display: "Else"
-                      default: true
-                      next: else_path
+                conditions:
+                  - display: "Maybe"
+                    when: "false"
+                    next: maybe
+                  - display: "Else"
+                    default: true
+                    next: else_path
                 branches:
                   Maybe: maybe
                   Else: else_path
@@ -224,14 +217,13 @@ def test_decision_pinned_branch_wins_over_auto():
               - id: d
                 type: decision
                 name: D
-                arguments:
-                  conditions:
-                    - display: "A"
-                      when: "true"
-                      next: a
-                    - display: "B"
-                      when: "false"
-                      next: b
+                conditions:
+                  - display: "A"
+                    when: "true"
+                    next: a
+                  - display: "B"
+                    when: "false"
+                    next: b
                 branches:
                   A: a
                   B: b
@@ -263,10 +255,9 @@ def test_manual_input_resolves_from_manual_choices():
               - id: mi
                 type: manual_input
                 name: MI
-                arguments:
-                  options:
-                    - display: Approve
-                    - display: Reject
+                options:
+                  - display: Approve
+                  - display: Reject
                 branches:
                   Approve: stop
                   Reject: stop
@@ -292,10 +283,9 @@ def test_manual_input_falls_back_to_first_option():
               - id: mi
                 type: manual_input
                 name: MI
-                arguments:
-                  options:
-                    - display: Approve
-                    - display: Reject
+                options:
+                  - display: Approve
+                  - display: Reject
                 branches:
                   Approve: stop
                   Reject: stop
@@ -343,10 +333,9 @@ def test_output_shape_attached_to_every_trace_record():
               - id: sv
                 type: set_variable
                 name: SV
-                arguments:
-                  arg_list:
-                    - name: x
-                      value: 1
+                arg_list:
+                  - name: x
+                    value: 1
                 next: stop
               - id: stop
                 type: stop
@@ -374,10 +363,9 @@ def test_for_each_sequential_emits_list_of_per_iteration_dicts():
                 name: Loop
                 for_each:
                   item: "{{ [10, 20, 30] }}"
-                arguments:
-                  arg_list:
-                    - name: current
-                      value: "{{ vars.item }}"
+                arg_list:
+                  - name: current
+                    value: "{{ vars.item }}"
                 next: stop
               - id: stop
                 type: stop
@@ -414,10 +402,9 @@ def test_for_each_break_loop_includes_breaking_iteration():
                 for_each:
                   item: "{{ [1, 2, 3, 4, 5] }}"
                   break_loop: "{{ vars.item == 3 }}"
-                arguments:
-                  arg_list:
-                    - name: current
-                      value: "{{ vars.item }}"
+                arg_list:
+                  - name: current
+                    value: "{{ vars.item }}"
                 next: stop
               - id: stop
                 type: stop
@@ -457,10 +444,9 @@ def test_for_each_condition_filters_iterations():
                 for_each:
                   item: "{{ [1, 2, 3] }}"
                   condition: "{{ vars.item % 2 == 0 }}"
-                arguments:
-                  arg_list:
-                    - name: current
-                      value: "{{ vars.item }}"
+                arg_list:
+                  - name: current
+                    value: "{{ vars.item }}"
                 next: stop
               - id: stop
                 type: stop
@@ -485,10 +471,9 @@ def test_for_each_empty_list_yields_empty_output():
                 name: Loop
                 for_each:
                   item: "{{ [] }}"
-                arguments:
-                  arg_list:
-                    - name: current
-                      value: "{{ vars.item }}"
+                arg_list:
+                  - name: current
+                    value: "{{ vars.item }}"
                 next: stop
               - id: stop
                 type: stop
@@ -542,8 +527,7 @@ def test_unsafe_connector_op_returns_simulated_placeholder():
                 name: Block
                 connector: fortigate
                 operation: block_address
-                arguments:
-                  ip: 8.8.8.8
+                ip: 8.8.8.8
                 next: stop
               - id: stop
                 type: stop

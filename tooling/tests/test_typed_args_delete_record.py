@@ -118,9 +118,8 @@ playbooks:
         next: del
       - name: del
         type: delete_record
-        arguments:
-          module: alerts
-          record_id: "{{ vars.id }}"
+        module: alerts
+        record_id: "{{ vars.id }}"
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

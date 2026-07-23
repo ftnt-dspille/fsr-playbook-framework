@@ -708,8 +708,22 @@ def _c8_mi_mode_mismatch(trace: list[dict[str, Any]],
         if not is_mi:
             continue
         args = s.get("arguments") or {}
-        mode = normalize_mode(args.get("type"), step_type=stype)
-        declared = declared_input_names(args)
+        # Phase G: step-level `inputs:` is the friendly form (no
+        # `arguments:` wrapper). Infer mode + declared fields from it
+        # when the compiler hasn't already expanded them into args.
+        if not args:
+            mi_inputs = s.get("inputs")
+            if mi_inputs:
+                mode = "InputBased"
+                declared = [str(v.get("name"))
+                            for v in mi_inputs
+                            if isinstance(v, dict) and v.get("name")]
+            else:
+                mode = "DecisionBased"
+                declared = []
+        else:
+            mode = normalize_mode(args.get("type"), step_type=stype)
+            declared = declared_input_names(args)
         name = s.get("name") or ""
         sid = s.get("id") or name
         jkey = (name or sid).replace(" ", "_")

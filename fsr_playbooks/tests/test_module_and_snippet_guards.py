@@ -48,11 +48,10 @@ playbooks:
     steps:
       - name: Run
         type: code_snippet
-        arguments:
-          connector: code-snippet
-          operation: python_inline_code_editor
-          params:
-            python_function: "   "
+        connector: code-snippet
+        operation: python_inline_code_editor
+        params:
+          python_function: "   "
 """
     res, blocking = _errs(yaml_text)
     assert not res.ok

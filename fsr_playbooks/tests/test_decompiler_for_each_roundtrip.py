@@ -33,10 +33,9 @@ playbooks:
       - name: Find Open
         type: find_record
         module: incidents
-        arguments:
-          query:
-            logic: AND
-            filters: []
+        query:
+          logic: AND
+          filters: []
         next: Escalate Each
       - name: Escalate Each
         type: set_variable

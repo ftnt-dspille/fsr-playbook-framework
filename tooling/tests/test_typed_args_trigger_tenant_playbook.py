@@ -99,8 +99,7 @@ playbooks:
         next: ttp
       - name: ttp
         type: trigger_tenant_playbook
-        arguments:
-          tenant_id: acme
+        tenant_id: acme
 """
     r = compile_yaml(text, db_path)
     missing = [e for e in r.errors
@@ -125,9 +124,8 @@ playbooks:
         next: ttp
       - name: ttp
         type: trigger_tenant_playbook
-        arguments:
-          playbook_alias_id: remote-ir-playbook
-          tenant_id: tenant-acme
+        playbook_alias_id: remote-ir-playbook
+        tenant_id: tenant-acme
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

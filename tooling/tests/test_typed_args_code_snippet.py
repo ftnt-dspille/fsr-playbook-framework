@@ -93,9 +93,8 @@ playbooks:
         next: snippet
       - name: snippet
         type: code_snippet
-        arguments:
-          code: |
-            print("hello world")
+        code: |
+          print("hello world")
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"],         [e.to_dict() for e in r.errors]

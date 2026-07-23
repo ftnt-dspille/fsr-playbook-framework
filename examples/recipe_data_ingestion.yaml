@@ -44,31 +44,30 @@ playbooks:
           (cyops_utilities.get_macro_list) keeps this recipe compilable
           out of the box; it does NOT fetch anything useful. The target
           connector must already be installed on the configured FSR.
-        arguments:
-          connector: cyops_utilities
-          operation: get_macro_list
-          config: ""
-          params: {}
-          # MOCK MODE: when the target connector isn't installed yet,
-          # validate the rest of this recipe's plumbing by filling in
-          # `mock_result` (a JSON STRING) with a representative fetch
-          # payload, then triggering with `fsrpb run-playbook --mock`.
-          # The runtime returns this string in place of executing the
-          # op, and downstream Create / Ingest steps run live against
-          # it. Default is non-mock; only activates when --mock is set.
-          mock_result: |
-            {
-              "data": {
-                "records": [
-                  {
-                    "id": "TODO-mock-1",
-                    "name": "TODO sample alert (mock)",
-                    "severity": "Medium",
-                    "description": "TODO sample description"
-                  }
-                ]
-              }
+        connector: cyops_utilities
+        operation: get_macro_list
+        config: ""
+        params: {}
+        # MOCK MODE: when the target connector isn't installed yet,
+        # validate the rest of this recipe's plumbing by filling in
+        # `mock_result` (a JSON STRING) with a representative fetch
+        # payload, then triggering with `fsrpb run-playbook --mock`.
+        # The runtime returns this string in place of executing the
+        # op, and downstream Create / Ingest steps run live against
+        # it. Default is non-mock; only activates when --mock is set.
+        mock_result: |
+          {
+            "data": {
+              "records": [
+                {
+                  "id": "TODO-mock-1",
+                  "name": "TODO sample alert (mock)",
+                  "severity": "Medium",
+                  "description": "TODO sample description"
+                }
+              ]
             }
+          }
 
       - name: Capture data
         type: set_variable
@@ -102,12 +101,11 @@ playbooks:
 
       - name: Raise empty input
         type: connector
-        arguments:
-          connector: cyops_utilities
-          operation: raise_exception
-          config: ""
-          params:
-            msg: "Create called with empty ingestedData — Fetch returned no records."
+        connector: cyops_utilities
+        operation: raise_exception
+        config: ""
+        params:
+          msg: "Create called with empty ingestedData — Fetch returned no records."
 
       - name: Create alert per item
         type: create_record
@@ -121,18 +119,17 @@ playbooks:
           item: "{{ vars.input.params.ingestedData }}"
           parallel: false
           condition: ""
-        arguments:
-          module: alerts
-          operation: Replace
-          resource:
-            name: "{{ vars.item.name }}"                  # TODO field name
-            severity: "{{ vars.item.severity | default('Medium') }}"
-            status: "Open"
-            type: "TODO source-event type label"
-            description: "{{ vars.item.description | default('') }}"
-            sourceId: "{{ vars.item.id }}"                # required for dedupe
-            sourceData: "{{ vars.item | toJSON }}"
-          step_variables: []
+        module: alerts
+        operation: Replace
+        resource:
+          name: "{{ vars.item.name }}"                  # TODO field name
+          severity: "{{ vars.item.severity | default('Medium') }}"
+          status: "Open"
+          type: "TODO source-event type label"
+          description: "{{ vars.item.description | default('') }}"
+          sourceId: "{{ vars.item.id }}"                # required for dedupe
+          sourceData: "{{ vars.item | toJSON }}"
+        step_variables: []
   # ---------------------------------------------------------------- Ingest
   - name: "TODO Connector > Ingest"
     description: Orchestrator — pulls Fetch, hands records to Create.
@@ -174,14 +171,12 @@ playbooks:
       - name: Call Fetch
         type: workflow_reference
         next: Fetch returned data
-        arguments:
-          target: "TODO Connector > Fetch"
-          arguments:
-            lastPullTime: "{{ vars.input.params.lastPullTime }}"
-          apply_async: false
-          pass_parent_env: false
-          pass_input_record: false
-          step_variables: []
+        target: "TODO Connector > Fetch"
+        lastPullTime: "{{ vars.input.params.lastPullTime }}"
+        apply_async: false
+        pass_parent_env: false
+        pass_input_record: false
+        step_variables: []
 
       - name: Fetch returned data
         type: decision
@@ -195,20 +190,17 @@ playbooks:
 
       - name: Raise no data
         type: connector
-        arguments:
-          connector: cyops_utilities
-          operation: raise_exception
-          config: ""
-          params:
-            msg: "Ingest: Fetch returned no records (lastPullTime={{ vars.input.params.lastPullTime }})"
+        connector: cyops_utilities
+        operation: raise_exception
+        config: ""
+        params:
+          msg: "Ingest: Fetch returned no records (lastPullTime={{ vars.input.params.lastPullTime }})"
 
       - name: Call Create
         type: workflow_reference
-        arguments:
-          target: "TODO Connector > Create"
-          arguments:
-            ingestedData: "{{ vars.steps.Call_Fetch.data }}"
-          apply_async: false
-          pass_parent_env: false
-          pass_input_record: false
-          step_variables: []
+        target: "TODO Connector > Create"
+        ingestedData: "{{ vars.steps.Call_Fetch.data }}"
+        apply_async: false
+        pass_parent_env: false
+        pass_input_record: false
+        step_variables: []

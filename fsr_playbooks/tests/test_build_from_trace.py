@@ -43,7 +43,7 @@ def test_builds_yaml_with_value_matched_wire():
     assert names[0] == "Start"
     assert "Isolate Host" in names
     block = next(s for s in pb["steps"] if s["name"] == "Isolate Host")
-    assert block["arguments"]["host"] == \
+    assert block["host"] == \
         "{{ vars.steps.Get_Ip_Report.data.attributes.network }}"
     # The wire was verified, no dangling-ref gap on host.
     assert out["verified"]["Isolate Host"]["host"] is True
@@ -88,11 +88,11 @@ def test_recorded_config_is_emitted_on_connector_step():
     doc = yaml.safe_load(out["yaml"])
     steps = {s["name"]: s for s in doc["playbooks"][0]["steps"]
              if s["type"] == "connector"}
-    assert steps["Block Ip New"]["arguments"]["config"] == "cfg-uuid-123"
+    assert steps["Block Ip New"]["config"] == "cfg-uuid-123"
     # The config-less step must not borrow the other step's id; the resolver
     # supplies the "" default at compile (asserted via the source YAML here —
     # omitted means defaulted downstream).
-    assert steps["Query Ip"]["arguments"].get("config") in (None, "")
+    assert steps["Query Ip"].get("config") in (None, "")
 
 
 def test_recorded_agent_is_emitted_on_connector_step():
@@ -112,10 +112,10 @@ def test_recorded_agent_is_emitted_on_connector_step():
     doc = yaml.safe_load(out["yaml"])
     steps = {s["name"]: s for s in doc["playbooks"][0]["steps"]
              if s["type"] == "connector"}
-    assert steps["Get Addresses"]["arguments"]["agent"] == \
+    assert steps["Get Addresses"]["agent"] == \
         "efe5dafd28b5e41cd4c37e5829ccc638"
-    assert steps["Get Addresses"]["arguments"]["config"] == "cfg-uuid-123"
-    assert steps["Query Ip"]["arguments"].get("agent") in (None, "")
+    assert steps["Get Addresses"]["config"] == "cfg-uuid-123"
+    assert steps["Query Ip"].get("agent") in (None, "")
 
 
 def _conn_steps(out):
@@ -144,7 +144,7 @@ def test_record_ioc_parameterized_to_records0_via_set_inputs():
     assert steps["Set Inputs"]["vars"]["ip"] == \
         "{{ vars.input.records[0].sourceIp }}"
     # the connector step consumes the staged var, no literal IP
-    assert steps["Query Ip"]["arguments"]["ip"] == \
+    assert steps["Query Ip"]["ip"] == \
         "{{ vars.steps.Set_Inputs.ip }}"
     assert "102.220.160.21" not in out["yaml"]
     # the gap is resolved (parameterized), not surfaced as unwired
@@ -162,7 +162,7 @@ def test_no_module_leaves_ioc_literal_no_set_inputs():
     assert out["ok"] is True
     doc, steps = _conn_steps(out)
     assert "Set Inputs" not in steps
-    assert steps["Query Ip"]["arguments"]["ip"] == "102.220.160.21"
+    assert steps["Query Ip"]["ip"] == "102.220.160.21"
 
 
 def test_record_fields_round_trip_json():

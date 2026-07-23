@@ -30,19 +30,17 @@ playbooks:
       - name: find
         type: find_record
         next: Apply tag
-        arguments:
-          module: indicators
-          query:
-            logic: AND
-            filters:
-              - field: value
-                operator: eq
-                value: "{{ vars.input.params.indicator_value }}"
-          partial: true
+        module: indicators
+        query:
+          logic: AND
+          filters:
+            - field: value
+              operator: eq
+              value: "{{ vars.input.params.indicator_value }}"
+        partial: true
 
       - name: Apply tag
         type: update_record
-        arguments:
-          collection: indicators
-          resource:
-            tags: "{{ vars.steps.find['hydra:member'][0].tags + [vars.input.params.tag] }}"
+        collection: indicators
+        resource:
+          tags: "{{ vars.steps.find['hydra:member'][0].tags + [vars.input.params.tag] }}"

@@ -21,7 +21,7 @@ playbooks:
   is_active: true
   steps:
   - {name: Start, type: start, next: Call}
-  - {name: Call, type: workflow_reference, arguments: {}}
+  - {name: Call, type: workflow_reference}
 """
     r = compile_yaml(y, DB)
     assert not r.ok

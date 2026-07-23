@@ -18,9 +18,8 @@ playbooks:
 
       - name: Get organization
         type: connector
-        arguments:
-          connector: fortinet-fortisiem
-          operation: get_org_name_by_org_id
-          config: ""
-          params:
-            domain_id: "{{ vars.target_org }}"
+        connector: fortinet-fortisiem
+        operation: get_org_name_by_org_id
+        config: ""
+        params:
+          domain_id: "{{ vars.target_org }}"

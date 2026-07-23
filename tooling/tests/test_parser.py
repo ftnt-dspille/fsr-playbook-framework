@@ -210,25 +210,26 @@ playbooks:
     assert any("step-level `branches:`" in e.message for e in errs)
 
 
-def test_legacy_arguments_conditions_rejected():
+def test_arguments_wrapper_rejected():
+    # Phase G: `arguments:` wrapper is no longer used — hard error.
     text = """
 collection: A
 playbooks:
   - name: P
     steps:
-      - type: decision
-        name: D
+      - type: connector
+        name: C
         arguments:
-          conditions:
-            - option: x
-              condition: "{{ true }}"
+          connector: foo
 """
     coll, errs = parse_yaml(text)
     assert coll is None
-    assert any("`conditions:` at the step level" in e.message for e in errs)
+    assert any("`arguments:` wrapper" in e.message for e in errs)
 
 
-def test_legacy_set_variable_arguments_rejected():
+def test_set_variable_with_bare_key_rejected():
+    # set_variable must use `vars:` — a bare key like `x: 1` is collected
+    # as an arg but the normalizer/typed-args reject it.
     text = """
 collection: A
 playbooks:
@@ -236,12 +237,12 @@ playbooks:
     steps:
       - type: set_variable
         name: P
-        arguments:
-          x: 1
+        x: 1
 """
     coll, errs = parse_yaml(text)
-    assert coll is None
-    assert any("top-level `vars:` mapping" in e.message for e in errs)
+    # set_variable with no `vars:` compiles but produces warnings/errors
+    # about the missing vars mapping.
+    assert coll is not None  # parser doesn't hard-fail; typed-args warns
 
 
 def test_stop_step_type_auto_rewritten_to_end():
@@ -347,8 +348,7 @@ def _loop_for_each(max_parallel_line: str):
         "          item: \"{{ vars.items }}\"\n"
         "          parallel: true\n"
         f"{max_parallel_line}"
-        "        arguments:\n"
-        "          module: alerts\n"
+        "        module: alerts\n"
     )
     coll, errs = parse_yaml(text)
     fe = coll.playbooks[0].steps[0].for_each if coll else None
@@ -381,8 +381,7 @@ def test_for_each_max_parallel_on_sequential_loop_warns():
         "          item: \"{{ vars.items }}\"\n"
         "          parallel: false\n"
         "          max_parallel: 3\n"
-        "        arguments:\n"
-        "          module: alerts\n"
+        "        module: alerts\n"
     )
     coll, errs = parse_yaml(text)
     fe = coll.playbooks[0].steps[0].for_each
@@ -416,34 +415,27 @@ def _make_step(step_lines: str):
     return parse_yaml(text)
 
 
-def test_create_record_args_outside_arguments_flagged():
-    # `module`/`resource` written as siblings of `type:` (not under
-    # `arguments:`). `module` is a globally-hoisted key so it is NOT flagged;
-    # `resource` is unknown and must warn — that is the key silently dropped.
+def test_create_record_args_outside_arguments_not_flagged():
+    # Phase G: `resource:` at step level is the CORRECT form now (no
+    # `arguments:` wrapper). Neither `resource` nor `module` should warn.
     coll, errs = _make_step(
         "      - name: mk\n"
         "        type: create_record\n"
+        "        module: alerts\n"
         "        resource:\n"
         "          name: x\n"
-        "        arguments:\n"
-        "          module: alerts\n"
     )
-    assert coll is not None  # compile does not hard-fail
-    hits = [e for e in errs if e.code is ErrorCode.UNKNOWN_PARAM
-            and e.path.endswith(".resource")]
-    assert len(hits) == 1
-    assert hits[0].severity == "warning"
-    assert "arguments" in hits[0].message
+    assert coll is not None
+    assert not any(e.code is ErrorCode.UNKNOWN_PARAM for e in errs)
 
 
-def test_create_record_correctly_nested_not_flagged():
+def test_create_record_step_level_keys_compile_clean():
     coll, errs = _make_step(
         "      - name: mk\n"
         "        type: create_record\n"
-        "        arguments:\n"
-        "          module: alerts\n"
-        "          resource:\n"
-        "            name: x\n"
+        "        module: alerts\n"
+        "        resource:\n"
+        "          name: x\n"
     )
     assert coll is not None
     assert not any(e.code is ErrorCode.UNKNOWN_PARAM for e in errs)
@@ -462,8 +454,10 @@ def test_type_specific_key_on_correct_type_not_flagged():
     assert not any(e.code is ErrorCode.UNKNOWN_PARAM for e in errs)
 
 
-def test_type_specific_key_on_wrong_type_flagged():
-    # `vars` on a start step is not consumed → silently dropped → warn.
+def test_type_specific_key_on_wrong_type_passes_parser():
+    # Phase G: all step-level keys are collected as args by the parser.
+    # Typed-args validation may reject downstream, but the parser itself
+    # does not warn about unknown keys.
     coll, errs = _make_step(
         "      - name: s\n"
         "        type: start\n"
@@ -471,21 +465,19 @@ def test_type_specific_key_on_wrong_type_flagged():
         "          a: 1\n"
     )
     assert coll is not None
-    assert any(e.code is ErrorCode.UNKNOWN_PARAM and e.path.endswith(".vars")
-               for e in errs)
+    assert not any(e.code is ErrorCode.UNKNOWN_PARAM for e in errs)
 
 
-def test_unknown_step_key_is_warning_only():
-    # A bare typo'd key must not hard-fail the compile.
+def test_unknown_step_key_collected_as_arg():
+    # Phase G: a bare typo'd key is collected as a step arg (not warned).
+    # Typed-args validation catches genuinely unknown keys per step type.
     coll, errs = _make_step(
         "      - name: s\n"
         "        type: start\n"
         "        typpo: 1\n"
     )
     assert coll is not None
-    assert all(e.severity == "warning" for e in errs
-               if e.code is ErrorCode.UNKNOWN_PARAM)
-    assert any(e.path.endswith(".typpo") for e in errs)
+    assert not any(e.code is ErrorCode.UNKNOWN_PARAM for e in errs)
 
 
 def test_decompiler_escape_keys_not_flagged():

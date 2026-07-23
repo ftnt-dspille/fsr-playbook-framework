@@ -18,20 +18,19 @@ playbooks:
       - name: Start
         type: start
         next: Convert Time
-        arguments: {module: alerts, button_label: Run}
+        module: alerts
+        button_label: Run
       - name: Convert Time
         type: connector
         next: Emit
-        arguments:
-          connector: cyops_utilities
-          operation: convert_periodic_time_to_minutes
-          config: ''
-          params: {periodic_time: 3 hours}
+        connector: cyops_utilities
+        operation: convert_periodic_time_to_minutes
+        config: ''
+        params: {periodic_time: 3 hours}
       - name: Emit
         type: create_record
-        arguments:
-          module: alerts
-          resource: {name: t, description: '{{ vars.steps.Convert_Time.data.minutes }}'}
+        module: alerts
+        resource: {name: t, description: '{{ vars.steps.Convert_Time.data.minutes }}'}
 """
 
 

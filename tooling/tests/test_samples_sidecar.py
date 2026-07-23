@@ -20,12 +20,11 @@ YAML_PLAIN = textwrap.dedent(
         steps:
           - type: manual_input
             name: Get IP Address
-            arguments:
-              inputs:
-                - name: ip_address
-                  kind: ipv4
-                - name: reason
-                  kind: text
+            inputs:
+              - name: ip_address
+                kind: ipv4
+              - name: reason
+                kind: text
             options:
               - display: Block
                 primary: true

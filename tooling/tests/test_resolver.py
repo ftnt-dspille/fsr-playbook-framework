@@ -32,8 +32,7 @@ def test_type_for_each_emits_modifier_not_type_hint(db_path):
     instead of guessing alternative step names."""
     text = _yaml(
         "        type: for_each\n"
-        "        arguments:\n"
-        "          list: '{{ vars.x }}'\n"
+        "        list: '{{ vars.x }}'\n"
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -74,9 +73,8 @@ playbooks:
 def test_unknown_connector_suggests(db_path):
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: fortimanger\n"
-        "          operation: get_devices\n"
+        "        connector: fortimanger\n"
+        "        operation: get_devices\n"
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -87,9 +85,8 @@ def test_unknown_connector_suggests(db_path):
 def test_unknown_operation_suggests(db_path):
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: fortinet-fortisiem\n"
-        "          operation: get_org_name_by_org_idz\n"
+        "        connector: fortinet-fortisiem\n"
+        "        operation: get_org_name_by_org_idz\n"
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -100,11 +97,10 @@ def test_unknown_operation_suggests(db_path):
 def test_unknown_param(db_path):
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: fortinet-fortisiem\n"
-        "          operation: get_org_name_by_org_id\n"
-        "          params:\n"
-        "            domain_id_typo: x\n"
+        "        connector: fortinet-fortisiem\n"
+        "        operation: get_org_name_by_org_id\n"
+        "        params:\n"
+        "          domain_id_typo: x\n"
     )
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -117,11 +113,10 @@ def test_picklist_enum_rejected_with_did_you_mean(db_path):
     should be rejected with a fuzzy suggestion."""
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: apivoid\n"
-        "          operation: dnspropagation\n"
-        "          params:\n"
-        "            dns_record_type: AAA\n"
+        "        connector: apivoid\n"
+        "        operation: dnspropagation\n"
+        "        params:\n"
+        "          dns_record_type: AAA\n"
     )
     r = compile_yaml(text, db_path)
     bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -133,11 +128,10 @@ def test_picklist_enum_rejected_with_did_you_mean(db_path):
 def test_picklist_enum_case_mismatch_emits_case_hint(db_path):
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: apivoid\n"
-        "          operation: dnspropagation\n"
-        "          params:\n"
-        "            dns_record_type: aaaa\n"
+        "        connector: apivoid\n"
+        "        operation: dnspropagation\n"
+        "        params:\n"
+        "          dns_record_type: aaaa\n"
     )
     r = compile_yaml(text, db_path)
     bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -152,11 +146,10 @@ def test_picklist_jinja_value_skipped(db_path):
     enum complaint, since we can't resolve the expression."""
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: apivoid\n"
-        "          operation: dnspropagation\n"
-        "          params:\n"
-        "            dns_record_type: \"{{ vars.input.params.t }}\"\n"
+        "        connector: apivoid\n"
+        "        operation: dnspropagation\n"
+        "        params:\n"
+        "          dns_record_type: \"{{ vars.input.params.t }}\"\n"
     )
     r = compile_yaml(text, db_path)
     bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -170,12 +163,11 @@ def test_integer_param_rejects_non_numeric_literal(db_path):
     A non-numeric literal should be rejected at compile time."""
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: aws-access-analyzer\n"
-        "          operation: list_analyzers\n"
-        "          params:\n"
-        "            type: ACCOUNT\n"
-        "            size: many\n"
+        "        connector: aws-access-analyzer\n"
+        "        operation: list_analyzers\n"
+        "        params:\n"
+        "          type: ACCOUNT\n"
+        "          size: many\n"
     )
     r = compile_yaml(text, db_path)
     bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -187,12 +179,11 @@ def test_integer_param_rejects_non_numeric_literal(db_path):
 def test_integer_param_accepts_numeric_string(db_path):
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: aws-access-analyzer\n"
-        "          operation: list_analyzers\n"
-        "          params:\n"
-        "            type: ACCOUNT\n"
-        "            size: \"25\"\n"
+        "        connector: aws-access-analyzer\n"
+        "        operation: list_analyzers\n"
+        "        params:\n"
+        "          type: ACCOUNT\n"
+        "          size: \"25\"\n"
     )
     r = compile_yaml(text, db_path)
     bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -204,12 +195,11 @@ def test_integer_param_accepts_numeric_string(db_path):
 def test_checkbox_param_rejects_arbitrary_string(db_path):
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: aws-access-analyzer\n"
-        "          operation: list_analyzers\n"
-        "          params:\n"
-        "            type: ACCOUNT\n"
-        "            assume_role: maybe\n"
+        "        connector: aws-access-analyzer\n"
+        "        operation: list_analyzers\n"
+        "        params:\n"
+        "          type: ACCOUNT\n"
+        "          assume_role: maybe\n"
     )
     r = compile_yaml(text, db_path)
     bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -222,11 +212,10 @@ def test_checkbox_param_accepts_native_bool_and_truthy_string(db_path):
     for val in ("true", "false", "True", "yes", "1"):
         text = _yaml(
             "        type: connector\n"
-            "        arguments:\n"
-            "          connector: aws-access-analyzer\n"
-            "          operation: list_analyzers\n"
-            "          params:\n"
-            "            type: ACCOUNT\n"
+          "          connector: aws-access-analyzer\n"
+          "          operation: list_analyzers\n"
+          "          params:\n"
+          "            type: ACCOUNT\n"
             f"            assume_role: {val}\n"
         )
         r = compile_yaml(text, db_path)
@@ -239,11 +228,10 @@ def test_checkbox_param_accepts_native_bool_and_truthy_string(db_path):
 def test_decimal_param_rejects_non_numeric(db_path):
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: claroty-xdome\n"
-        "          operation: get_vulnerabilities\n"
-        "          params:\n"
-        "            cvss_v3_score: critical\n"
+        "        connector: claroty-xdome\n"
+        "        operation: get_vulnerabilities\n"
+        "        params:\n"
+        "          cvss_v3_score: critical\n"
     )
     r = compile_yaml(text, db_path)
     bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -256,13 +244,12 @@ def test_typed_param_skips_jinja(db_path):
     """Jinja templates defer to runtime; no static type complaint."""
     text = _yaml(
         "        type: connector\n"
-        "        arguments:\n"
-        "          connector: aws-access-analyzer\n"
-        "          operation: list_analyzers\n"
-        "          params:\n"
-        "            type: ACCOUNT\n"
-        "            size: \"{{ vars.input.params.n }}\"\n"
-        "            assume_role: \"{{ vars.input.params.role }}\"\n"
+        "        connector: aws-access-analyzer\n"
+        "        operation: list_analyzers\n"
+        "        params:\n"
+        "          type: ACCOUNT\n"
+        "          size: \"{{ vars.input.params.n }}\"\n"
+        "          assume_role: \"{{ vars.input.params.role }}\"\n"
     )
     r = compile_yaml(text, db_path)
     bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -334,12 +321,11 @@ def test_tier23_ipv4_observed_type_fires(db_path):
     try:
         text = _yaml(
             "        type: connector\n"
-            "        arguments:\n"
-            "          connector: abuseipdb\n"
-            "          operation: ip_lookup\n"
-            "          params:\n"
-            "            ip: not-an-ip\n"
-            "            days: 30\n"
+            "        connector: abuseipdb\n"
+            "        operation: ip_lookup\n"
+            "        params:\n"
+            "          ip: not-an-ip\n"
+            "          days: 30\n"
         )
         r = compile_yaml(text, db_path)
         bad = [e for e in r.errors if e.code is ErrorCode.BAD_VALUE
@@ -350,12 +336,11 @@ def test_tier23_ipv4_observed_type_fires(db_path):
         # Jinja-templated value: no diagnostic.
         text2 = _yaml(
             "        type: connector\n"
-            "        arguments:\n"
-            "          connector: abuseipdb\n"
-            "          operation: ip_lookup\n"
-            "          params:\n"
-            "            ip: \"{{ vars.input.records.source_ip }}\"\n"
-            "            days: 30\n"
+            "        connector: abuseipdb\n"
+            "        operation: ip_lookup\n"
+            "        params:\n"
+            "          ip: \"{{ vars.input.records.source_ip }}\"\n"
+            "          days: 30\n"
         )
         r2 = compile_yaml(text2, db_path)
         bad2 = [e for e in r2.errors if (e.path or "").endswith(".ip")

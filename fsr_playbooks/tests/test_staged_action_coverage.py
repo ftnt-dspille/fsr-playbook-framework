@@ -110,7 +110,7 @@ def test_trace_build_replays_staged_containment_guarded():
     names = [s["name"] for s in pb["steps"]]
     # The staged containment is present as a real connector step...
     block = next(s for s in pb["steps"] if s["name"] == "Block Ip New")
-    assert block["arguments"]["operation"] == "block_ip_new"
+    assert block["operation"] == "block_ip_new"
     # ...gated behind the synthesized malicious-verdict decision (safe-by-default).
     assert "Assess Verdict" in names
     assert "Confirmed Malicious" in names

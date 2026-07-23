@@ -61,37 +61,36 @@ playbooks:
           box; it does NOT fetch a feed. Recipe rule: target connector
           must already be installed on the configured FSR — verify with
           `fsrpb health <connector>` before running.
-        arguments:
-          connector: cyops_utilities
-          operation: get_macro_list
-          config: ""
-          params: {}
-          # TODO once you swap in the real connector + op, supply the
-          # fetch parameters here. Use
-          # `{{ vars.input.params.lastPullTime }}` for incremental pulls.
-          #
-          # MOCK MODE: when the target connector isn't installed yet, you
-          # can still validate the rest of this recipe's plumbing by
-          # filling in `mock_result` (a JSON STRING — yes, stringified)
-          # with a representative feed-fetch payload, then triggering
-          # with `fsrpb run-playbook --mock`. The runtime returns this
-          # string in place of executing the connector op, while every
-          # downstream step (mapping → Decision → IngestBulkFeed) runs
-          # live against it. Default trigger is non-mock; this only
-          # activates when --mock is passed.
-          mock_result: |
-            {
-              "indicators": [
-                {
-                  "id": "TODO-mock-1",
-                  "value": "1.2.3.4",
-                  "type": "ipv4-addr",
-                  "tlp": "white",
-                  "confidence": 60,
-                  "description": "TODO sample indicator (mock)"
-                }
-              ]
-            }
+        connector: cyops_utilities
+        operation: get_macro_list
+        config: ""
+        params: {}
+        # TODO once you swap in the real connector + op, supply the
+        # fetch parameters here. Use
+        # `{{ vars.input.params.lastPullTime }}` for incremental pulls.
+        #
+        # MOCK MODE: when the target connector isn't installed yet, you
+        # can still validate the rest of this recipe's plumbing by
+        # filling in `mock_result` (a JSON STRING — yes, stringified)
+        # with a representative feed-fetch payload, then triggering
+        # with `fsrpb run-playbook --mock`. The runtime returns this
+        # string in place of executing the connector op, while every
+        # downstream step (mapping → Decision → IngestBulkFeed) runs
+        # live against it. Default trigger is non-mock; this only
+        # activates when --mock is passed.
+        mock_result: |
+          {
+            "indicators": [
+              {
+                "id": "TODO-mock-1",
+                "value": "1.2.3.4",
+                "type": "ipv4-addr",
+                "tlp": "white",
+                "confidence": 60,
+                "description": "TODO sample indicator (mock)"
+              }
+            ]
+          }
 
       - name: Map to ingestedData
         type: set_variable
@@ -119,12 +118,11 @@ playbooks:
 
       - name: Raise no data
         type: connector
-        arguments:
-          connector: cyops_utilities
-          operation: raise_exception
-          config: ""
-          params:
-            msg: "Feed fetch returned no indicators (lastPullTime={{ vars.input.params.lastPullTime }})"
+        connector: cyops_utilities
+        operation: raise_exception
+        config: ""
+        params:
+          msg: "Feed fetch returned no indicators (lastPullTime={{ vars.input.params.lastPullTime }})"
 
       - name: Ingest indicators
         type: ingest_bulk_feed
@@ -142,30 +140,29 @@ playbooks:
           condition: ""
           __bulk: true
           batch_size: 1000
-        arguments:
-          collection: /api/ingest-feeds/threat_intel_feeds
-          resource:
-            __replace: ""
-            value: "{{ vars.item.value }}"            # TODO field name
-            source: "{{ vars.feed_source_name }}"
-            sourceId: "{{ vars.item.id }}"            # TODO field name (must be unique per indicator for dedupe)
-            sourceData: "{{ vars.item | toJSON }}"
-            typeOfFeed: "{{ vars.item.type | resolveRange(vars.typeOfFeed_map) }}"  # TODO field name
-            tLP: "{{ vars.item.tlp | default('white') | resolveRange(vars.tlp_map) }}"  # TODO field name
-            confidence: "{{ vars.item.confidence | default(vars.confidence_default) }}"
-            description: "{{ vars.item.description | default('') }}"
-            patternType: "STIX"
-            patternVersion: "2.1"
-            recordTags: []
-            threatTypes: []
-            killChainPhases: []
-          __recommend: []
-          step_variables: []
-          # MOCK MODE: even with `useMockOutput=true / globalMock=false`,
-          # IngestBulkFeed still executes live unless it has its own
-          # `mock_result`. Fill in a stub success payload here while
-          # validating recipe plumbing without real picklist UUIDs;
-          # remove once the Configuration step's picklist maps point at
-          # real UUIDs from the live FSR.
-          mock_result: |
-            {"status": "ok", "ingested": 0, "mock": true}
+        collection: /api/ingest-feeds/threat_intel_feeds
+        resource:
+          __replace: ""
+          value: "{{ vars.item.value }}"            # TODO field name
+          source: "{{ vars.feed_source_name }}"
+          sourceId: "{{ vars.item.id }}"            # TODO field name (must be unique per indicator for dedupe)
+          sourceData: "{{ vars.item | toJSON }}"
+          typeOfFeed: "{{ vars.item.type | resolveRange(vars.typeOfFeed_map) }}"  # TODO field name
+          tLP: "{{ vars.item.tlp | default('white') | resolveRange(vars.tlp_map) }}"  # TODO field name
+          confidence: "{{ vars.item.confidence | default(vars.confidence_default) }}"
+          description: "{{ vars.item.description | default('') }}"
+          patternType: "STIX"
+          patternVersion: "2.1"
+          recordTags: []
+          threatTypes: []
+          killChainPhases: []
+        __recommend: []
+        step_variables: []
+        # MOCK MODE: even with `useMockOutput=true / globalMock=false`,
+        # IngestBulkFeed still executes live unless it has its own
+        # `mock_result`. Fill in a stub success payload here while
+        # validating recipe plumbing without real picklist UUIDs;
+        # remove once the Configuration step's picklist maps point at
+        # real UUIDs from the live FSR.
+        mock_result: |
+          {"status": "ok", "ingested": 0, "mock": true}

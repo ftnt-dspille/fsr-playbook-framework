@@ -97,11 +97,10 @@ playbooks:
         next: ask
       - name: ask
         type: manual_input
-        arguments:
-          title: Approve?
-          inputs:
-            - {name: comment, kind: textarea, label: Comment, required: true}
-            - {name: severity, kind: select, options: [Low, High]}
+        title: Approve?
+        inputs:
+          - {name: comment, kind: textarea, label: Comment, required: true}
+          - {name: severity, kind: select, options: [Low, High]}
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -122,10 +121,9 @@ playbooks:
         next: ask
       - name: ask
         type: manual_input
-        arguments:
-          title: T
-          inputs:
-            - {name: c, kind: bogus_kind}
+        title: T
+        inputs:
+          - {name: c, kind: bogus_kind}
 """
     r = compile_yaml(text, db_path)
     assert any(
@@ -149,10 +147,9 @@ playbooks:
         next: ask
       - name: ask
         type: manual_input
-        arguments:
-          title: T
-          inputs:
-            - {name: c, kind: text, tooptip: x}
+        title: T
+        inputs:
+          - {name: c, kind: text, tooptip: x}
 """
     r = compile_yaml(text, db_path)
     msgs = [e.message or "" for e in r.errors]

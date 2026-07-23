@@ -258,6 +258,41 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
     return yaml.safe_dump(_clean(out), sort_keys=False, allow_unicode=True)
 
 
+# Phase G: hoist remaining step args to the step's top level (no `arguments:`
+# wrapper). Strip wire-envelope keys that would collide with IR step fields:
+# `name` (connector display label — re-derived by the compiler from the
+# connector catalog; the step's `name` is the canvas node name) and
+# `description` (if already at step level as an IR field).
+_STEP_IR_FIELD_NAMES = frozenset({
+    "type", "name", "next", "branches", "unlabeled_next", "comment",
+    "description", "for_each", "id",
+})
+
+
+def _hoist_args(out: dict, args: dict) -> None:
+    """Merge `args` into `out` at step level, skipping IR-field collisions."""
+    # `name` in args is the connector display label — collides with step.name.
+    # Preserve as `display_name:` if it differs from the step name (custom
+    # label); strip if it matches (re-derived by the compiler from catalog).
+    # Must run before the IR-field loop below, which would otherwise pop it.
+    conn_label = args.pop("name", None)
+    if conn_label is not None and conn_label != out.get("name"):
+        args["display_name"] = conn_label
+    # Phase G: workflow_reference stores child-playbook input params under a
+    # nested `arguments` key. Flatten them to step level (the parser's
+    # resolver re-separates envelope keys from child params on recompile).
+    if "arguments" in args:
+        child = args.pop("arguments")
+        if isinstance(child, dict):
+            for k, v in child.items():
+                args.setdefault(k, v)
+        # If it's a list (empty []), just drop it — no child params.
+    for k in list(args):
+        if k in _STEP_IR_FIELD_NAMES and k in out:
+            args.pop(k)
+    out.update(args)
+
+
 def _decompile_step(s, pb_name: str | None = None,
                      db: "sqlite3.Connection | None" = None) -> dict:
     """Emit a step in the canonical authoring surface:
@@ -275,20 +310,16 @@ def _decompile_step(s, pb_name: str | None = None,
     args = dict(s.arguments) if isinstance(s.arguments, dict) else None
     branches_remaining = dict(s.branches)
 
-    # Universal step envelope (Phase 4): the parser hoists these wire keys
-    # out of `arguments:` to the step surface, so on pull we reverse that —
-    # otherwise a connector's `when`/`do_until`/`agent` round-trips back as
-    # raw `arguments.when`, which the editor never compiles to. Lift them
-    # back to the step top level verbatim (canonical spelling, lossless).
+    # Phase G: step args are emitted at the step's top level (no `arguments:`
+    # wrapper). The envelope keys (when, module, etc.) are hoisted to `out`
+    # first; the remaining args are merged via `out.update(args)` at the end
+    # of each branch, skipping keys that collide with IR step fields.
     if isinstance(args, dict):
         for env_key in ("when", "ignore_errors", "do_until", "apply_async",
                         "agent", "agentId", "pickFromTenant", "step_variables",
                         "mock_result", "module", "modules"):
             if env_key in args:
                 out[env_key] = args.pop(env_key)
-        # Fold a pure `message: {content: "<text>"}` back to the friendlier
-        # `post_comment: "<text>"` sugar (parser accepts both). Keep the full
-        # `message:` block when it carries more than a plain content string.
         msg = args.get("message")
         if isinstance(msg, dict) and set(msg) == {"content"} \
                 and isinstance(msg["content"], str):
@@ -296,9 +327,6 @@ def _decompile_step(s, pb_name: str | None = None,
         elif "message" in args:
             out["message"] = args.pop("message")
 
-        # Drop pure editor-only UI-state noise (see `_EDITOR_NOISE_KEYS`). Safe
-        # for every step type: no branch below consumes these keys and no
-        # ruleset requires them, so removing them is lossless for the runtime.
         for _noise_key in _EDITOR_NOISE_KEYS:
             args.pop(_noise_key, None)
 
@@ -383,7 +411,7 @@ def _decompile_step(s, pb_name: str | None = None,
         if dc and dc != default_dc:
             friendly["displayConditions"] = dc
         if friendly:
-            out["arguments"] = friendly
+            out.update(friendly)
     elif s.type == "decision" and isinstance(args, dict):
         conds = args.pop("conditions", None) or []
         new_conds = []
@@ -408,7 +436,7 @@ def _decompile_step(s, pb_name: str | None = None,
         if new_conds:
             out["conditions"] = new_conds
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "manual_input" and isinstance(args, dict):
         rmap = args.pop("response_mapping", None)
         opts: list = []
@@ -433,7 +461,7 @@ def _decompile_step(s, pb_name: str | None = None,
         if new_opts:
             out["options"] = new_opts
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "set_variable" and isinstance(args, dict):
         # Resolver flattens arg_list into the args dict; treat every key
         # as a variable assignment.
@@ -515,7 +543,7 @@ def _decompile_step(s, pb_name: str | None = None,
                             and args.get("operationTitle") == _orow["title"]):
                         args.pop("operationTitle", None)
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "api_endpoint" and isinstance(args, dict):
         # api_endpoint (Custom API Endpoint trigger) minimification. The forward
         # normalizer (`_normalize_api_endpoint_args`) setdefaults five
@@ -545,7 +573,7 @@ def _decompile_step(s, pb_name: str | None = None,
         if out.get("step_variables") == _API_ENDPOINT_DEFAULT_STEP_VARS:
             out.pop("step_variables", None)
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "code_snippet" and isinstance(args, dict):
         # code_snippet (CodeSnippet) minimification. The forward normalizer
         # (`_normalize_code_snippet_args` -> `expand_code_snippet`) expands the
@@ -573,7 +601,7 @@ def _decompile_step(s, pb_name: str | None = None,
             if out.get("step_variables") == []:
                 out.pop("step_variables", None)
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "send_email" and isinstance(args, dict):
         # send_email minimification. The forward normalizer turns the friendly
         # `send_email` step into a `SendMail` connector-family call: it defaults
@@ -607,9 +635,9 @@ def _decompile_step(s, pb_name: str | None = None,
             if out.get("step_variables") == []:
                 out.pop("step_variables", None)
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif args:
-        out["arguments"] = args
+        _hoist_args(out, args)
 
     # `for_each` is lifted OUT of `arguments:` when the IR is built from the
     # wire, so it must be put back on the step surface here or the loop is

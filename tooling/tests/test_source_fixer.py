@@ -81,8 +81,7 @@ def test_set_var_reserved_key_renames_declaration_and_refs():
         "          message: hi\n"
         "      - type: manual_input\n"
         "        name: Show\n"
-        "        arguments:\n"
-        '          description: "{{ vars.message }}"\n'
+        '        description: "{{ vars.message }}"\n'
     )
     fixes = [f for f in collect_fixes(text) if f.code == "set_var_reserved_key"]
     # One declaration rename + one reference rewrite.
@@ -92,7 +91,7 @@ def test_set_var_reserved_key_renames_declaration_and_refs():
     assert decl.replacement == "message_var"
     ref = next(f for f in fixes if "vars.message" in f.original)
     assert ref.replacement == "vars.message_var"
-    assert ref.line == 11
+    assert ref.line == 10
 
 
 def test_set_var_reserved_key_arg_list_form():
@@ -102,10 +101,9 @@ def test_set_var_reserved_key_arg_list_form():
         "    steps:\n"
         "      - type: set_variable\n"
         "        name: SV\n"
-        "        arguments:\n"
-        "          arg_list:\n"
-        "            - name: result\n"
-        "              value: 1\n"
+        "        arg_list:\n"
+        "          - name: result\n"
+        "            value: 1\n"
     )
     fixes = [f for f in collect_fixes(text) if f.code == "set_var_reserved_key"]
     assert any(f.original == "result" and f.replacement == "result_var"
@@ -123,8 +121,7 @@ def test_set_var_step_namespace_rewrites_step_dot_key():
         "          greeting: hi\n"
         "      - type: manual_input\n"
         "        name: Show\n"
-        "        arguments:\n"
-        '          description: "{{ vars.steps.Set_Variable.greeting }}"\n'
+        '        description: "{{ vars.steps.Set_Variable.greeting }}"\n'
     )
     fixes = [f for f in collect_fixes(text) if f.code == "set_var_step_namespace"]
     assert len(fixes) == 1
@@ -145,8 +142,7 @@ def test_set_var_step_namespace_post_rename_uses_new_key():
         "          message: hi\n"
         "      - type: manual_input\n"
         "        name: Show\n"
-        "        arguments:\n"
-        '          description: "{{ vars.steps.Set_Variable.message }}"\n'
+        '        description: "{{ vars.steps.Set_Variable.message }}"\n'
     )
     ns = [f for f in collect_fixes(text) if f.code == "set_var_step_namespace"]
     assert len(ns) == 1 and ns[0].replacement == "vars.message_var"
@@ -164,8 +160,7 @@ def test_apply_fixes_produces_corrected_source():
         "          greeting: \"{{ vars.input.severity }}\"\n"
         "      - type: manual_input\n"
         "        name: Show\n"
-        "        arguments:\n"
-        '          description: "{{ vars.steps.Set_Variable.greeting }}"\n'
+        '        description: "{{ vars.steps.Set_Variable.greeting }}"\n'
         "      - name: bye\n"
         "        type: stop\n"
     )

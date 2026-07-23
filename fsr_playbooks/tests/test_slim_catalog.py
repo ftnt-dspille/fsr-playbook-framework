@@ -105,8 +105,7 @@ playbooks:
         type: connector
         connector: definitely_not_a_real_connector_xyz
         operation: some_op
-        arguments:
-          params: {}
+        params: {}
 """
     res = compile_yaml(yaml_text, PACKAGED_SLIM_DB)
     blocking = [e.message for e in res.errors if e.severity != "warning"]

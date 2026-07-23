@@ -6,14 +6,13 @@ all route through the same connector dispatcher
 (``script: /wf/workflow/tasks/connector``). Each carries a static envelope
 plus a per-operation params payload::
 
-    arguments:
-      connector:       <name>     # required — the connector to call
-      operation:       <op>       # required — the operation to invoke
-      config:          <name>     # optional — a named connector config (default "")
-      version:         <ver>      # auto-stamped from the catalog; authors never set it
-      agent:           <name>     # optional — bind to a FortiSOAR Agent (fortigate, edge)
-      params:          {…}        # the per-op arguments — DYNAMIC, from the live catalog
-      operationTitle:  "FSR: …"   # the designer label; re-derived from the catalog
+    connector:       <name>     # required — the connector to call
+    operation:       <op>       # required — the operation to invoke
+    config:          <name>     # optional — a named connector config (default "")
+    version:         <ver>      # auto-stamped from the catalog; authors never set it
+    agent:           <name>     # optional — bind to a FortiSOAR Agent (fortigate, edge)
+    params:          {…}        # the per-op arguments — DYNAMIC, from the live catalog
+    operationTitle:  "FSR: …"   # the designer label; re-derived from the catalog
 
 This layer types the **static envelope** so an agent can introspect "what does a
 connector step take?" via ``get_step_arg_schema("connector")`` (was ``None`` --

@@ -24,47 +24,43 @@ playbooks:
     steps:
       - name: start
         type: start
-        arguments:
-          module: alerts
-          requires_record: true
+        module: alerts
+        requires_record: true
         next: Yeti Auth
 
       - name: Yeti Auth
         type: connector
         next: Yeti Search
-        arguments:
-          connector: http
-          operation: http_post
-          config: "SOC Yeti"
-          params:
-            rest_api: "/auth/api-token"
+        connector: http
+        operation: http_post
+        config: "SOC Yeti"
+        params:
+          rest_api: "/auth/api-token"
 
       - name: Yeti Search
         type: connector
         next: NetBox Lookup
-        arguments:
-          connector: http
-          operation: http_post
-          config: "SOC Yeti"
-          params:
-            rest_api: "/observables/search"
-            header:
-              Authorization: "Bearer {{ vars.steps.Yeti_Auth.data.body.access_token }}"
-            data:
-              query:
-                value: "{{ vars.input.records[0].destinationIp }}"
+        connector: http
+        operation: http_post
+        config: "SOC Yeti"
+        params:
+          rest_api: "/observables/search"
+          header:
+            Authorization: "Bearer {{ vars.steps.Yeti_Auth.data.body.access_token }}"
+          data:
+            query:
+              value: "{{ vars.input.records[0].destinationIp }}"
 
       - name: NetBox Lookup
         type: connector
         next: Build Verdict
-        arguments:
-          connector: http
-          operation: http_get
-          config: "SOC NetBox"
-          params:
-            rest_api: "/ipam/ip-addresses/"
-            parameter:
-              address: "{{ vars.input.records[0].sourceIp }}"
+        connector: http
+        operation: http_get
+        config: "SOC NetBox"
+        params:
+          rest_api: "/ipam/ip-addresses/"
+          parameter:
+            address: "{{ vars.input.records[0].sourceIp }}"
 
       - name: Build Verdict
         type: set_variable

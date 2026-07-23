@@ -23,8 +23,7 @@ playbooks:
     steps:
       - type: start
         name: Start
-        arguments:
-          module: alerts
+        module: alerts
         next: End
       - type: end
         name: End
@@ -72,10 +71,9 @@ playbooks:
         next: Ask
       - type: manual_input
         name: Ask
-        arguments:
-          title: Enter IP
-          inputs:
-            - {name: ip_address, kind: text, label: IP Address, required: true}
+        title: Enter IP
+        inputs:
+          - {name: ip_address, kind: text, label: IP Address, required: true}
         options:
           - display: ok
             next: End
@@ -99,10 +97,9 @@ playbooks:
         next: Ask
       - type: manual_input
         name: Ask
-        arguments:
-          title: Email me
-          inputs:
-            - {name: contact_email, kind: text}
+        title: Email me
+        inputs:
+          - {name: contact_email, kind: text}
         options:
           - display: ok
             next: End
@@ -126,10 +123,9 @@ playbooks:
         next: Ask
       - type: manual_input
         name: Ask
-        arguments:
-          title: Enter IP
-          inputs:
-            - {name: ip_address, kind: ipv4}
+        title: Enter IP
+        inputs:
+          - {name: ip_address, kind: ipv4}
         options:
           - display: ok
             next: End
@@ -158,12 +154,11 @@ playbooks:
         next: B
       - type: connector
         name: B
-        arguments:
-          connector: fortigate-firewall
-          operation: block_ip_new
-          method: "Quarantine Based"
-          ip_addresses: "1.2.3.4"
-          time_to_live: "12 Hour"
+        connector: fortigate-firewall
+        operation: block_ip_new
+        method: "Quarantine Based"
+        ip_addresses: "1.2.3.4"
+        time_to_live: "12 Hour"
         next: End
       - type: end
         name: End
@@ -199,12 +194,11 @@ playbooks:
         next: B
       - type: connector
         name: B
-        arguments:
-          connector: fortigate-firewall
-          operation: block_ip_new
-          params:
-            method: "Quarantine Based"
-            ip_block_policy: "WrongBranch"
+        connector: fortigate-firewall
+        operation: block_ip_new
+        params:
+          method: "Quarantine Based"
+          ip_block_policy: "WrongBranch"
         next: End
       - type: end
         name: End
@@ -227,16 +221,15 @@ playbooks:
         next: B
       - type: connector
         name: B
-        arguments:
-          connector: fortigate-firewall
-          operation: block_ip_new
-          params:
-            method: "Policy Based"
-            ip_block_policy: "MyPolicy"
-            ip_type: "IPv4"
-            ip: "1.2.3.4"
-            ngfw_mode: "profile-based"
-            vdom: "root"
+        connector: fortigate-firewall
+        operation: block_ip_new
+        params:
+          method: "Policy Based"
+          ip_block_policy: "MyPolicy"
+          ip_type: "IPv4"
+          ip: "1.2.3.4"
+          ngfw_mode: "profile-based"
+          vdom: "root"
         next: End
       - type: end
         name: End

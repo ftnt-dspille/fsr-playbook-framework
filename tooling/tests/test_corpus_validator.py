@@ -18,11 +18,10 @@ playbooks:
         next: u
       - name: u
         type: update_record
-        arguments:
-          resource:
-            "@id": "/api/3/alerts/abc"
-            description: "x"
-          operation: append
+        resource:
+          "@id": "/api/3/alerts/abc"
+          description: "x"
+        operation: append
 """
     r = compile_yaml(text, db_path)
     drift = [
@@ -46,11 +45,10 @@ playbooks:
         next: u
       - name: u
         type: update_record
-        arguments:
-          resource:
-            "@id": "/api/3/alerts/abc"
-            description: "x"
-          operation: Append
+        resource:
+          "@id": "/api/3/alerts/abc"
+          description: "x"
+        operation: Append
 """
     r = compile_yaml(text, db_path)
     drift = [
@@ -115,11 +113,10 @@ playbooks:
         next: u
       - name: u
         type: update_record
-        arguments:
-          resource:
-            "@id": "/api/3/alerts/abc"
-            description: "x"
-          operation: "{{ vars.op }}"
+        resource:
+          "@id": "/api/3/alerts/abc"
+          description: "x"
+        operation: "{{ vars.op }}"
 """
     r = compile_yaml(text, db_path)
     drift = [

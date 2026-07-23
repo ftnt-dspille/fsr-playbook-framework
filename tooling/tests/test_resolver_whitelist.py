@@ -24,8 +24,7 @@ playbooks:
         next: d
       - name: d
         type: delay
-        arguments:
-          mins: 5
+        mins: 5
 """
     r = compile_yaml(text, db_path)
     errs = _unknown_param(r)
@@ -43,8 +42,7 @@ playbooks:
         next: d
       - name: d
         type: delay
-        arguments:
-          minutes: 5
+        minutes: 5
 """
     r = compile_yaml(text, db_path)
     assert not _unknown_param(r), [e.to_dict() for e in r.errors]
@@ -61,9 +59,8 @@ playbooks:
         next: c
       - name: c
         type: code_snippet
-        arguments:
-          code: "print('hi')"
-          script: "print('hi')"
+        code: "print('hi')"
+        script: "print('hi')"
 """
     r = compile_yaml(text, db_path)
     errs = _unknown_param(r)
@@ -81,9 +78,8 @@ playbooks:
         next: u
       - name: u
         type: update_record
-        arguments:
-          module: alerts
-          severity: High
+        module: alerts
+        severity: High
 """
     r = compile_yaml(text, db_path)
     errs = _unknown_param(r)
@@ -98,9 +94,8 @@ playbooks:
     steps:
       - name: trg
         type: start_on_create
-        arguments:
-          module: alerts
-          mocked: true
+        module: alerts
+        mocked: true
 """
     r = compile_yaml(text, db_path)
     errs = _unknown_param(r)

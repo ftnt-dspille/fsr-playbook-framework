@@ -2,8 +2,7 @@
 
 A friendly delay step is authored as::
 
-    arguments:
-      seconds: 5      # and/or minutes / hours / days
+    seconds: 5      # and/or minutes / hours / days
 
 and expands to FSR's canonical `TimeBased` rule shape with the instance-wide
 `resume_playbook` channel UUID. Already-canonical args (top-level `type` /

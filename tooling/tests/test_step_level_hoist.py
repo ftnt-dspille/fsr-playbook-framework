@@ -23,10 +23,9 @@ playbooks:
         type: connector
         mock_result:
           status: ok
-        arguments:
-          connector: virustotal
-          operation: query_ip
-          params: { ip: "8.8.8.8" }
+        connector: virustotal
+        operation: query_ip
+        params: { ip: "8.8.8.8" }
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]
@@ -52,10 +51,9 @@ playbooks:
         set:
           counter: 1
           tag: alpha
-        arguments:
-          module: alerts
-          resource:
-            name: x
+        module: alerts
+        resource:
+          name: x
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]
@@ -78,8 +76,7 @@ playbooks:
           logic: AND
           filters:
             - { field: severity, op: eq, value: High }
-        arguments:
-          module: alerts
+        module: alerts
 """
     r = compile_yaml(text, db_path)
     assert r.ok, [e.to_dict() for e in r.errors]
@@ -104,10 +101,9 @@ playbooks:
       - name: c
         type: create_record
         set: { a: 1 }
-        arguments:
-          module: alerts
-          resource: { name: x }
-          step_variables: { b: 2 }
+        module: alerts
+        resource: { name: x }
+        step_variables: { b: 2 }
 """
     r = compile_yaml(text, db_path)
     bad = [
@@ -129,15 +125,15 @@ playbooks:
       - name: f
         type: connector
         mock_result: { a: 1 }
+        connector: virustotal
+        operation: query_ip
+        params: { ip: "8.8.8.8" }
         arguments:
-          connector: virustotal
-          operation: query_ip
-          params: { ip: "8.8.8.8" }
           mock_result: { a: 2 }
 """
     r = compile_yaml(text, db_path)
     bad = [
         e for e in r.errors if e.code is ErrorCode.BAD_VALUE
-        and e.path.endswith(".mock_result")
+        and "arguments" in (e.message or "")
     ]
     assert bad, [e.to_dict() for e in r.errors]

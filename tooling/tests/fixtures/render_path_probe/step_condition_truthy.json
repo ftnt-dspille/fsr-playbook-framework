@@ -2,7 +2,7 @@
   "scenario": "step_condition_truthy",
   "playbook_name": "rp_cond_true",
   "description": "step with condition: true runs normally",
-  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_cond_true\"\n    description: \"condition truthy\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"Gated\"\n      - name: \"Gated\"\n        type: code_snippet\n        arguments:\n          condition: \"{{ true }}\"\n          code: \"return {'ran': 'yes'}\"\n        next: \"After\"\n      - name: \"After\"\n        type: set_variable\n        vars:\n          saw_gated_ran: \"{{ vars.steps.Gated.ran }}\"\n",
+  "yaml": "collection: \"FSRPB Render Path Probe\"\ndescription: \"render-path probe collection\"\nplaybooks:\n  - name: \"rp_cond_true\"\n    description: \"condition truthy\"\n    is_active: true\n    steps:\n      - name: \"Trigger\"\n        type: start\n        next: \"Gated\"\n      - name: \"Gated\"\n        type: code_snippet\n        condition: \"{{ true }}\"\n        code: \"return {'ran': 'yes'}\"\n        next: \"After\"\n      - name: \"After\"\n        type: set_variable\n        vars:\n          saw_gated_ran: \"{{ vars.steps.Gated.ran }}\"\n",
   "run_status": "failed",
   "env": {
     "debug": true,

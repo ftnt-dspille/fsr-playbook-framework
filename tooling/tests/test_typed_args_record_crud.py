@@ -127,10 +127,9 @@ playbooks:
         next: mk
       - name: mk
         type: create_record
-        arguments:
-          module: alerts
-          resource:
-            name: "{{ vars.name }}"
+        module: alerts
+        resource:
+          name: "{{ vars.name }}"
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

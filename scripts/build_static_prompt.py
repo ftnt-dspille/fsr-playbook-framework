@@ -240,9 +240,8 @@ emails populated) are structurally rejected.
 ```yaml
 - type: manual_input
   name: Ask User
-  arguments:
-    title: "Approve?"
-    description: "Confirm before proceeding."
+  title: "Approve?"
+  description: "Confirm before proceeding."
   options:
     - display: Approve
       primary: true

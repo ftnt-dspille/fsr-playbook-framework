@@ -694,7 +694,7 @@ class ConnectorArgsMixin:
           - `workflowReference: /api/3/workflows/<uuid>` — pass-through for
             cross-collection references (we can't validate further).
 
-        Caller's `arguments: {key: value}` keys are validated against the
+        Caller's `key: value` keys are validated against the
         target playbook's `parameters: [...]` list when target is local.
         """
         a = step.arguments
@@ -707,6 +707,22 @@ class ConnectorArgsMixin:
         # MISSING_FIELD emitted below (the manual_input / connector lesson).
         if isinstance(a, dict):
             _expand_workflow_reference_typed(a, path, errors)
+
+        # Phase G: child-playbook input parameters are step-level keys
+        # (e.g. `hostname: fsr-1`), not nested under `arguments.arguments`.
+        # Separate envelope keys from child-input keys and build the
+        # `arguments` sub-dict the wire format expects.
+        _WR_ENVELOPE_KEYS = {
+            "target", "workflowReference", "apply_async",
+            "pass_parent_env", "pass_input_record", "step_variables",
+            "for_each", "when", "mock_result", "do_until",
+        }
+        if isinstance(a, dict) and "arguments" not in a:
+            child_args = {k: v for k, v in a.items()
+                          if k not in _WR_ENVELOPE_KEYS}
+            if child_args:
+                a["arguments"] = child_args
+
         target_name = a.get("target")
         ref_iri = a.get("workflowReference")
 
@@ -769,7 +785,7 @@ class ConnectorArgsMixin:
                                  remote workflow to run.
             tenant_id:           optional. The peer tenant to run it in.
 
-        The caller's ``arguments: {key: value}`` map is left untouched --
+        The caller's ``key: value`` map is left untouched --
         cross-tenant the target's parameters aren't reachable for validation,
         and the handler accepts ``**kwargs`` (unknown keys are warnings, owned
         by ``arg_validator`` against the live signature).

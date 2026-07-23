@@ -27,7 +27,7 @@ def test_good_wire_verifies_against_captured_output():
     assert out["verified"]["Isolate Host"]["host"] is True
     assert not out["repaired"]
     # The wire survives in the emitted step.
-    assert out["steps"][1]["arguments"]["host"] == \
+    assert out["steps"][1]["host"] == \
         "{{ vars.steps.Get_Ip_Report.data.attributes.network }}"
     assert not out["static_errors"], out["static_errors"]
 
@@ -50,7 +50,7 @@ def test_bad_wire_is_repaired_to_literal():
     # host wire failed → repaired to literal, listed as a gap.
     assert out["verified"]["Isolate Host"]["host"] is False
     assert "host" in out["repaired"]["Isolate Host"]
-    assert out["steps"][1]["arguments"]["host"] == "203.0.113.0/24"
+    assert out["steps"][1]["host"] == "203.0.113.0/24"
     assert "host" in out["gaps"]["Isolate Host"]
 
 

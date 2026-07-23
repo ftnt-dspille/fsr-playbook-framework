@@ -43,7 +43,9 @@ playbooks:
     next: Block IP
   - type: connector
     name: Block IP
-    arguments: {connector: cyops_utilities, operation: no_op, params: {}}
+    connector: cyops_utilities
+    operation: no_op
+    params: {}
 """
 
 # The edit the live session was trying to make: a manual_input approval gate
@@ -51,11 +53,10 @@ playbooks:
 AFTER = BEFORE.rstrip("\n") + """
   - type: manual_input
     name: Prompt Block IP
-    arguments:
-      title: Confirm the block
-      description: Approve blocking this address.
-      inputs:
-      - {name: ip_to_block, kind: ipv4, label: IP to block, required: true}
+    title: Confirm the block
+    description: Approve blocking this address.
+    inputs:
+    - {name: ip_to_block, kind: ipv4, label: IP to block, required: true}
     options:
     - {display: Confirm, primary: true, next: Block IP}
 """

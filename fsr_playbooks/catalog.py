@@ -67,8 +67,7 @@ steps:
 - name: CallChild
   type: workflow_reference
   apply_async: false            # synchronous: parent waits for the child
-  arguments:
-    target: Validate Six Digit Number   # child playbook name (or UUID)
+  target: Validate Six Digit Number   # child playbook name (or UUID)
   retry:                        # do-until: re-run the child until the check passes
     until: '{{ vars.steps.CallChild.is_valid_number == true }}'
     times: 8

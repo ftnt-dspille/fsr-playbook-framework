@@ -32,11 +32,10 @@ YAML = textwrap.dedent(
           - id: fetch
             type: connector
             name: Fetch Ticket
-            arguments:
-              connector: jira
-              operation: get_ticket_details
-              params:
-                issue_key: JIR-1
+            connector: jira
+            operation: get_ticket_details
+            params:
+              issue_key: JIR-1
             next: stop
           - id: stop
             type: stop
@@ -100,20 +99,18 @@ def test_mock_result_on_step_overlays_into_render_context(monkeypatch):
               - id: block
                 type: connector
                 name: Block IP on FortiGate
-                arguments:
-                  connector: fortigate-firewall
-                  operation: block_ip_new
-                  mock_result:
-                    already_blocked: ["1.1.1.1"]
-                    newly_blocked: []
+                connector: fortigate-firewall
+                operation: block_ip_new
+                mock_result:
+                  already_blocked: ["1.1.1.1"]
+                  newly_blocked: []
               - id: fetch
                 type: connector
                 name: Fetch Ticket
-                arguments:
-                  connector: jira
-                  operation: get_ticket_details
-                  params:
-                    issue_key: "{{ vars.steps.Block_IP_on_FortiGate.already_blocked[0] }}"
+                connector: jira
+                operation: get_ticket_details
+                params:
+                  issue_key: "{{ vars.steps.Block_IP_on_FortiGate.already_blocked[0] }}"
               - type: end
                 name: Stop
         """
@@ -214,10 +211,9 @@ def test_samples_sidecar_overlays_into_render_context(monkeypatch):
             steps:
               - type: manual_input
                 name: Get IP Address
-                arguments:
-                  inputs:
-                    - name: ip_address
-                      kind: ipv4
+                inputs:
+                  - name: ip_address
+                    kind: ipv4
                 options:
                   - display: Block
                     primary: true
@@ -225,11 +221,10 @@ def test_samples_sidecar_overlays_into_render_context(monkeypatch):
               - id: fetch
                 type: connector
                 name: Fetch Ticket
-                arguments:
-                  connector: jira
-                  operation: get_ticket_details
-                  params:
-                    issue_key: "{{ vars.steps.Get_IP_Address.input.ip_address }}"
+                connector: jira
+                operation: get_ticket_details
+                params:
+                  issue_key: "{{ vars.steps.Get_IP_Address.input.ip_address }}"
               - type: end
                 name: Stop
         # fsrpb:samples
@@ -272,9 +267,8 @@ def test_step_lookup_by_synthesized_id_when_yaml_omits_id(monkeypatch):
                 next: Block IP on FortiGate
               - type: connector
                 name: Block IP on FortiGate
-                arguments:
-                  connector: fortigate-firewall
-                  operation: block_ip_new
+                connector: fortigate-firewall
+                operation: block_ip_new
         """
     )
     monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)

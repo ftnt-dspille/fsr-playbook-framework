@@ -36,12 +36,11 @@ playbooks:
         comment: |
           Call the AbuseIPDB connector. Step output is keyed by step name:
           vars.steps.Check_IP_on_AbuseIPDB.
-        arguments:
-          connector: abuseipdb
-          operation: ip_lookup
-          config: ""
-          params:
-            ip: "{{ vars.source_ip }}"
+        connector: abuseipdb
+        operation: ip_lookup
+        config: ""
+        params:
+          ip: "{{ vars.source_ip }}"
 
       - name: Extract abuse confidence score
         type: set_variable
@@ -86,7 +85,6 @@ playbooks:
         comment: |
           Update the alert record with the new severity level.
           The picklist filter converts the string to the proper picklist reference.
-        arguments:
-          collection: alerts
-          resource:
-            severity: "{{ vars.new_severity | picklist('severity') }}"
+        collection: alerts
+        resource:
+          severity: "{{ vars.new_severity | picklist('severity') }}"

@@ -270,10 +270,9 @@ playbooks:
           item: '{{ vars.items }}'
           __bulk: true
           batch_size: 1000
-        arguments:
-          collection: /api/ingest-feeds/threat_intel_feeds
-          resource:
-            value: '{{ vars.item.value }}'
+        collection: /api/ingest-feeds/threat_intel_feeds
+        resource:
+          value: '{{ vars.item.value }}'
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -290,10 +289,9 @@ playbooks:
         next: mail
       - name: mail
         type: send_email
-        arguments:
-          to: [a@x.com]
-          subject: hi
-          body: hello
+        to: [a@x.com]
+        subject: hi
+        body: hello
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -311,9 +309,8 @@ playbooks:
         next: appr
       - name: appr
         type: approval
-        arguments:
-          resource:
-            approvaldescription: please
+        resource:
+          approvaldescription: please
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

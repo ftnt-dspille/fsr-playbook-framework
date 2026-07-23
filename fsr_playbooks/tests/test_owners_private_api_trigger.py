@@ -50,17 +50,16 @@ def _warmed_db(tmp_path, teams: dict[str, str]):
 _TOKEN_TRIGGER = """\
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
-          authentication_methods: [""]
-          __triggerLimit: true
-          triggerOnSource: true
-          triggerOnReplicate: false
-          step_variables:
-            input:
-              params:
-                api_body: "{{vars.request.data}}"
-                api_params: "{{vars.request.params}}"
+        route: lookup_ip
+        authentication_methods: [""]
+        __triggerLimit: true
+        triggerOnSource: true
+        triggerOnReplicate: false
+        step_variables:
+          input:
+            params:
+              api_body: "{{vars.request.data}}"
+              api_params: "{{vars.request.params}}"
 """
 
 
@@ -111,9 +110,8 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
-          authentication_methods: [""]
+        route: lookup_ip
+        authentication_methods: [""]
 """
     res = compile_yaml(yaml, db)
     err = next(e for e in res.errors if "owners" in (e.path or ""))
@@ -135,9 +133,8 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
-          authentication_methods: [""]
+        route: lookup_ip
+        authentication_methods: [""]
 """
     res = compile_yaml(yaml, PACKAGED_SLIM_DB)
     err = next(e for e in res.errors if "owners" in (e.path or ""))
@@ -255,8 +252,7 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
+        route: lookup_ip
 """
     res = compile_yaml(yaml, PACKAGED_SLIM_DB)
     assert res.ok, [e for e in res.errors if e.severity != "warning"]
@@ -288,8 +284,7 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
+        route: lookup_ip
 """
     explicit = f"""
 collection: 00-test
@@ -315,9 +310,8 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
-          authentication_methods: ["anonymous"]
+        route: lookup_ip
+        authentication_methods: ["anonymous"]
 """
     res = compile_yaml(yaml, PACKAGED_SLIM_DB)
     assert res.ok, [e for e in res.errors if e.severity != "warning"]
@@ -333,9 +327,8 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
-          authentication_methods: ["Basic"]
+        route: lookup_ip
+        authentication_methods: ["Basic"]
 """
     res = compile_yaml(yaml, PACKAGED_SLIM_DB)
     assert res.ok, [e for e in res.errors if e.severity != "warning"]

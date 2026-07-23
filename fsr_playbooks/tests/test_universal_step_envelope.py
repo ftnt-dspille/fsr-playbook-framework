@@ -41,9 +41,8 @@ playbooks:
       - name: Upd
         type: update_record
 {body}
-        arguments:
-          module: incidents
-          resource: {{status: Closed}}
+        module: incidents
+        resource: {{status: Closed}}
 """
 
 
@@ -69,6 +68,10 @@ def test_top_level_envelope_keys_hoisted():
 
 
 def test_top_level_and_arguments_conflict_errors():
+    """Phase G: no `arguments:` wrapper, so the step-level vs
+    `arguments:`-level conflict scenario is moot. Duplicate keys at
+    the same YAML level are silently overwritten by the YAML parser.
+    This test now verifies that a step with `arguments:` is rejected."""
     res, _ = _emit("""
 collection: T
 playbooks:
@@ -77,14 +80,12 @@ playbooks:
       - {name: Start, type: start, next: Upd}
       - name: Upd
         type: update_record
-        ignore_errors: true
+        module: incidents
         arguments:
-          module: incidents
-          ignore_errors: false
           resource: {status: Closed}
 """)
     assert not res.ok
-    assert any("ignore_errors" in m and "pick one" in m for m in _errs(res))
+    assert any("arguments:" in m for m in _errs(res))
 
 
 # ---- retry sugar -----------------------------------------------------------

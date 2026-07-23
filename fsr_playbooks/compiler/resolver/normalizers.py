@@ -479,8 +479,7 @@ class NormalizerMixin:
 
             - name: Start
               type: api_endpoint
-              arguments:
-                route: lookup_ip
+              route: lookup_ip
 
         compiles to the same wire shape as a fully-specified token-based
         trigger. Live-grounded on an exported private playbook (see
@@ -975,14 +974,13 @@ class NormalizerMixin:
 
         Friendly authoring shape that avoids the parallel `branches:` map:
 
-            arguments:
-              conditions:
-                - option: "Greater Than 10"
-                  condition: "{{ vars.input.value > 10 }}"
-                  next: greater_step
-                - option: "Else"
-                  default: true
-                  next: not_greater_step
+            conditions:
+              - option: "Greater Than 10"
+                condition: "{{ vars.input.value > 10 }}"
+                next: greater_step
+              - option: "Else"
+                default: true
+                next: not_greater_step
 
         The `next:` key is stripped from the emitted condition entry and
         copied into `step.branches[option] = next` so the existing emitter
@@ -1002,13 +1000,12 @@ class NormalizerMixin:
     ) -> None:
         """Friendly manual_input authoring shape:
 
-            arguments:
-              title: "Approve?"
-              description: "Optional markdown body"
-              options: [Continue]                  # or [{option: yes, primary: true}, {option: no}]
-              inputs:                              # optional fields to collect
-                - {name: comment, kind: textarea, label: "Comment", required: true}
-                - {name: severity, kind: select, options: [Low, Med, High]}
+            title: "Approve?"
+            description: "Optional markdown body"
+            options: [Continue]                  # or [{option: yes, primary: true}, {option: no}]
+            inputs:                              # optional fields to collect
+              - {name: comment, kind: textarea, label: "Comment", required: true}
+              - {name: severity, kind: select, options: [Low, Med, High]}
 
         Expands to FSR's canonical InputBased shape (input.schema +
         response_mapping + the dozen always-present sibling fields).
@@ -1045,7 +1042,7 @@ class NormalizerMixin:
         # combinations (e.g. external email keys in an internal-only
         # prompt). See MI_DECISION_VALIDATION_AUDIT.md §0 for the model.
         _FRIENDLY = {"title", "description", "options", "inputs",
-                     "mode", "audience", "assignee"}
+                     "audience", "assignee"}
         _CANONICAL = {
             "type", "input", "record", "is_approval", "isRecordLinked",
             "owner_detail", "step_variables", "response_mapping",
@@ -1078,22 +1075,19 @@ class NormalizerMixin:
                 ),
             ))
             return
-        # `type` if provided must be one of the two FSR ManualInput
-        # dispatch values. Live FSR uses both: InputBased for any
-        # form-collecting prompt, DecisionBased for button-only flows
-        # (no input form). Anything else is junk.
-        t = a.get("type")
-        if t is not None and t not in ("InputBased", "DecisionBased"):
+        # MI mode is inferred: `inputs:` present → InputBased (form),
+        # absent → DecisionBased (button-only). No `mode:` or `type:` key
+        # at the authoring level — the collision with step-level `type:`
+        # makes it impossible to hoist safely.
+        if "type" in a:
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(
-                    f"manual_input.arguments.type must be 'InputBased' "
-                    f"or 'DecisionBased' (got {t!r}); FSR has no other "
-                    f"dispatch paths"
+                    "manual_input: `type:` is not settable — the "
+                    "compiler infers InputBased when `inputs:` is "
+                    "present and DecisionBased otherwise"
                 ),
                 path=f"{path}.arguments.type",
-                suggestion="omit `type:` to let the compiler choose "
-                           "InputBased (the default for any form-collecting prompt)",
             ))
             return
         if isinstance(a.get("input"), dict) and isinstance(
@@ -1131,7 +1125,9 @@ class NormalizerMixin:
             options[0]["primary"] = True
         inputs = a.pop("inputs", None) or []
         expanded_inputs = self._expand_input_variables(inputs, path, errors)
-        a["type"] = a.get("type", "InputBased")
+        # Infer MI mode: form fields present → InputBased, otherwise
+        # button-only → DecisionBased.
+        a["type"] = "InputBased" if expanded_inputs else "DecisionBased"
         a["input"] = {
             "schema": {
                 "title": title,
@@ -1283,10 +1279,9 @@ class NormalizerMixin:
     ) -> None:
         """Friendly Python-snippet step:
 
-            arguments:
-              code: |
-                print("hi")
-              config: test          # optional connector-config name (defaults to default)
+            code: |
+              print("hi")
+            config: test          # optional connector-config name (defaults to default)
 
         FSR's CodeSnippet step type uses the connector dispatcher under
         the hood (`script: /wf/workflow/tasks/connector`, connector
@@ -1374,8 +1369,7 @@ class NormalizerMixin:
     ) -> None:
         """Friendly delay step:
 
-            arguments:
-              seconds: 5      # or minutes/hours/days
+            seconds: 5      # or minutes/hours/days
 
         Expands to FSR's canonical TimeBased rule shape with the
         instance-wide `resume_playbook` channel UUID. Already-canonical

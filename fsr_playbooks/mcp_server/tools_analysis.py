@@ -751,6 +751,8 @@ def step_test(yaml_text: str,
         return {"ok": False, "error": "no playbooks in YAML"}
     pb = next((p for p in pbs if p.get("name") == playbook), pbs[0])
     steps = pb.get("steps") or []
+    # Phase G: hoist step-level args into `arguments` (no wrapper in YAML).
+    _normalize_friendly_steps(steps)
 
     # Match the IR's id-synthesis: when a step omits `id:`, the parser
     # slugifies `name:` (lowercase, non-alphanum → `_`). The visual layer
@@ -1247,6 +1249,22 @@ def _normalize_friendly_steps(steps: list[dict]) -> None:
       mirror each option's `next:` into a `branches:` map so the
       stepper advances past the prompt to the chosen target.
     """
+    # Hoist step-level args into `arguments` (Phase G: no `arguments:` wrapper).
+    # Mirrors the parser: IR keys stay at step level; everything else is an arg.
+    _IR_KEYS = {"id", "type", "name", "next", "branches", "unlabeled_next",
+                "comment", "description", "for_each",
+                "post_comment", "set", "retry", "on_remote",
+                "conditions", "default", "options", "inputs", "title",
+                "is_approval", "vars"}
+    for s in steps:
+        if not isinstance(s, dict) or "arguments" in s:
+            continue
+        hoisted = {k: v for k, v in s.items()
+                   if k not in _IR_KEYS and not k.startswith("_")}
+        if hoisted:
+            args = s.setdefault("arguments", {})
+            if isinstance(args, dict):
+                args.update(hoisted)
     for s in steps:
         if not isinstance(s, dict):
             continue
@@ -1274,9 +1292,21 @@ def _normalize_friendly_steps(steps: list[dict]) -> None:
                 if isinstance(friendly, list):
                     args["conditions"] = friendly
         elif stype == "manual_input":
+            # Infer MI mode for the render analyzer: inputs present →
+            # InputBased, absent → DecisionBased. Set on arguments.type
+            # so normalize_mode() in the C8 check finds it. Also copy
+            # the friendly `inputs:` list into arguments.inputVariables
+            # so declared_input_names() can read it without the full
+            # compiler expansion.
+            args = s.setdefault("arguments", {})
+            if isinstance(args, dict) and "type" not in args:
+                mi_inputs = s.get("inputs")
+                has_inputs = bool(mi_inputs)
+                args["type"] = "InputBased" if has_inputs else "DecisionBased"
+                if has_inputs:
+                    args.setdefault("inputVariables", mi_inputs)
             opts = s.get("options")
             if isinstance(opts, list) and opts:
-                args = s.setdefault("arguments", {})
                 if isinstance(args, dict):
                     args.setdefault("options", opts)
                 # Mirror option targets into a branches map so the

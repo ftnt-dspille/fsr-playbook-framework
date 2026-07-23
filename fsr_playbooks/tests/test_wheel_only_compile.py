@@ -30,10 +30,9 @@ playbooks:
         next: Run
       - name: Run
         type: code_snippet
-        arguments:
-          code: |
-            print("hi")
-          config: prod
+        code: |
+          print("hi")
+        config: prod
 """
 
 

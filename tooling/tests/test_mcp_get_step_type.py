@@ -217,19 +217,22 @@ playbooks:
     next: Ask
   - type: manual_input
     name: Ask
-    arguments:
-      title: T
-      inputs:
-      - {name: f, kind: text, label: F}
+    title: T
+    inputs:
+    - {name: f, kind: text, label: F}
     options:
     - {KEY: Approve, primary: true, next: Done}
     - {KEY: Reject, next: Other}
   - type: connector
     name: Done
-    arguments: {connector: cyops_utilities, operation: no_op, params: {}}
+    connector: cyops_utilities
+    operation: no_op
+    params: {}
   - type: connector
     name: Other
-    arguments: {connector: cyops_utilities, operation: no_op, params: {}}
+    connector: cyops_utilities
+    operation: no_op
+    params: {}
 """
 
     def _routes(key: str):

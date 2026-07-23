@@ -2,15 +2,14 @@
 
 A friendly find_record step is authored as::
 
-    arguments:
-      module: indicators
-      query:
-        logic: AND
-        filters:
-          - field: value
-            operator: eq
-            value: "{{ vars.input.params.indicator_value }}"
-      partial: true
+    module: indicators
+    query:
+      logic: AND
+      filters:
+        - field: value
+          operator: eq
+          value: "{{ vars.input.params.indicator_value }}"
+    partial: true
 
 The handler is ``find_data(module, query, partial=True, **kw)``. Unlike
 delay/code_snippet, find_record has **no friendly→canonical transform** — the

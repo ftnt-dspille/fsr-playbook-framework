@@ -35,25 +35,23 @@ playbooks:
       - name: Find target alert
         type: find_record
         next: Stamp description
-        arguments:
-          module: alerts
-          query:
-            logic: AND
-            filters:
-              - type: primitive
-                field: uuid
-                value: "{{ vars.input.params.target_uuid }}"
-                operator: eq
-                _operator: eq
-            __selectFields: [uuid, name, description]
-          step_variables: []
+        module: alerts
+        query:
+          logic: AND
+          filters:
+            - type: primitive
+              field: uuid
+              value: "{{ vars.input.params.target_uuid }}"
+              operator: eq
+              _operator: eq
+          __selectFields: [uuid, name, description]
+        step_variables: []
 
       - name: Stamp description
         type: update_record
-        arguments:
-          collection: "{{ vars.steps.Find_target_alert[0]['@id'] }}"
-          collectionType: /api/3/alerts
-          resource:
-            description: "fsrpb e2e — stamped at {{ vars.task_id }}"
-          operation: Replace
-          step_variables: []
+        collection: "{{ vars.steps.Find_target_alert[0]['@id'] }}"
+        collectionType: /api/3/alerts
+        resource:
+          description: "fsrpb e2e — stamped at {{ vars.task_id }}"
+        operation: Replace
+        step_variables: []
