@@ -573,13 +573,16 @@ class NormalizerMixin:
             module → collection ('/api/3/<m>')
         - update_record (UpdateRecord):
             module → collectionType ('/api/3/<m>')
-            (`collection:` here is the *record* IRI; do not overwrite.)
+            record → collection    (the targeted record IRI; `collection:` is
+            rejected on update — it was the record IRI but collided with
+            create's module-IRI `collection`, the #1 record-CRUD footgun)
 
-        find_record's handler takes `module:` directly; nothing to do.
-        Already-set canonical keys win — never clobber an explicit value.
+        `module:` is mandatory on create/update (an explicit canonical IRI key
+        is an escape hatch). find_record's handler takes `module:` directly;
+        nothing to do there. Already-set canonical keys win — never clobber.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"module", "mock_result", "condition"}
+        _FRIENDLY = {"module", "mock_result", "condition", "record"}
         _CANONICAL = {
             "collection", "collectionType", "resource", "operation",
             "fieldOperation", "__recommend", "_showJson", "step_variables",

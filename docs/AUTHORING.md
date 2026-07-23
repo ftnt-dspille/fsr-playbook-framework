@@ -923,7 +923,7 @@ Editor-derived argument shapes for every step type, keyed by canonical FSR name 
 | `tagsOperation` | string |  | Special operation mode for recordTags field; present in 33/334 instances; similar to operation but scoped to tags |
 | `when` | string |  | Jinja conditional for step execution; present in 59/334 instances; deleted if empty string; supports full Jinja expressions |
 
-#### InsertData — `create_record`, `insert_record`
+#### InsertData — `create_record`
 
 | Argument | Type | Required | Meaning |
 |----------|------|----------|---------|

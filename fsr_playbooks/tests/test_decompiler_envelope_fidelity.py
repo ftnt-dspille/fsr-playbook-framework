@@ -124,7 +124,7 @@ def test_editor_noise_keys_stripped_on_decompile():
     designer auto-adds to record-write steps. They carry no runtime meaning
     (no branch reads them, no ruleset requires them), so the decompiler drops
     them instead of leaking them as boilerplate into the friendly YAML."""
-    step = Step(id="w", type="insert_record", name="Create",
+    step = Step(id="w", type="create_record", name="Create",
                 arguments={"collection": "/api/3/alerts",
                            "operation": "Overwrite",
                            "resource": {"name": "x"},
@@ -133,9 +133,9 @@ def test_editor_noise_keys_stripped_on_decompile():
     args = out  # Phase G: args at step level
     assert "__recommend" not in args
     assert "_showJson" not in args
-    # Load-bearing wire is untouched.
+    # Load-bearing wire is untouched (collection reversed to friendly module:).
     assert args["operation"] == "Overwrite"
-    assert args["collection"] == "/api/3/alerts"
+    assert args["module"] == "alerts"
     assert args["resource"] == {"name": "x"}
 
 
@@ -155,7 +155,7 @@ playbooks:
         module: alerts
         next: Create
       - name: Create
-        type: insert_record
+        type: create_record
         module: alerts
         operation: Overwrite
         __recommend: []

@@ -160,7 +160,7 @@ playbooks:
             - {field: name, op: like, value: "%marker%"}
       - name: Stamp marker
         type: update_record
-        collection: "{{ vars.input.records[0]['@id'] }}"
+        record: "{{ vars.input.records[0]['@id'] }}"
         module: alerts
         resource:
           description: "marker"

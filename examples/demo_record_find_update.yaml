@@ -12,10 +12,11 @@
 #       __selectFields: list of fields to fetch (optional)
 #     step_variables: []
 #
-#   update_record arguments:
-#     collection:     IRI of the record to update (Jinja from find_record output)
-#     collectionType: module IRI (e.g. /api/3/alerts)
-#     resource:       {field: value, ...} fields to set
+#   update_record arguments (friendly form):
+#     module:   module name (e.g. alerts) -> wire collectionType /api/3/alerts
+#     record:   IRI of the record to update (Jinja from find_record output) ->
+#               wire collection
+#     resource: {field: value, ...} fields to set
 #     operation:      'Replace' | 'Append'
 #     step_variables: []
 
@@ -49,8 +50,8 @@ playbooks:
 
       - name: Stamp description
         type: update_record
-        collection: "{{ vars.steps.Find_target_alert[0]['@id'] }}"
-        collectionType: /api/3/alerts
+        record: "{{ vars.steps.Find_target_alert[0]['@id'] }}"
+        module: alerts
         resource:
           description: "fsrpb e2e — stamped at {{ vars.task_id }}"
         operation: Replace

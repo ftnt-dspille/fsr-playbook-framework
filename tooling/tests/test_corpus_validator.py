@@ -18,6 +18,7 @@ playbooks:
         next: u
       - name: u
         type: update_record
+        module: alerts
         resource:
           "@id": "/api/3/alerts/abc"
           description: "x"
@@ -45,6 +46,7 @@ playbooks:
         next: u
       - name: u
         type: update_record
+        module: alerts
         resource:
           "@id": "/api/3/alerts/abc"
           description: "x"

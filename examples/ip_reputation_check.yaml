@@ -86,6 +86,6 @@ playbooks:
         comment: |
           Update the alert record with the new severity level.
           The picklist filter converts the string to the proper picklist reference.
-        collection: alerts
+        module: alerts
         resource:
           severity: "{{ vars.new_severity | picklist('severity') }}"

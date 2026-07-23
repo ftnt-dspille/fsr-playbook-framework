@@ -38,7 +38,7 @@
 #   PB1 Orchestrator ......... start(manual), set_variable, connector,
 #                              code_snippet, find_record, decision,
 #                              manual_input, approval, delay, ingest_bulk_feed,
-#                              create_record, insert_record, update_record,
+#                              create_record, update_record,
 #                              delete_record, send_email, set_api_keys,
 #                              workflow_reference, trigger_tenant_playbook,
 #                              utilities, stop, end
@@ -264,17 +264,17 @@ playbooks:
         next: Comment on audit alert
         ignore_errors: true
         module: alerts
-        collection: "{{ vars.steps.Find_audit_alert[0]['@id'] | default('') }}"
+        record: "{{ vars.steps.Find_audit_alert[0]['@id'] | default('') }}"
         resource:
           description: "{{ vars.marker }} - ingested"
         operation: Replace
         step_variables: []
 
       - name: Comment on audit alert
-        type: insert_record
+        type: create_record
         next: Delete audit alert
         ignore_errors: true
-        comment: insert_record is the legacy alias of create_record (both -> InsertData); exercised here against the comments module.
+        comment: create_record (InsertData) exercised here against the comments module.
         module: comments
         operation: Overwrite
         resource:

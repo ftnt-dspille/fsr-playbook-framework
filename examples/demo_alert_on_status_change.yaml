@@ -25,7 +25,7 @@ playbooks:
 
       - name: Stamp marker
         type: update_record
-        collection: "{{ vars.input.records[0]['@id'] }}"
+        record: "{{ vars.input.records[0]['@id'] }}"
         module: alerts                # → collectionType: /api/3/alerts
         resource:
           description: "fsrpb_e2e_on_update_marker"

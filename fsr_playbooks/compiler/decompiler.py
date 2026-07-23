@@ -636,6 +636,39 @@ def _decompile_step(s, pb_name: str | None = None,
                 out.pop("step_variables", None)
         if args:
             _hoist_args(out, args)
+    elif s.type in ("create_record", "update_record") and isinstance(args, dict):
+        # Phase A1: reverse the friendly record-CRUD surface. The forward
+        # `expand_record_crud` rewrites friendly `module:` -> wire `collection`
+        # (create) / `collectionType` (update), and friendly `record:` -> wire
+        # `collection` (update). Reverse so a pulled step surfaces the friendly
+        # keys (`module:` / `record:`) instead of the wire IRIs — and so the
+        # compiler's A1 rules (`module:` mandatory; `collection:` rejected on
+        # update) accept the decompiled YAML on recompile. On update,
+        # `collectionType:` (wire module IRI) -> `module:` and `collection:`
+        # (wire record IRI) -> `record:`. On create, `collection:` (wire module
+        # IRI) -> `module:`; `/api/3/upsert/<m>` -> `module: <m>` + `is_upsert:
+        # true`; a non-`/api/3/` collection can't reverse to a module name and
+        # passes through as `collection:` (the compiler still accepts it on
+        # create as the canonical module IRI).
+        if s.type == "update_record":
+            ct = args.pop("collectionType", None)
+            if isinstance(ct, str):
+                args["module"] = ct[len("/api/3/"):] if ct.startswith("/api/3/") else ct
+            rec = args.pop("collection", None)
+            if rec is not None:
+                args["record"] = rec
+        else:  # create_record (InsertData)
+            coll = args.pop("collection", None)
+            if isinstance(coll, str):
+                if coll.startswith("/api/3/upsert/"):
+                    args["module"] = coll[len("/api/3/upsert/"):]
+                    args["is_upsert"] = True
+                elif coll.startswith("/api/3/"):
+                    args["module"] = coll[len("/api/3/"):]
+                else:
+                    args["collection"] = coll
+        if args:
+            _hoist_args(out, args)
     elif args:
         _hoist_args(out, args)
 

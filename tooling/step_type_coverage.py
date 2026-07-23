@@ -69,7 +69,7 @@ class StepCoverage:
             raise ValueError(f"priority={self.priority!r} not in {_PRI_VALUES}")
 
 
-# The matrix. One row per friendly step type in SHORT_TYPE_TO_FSR (24).
+# The matrix. One row per friendly step type in SHORT_TYPE_TO_FSR (23).
 # `typed`/`schema` are verified against the live registries by the gate test,
 # so they cannot drift; `read` is verified against the decompiler source.
 # `priority` + `note` are the human-maintained backlog.
@@ -78,12 +78,10 @@ COVERAGE: dict[str, StepCoverage] = {
     "create_record": StepCoverage(
         typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_DONE,
         note="record_crud model; module->collection; is_upsert->upsert endpoint."),
-    "insert_record": StepCoverage(
-        typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_DONE,
-        note="shares RecordCrudArgs; module->collection."),
     "update_record": StepCoverage(
         typed=True, schema=True, read=READ_PASS_THROUGH, priority=PRI_DONE,
-        note="RecordCrudArgs; module->collectionType (record IRI untouched)."),
+        note="RecordCrudArgs; module->collectionType; record:->collection "
+             "(collection: rejected on update)."),
     "delete_record": StepCoverage(
         typed=True, schema=True, read=READ_SUGAR_NOT_RECOVERED, priority=PRI_MED,
         note="compiles to cyops_utilities DELETE; round-trips as `connector`. "

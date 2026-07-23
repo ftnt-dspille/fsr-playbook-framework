@@ -62,7 +62,6 @@ STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     "find_record": FindRecordArgs,
     "delete_record": DeleteRecordArgs,
     "create_record": RecordCrudArgs,
-    "insert_record": RecordCrudArgs,
     "update_record": RecordCrudArgs,
     "record_action": RecordActionArgs,
     # `start` covers TWO of the 6 trigger variants: Manual (start + module ->

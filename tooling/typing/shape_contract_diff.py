@@ -69,6 +69,8 @@ IGNORE_KEYS = {"name", "id", "type", "next", "kind"}
 # signal that a fresh untyped cross-stage shape disagreement has appeared.
 ACCEPTED_PHANTOM: set[str] = {
     "apply_async",
+    "collectionType",  # wire key written by record_crud.py (not in STAGES);
+    # decompiler reads it on pull to reverse → friendly `module:`.
     "connector_name",
     "inputs",
     "mock_result",

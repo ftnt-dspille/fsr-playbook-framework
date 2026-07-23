@@ -6,7 +6,7 @@ fixture: examples/demo_alert_action.yaml
 playbook: FSRPB Demo - Triage Alert
 
 setup:
-  - kind: insert_record
+  - kind: create_record
     module: alerts
     fields:
       name: fsrpb_e2e_test_alert
