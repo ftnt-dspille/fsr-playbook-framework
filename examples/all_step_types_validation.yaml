@@ -236,7 +236,7 @@ playbooks:
           box-specific; the step TYPE still executes.
         module: alerts
         operation: Replace
-        resource:
+        fields:
           name: "Feed ingest audit - {{ vars.feed_source_name }}"
           description: "{{ vars.marker }}"
           source: "{{ vars.feed_source_name }}"
@@ -265,7 +265,7 @@ playbooks:
         ignore_errors: true
         module: alerts
         record: "{{ vars.steps.Find_audit_alert[0]['@id'] | default('') }}"
-        resource:
+        fields:
           description: "{{ vars.marker }} - ingested"
         operation: Replace
         step_variables: []
@@ -277,7 +277,7 @@ playbooks:
         comment: create_record (InsertData) exercised here against the comments module.
         module: comments
         operation: Overwrite
-        resource:
+        fields:
           content: "Ingested {{ vars.ingestedData | length }} indicator(s) from {{ vars.feed_source_name }}."
         step_variables: []
 

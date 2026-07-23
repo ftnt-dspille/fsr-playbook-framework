@@ -121,7 +121,7 @@ playbooks:
           condition: ""
         module: alerts
         operation: Replace
-        resource:
+        fields:
           name: "{{ vars.item.name }}"                  # TODO field name
           severity: "{{ vars.item.severity | default('Medium') }}"
           status: "Open"

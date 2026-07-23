@@ -16,7 +16,7 @@
 #     module:   module name (e.g. alerts) -> wire collectionType /api/3/alerts
 #     record:   IRI of the record to update (Jinja from find_record output) ->
 #               wire collection
-#     resource: {field: value, ...} fields to set
+#     fields:    {field: value, ...} fields to set
 #     operation:      'Replace' | 'Append'
 #     step_variables: []
 
@@ -52,7 +52,7 @@ playbooks:
         type: update_record
         record: "{{ vars.steps.Find_target_alert[0]['@id'] }}"
         module: alerts
-        resource:
+        fields:
           description: "fsrpb e2e — stamped at {{ vars.task_id }}"
         operation: Replace
         step_variables: []

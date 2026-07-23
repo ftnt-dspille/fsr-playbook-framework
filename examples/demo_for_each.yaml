@@ -42,7 +42,7 @@ playbooks:
           condition: ""
         module: alerts
         operation: Replace
-        resource:
+        fields:
           name: "{{ vars.item.name }}"
           severity: "{{ vars.item.severity }}"
           description: "{{ vars.item.description }}"

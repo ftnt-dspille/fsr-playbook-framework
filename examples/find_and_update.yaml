@@ -10,7 +10,7 @@
 #   module:   target module name (alerts, incidents, indicators, ...)
 #   record:   IRI of the record to update (for a targeted update); omitted for
 #             the bulk `__bulk` path FSR adds at runtime
-#   resource: dict of {field: new_value} to set on the matched record(s)
+#   fields:   dict of {field: new_value} to set on the matched record(s)
 
 collection: Compiler Examples
 description: find + update pattern.
@@ -42,5 +42,5 @@ playbooks:
       - name: Apply tag
         type: update_record
         module: indicators
-        resource:
+        fields:
           tags: "{{ vars.steps.find['hydra:member'][0].tags + [vars.input.params.tag] }}"

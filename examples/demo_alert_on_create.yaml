@@ -28,7 +28,7 @@ playbooks:
         type: update_record
         record: "{{ vars.input.records[0]['@id'] }}"
         module: alerts
-        resource:
+        fields:
           description: "fsrpb_e2e_on_create_marker"
         operation: Replace
         step_variables: []

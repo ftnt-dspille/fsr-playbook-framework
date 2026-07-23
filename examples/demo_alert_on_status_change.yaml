@@ -27,7 +27,7 @@ playbooks:
         type: update_record
         record: "{{ vars.input.records[0]['@id'] }}"
         module: alerts                # → collectionType: /api/3/alerts
-        resource:
+        fields:
           description: "fsrpb_e2e_on_update_marker"
         operation: Replace
         step_variables: []
