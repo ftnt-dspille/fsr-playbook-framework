@@ -43,7 +43,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from evals.levers import lever_for  # noqa: E402
 
-CONN = "fsr-playbook-builder"
+# The deployed connector's `name` (info.json), NOT the repo/dir name. It was
+# renamed fsr-playbook-builder -> connector-fsr-soc-assistant; env-overridable so
+# a future rename doesn't need a code edit (see the "read info.json, don't
+# hardcode" rule). A stale value here surfaces as "Connector ... does not exists".
+CONN = os.environ.get("FSR_BUILDER_CONNECTOR", "connector-fsr-soc-assistant")
 DEFAULT_VERSION = "0.3.116"
 DEFAULT_CONFIG = "fsrpb-live"
 RUN_DIR = REPO_ROOT / "data" / "eval_runs"
@@ -65,8 +69,12 @@ _DEFAULT_BRIDGES = [
 
 def _execute(client, op: str, params: dict, version: str, config: str,
              timeout: int = 290) -> Any:
-    body = {"connector": CONN, "operation": op, "version": version,
+    body = {"connector": CONN, "operation": op,
             "config": config, "params": params}
+    # Omit a falsy version so the box resolves the ACTIVE installed version
+    # (sending a stale literal like 0.3.116 errors with "does not exists").
+    if version:
+        body["version"] = version
     return client.post("/api/integration/execute/", body)
 
 
@@ -79,12 +87,18 @@ def _unwrap(resp: Any) -> Any:
 
 
 def drive_scenario(message: str, intent: str, *, record: Any = None,
+                   entity: Any = None,
                    version: str = DEFAULT_VERSION, config: str = DEFAULT_CONFIG,
                    resume: dict | None = None, session: str | None = None,
                    log=print) -> dict:
     """Drive a sync chat_turn (+ optional chat_resume) and return the merged
     transcript plus derived trace/final_text. Raises on a non-dict / error
-    response so the caller reports a clean failure (never hangs)."""
+    response so the caller reports a clean failure (never hangs).
+
+    `record` is the triage alert context; `entity` is the build/enhance open-
+    playbook context (the connector reads `params.entity`, mounting
+    `entity.playbook_yaml` into its OPEN PLAYBOOK block — the shipped widget
+    path). Enhance scenarios pass `entity`, not `record`."""
     from probes import _env  # type: ignore
 
     cfg = _env.get_config()
@@ -102,6 +116,8 @@ def drive_scenario(message: str, intent: str, *, record: Any = None,
     }
     if record is not None:
         params["record"] = record
+    if entity is not None:
+        params["entity"] = entity
 
     log(f">> chat_turn (sync) session={session} intent={intent}")
     log(f">> msg: {message}")

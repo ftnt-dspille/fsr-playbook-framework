@@ -122,6 +122,9 @@ chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
 chat-calibrate: ## live: capability gate over every investigation fixture (costs credits)
 	$(PY) tooling/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),)
 
+enhance-live: ## live: enhance-DELIVERY gate — drive every enhance_scenario, grade emit_enhancement_offer vs prose (SCENARIO=<name> RUNS=n CONFIG=name). Needs .env + deployed connector.
+	$(PY) tooling/evals/enhance_live.py $(if $(SCENARIO),--only $(SCENARIO),) $(if $(RUNS),--runs $(RUNS),) $(if $(CONFIG),--config $(CONFIG),)
+
 lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
 	uv run ruff check fsr_playbooks/ tooling/
 
