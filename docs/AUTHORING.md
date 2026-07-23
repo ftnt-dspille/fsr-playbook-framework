@@ -96,9 +96,8 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 | `stop` / `end` | `Connectors` (cyops_utilities `no_op`) | `connector` | (no args — synthesized as Utils: No Operation) |
 | `delete_record` | `Connectors` (cyops_utilities `make_cyops_request`, `method: DELETE`) | `connector` | one of: `record:` (IRI/`@id`), `module:`+`record_id:`, or `module:`+`query:` (bulk `delete-with-query`); optional `show_deleted:` — FSR has no dedicated delete step type |
 | `find_record` | `FindRecords` | `find_data` | `module, query, partial` |
-| `create_record` | `InsertData` | `insert_data` | `module` (→ `collection`), `resource`, `operation` |
-| `update_record` | `UpdateRecord` | `update_data` | `collection` (record IRI), `module` (→ `collectionType`), `resource`, `operation` |
-| `insert_record` | `InsertData` | `insert_data` | legacy alias for `create_record` |
+| `create_record` | `InsertData` | `insert_data` | `module` (→ `collection`), `resource`, `operation`, `is_upsert` |
+| `update_record` | `UpdateRecord` | `update_data` | `record` (record IRI → `collection`), `module` (→ `collectionType`), `resource`, `operation` |
 | `delay` | `Delay` | `delay` | `seconds` (or `minutes`/`hours`/`days`) |
 | `manual_input` | `ManualInput` | `manual_input` | `title, description, options: [...], inputs: []` |
 | `code_snippet` | `CodeSnippet` | `connector` | `code: |...`, optional `config: <friendly-name>` |

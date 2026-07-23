@@ -39,7 +39,6 @@ _SYNTHETIC_PURPOSE: dict[str, str] = {
     "end": "terminate a branch cleanly (compiles to a no-op connector step)",
     "delete_record": "delete a record (connector DELETE; FSR has no native delete step)",
     "ingest_bulk_feed": "bulk-insert feed records, bypassing on-create triggers",
-    "insert_record": "create a record (legacy alias of create_record)",
 }
 
 

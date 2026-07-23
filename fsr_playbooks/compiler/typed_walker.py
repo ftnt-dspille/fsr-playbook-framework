@@ -578,7 +578,7 @@ def _synth_step_shape(
     if t == "find_record":
         rec = _module_record_shape(_step_module(step), module_fields_fn)
         return _shape_list(rec)
-    if t in {"create_record", "insert_record", "update_record"}:
+    if t in {"create_record", "update_record"}:
         return _module_record_shape(_step_module(step), module_fields_fn)
     if t in {"code_snippet"}:
         # The body returns arbitrary Python, so we can't infer the shape — but

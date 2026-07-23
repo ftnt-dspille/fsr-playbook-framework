@@ -177,9 +177,7 @@ def test_offline_decompile_read_flags_match_matrix(db_path):
     assert res.fsr_json is not None
     col = decompile(res.fsr_json, db_path)
     recovered = {s.type for wf in col.playbooks for s in wf.steps}
-    # Every non-sugar type we authored must be recovered as a friendly name --
-    # itself or an alias sharing its canonical (create_record <-> insert_record
-    # both -> InsertData; the decompiler is last-wins).
+    # Every non-sugar type we authored must be recovered as a friendly name.
     expected = set(ALL_STEP_TYPES) - SUGAR_NOT_RECOVERED
     missing = [t for t in expected if not (recovered & _FRIENDLY_TO_ACCEPT[t])]
     assert not missing, (

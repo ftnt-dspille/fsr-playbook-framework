@@ -286,7 +286,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     message=(
                         "the `arguments:` wrapper is no longer used — "
                         "hoist all step arguments to the step's top level "
-                        "(e.g. `connector:`, `operation:`, `resource:` etc. "
+                        "(e.g. `module:`, `connector:`, `operation:` etc. "
                         "are step-level keys now, not nested under arguments:)"
                     ),
                     path=f"{sp}.arguments",

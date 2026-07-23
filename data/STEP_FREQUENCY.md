@@ -67,7 +67,7 @@ all record-context triggers).
 | 334 | UpdateRecord | `update_record` |
 | 311 | Decision | `decision` |
 | 273 | FindRecords | `find_record` |
-| 236 | InsertData | `insert_record` |
+| 236 | InsertData | `create_record` |
 | 150 | ManualInput | `manual_input` |
 | 30 | Delay | `delay` |
 | 24 | CodeSnippet | `code_snippet` |
@@ -97,7 +97,7 @@ Tag legend: ✅ covered by an existing green fixture · 🔴 not covered.
 2. 🔴 `find_record` (17 %) and `update_record` (21 %) — touch real
    module records. Need a fixture that inserts a tagged test record,
    finds it, updates it, asserts, deletes. Combined fixture covers both.
-3. 🔴 `insert_record` (15 %) — covered by the find/update fixture above.
+3. 🔴 `create_record` (15 %) — covered by the find/update fixture above.
 4. 🔴 `manual_input` (9 %) — half-async. The runner needs a "pause for
    manual input → respond → resume" mode. CLI tools `inputs list/show/
    respond` already exist; e2e runner needs to glue them in.

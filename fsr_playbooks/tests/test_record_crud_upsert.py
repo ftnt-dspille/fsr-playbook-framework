@@ -1,4 +1,4 @@
-"""`is_upsert` on create_record/insert_record routes the step at the upsert endpoint.
+"""`is_upsert` on create_record routes the step at the upsert endpoint.
 
 FortiSOAR exposes record upsert as a *separate collection* —
 ``/api/3/upsert/<module>``, not a flag on InsertData. So ``is_upsert`` is a

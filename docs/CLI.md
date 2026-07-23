@@ -224,7 +224,7 @@ Subcommands:
 | `--active` | only isActive=true | — |
 | `--triggered-by` | playbooks listening to this record-event (requires --module) | choices: `on-create`, `on-update`, `on-delete`, `pre-create`, `pre-update`, `pre-delete` |
 | `--module` | module name (alerts, incidents, …) — used with --triggered-by | — |
-| `--writes-to` | playbooks with insert_record / update_record / approval against this module | — |
+| `--writes-to` | playbooks with create_record / update_record / approval against this module | — |
 | `--json` | emit JSON | — |
 
 ### `find-step-examples`

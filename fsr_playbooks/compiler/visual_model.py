@@ -56,7 +56,6 @@ _FAMILY_BY_TYPE: dict[str, str] = {
     "connector": "connector_op",
     "find_record": "record_crud",
     "create_record": "record_crud",
-    "insert_record": "record_crud",
     "update_record": "record_crud",
     "delete_record": "record_crud",
     "set_variable": "utility",

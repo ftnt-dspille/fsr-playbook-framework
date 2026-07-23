@@ -35,9 +35,8 @@ These are the *only* step types the resolver accepts. Use the friendly short nam
 | `decision` | `Decision` | branch on Jinja conditions with a single `default: true` else branch |
 | `connector` | `Connectors` | invoke a connector op; params under `arguments.params` |
 | `find_record` | `FindRecords` | query records from a module with a typed filter tree |
-| `create_record` | `InsertData` | create a record (alias: `insert_record`) |
+| `create_record` | `InsertData` | create a record |
 | `update_record` | `UpdateRecord` | update a record by IRI |
-| `insert_record` | `InsertData` | alias of create_record |
 | `manual_input` | `ManualInput` | ask the analyst — Context (Record Linked vs Independent), Behavior, InputType |
 | `approval` | `Approval` | approve / reject buttons routed to an analyst |
 | `code_snippet` | `CodeSnippet` | run inline Python (use sparingly — opaque to the typed walker) |
@@ -206,22 +205,6 @@ type: update_record
       module: alerts
       resource:
         severity: '{{ ''Critical'' | picklist(''severity'') }}'
-```
-
-### `insert_record`
-
-**Accepted keys**: `module, resource`
-
-Alias for create_record (legacy short name).
-
-Example:
-```yaml
-type: create_record
-    name: Create alert
-    arguments:
-      module: alerts
-      resource:
-        name: Test alert
 ```
 
 ### `manual_input`

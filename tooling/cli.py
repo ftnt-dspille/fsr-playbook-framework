@@ -4687,7 +4687,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="playbooks listening to this record-event (requires --module)")
     sp.add_argument("--module", help="module name (alerts, incidents, …) — used with --triggered-by")
     sp.add_argument("--writes-to", metavar="MODULE",
-                    help="playbooks with insert_record / update_record / approval against this module")
+                    help="playbooks with create_record / update_record / approval against this module")
     sp.add_argument("--json", action="store_true", help="emit JSON")
     sp.set_defaults(func=cmd_find)
 

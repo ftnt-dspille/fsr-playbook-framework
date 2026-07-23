@@ -39,7 +39,7 @@ from fsr_playbooks.mcp_server.tools_discovery import (  # noqa: E402
 _STEP_ORDER = [
     "start", "start_on_create", "start_on_update",
     "set_variable", "decision", "connector",
-    "find_record", "create_record", "update_record", "insert_record",
+    "find_record", "create_record", "update_record",
     "manual_input", "approval", "code_snippet",
     "delay", "workflow_reference", "stop", "end",
 ]
@@ -73,9 +73,8 @@ def _step_section() -> str:
         "decision": "branch on Jinja conditions with a single `default: true` else branch",
         "connector": "invoke a connector op; params under `arguments.params`",
         "find_record": "query records from a module with a typed filter tree",
-        "create_record": "create a record (alias: `insert_record`)",
+        "create_record": "create a record",
         "update_record": "update a record by IRI",
-        "insert_record": "alias of create_record",
         "manual_input": "ask the analyst — Context (Record Linked vs Independent), Behavior, InputType",
         "approval": "approve / reject buttons routed to an analyst",
         "code_snippet": "run inline Python (use sparingly — opaque to the typed walker)",

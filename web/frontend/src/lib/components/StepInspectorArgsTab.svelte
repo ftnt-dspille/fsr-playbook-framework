@@ -1062,7 +1062,7 @@
   {@const a = (node.arguments ?? {}) as Record<string, unknown>}
   {@const isFind = node.type === 'find_record'}
   {@const isDelete = node.type === 'delete_record'}
-  {@const isWrite = node.type === 'create_record' || node.type === 'insert_record' || node.type === 'update_record'}
+  {@const isWrite = node.type === 'create_record' || node.type === 'update_record'}
   {@const isBulk = node.type === 'ingest_bulk_feed'}
   {@const queryGroup = {
     logic: (((a.query as Record<string, unknown>)?.logic as 'AND' | 'OR') ?? 'AND'),

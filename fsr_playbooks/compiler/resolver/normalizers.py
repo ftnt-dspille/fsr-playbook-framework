@@ -141,6 +141,19 @@ class NormalizerMixin:
                     suggestion=msg,
                 ))
                 return
+            if step.type == "insert_record":
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_STEP_TYPE,
+                    message=(
+                        "`insert_record` was removed — it was a legacy alias "
+                        "for `create_record` (both compile to InsertData). Use "
+                        "`type: create_record` instead."
+                    ),
+                    path=f"{path}.type",
+                    near="create_record",
+                    suggestion="did you mean 'create_record'?",
+                ))
+                return
             errors.append(CompileError(
                 code=ErrorCode.UNKNOWN_STEP_TYPE,
                 message=f"unknown step type: {step.type!r}",
@@ -177,7 +190,7 @@ class NormalizerMixin:
         if step.type == "api_endpoint":
             self._normalize_api_endpoint_args(step, path, errors)
 
-        if step.type in ("create_record", "insert_record", "update_record"):
+        if step.type in ("create_record", "update_record"):
             self._normalize_record_crud_args(step, path, errors)
 
         if step.type == "find_record":
@@ -569,7 +582,7 @@ class NormalizerMixin:
     ) -> None:
         """Friendly `module: alerts` → canonical IRI keys.
 
-        - create_record / insert_record (InsertData):
+        - create_record (InsertData):
             module → collection ('/api/3/<m>')
         - update_record (UpdateRecord):
             module → collectionType ('/api/3/<m>')

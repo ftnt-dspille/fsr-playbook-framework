@@ -474,6 +474,6 @@ function familyFor(stepType: string): VisualNode['family'] {
   if (t === 'manual_input') return 'manual_input';
   if (t === 'workflow_reference') return 'workflow_ref';
   if (t === 'stop' || t === 'end') return 'terminal';
-  if (['find_record', 'create_record', 'insert_record', 'update_record', 'delete_record', 'ingest_bulk_feed'].includes(t)) return 'record_crud';
+  if (['find_record', 'create_record', 'update_record', 'delete_record', 'ingest_bulk_feed'].includes(t)) return 'record_crud';
   return 'utility';
 }

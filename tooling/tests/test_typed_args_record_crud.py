@@ -1,5 +1,4 @@
-"""Typed-args model for record-write steps (`create_record` / `insert_record` /
-`update_record`) — registry contract, the friendly module->IRI transform (the
+"""Typed-args model for record-write steps (`create_record` / `update_record`) — registry contract, the friendly module->IRI transform (the
 collection-vs-collectionType split + already-set-wins + /api/ passthrough), and
 the new scalar validation (`module`/`is_upsert` wrong-typed -> clean BAD_VALUE).
 

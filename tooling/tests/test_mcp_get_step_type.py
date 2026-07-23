@@ -30,7 +30,7 @@ import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 SHORT_TYPES = [
     "start", "start_on_create", "start_on_update",
     "set_variable", "decision", "connector", "stop", "end",
-    "find_record", "create_record", "insert_record", "update_record",
+    "find_record", "create_record", "update_record",
     "delay", "manual_input", "code_snippet", "workflow_reference",
     "approval",
 ]

@@ -40,7 +40,7 @@ class PicklistMixin:
         # the module IRI; on update it's the record IRI — use collectionType
         # there. Bail if we can't pin down the module — without it we can't
         # look up which fields are picklist-backed.
-        if step.type in ("create_record", "insert_record"):
+        if step.type == "create_record":
             mod_iri = a.get("collection")
         else:
             mod_iri = a.get("collectionType")

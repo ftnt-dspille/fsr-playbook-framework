@@ -1417,7 +1417,6 @@ _SHORT_TO_CANONICAL: dict[str, str] = {
     "find_record": "FindRecords",
     "update_record": "UpdateRecord",
     "create_record": "InsertData",
-    "insert_record": "InsertData",
     "delay": "Delay",
     "manual_input": "ManualInput",
     "code_snippet": "CodeSnippet",
@@ -1719,34 +1718,22 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "insert_record": {
-        "accepted_keys": ["module", "resource"],
-        "note": "Alias for create_record (legacy short name).",
-        "example": {
-            "type": "create_record",
-            "name": "Create alert",
-            "arguments": {
-                "module": "alerts",
-                "resource": {"name": "Test alert"},
-            },
-        },
-    },
     "update_record": {
-        "accepted_keys": ["module", "collection", "resource"],
+        "accepted_keys": ["module", "record", "resource"],
         "note": (
-            "`module:` (or `collectionType:`) names the module being "
-            "updated. `collection:` is the RECORD IRI to update — "
+            "`module:` names the module being updated. `record:` is the "
+            "RECORD IRI to update — usually "
+            "`\"{{ vars.input.records[0]['@id'] }}\"`."
             "usually `\"{{ vars.input.records[0]['@id'] }}\"`. Don't "
             "confuse the two."
         ),
         "example": {
             "type": "update_record",
             "name": "Update alert severity",
-            "arguments": {
-                "module": "alerts",
-                "resource": {
-                    "severity": "{{ 'Critical' | picklist('severity') }}",
-                },
+            "module": "alerts",
+            "record": "{{ vars.input.records[0]['@id'] }}",
+            "resource": {
+                "severity": "{{ 'Critical' | picklist('severity') }}",
             },
         },
     },

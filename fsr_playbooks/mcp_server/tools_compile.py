@@ -224,7 +224,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         },
     },
     "create_record": {
-        "accepted_keys": ["module", "resource"],
+        "accepted_keys": ["module", "resource", "is_upsert"],
         "note": (
             "`module:` is the friendly module name (alerts, incidents, "
             "indicators, ...) — compiler converts to the IRI form. "
@@ -233,43 +233,27 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "example": {
             "type": "create_record",
             "name": "Create alert",
-            "arguments": {
-                "module": "alerts",
-                "resource": {
-                    "name": "Phishing - {{ vars.input.params.subject }}",
-                    "severity": "{{ 'High' | picklist('severity') }}",
-                },
-            },
-        },
-    },
-    "insert_record": {
-        "accepted_keys": ["module", "resource"],
-        "note": "Alias for create_record (legacy short name).",
-        "example": {
-            "type": "create_record",
-            "name": "Create alert",
-            "arguments": {
-                "module": "alerts",
-                "resource": {"name": "Test alert"},
+            "module": "alerts",
+            "resource": {
+                "name": "Phishing - {{ vars.input.params.subject }}",
+                "severity": "{{ 'High' | picklist('severity') }}",
             },
         },
     },
     "update_record": {
-        "accepted_keys": ["module", "collection", "resource"],
+        "accepted_keys": ["module", "record", "resource"],
         "note": (
-            "`module:` (or `collectionType:`) names the module being "
-            "updated. `collection:` is the RECORD IRI to update — "
-            "usually `\"{{ vars.input.records[0]['@id'] }}\"`. Don't "
-            "confuse the two."
+            "`module:` names the module being updated. `record:` is the "
+            "RECORD IRI to update — usually "
+            "`\"{{ vars.input.records[0]['@id'] }}\"`."
         ),
         "example": {
             "type": "update_record",
             "name": "Update alert severity",
-            "arguments": {
-                "module": "alerts",
-                "resource": {
-                    "severity": "{{ 'Critical' | picklist('severity') }}",
-                },
+            "module": "alerts",
+            "record": "{{ vars.input.records[0]['@id'] }}",
+            "resource": {
+                "severity": "{{ 'Critical' | picklist('severity') }}",
             },
         },
     },

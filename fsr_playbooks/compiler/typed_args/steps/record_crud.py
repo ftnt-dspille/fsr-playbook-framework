@@ -1,4 +1,4 @@
-"""Typed model for `create_record` / `insert_record` / `update_record` arguments.
+"""Typed model for `create_record` / `update_record` arguments.
 
 These are the record-write step types (FSR handlers ``InsertData`` /
 ``UpdateRecord``). Their one friendly→canonical transform is the module→IRI
@@ -102,7 +102,7 @@ def expand_record_crud(
     if module and isinstance(module, str):
         module = resolve_module(module, f"{path}.arguments.module", errors)
         iri = f"/api/3/{module}" if not module.startswith("/api/") else module
-        if step_type in ("create_record", "insert_record"):
+        if step_type == "create_record":
             a.setdefault("collection", iri)
         elif step_type == "update_record":
             a.setdefault("collectionType", iri)
@@ -157,7 +157,7 @@ def expand_record_crud(
     # collection) is left untouched. `update_record` is already a partial patch
     # by IRI/query, so `is_upsert` has no effect there beyond being dropped.
     is_upsert = a.pop("is_upsert", None)
-    if is_upsert and step_type in ("create_record", "insert_record"):
+    if is_upsert and step_type == "create_record":
         coll = a.get("collection")
         if (isinstance(coll, str) and coll.startswith("/api/3/")
                 and not coll.startswith("/api/3/upsert/")):
