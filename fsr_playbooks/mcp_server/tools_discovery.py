@@ -675,6 +675,82 @@ def _format_param_line(p: dict, indent: int = 0) -> str:
     return head
 
 
+def _output_field_names(op_row: dict) -> list[str]:
+    """Top-level field names that live under a connector result's `.data`
+    envelope, best-effort from the catalog — so an author binds
+    `vars.steps.<name>.data.<field>` rather than a bare `.data`.
+
+    The two catalog schemas nest DIFFERENTLY and must not be conflated:
+    - `output_schema_json` (static) is the `.data` PAYLOAD shape. Untyped
+      scaffolding (every leaf an empty string) so we never surface its
+      *types*, but its top-level *keys* are the real `.data` field names
+      (e.g. `convert_periodic_time_to_minutes` → `["minutes"]`).
+    - `output_schema_observed` (run-derived) captures the FULL result, which
+      for most connectors is the flattened envelope (`status`/`message` as
+      siblings of the payload fields), NOT the `.data` sub-object. Surfacing
+      those top-level keys as `.data.<field>` would teach a WRONG binding, so
+      we only trust it when it carries an explicit nested `data` object.
+
+    Returns [] when nothing reliable is known — the caller then emits the
+    generic envelope rule instead of a specific (possibly wrong) field list."""
+    # Static payload schema first — its keys are unambiguously `.data` fields.
+    raw = op_row.get("output_schema_json")
+    if raw:
+        try:
+            shape = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            shape = None
+        if isinstance(shape, dict) and shape:
+            return [str(k) for k in shape.keys()]
+    # Observed schema only when it explicitly nests a `data` object.
+    raw = op_row.get("output_schema_observed")
+    if raw:
+        try:
+            shape = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            shape = None
+        if isinstance(shape, dict) and isinstance(shape.get("data"), dict) \
+                and shape["data"]:
+            return [str(k) for k in shape["data"].keys()]
+    return []
+
+
+def _output_binding_hint(op_row: dict) -> str:
+    """One markdown block teaching how to bind THIS op's output.
+
+    Surfaced in `get_op_schema` because the envelope rule otherwise lives
+    only in `get_step_type("connector")`, which the build sequence often
+    skips — a weak model then binds the whole envelope (`.data`, renders as
+    `Array`/`[object Object]`) instead of `.data.<field>`."""
+    fields = _output_field_names(op_row)
+    step_ex = "Convert_Time"
+    lines = ["## output binding"]
+    if fields:
+        first = fields[0]
+        lines.append(
+            f"Output fields (under the `.data` envelope): {', '.join(fields)}."
+        )
+        lines.append(
+            f"Reference one as `vars.steps.<step_name>.data.{first}` — NOT a "
+            f"bare `vars.steps.<step_name>.data` (that is the whole object and "
+            f"renders as `Array`/`[object Object]`)."
+        )
+        lines.append(
+            f"E.g. a step named `{step_ex.replace('_', ' ')}` → "
+            f"`{{{{ vars.steps.{step_ex}.data.{first} }}}}`."
+        )
+    else:
+        lines.append(
+            "A connector result is an ENVELOPE: the op's output sits under "
+            "`data` (siblings `status`/`message`). Reference an output field "
+            "as `vars.steps.<step_name>.data.<key>` — NOT `vars.steps."
+            "<step_name>.data` (the whole object, renders as `Array`/"
+            "`[object Object]`). `<step_name>` is the step's display NAME "
+            "with spaces → underscores."
+        )
+    return "\n".join(lines)
+
+
 def _render_op_schema_md(
     op_row: dict,
     params: list[dict],
@@ -786,6 +862,8 @@ def _render_op_schema_md(
         "```",
     ]
     lines.extend(skeleton)
+    lines.append("")
+    lines.append(_output_binding_hint(op_row))
     return "\n".join(lines)
 
 
@@ -932,10 +1010,22 @@ def get_op_schema(connector: str, op: str,
             "connector_name": op_row[0].get("connector_name"),
             "markdown": md,
         }
-        # Only the run-derived observed schema is trustworthy; the static
-        # FortiSOAR output schema is excluded as untyped scaffolding (E3).
+        # Only the run-derived observed schema is trustworthy for TYPES; the
+        # static FortiSOAR output schema is excluded as untyped scaffolding
+        # (E3). But its top-level KEYS are the real output field names, which
+        # the author needs for `.data.<key>` binding — surface those even when
+        # the shape itself is unobserved. `output_fields` drives the binding
+        # hint in the markdown skeleton above.
+        out_fields = _output_field_names(op_row[0])
+        if out_fields:
+            out["output_fields"] = out_fields
         if op_row[0].get("output_schema_observed"):
             out["output_schema"] = "observed — pass verbose=True for the run-derived shape"
+        elif out_fields:
+            out["output_schema"] = (
+                f"field names known ({', '.join(out_fields)}); types unobserved — "
+                "run_op in a safe context for the run-derived shape"
+            )
         elif _op_risk(op, op_row[0].get("category")) == "safe":
             out["output_schema"] = (
                 "none yet — this op is read-only; run_op to observe its real output shape"
