@@ -136,7 +136,7 @@ def test_editor_noise_keys_stripped_on_decompile():
     # Load-bearing wire is untouched (collection reversed to friendly module:).
     assert args["operation"] == "Overwrite"
     assert args["module"] == "alerts"
-    assert args["resource"] == {"name": "x"}
+    assert args["fields"] == {"name": "x"}
 
 
 def test_editor_noise_strip_is_lossless_round_trip():

@@ -595,7 +595,7 @@ class NormalizerMixin:
         nothing to do there. Already-set canonical keys win — never clobber.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"module", "mock_result", "condition", "record"}
+        _FRIENDLY = {"module", "mock_result", "condition", "record", "fields"}
         _CANONICAL = {
             "collection", "collectionType", "resource", "operation",
             "fieldOperation", "__recommend", "_showJson", "step_variables",

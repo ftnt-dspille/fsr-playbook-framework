@@ -92,6 +92,14 @@ def expand_record_crud(
     validate_args(RecordCrudArgs, args, f"{path}.arguments", errors)
 
     a = dict(args)
+    # `fields:` is the friendly alias for the wire `resource:` key (the
+    # record payload). Authors think "set these fields" — `resource:` is
+    # an FSR API term. Both compile to the same wire key; `resource:`
+    # stays accepted for back-compat.
+    if "fields" in a and "resource" not in a:
+        a["resource"] = a.pop("fields")
+    else:
+        a.pop("fields", None)
     # Phase A1: `record:` is the friendly key for update_record's record IRI
     # (it compiles to the wire `collection:`). `collection:` on update_record
     # is rejected below — it was the record IRI but collided with create's

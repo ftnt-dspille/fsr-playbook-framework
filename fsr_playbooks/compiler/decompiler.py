@@ -667,6 +667,11 @@ def _decompile_step(s, pb_name: str | None = None,
                     args["module"] = coll[len("/api/3/"):]
                 else:
                     args["collection"] = coll
+        # `resource:` is the wire key for the record payload — emit the
+        # friendly `fields:` alias instead. Both compile to the same wire
+        # key, so recompile accepts either.
+        if "resource" in args:
+            args["fields"] = args.pop("resource")
         if args:
             _hoist_args(out, args)
     elif args:
