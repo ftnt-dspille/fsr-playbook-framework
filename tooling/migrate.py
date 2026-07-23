@@ -106,16 +106,11 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
     lines = new_lines
 
     # 2. Remove arguments: wrapper
-    before = len(lines)
+    before_args = "".join(lines)
     lines = _strip_arguments_wrapper(lines)
-    if len(lines) != before or any("arguments:" not in l for l in lines):
-        # Heuristic: if any arguments: line was removed, report it
-        if any("arguments:" in l and not l.lstrip().startswith("#")
-               for l in lines):
-            pass  # some arguments: remain (e.g. in a different context)
-        else:
-            if before != len(lines) or text.count("arguments:") != "".join(lines).count("arguments:"):
-                changes.append("arguments: wrapper removed")
+    after_args = "".join(lines)
+    if after_args != before_args:
+        changes.append("arguments: wrapper removed")
 
     # 3+4. Context-aware key renames on record-CRUD steps
     out: list[str] = []
