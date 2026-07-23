@@ -26,7 +26,14 @@ class GetRecordArgs(BaseModel):
     module: Optional[str] = None
     uuid: Optional[str] = None
     record_id: Optional[str] = None
-    relationships: Optional[bool] = None
+    # Accept a bool OR a list of relationship names. The registered tool takes a
+    # bool ("hydrate related records inline"), but the agent naturally reaches
+    # for `relationships=["ztpfArtifacts"]` to expand a *named* relationship —
+    # which used to bounce at this gate with "Input should be a valid boolean",
+    # dead-ending the very "summarize the related steps" turn ztpf devices need.
+    # A name-list is coerced to True (hydrate all) in the tool; a bad value can
+    # never regress a lookup into a validation error.
+    relationships: Optional[bool | list[str]] = None
     full: Optional[bool] = None
     include: Optional[list[str]] = None
 
@@ -37,17 +44,30 @@ class GetRecordArgs(BaseModel):
                 "identify the record via `iri` alone, or `module` plus "
                 "`uuid`/`record_id` — e.g. "
                 'get_record(iri="/api/3/alerts/<uuid>") or '
-                'get_record(module="alerts", uuid="<uuid>")'
+                'get_record(module="alerts", uuid="<uuid>"). '
+                "get_record fetches ONE record — to find records by a field or "
+                "relationship (e.g. every step on a device), use "
+                "search_module_records(module=..., filters={...})."
             )
         return self
 
 
 class SearchModuleRecordsArgs(BaseModel):
-    """Arguments for the search_module_records tool."""
+    """Arguments for the search_module_records tool.
+
+    ``filters`` accepts BOTH shapes the agent emits: the ``{field: value}`` map
+    the tool documents, AND the list-of-conditions form
+    ``[{"field": ..., "op": ..., "value": ...}]`` (or ``{"key":..,"value":..}``)
+    it instinctively reaches for. The list form used to bounce here with
+    "filters: Input should be a valid dictionary" — the single most frequent
+    tool error in live ztpf sessions (the agent retried it 4+ times per session,
+    never finding records that plainly existed). The tool normalizes whichever
+    shape arrives; this gate must not reject either.
+    """
     model_config = ConfigDict(extra="allow")
 
     module: str
-    filters: Optional[dict[str, Any]] = None
+    filters: Optional[dict[str, Any] | list[dict[str, Any]]] = None
     limit: Optional[int] = None
 
 
