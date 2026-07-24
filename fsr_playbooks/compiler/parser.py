@@ -44,7 +44,7 @@ _STEP_IR_KEYS = frozenset({
     "comment", "description", "for_each",
 })
 _STEP_SUGAR_KEYS = frozenset({
-    "post_comment", "set", "retry", "on_remote",
+    "post_comment", "set", "retry", "on_remote", "with",
     "conditions", "default", "options", "inputs", "title", "is_approval", "vars",
 })
 
@@ -62,6 +62,29 @@ def _coerce_label(v: Any) -> tuple[Any, bool]:
     if v is False:
         return "no", True
     return v, False
+
+
+def _apply_with_binding(obj: Any, alias: str, replacement: str) -> None:
+    """Recursively replace `alias` with `replacement` in all string values
+    within a nested dict/list structure. Used by the `with:` path-binding
+    handler to rewrite Jinja expressions at compile time.
+
+    The replacement is a word-boundary regex match so `vars.info` matches
+    in `{{ vars.info.adom }}` but NOT in `{{ vars.information }}`.
+    """
+    pattern = re.compile(rf"\b{re.escape(alias)}\b")
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str):
+                obj[k] = pattern.sub(replacement, v)
+            else:
+                _apply_with_binding(v, alias, replacement)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            if isinstance(v, str):
+                obj[i] = pattern.sub(replacement, v)
+            else:
+                _apply_with_binding(v, alias, replacement)
 
 
 _norway_warnings: list[str] = []  # populated transiently by callers below
@@ -730,6 +753,52 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     for_each.setdefault("batch_size", 100)  # editor default when bulk
                 else:
                     for_each.pop("batch_size", None)      # batch_size is a bulk-only key
+
+            # Phase H1: `with:` path binding — compile-time Jinja alias
+            # rewriting. Authors write `with: {info: "{{ vars.steps.X.data.
+            # code_output }}"}` and then use `{{ vars.info.adom }}` in the
+            # step's arguments. The parser rewrites `vars.info` → the bound
+            # expression in all string values within `args`, resolving the
+            # alias at compile time. No wire output — purely an authoring
+            # convenience that produces the same wire as the expanded form.
+            with_raw = s_raw.get("with")
+            if with_raw is not None:
+                if not isinstance(with_raw, dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.with must be a mapping of name → Jinja expression",
+                        path=f"{sp}.with",
+                    ))
+                else:
+                    for bind_name, bind_expr in with_raw.items():
+                        if not isinstance(bind_name, str) or not re.match(
+                            r"^[A-Za-z_][A-Za-z0-9_]*$", bind_name
+                        ):
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"with: binding name {bind_name!r} must be a "
+                                    f"valid identifier (letter/underscore start)"
+                                ),
+                                path=f"{sp}.with.{bind_name}",
+                            ))
+                            continue
+                        if not isinstance(bind_expr, str):
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"with: binding {bind_name!r} must be a "
+                                    f"Jinja expression string"
+                                ),
+                                path=f"{sp}.with.{bind_name}",
+                            ))
+                            continue
+                        raw_expr = bind_expr.strip()
+                        if raw_expr.startswith("{{") and raw_expr.endswith("}}"):
+                            raw_expr = raw_expr[2:-2].strip()
+                        _apply_with_binding(
+                            args, f"vars.{bind_name}", raw_expr
+                        )
 
             # Phase G: all non-reserved step-level keys are collected as args
             # above, so the unknown-key warning is no longer needed. Typed-args
