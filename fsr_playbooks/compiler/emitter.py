@@ -47,78 +47,124 @@ def _group_iri(u: str) -> str:
 # Layout constants used both for steps and for auto-positioning notes.
 _STEP_LEFT = 200
 _STEP_TOP_BASE = 120
-_STEP_VSTRIDE = 100
-_STEP_HSTRIDE = 280          # Horizontal spacing between sibling branches.
+_STEP_VSTRIDE = 130
+_STEP_HSTRIDE = 340          # Horizontal spacing between sibling branches.
 _STEP_WIDTH = 200            # FSR canvas step boxes are ~200px wide.
 _NOTE_GAP = 40               # Horizontal gap between step and its auto-note.
 
 
-def _compute_layout(steps: list, start_id: str | None) -> dict[str, tuple[int, int]]:
-    """Tree-aware (top, left) assignment.
+def _ordered_children(s, by_id: dict) -> list[str]:
+    """Child step ids in draw order: linear `next` first, then each branch
+    label (declaration order), then any `unlabeled_next`. Filters danglers."""
+    out: list[str] = []
+    if s.next and s.next in by_id:
+        out.append(s.next)
+    for _label, target in s.branches.items():
+        if target in by_id:
+            out.append(target)
+    for target in getattr(s, "unlabeled_next", []) or []:
+        if target in by_id:
+            out.append(target)
+    return out
 
-    Linear `next:` keeps the same column. Decision `branches:` (and any
-    other multi-target step type that uses the same field) fan out: the
-    first branch stays in the parent column, each subsequent branch gets
-    a column to the right. `unlabeled_next` siblings get the same
-    treatment. BFS so a step reachable via two paths wins on the shorter
-    one. Steps unreachable from start fall through to a stable
-    column=last+1 to avoid stacking on the trunk.
+
+def _compute_layout(steps: list, start_id: str | None) -> dict[str, tuple[int, int]]:
+    """Layered (top, left) assignment for a mostly-DAG playbook flow.
+
+    ROW (top) = longest-path distance from Start. Using the *longest* path (not
+    BFS-shortest) means a node that merges two branches sits BELOW every one of
+    its predecessors, so all edges flow downward — no branch has to loop back
+    up into a shared join (e.g. two reject paths converging on one gate).
+
+    COLUMN (left) = a BFS hint (linear `next:` keeps the parent column; each
+    branch target fans one column right), then a per-row collision pass slides
+    any node whose (row, col) cell is already taken to the next free column, so
+    independent sub-trees never stack. Loops (`do_until` back-edges) are detected
+    and excluded from the longest-path relaxation so a cycle can't push depth to
+    infinity. Unreachable steps park in fresh columns at the bottom.
     """
     if not steps:
         return {}
     by_id = {s.id: s for s in steps}
-    layout: dict[str, tuple[int, int]] = {}
-    if start_id and start_id in by_id:
-        first = start_id
-    else:
-        first = steps[0].id
+    first = start_id if (start_id and start_id in by_id) else steps[0].id
 
-    # BFS: (id, depth, col)
-    queue: list[tuple[str, int, int]] = [(first, 0, 0)]
-    max_col = 0
+    # --- Column hint via BFS (first visit wins), branches fan right. ---
+    col_hint: dict[str, int] = {}
+    order: list[str] = []  # BFS visitation order (roots first)
+    queue: list[tuple[str, int]] = [(first, 0)]
     while queue:
-        sid, depth, col = queue.pop(0)
-        if sid in layout or sid not in by_id:
+        sid, col = queue.pop(0)
+        if sid in col_hint or sid not in by_id:
             continue
-        top = _STEP_TOP_BASE + depth * _STEP_VSTRIDE
-        left = _STEP_LEFT + col * _STEP_HSTRIDE
-        layout[sid] = (top, left)
-        if col > max_col:
-            max_col = col
+        col_hint[sid] = col
+        order.append(sid)
         s = by_id[sid]
-        # Collect children. Linear `next` stays in column; each branch
-        # target gets an offset column.
-        children: list[tuple[str, int]] = []
-        if s.next and s.next in by_id:
-            children.append((s.next, col))
-        # branches: dict[label, target_id] — labels iterated in declaration order.
-        # If the step has a linear `next:`, that target stays in the parent
-        # column and each branch target offsets one column to the right per
-        # branch. With no linear `next:`, the first branch stays in the parent
-        # column and subsequent branches offset right from there. Without this,
-        # `next` and `branches[0]` collide on the same (top, left).
-        offset = 0
-        base_branch_offset = 1 if s.next else 0
-        for label, target in s.branches.items():
-            if target in by_id:
-                children.append((target, col + base_branch_offset + offset))
-                offset += 1
-        for target in getattr(s, "unlabeled_next", []) or []:
-            if target in by_id:
-                children.append((target, col + base_branch_offset + offset))
-                offset += 1
-        for tgt, tcol in children:
-            if tgt not in layout:
-                queue.append((tgt, depth + 1, tcol))
-
-    # Steps not reachable from start: park them in their declaration order
-    # at the bottom of the trunk, in a fresh column to the right.
+        base = 1 if s.next else 0
+        off = 0
+        for i, tgt in enumerate(_ordered_children(s, by_id)):
+            is_linear = i == 0 and bool(s.next)
+            tcol = col if is_linear else col + base + off
+            if not is_linear:
+                off += 1
+            if tgt not in col_hint:
+                queue.append((tgt, tcol))
+    # Unreached steps: give each a fresh column so they don't stack on the trunk.
+    max_hint = max(col_hint.values(), default=0)
     for s in steps:
-        if s.id in layout:
-            continue
-        max_col += 1
-        layout[s.id] = (_STEP_TOP_BASE + (len(layout)) * _STEP_VSTRIDE,
-                        _STEP_LEFT + max_col * _STEP_HSTRIDE)
+        if s.id not in col_hint:
+            max_hint += 1
+            col_hint[s.id] = max_hint
+            order.append(s.id)
+
+    # --- Row via longest path, ignoring back-edges (loops). ---
+    # DFS finish order gives a topological order over the DAG minus back-edges;
+    # relaxing longest-path in that order is O(V+E) and cycle-safe.
+    color: dict[str, int] = dict.fromkeys(by_id, 0)  # 0=white 1=gray 2=black
+    finish: list[str] = []
+    back: set[tuple[str, str]] = set()
+
+    def _dfs(root: str) -> None:
+        stack = [(root, 0)]
+        while stack:
+            u, i = stack.pop()
+            kids = _ordered_children(by_id[u], by_id)
+            if i == 0:
+                color[u] = 1
+            if i < len(kids):
+                stack.append((u, i + 1))
+                v = kids[i]
+                if color[v] == 0:
+                    stack.append((v, 0))
+                elif color[v] == 1:
+                    back.add((u, v))  # edge into an on-stack ancestor = loop
+            else:
+                color[u] = 2
+                finish.append(u)
+
+    _dfs(first)
+    for s in steps:
+        if color[s.id] == 0:
+            _dfs(s.id)
+
+    depth: dict[str, int] = {sid: 0 for sid in by_id}
+    for u in reversed(finish):  # topological order
+        du = depth[u]
+        for v in _ordered_children(by_id[u], by_id):
+            if (u, v) in back:
+                continue
+            if du + 1 > depth[v]:
+                depth[v] = du + 1
+
+    # --- Place, resolving cell collisions by sliding right. ---
+    layout: dict[str, tuple[int, int]] = {}
+    occupied: set[tuple[int, int]] = set()
+    for sid in sorted(order, key=lambda x: (depth[x], col_hint[x])):
+        d, col = depth[sid], col_hint[sid]
+        while (d, col) in occupied:
+            col += 1
+        occupied.add((d, col))
+        layout[sid] = (_STEP_TOP_BASE + d * _STEP_VSTRIDE,
+                       _STEP_LEFT + col * _STEP_HSTRIDE)
     return layout
 
 
@@ -538,16 +584,24 @@ def _emit_group(ann: Annotation, step_layout: dict[str, tuple[int, int]]) -> dic
             lefts = [l for _, l in layouts]
             if ann.kind == "note":
                 top = top if top is not None else min(tops)
-                # Park notes in a single column to the RIGHT of every step
-                # in the workflow, not just the right of the contained
-                # step. Otherwise notes for steps in column 0 land
-                # mid-canvas and visually collide with steps in column 1+
-                # (Decision branch targets). All notes in the same column
-                # → no overlap with the topology, and notes for different
-                # steps differ vertically so they don't overlap each other.
+                # Hug the step: place the note just right of the rightmost
+                # step in the note's own vertical BAND (its rows ± one), not
+                # the far right of the whole canvas. This keeps a note next
+                # to the step it annotates while still clearing any Decision
+                # branch step that sits beside it in those rows.
                 if left is None:
-                    canvas_max_left = max(l for _, l in step_layout.values()) if step_layout else max(lefts)
-                    left = canvas_max_left + _STEP_WIDTH + _NOTE_GAP
+                    band_top = top - _STEP_VSTRIDE
+                    band_bot = top + (height or _STEP_VSTRIDE) + _STEP_VSTRIDE
+                    band = [l for t, l in step_layout.values()
+                            if band_top < t < band_bot]
+                    anchor = max(band) if band else max(lefts)
+                    # Snap to the next GRID column past the rightmost step in
+                    # the band. Steps sit at _STEP_LEFT + col*_STEP_HSTRIDE, so
+                    # +_STEP_HSTRIDE lands the note on an empty column in these
+                    # rows — no overlap regardless of the real rendered box
+                    # width (which is wider than _STEP_WIDTH), while staying as
+                    # close to the step as one column allows.
+                    left = anchor + _STEP_HSTRIDE
             else:  # block: bounding box
                 top = top if top is not None else max(0, min(tops) - 30)
                 left = left if left is not None else max(0, min(lefts) - 30)
