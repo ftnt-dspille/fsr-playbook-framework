@@ -95,9 +95,9 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 | `connector` | `Connectors` | `connector` | `connector, operation, params, version, config, step_variables` |
 | `stop` / `end` | `Connectors` (cyops_utilities `no_op`) | `connector` | (no args — synthesized as Utils: No Operation) |
 | `delete_record` | `Connectors` (cyops_utilities `make_cyops_request`, `method: DELETE`) | `connector` | one of: `record:` (IRI/`@id`), `module:`+`record_id:`, or `module:`+`query:` (bulk `delete-with-query`); optional `show_deleted:` — FSR has no dedicated delete step type |
-| `find_record` | `FindRecords` | `find_data` | `module, query, partial` |
-| `create_record` | `InsertData` | `insert_data` | `module` (→ `collection`), `resource`, `operation`, `is_upsert` |
-| `update_record` | `UpdateRecord` | `update_data` | `record` (record IRI → `collection`), `module` (→ `collectionType`), `resource`, `operation` |
+| `find_record` | `FindRecords` | `find_data` | `module`, `filters: [{field, operator, value}]` (friendly; compiles to `query:`), `limit`, `logic`, `partial`, `relationships` |
+| `create_record` | `InsertData` | `insert_data` | `module` (→ `collection`), `fields` (→ `resource`), `operation`, `is_upsert` |
+| `update_record` | `UpdateRecord` | `update_data` | `record` (record IRI → `collection`), `module` (→ `collectionType`), `fields` (→ `resource`), `operation` |
 | `delay` | `Delay` | `delay` | `seconds` (or `minutes`/`hours`/`days`) |
 | `manual_input` | `ManualInput` | `manual_input` | `title, description, options: [...], inputs: []` |
 | `code_snippet` | `CodeSnippet` | `connector` | `code: |...`, optional `config: <friendly-name>` |
@@ -108,6 +108,13 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 | `workflow_reference` | `WorkflowReference` | (per-type validator) | `target` (local name) or `workflowReference` (IRI) + `arguments` |
 
 > Removed: `record_action` short alias is gone — fold into `start` with a `module:` arg. `requires_record: false` is the same as the old "no record context" form.
+>
+> **`start` step-type swap**: `type: start` with a `module:` key compiles to
+> `cybersponse.action` (the Execute-menu record trigger, uuid f414d039); without
+> `module:` it compiles to `cybersponse.abstract_trigger` (manual/API/designer
+> trigger). The friendly keys `requires_record` / `run_mode` are the explicit
+> authoring form — the inverted wire flags (`noRecordExecution` /
+> `singleRecordExecution`) are compiler-internal and never authored directly.
 
 Other FSR step types (`cybersponse.action`, `RestApi`, `RunScript`,
 `ParallelExecution`, `MapPlaybook`, `FetchEmail`) round-trip
