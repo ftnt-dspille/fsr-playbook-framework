@@ -98,11 +98,10 @@ def _strip_arguments_wrapper(lines: list[str]) -> list[str]:
                 # that for lines outside the arguments block, but a sibling
                 # key inside the block also ends the scalar.
                 if in_block_scalar:
-                    # Check if this line is a new key (not continuation of the
-                    # block scalar). A new key is at the same indent as the
-                    # block-scalar key (dedented indent).
+                    # Block scalar ends when a line's post-dedent indent is at
+                    # or below the key's dedented indent (step level).
                     key_indent = nxt_indent - dedent
-                    if key_indent <= base_indent + dedent:
+                    if key_indent <= base_indent:
                         in_block_scalar = False
                     else:
                         out.append(nxt)  # literal content — no dedent
@@ -147,6 +146,63 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
     after_args = "".join(lines)
     if after_args != before_args:
         changes.append("arguments: wrapper removed")
+
+    # 2b. After hoisting, drop keys that were valid under arguments: but
+    # collide with step-level IR keys. The compiler re-derives these:
+    #   - `name:` (connector display label — re-derived from the catalog)
+    #   - `type: InputBased`/`DecisionBased` (MI mode — inferred from
+    #     `inputs:` presence/absence per Phase G)
+    # The step-level `name:`/`type:` appear right after the `- type:` list
+    # item; a `name:`/`type:` that appears LATER (after other args like
+    # `connector:`, `operation:`, `module:`, etc.) is the hoisted duplicate.
+    out2: list[str] = []
+    current_type_val: str | None = None
+    seen_step_name = False
+    seen_step_type = False
+    seen_other_key = False
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*-\s+(type|name):", line):
+            # New step starts — reset tracking
+            seen_step_name = False
+            seen_step_type = False
+            seen_other_key = False
+            current_type_val = _step_type_after(lines, i)
+            # If the list item has `name:` on the same line, mark it
+            if re.match(r"^\s*-\s+name:", line):
+                pass  # step name on the list-item line
+            if re.match(r"^\s*-\s+type:", line):
+                seen_step_type = True
+            out2.append(line)
+            continue
+
+        stripped = line.lstrip()
+        # Track what we've seen in this step
+        if re.match(r"^\s+name:", line) and not seen_other_key:
+            out2.append(line)
+            continue
+        if re.match(r"^\s+type:", line) and not seen_other_key:
+            seen_step_type = True
+            out2.append(line)
+            continue
+
+        # Any non-name/type key means subsequent name:/type: are duplicates
+        if stripped and not stripped.startswith("#") and not stripped.startswith("-"):
+            if not re.match(r"^\s+(name|type):", line):
+                seen_other_key = True
+
+        # Drop duplicate `name:` that appears after other keys
+        if re.match(r"^\s+name:\s+", line) and seen_other_key:
+            changes.append("dropped duplicate name: (connector label)")
+            continue
+        # Drop `type: InputBased`/`DecisionBased` on manual_input after other keys
+        if (current_type_val == "manual_input" and seen_step_type
+                and seen_other_key
+                and re.match(r"^\s+type:\s*(InputBased|DecisionBased)", line)):
+            changes.append("dropped type: (inferred from inputs:)")
+            continue
+
+        out2.append(line)
+    lines = out2
 
     # 3+4. Context-aware key renames on record-CRUD steps
     out: list[str] = []
