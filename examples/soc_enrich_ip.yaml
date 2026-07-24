@@ -65,11 +65,14 @@ playbooks:
       - name: Build Verdict
         type: set_variable
         next: Branch on Threat
+        with:
+          yeti: "{{ vars.steps.Yeti_Search.data }}"
+          netbox: "{{ vars.steps.NetBox_Lookup.data }}"
         vars:
-          yeti_hits: "{{ vars.steps.Yeti_Search.data.total | default(0) }}"
-          yeti_tags: "{{ vars.steps.Yeti_Search.data.observables[0].tags | map(attribute='name') | join(', ') if (vars.steps.Yeti_Search.data.total | default(0)) > 0 else 'none' }}"
-          asset_tenant: "{{ vars.steps.NetBox_Lookup.data.results[0].tenant.name if (vars.steps.NetBox_Lookup.data.count | default(0)) > 0 else 'Unknown' }}"
-          asset_owner: "{{ vars.steps.NetBox_Lookup.data.results[0].description if (vars.steps.NetBox_Lookup.data.count | default(0)) > 0 else 'Unknown' }}"
+          yeti_hits: "{{ vars.yeti.total | default(0) }}"
+          yeti_tags: "{{ vars.yeti.observables[0].tags | map(attribute='name') | join(', ') if (vars.yeti.total | default(0)) > 0 else 'none' }}"
+          asset_tenant: "{{ vars.netbox.results[0].tenant.name if (vars.netbox.count | default(0)) > 0 else 'Unknown' }}"
+          asset_owner: "{{ vars.netbox.results[0].description if (vars.netbox.count | default(0)) > 0 else 'Unknown' }}"
 
       - name: Branch on Threat
         type: decision
