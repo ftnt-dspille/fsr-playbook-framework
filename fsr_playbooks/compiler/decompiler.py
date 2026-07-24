@@ -672,6 +672,19 @@ def _decompile_step(s, pb_name: str | None = None,
         # key, so recompile accepts either.
         if "resource" in args:
             args["fields"] = args.pop("resource")
+        # Phase C1: strip wire-internal defaults from record-CRUD steps.
+        # These are re-derived by the compiler on recompile, so emitting
+        # them is pure noise the agent may copy.
+        if args.get("fieldOperation") == []:
+            args.pop("fieldOperation", None)
+        if args.get("tagsOperation") == "Overwrite":
+            args.pop("tagsOperation", None)
+        if args.get("__recommend") == []:
+            args.pop("__recommend", None)
+        if args.get("_showJson") is False:
+            args.pop("_showJson", None)
+        if out.get("step_variables") == []:
+            out.pop("step_variables", None)
         if args:
             _hoist_args(out, args)
     elif s.type == "find_record" and isinstance(args, dict):
