@@ -35,9 +35,18 @@ _RECORD_CRUD_TYPES = frozenset({"create_record", "update_record"})
 
 
 def _step_type_after(lines: list[str], idx: int) -> str | None:
-    """Find the `type:` value for the step whose list-item starts at idx."""
+    """Find the `type:` value for the step whose list-item starts at idx.
+
+    Handles both ``- type: x`` (type on the list-item line) and a separate
+    ``type: x`` line following the list-item dash.
+    """
     for i in range(idx, min(idx + 10, len(lines))):
-        m = re.match(r"^\s*type:\s*(\S+)", lines[i])
+        # `- type: x` — type: on the list-item line itself
+        m = re.match(r"^\s*-\s+type:\s*(\S+)", lines[i])
+        if m:
+            return m.group(1).rstrip(":")
+        # `    type: x` — type: on a subsequent line
+        m = re.match(r"^\s+type:\s*(\S+)", lines[i])
         if m:
             return m.group(1).rstrip(":")
     return None
@@ -47,7 +56,9 @@ def _strip_arguments_wrapper(lines: list[str]) -> list[str]:
     """Remove the ``arguments:`` wrapper: dedent all children to step level.
 
     Handles 2-space and 4-space indentation. Blank lines and comments
-    inside the block are preserved.
+    inside the block are preserved. Content of literal block scalars
+    (``key: |``) and folded scalars (``key: >``) is NOT dedented — it is
+    literal text where indentation is semantically load-bearing.
     """
     out: list[str] = []
     i = 0
@@ -58,6 +69,7 @@ def _strip_arguments_wrapper(lines: list[str]) -> list[str]:
             base_indent = len(line) - len(stripped)
             j = i + 1
             dedent: int | None = None
+            in_block_scalar = False
             while j < len(lines):
                 nxt = lines[j]
                 nxt_stripped = nxt.lstrip()
@@ -72,6 +84,30 @@ def _strip_arguments_wrapper(lines: list[str]) -> list[str]:
                     dedent = nxt_indent - base_indent
                     if dedent not in (2, 4):
                         dedent = 2
+                # Detect block-scalar start: `key: |` or `key: >`
+                if re.match(r"^\s*\S.*:\s*[|>]\s*$", nxt):
+                    in_block_scalar = True
+                    dedented = nxt[dedent:] if len(nxt) >= dedent else nxt.lstrip()
+                    out.append(dedented)
+                    j += 1
+                    continue
+                # If inside a block scalar, keep the line as-is (don't dedent
+                # literal content — its indentation is semantically load-bearing).
+                # A block scalar ends when a line at or below the key's indent
+                # appears; the nxt_indent <= base_indent check above handles
+                # that for lines outside the arguments block, but a sibling
+                # key inside the block also ends the scalar.
+                if in_block_scalar:
+                    # Check if this line is a new key (not continuation of the
+                    # block scalar). A new key is at the same indent as the
+                    # block-scalar key (dedented indent).
+                    key_indent = nxt_indent - dedent
+                    if key_indent <= base_indent + dedent:
+                        in_block_scalar = False
+                    else:
+                        out.append(nxt)  # literal content — no dedent
+                        j += 1
+                        continue
                 dedented = nxt[dedent:] if len(nxt) >= dedent else nxt.lstrip()
                 out.append(dedented)
                 j += 1
