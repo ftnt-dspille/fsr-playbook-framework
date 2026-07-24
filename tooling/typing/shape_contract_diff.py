@@ -75,6 +75,7 @@ ACCEPTED_PHANTOM: set[str] = {
     # decompiler reads it on pull to reverse → friendly `module:`.
     "connector_name",
     "fieldOperation",  # wire-internal default read by decompiler (stripped on pull)
+    "from_str",  # stale legacy smtp field read by decompiler (stripped on pull)
     "inputs",
     "mock_result",
     "module",
@@ -84,6 +85,7 @@ ACCEPTED_PHANTOM: set[str] = {
     "python_function",
     "tagsOperation",  # wire-internal default read by decompiler (stripped on pull)
     "target",
+    "timeout",  # wire-internal branch-resume variant read by decompiler (stripped)
     "vars",
     "when",
 }

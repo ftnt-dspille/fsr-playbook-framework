@@ -325,10 +325,81 @@ def _decompile_step(s, pb_name: str | None = None,
                 and isinstance(msg["content"], str):
             out["post_comment"] = args.pop("message")["content"]
         elif "message" in args:
-            out["message"] = args.pop("message")
+            # Strip wire-internal fields from the message block (the live
+            # box stamps parentstepid, stepId, etc. that the compiler rejects).
+            msg_dict = args.pop("message")
+            if isinstance(msg_dict, dict):
+                for _wire_k in ("parentstepid", "stepId", "stepiri"):
+                    msg_dict.pop(_wire_k, None)
+            out["message"] = msg_dict
 
         for _noise_key in _EDITOR_NOISE_KEYS:
             args.pop(_noise_key, None)
+
+    # Strip empty-string `timeout` — the live box stamps `timeout: ""` as a
+    # default; the compiler's typed-args model expects int and rejects "".
+    # An empty timeout is always a no-op, so strip it unconditionally.
+    # Also strip dict timeout (branch-resume variant {days, hours, minutes,
+    # step_iri}) — wire-internal routing data the box stamps on manual_input
+    # steps; the typed-args model expects int, not dict.
+    if isinstance(args, dict):
+        tv = args.get("timeout")
+        if tv == "" or isinstance(tv, dict):
+            args.pop("timeout", None)
+
+    # Strip empty-string values from connector `params:` for enum/select
+    # and integer params. The live box stamps `param: ""` for unset values;
+    # the compiler rejects them (enum: "" not in allowed, int: "" doesn't
+    # coerce). These are always no-op defaults the box auto-fills at runtime.
+    if isinstance(args, dict) and isinstance(args.get("params"), dict) and db is not None:
+        params = args["params"]
+        connector = args.get("connector")
+        operation = args.get("operation")
+        if isinstance(connector, str) and isinstance(operation, str):
+            for p_name in list(params):
+                if params[p_name] != "":
+                    continue
+                try:
+                    row = db.execute(
+                        "SELECT type FROM operation_params "
+                        "WHERE connector_name=? AND op_name=? AND param_name=?",
+                        (connector, operation, p_name),
+                    ).fetchone()
+                except Exception:
+                    row = None
+                if row and row[0] and row[0].lower() in (
+                    "select", "multiselect", "integer", "intger",
+                    "decimal", "numeric", "boolean", "checkbox",
+                ):
+                    params.pop(p_name)
+
+    # Strip conditionally-hidden params: the live box stamps params whose
+    # parent_param condition isn't met (e.g. task_timeout when track_task
+    # is false). The compiler's visibility check would reject them; strip
+    # them here so the pulled YAML recompiles cleanly.
+    if isinstance(args, dict) and isinstance(args.get("params"), dict) and db is not None:
+        params = args["params"]
+        connector = args.get("connector")
+        operation = args.get("operation")
+        if isinstance(connector, str) and isinstance(operation, str):
+            for p_name in list(params):
+                try:
+                    row = db.execute(
+                        "SELECT parent_param_name, condition_value "
+                        "FROM operation_params "
+                        "WHERE connector_name=? AND op_name=? AND param_name=?",
+                        (connector, operation, p_name),
+                    ).fetchone()
+                except Exception:
+                    row = None
+                if not row or not row[0]:
+                    continue  # no parent → always visible
+                parent, cond = row
+                if parent is None:
+                    continue  # top-level → always visible
+                parent_val = params.get(parent)
+                if parent_val is None or str(parent_val) != str(cond):
+                    params.pop(p_name, None)
 
     # Action-trigger module binding (start + module -> cybersponse.action). The
     # parser hoists a friendly step-level `module:`/`modules:` into
@@ -683,6 +754,11 @@ def _decompile_step(s, pb_name: str | None = None,
                 args.pop("config", None)
             if out.get("step_variables") == []:
                 out.pop("step_variables", None)
+        # Strip stale legacy `from_str` — older smtp connectors used this
+        # as a top-level argument; the current schema has `from` in params.
+        # The real value lives in params.from (hoisted above); from_str is
+        # always a stale leftover the compiler rejects as unknown.
+        args.pop("from_str", None)
         if args:
             _hoist_args(out, args)
     elif s.type in ("create_record", "update_record") and isinstance(args, dict):
