@@ -636,14 +636,16 @@ class NormalizerMixin:
     def _normalize_find_record_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
-        """Strict-whitelist guard for find_record.
+        """Friendly `filters:` form → wire `query:` envelope.
 
         Handler signature is `find_data(module, query, partial=True, **kw)`.
-        Unknown keys silently disappear at runtime, so reject misspellings
-        (e.g. `filter:` instead of `query:`) at compile time.
+        The friendly form lets authors write flat `filters:` / `limit:` /
+        `logic:` instead of the raw wire `query: {sort: [], limit, logic,
+        filters: [{type: primitive, field, value, operator, _operator}]}`.
+        An existing `query:` is still accepted (back-compat).
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY: set[str] = set()
+        _FRIENDLY = {"filters", "limit", "logic", "relationships"}
         _CANONICAL = {
             "module", "query", "partial", "mock_result", "condition",
             "step_variables", "checkboxFields",
@@ -653,10 +655,47 @@ class NormalizerMixin:
         )
         # Scalar-field type validation via the typed-args layer
         # (`typed_args.steps.expand_find_record`), which owns the `FindRecordArgs`
-        # model (module:str, partial/checkboxFields:bool). Validation-only — it
-        # never mutates `a` (find_record has no friendly→canonical transform), so
-        # the `__selectFields` cleanup below and `step.arguments` are untouched.
+        # model. Validation-only — runs before the friendly→canonical transform.
         _expand_find_record_typed(a, path, errors)
+
+        # Phase B1: friendly `filters:` → wire `query:` envelope.
+        # Only transform when `filters:` is present AND `query:` is not
+        # (an explicit `query:` wins — back-compat for authored wire shapes).
+        if isinstance(a.get("filters"), list) and "query" not in a:
+            filters_in = a.pop("filters")
+            limit = a.pop("limit", 30)
+            logic = a.pop("logic", "AND")
+            wire_filters = []
+            for f in filters_in:
+                if not isinstance(f, dict):
+                    wire_filters.append(f)
+                    continue
+                wf: dict[str, Any] = {"type": "primitive"}
+                wf["field"] = f.get("field")
+                wf["value"] = f.get("value")
+                op = f.get("operator", "eq")
+                wf["operator"] = op
+                wf["_operator"] = op
+                # Carry through any extra keys the author set (e.g. __selectFields)
+                for k, v in f.items():
+                    if k not in ("field", "value", "operator"):
+                        wf.setdefault(k, v)
+                wire_filters.append(wf)
+            a["query"] = {
+                "sort": [],
+                "limit": limit,
+                "logic": logic,
+                "filters": wire_filters,
+            }
+            a.setdefault("checkboxFields", False)
+
+        # `relationships: true` → append `?$relationships=true` to module
+        if a.get("relationships") is True:
+            mod = a.get("module")
+            if isinstance(mod, str) and "?$relationships=true" not in mod:
+                a["module"] = mod + "?$relationships=true"
+            a.pop("relationships", None)
+
         # Editor rule (bundle line 34498): query.__selectFields only persists
         # when checkboxFields is truthy; otherwise the editor deletes it before
         # POST so a stale field projection doesn't ship.

@@ -674,6 +674,47 @@ def _decompile_step(s, pb_name: str | None = None,
             args["fields"] = args.pop("resource")
         if args:
             _hoist_args(out, args)
+    elif s.type == "find_record" and isinstance(args, dict):
+        # Phase B1: reverse the friendly `filters:` form. The forward
+        # normalizer builds the wire `query: {sort, limit, logic, filters:
+        # [{type, field, value, operator, _operator}]}` envelope from flat
+        # `filters:` / `limit:` / `logic:`. Reverse it so a pulled step
+        # surfaces the friendly form, not the raw wire envelope.
+        q = args.pop("query", None)
+        if isinstance(q, dict):
+            filters_out = []
+            for f in q.get("filters") or []:
+                if not isinstance(f, dict):
+                    filters_out.append(f)
+                    continue
+                wf = {}
+                wf["field"] = f.get("field")
+                wf["value"] = f.get("value")
+                op = f.get("operator", "eq")
+                wf["operator"] = op
+                # carry through any extra keys (e.g. __selectFields)
+                for k, v in f.items():
+                    if k not in ("type", "field", "value", "operator",
+                                 "_operator"):
+                        wf.setdefault(k, v)
+                filters_out.append(wf)
+            if filters_out:
+                args["filters"] = filters_out
+            else:
+                # Empty filters — keep the wire `query:` envelope so the
+                # validator's required-`query` check passes on recompile.
+                args["query"] = q
+            limit = q.get("limit")
+            if limit is not None and limit != 30:
+                args["limit"] = limit
+            logic = q.get("logic")
+            if logic is not None and logic != "AND":
+                args["logic"] = logic
+        # Strip the wire-only `checkboxFields: false` the normalizer defaults
+        if args.get("checkboxFields") is False:
+            args.pop("checkboxFields", None)
+        if args:
+            _hoist_args(out, args)
     elif args:
         _hoist_args(out, args)
 

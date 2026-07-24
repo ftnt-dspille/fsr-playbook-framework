@@ -3,27 +3,20 @@
 A friendly find_record step is authored as::
 
     module: indicators
-    query:
-      logic: AND
-      filters:
-        - field: value
-          operator: eq
-          value: "{{ vars.input.params.indicator_value }}"
-    partial: true
+    filters:
+      - field: value
+        operator: eq
+        value: "{{ vars.input.params.indicator_value }}"
+    limit: 30            # optional, default 30
+    logic: AND           # optional, default AND
+    partial: true        # optional, default true
 
-The handler is ``find_data(module, query, partial=True, **kw)``. Unlike
-delay/code_snippet, find_record has **no friendly→canonical transform** — the
-authored keys are already the wire keys. So this layer is *validation-only*:
-``FindRecordArgs`` types the scalar fields (`module`, `partial`,
-`checkboxFields`) so a wrong-typed value becomes a clean `BAD_VALUE` instead of
-silently riding through to the runtime (the handler drops unknown/garbage
-kwargs without complaint). `expand_find_record` never mutates `args` — it
-returns ``None`` and the resolver keeps the original dict, its `_check_unknown_keys`
-whitelist, and the editor's `query.__selectFields` cleanup rule.
-
-`query` is left untyped (``Any``): it is normally a filter dict, but a whole-query
-Jinja string (`"{{ vars.saved_query }}"`) renders to a dict at runtime, so
-constraining it to `dict` would false-positive on valid authoring.
+The handler is ``find_data(module, query, partial=True, **kw)``.
+``filters:`` / ``limit:`` / ``logic:`` are friendly keys that compile
+to the wire ``query:`` envelope; the raw ``query:`` key is still
+accepted for back-compat. This layer is validation-only for the scalar
+fields; the friendly→canonical transform lives in the normalizer's
+``_normalize_find_record_args``.
 """
 from __future__ import annotations
 
@@ -39,12 +32,12 @@ from .._bridge import validate_args
 class FindRecordArgs(StrictArgs):
     """Typed view of a find_record step's arguments.
 
-    `module` is the target module name (a string, or a Jinja string that
-    renders to one). `partial`/`checkboxFields` are boolean flags (pydantic
-    coerces the usual `true`/`1`/`"true"` forms). `query` is passed through
-    untyped. `extra="allow"` because sibling/canonical keys (`mock_result`,
-    `condition`, `step_variables`, …) ride through untouched — the resolver's
-    `_check_unknown_keys` has already rejected anything genuinely unknown.
+    `module` is the target module name. `partial`/`checkboxFields` are
+    boolean flags. `filters`/`limit`/`logic` are the friendly form that
+    compiles to the wire `query:` envelope. `query` is the raw wire form
+    (still accepted). `extra="allow"` because sibling/canonical keys ride
+    through untouched — the resolver's `_check_unknown_keys` has already
+    rejected anything genuinely unknown.
     """
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
@@ -53,6 +46,10 @@ class FindRecordArgs(StrictArgs):
     query: Optional[Any] = None
     partial: Optional[bool] = None
     checkboxFields: Optional[bool] = None
+    filters: Optional[Any] = None
+    limit: Optional[int] = None
+    logic: Optional[str] = None
+    relationships: Optional[bool] = None
 
 
 def expand_find_record(
@@ -60,12 +57,10 @@ def expand_find_record(
 ) -> Optional[dict]:
     """Type-validate a find_record step's arguments.
 
-    Validation-only: always returns ``None`` (find_record has no
-    friendly→canonical transform, so the resolver keeps `step.arguments`
-    unchanged along with its whitelist + `__selectFields` cleanup). A bad scalar
-    field (e.g. `partial: "maybe"`, `module: [1, 2]`) appends a `BAD_VALUE` and
-    leaves the step for the author to fix — matching the leave-unchanged
-    contract of the other step models.
+    Validation-only: always returns ``None`` (the friendly→canonical
+    transform lives in the normalizer). A bad scalar field (e.g.
+    `partial: "maybe"`, `module: [1, 2]`) appends a `BAD_VALUE` and
+    leaves the step for the author to fix.
     """
     if not isinstance(args, dict):
         return None
