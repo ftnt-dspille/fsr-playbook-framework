@@ -96,8 +96,8 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 | `stop` / `end` | `Connectors` (cyops_utilities `no_op`) | `connector` | (no args — synthesized as Utils: No Operation) |
 | `delete_record` | `Connectors` (cyops_utilities `make_cyops_request`, `method: DELETE`) | `connector` | one of: `record:` (IRI/`@id`), `module:`+`record_id:`, or `module:`+`query:` (bulk `delete-with-query`); optional `show_deleted:` — FSR has no dedicated delete step type |
 | `find_record` | `FindRecords` | `find_data` | `module`, `filters: [{field, operator, value}]` (friendly; compiles to `query:`), `limit`, `logic`, `partial`, `relationships` |
-| `create_record` | `InsertData` | `insert_data` | `module` (→ `collection`), `fields` (→ `resource`), `operation`, `is_upsert` |
-| `update_record` | `UpdateRecord` | `update_data` | `record` (record IRI → `collection`), `module` (→ `collectionType`), `fields` (→ `resource`), `operation` |
+| `create_record` | `InsertData` | `insert_data` | `module` (required → `collection`), `fields` (→ `resource`), `operation`, `is_upsert` |
+| `update_record` | `UpdateRecord` | `update_data` | `record` (record IRI → `collection`), `module` (required → `collectionType`), `fields` (→ `resource`), `operation` |
 | `delay` | `Delay` | `delay` | `seconds` (or `minutes`/`hours`/`days`) |
 | `manual_input` | `ManualInput` | `manual_input` | `title, description, options: [...], inputs: [], email: {enabled, subject, recipients, body, from}, assign_to: {person \| team \| record_field}` |
 | `code_snippet` | `CodeSnippet` | `connector` | `code: |...`, optional `config: <friendly-name>` |
@@ -882,18 +882,20 @@ spaces → underscores).
   drives `branches:`, not a variable on the step output.
 
 **`create_record` / `update_record`**
+
+`module:` is **required** on both create and update — the compiler
+hard-errors without it (it resolves the target REST collection IRI).
+
 ```yaml
 - type: create_record
-  arguments:
-    module: alerts                # → collection: /api/3/alerts
-    resource: {name: "...", severity: High}
+  module: alerts                # required → collection: /api/3/alerts
+  fields: {name: "...", severity: High}  # → resource:
 
 - type: update_record
-  arguments:
-    collection: "{{ vars.steps.Find.records[0]['@id'] }}"  # the record IRI
-    module: alerts                # → collectionType: /api/3/alerts
-    resource: {description: "..."}
-    operation: Replace
+  record: "{{ vars.steps.Find.records[0]['@id'] }}"  # record IRI → collection:
+  module: alerts                # required → collectionType: /api/3/alerts
+  fields: {description: "..."}  # → resource:
+  operation: Replace
 ```
 
 <!-- BEGIN GENERATED STEP REFERENCE (fsr_playbooks.tests.step_reference_gen) -->
