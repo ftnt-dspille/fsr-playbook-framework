@@ -460,6 +460,55 @@ def _decompile_step(s, pb_name: str | None = None,
             new_opts.append(entry)
         if new_opts:
             out["options"] = new_opts
+        # Phase D1: reverse friendly `email:` / `assign_to:` forms.
+        # The forward normalizer turns `email: {enabled, subject, recipients,
+        # body, from}` into wire `email_notification: {enabled,
+        # smtpParameters: [{to, subject, body, from}]}` and `assign_to:
+        # {person|team|record_field}` into wire `owner_detail: {isAssigned,
+        # assignedToPerson/assignedToTeam/assignedToRecord}`. Reverse so a
+        # pulled step surfaces the friendly form. Skip the default unassigned
+        # / disabled envelopes (recompile re-creates them via setdefault).
+        en = args.pop("email_notification", None)
+        if isinstance(en, dict):
+            is_default = (
+                en.get("enabled") is False
+                and not en.get("smtpParameters")
+            )
+            if not is_default:
+                email_out: dict[str, Any] = {}
+                if "enabled" in en:
+                    email_out["enabled"] = en["enabled"]
+                params = en.get("smtpParameters") or []
+                if params and isinstance(params[0], dict):
+                    p = params[0]
+                    if p.get("to") is not None:
+                        email_out["recipients"] = p["to"]
+                    for k in ("subject", "body", "from"):
+                        if p.get(k) is not None:
+                            email_out[k] = p[k]
+                args["email"] = email_out
+        od = args.pop("owner_detail", None)
+        if isinstance(od, dict):
+            is_default = (
+                od.get("isAssigned") is False
+                and not any(
+                    od.get(k) for k in
+                    ("assignedToPerson", "assignedToTeam", "assignedToRecord")
+                )
+            )
+            if not is_default:
+                assign_out: dict[str, Any] = {}
+                if od.get("assignedToPerson"):
+                    assign_out["person"] = od["assignedToPerson"]
+                team = od.get("assignedToTeam")
+                if isinstance(team, list) and team:
+                    assign_out["team"] = team[0]
+                elif isinstance(team, str) and team:
+                    assign_out["team"] = team
+                if od.get("assignedToRecord"):
+                    assign_out["record_field"] = True
+                if assign_out:
+                    args["assign_to"] = assign_out
         if args:
             _hoist_args(out, args)
     elif s.type == "set_variable" and isinstance(args, dict):
