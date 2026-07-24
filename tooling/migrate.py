@@ -157,13 +157,11 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
     # `connector:`, `operation:`, `module:`, etc.) is the hoisted duplicate.
     out2: list[str] = []
     current_type_val: str | None = None
-    seen_step_name = False
     seen_step_type = False
     seen_other_key = False
     for i, line in enumerate(lines):
         if re.match(r"^\s*-\s+(type|name):", line):
             # New step starts — reset tracking
-            seen_step_name = False
             seen_step_type = False
             seen_other_key = False
             current_type_val = _step_type_after(lines, i)
