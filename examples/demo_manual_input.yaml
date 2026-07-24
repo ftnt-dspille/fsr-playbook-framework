@@ -23,9 +23,8 @@ playbooks:
             next: Stamp approved
           - display: reject
             next: Stamp rejected
-        arguments:
-          title: "Approve the e2e action?"
-          description: "Click **approve** to continue, **reject** to abort."
+        title: "Approve the e2e action?"
+        description: "Click **approve** to continue, **reject** to abort."
 
       - name: Stamp approved
         type: set_variable

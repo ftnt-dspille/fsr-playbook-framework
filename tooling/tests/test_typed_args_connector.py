@@ -116,8 +116,7 @@ playbooks:
         next: do
       - name: do
         type: connector
-        arguments:
-          operation: make_cyops_request
+        operation: make_cyops_request
 """
     r = compile_yaml(text, db_path)
     missing = [e for e in r.errors
@@ -138,9 +137,8 @@ playbooks:
         next: noop
       - name: noop
         type: connector
-        arguments:
-          connector: cyops_utilities
-          operation: no_op
+        connector: cyops_utilities
+        operation: no_op
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

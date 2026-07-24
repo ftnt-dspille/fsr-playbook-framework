@@ -19,9 +19,8 @@ playbooks:
         next: act
       - name: act
         type: connector
-        arguments:
-          connector: totally_not_a_real_connector
-          operation: do_thing
+        connector: totally_not_a_real_connector
+        operation: do_thing
 """
 
 

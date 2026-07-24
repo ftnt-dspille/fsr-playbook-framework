@@ -153,19 +153,17 @@ playbooks:
       - name: On Alert Create
         type: start_on_create
         next: Stamp marker
-        arguments:
-          module: alerts
-          when:
-            logic: AND
-            filters:
-              - {field: name, op: like, value: "%marker%"}
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - {field: name, op: like, value: "%marker%"}
       - name: Stamp marker
         type: update_record
-        arguments:
-          collection: "{{ vars.input.records[0]['@id'] }}"
-          module: alerts
-          resource:
-            description: "marker"
+        record: "{{ vars.input.records[0]['@id'] }}"
+        module: alerts
+        resource:
+          description: "marker"
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

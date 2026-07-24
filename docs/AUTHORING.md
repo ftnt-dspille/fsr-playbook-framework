@@ -95,12 +95,11 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 | `connector` | `Connectors` | `connector` | `connector, operation, params, version, config, step_variables` |
 | `stop` / `end` | `Connectors` (cyops_utilities `no_op`) | `connector` | (no args — synthesized as Utils: No Operation) |
 | `delete_record` | `Connectors` (cyops_utilities `make_cyops_request`, `method: DELETE`) | `connector` | one of: `record:` (IRI/`@id`), `module:`+`record_id:`, or `module:`+`query:` (bulk `delete-with-query`); optional `show_deleted:` — FSR has no dedicated delete step type |
-| `find_record` | `FindRecords` | `find_data` | `module, query, partial` |
-| `create_record` | `InsertData` | `insert_data` | `module` (→ `collection`), `resource`, `operation` |
-| `update_record` | `UpdateRecord` | `update_data` | `collection` (record IRI), `module` (→ `collectionType`), `resource`, `operation` |
-| `insert_record` | `InsertData` | `insert_data` | legacy alias for `create_record` |
+| `find_record` | `FindRecords` | `find_data` | `module`, `filters: [{field, operator, value}]` (friendly; compiles to `query:`), `limit`, `logic`, `partial`, `relationships` |
+| `create_record` | `InsertData` | `insert_data` | `module` (required → `collection`), `fields` (→ `resource`), `operation`, `is_upsert` |
+| `update_record` | `UpdateRecord` | `update_data` | `record` (record IRI → `collection`), `module` (required → `collectionType`), `fields` (→ `resource`), `operation` |
 | `delay` | `Delay` | `delay` | `seconds` (or `minutes`/`hours`/`days`) |
-| `manual_input` | `ManualInput` | `manual_input` | `title, description, options: [...], inputs: []` |
+| `manual_input` | `ManualInput` | `manual_input` | `title, description, options: [...], inputs: [], email: {enabled, subject, recipients, body, from}, assign_to: {person \| team \| record_field}` |
 | `code_snippet` | `CodeSnippet` | `connector` | `code: |...`, optional `config: <friendly-name>` |
 | `approval` | `Approval` | `approval` | `resource: {assignedTo / owners / userOwners, approvaldescription}`, optional `response_mapping`, `timeout` (`collection` defaults to `approvals`) |
 | `send_email` | `SendEmail` | `send_email` | `to: [...]`, `subject`, `body` (→ `content`), optional `from` (→ `from_str`), `cc`, `bcc` |
@@ -109,6 +108,13 @@ Run `fsrpb explain step <name>` for the canonical handler signature.
 | `workflow_reference` | `WorkflowReference` | (per-type validator) | `target` (local name) or `workflowReference` (IRI) + `arguments` |
 
 > Removed: `record_action` short alias is gone — fold into `start` with a `module:` arg. `requires_record: false` is the same as the old "no record context" form.
+>
+> **`start` step-type swap**: `type: start` with a `module:` key compiles to
+> `cybersponse.action` (the Execute-menu record trigger, uuid f414d039); without
+> `module:` it compiles to `cybersponse.abstract_trigger` (manual/API/designer
+> trigger). The friendly keys `requires_record` / `run_mode` are the explicit
+> authoring form — the inverted wire flags (`noRecordExecution` /
+> `singleRecordExecution`) are compiler-internal and never authored directly.
 
 Other FSR step types (`cybersponse.action`, `RestApi`, `RunScript`,
 `ParallelExecution`, `MapPlaybook`, `FetchEmail`) round-trip
@@ -229,6 +235,8 @@ under `arguments:` is an error so you don't end up with two values.
   for_each: { item: "{{ vars.ips }}" }   # loop config (full reference below)
   mock_result: { data: { score: 0 } }    # used by --mock runs
   set: { last_lookup_at: "{{ now() }}" } # inline vars stamped after the step
+  with:                                   # alias deep Jinja paths (see below)
+    info: "{{ vars.steps.Enrich.data.code_output }}"
   post_comment: "auto-added by triage"   # → message block (comment on record)
   comment: "blocks egress to the C2 IP" # canvas sticky-note for humans
   arguments:
@@ -247,9 +255,35 @@ under `arguments:` is an error so you don't end up with two values.
 | `for_each:` | `for_each` | Loop the step over a list (full reference below). |
 | `mock_result:` | `mock_result` | The payload `--mock` runs return for this step. |
 | `set:` | `step_variables` | Inline vars stamped after the step. Same spelling whether the step is `set_variable` (where it's `vars:`) or anything else. |
+| `with:` | (compile-time only) | Jinja path binding — alias a long `vars.steps.X.data.Y` path for the step's scope. The compiler rewrites `vars.<name>` with the bound expression in all step arguments. No wire output. |
 | `post_comment:` | `message` | Post a collaboration comment to the record. Sugar for `message: {content: "…"}`; use the `message:` block (below) for tags/record/thread. Setting both is an error. |
 | `comment:` | (annotation) | A canvas sticky-note for humans; does not affect execution. |
 | `description:` | `description` | Free-form text shown in the step's detail pane (FSR's per-step `description`, distinct from the `comment:` sticky-note). Round-trips verbatim on pull. |
+
+### `with:` — Jinja path binding
+
+When a step references the same deep Jinja path many times (`vars.steps.X.
+data.code_output.host` repeated 30+ times), `with:` aliases it for the
+step's scope. The compiler rewrites `vars.<name>` with the bound
+expression in **all** string values within the step's arguments —
+purely a compile-time convenience with no wire output.
+
+```yaml
+- name: FMG Ensure Vendor Address
+  type: connector
+  with:
+    info: "{{ vars.steps.Enrich_Host.data.code_output }}"
+  connector: fortinet-fortimanager-json-rpc
+  operation: get_address
+  params:
+    url: "/pm/config/adom/{{ vars.info.adom }}/obj/firewall/address/{{ vars.info.src_addr_name }}"
+```
+
+- Binding names must be valid identifiers (letter/underscore start,
+  alphanumeric + underscore body).
+- Values can be `{{ }}`-wrapped or bare Jinja expressions.
+- Word-boundary matching: `vars.info` matches in `{{ vars.info.adom }}`
+  but **not** in `{{ vars.information }}`.
 
 ### `message:` / `post_comment:` — posting a comment to the record
 
@@ -776,15 +810,39 @@ python_inline_code_editor` step. Config UUID resolved live + cached at
 
 Friendly form (compiler expands to FSR's canonical InputBased shape).
 **Top-level keys are strictly whitelisted**: `title`, `description`,
-`options`, `inputs`, `is_approval`. Anything else is a hard error —
-silent-drop trap verified in the field. Each whitelisted key may be written
-at the step level (next to `type:`) or under `arguments:`, but not both
-(setting one in both places is a conflict error).
+`options`, `inputs`, `is_approval`, `email`, `assign_to`. Anything else
+is a hard error — silent-drop trap verified in the field. Each
+whitelisted key may be written at the step level (next to `type:`) or
+under `arguments:`, but not both (setting one in both places is a
+conflict error).
 
 Set `is_approval: true` to make the prompt an **approval gate** — the
 compiler re-points the step to the distinct `ApprovalManualInput` step type
 (sharing the ManualInput dispatcher + `InputBased` render mode). Without the
 flag the step ships as a plain `ManualInput` and FSR renders a plain prompt.
+
+**`email:`** — friendly email notification. Instead of the raw wire
+`email_notification: {enabled, smtpParameters: [{to, subject, body, from}]}`,
+write:
+
+```yaml
+  email:
+    enabled: true
+    subject: "Action required: {{ vars.alert.title }}"
+    recipients:
+      - alice@example.com
+      - bob@example.com
+    body: "Please review this alert"
+```
+
+**`assign_to:`** — friendly assignment. Instead of the raw wire
+`owner_detail: {isAssigned, assignedToPerson, assignedToTeam, ...}`,
+write:
+
+```yaml
+  assign_to:
+    person: "admin"          # or: team: "Tier 1"  or: record_field: true
+```
 
 ```yaml
 - type: manual_input
@@ -824,18 +882,20 @@ spaces → underscores).
   drives `branches:`, not a variable on the step output.
 
 **`create_record` / `update_record`**
+
+`module:` is **required** on both create and update — the compiler
+hard-errors without it (it resolves the target REST collection IRI).
+
 ```yaml
 - type: create_record
-  arguments:
-    module: alerts                # → collection: /api/3/alerts
-    resource: {name: "...", severity: High}
+  module: alerts                # required → collection: /api/3/alerts
+  fields: {name: "...", severity: High}  # → resource:
 
 - type: update_record
-  arguments:
-    collection: "{{ vars.steps.Find.records[0]['@id'] }}"  # the record IRI
-    module: alerts                # → collectionType: /api/3/alerts
-    resource: {description: "..."}
-    operation: Replace
+  record: "{{ vars.steps.Find.records[0]['@id'] }}"  # record IRI → collection:
+  module: alerts                # required → collectionType: /api/3/alerts
+  fields: {description: "..."}  # → resource:
+  operation: Replace
 ```
 
 <!-- BEGIN GENERATED STEP REFERENCE (fsr_playbooks.tests.step_reference_gen) -->
@@ -923,7 +983,7 @@ Editor-derived argument shapes for every step type, keyed by canonical FSR name 
 | `tagsOperation` | string |  | Special operation mode for recordTags field; present in 33/334 instances; similar to operation but scoped to tags |
 | `when` | string |  | Jinja conditional for step execution; present in 59/334 instances; deleted if empty string; supports full Jinja expressions |
 
-#### InsertData — `create_record`, `insert_record`
+#### InsertData — `create_record`
 
 | Argument | Type | Required | Meaning |
 |----------|------|----------|---------|

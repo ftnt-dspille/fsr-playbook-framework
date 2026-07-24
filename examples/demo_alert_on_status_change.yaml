@@ -17,19 +17,17 @@ playbooks:
       - name: On Alert Status Change
         type: start_on_update
         next: Stamp marker
-        arguments:
-          module: alerts
-          when:
-            logic: OR
-            filters:
-              - {field: status, op: changed}
+        module: alerts
+        when:
+          logic: OR
+          filters:
+            - {field: status, op: changed}
 
       - name: Stamp marker
         type: update_record
-        arguments:
-          collection: "{{ vars.input.records[0]['@id'] }}"
-          module: alerts                # → collectionType: /api/3/alerts
-          resource:
-            description: "fsrpb_e2e_on_update_marker"
-          operation: Replace
-          step_variables: []
+        record: "{{ vars.input.records[0]['@id'] }}"
+        module: alerts                # → collectionType: /api/3/alerts
+        fields:
+          description: "fsrpb_e2e_on_update_marker"
+        operation: Replace
+        step_variables: []

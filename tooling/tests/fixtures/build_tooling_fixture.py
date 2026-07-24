@@ -39,11 +39,27 @@ DEV = REPO / "data" / "fsr_reference.db"
 SLIM = REPO / "fsr_playbooks" / "_data" / "fsr_reference.db"
 OUT = Path(__file__).resolve().parent / "tooling_reference.db"
 
-# Every connector the db_path-using tooling tests reference.
+# Every connector the db_path-using tooling tests + live system-pull
+# round-trip reference.
 CONN = [
     "fortigate-firewall", "virustotal", "cyops_utilities", "smtp", "ssh",
     "abuseipdb", "activedirectory", "fortinet-fortisiem", "fortinet-fortiedr",
     "apivoid", "aws-access-analyzer", "recorded-future", "http", "claroty-xdome",
+    # Live system-pull round-trip (live box system playbooks)
+    "abnormal-security", "armis", "azure-key-vault", "cisa-advisory",
+    "code-runner", "crowd-strike-falcon", "cyops-schedule-report",
+    "forticloud-asset-management", "fortinet-fortiauthenticator",
+    "fortinet-fortiflex", "fortinet-fortiguard-ioc",
+    "fortinet-fortiguard-threat-intelligence", "fortinet-fortimanager",
+    "fortinet-fortimanager-json-rpc", "fortinet-fortindr-cloud",
+    "fortinet-fortirecon-easm", "fortisoar-ml-engine", "github",
+    "infoblox-ddi", "openai", "sailpoint-identitynow", "screenshot",
+    "servicenow", "servicenow-cmdb", "slack",
+    # Additional connectors in the full dev DB after probe
+    "aiassistant-utils", "code-snippet", "connector-fsr-soc-assistant",
+    "exchange", "file-content-extraction", "fortinet-fortiai-proxy",
+    "fortinet-forticlient-ems", "fsr-agent-communication-bridge",
+    "generic-http", "imap", "phishing-classifier", "whois-rdap",
 ]
 # Connectors the clobbered dev cache lacks but the committed slim catalog has.
 FROM_SLIM = ["abuseipdb", "activedirectory", "fortinet-fortisiem", "ssh"]

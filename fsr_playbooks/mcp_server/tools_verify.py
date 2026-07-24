@@ -496,7 +496,7 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
                         has_default=has_def, step_id=s.id, path=spath,
                     ))
 
-            elif t in {"create_record", "insert_record", "update_record"}:
+            elif t in {"create_record", "update_record"}:
                 module = a.get("module")
                 # Module existence applies to all record writes.
                 fixes.extend(check_record_module(

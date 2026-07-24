@@ -124,19 +124,19 @@ def test_editor_noise_keys_stripped_on_decompile():
     designer auto-adds to record-write steps. They carry no runtime meaning
     (no branch reads them, no ruleset requires them), so the decompiler drops
     them instead of leaking them as boilerplate into the friendly YAML."""
-    step = Step(id="w", type="insert_record", name="Create",
+    step = Step(id="w", type="create_record", name="Create",
                 arguments={"collection": "/api/3/alerts",
                            "operation": "Overwrite",
                            "resource": {"name": "x"},
                            "__recommend": [], "_showJson": False})
     out = _decompile_step(step)
-    args = out.get("arguments") or {}
+    args = out  # Phase G: args at step level
     assert "__recommend" not in args
     assert "_showJson" not in args
-    # Load-bearing wire is untouched.
+    # Load-bearing wire is untouched (collection reversed to friendly module:).
     assert args["operation"] == "Overwrite"
-    assert args["collection"] == "/api/3/alerts"
-    assert args["resource"] == {"name": "x"}
+    assert args["module"] == "alerts"
+    assert args["fields"] == {"name": "x"}
 
 
 def test_editor_noise_strip_is_lossless_round_trip():
@@ -155,17 +155,16 @@ playbooks:
         module: alerts
         next: Create
       - name: Create
-        type: insert_record
+        type: create_record
         module: alerts
-        arguments:
-          operation: Overwrite
-          __recommend: []
-          _showJson: false
-          resource:
-            name: hi
+        operation: Overwrite
+        __recommend: []
+        _showJson: false
+        resource:
+          name: hi
 """
     )
-    args = by_name["Create"].get("arguments") or {}
+    args = by_name["Create"]  # Phase G: args at step level
     assert "__recommend" not in args
     assert "_showJson" not in args
     assert args["operation"] == "Overwrite"
@@ -190,10 +189,9 @@ playbooks:
       - name: Triage
         type: start
         module: alerts
-        arguments:
-          button_label: Triage Alert
-          requires_record: true
-          run_mode: per_record
+        button_label: Triage Alert
+        requires_record: true
+        run_mode: per_record
         next: Set
       - name: Set
         type: set_variable
@@ -386,13 +384,12 @@ def test_manual_start_minimized_to_friendly_fields():
     assert triage["type"] == "start"
     assert triage.get("module") == "alerts"
     # route + requires_record + button_label survive (non-default); nothing else does.
-    assert triage["arguments"] == {
-        "route": "e94851e1-1184-4abb-a2b2-1ce8a48048e7",
-        "requires_record": False,
-        "button_label": "Triage Alert",
-    }, f"unexpected arguments: {triage.get('arguments')!r}"
-    leaked = _DROPPED_BOILERPLATE & set((triage.get("arguments") or {}))
-    assert not leaked, f"boilerplate keys leaked into arguments: {leaked}"
+    # route + requires_record + button_label survive at step level (non-default)
+    assert triage.get("route") == "e94851e1-1184-4abb-a2b2-1ce8a48048e7"
+    assert triage.get("requires_record") is False
+    assert triage.get("button_label") == "Triage Alert"
+    leaked = _DROPPED_BOILERPLATE & set(triage)
+    assert not leaked, f"boilerplate keys leaked: {leaked}"
     # the default step_variables (empty params) is dropped, not hoisted.
     assert "step_variables" not in triage
 
@@ -426,7 +423,7 @@ def test_run_mode_once_for_all_round_trips():
     assert r1.ok, [e.message for e in r1.errors]
     # the decompiled step should carry run_mode: once_for_all.
     triage = yaml.safe_load(decompile_to_yaml(r1.fsr_json, PACKAGED_SLIM_DB))["playbooks"][0]["steps"][0]
-    assert triage["arguments"].get("run_mode") == "once_for_all", (
+    assert triage.get("run_mode") == "once_for_all", (
         f"once_for_all should survive as run_mode, got {triage['arguments']!r}")
     r2 = compile_yaml(decompile_to_yaml(r1.fsr_json, PACKAGED_SLIM_DB), PACKAGED_SLIM_DB)
     assert r2.ok and _trigger_args(r1) == _trigger_args(r2), (
@@ -443,8 +440,8 @@ def test_route_preserved_when_present():
     j = _full_action_trigger_json("alerts", route=custom)
     doc = yaml.safe_load(decompile_to_yaml(j, PACKAGED_SLIM_DB))
     triage = doc["playbooks"][0]["steps"][0]
-    assert triage["arguments"]["route"] == custom, "route must be under arguments:"
-    assert "route" not in triage, "route must NOT be at step top level"
+    assert triage["route"] == custom, "route must be at step level"
+    assert "route" in triage, "route must be at step top level"
     r = compile_yaml(yaml.safe_dump(doc, sort_keys=False), PACKAGED_SLIM_DB)
     assert r.ok, [e.message for e in r.errors]
     assert _trigger_args(r)["route"] == custom, "route drifted on recompile"
@@ -472,7 +469,7 @@ def test_button_label_emitted_only_when_not_playbook_name():
     # title != playbook name -> emitted as button_label.
     j2 = _full_action_trigger_json("alerts", title="Triage Alert", playbook_name="PB")
     triage2 = yaml.safe_load(decompile_to_yaml(j2, PACKAGED_SLIM_DB))["playbooks"][0]["steps"][0]
-    assert triage2["arguments"].get("button_label") == "Triage Alert", (
+    assert triage2.get("button_label") == "Triage Alert", (
         f"distinct title should become button_label, got {triage2.get('arguments')!r}")
 
 
@@ -488,7 +485,7 @@ def test_default_display_conditions_dropped():
     custom_dc = {"alerts": {"sort": [], "limit": 50, "logic": "AND", "filters": []}}
     j2 = _full_action_trigger_json("alerts", display_conditions=custom_dc)
     triage2 = yaml.safe_load(decompile_to_yaml(j2, PACKAGED_SLIM_DB))["playbooks"][0]["steps"][0]
-    assert triage2["arguments"].get("displayConditions") == custom_dc, (
+    assert triage2.get("displayConditions") == custom_dc, (
         f"custom displayConditions should be kept, got {triage2.get('arguments')!r}")
 
 
@@ -520,17 +517,16 @@ playbooks:
         next: TTP
       - name: TTP
         type: trigger_tenant_playbook
-        arguments:
-          playbook_alias_id: remote-ir-playbook
-          tenant_id: tenant-acme
+        playbook_alias_id: remote-ir-playbook
+        tenant_id: tenant-acme
 """
     )
     s = by_name["TTP"]
     assert s["type"] == "trigger_tenant_playbook", (
         f"RemotePlaybookReference should decompile to trigger_tenant_playbook, "
         f"got {s.get('type')!r}")
-    assert s["arguments"]["playbook_alias_id"] == "remote-ir-playbook"
-    assert s["arguments"]["tenant_id"] == "tenant-acme"
+    assert s["playbook_alias_id"] == "remote-ir-playbook"
+    assert s["tenant_id"] == "tenant-acme"
 
 
 
@@ -551,8 +547,7 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
+        route: lookup_ip
       - name: Do
         type: set_variable
         vars: {x: 1}
@@ -560,7 +555,7 @@ playbooks:
     )
     s = by_name["Start"]
     assert s["type"] == "api_endpoint"
-    args = s.get("arguments") or {}
+    args = s  # Phase G: args are at step level now (no `arguments:` wrapper)
     # route is the one friendly scalar -- always preserved.
     assert args.get("route") == "lookup_ip", args
     # The five re-derived defaults must be dropped (not surfaced as boilerplate).
@@ -586,17 +581,16 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: webhook_in
-          authentication_methods: [anonymous]
-          triggerOnSource: false
+        route: webhook_in
+        authentication_methods: [anonymous]
+        triggerOnSource: false
       - name: Do
         type: set_variable
         vars: {x: 1}
 """
     )
     s = by_name["Start"]
-    args = s.get("arguments") or {}
+    args = s  # Phase G: args are at step level now (no `arguments:` wrapper)
     assert args.get("route") == "webhook_in"
     assert args.get("authentication_methods") == ["anonymous"], args   # preserved
     assert args.get("triggerOnSource") is False, args                  # preserved
@@ -624,14 +618,13 @@ playbooks:
         next: CS
       - name: CS
         type: code_snippet
-        arguments:
-          code: |
-            print("hi")
+        code: |
+          print("hi")
 """
     )
     s = by_name["CS"]
     assert s["type"] == "code_snippet"
-    args = s.get("arguments") or {}
+    args = s  # Phase G: args are at step level now (no `arguments:` wrapper)
     # The code body is recovered to the friendly `code:` surface.
     assert args.get("code", "").strip() == 'print("hi")', args
     # The re-derived envelope keys are dropped (not surfaced as boilerplate).
@@ -655,8 +648,8 @@ def test_code_snippet_minified_preserves_real_config_uuid():
         "config": "abc-123-uuid", "params": {"python_function": "x"},
     })
     out = _decompile_step(s)
-    assert out["arguments"]["config"] == "abc-123-uuid"   # preserved
-    assert out["arguments"]["code"] == "x"
+    assert out["config"] == "abc-123-uuid"   # preserved
+    assert out["code"] == "x"
 
 
 def test_code_snippet_without_python_function_passes_through():
@@ -671,8 +664,8 @@ def test_code_snippet_without_python_function_passes_through():
         "version": "2.1.4",
     })
     out = _decompile_step(s)
-    assert out["arguments"]["connector"] == "code-snippet"   # envelope intact
-    assert "code" not in out["arguments"]
+    assert out["connector"] == "code-snippet"   # envelope intact
+    assert "code" not in out
 
 
 def test_send_email_minified_strips_connector_envelope():
@@ -693,15 +686,14 @@ playbooks:
         next: Mail
       - name: Mail
         type: send_email
-        arguments:
-          to: [admin@example.com]
-          subject: hello
-          body: |
-            hi there
+        to: [admin@example.com]
+        subject: hello
+        body: |
+          hi there
 """
     )
     s = by_name["Mail"]
-    args = s.get("arguments") or {}
+    args = s  # Phase G: args are at step level now (no `arguments:` wrapper)
     # email fields recovered flat (params unwrapped)
     assert args.get("body", "").strip() == "hi there", args
     assert args.get("subject") == "hello", args
@@ -727,16 +719,15 @@ playbooks:
         next: Mail
       - name: Mail
         type: send_email
-        arguments:
-          to: [admin@example.com]
-          subject: hello
-          body: |
-            hi there
-          from: bot@example.com
+        to: [admin@example.com]
+        subject: hello
+        body: |
+          hi there
+        from: bot@example.com
 """
     )
     s = by_name["Mail"]
-    args = s.get("arguments") or {}
+    args = s  # Phase G: args are at step level now (no `arguments:` wrapper)
     assert args.get("from") == "bot@example.com", args   # friendly `from:` kept
     assert "from_str" not in args, args                  # no canonical rename
     assert args.get("body", "").strip() == "hi there", args
@@ -766,14 +757,14 @@ playbooks:
     )
     s = by_name["Done"]
     assert s["type"] == "connector"
-    args = s.get("arguments") or {}
-    # load-bearing wire preserved
-    assert args.get("connector") == "cyops_utilities", args
-    assert args.get("operation") == "no_op", args
-    # re-derived display labels dropped (they matched catalog defaults)
-    assert "name" not in args, args
-    assert "operationTitle" not in args, args
-    assert "version" not in args, args
+    # load-bearing wire preserved at step level (Phase G: no arguments wrapper)
+    assert s.get("connector") == "cyops_utilities", s
+    assert s.get("operation") == "no_op", s
+    # re-derived display labels dropped (they matched catalog defaults).
+    # `s["name"]` is the step name ("Done"), NOT the connector display label.
+    assert s["name"] == "Done", s
+    assert "operationTitle" not in s, s
+    assert "version" not in s, s
 
 
 def test_connector_preserves_customized_name_and_operationTitle():
@@ -794,9 +785,11 @@ def test_connector_preserves_customized_name_and_operationTitle():
             "version": "2.0.0", "params": {"limit": 10},
         })
         out = _decompile_step(s, db=conn)
-        args = out["arguments"]
-        # custom labels preserved (don't match catalog defaults)
-        assert args["name"] == "My Custom Label", args
+        args = out
+        # custom labels preserved (don't match catalog defaults).
+        # `name` is the step name ("Call AbuseIPDB"); connector display label
+        # is emitted as `display_name` to avoid collision.
+        assert args.get("display_name") == "My Custom Label", args
         assert args["operationTitle"] == "Custom Op Title", args
         # version is ALWAYS re-derived -- stripped unconditionally
         assert "version" not in args, args
@@ -823,9 +816,9 @@ def test_connector_without_db_preserves_name_and_operationTitle():
         "version": "2.0.0",
     })
     out = _decompile_step(s)  # no db -> catalog-gated strip skipped
-    args = out["arguments"]
-    # no catalog -> name/operationTitle preserved (safe fall-through)
-    assert args["name"] == "AbuseIPDB", args
+    args = out  # Phase G: args at step level
+    # no catalog -> display_name/operationTitle preserved (safe fall-through)
+    assert args.get("display_name") == "AbuseIPDB", args
     assert args["operationTitle"] == "Get IP Blacklist", args
     # version is unconditionally stripped (always a re-derived default)
     assert "version" not in args, args
@@ -896,7 +889,7 @@ def test_cyops_utilities_canonical_decompiles_to_connector():
     s = doc["playbooks"][0]["steps"][0]
     # The overlay routes the raw canonical to friendly `connector`.
     assert s["type"] == "connector", s
-    args = s.get("arguments") or {}
+    args = s  # Phase G: args are at step level now (no `arguments:` wrapper)
     # load-bearing wire preserved
     assert args.get("connector") == "cyops_utilities", args
     assert args.get("operation") == "no_op", args

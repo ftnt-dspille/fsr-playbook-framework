@@ -110,15 +110,14 @@ playbooks:
         next: Fetch alerts from VirusTotal
       - name: Fetch alerts from VirusTotal
         type: connector
-        arguments:
-          connector: virustotal
-          operation: query_url
-          url: "https://example.com"
+        connector: virustotal
+        operation: query_url
+        url: "https://example.com"
 """
 
 FETCH_WITH_MOCK = FETCH_NO_MOCK.replace(
     'url: "https://example.com"',
-    'url: "https://example.com"\n          mock_result:\n            status: success',
+    'url: "https://example.com"\n        mock_result:\n          status: success',
 )
 
 

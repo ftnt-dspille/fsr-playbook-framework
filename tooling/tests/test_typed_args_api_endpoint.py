@@ -98,8 +98,7 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: lookup_ip
+        route: lookup_ip
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -114,8 +113,7 @@ playbooks:
     steps:
       - name: Start
         type: api_endpoint
-        arguments:
-          route: 123
+        route: 123
 """
     r = compile_yaml(text, db_path)
     assert any(

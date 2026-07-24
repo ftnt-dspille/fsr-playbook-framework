@@ -30,7 +30,7 @@ def test_value_match_wires_downstream_literal_to_prior_output():
     t = _trace_enrich_then_block()
     out = sc.compile_trace(t)
     block = out["steps"][1]
-    host = block["arguments"]["host"]
+    host = block["host"]
     assert host == "{{ vars.steps.Get_Ip_Report.data.attributes.network }}", host
 
 
@@ -39,7 +39,7 @@ def test_first_occurrence_left_as_literal():
     out = sc.compile_trace(t)
     enrich = out["steps"][0]
     # The IP is a one-off triage value with no earlier producer → literal.
-    assert enrich["arguments"]["ip"] == "203.0.113.77"
+    assert enrich["ip"] == "203.0.113.77"
     assert "Get_Ip_Report" not in out["wiring"]  # nothing wired in step 1
 
 
@@ -53,17 +53,17 @@ def test_embedded_ioc_in_query_string_is_wired():
     t.record_run_op("fortinet-fortisiem", "search_events",
                     {"attribute": "destIpAddr = 185.220.101.47"}, {})
     out = sc.compile_trace(t)
-    attr = out["steps"][1]["arguments"]["attribute"]
+    attr = out["steps"][1]["attribute"]
     assert attr == "destIpAddr = {{ vars.steps.Get_Incidents[0].indicator }}", attr
 
 
-def test_embedded_match_respects_token_boundary():
+def test_embedded_match_respects_token_boundaries():
     """A partial IOC must NOT wire: 185.220.101.47 inside 185.220.101.470."""
     t = SkillTrace()
     t.record_run_op("c", "first", {}, {"ip": "185.220.101.47"})
     t.record_run_op("c", "second", {"q": "host 185.220.101.470 seen"}, {})
     out = sc.compile_trace(t)
-    assert out["steps"][1]["arguments"]["q"] == "host 185.220.101.470 seen"
+    assert out["steps"][1]["q"] == "host 185.220.101.470 seen"
 
 
 def test_embedded_skips_plain_words():
@@ -73,7 +73,7 @@ def test_embedded_skips_plain_words():
     t.record_run_op("c", "first", {}, {"country": "Germany"})
     t.record_run_op("c", "second", {"note": "actor based in Germany region"}, {})
     out = sc.compile_trace(t)
-    assert out["steps"][1]["arguments"]["note"] == "actor based in Germany region"
+    assert out["steps"][1]["note"] == "actor based in Germany region"
 
 
 def test_whole_value_match_preferred_over_embedded():
@@ -83,7 +83,7 @@ def test_whole_value_match_preferred_over_embedded():
     t.record_run_op("c", "first", {}, {"net": "203.0.113.0/24"})
     t.record_run_op("c", "second", {"cidr": "203.0.113.0/24"}, {})
     out = sc.compile_trace(t)
-    assert out["steps"][1]["arguments"]["cidr"] == "{{ vars.steps.First.net }}"
+    assert out["steps"][1]["cidr"] == "{{ vars.steps.First.net }}"
 
 
 def test_bidirectional_hunt_wires_every_occurrence():
@@ -97,7 +97,7 @@ def test_bidirectional_hunt_wires_every_occurrence():
         {"attribute": "srcIpAddr = 185.220.101.47 OR destIpAddr = 185.220.101.47"},
         {})
     out = sc.compile_trace(t)
-    attr = out["steps"][1]["arguments"]["attribute"]
+    attr = out["steps"][1]["attribute"]
     ref = "{{ vars.steps.Get_Incidents[0].indicator }}"
     assert attr == f"srcIpAddr = {ref} OR destIpAddr = {ref}", attr
 
@@ -107,9 +107,9 @@ def test_record_field_parameterizes_embedded_ioc():
     producer; it should parameterize to the trigger record (re-runnable), not
     bake the IOC in as a literal."""
     steps = [{"type": "connector", "name": "Search Events",
-              "arguments": {"connector": "fortinet-fortisiem",
-                            "operation": "search_events",
-                            "attribute": "srcIpAddr = 185.220.101.47"}}]
+              "connector": "fortinet-fortisiem",
+              "operation": "search_events",
+              "attribute": "srcIpAddr = 185.220.101.47"}]
     gaps = {"Search Events": ["attribute"]}
     record_vars, new_steps, first = sc.wire_record_inputs(
         steps, gaps, {"sourceIp": "185.220.101.47"}, "Search Events")
@@ -118,7 +118,7 @@ def test_record_field_parameterizes_embedded_ioc():
     assert new_steps[0]["name"] == "Set Inputs"
     (var, ref), = record_vars.items()
     assert ref == "{{ vars.input.records[0].sourceIp }}"
-    attr = steps[0]["arguments"]["attribute"]
+    attr = steps[0]["attribute"]
     assert attr == "srcIpAddr = {{ vars.steps.Set_Inputs." + var + " }}", attr
     assert gaps == {}  # the param was resolved, not left a gap
 
@@ -203,7 +203,7 @@ def test_bracket_quoting_for_non_identifier_keys():
                     {"hydra:member": [{"@id": "/api/3/hosts/abc-123-uuid"}]})
     t.record_run_op("fortiedr", "block", {"target": "/api/3/hosts/abc-123-uuid"}, {})
     out = sc.compile_trace(t)
-    ref = out["steps"][1]["arguments"]["target"]
+    ref = out["steps"][1]["target"]
     assert ref == "{{ vars.steps.Find['hydra:member'][0]['@id'] }}", ref
 
 

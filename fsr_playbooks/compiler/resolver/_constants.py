@@ -20,9 +20,6 @@ SHORT_TYPE_TO_FSR: dict[str, str] = {
     # on-create playbook triggers (intentional for high-volume feeds; do
     # NOT use this for Alerts ingestion where triggers must fire).
     "ingest_bulk_feed": "IngestBulkFeed",
-    # Legacy alias kept so existing fixtures don't break; emit a hint via
-    # the linter when authors use the old name.
-    "insert_record": "InsertData",
     "delay": "Delay",
     "manual_input": "ManualInput",
     "code_snippet": "CodeSnippet",

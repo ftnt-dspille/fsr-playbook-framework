@@ -7,10 +7,10 @@
 #   partial: when true, returns first page only
 #
 # `update_record` (handler `update_data`):
-#   collection: module name (yes, "collection" — the param name is misleading;
-#               it's the records collection, not a workflow_collection)
-#   resource: dict of {field: new_value}; the record IRI to update is
-#             passed via the special `__bulk` mechanism FSR adds at runtime.
+#   module:   target module name (alerts, incidents, indicators, ...)
+#   record:   IRI of the record to update (for a targeted update); omitted for
+#             the bulk `__bulk` path FSR adds at runtime
+#   fields:   dict of {field: new_value} to set on the matched record(s)
 
 collection: Compiler Examples
 description: find + update pattern.
@@ -30,19 +30,15 @@ playbooks:
       - name: find
         type: find_record
         next: Apply tag
-        arguments:
-          module: indicators
-          query:
-            logic: AND
-            filters:
-              - field: value
-                operator: eq
-                value: "{{ vars.input.params.indicator_value }}"
-          partial: true
+        module: indicators
+        filters:
+          - field: value
+            operator: eq
+            value: "{{ vars.input.params.indicator_value }}"
+        partial: true
 
       - name: Apply tag
         type: update_record
-        arguments:
-          collection: indicators
-          resource:
-            tags: "{{ vars.steps.find['hydra:member'][0].tags + [vars.input.params.tag] }}"
+        module: indicators
+        fields:
+          tags: "{{ vars.steps.find['hydra:member'][0].tags + [vars.input.params.tag] }}"

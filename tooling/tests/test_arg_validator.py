@@ -13,8 +13,7 @@ playbooks:
         next: f
       - name: f
         type: find_record
-        arguments:
-          module: alerts
+        module: alerts
 """
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -103,11 +102,10 @@ playbooks:
         next: noop
       - name: noop
         type: connector
-        arguments:
-          connector: cyops_utilities
-          operation: no_op
-          params:
-            unverifiable: 1
+        connector: cyops_utilities
+        operation: no_op
+        params:
+          unverifiable: 1
 """
     r = compile_yaml(text, db_path)
     msgs = [e.message for e in r.errors]
@@ -166,9 +164,8 @@ playbooks:
         next: ask
       - name: ask
         type: manual_input
-        arguments:
-          floopwidget: 42
-          bogon: hi
+        floopwidget: 42
+        bogon: hi
 """
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -191,10 +188,8 @@ playbooks:
         next: ask
       - name: ask
         type: manual_input
-        arguments:
-          record: "{{ vars.input.records[0]['@id'] }}"
-          type: single-select
-          input: just a string
+        record: "{{ vars.input.records[0]['@id'] }}"
+        input: just a string
 """
     r = compile_yaml(text, db_path)
     assert not r.ok
@@ -218,8 +213,7 @@ playbooks:
         next: ask
       - name: ask
         type: manual_input
-        arguments:
-          title: Block this?
+        title: Block this?
         options:
           - display: block
             primary: true
@@ -321,7 +315,7 @@ def test_decision_no_default_warns(db_path):
 
 def test_set_variable_legacy_arguments_rejected(db_path):
     """Set-variable steps must use the top-level `vars:` mapping.
-    Anything else under `arguments:` is rejected at parse time."""
+    `arguments:` wrapper is rejected at parse time."""
     text = """
 collection: T
 playbooks:
@@ -333,12 +327,13 @@ playbooks:
       - name: s
         type: set_variable
         arguments:
-          variables:
-            - {name: greeting, value: 'hi'}
+          vars:
+            greeting: hi
 """
     r = compile_yaml(text, db_path)
     assert not r.ok
-    assert any("top-level `vars:` mapping" in e.message for e in r.errors)
+    assert any("arguments:" in e.message or "vars:" in e.message
+               for e in r.errors)
 
 
 def test_set_variable_canonical_vars_works(db_path):

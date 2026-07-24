@@ -36,15 +36,11 @@ playbooks:
       - name: Call multiplier
         type: workflow_reference
         next: Stamp result
-        arguments:
-          target: FSRPB Score Multiplier
-          arguments:
-            base: "{{ vars.input.params.base }}"
-          apply_async: false
-          pass_parent_env: false
-          pass_input_record: false
-          step_variables: []
-
+        target: FSRPB Score Multiplier
+        base: "{{ vars.input.params.base }}"
+        apply_async: false
+        pass_parent_env: false
+        pass_input_record: false
       - name: Stamp result
         type: set_variable
         vars:

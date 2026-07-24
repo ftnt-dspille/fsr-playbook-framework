@@ -115,19 +115,18 @@ playbooks:
     steps:
       - name: "On Update"
         type: start_on_update
-        arguments:
-          resource: alerts
-          resources: [alerts]
-          triggerOnSource: true
-          triggerOnReplicate: false
-          fieldbasedtrigger:
-            logic: AND
-            limit: 30
-            sort: []
-            filters:
-              - field: "{field}"
-                operator: "{operator}"
-                type: primitive
+        resource: alerts
+        resources: [alerts]
+        triggerOnSource: true
+        triggerOnReplicate: false
+        fieldbasedtrigger:
+          logic: AND
+          limit: 30
+          sort: []
+          filters:
+            - field: "{field}"
+              operator: "{operator}"
+              type: primitive
 {val_line}        next: "noop"
       - name: "noop"
         type: set_variable

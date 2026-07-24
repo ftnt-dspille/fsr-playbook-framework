@@ -38,7 +38,7 @@
 #   PB1 Orchestrator ......... start(manual), set_variable, connector,
 #                              code_snippet, find_record, decision,
 #                              manual_input, approval, delay, ingest_bulk_feed,
-#                              create_record, insert_record, update_record,
+#                              create_record, update_record,
 #                              delete_record, send_email, set_api_keys,
 #                              workflow_reference, trigger_tenant_playbook,
 #                              utilities, stop, end
@@ -71,9 +71,8 @@ playbooks:
       - name: Start
         type: start
         next: Configure
-        arguments:
-          module: indicators
-          button_label: Ingest a threat feed
+        module: indicators
+        button_label: Ingest a threat feed
 
       - name: Configure
         type: set_variable
@@ -103,26 +102,24 @@ playbooks:
           recipe compiles + round-trips offline; it does NOT fetch a feed and
           its result is unused (the data comes from `Configure`). mock_result
           keeps the offline compile + mock runs honest.
-        arguments:
-          connector: cyops_utilities
-          operation: get_macro_list
-          config: ""
-          params: {}
-          mock_result: |
-            {
-              "indicators": [
-                {"id": "demo-1", "value": "198.51.100.10", "type": "ipv4-addr", "tlp": "amber", "confidence": 70, "description": "demo indicator (mock)"}
-              ]
-            }
+        connector: cyops_utilities
+        operation: get_macro_list
+        config: ""
+        params: {}
+        mock_result: |
+          {
+            "indicators": [
+              {"id": "demo-1", "value": "198.51.100.10", "type": "ipv4-addr", "tlp": "amber", "confidence": 70, "description": "demo indicator (mock)"}
+            ]
+          }
 
       - name: Transform fetch
         type: code_snippet
         next: Map ingested data
         comment: Exercises the code_snippet type (sandbox-safe; no imports). Output unused.
-        arguments:
-          code: |
-            src = "{{ vars.feed_source_name }}"
-            print(src.strip().lower().replace(" ", "-"))
+        code: |
+          src = "{{ vars.feed_source_name }}"
+          print(src.strip().lower().replace(" ", "-"))
 
       - name: Map ingested data
         type: set_variable
@@ -144,12 +141,11 @@ playbooks:
       - name: Raise no data
         type: connector
         next: Stop here
-        arguments:
-          connector: cyops_utilities
-          operation: raise_exception
-          config: ""
-          params:
-            msg: "Feed fetch returned no indicators (lastPullTime={{ vars.input.params.lastPullTime }})"
+        connector: cyops_utilities
+        operation: raise_exception
+        config: ""
+        params:
+          msg: "Feed fetch returned no indicators (lastPullTime={{ vars.input.params.lastPullTime }})"
 
       - name: Stop here
         type: stop
@@ -175,9 +171,8 @@ playbooks:
       # pyfsr memory `manual-input-run-scoped-helper` + MANUAL_INPUT.md.
       - name: Legacy Approval Coverage
         type: approval
-        arguments:
-          resource:
-            approvaldescription: "Orphan -- exercises the approval step TYPE (compile/round-trip); never reached at run time."
+        resource:
+          approvaldescription: "Orphan -- exercises the approval step TYPE (compile/round-trip); never reached at run time."
 
       # Like the approval orphan above, `create_task` (ManualTask) is a human-
       # in-the-loop step that PAUSES the run (status `awaiting`) but creates NO
@@ -188,16 +183,13 @@ playbooks:
       # pyfsr memory `manual-input-run-scoped-helper`.
       - name: Create Task Coverage
         type: create_task
-        arguments:
-          resource:
-            name: "Orphan -- exercises the create_task step TYPE (compile/round-trip); never reached at run time."
-            description: "coverage-only"
+        resource:
+          description: "coverage-only"
 
       - name: Wait briefly
         type: delay
         next: Ingest indicators
-        arguments:
-          seconds: 1
+        seconds: 1
 
       - name: Ingest indicators
         type: ingest_bulk_feed
@@ -216,23 +208,21 @@ playbooks:
           condition: ""
           __bulk: true
           batch_size: 1000
-        arguments:
-          collection: /api/ingest-feeds/threat_intel_feeds
-          resource:
-            __replace: ""
-            value: "{{ vars.item.value }}"
-            source: "{{ vars.feed_source_name }}"
-            sourceId: "{{ vars.item.id }}"
-            sourceData: "{{ vars.item | toJSON }}"
-            description: "{{ vars.item.description | default('') }}"
-            patternType: "STIX"
-            patternVersion: "2.1"
-            recordTags: []
-            threatTypes: []
-            killChainPhases: []
-          step_variables: []
-          mock_result: |
-            {"status": "ok", "ingested": 0, "mock": true}
+        collection: /api/ingest-feeds/threat_intel_feeds
+        resource:
+          __replace: ""
+          value: "{{ vars.item.value }}"
+          source: "{{ vars.feed_source_name }}"
+          sourceId: "{{ vars.item.id }}"
+          sourceData: "{{ vars.item | toJSON }}"
+          description: "{{ vars.item.description | default('') }}"
+          patternType: "STIX"
+          patternVersion: "2.1"
+          recordTags: []
+          threatTypes: []
+          killChainPhases: []
+        mock_result: |
+          {"status": "ok", "ingested": 0, "mock": true}
 
       - name: Create audit alert
         type: create_record
@@ -242,57 +232,41 @@ playbooks:
           Creates an alert tagged with `marker` so the later find/delete steps
           can locate it. `ignore_errors` because module required-fields are
           box-specific; the step TYPE still executes.
-        arguments:
-          module: alerts
-          operation: Replace
-          resource:
-            name: "Feed ingest audit - {{ vars.feed_source_name }}"
-            description: "{{ vars.marker }}"
-            source: "{{ vars.feed_source_name }}"
-          step_variables: []
-
+        module: alerts
+        operation: Replace
+        fields:
+          description: "{{ vars.marker }}"
+          source: "{{ vars.feed_source_name }}"
       - name: Find audit alert
         type: find_record
         next: Update audit status
         ignore_errors: true
         comment: Find the alert we just created (by the marker) so update/delete target a real record.
-        arguments:
-          module: alerts
-          query:
-            logic: AND
-            filters:
-              - type: primitive
-                field: description
-                value: "{{ vars.marker }}"
-                operator: like
-                _operator: like
-            __selectFields: [uuid, name, description]
-          step_variables: []
-
+        module: alerts
+        filters:
+          - type: primitive
+            field: description
+            value: "{{ vars.marker }}"
+            operator: like
+            _operator: like
       - name: Update audit status
         type: update_record
         next: Comment on audit alert
         ignore_errors: true
-        arguments:
-          module: alerts
-          collection: "{{ vars.steps.Find_audit_alert[0]['@id'] | default('') }}"
-          resource:
-            description: "{{ vars.marker }} - ingested"
-          operation: Replace
-          step_variables: []
-
+        module: alerts
+        record: "{{ vars.steps.Find_audit_alert[0]['@id'] | default('') }}"
+        fields:
+          description: "{{ vars.marker }} - ingested"
+        operation: Replace
       - name: Comment on audit alert
-        type: insert_record
+        type: create_record
         next: Delete audit alert
         ignore_errors: true
-        comment: insert_record is the legacy alias of create_record (both -> InsertData); exercised here against the comments module.
-        arguments:
-          module: comments
-          operation: Overwrite
-          resource:
-            content: "Ingested {{ vars.ingestedData | length }} indicator(s) from {{ vars.feed_source_name }}."
-          step_variables: []
-
+        comment: create_record (InsertData) exercised here against the comments module.
+        module: comments
+        operation: Overwrite
+        fields:
+          content: "Ingested {{ vars.ingestedData | length }} indicator(s) from {{ vars.feed_source_name }}."
       - name: Delete audit alert
         type: delete_record
         next: Notify team
@@ -302,53 +276,44 @@ playbooks:
           `record:` takes the find-result IRI (@id) directly (the `record_id:`
           form builds `/api/3/<module>/<record_id>` and so wants a bare uuid;
           feeding it the @id IRI doubles the path -> 404).
-        arguments:
-          module: alerts
-          record: "{{ vars.steps.Find_audit_alert[0]['@id'] | default('') }}"
+        module: alerts
+        record: "{{ vars.steps.Find_audit_alert[0]['@id'] | default('') }}"
 
       - name: Notify team
         type: send_email
         next: Store playbook keys
         ignore_errors: true
         comment: send_email now targets the SendMail connector path (smtp/send_email), which SUCCEEDS on 8.0. ignore_errors kept as a safety net in case a lab box has no smtp config (localhost-postfix absent).
-        arguments:
-          to: [soc@example.com]
-          subject: "Threat feed ingest complete - {{ vars.feed_source_name }}"
-          body: "Ingested {{ vars.ingestedData | length }} indicator(s)."
+        to: [soc@example.com]
+        subject: "Threat feed ingest complete - {{ vars.feed_source_name }}"
+        body: "Ingested {{ vars.ingestedData | length }} indicator(s)."
 
       - name: Store playbook keys
         type: set_api_keys
         next: Call normalize child
-        arguments:
-          public_key: "{{ vars.feed_source_name }}-public"
-          private_key: "{{ vars.feed_source_name }}-private"
+        public_key: "{{ vars.feed_source_name }}-public"
+        private_key: "{{ vars.feed_source_name }}-private"
 
       - name: Call normalize child
         type: workflow_reference
         next: Notify peer tenant
-        arguments:
-          target: Normalize Indicator
-          arguments:
-            indicator_value: "{{ vars.indicators[0].value }}"
-          apply_async: false
-          pass_parent_env: false
-          pass_input_record: false
-          step_variables: []
-
+        target: Normalize Indicator
+        indicator_value: "{{ vars.indicators[0].value }}"
+        apply_async: false
+        pass_parent_env: false
+        pass_input_record: false
       - name: Notify peer tenant
         type: trigger_tenant_playbook
         next: Utils finish
         ignore_errors: true
         comment: ignore_errors because no peer FortiSOAR tenant is configured on a lab box; the step TYPE still executes.
-        arguments:
-          playbook_alias_id: remote-ir-playbook
-          tenant_id: tenant-acme
+        playbook_alias_id: remote-ir-playbook
+        tenant_id: tenant-acme
 
       - name: Utils finish
         type: utilities
         next: Done
-        arguments:
-          operation: no_op
+        operation: no_op
 
       - name: Done
         type: end
@@ -370,12 +335,11 @@ playbooks:
       - name: On Create
         type: start_on_create
         next: Stamp created
-        arguments:
-          module: alerts
-          when:
-            logic: AND
-            filters:
-              - {field: description, op: contains, value: "fsrpb_all_step_types_"}
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - {field: description, op: contains, value: "fsrpb_all_step_types_"}
 
       - name: Stamp created
         type: set_variable
@@ -398,12 +362,11 @@ playbooks:
       - name: On Update
         type: start_on_update
         next: Note change
-        arguments:
-          module: alerts
-          when:
-            logic: AND
-            filters:
-              - {field: description, op: contains, value: "fsrpb_all_step_types_"}
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - {field: description, op: contains, value: "fsrpb_all_step_types_"}
 
       - name: Note change
         type: set_variable
@@ -425,12 +388,11 @@ playbooks:
       - name: On Delete
         type: start_on_delete
         next: Log removal
-        arguments:
-          module: alerts
-          when:
-            logic: AND
-            filters:
-              - {field: description, op: contains, value: "fsrpb_all_step_types_"}
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - {field: description, op: contains, value: "fsrpb_all_step_types_"}
 
       - name: Log removal
         type: set_variable
@@ -452,9 +414,8 @@ playbooks:
       - name: Start
         type: api_endpoint
         next: Build task from body
-        arguments:
-          route: allstep/submit
-          authentication_methods: [anonymous]
+        route: allstep/submit
+        authentication_methods: [anonymous]
 
       - name: Build task from body
         type: set_variable
@@ -465,10 +426,8 @@ playbooks:
       - name: Create Followup Task
         type: create_task
         next: End
-        arguments:
-          resource:
-            name: "{{ vars.task_name }}"
-            description: "Task created via the all-step-types API endpoint trigger."
+        resource:
+          description: "Task created via the all-step-types API endpoint trigger."
 
       - name: End
         type: end

@@ -258,6 +258,41 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
     return yaml.safe_dump(_clean(out), sort_keys=False, allow_unicode=True)
 
 
+# Phase G: hoist remaining step args to the step's top level (no `arguments:`
+# wrapper). Strip wire-envelope keys that would collide with IR step fields:
+# `name` (connector display label — re-derived by the compiler from the
+# connector catalog; the step's `name` is the canvas node name) and
+# `description` (if already at step level as an IR field).
+_STEP_IR_FIELD_NAMES = frozenset({
+    "type", "name", "next", "branches", "unlabeled_next", "comment",
+    "description", "for_each", "id",
+})
+
+
+def _hoist_args(out: dict, args: dict) -> None:
+    """Merge `args` into `out` at step level, skipping IR-field collisions."""
+    # `name` in args is the connector display label — collides with step.name.
+    # Preserve as `display_name:` if it differs from the step name (custom
+    # label); strip if it matches (re-derived by the compiler from catalog).
+    # Must run before the IR-field loop below, which would otherwise pop it.
+    conn_label = args.pop("name", None)
+    if conn_label is not None and conn_label != out.get("name"):
+        args["display_name"] = conn_label
+    # Phase G: workflow_reference stores child-playbook input params under a
+    # nested `arguments` key. Flatten them to step level (the parser's
+    # resolver re-separates envelope keys from child params on recompile).
+    if "arguments" in args:
+        child = args.pop("arguments")
+        if isinstance(child, dict):
+            for k, v in child.items():
+                args.setdefault(k, v)
+        # If it's a list (empty []), just drop it — no child params.
+    for k in list(args):
+        if k in _STEP_IR_FIELD_NAMES and k in out:
+            args.pop(k)
+    out.update(args)
+
+
 def _decompile_step(s, pb_name: str | None = None,
                      db: "sqlite3.Connection | None" = None) -> dict:
     """Emit a step in the canonical authoring surface:
@@ -275,32 +310,96 @@ def _decompile_step(s, pb_name: str | None = None,
     args = dict(s.arguments) if isinstance(s.arguments, dict) else None
     branches_remaining = dict(s.branches)
 
-    # Universal step envelope (Phase 4): the parser hoists these wire keys
-    # out of `arguments:` to the step surface, so on pull we reverse that —
-    # otherwise a connector's `when`/`do_until`/`agent` round-trips back as
-    # raw `arguments.when`, which the editor never compiles to. Lift them
-    # back to the step top level verbatim (canonical spelling, lossless).
+    # Phase G: step args are emitted at the step's top level (no `arguments:`
+    # wrapper). The envelope keys (when, module, etc.) are hoisted to `out`
+    # first; the remaining args are merged via `out.update(args)` at the end
+    # of each branch, skipping keys that collide with IR step fields.
     if isinstance(args, dict):
         for env_key in ("when", "ignore_errors", "do_until", "apply_async",
                         "agent", "agentId", "pickFromTenant", "step_variables",
                         "mock_result", "module", "modules"):
             if env_key in args:
                 out[env_key] = args.pop(env_key)
-        # Fold a pure `message: {content: "<text>"}` back to the friendlier
-        # `post_comment: "<text>"` sugar (parser accepts both). Keep the full
-        # `message:` block when it carries more than a plain content string.
         msg = args.get("message")
         if isinstance(msg, dict) and set(msg) == {"content"} \
                 and isinstance(msg["content"], str):
             out["post_comment"] = args.pop("message")["content"]
         elif "message" in args:
-            out["message"] = args.pop("message")
+            # Strip wire-internal fields from the message block (the live
+            # box stamps parentstepid, stepId, etc. that the compiler rejects).
+            msg_dict = args.pop("message")
+            if isinstance(msg_dict, dict):
+                for _wire_k in ("parentstepid", "stepId", "stepiri"):
+                    msg_dict.pop(_wire_k, None)
+            out["message"] = msg_dict
 
-        # Drop pure editor-only UI-state noise (see `_EDITOR_NOISE_KEYS`). Safe
-        # for every step type: no branch below consumes these keys and no
-        # ruleset requires them, so removing them is lossless for the runtime.
         for _noise_key in _EDITOR_NOISE_KEYS:
             args.pop(_noise_key, None)
+
+    # Strip empty-string `timeout` — the live box stamps `timeout: ""` as a
+    # default; the compiler's typed-args model expects int and rejects "".
+    # An empty timeout is always a no-op, so strip it unconditionally.
+    # Also strip dict timeout (branch-resume variant {days, hours, minutes,
+    # step_iri}) — wire-internal routing data the box stamps on manual_input
+    # steps; the typed-args model expects int, not dict.
+    if isinstance(args, dict):
+        tv = args.get("timeout")
+        if tv == "" or isinstance(tv, dict):
+            args.pop("timeout", None)
+
+    # Strip empty-string values from connector `params:` for enum/select
+    # and integer params. The live box stamps `param: ""` for unset values;
+    # the compiler rejects them (enum: "" not in allowed, int: "" doesn't
+    # coerce). These are always no-op defaults the box auto-fills at runtime.
+    if isinstance(args, dict) and isinstance(args.get("params"), dict) and db is not None:
+        params = args["params"]
+        connector = args.get("connector")
+        operation = args.get("operation")
+        if isinstance(connector, str) and isinstance(operation, str):
+            for p_name in list(params):
+                if params[p_name] != "":
+                    continue
+                try:
+                    row = db.execute(
+                        "SELECT type FROM operation_params "
+                        "WHERE connector_name=? AND op_name=? AND param_name=?",
+                        (connector, operation, p_name),
+                    ).fetchone()
+                except Exception:
+                    row = None
+                if row and row[0] and row[0].lower() in (
+                    "select", "multiselect", "integer", "intger",
+                    "decimal", "numeric", "boolean", "checkbox",
+                ):
+                    params.pop(p_name)
+
+    # Strip conditionally-hidden params: the live box stamps params whose
+    # parent_param condition isn't met (e.g. task_timeout when track_task
+    # is false). The compiler's visibility check would reject them; strip
+    # them here so the pulled YAML recompiles cleanly.
+    if isinstance(args, dict) and isinstance(args.get("params"), dict) and db is not None:
+        params = args["params"]
+        connector = args.get("connector")
+        operation = args.get("operation")
+        if isinstance(connector, str) and isinstance(operation, str):
+            for p_name in list(params):
+                try:
+                    row = db.execute(
+                        "SELECT parent_param_name, condition_value "
+                        "FROM operation_params "
+                        "WHERE connector_name=? AND op_name=? AND param_name=?",
+                        (connector, operation, p_name),
+                    ).fetchone()
+                except Exception:
+                    row = None
+                if not row or not row[0]:
+                    continue  # no parent → always visible
+                parent, cond = row
+                if parent is None:
+                    continue  # top-level → always visible
+                parent_val = params.get(parent)
+                if parent_val is None or str(parent_val) != str(cond):
+                    params.pop(p_name, None)
 
     # Action-trigger module binding (start + module -> cybersponse.action). The
     # parser hoists a friendly step-level `module:`/`modules:` into
@@ -383,7 +482,7 @@ def _decompile_step(s, pb_name: str | None = None,
         if dc and dc != default_dc:
             friendly["displayConditions"] = dc
         if friendly:
-            out["arguments"] = friendly
+            out.update(friendly)
     elif s.type == "decision" and isinstance(args, dict):
         conds = args.pop("conditions", None) or []
         new_conds = []
@@ -408,7 +507,7 @@ def _decompile_step(s, pb_name: str | None = None,
         if new_conds:
             out["conditions"] = new_conds
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "manual_input" and isinstance(args, dict):
         rmap = args.pop("response_mapping", None)
         opts: list = []
@@ -432,8 +531,57 @@ def _decompile_step(s, pb_name: str | None = None,
             new_opts.append(entry)
         if new_opts:
             out["options"] = new_opts
+        # Phase D1: reverse friendly `email:` / `assign_to:` forms.
+        # The forward normalizer turns `email: {enabled, subject, recipients,
+        # body, from}` into wire `email_notification: {enabled,
+        # smtpParameters: [{to, subject, body, from}]}` and `assign_to:
+        # {person|team|record_field}` into wire `owner_detail: {isAssigned,
+        # assignedToPerson/assignedToTeam/assignedToRecord}`. Reverse so a
+        # pulled step surfaces the friendly form. Skip the default unassigned
+        # / disabled envelopes (recompile re-creates them via setdefault).
+        en = args.pop("email_notification", None)
+        if isinstance(en, dict):
+            is_default = (
+                en.get("enabled") is False
+                and not en.get("smtpParameters")
+            )
+            if not is_default:
+                email_out: dict[str, Any] = {}
+                if "enabled" in en:
+                    email_out["enabled"] = en["enabled"]
+                params = en.get("smtpParameters") or []
+                if params and isinstance(params[0], dict):
+                    p = params[0]
+                    if p.get("to") is not None:
+                        email_out["recipients"] = p["to"]
+                    for k in ("subject", "body", "from"):
+                        if p.get(k) is not None:
+                            email_out[k] = p[k]
+                args["email"] = email_out
+        od = args.pop("owner_detail", None)
+        if isinstance(od, dict):
+            is_default = (
+                od.get("isAssigned") is False
+                and not any(
+                    od.get(k) for k in
+                    ("assignedToPerson", "assignedToTeam", "assignedToRecord")
+                )
+            )
+            if not is_default:
+                assign_out: dict[str, Any] = {}
+                if od.get("assignedToPerson"):
+                    assign_out["person"] = od["assignedToPerson"]
+                team = od.get("assignedToTeam")
+                if isinstance(team, list) and team:
+                    assign_out["team"] = team[0]
+                elif isinstance(team, str) and team:
+                    assign_out["team"] = team
+                if od.get("assignedToRecord"):
+                    assign_out["record_field"] = True
+                if assign_out:
+                    args["assign_to"] = assign_out
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "set_variable" and isinstance(args, dict):
         # Resolver flattens arg_list into the args dict; treat every key
         # as a variable assignment.
@@ -515,7 +663,7 @@ def _decompile_step(s, pb_name: str | None = None,
                             and args.get("operationTitle") == _orow["title"]):
                         args.pop("operationTitle", None)
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "api_endpoint" and isinstance(args, dict):
         # api_endpoint (Custom API Endpoint trigger) minimification. The forward
         # normalizer (`_normalize_api_endpoint_args`) setdefaults five
@@ -545,7 +693,7 @@ def _decompile_step(s, pb_name: str | None = None,
         if out.get("step_variables") == _API_ENDPOINT_DEFAULT_STEP_VARS:
             out.pop("step_variables", None)
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "code_snippet" and isinstance(args, dict):
         # code_snippet (CodeSnippet) minimification. The forward normalizer
         # (`_normalize_code_snippet_args` -> `expand_code_snippet`) expands the
@@ -573,7 +721,7 @@ def _decompile_step(s, pb_name: str | None = None,
             if out.get("step_variables") == []:
                 out.pop("step_variables", None)
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
     elif s.type == "send_email" and isinstance(args, dict):
         # send_email minimification. The forward normalizer turns the friendly
         # `send_email` step into a `SendMail` connector-family call: it defaults
@@ -606,10 +754,107 @@ def _decompile_step(s, pb_name: str | None = None,
                 args.pop("config", None)
             if out.get("step_variables") == []:
                 out.pop("step_variables", None)
+        # Strip stale legacy `from_str` — older smtp connectors used this
+        # as a top-level argument; the current schema has `from` in params.
+        # The real value lives in params.from (hoisted above); from_str is
+        # always a stale leftover the compiler rejects as unknown.
+        args.pop("from_str", None)
         if args:
-            out["arguments"] = args
+            _hoist_args(out, args)
+    elif s.type in ("create_record", "update_record") and isinstance(args, dict):
+        # Phase A1: reverse the friendly record-CRUD surface. The forward
+        # `expand_record_crud` rewrites friendly `module:` -> wire `collection`
+        # (create) / `collectionType` (update), and friendly `record:` -> wire
+        # `collection` (update). Reverse so a pulled step surfaces the friendly
+        # keys (`module:` / `record:`) instead of the wire IRIs — and so the
+        # compiler's A1 rules (`module:` mandatory; `collection:` rejected on
+        # update) accept the decompiled YAML on recompile. On update,
+        # `collectionType:` (wire module IRI) -> `module:` and `collection:`
+        # (wire record IRI) -> `record:`. On create, `collection:` (wire module
+        # IRI) -> `module:`; `/api/3/upsert/<m>` -> `module: <m>` + `is_upsert:
+        # true`; a non-`/api/3/` collection can't reverse to a module name and
+        # passes through as `collection:` (the compiler still accepts it on
+        # create as the canonical module IRI).
+        if s.type == "update_record":
+            ct = args.pop("collectionType", None)
+            if isinstance(ct, str):
+                args["module"] = ct[len("/api/3/"):] if ct.startswith("/api/3/") else ct
+            rec = args.pop("collection", None)
+            if rec is not None:
+                args["record"] = rec
+        else:  # create_record (InsertData)
+            coll = args.pop("collection", None)
+            if isinstance(coll, str):
+                if coll.startswith("/api/3/upsert/"):
+                    args["module"] = coll[len("/api/3/upsert/"):]
+                    args["is_upsert"] = True
+                elif coll.startswith("/api/3/"):
+                    args["module"] = coll[len("/api/3/"):]
+                else:
+                    args["collection"] = coll
+        # `resource:` is the wire key for the record payload — emit the
+        # friendly `fields:` alias instead. Both compile to the same wire
+        # key, so recompile accepts either.
+        if "resource" in args:
+            args["fields"] = args.pop("resource")
+        # Phase C1: strip wire-internal defaults from record-CRUD steps.
+        # These are re-derived by the compiler on recompile, so emitting
+        # them is pure noise the agent may copy.
+        if args.get("fieldOperation") == []:
+            args.pop("fieldOperation", None)
+        if args.get("tagsOperation") == "Overwrite":
+            args.pop("tagsOperation", None)
+        if args.get("__recommend") == []:
+            args.pop("__recommend", None)
+        if args.get("_showJson") is False:
+            args.pop("_showJson", None)
+        if out.get("step_variables") == []:
+            out.pop("step_variables", None)
+        if args:
+            _hoist_args(out, args)
+    elif s.type == "find_record" and isinstance(args, dict):
+        # Phase B1: reverse the friendly `filters:` form. The forward
+        # normalizer builds the wire `query: {sort, limit, logic, filters:
+        # [{type, field, value, operator, _operator}]}` envelope from flat
+        # `filters:` / `limit:` / `logic:`. Reverse it so a pulled step
+        # surfaces the friendly form, not the raw wire envelope.
+        q = args.pop("query", None)
+        if isinstance(q, dict):
+            filters_out = []
+            for f in q.get("filters") or []:
+                if not isinstance(f, dict):
+                    filters_out.append(f)
+                    continue
+                wf = {}
+                wf["field"] = f.get("field")
+                wf["value"] = f.get("value")
+                op = f.get("operator", "eq")
+                wf["operator"] = op
+                # carry through any extra keys (e.g. __selectFields)
+                for k, v in f.items():
+                    if k not in ("type", "field", "value", "operator",
+                                 "_operator"):
+                        wf.setdefault(k, v)
+                filters_out.append(wf)
+            if filters_out:
+                args["filters"] = filters_out
+            else:
+                # Empty filters — keep the wire `query:` envelope so the
+                # validator's required-`query` check passes on recompile.
+                args["query"] = q
+            limit = q.get("limit")
+            if limit is not None and limit != 30:
+                args["limit"] = limit
+            logic = q.get("logic")
+            if logic is not None and logic != "AND":
+                args["logic"] = logic
+        # Strip the wire-only `checkboxFields: false` the normalizer defaults
+        if args.get("checkboxFields") is False:
+            args.pop("checkboxFields", None)
+        if args:
+            _hoist_args(out, args)
     elif args:
-        out["arguments"] = args
+        _hoist_args(out, args)
 
     # `for_each` is lifted OUT of `arguments:` when the IR is built from the
     # wire, so it must be put back on the step surface here or the loop is

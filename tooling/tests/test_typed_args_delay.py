@@ -83,8 +83,7 @@ playbooks:
         next: d
       - name: d
         type: delay
-        arguments:
-          minutes: 5
+        minutes: 5
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

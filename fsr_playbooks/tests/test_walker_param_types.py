@@ -193,12 +193,11 @@ playbooks:
         next: S
       - name: S
         type: connector
-        arguments:
-          connector: nist-nvd
-          operation: cve_search
-          config: ""
-          params:
-            resultsPerPage: {value}
+        connector: nist-nvd
+        operation: cve_search
+        config: ""
+        params:
+          resultsPerPage: {value}
 """
     res = compile_yaml(yaml_text, str(default_db_path()))
     codes = [e.code.value for e in (res.errors or [])]

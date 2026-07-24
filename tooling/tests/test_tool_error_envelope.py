@@ -96,8 +96,7 @@ playbooks:
           greeting: hi
       - type: manual_input
         name: Show
-        arguments:
-          description: "{{ vars.steps.Set_Variable.greeting }}"
+        description: "{{ vars.steps.Set_Variable.greeting }}"
 """
 
 

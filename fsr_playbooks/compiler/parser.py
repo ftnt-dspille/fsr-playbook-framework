@@ -35,24 +35,18 @@ _PARAM_TYPE_VOCAB = {
 # `branches`/`id` have their own dedicated rejections earlier in the loop;
 # `unlabeled_next` is the decompiler's lossy escape hatch — both are listed here
 # so the generic check never double-reports or fires on decompiled YAML.
-_UNIVERSAL_STEP_KEYS = frozenset({
-    "name", "type", "arguments", "next", "comment", "description",
-    "for_each", "post_comment", "message",
-    "mock_result", "when", "step_variables", "set",
-    "ignore_errors", "do_until", "apply_async",
-    "agent", "agentId", "pickFromTenant", "retry", "on_remote",
-    "module", "modules",
-    "branches", "id", "unlabeled_next",
+# Step-level keys that are NOT step arguments — they're IR Step fields or
+# sugar keys the parser transforms into arguments. Everything else at step
+# level is collected as a step argument directly (Phase G: the `arguments:`
+# wrapper is gone; all args are hoisted to the step's top level).
+_STEP_IR_KEYS = frozenset({
+    "id", "type", "name", "next", "branches", "unlabeled_next",
+    "comment", "description", "for_each",
 })
-# Keys the parser consumes only for a specific step type (hoisted into
-# `arguments:` by the type-specific blocks above). Mirrors those blocks exactly.
-_STEP_KEYS_BY_TYPE = {
-    "decision": frozenset({"conditions", "default"}),
-    "manual_input": frozenset({"options", "inputs", "title", "is_approval"}),
-    "set_variable": frozenset({"vars"}),
-    "delete_record": frozenset({"record", "record_id", "query", "show_deleted"}),
-    "connector": frozenset({"connector", "operation", "params", "config"}),
-}
+_STEP_SUGAR_KEYS = frozenset({
+    "post_comment", "set", "retry", "on_remote", "with",
+    "conditions", "default", "options", "inputs", "title", "is_approval", "vars",
+})
 
 
 def _coerce_label(v: Any) -> tuple[Any, bool]:
@@ -68,6 +62,29 @@ def _coerce_label(v: Any) -> tuple[Any, bool]:
     if v is False:
         return "no", True
     return v, False
+
+
+def _apply_with_binding(obj: Any, alias: str, replacement: str) -> None:
+    """Recursively replace `alias` with `replacement` in all string values
+    within a nested dict/list structure. Used by the `with:` path-binding
+    handler to rewrite Jinja expressions at compile time.
+
+    The replacement is a word-boundary regex match so `vars.info` matches
+    in `{{ vars.info.adom }}` but NOT in `{{ vars.information }}`.
+    """
+    pattern = re.compile(rf"\b{re.escape(alias)}\b")
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str):
+                obj[k] = pattern.sub(replacement, v)
+            else:
+                _apply_with_binding(v, alias, replacement)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            if isinstance(v, str):
+                obj[i] = pattern.sub(replacement, v)
+            else:
+                _apply_with_binding(v, alias, replacement)
 
 
 _norway_warnings: list[str] = []  # populated transiently by callers below
@@ -283,14 +300,26 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     path=f"{sp}.type",
                 ))
 
-            args = s_raw.get("arguments") or {}
-            if not isinstance(args, dict):
+            # Phase G: all step args are at the step's top level — the
+            # `arguments:` wrapper is gone. Collect every non-IR, non-sugar
+            # key as a step argument.
+            if "arguments" in s_raw:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message="arguments must be a mapping",
+                    message=(
+                        "the `arguments:` wrapper is no longer used — "
+                        "hoist all step arguments to the step's top level "
+                        "(e.g. `module:`, `connector:`, `operation:` etc. "
+                        "are step-level keys now, not nested under arguments:)"
+                    ),
                     path=f"{sp}.arguments",
                 ))
-                args = {}
+                continue
+            _reserved = _STEP_IR_KEYS | _STEP_SUGAR_KEYS | {"arguments"}
+            args = {
+                k: v for k, v in s_raw.items()
+                if k not in _reserved
+            }
 
             # Reject legacy nested shapes that have step-level shortcuts.
             if stype == "decision" and "conditions" in args:
@@ -324,51 +353,12 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 ))
                 continue
 
-            # Step-level cross-cutting fields hoisted into `arguments:` so
-            # downstream resolver/emitter code (and the wire shape) sees
-            # them where it expects. Authors get to write them next to the
-            # step instead of buried under `arguments:`. Both forms are
-            # accepted transitionally; supplying both is an error so the
-            # author doesn't accidentally end up with two values.
-            #
-            #   step.mock_result    → arguments.mock_result
-            #   step.when           → arguments.when (start_on_* only — the
-            #                         resolver pops it back out)
-            #   step.step_variables → arguments.step_variables
-            #   step.module(s)      → arguments.module(s) (start: binds the
-            #                         trigger to a module so it resolves to a
-            #                         cybersponse.action manual Execute-menu
-            #                         trigger; the normalizer reads it off
-            #                         arguments). Without this hoist a
-            #                         top-level `module:` is silently dropped
-            #                         and the start stays a Referenced trigger.
-            #   step.set            → arguments.step_variables (sugar — same
-            #                         spelling whether you're on set_variable
-            #                         (`vars:`) or a connector/create step)
-            #   step.ignore_errors  → arguments.ignore_errors (universal: keep
-            #                         running the playbook even if this step
-            #                         raises)
-            #   step.do_until       → arguments.do_until (retry loop; `retry:`
-            #                         below is the friendly sugar for it)
-            #   step.apply_async    → arguments.apply_async (fire-and-forget
-            #                         connector / workflow_reference execution)
-            #   step.agent/agentId/pickFromTenant → the remote-agent envelope
-            #                         (`on_remote:` below is the friendly sugar)
-            for hoist_key in ("mock_result", "when", "step_variables", "message",
-                              "module", "modules", "ignore_errors", "do_until",
-                              "apply_async", "agent", "agentId", "pickFromTenant"):
-                if hoist_key in s_raw:
-                    if hoist_key in args:
-                        errors.append(CompileError(
-                            code=ErrorCode.BAD_VALUE,
-                            message=(
-                                f"{hoist_key!r} set both at step level and "
-                                f"under arguments — pick one"
-                            ),
-                            path=f"{sp}.{hoist_key}",
-                        ))
-                    else:
-                        args[hoist_key] = s_raw[hoist_key]
+            # Step-level cross-cutting keys (mock_result, when, module,
+            # ignore_errors, etc.) are already in `args` — Phase G collects
+            # all non-reserved step-level keys as args directly. The sugar
+            # handlers below transform friendly keys (set:, retry:, etc.)
+            # into their canonical wire equivalents in `args`.
+
             if "set" in s_raw:
                 if "step_variables" in args:
                     errors.append(CompileError(
@@ -576,16 +566,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 # global hoist.
                 for hk in ("inputs", "title", "description", "is_approval"):
                     if hk in s_raw:
-                        if hk in args:
-                            errors.append(CompileError(
-                                code=ErrorCode.BAD_VALUE,
-                                message=(f"manual_input: {hk!r} set both at "
-                                         f"step level and under arguments — "
-                                         f"keep one"),
-                                path=f"{sp}.{hk}",
-                            ))
-                        else:
-                            args[hk] = s_raw[hk]
+                        args[hk] = s_raw[hk]
             if stype == "set_variable":
                 top_vars = s_raw.get("vars")
                 if isinstance(top_vars, dict):
@@ -599,47 +580,12 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                         path=f"{sp}.vars",
                     ))
 
-            if stype == "delete_record":
-                # Hoist the friendly delete targeting keys from step level into
-                # arguments (the resolver's _normalize_delete_record_args reads
-                # them there). `module` is already hoisted globally.
-                for hk in ("record", "record_id", "query", "show_deleted"):
-                    if hk in s_raw:
-                        if hk in args:
-                            errors.append(CompileError(
-                                code=ErrorCode.BAD_VALUE,
-                                message=(f"{hk!r} set both at step level and "
-                                         f"under arguments — keep one"),
-                                path=f"{sp}.{hk}",
-                            ))
-                        else:
-                            args[hk] = s_raw[hk]
+            # delete_record: `record`, `record_id`, `query`, `show_deleted`
+            # are regular step args now (collected by the general rule above).
+            # No special hoist needed.
 
-            if stype == "connector":
-                # Step-level `connector:` / `operation:` / `params:` /
-                # `config:` siblings of `arguments:` are a recurring agent
-                # typo (session 0eb8c6a6 burned a validate round on this;
-                # S3 eval saw the box model drop `params:` at the top level
-                # 2/3 runs -> a hard `missing_field` on the required param
-                # because the resolver only reads `arguments.params`). FSR's
-                # wire format keeps them all under arguments; auto-hoist with
-                # a warning so the agent learns instead of cycling. `params`
-                # was the asymmetric gap: `connector`/`operation` were already
-                # hoisted, so a step with those top-level but `params:` also
-                # top-level compiled the op with no inputs.
-                for hk in ("connector", "operation", "params", "config"):
-                    if hk in s_raw and hk not in args:
-                        args[hk] = s_raw[hk]
-                        errors.append(CompileError(
-                            code=ErrorCode.BAD_VALUE,
-                            severity="warning",
-                            message=(
-                                f"connector step has step-level `{hk}:` — "
-                                f"hoisted into `arguments.{hk}`. Put it "
-                                f"under `arguments:` next time."
-                            ),
-                            path=f"{sp}.{hk}",
-                        ))
+            # connector: `connector`, `operation`, `params`, `config` are
+            # regular step args now (collected by the general rule above).
 
             if "branches" in s_raw:
                 errors.append(CompileError(
@@ -808,25 +754,55 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 else:
                     for_each.pop("batch_size", None)      # batch_size is a bulk-only key
 
-            # Flag top-level step keys the parse never reads. These are
-            # silently dropped otherwise — the create_record `resource:`-outside-
-            # `arguments:` class of bug that validates clean and fails only at
-            # runtime. Warning (not error) so a genuinely-harmless extra key
-            # doesn't hard-fail a compile; the message points the author at the
-            # fix. `arguments`'s own contents are validated downstream.
-            allowed_keys = _UNIVERSAL_STEP_KEYS | _STEP_KEYS_BY_TYPE.get(stype, frozenset())
-            for k in sorted(set(s_raw) - allowed_keys):
-                errors.append(CompileError(
-                    code=ErrorCode.UNKNOWN_PARAM,
-                    severity="warning",
-                    message=(
-                        f"step-level key {k!r} on step type {stype!r} is not "
-                        f"recognized and was ignored — if it is an argument for "
-                        f"the step, nest it under `arguments:`"
-                    ),
-                    path=f"{sp}.{k}",
-                    suggestion=f"move it under arguments: {{ {k}: ... }}",
-                ))
+            # Phase H1: `with:` path binding — compile-time Jinja alias
+            # rewriting. Authors write `with: {info: "{{ vars.steps.X.data.
+            # code_output }}"}` and then use `{{ vars.info.adom }}` in the
+            # step's arguments. The parser rewrites `vars.info` → the bound
+            # expression in all string values within `args`, resolving the
+            # alias at compile time. No wire output — purely an authoring
+            # convenience that produces the same wire as the expanded form.
+            with_raw = s_raw.get("with")
+            if with_raw is not None:
+                if not isinstance(with_raw, dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.with must be a mapping of name → Jinja expression",
+                        path=f"{sp}.with",
+                    ))
+                else:
+                    for bind_name, bind_expr in with_raw.items():
+                        if not isinstance(bind_name, str) or not re.match(
+                            r"^[A-Za-z_][A-Za-z0-9_]*$", bind_name
+                        ):
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"with: binding name {bind_name!r} must be a "
+                                    f"valid identifier (letter/underscore start)"
+                                ),
+                                path=f"{sp}.with.{bind_name}",
+                            ))
+                            continue
+                        if not isinstance(bind_expr, str):
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"with: binding {bind_name!r} must be a "
+                                    f"Jinja expression string"
+                                ),
+                                path=f"{sp}.with.{bind_name}",
+                            ))
+                            continue
+                        raw_expr = bind_expr.strip()
+                        if raw_expr.startswith("{{") and raw_expr.endswith("}}"):
+                            raw_expr = raw_expr[2:-2].strip()
+                        _apply_with_binding(
+                            args, f"vars.{bind_name}", raw_expr
+                        )
+
+            # Phase G: all non-reserved step-level keys are collected as args
+            # above, so the unknown-key warning is no longer needed. Typed-args
+            # validation downstream catches genuinely unknown keys per step type.
 
             steps.append(Step(
                 id=sid,

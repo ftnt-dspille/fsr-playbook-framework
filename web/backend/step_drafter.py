@@ -78,7 +78,7 @@ STEP_INTROS: dict[str, str] = {
     "workflow_reference":
         "Calls a child playbook. Args: `workflowReference: '/api/3/"
         "workflows/<uuid>'` (or a Jinja expression resolving to one), "
-        "`arguments: {<inputName>: <value>, ...}` for the target's "
+        "`<inputName>: <value>, ...` for the target's "
         "input parameters, plus `apply_async`, `pass_input_record`, "
         "`pass_parent_env` flags.",
     "code_snippet":

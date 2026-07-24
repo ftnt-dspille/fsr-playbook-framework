@@ -51,7 +51,8 @@ playbooks:
       - name: Start
         type: start
         next: Convert
-        arguments: {module: alerts, button_label: Run}
+        module: alerts
+        button_label: Run
       - name: Convert
         type: connector
         connector: cyops_utilities
@@ -60,9 +61,8 @@ playbooks:
         next: Emit
       - name: Emit
         type: create_record
-        arguments:
-          module: alerts
-          resource: {name: t, description: '{{ vars.steps.Convert.data.minutes }}'}
+        module: alerts
+        resource: {name: t, description: '{{ vars.steps.Convert.data.minutes }}'}
 """
 
 
@@ -76,34 +76,29 @@ playbooks:
       - name: Start
         type: start
         next: Convert
-        arguments: {{module: alerts, button_label: Run}}
+        module: alerts
+        button_label: Run
       - name: Convert
         type: connector
         next: Emit
-        arguments:
-          connector: cyops_utilities
-          operation: convert_periodic_time_to_minutes
-          config: ''
-          params: {{periodic_time: 3 hours}}
+        connector: cyops_utilities
+        operation: convert_periodic_time_to_minutes
+        config: ''
+        params: {{periodic_time: 3 hours}}
       - name: Emit
         type: create_record
-        arguments:
-          module: alerts
-          resource: {{name: t, description: '{desc_ref}'}}
+        module: alerts
+        resource: {{name: t, description: '{desc_ref}'}}
 """
 
 
 def test_top_level_params_are_hoisted_not_dropped():
     """The all-top-level shape the box model emits must compile — `params` is
-    hoisted into `arguments:` like `connector`/`operation`, so the required
-    param is present and no `missing_field` error fires."""
+    collected as a step-level arg alongside `connector`/`operation`, so the
+    required param is present and no `missing_field` error fires."""
     errs = _errs(_ALL_TOP_LEVEL)
     hard = _hard(errs)
     assert not hard, f"expected no hard errors, got {[(e.code, e.message) for e in hard]}"
-    # And the fix is a warn-and-teach, not silent — a hoist warning mentions params.
-    assert any("params" in (e.message or "") and "hoisted" in (e.message or "").lower()
-               for e in _warns(errs)), \
-        "expected a warn-and-hoist message teaching to nest params under arguments"
 
 
 def test_correct_data_path_is_not_flagged():
@@ -147,20 +142,19 @@ playbooks:
       - name: Start
         type: start
         next: Convert Time
-        arguments: {{module: alerts, button_label: Run}}
+        module: alerts
+        button_label: Run
       - name: Convert Time
         type: connector
         next: Emit
-        arguments:
-          connector: cyops_utilities
-          operation: convert_periodic_time_to_minutes
-          config: ''
-          params: {{periodic_time: 3 hours}}
+        connector: cyops_utilities
+        operation: convert_periodic_time_to_minutes
+        config: ''
+        params: {{periodic_time: 3 hours}}
       - name: Emit
         type: create_record
-        arguments:
-          module: alerts
-          resource: {{name: t, description: '{ref}'}}
+        module: alerts
+        resource: {{name: t, description: '{ref}'}}
 """
     res = compile_yaml(y, DB)
     assert res.fsr_json is not None, [ (e.severity, e.message) for e in res.errors ]

@@ -37,8 +37,8 @@ def _pb(*conn_ops: tuple[str, str]) -> str:
     for i, (conn, op) in enumerate(conn_ops):
         steps.append(
             f"      - name: s{i}\n        type: connector\n"
-            f"        arguments:\n          connector: {conn}\n"
-            f"          operation: {op}\n          params: {{}}")
+            f"        connector: {conn}\n"
+            f"        operation: {op}\n        params: {{}}")
     body = "\n".join(steps)
     return f"playbooks:\n  - name: Auto Respond\n    steps:\n{body}\n"
 

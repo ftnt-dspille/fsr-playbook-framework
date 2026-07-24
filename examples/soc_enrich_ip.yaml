@@ -24,56 +24,55 @@ playbooks:
     steps:
       - name: start
         type: start
-        arguments:
-          module: alerts
-          requires_record: true
+        module: alerts
+        requires_record: true
         next: Yeti Auth
 
       - name: Yeti Auth
         type: connector
         next: Yeti Search
-        arguments:
-          connector: http
-          operation: http_post
-          config: "SOC Yeti"
-          params:
-            rest_api: "/auth/api-token"
+        connector: http
+        operation: http_post
+        config: "SOC Yeti"
+        params:
+          rest_api: "/auth/api-token"
 
       - name: Yeti Search
         type: connector
         next: NetBox Lookup
-        arguments:
-          connector: http
-          operation: http_post
-          config: "SOC Yeti"
-          params:
-            rest_api: "/observables/search"
-            header:
-              Authorization: "Bearer {{ vars.steps.Yeti_Auth.data.body.access_token }}"
-            data:
-              query:
-                value: "{{ vars.input.records[0].destinationIp }}"
+        connector: http
+        operation: http_post
+        config: "SOC Yeti"
+        params:
+          rest_api: "/observables/search"
+          header:
+            Authorization: "Bearer {{ vars.steps.Yeti_Auth.data.body.access_token }}"
+          data:
+            query:
+              value: "{{ vars.input.records[0].destinationIp }}"
 
       - name: NetBox Lookup
         type: connector
         next: Build Verdict
-        arguments:
-          connector: http
-          operation: http_get
-          config: "SOC NetBox"
-          params:
-            rest_api: "/ipam/ip-addresses/"
-            parameter:
-              address: "{{ vars.input.records[0].sourceIp }}"
+        connector: http
+        operation: http_get
+        config: "SOC NetBox"
+        params:
+          rest_api: "/ipam/ip-addresses/"
+          parameter:
+            address: "{{ vars.input.records[0].sourceIp }}"
 
       - name: Build Verdict
         type: set_variable
         next: Branch on Threat
+        with:
+          yeti: "{{ vars.steps.Yeti_Search.data }}"
+          netbox: "{{ vars.steps.NetBox_Lookup.data }}"
         vars:
-          yeti_hits: "{{ vars.steps.Yeti_Search.data.total | default(0) }}"
-          yeti_tags: "{{ vars.steps.Yeti_Search.data.observables[0].tags | map(attribute='name') | join(', ') if (vars.steps.Yeti_Search.data.total | default(0)) > 0 else 'none' }}"
-          asset_tenant: "{{ vars.steps.NetBox_Lookup.data.results[0].tenant.name if (vars.steps.NetBox_Lookup.data.count | default(0)) > 0 else 'Unknown' }}"
-          asset_owner: "{{ vars.steps.NetBox_Lookup.data.results[0].description if (vars.steps.NetBox_Lookup.data.count | default(0)) > 0 else 'Unknown' }}"
+          yeti_hits: "{{ vars.yeti.total | default(0) }}"
+          yeti_tags: "{{ vars.yeti.observables[0].tags | map(attribute='name') | join(', ') if (vars.yeti.total | default(0)) > 0 else 'none' }}"
+          asset_tenant: "{{ vars.netbox.results[0].tenant.name if (vars.netbox.count | default(0)) > 0 else 'Unknown' }}"
+          asset_owner: "{{ vars.netbox.results[0].description if (vars.netbox.count | default(0)) > 0 else 'Unknown' }}"
 
       - name: Branch on Threat
         type: decision

@@ -56,7 +56,6 @@ _FAMILY_BY_TYPE: dict[str, str] = {
     "connector": "connector_op",
     "find_record": "record_crud",
     "create_record": "record_crud",
-    "insert_record": "record_crud",
     "update_record": "record_crud",
     "delete_record": "record_crud",
     "set_variable": "utility",
@@ -634,11 +633,9 @@ def _splice_arguments(s_doc: Any, new_args: dict) -> None:
             # New top-level shortcut requested by the edit.
             s_doc[hoisted] = new_args.pop(hoisted)
 
-    # Remaining keys go into `arguments:` (creating it if needed).
-    if new_args:
-        s_doc["arguments"] = new_args
-    elif "arguments" in s_doc:
-        del s_doc["arguments"]
+    # Remaining keys go at step level (Phase G: no `arguments:` wrapper).
+    for k, v in new_args.items():
+        s_doc[k] = v
 
 
 def _apply_edge_rewiring(steps: list, graph_pb: dict, pd: _PlaybookDiff,

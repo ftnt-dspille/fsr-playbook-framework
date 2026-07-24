@@ -192,21 +192,19 @@ def test_consumed_paths_attached_to_trace(monkeypatch):
               - id: fetch
                 type: connector
                 name: Fetch
-                arguments:
-                  connector: jira
-                  operation: get_ticket_details
-                  mock_result:
-                    data: {id: 9, summary: ok}
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data: {id: 9, summary: ok}
                 next: emit
               - id: emit
                 type: set_variable
                 name: Emit
-                arguments:
-                  arg_list:
-                    - name: ticket_id
-                      value: "{{ vars.steps.Fetch.data.id }}"
-                    - name: alert
-                      value: "{{ vars.input.params.alert_id }}"
+                arg_list:
+                  - name: ticket_id
+                    value: "{{ vars.steps.Fetch.data.id }}"
+                  - name: alert
+                    value: "{{ vars.input.params.alert_id }}"
                 next: stop
               - id: stop
                 type: stop

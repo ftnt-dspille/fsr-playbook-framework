@@ -13,10 +13,13 @@ from fsr_playbooks.compiler.errors import ErrorCode
 
 
 def _wrap(args_block: str, options_block: str = "") -> str:
-    """Wrap a manual_input arguments block in a minimal compilable
-    playbook. `args_block` goes under `arguments:` (8-space-indented).
-    `options_block` goes at step level (6-space-indented) and provides
-    the options list when needed."""
+    """Wrap a manual_input args block in a minimal compilable playbook.
+    `args_block` goes at step level (8-space-indented). `options_block` goes
+    at step level (6-space-indented) and provides the options list when needed."""
+    # Phase G: args are at step level now (no arguments: wrapper), so dedent
+    # the block by 2 spaces (callers still pass 10-space-indented content).
+    lines = args_block.splitlines(keepends=True)
+    args_block = "".join(l[2:] if l.startswith("  ") else l for l in lines)
     opt = options_block if options_block else "        options:\n          - display: stop\n            next: stop\n"
     return f"""
 collection: T
@@ -30,7 +33,6 @@ playbooks:
         next: ask
       - name: ask
         type: manual_input
-        arguments:
 {args_block}{opt}
       - name: stop
         type: end
@@ -86,9 +88,9 @@ def test_friendly_form_default_continue_when_no_options(db_path):
 
 def test_canonical_form_passes_through(db_path):
     """An author who hand-writes the full FSR shape should not get
-    rejected — every key is on the canonical whitelist."""
+    rejected — every key is on the canonical whitelist. `type` is
+    inferred (InputBased) from the presence of `input:`."""
     text = _wrap(
-        "          type: InputBased\n"
         "          input:\n"
         "            schema:\n"
         "              title: T\n"
@@ -133,21 +135,21 @@ def test_unknown_key_truly_unknown_rejected(db_path):
 # ---- the trap: bad `type` value ----------------------------------
 
 def test_type_textarea_rejected(db_path):
-    """`type: textarea` is not a real FSR ManualInput dispatch."""
+    """`type:` on manual_input collides with the step type field.
+    `type: textarea` overrides `type: manual_input` → unknown step
+    type error from the parser."""
     text = _wrap("          type: textarea\n          title: hi\n")
     r = compile_yaml(text, db_path)
     assert not r.ok
-    e = next(e for e in r.errors if e.code is ErrorCode.BAD_VALUE)
-    assert "InputBased" in e.message
 
 
 def test_type_single_select_rejected(db_path):
-    """Old `type: single-select` shape — pre-fix examples used it."""
+    """`type:` on manual_input collides with the step type field.
+    `type: single-select` overrides `type: manual_input` → unknown
+    step type error from the parser."""
     text = _wrap("          type: single-select\n          title: hi\n")
     r = compile_yaml(text, db_path)
     assert not r.ok
-    e = next(e for e in r.errors if e.code is ErrorCode.BAD_VALUE)
-    assert "InputBased" in e.message
 
 
 # ---- the trap: input must be a dict ------------------------------
@@ -166,10 +168,10 @@ def test_input_string_rejected_with_pointer(db_path):
 # ---- audit-driven additions (2026-05-06): I17, I20, I21, I22, I23 ------
 
 def test_type_decision_based_accepted(db_path):
-    """`type: DecisionBased` is real (button-only prompts, 26/168 live).
-    Audit §2 — used to be a hard error."""
+    """DecisionBased (button-only) is inferred when there are no
+    `inputs:` — just `options:`."""
     text = _wrap(
-        "          type: DecisionBased\n",
+        "          title: Pick\n",
         options_block=(
             "        options:\n"
             "          - display: Continue\n"
@@ -178,6 +180,8 @@ def test_type_decision_based_accepted(db_path):
     )
     r = compile_yaml(text, db_path)
     assert r.ok, [str(e) for e in r.errors]
+    mi_step = r.fsr_json["data"][0]["workflows"][0]["steps"][1]
+    assert mi_step["arguments"]["type"] == "DecisionBased"
 
 
 def test_description_defaults_to_title_when_omitted(db_path):
@@ -278,8 +282,7 @@ playbooks:
         next: ask
       - name: ask
         type: manual_input
-        arguments:
-          title: Approve?
+        title: Approve?
         options:
           - display: ok
             primary: true
@@ -381,8 +384,11 @@ def test_step_level_inputs_match_live_playbook_wire_shape(db_path):
 
 
 def test_step_level_and_arguments_inputs_conflict_errors(db_path):
-    """Same key at step level and under `arguments:` is a hard error, not a
-    silent winner (mirrors the global hoist conflict guard)."""
+    """Phase G: no `arguments:` wrapper, so the step-level vs
+    `arguments:`-level conflict scenario is moot. Duplicate keys at
+    the same level are a YAML parser concern, not a compiler guard.
+    This test now verifies the canonical-form pass-through doesn't
+    flag a false conflict when `input:` is present."""
     text = """
 collection: T
 visible: true
@@ -396,8 +402,9 @@ playbooks:
       - name: ask
         type: manual_input
         title: Step Level Title
-        arguments:
-          title: Arguments Title
+        input:
+          schema:
+            inputVariables: []
         options:
           - display: Submit
             primary: true
@@ -406,9 +413,7 @@ playbooks:
         type: end
 """
     r = compile_yaml(text, db_path)
-    assert not r.ok
-    assert any(e.code is ErrorCode.BAD_VALUE and "both at" in e.message
-               for e in r.errors)
+    assert r.ok, [str(e) for e in r.errors]
 
 
 def test_mode_record_linked_requires_record(db_path):

@@ -52,8 +52,7 @@ playbooks:
         next: util
       - name: util
         type: utilities
-        arguments:
-          operation: no_op
+        operation: no_op
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -95,11 +94,10 @@ playbooks:
         next: util
       - name: util
         type: utilities
-        arguments:
-          operation: make_cyops_request
-          params:
-            iri: "/api/3/alerts"
-            method: GET
+        operation: make_cyops_request
+        params:
+          iri: "/api/3/alerts"
+          method: GET
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -119,9 +117,8 @@ playbooks:
         next: util
       - name: util
         type: utilities
-        arguments:
-          operation: no_op
-          connector: 123
+        operation: no_op
+        connector: 123
 """
     r = compile_yaml(text, db_path)
     assert any(
@@ -145,7 +142,7 @@ playbooks:
         next: util
       - name: util
         type: utilities
-        arguments: {}
+
 """
     r = compile_yaml(text, db_path)
     missing = [e for e in r.errors

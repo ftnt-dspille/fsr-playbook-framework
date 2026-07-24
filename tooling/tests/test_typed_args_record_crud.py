@@ -1,5 +1,4 @@
-"""Typed-args model for record-write steps (`create_record` / `insert_record` /
-`update_record`) — registry contract, the friendly module->IRI transform (the
+"""Typed-args model for record-write steps (`create_record` / `update_record`) — registry contract, the friendly module->IRI transform (the
 collection-vs-collectionType split + already-set-wins + /api/ passthrough), and
 the new scalar validation (`module`/`is_upsert` wrong-typed -> clean BAD_VALUE).
 
@@ -30,8 +29,8 @@ def _expand(args, step_type="create_record", errs=None):
     )
 
 
-def test_registry_models_all_three_record_types():
-    for t in ("create_record", "insert_record", "update_record"):
+def test_registry_models_record_types():
+    for t in ("create_record", "update_record"):
         assert STEP_ARG_MODELS.get(t) is RecordCrudArgs
         assert is_modeled(t) is True
 
@@ -42,11 +41,6 @@ def test_create_record_module_to_collection():
     assert "module" not in out
 
 
-def test_insert_record_module_to_collection():
-    out = _expand({"module": "alerts"}, "insert_record")
-    assert out["collection"] == "/api/3/alerts"
-
-
 def test_update_record_module_to_collection_type():
     out = _expand({"module": "alerts"}, "update_record")
     assert out["collectionType"] == "/api/3/alerts"
@@ -54,12 +48,27 @@ def test_update_record_module_to_collection_type():
     assert "collection" not in out
 
 
-def test_update_record_does_not_clobber_record_iri():
+def test_update_record_record_key_maps_to_collection():
     out = _expand(
-        {"module": "alerts", "collection": "/api/3/alerts/abc"}, "update_record"
+        {"module": "alerts", "record": "/api/3/alerts/abc"}, "update_record"
     )
     assert out["collection"] == "/api/3/alerts/abc"
     assert out["collectionType"] == "/api/3/alerts"
+
+
+def test_update_record_collection_rejected():
+    # `collection:` on update_record is the #1 record-CRUD footgun (it was the
+    # record IRI but collided with create's module-IRI `collection`); the
+    # friendly key is `record:`.
+    errs: list[CompileError] = []
+    out = _expand(
+        {"module": "alerts", "collection": "/api/3/alerts/abc"}, "update_record", errs
+    )
+    assert any(
+        e.code is ErrorCode.BAD_VALUE and "record:" in e.message for e in errs
+    )
+    # the wire `collection` is NOT set from the rejected `collection:` key
+    assert out is not None and "collection" not in out
 
 
 def test_already_set_collection_wins():
@@ -82,9 +91,13 @@ def test_resource_payload_rides_through_untouched():
     assert out["resource"] == {"name": "x", "severity": "High"}
 
 
-def test_no_module_is_noop():
-    out = _expand({"resource": {"name": "x"}}, "create_record")
-    assert out == {"resource": {"name": "x"}}
+def test_no_module_is_blocking():
+    errs: list[CompileError] = []
+    _expand({"resource": {"name": "x"}}, "create_record", errs)
+    assert any(
+        e.code is ErrorCode.MISSING_FIELD and e.path.endswith("arguments.module")
+        for e in errs
+    )
 
 
 def test_non_string_module_is_clean_bad_value():
@@ -108,7 +121,7 @@ def test_non_bool_is_upsert_is_clean_bad_value():
 def test_is_upsert_truthy_coerces():
     # pydantic coerces the usual true/1/"true" forms — no BAD_VALUE.
     errs: list[CompileError] = []
-    _expand({"module": "alerts", "is_upsert": "true"}, "insert_record", errs)
+    _expand({"module": "alerts", "is_upsert": "true"}, "create_record", errs)
     assert not [e for e in errs if e.code is ErrorCode.BAD_VALUE]
 
 
@@ -127,10 +140,9 @@ playbooks:
         next: mk
       - name: mk
         type: create_record
-        arguments:
-          module: alerts
-          resource:
-            name: "{{ vars.name }}"
+        module: alerts
+        resource:
+          name: "{{ vars.name }}"
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \

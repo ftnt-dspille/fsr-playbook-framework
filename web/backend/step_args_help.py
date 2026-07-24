@@ -329,7 +329,6 @@ STEP_ARGS_HELP: dict[str, dict[str, Any]] = {
     "set_variable": _SET_VARIABLE,
     "find_record": _FIND_RECORD,
     "create_record": _CREATE_RECORD,
-    "insert_record": _CREATE_RECORD,
     "update_record": _UPDATE_RECORD,
     "ingest_bulk_feed": _INGEST_BULK_FEED,
     "workflow_reference": _WORKFLOW_REFERENCE,

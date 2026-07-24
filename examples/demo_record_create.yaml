@@ -20,11 +20,9 @@ playbooks:
 
       - name: Create alert
         type: create_record
-        arguments:
-          module: alerts                # → collection: /api/3/alerts
-          operation: Replace
-          resource:
-            name: "{{ vars.input.params.alert_name }}"
-            severity: /api/3/picklists/40187287-89fc-4e9c-b717-e9443d57eedb   # High
-            description: "fsrpb_e2e_create marker"
-          step_variables: []
+        module: alerts                # → collection: /api/3/alerts
+        operation: Replace
+        fields:
+          severity: /api/3/picklists/40187287-89fc-4e9c-b717-e9443d57eedb   # High
+          description: "fsrpb_e2e_create marker"
+        step_variables: []

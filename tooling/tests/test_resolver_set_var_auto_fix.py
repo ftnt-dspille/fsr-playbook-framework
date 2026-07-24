@@ -47,9 +47,8 @@ playbooks:
         next: M
       - type: manual_input
         name: M
-        arguments:
-          title: t
-          description: |
+        title: t
+        description: |
 {description_yaml}
         options:
           - display: OK
@@ -196,9 +195,8 @@ playbooks:
         next: Lookup
       - type: connector
         name: Lookup
-        arguments:
-          connector: cyops_utilities
-          operation: no_op
+        connector: cyops_utilities
+        operation: no_op
         next: SV
       - type: set_variable
         name: SV
@@ -207,9 +205,8 @@ playbooks:
         next: M
       - type: manual_input
         name: M
-        arguments:
-          title: t
-          description: 'out: {{ vars.steps.Lookup.message }}'
+        title: t
+        description: 'out: {{ vars.steps.Lookup.message }}'
         options:
           - display: OK
             primary: true

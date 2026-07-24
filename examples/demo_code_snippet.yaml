@@ -21,11 +21,10 @@ playbooks:
       - name: Build greeting
         type: code_snippet
         next: Stamp greeting
-        arguments:
-          code: |
-            name = "{{ vars.input.params.first_name }}"
-            greeting = f"hello {name}"
-            print(greeting)
+        code: |
+          name = "{{ vars.input.params.first_name }}"
+          greeting = f"hello {name}"
+          print(greeting)
 
       - name: Stamp greeting
         type: set_variable

@@ -28,9 +28,8 @@ playbooks:
             next: Pretend we blocked
           - display: skip
             next: Skip
-        arguments:
-          title: Block this IP?
-          description: Click **block** to proceed, **skip** to abort.
+        title: Block this IP?
+        description: Click **block** to proceed, **skip** to abort.
 
       - name: Pretend we blocked
         type: set_variable

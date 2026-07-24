@@ -19,14 +19,13 @@ notes: |
 steps_yaml: |
   - type: manual_input
     name: Collect Input
-    arguments:
-      title: Provide Input
-      description: Enter the value to act on.
-      inputs:
-        - name: target_value
-          kind: text
-          label: Target Value
-          required: true
+    title: Provide Input
+    description: Enter the value to act on.
+    inputs:
+      - name: target_value
+        kind: text
+        label: Target Value
+        required: true
     options:
       - display: Continue
         primary: true

@@ -24,7 +24,7 @@ from typing import Any, Iterable, Optional
 # F applies to record *creation* only. `update_record` is a partial patch —
 # an absent required field is legal there (you're updating a subset), so
 # requiring completeness on update would false-positive.
-RECORD_CREATE_TYPES = frozenset({"create_record", "insert_record"})
+RECORD_CREATE_TYPES = frozenset({"create_record"})
 
 # Config-LESS built-in connectors: their ops run with an empty `config: ''` and
 # they never carry a saved configuration, so a step that pins no config binds

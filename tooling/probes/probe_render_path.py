@@ -248,11 +248,10 @@ SCENARIOS: list[Scenario] = [
                 next: "Call"
               - name: "Call"
                 type: workflow_reference
-                arguments:
-                  target: rp_ref_sync_child
-                  apply_async: false
-                  pass_parent_env: false
-                  pass_input_record: false
+                target: rp_ref_sync_child
+                apply_async: false
+                pass_parent_env: false
+                pass_input_record: false
                 next: "Capture"
               - name: "Capture"
                 type: set_variable
@@ -289,13 +288,11 @@ SCENARIOS: list[Scenario] = [
                 next: "Call"
               - name: "Call"
                 type: workflow_reference
-                arguments:
-                  target: rp_ref_args_child
-                  arguments:
-                    base: 7
-                  apply_async: false
-                  pass_parent_env: false
-                  pass_input_record: false
+                target: rp_ref_args_child
+                base: 7
+                apply_async: false
+                pass_parent_env: false
+                pass_input_record: false
                 next: "Capture"
               - name: "Capture"
                 type: set_variable
@@ -339,11 +336,10 @@ SCENARIOS: list[Scenario] = [
                 next: "Call"
               - name: "Call"
                 type: workflow_reference
-                arguments:
-                  target: rp_ref_envT_child
-                  apply_async: false
-                  pass_parent_env: true
-                  pass_input_record: false
+                target: rp_ref_envT_child
+                apply_async: false
+                pass_parent_env: true
+                pass_input_record: false
                 next: "Capture"
               - name: "Capture"
                 type: set_variable
@@ -383,13 +379,11 @@ SCENARIOS: list[Scenario] = [
                 for_each:
                   item: "{{ [1, 2, 3] }}"
                   parallel: false
-                arguments:
-                  target: rp_ref_loop_child
-                  arguments:
-                    n: "{{ vars.item }}"
-                  apply_async: false
-                  pass_parent_env: false
-                  pass_input_record: false
+                target: rp_ref_loop_child
+                n: "{{ vars.item }}"
+                apply_async: false
+                pass_parent_env: false
+                pass_input_record: false
                 next: "Capture"
               - name: "Capture"
                 type: set_variable

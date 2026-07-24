@@ -48,14 +48,14 @@ YAML_PATH = EXAMPLES / "all_step_types_validation.yaml"
 COLLECTION_NAME = "FSRPB All Step Types Validation"
 ORCHESTRATOR = "Orchestrator - Threat Feed Ingest"
 
-# The 26 friendly step types this playbook must exercise (24 typed + the
+# The 25 friendly step types this playbook must exercise (23 typed + the
 # stop/end one-way sugars). Author-loop coverage is asserted against this set.
 ALL_STEP_TYPES: list[str] = [
     # triggers (one per playbook; 6 variants)
     "start", "start_on_create", "start_on_update", "start_on_delete",
     "api_endpoint",
     # record family
-    "create_record", "insert_record", "update_record", "delete_record",
+    "create_record", "update_record", "delete_record",
     "find_record",
     # control / data
     "set_variable", "decision", "delay", "code_snippet", "manual_input",
@@ -83,10 +83,10 @@ SUGAR_NOT_RECOVERED: frozenset[str] = frozenset(
 # variant (cybersponse.action). Grounded in ``tooling/step_type_coverage.py``
 # EDITOR_PALETTE + CONNECTOR_FAMILY.
 #
-# Alias-aware: where multiple friendly types share one canonical (create_record
-# & insert_record both -> InsertData; stop/end/utilities/delete_record/connector
-# all -> Connectors), the decompiler is last-wins, so an authored type may
-# round-trip as its alias. Accept any friendly sharing the same canonical.
+# Alias-aware: where multiple friendly types share one canonical
+# (stop/end/utilities/delete_record/connector all -> Connectors), the
+# decompiler is last-wins, so an authored type may round-trip as its alias.
+# Accept any friendly sharing the same canonical.
 from collections import defaultdict
 
 _CANON_TO_FRIENDLIES: dict[str, set[str]] = defaultdict(set)
@@ -177,9 +177,7 @@ def test_offline_decompile_read_flags_match_matrix(db_path):
     assert res.fsr_json is not None
     col = decompile(res.fsr_json, db_path)
     recovered = {s.type for wf in col.playbooks for s in wf.steps}
-    # Every non-sugar type we authored must be recovered as a friendly name --
-    # itself or an alias sharing its canonical (create_record <-> insert_record
-    # both -> InsertData; the decompiler is last-wins).
+    # Every non-sugar type we authored must be recovered as a friendly name.
     expected = set(ALL_STEP_TYPES) - SUGAR_NOT_RECOVERED
     missing = [t for t in expected if not (recovered & _FRIENDLY_TO_ACCEPT[t])]
     assert not missing, (

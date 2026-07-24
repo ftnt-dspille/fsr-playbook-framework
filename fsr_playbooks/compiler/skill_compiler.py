@@ -226,11 +226,11 @@ _SET_INPUTS_STEP = "Set Inputs"
 
 
 def _step_param_container(step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """The dict that holds a step's wirable params: `arguments` for connector
-    steps, `vars` for set_variable. Returns None for step types with no
-    param map to rewrite."""
+    """The dict that holds a step's wirable params. Phase G: connector
+    args are at step level (no `arguments:` wrapper), so the step dict
+    itself is the param container. `set_variable` uses `vars`."""
     if step.get("type") == "connector":
-        return step.get("arguments")
+        return step.get("arguments") or step
     if step.get("type") == "set_variable":
         return step.get("vars")
     return None
@@ -395,7 +395,8 @@ def insert_containment_guard(
 
     ci = next((i for i, s in enumerate(steps)
                if s.get("type") == "connector"
-               and _is_containment_op((s.get("arguments") or {}).get("operation"))),
+               and _is_containment_op(
+                   (s.get("arguments") or s).get("operation"))),
               None)
     if ci is None:
         return compiled

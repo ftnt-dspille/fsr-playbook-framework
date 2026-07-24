@@ -276,20 +276,18 @@ playbooks:
         operation: make_cyops_request
         step_variables:
           ttl_config: '{{ vars.result.data["hydra:member"][0]["publicValues"]["ttl_config"] }}'
-        arguments:
-          params:
-            iri: /api/3/system_settings
-            method: GET
+        params:
+          iri: /api/3/system_settings
+          method: GET
         next: use
       - name: use
         type: connector
         connector: cyops_utilities
         operation: make_cyops_request
-        arguments:
-          params:
-            iri: /api/wf/api/workflows/delete/
-            body: '{{ vars.ttl_config }}'
-            method: DELETE
+        params:
+          iri: /api/wf/api/workflows/delete/
+          body: '{{ vars.ttl_config }}'
+          method: DELETE
 """
 
 

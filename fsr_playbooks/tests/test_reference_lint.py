@@ -31,7 +31,7 @@ playbooks:
   steps:
   - {{name: Start, type: start, next: CallChild}}
   - {{name: CallChild, type: workflow_reference, apply_async: false,
-     arguments: {{target: Child}}, next: Stamp}}
+     target: Child, next: Stamp}}
   - {{name: Stamp, type: set_variable, vars: {{final: "{{{{ vars.steps.CallChild.{key} }}}}"}}}}
 """
 

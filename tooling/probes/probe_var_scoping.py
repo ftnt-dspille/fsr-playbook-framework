@@ -117,9 +117,8 @@ playbooks:
           only_false: "set_on_false_arm"
       - name: Boom
         type: code_snippet
-        arguments:
-          code: |
-            raise Exception('force-fail to persist results')
+        code: |
+          raise Exception('force-fail to persist results')
 """
 
 
@@ -151,9 +150,8 @@ playbooks:
           item: "{{ vars.steps.Build_List.mylist }}"
           parallel: false
           condition: ""
-        arguments:
-          code: |
-            print("iter")
+        code: |
+          print("iter")
       - name: After Loop
         type: set_variable
         next: Boom
@@ -161,9 +159,8 @@ playbooks:
           item_after: "{{ vars.item | default('UNSET') }}"
       - name: Boom
         type: code_snippet
-        arguments:
-          code: |
-            raise Exception('force-fail to persist results')
+        code: |
+          raise Exception('force-fail to persist results')
 """
 
 

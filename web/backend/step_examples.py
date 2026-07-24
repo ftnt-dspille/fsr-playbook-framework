@@ -38,7 +38,6 @@ STEP_TYPE_TO_CORPUS: dict[str, list[str]] = {
     "set_variable":     ["SetVariable"],
     "find_record":      ["FindRecords"],
     "create_record":    ["InsertData"],
-    "insert_record":    ["InsertData"],
     "update_record":    ["UpdateRecord"],
     "delete_record":    ["UpdateRecord"],  # FSR uses UpdateRecord with __delete
     "ingest_bulk_feed": ["IngestBulkFeed"],
@@ -366,7 +365,7 @@ def _summarise(args: dict[str, Any], friendly: str, corpus: str) -> str:
         return summarise_trigger(args, corpus)
     if friendly == "manual_input":        return summarise_manual_input(args)
     if friendly == "find_record":         return summarise_find_record(args)
-    if friendly in ("create_record", "insert_record",
+    if friendly in ("create_record",
                     "update_record", "delete_record", "ingest_bulk_feed"):
         return summarise_record_write(args, corpus)
     if friendly == "workflow_reference":  return summarise_workflow_ref(args)

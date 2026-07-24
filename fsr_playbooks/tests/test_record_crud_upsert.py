@@ -1,4 +1,4 @@
-"""`is_upsert` on create_record/insert_record routes the step at the upsert endpoint.
+"""`is_upsert` on create_record routes the step at the upsert endpoint.
 
 FortiSOAR exposes record upsert as a *separate collection* —
 ``/api/3/upsert/<module>``, not a flag on InsertData. So ``is_upsert`` is a
@@ -75,29 +75,17 @@ def test_is_upsert_does_not_double_rewrite_upsert_collection():
 def test_is_upsert_dropped_from_update_record_without_rewrite():
     # update_record is already a partial patch by IRI/query; is_upsert has no
     # endpoint meaning there, but the lever is still dropped (never a wire arg).
-    # For update_record the record IRI is carried in `collection` (module ->
-    # collectionType); it is preserved, not rewritten to the upsert endpoint.
+    # For update_record the record IRI is the friendly `record:` (module ->
+    # collectionType); it is preserved as wire `collection`, not rewritten to
+    # the upsert endpoint.
     args, errs = _normalize({
         "module": "alerts",
         "is_upsert": True,
-        "collection": "/api/3/alerts/abc",
+        "record": "/api/3/alerts/abc",
         "resource": {"name": "n"},
     }, step_type="update_record")
     assert not errs, errs
     assert args["collectionType"] == "/api/3/alerts"
-    assert args["collection"] == "/api/3/alerts/abc"  # record IRI preserved
+    assert args["collection"] == "/api/3/alerts/abc"  # record IRI (from record:)
     assert "is_upsert" not in args
     assert "operation" not in args  # no Overwrite default on update
-
-
-def test_insert_record_also_upserts():
-    # insert_record is the alias for create_record (both InsertData).
-    args, errs = _normalize({
-        "module": "alerts",
-        "is_upsert": True,
-        "resource": {"sourceId": "x", "name": "n"},
-    }, step_type="insert_record")
-    assert not errs, errs
-    assert args["collection"] == "/api/3/upsert/alerts"
-    assert args["operation"] == "Overwrite"
-    assert "is_upsert" not in args

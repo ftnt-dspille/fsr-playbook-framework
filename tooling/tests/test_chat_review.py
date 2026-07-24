@@ -130,9 +130,8 @@ def test_set_variable_typo_detected(tmpdb: Path) -> None:
         "    steps:\n"
         "      - id: s\n"
         "        type: set_variable\n"
-        "        arguments:\n"
-        "          variables:\n"
-        "            - {name: x, value: hi}\n"
+        "        vars:\n"
+        "          x: hi\n"
         "```\n"
     )
     _msg(conn, "typo_test", 2, 0, "assistant_text", yaml_block)
@@ -239,9 +238,8 @@ def test_yaml_in_wrong_fence_detected(tmpdb: Path) -> None:
          "  - id: pb\n"
          "    steps:\n"
          "      - id: s\n"
-         "        type: set_variable\n"
-         "        arguments:\n"
-         "          arg_list: []\n"
+          "        type: set_variable\n"
+          "        vars: {}\n"
          "```\n")
     conn.commit()
     conn.close()

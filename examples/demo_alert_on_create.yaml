@@ -15,22 +15,20 @@ playbooks:
       - name: On Alert Create
         type: start_on_create
         next: Stamp marker
-        arguments:
-          module: alerts
-          when:
-            logic: AND
-            filters:
-              # `name` is a plain string field; picklist-typed fields
-              # like `type`/`severity` store IRIs, not display values,
-              # so a literal-string `like` filter on them never matches.
-              - {field: name, op: like, value: "%fsrpb_e2e_on_create%"}
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            # `name` is a plain string field; picklist-typed fields
+            # like `type`/`severity` store IRIs, not display values,
+            # so a literal-string `like` filter on them never matches.
+            - {field: name, op: like, value: "%fsrpb_e2e_on_create%"}
 
       - name: Stamp marker
         type: update_record
-        arguments:
-          collection: "{{ vars.input.records[0]['@id'] }}"
-          module: alerts
-          resource:
-            description: "fsrpb_e2e_on_create_marker"
-          operation: Replace
-          step_variables: []
+        record: "{{ vars.input.records[0]['@id'] }}"
+        module: alerts
+        fields:
+          description: "fsrpb_e2e_on_create_marker"
+        operation: Replace
+        step_variables: []

@@ -118,8 +118,7 @@ playbooks:
       - name: ask
         type: manual_input
         title: "Approve?"
-        arguments:
-          is_approval: maybe
+        is_approval: maybe
 """
     r = compile_yaml(text, db_path)
     codes = [e.code for e in r.errors if e.severity == "error"]
@@ -159,9 +158,8 @@ playbooks:
       - name: ask
         type: manual_input
         options: [Approve]
-        arguments:
-          title: "Approve?"
-          is_approval: true
+        title: "Approve?"
+        is_approval: true
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -181,8 +179,7 @@ playbooks:
       - name: ask
         type: manual_input
         options: [Continue]
-        arguments:
-          title: "Continue?"
+        title: "Continue?"
 """
     r = compile_yaml(text, db_path)
     assert not [e for e in r.errors if e.severity == "error"], \
@@ -231,8 +228,8 @@ playbooks:
         type: manual_input
         is_approval: true
         options: [Approve]
+        title: "Approve?"
         arguments:
-          title: "Approve?"
           is_approval: true
 """
     r = compile_yaml(text, db_path)

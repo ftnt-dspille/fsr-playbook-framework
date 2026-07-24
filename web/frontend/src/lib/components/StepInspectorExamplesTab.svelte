@@ -59,7 +59,7 @@
   // the load decision is self-contained).
   const CORPUS_TYPES = new Set([
     'decision', 'manual_input', 'set_variable', 'find_record',
-    'create_record', 'insert_record', 'update_record', 'delete_record',
+    'create_record', 'update_record', 'delete_record',
     'ingest_bulk_feed', 'delay', 'code_snippet', 'workflow_reference',
     'start_on_create', 'start_on_update', 'start',
     'manual_action', 'api_call'

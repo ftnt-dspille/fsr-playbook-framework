@@ -28,30 +28,22 @@ playbooks:
         # URL error in the manual-input handler.
         type: manual_input
         next: After input
-        arguments:
-          type: InputBased
-          input:
-            schema:
-              title: "E2E test gate"
-              description: "Click Continue to resume the test playbook."
-              inputVariables: []
-          record: ""
-          is_approval: false
-          isRecordLinked: false
-          owner_detail:
-            isAssigned: false
-          step_variables: []
-          response_mapping:
-            options:
-              - {option: Continue, primary: true}
-            duplicateOption: false
-            customSuccessMessage: "Awaiting Playbook resumed successfully."
-          email_notification:
-            enabled: false
-            smtpParameters: []
-          inline_channel_list: []
-          external_channel_list: []
-          unauthenticated_input: false
+        input:
+          schema:
+            title: "E2E test gate"
+            description: "Click Continue to resume the test playbook."
+            inputVariables: []
+        record: ""
+        is_approval: false
+        isRecordLinked: false
+        response_mapping:
+          options:
+            - {option: Continue, primary: true}
+          duplicateOption: false
+          customSuccessMessage: "Awaiting Playbook resumed successfully."
+        inline_channel_list: []
+        external_channel_list: []
+        unauthenticated_input: false
 
       - name: After input
         type: set_variable

@@ -24,12 +24,11 @@ playbooks:
       - name: Query VirusTotal
         type: connector
         next: Extract malicious count
-        arguments:
-          connector: virustotal
-          operation: query_ip
-          config: ""
-          params:
-            ip: "{{ vars.input.params.ip }}"
+        connector: virustotal
+        operation: query_ip
+        config: ""
+        params:
+          ip: "{{ vars.input.params.ip }}"
 
       - name: Extract malicious count
         type: set_variable

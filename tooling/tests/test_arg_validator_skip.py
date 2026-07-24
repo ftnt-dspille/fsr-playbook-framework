@@ -38,10 +38,9 @@ playbooks:
         next: Hello
       - name: Hello
         type: connector
-        arguments:
-          connector: cyops_utilities
-          operation: no_op
-          config: ""
+        connector: cyops_utilities
+        operation: no_op
+        config: ""
         next: stop
       - name: stop
         type: end
@@ -90,10 +89,9 @@ playbooks:
         next: u
       - name: Update
         type: update_record
-        arguments:
-          module: alerts
-          resource:
-            severity: "{{ 'High' | picklist('severity') }}"
+        module: alerts
+        resource:
+          severity: "{{ 'High' | picklist('severity') }}"
         next: stop
       - name: stop
         type: end
@@ -118,8 +116,7 @@ playbooks:
         next: d
       - name: Wait
         type: delay
-        arguments:
-          seconds: 5
+        seconds: 5
         next: stop
       - name: stop
         type: end
@@ -146,9 +143,8 @@ playbooks:
         next: s
       - name: Stash
         type: set_variable
-        arguments:
-          source_ip: "1.2.3.4"
-          verdict: pending
+        source_ip: "1.2.3.4"
+        verdict: pending
         next: stop
       - name: stop
         type: end
@@ -174,9 +170,8 @@ playbooks:
         next: c
       - name: Compute
         type: code_snippet
-        arguments:
-          code: |
-            result = 1 + 1
+        code: |
+          result = 1 + 1
         next: stop
       - name: stop
         type: end

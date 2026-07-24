@@ -2,12 +2,11 @@
 
 A friendly manual_input step is authored as::
 
-    arguments:
-      title: "Approve?"
-      description: "Optional markdown body"
-      options: [Continue]                 # or [{option: yes, primary: true}, ...]
-      inputs:                             # optional fields to collect
-        - {name: comment, kind: textarea, label: "Comment", required: true}
+    title: "Approve?"
+    description: "Optional markdown body"
+    options: [Continue]                 # or [{option: yes, primary: true}, ...]
+    inputs:                             # optional fields to collect
+      - {name: comment, kind: textarea, label: "Comment", required: true}
 
 and expands to FSR's canonical InputBased shape (`input.schema` +
 `response_mapping` + a dozen always-present sibling fields).
@@ -128,6 +127,8 @@ class ManualInputArgs(StrictArgs):
     # Friendly authoring scalars.
     title: Optional[str] = None
     description: Optional[str] = None
+    email: Optional[Any] = None
+    assign_to: Optional[Any] = None
     # Canonical scalar flags (FSR booleans; pydantic coerces true/false/0/1/"yes"…).
     is_approval: Optional[bool] = None
     isRecordLinked: Optional[bool] = None

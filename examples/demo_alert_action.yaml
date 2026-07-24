@@ -19,11 +19,10 @@ playbooks:
       - name: Triage Alert            # canvas/step name (what shows on the node)
         type: start
         next: Read severity
-        arguments:
-          module: alerts
-          button_label: "Triage Alert" # what shows on the Execute menu button
-          requires_record: true
-          run_mode: per_record
+        module: alerts
+        button_label: "Triage Alert" # what shows on the Execute menu button
+        requires_record: true
+        run_mode: per_record
 
       - name: Read severity
         type: set_variable

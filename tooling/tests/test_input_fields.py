@@ -25,9 +25,8 @@ playbooks:
         next: Ask
       - name: Ask
         type: manual_input
-        arguments:
-          title: Form
-          inputs:
+        title: Form
+        inputs:
 {inputs_yaml}
         options:
           - display: continue
@@ -169,9 +168,8 @@ playbooks:
         next: Ask
       - name: Ask
         type: manual_input
-        arguments:
-          title: Form
-          inputs:
+        title: Form
+        inputs:
 {inputs_yaml}
         options:
           - display: continue

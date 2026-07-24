@@ -30,7 +30,11 @@ def _scaffold(example: dict) -> str:
     # The example may carry step-level keys (options:, conditions:,
     # next:, …) alongside arguments — preserve them verbatim. The parser
     # recognizes step-level options/conditions/vars/next/branches.
+    # Phase G: hoist `arguments:` contents to step level.
     middle = dict(example)
+    if "arguments" in middle and isinstance(middle["arguments"], dict):
+        for k, v in middle.pop("arguments").items():
+            middle.setdefault(k, v)
     middle.setdefault("name", "Middle")
     middle_name = middle["name"]
     stype = example.get("type")

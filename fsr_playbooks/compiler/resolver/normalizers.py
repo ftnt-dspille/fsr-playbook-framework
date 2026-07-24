@@ -141,6 +141,19 @@ class NormalizerMixin:
                     suggestion=msg,
                 ))
                 return
+            if step.type == "insert_record":
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_STEP_TYPE,
+                    message=(
+                        "`insert_record` was removed — it was a legacy alias "
+                        "for `create_record` (both compile to InsertData). Use "
+                        "`type: create_record` instead."
+                    ),
+                    path=f"{path}.type",
+                    near="create_record",
+                    suggestion="did you mean 'create_record'?",
+                ))
+                return
             errors.append(CompileError(
                 code=ErrorCode.UNKNOWN_STEP_TYPE,
                 message=f"unknown step type: {step.type!r}",
@@ -177,7 +190,7 @@ class NormalizerMixin:
         if step.type == "api_endpoint":
             self._normalize_api_endpoint_args(step, path, errors)
 
-        if step.type in ("create_record", "insert_record", "update_record"):
+        if step.type in ("create_record", "update_record"):
             self._normalize_record_crud_args(step, path, errors)
 
         if step.type == "find_record":
@@ -479,8 +492,7 @@ class NormalizerMixin:
 
             - name: Start
               type: api_endpoint
-              arguments:
-                route: lookup_ip
+              route: lookup_ip
 
         compiles to the same wire shape as a fully-specified token-based
         trigger. Live-grounded on an exported private playbook (see
@@ -570,17 +582,20 @@ class NormalizerMixin:
     ) -> None:
         """Friendly `module: alerts` → canonical IRI keys.
 
-        - create_record / insert_record (InsertData):
+        - create_record (InsertData):
             module → collection ('/api/3/<m>')
         - update_record (UpdateRecord):
             module → collectionType ('/api/3/<m>')
-            (`collection:` here is the *record* IRI; do not overwrite.)
+            record → collection    (the targeted record IRI; `collection:` is
+            rejected on update — it was the record IRI but collided with
+            create's module-IRI `collection`, the #1 record-CRUD footgun)
 
-        find_record's handler takes `module:` directly; nothing to do.
-        Already-set canonical keys win — never clobber an explicit value.
+        `module:` is mandatory on create/update (an explicit canonical IRI key
+        is an escape hatch). find_record's handler takes `module:` directly;
+        nothing to do there. Already-set canonical keys win — never clobber.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"module", "mock_result", "condition"}
+        _FRIENDLY = {"module", "mock_result", "condition", "record", "fields"}
         _CANONICAL = {
             "collection", "collectionType", "resource", "operation",
             "fieldOperation", "__recommend", "_showJson", "step_variables",
@@ -621,14 +636,16 @@ class NormalizerMixin:
     def _normalize_find_record_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
-        """Strict-whitelist guard for find_record.
+        """Friendly `filters:` form → wire `query:` envelope.
 
         Handler signature is `find_data(module, query, partial=True, **kw)`.
-        Unknown keys silently disappear at runtime, so reject misspellings
-        (e.g. `filter:` instead of `query:`) at compile time.
+        The friendly form lets authors write flat `filters:` / `limit:` /
+        `logic:` instead of the raw wire `query: {sort: [], limit, logic,
+        filters: [{type: primitive, field, value, operator, _operator}]}`.
+        An existing `query:` is still accepted (back-compat).
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY: set[str] = set()
+        _FRIENDLY = {"filters", "limit", "logic", "relationships"}
         _CANONICAL = {
             "module", "query", "partial", "mock_result", "condition",
             "step_variables", "checkboxFields",
@@ -638,10 +655,47 @@ class NormalizerMixin:
         )
         # Scalar-field type validation via the typed-args layer
         # (`typed_args.steps.expand_find_record`), which owns the `FindRecordArgs`
-        # model (module:str, partial/checkboxFields:bool). Validation-only — it
-        # never mutates `a` (find_record has no friendly→canonical transform), so
-        # the `__selectFields` cleanup below and `step.arguments` are untouched.
+        # model. Validation-only — runs before the friendly→canonical transform.
         _expand_find_record_typed(a, path, errors)
+
+        # Phase B1: friendly `filters:` → wire `query:` envelope.
+        # Only transform when `filters:` is present AND `query:` is not
+        # (an explicit `query:` wins — back-compat for authored wire shapes).
+        if isinstance(a.get("filters"), list) and "query" not in a:
+            filters_in = a.pop("filters")
+            limit = a.pop("limit", 30)
+            logic = a.pop("logic", "AND")
+            wire_filters = []
+            for f in filters_in:
+                if not isinstance(f, dict):
+                    wire_filters.append(f)
+                    continue
+                wf: dict[str, Any] = {"type": "primitive"}
+                wf["field"] = f.get("field")
+                wf["value"] = f.get("value")
+                op = f.get("operator", "eq")
+                wf["operator"] = op
+                wf["_operator"] = op
+                # Carry through any extra keys the author set (e.g. __selectFields)
+                for k, v in f.items():
+                    if k not in ("field", "value", "operator"):
+                        wf.setdefault(k, v)
+                wire_filters.append(wf)
+            a["query"] = {
+                "sort": [],
+                "limit": limit,
+                "logic": logic,
+                "filters": wire_filters,
+            }
+            a.setdefault("checkboxFields", False)
+
+        # `relationships: true` → append `?$relationships=true` to module
+        if a.get("relationships") is True:
+            mod = a.get("module")
+            if isinstance(mod, str) and "?$relationships=true" not in mod:
+                a["module"] = mod + "?$relationships=true"
+            a.pop("relationships", None)
+
         # Editor rule (bundle line 34498): query.__selectFields only persists
         # when checkboxFields is truthy; otherwise the editor deletes it before
         # POST so a stale field projection doesn't ship.
@@ -975,14 +1029,13 @@ class NormalizerMixin:
 
         Friendly authoring shape that avoids the parallel `branches:` map:
 
-            arguments:
-              conditions:
-                - option: "Greater Than 10"
-                  condition: "{{ vars.input.value > 10 }}"
-                  next: greater_step
-                - option: "Else"
-                  default: true
-                  next: not_greater_step
+            conditions:
+              - option: "Greater Than 10"
+                condition: "{{ vars.input.value > 10 }}"
+                next: greater_step
+              - option: "Else"
+                default: true
+                next: not_greater_step
 
         The `next:` key is stripped from the emitted condition entry and
         copied into `step.branches[option] = next` so the existing emitter
@@ -1002,13 +1055,12 @@ class NormalizerMixin:
     ) -> None:
         """Friendly manual_input authoring shape:
 
-            arguments:
-              title: "Approve?"
-              description: "Optional markdown body"
-              options: [Continue]                  # or [{option: yes, primary: true}, {option: no}]
-              inputs:                              # optional fields to collect
-                - {name: comment, kind: textarea, label: "Comment", required: true}
-                - {name: severity, kind: select, options: [Low, Med, High]}
+            title: "Approve?"
+            description: "Optional markdown body"
+            options: [Continue]                  # or [{option: yes, primary: true}, {option: no}]
+            inputs:                              # optional fields to collect
+              - {name: comment, kind: textarea, label: "Comment", required: true}
+              - {name: severity, kind: select, options: [Low, Med, High]}
 
         Expands to FSR's canonical InputBased shape (input.schema +
         response_mapping + the dozen always-present sibling fields).
@@ -1045,7 +1097,7 @@ class NormalizerMixin:
         # combinations (e.g. external email keys in an internal-only
         # prompt). See MI_DECISION_VALIDATION_AUDIT.md §0 for the model.
         _FRIENDLY = {"title", "description", "options", "inputs",
-                     "mode", "audience", "assignee"}
+                     "audience", "assignee", "email", "assign_to"}
         _CANONICAL = {
             "type", "input", "record", "is_approval", "isRecordLinked",
             "owner_detail", "step_variables", "response_mapping",
@@ -1078,28 +1130,59 @@ class NormalizerMixin:
                 ),
             ))
             return
-        # `type` if provided must be one of the two FSR ManualInput
-        # dispatch values. Live FSR uses both: InputBased for any
-        # form-collecting prompt, DecisionBased for button-only flows
-        # (no input form). Anything else is junk.
-        t = a.get("type")
-        if t is not None and t not in ("InputBased", "DecisionBased"):
+        # MI mode is inferred: `inputs:` present → InputBased (form),
+        # absent → DecisionBased (button-only). No `mode:` or `type:` key
+        # at the authoring level — the collision with step-level `type:`
+        # makes it impossible to hoist safely.
+        if "type" in a:
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(
-                    f"manual_input.arguments.type must be 'InputBased' "
-                    f"or 'DecisionBased' (got {t!r}); FSR has no other "
-                    f"dispatch paths"
+                    "manual_input: `type:` is not settable — the "
+                    "compiler infers InputBased when `inputs:` is "
+                    "present and DecisionBased otherwise"
                 ),
                 path=f"{path}.arguments.type",
-                suggestion="omit `type:` to let the compiler choose "
-                           "InputBased (the default for any form-collecting prompt)",
             ))
             return
         if isinstance(a.get("input"), dict) and isinstance(
                 a.get("response_mapping"), dict):
             step.arguments = a
             return
+        # Phase D1: friendly `email:` → wire `email_notification:` block.
+        # Authors write `email: {enabled: true, subject: "...", recipients: [...]}`
+        # instead of the raw wire `email_notification: {enabled, smtpParameters: [...]}`.
+        email_friendly = a.pop("email", None)
+        if isinstance(email_friendly, dict):
+            en = {"enabled": email_friendly.get("enabled", True)}
+            recipients = email_friendly.get("recipients", [])
+            if isinstance(recipients, str):
+                recipients = [recipients]
+            # smtpParameters: [{to, subject, body, from, cc, bcc}] — the wire shape.
+            params: dict[str, Any] = {}
+            if recipients:
+                params["to"] = recipients
+            if email_friendly.get("subject"):
+                params["subject"] = email_friendly["subject"]
+            if email_friendly.get("body"):
+                params["body"] = email_friendly["body"]
+            if email_friendly.get("from"):
+                params["from"] = email_friendly["from"]
+            en["smtpParameters"] = [params] if params else []
+            a["email_notification"] = en
+        # Phase D1: friendly `assign_to:` → wire `owner_detail:` block.
+        # Authors write `assign_to: {person: "..."}` or `assign_to: {team: "..."}`
+        # instead of the raw wire `owner_detail: {isAssigned: true, assignedToPerson/...}`.
+        assign_friendly = a.pop("assign_to", None)
+        if isinstance(assign_friendly, dict):
+            od: dict[str, Any] = {"isAssigned": True}
+            if assign_friendly.get("person"):
+                od["assignedToPerson"] = assign_friendly["person"]
+            if assign_friendly.get("team"):
+                od["assignedToTeam"] = [assign_friendly["team"]]
+            if assign_friendly.get("record_field"):
+                od["assignedToRecord"] = True
+            a["owner_detail"] = od
         title = a.pop("title", None) or step.name or "Awaiting input"
         # FSR's runtime rejects a manual_input with an empty description body even
         # though it validates fine offline. Fall back to the title (always
@@ -1131,7 +1214,9 @@ class NormalizerMixin:
             options[0]["primary"] = True
         inputs = a.pop("inputs", None) or []
         expanded_inputs = self._expand_input_variables(inputs, path, errors)
-        a["type"] = a.get("type", "InputBased")
+        # Infer MI mode: form fields present → InputBased, otherwise
+        # button-only → DecisionBased.
+        a["type"] = "InputBased" if expanded_inputs else "DecisionBased"
         a["input"] = {
             "schema": {
                 "title": title,
@@ -1283,10 +1368,9 @@ class NormalizerMixin:
     ) -> None:
         """Friendly Python-snippet step:
 
-            arguments:
-              code: |
-                print("hi")
-              config: test          # optional connector-config name (defaults to default)
+            code: |
+              print("hi")
+            config: test          # optional connector-config name (defaults to default)
 
         FSR's CodeSnippet step type uses the connector dispatcher under
         the hood (`script: /wf/workflow/tasks/connector`, connector
@@ -1374,8 +1458,7 @@ class NormalizerMixin:
     ) -> None:
         """Friendly delay step:
 
-            arguments:
-              seconds: 5      # or minutes/hours/days
+            seconds: 5      # or minutes/hours/days
 
         Expands to FSR's canonical TimeBased rule shape with the
         instance-wide `resume_playbook` channel UUID. Already-canonical

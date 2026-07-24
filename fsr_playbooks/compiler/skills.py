@@ -90,32 +90,26 @@ def _compile_run_connector_action(
 ) -> Dict[str, Any]:
     """RunConnectorAction. `inputs` carries `connector`, `operation`, and
     the op params; wired params have their literal swapped for a jinja
-    ref. Emits the canonical `type: connector` step with everything under
-    `arguments:` (the wire shape the resolver expects)."""
+    ref. Emits a `type: connector` step with args at step level (Phase G:
+    no `arguments:` wrapper)."""
     merged = _apply_wires(inputs, wired_refs)
     connector = merged.pop("connector", None)
     operation = merged.pop("operation", None)
-    # The config id run_op resolved at execution time (recorded on the trace),
-    # so the step runs against the same configuration the agent used. Carried
-    # at the step level, not as an op param.
     config = merged.pop("config", None)
-    # The FortiSOAR Agent id when run_op routed the op through an agent
-    # (agent-bound connectors). The step needs the agent binding alongside the
-    # config id or the workflow engine can't reach the connector.
     agent = merged.pop("agent", None)
-    arguments: Dict[str, Any] = {}
+    step: Dict[str, Any] = {"type": "connector", "name": step_name}
     if connector is not None:
-        arguments["connector"] = connector
+        step["connector"] = connector
     if operation is not None:
-        arguments["operation"] = operation
+        step["operation"] = operation
     if config is not None:
-        arguments["config"] = config
+        step["config"] = config
     if agent:
-        arguments["agent"] = agent
-    # Remaining keys are the op params.
+        step["agent"] = agent
     for k, v in merged.items():
-        arguments[k] = v
-    return {"type": "connector", "name": step_name, "arguments": arguments}
+        if k not in ("name", "type"):
+            step[k] = v
+    return step
 
 
 def _compile_set_variable(

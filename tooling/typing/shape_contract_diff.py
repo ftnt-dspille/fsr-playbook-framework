@@ -68,21 +68,24 @@ IGNORE_KEYS = {"name", "id", "type", "next", "kind"}
 # A NEW phantom read NOT in this set is what `--check` fails on — that is the
 # signal that a fresh untyped cross-stage shape disagreement has appeared.
 ACCEPTED_PHANTOM: set[str] = {
+    "__recommend",  # wire-internal default read by decompiler (stripped on pull)
+    "_showJson",  # wire-internal default read by decompiler (stripped on pull)
     "apply_async",
+    "collectionType",  # wire key written by record_crud.py (not in STAGES);
+    # decompiler reads it on pull to reverse → friendly `module:`.
     "connector_name",
+    "fieldOperation",  # wire-internal default read by decompiler (stripped on pull)
+    "from_str",  # stale legacy smtp field read by decompiler (stripped on pull)
     "inputs",
     "mock_result",
     "module",
     "modules",
     "op",
     "op_name",
-    # code_snippet's authored code: the YAML author writes
-    # `arguments.params.python_function:` (a hand-authored canonical step per
-    # decompiler.py); read by decompiler/linter/normalizers/snippet_checks but
-    # never produced by a compiler stage — same author-supplied class as
-    # module/op/target/when. Pre-existing at HEAD; accepted here.
     "python_function",
+    "tagsOperation",  # wire-internal default read by decompiler (stripped on pull)
     "target",
+    "timeout",  # wire-internal branch-resume variant read by decompiler (stripped)
     "vars",
     "when",
 }

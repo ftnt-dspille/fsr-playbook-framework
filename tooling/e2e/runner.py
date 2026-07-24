@@ -168,8 +168,7 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
     try:
         for i, step in enumerate(setup_steps):
             kind = step.get("kind")
-            # Accept create_record (preferred) and the legacy insert_record alias.
-            if kind not in ("create_record", "insert_record"):
+            if kind != "create_record":
                 _log(f"[{run_id}] setup[{i}] unknown kind {kind!r}, skipping")
                 continue
             module = step.get("module")
