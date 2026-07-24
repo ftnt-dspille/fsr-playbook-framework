@@ -264,6 +264,61 @@ def _op_presence(connector: str, op: str) -> tuple[bool, bool]:
         return False, False
 
 
+def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | None:
+    """Clean `unknown_connector` bounce for a `run_op` whose connector isn't real.
+
+    The chat `dispatch`, for an uncatalogued connector, would escalate to a
+    tier-3 **approval card** the model can't act on — so the store-presence
+    check inside ``mcp_server.tools_execution.run_op`` (which returns the
+    actionable ``unknown_connector`` error the dedicated ``siem_*/faz_*``
+    wrappers already surface) never runs. Live on 8.0: an alert hunt with no
+    SIEM configured fabricated ``run_op("fortinet-fortisiem","siem_search_host")``
+    and parked on a card instead of self-correcting.
+
+    Mirror ``tools_execution.run_op``'s resolution: look the connector up in the
+    store ``connectors`` table; if absent, confirm it truly doesn't exist (a
+    connector installed after the last warmup is absent from the catalog but
+    present on the box — ``stale_catalog_hint`` returns a re-warmup hint, and we
+    keep the conservative path there). Only a connector that exists NOWHERE
+    yields the bounce — and one that can't be reached can't execute anything, so
+    an error is strictly safer than a card. Returns the error dict to
+    short-circuit, or ``None`` to fall through to normal tiering.
+    """
+    if not connector or not _DB_PATH.exists():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        try:
+            row = con.execute(
+                "SELECT 1 FROM connectors WHERE name=? LIMIT 1", (connector,)
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None  # DB trouble → stay conservative (normal tiering)
+    if row is not None:
+        return None  # connector is catalogued → let normal tiering decide
+    # Absent from the catalog. Ask the box before declaring it nonexistent.
+    try:
+        from ..mcp_server import _shared
+        stale = _shared.stale_catalog_hint(connector)
+    except Exception:  # noqa: BLE001 — never harden a tier lookup into a crash
+        stale = None
+    if stale is not None:
+        return None  # installed-after-warmup; keep the conservative path
+    return {
+        "ok": False,
+        "code": "unknown_connector",
+        "connector": connector,
+        "message": f"connector '{connector}' not found in store",
+        "suggestions": [
+            "Run `find_connector` to search the catalog for the right name.",
+            "Only connectors from `list_configured_connectors` can run — pivot "
+            "to a configured one, or consolidate what you already have.",
+        ],
+    }
+
+
 def _op_name_is_destructive(op: str) -> bool:
     """True when an op NAME alone marks it as a containment/response action.
 
@@ -1088,6 +1143,19 @@ def dispatch(
             _record_audit(name, raw_args, tier, "denied")
             return {"ok": False, "code": "user_denied",
                     "reason": f"Eval policy '{policy}' denied tier-{tier} action."}
+
+        # About to card this call. A `run_op` against a connector that exists
+        # nowhere must bounce a clean `unknown_connector` (like the dedicated
+        # wrappers do) instead of a misleading approval card the model can't act
+        # on — but only HERE, after grants/policy: a granted or eval-approved
+        # call still executes and lets run_op surface its own store error.
+        if name == "run_op":
+            absent = _run_op_absent_connector_error(
+                (raw_args or {}).get("connector") or "",
+                (raw_args or {}).get("op") or "")
+            if absent is not None:
+                _record_audit(name, raw_args, tier, "unknown_connector")
+                return absent
 
         approval_id = uuid.uuid4().hex
         envelope = {

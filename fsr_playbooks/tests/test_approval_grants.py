@@ -164,15 +164,16 @@ def test_run_op_grant_scoped_by_op_key(monkeypatch, session_id):
 
     monkeypatch.setattr(tools_mod, "_resolve_tier", mock_resolve_tier)
 
-    # Grant for fortigate:block_ip
+    # Grant for fortigate-firewall:block_ip (a real, catalogued connector — a
+    # bogus name would now bounce as unknown_connector before ever carding).
     grant_tool_approval(
-        session_id, "run_op", op_key="fortigate:block_ip", mode="once"
+        session_id, "run_op", op_key="fortigate-firewall:block_ip", mode="once"
     )
 
     # Call with matching op_key: should auto-run.
     result1 = dispatch(
         "run_op",
-        {"connector": "fortigate", "op": "block_ip", "params": {}},
+        {"connector": "fortigate-firewall", "op": "block_ip", "params": {}},
         session_id=session_id,
     )
     assert result1.get("ok") is True
@@ -181,7 +182,7 @@ def test_run_op_grant_scoped_by_op_key(monkeypatch, session_id):
     # Call with different op_key: should require approval.
     result2 = dispatch(
         "run_op",
-        {"connector": "fortigate", "op": "unblock_ip", "params": {}},
+        {"connector": "fortigate-firewall", "op": "unblock_ip", "params": {}},
         session_id=session_id,
     )
     assert result2.get("pending_approval") is True
