@@ -127,6 +127,8 @@ class ManualInputArgs(StrictArgs):
     # Friendly authoring scalars.
     title: Optional[str] = None
     description: Optional[str] = None
+    email: Optional[Any] = None
+    assign_to: Optional[Any] = None
     # Canonical scalar flags (FSR booleans; pydantic coerces true/false/0/1/"yes"…).
     is_approval: Optional[bool] = None
     isRecordLinked: Optional[bool] = None

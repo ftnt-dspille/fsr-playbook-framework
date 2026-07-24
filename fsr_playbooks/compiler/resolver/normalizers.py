@@ -1097,7 +1097,7 @@ class NormalizerMixin:
         # combinations (e.g. external email keys in an internal-only
         # prompt). See MI_DECISION_VALIDATION_AUDIT.md §0 for the model.
         _FRIENDLY = {"title", "description", "options", "inputs",
-                     "audience", "assignee"}
+                     "audience", "assignee", "email", "assign_to"}
         _CANONICAL = {
             "type", "input", "record", "is_approval", "isRecordLinked",
             "owner_detail", "step_variables", "response_mapping",
@@ -1149,6 +1149,40 @@ class NormalizerMixin:
                 a.get("response_mapping"), dict):
             step.arguments = a
             return
+        # Phase D1: friendly `email:` → wire `email_notification:` block.
+        # Authors write `email: {enabled: true, subject: "...", recipients: [...]}`
+        # instead of the raw wire `email_notification: {enabled, smtpParameters: [...]}`.
+        email_friendly = a.pop("email", None)
+        if isinstance(email_friendly, dict):
+            en = {"enabled": email_friendly.get("enabled", True)}
+            recipients = email_friendly.get("recipients", [])
+            if isinstance(recipients, str):
+                recipients = [recipients]
+            # smtpParameters: [{to, subject, body, from, cc, bcc}] — the wire shape.
+            params: dict[str, Any] = {}
+            if recipients:
+                params["to"] = recipients
+            if email_friendly.get("subject"):
+                params["subject"] = email_friendly["subject"]
+            if email_friendly.get("body"):
+                params["body"] = email_friendly["body"]
+            if email_friendly.get("from"):
+                params["from"] = email_friendly["from"]
+            en["smtpParameters"] = [params] if params else []
+            a["email_notification"] = en
+        # Phase D1: friendly `assign_to:` → wire `owner_detail:` block.
+        # Authors write `assign_to: {person: "..."}` or `assign_to: {team: "..."}`
+        # instead of the raw wire `owner_detail: {isAssigned: true, assignedToPerson/...}`.
+        assign_friendly = a.pop("assign_to", None)
+        if isinstance(assign_friendly, dict):
+            od: dict[str, Any] = {"isAssigned": True}
+            if assign_friendly.get("person"):
+                od["assignedToPerson"] = assign_friendly["person"]
+            if assign_friendly.get("team"):
+                od["assignedToTeam"] = [assign_friendly["team"]]
+            if assign_friendly.get("record_field"):
+                od["assignedToRecord"] = True
+            a["owner_detail"] = od
         title = a.pop("title", None) or step.name or "Awaiting input"
         # FSR's runtime rejects a manual_input with an empty description body even
         # though it validates fine offline. Fall back to the title (always
