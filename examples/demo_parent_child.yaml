@@ -41,8 +41,6 @@ playbooks:
         apply_async: false
         pass_parent_env: false
         pass_input_record: false
-        step_variables: []
-
       - name: Stamp result
         type: set_variable
         vars:

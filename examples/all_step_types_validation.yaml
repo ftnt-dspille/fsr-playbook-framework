@@ -184,7 +184,6 @@ playbooks:
       - name: Create Task Coverage
         type: create_task
         resource:
-          name: "Orphan -- exercises the create_task step TYPE (compile/round-trip); never reached at run time."
           description: "coverage-only"
 
       - name: Wait briefly
@@ -222,7 +221,6 @@ playbooks:
           recordTags: []
           threatTypes: []
           killChainPhases: []
-        step_variables: []
         mock_result: |
           {"status": "ok", "ingested": 0, "mock": true}
 
@@ -237,28 +235,20 @@ playbooks:
         module: alerts
         operation: Replace
         fields:
-          name: "Feed ingest audit - {{ vars.feed_source_name }}"
           description: "{{ vars.marker }}"
           source: "{{ vars.feed_source_name }}"
-        step_variables: []
-
       - name: Find audit alert
         type: find_record
         next: Update audit status
         ignore_errors: true
         comment: Find the alert we just created (by the marker) so update/delete target a real record.
         module: alerts
-        query:
-          logic: AND
-          filters:
-            - type: primitive
-              field: description
-              value: "{{ vars.marker }}"
-              operator: like
-              _operator: like
-          __selectFields: [uuid, name, description]
-        step_variables: []
-
+        filters:
+          - type: primitive
+            field: description
+            value: "{{ vars.marker }}"
+            operator: like
+            _operator: like
       - name: Update audit status
         type: update_record
         next: Comment on audit alert
@@ -268,8 +258,6 @@ playbooks:
         fields:
           description: "{{ vars.marker }} - ingested"
         operation: Replace
-        step_variables: []
-
       - name: Comment on audit alert
         type: create_record
         next: Delete audit alert
@@ -279,8 +267,6 @@ playbooks:
         operation: Overwrite
         fields:
           content: "Ingested {{ vars.ingestedData | length }} indicator(s) from {{ vars.feed_source_name }}."
-        step_variables: []
-
       - name: Delete audit alert
         type: delete_record
         next: Notify team
@@ -316,8 +302,6 @@ playbooks:
         apply_async: false
         pass_parent_env: false
         pass_input_record: false
-        step_variables: []
-
       - name: Notify peer tenant
         type: trigger_tenant_playbook
         next: Utils finish
@@ -443,7 +427,6 @@ playbooks:
         type: create_task
         next: End
         resource:
-          name: "{{ vars.task_name }}"
           description: "Task created via the all-step-types API endpoint trigger."
 
       - name: End

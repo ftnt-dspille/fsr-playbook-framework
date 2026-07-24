@@ -31,12 +31,10 @@ playbooks:
         type: find_record
         next: Apply tag
         module: indicators
-        query:
-          logic: AND
-          filters:
-            - field: value
-              operator: eq
-              value: "{{ vars.input.params.indicator_value }}"
+        filters:
+          - field: value
+            operator: eq
+            value: "{{ vars.input.params.indicator_value }}"
         partial: true
 
       - name: Apply tag

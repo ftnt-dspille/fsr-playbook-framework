@@ -43,6 +43,5 @@ playbooks:
         module: alerts
         operation: Replace
         fields:
-          name: "{{ vars.item.name }}"
           severity: "{{ vars.item.severity }}"
           description: "{{ vars.item.description }}"

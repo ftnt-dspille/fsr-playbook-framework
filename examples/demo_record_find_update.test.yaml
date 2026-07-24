@@ -5,7 +5,6 @@ setup:
   - kind: create_record
     module: alerts
     fields:
-      name: fsrpb_e2e_crud_alert
       severity: Medium
       description: original description
     capture_as: alert

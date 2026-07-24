@@ -37,17 +37,12 @@ playbooks:
         type: find_record
         next: Stamp description
         module: alerts
-        query:
-          logic: AND
-          filters:
-            - type: primitive
-              field: uuid
-              value: "{{ vars.input.params.target_uuid }}"
-              operator: eq
-              _operator: eq
-          __selectFields: [uuid, name, description]
-        step_variables: []
-
+        filters:
+          - type: primitive
+            field: uuid
+            value: "{{ vars.input.params.target_uuid }}"
+            operator: eq
+            _operator: eq
       - name: Stamp description
         type: update_record
         record: "{{ vars.steps.Find_target_alert[0]['@id'] }}"

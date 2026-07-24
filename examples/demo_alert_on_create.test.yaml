@@ -8,7 +8,6 @@ setup:
   - kind: create_record
     module: alerts
     fields:
-      name: fsrpb_e2e_on_create_seed
       severity: Medium
       status: Open
       type: Phishing

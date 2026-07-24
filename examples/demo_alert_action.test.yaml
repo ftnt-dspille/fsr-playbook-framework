@@ -9,7 +9,6 @@ setup:
   - kind: create_record
     module: alerts
     fields:
-      name: fsrpb_e2e_test_alert
       severity: High               # resolved to /api/3/picklists/<uuid>
       description: temporary alert created by fsrpb e2e harness
     capture_as: alert

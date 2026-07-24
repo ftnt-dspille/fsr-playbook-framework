@@ -224,6 +224,81 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
         out.append(line)
     lines = out
 
+    # 6. C2: strip wire-internal fields (empty/default values the compiler
+    # re-creates via setdefault). These are noise in hand-authored YAML.
+    c2_patterns = [
+        (r"^\s*step_variables:\s*\[\]\s*\n", "step_variables: []"),
+        (r"^\s*fieldOperation:\s*\[\]\s*\n", "fieldOperation: []"),
+        (r"^\s*tagsOperation:\s*Overwrite\s*\n", "tagsOperation: Overwrite"),
+        (r"^\s*__recommend:\s*\[\]\s*\n", "__recommend: []"),
+        (r"^\s*_showJson:\s*false\s*\n", "_showJson: false"),
+        # D2: strip default manual_input owner_detail/email_notification blocks
+        (r"^\s*owner_detail:\s*\n\s*isAssigned:\s*false\s*\n",
+         "owner_detail: {isAssigned: false} (default)"),
+        (r"^\s*email_notification:\s*\n\s*enabled:\s*false\s*\n\s*smtpParameters:\s*\[\]\s*\n",
+         "email_notification: {enabled: false, smtpParameters: []} (default)"),
+    ]
+    text = "".join(lines)
+    for pat, label in c2_patterns:
+        new_text = re.sub(pat, "", text, flags=re.MULTILINE)
+        if new_text != text:
+            changes.append(f"stripped {label} (wire-internal)")
+            text = new_text
+    lines = text.splitlines(keepends=True)
+
+    # 7. B2: find_record query: → filters:/limit:/logic:
+    # Unpack the query: envelope by removing the query: line and dedenting
+    # its children to the step level. Skip default logic: AND / limit: 30.
+    out: list[str] = []
+    current_type = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if re.match(r"^\s*-\s+(type|name):", line):
+            current_type = _step_type_after(lines, i)
+
+        if current_type == "find_record" and re.match(r"^(\s+)query:", line):
+            query_indent = len(re.match(r"^(\s+)", line).group(1))
+            changes.append("B2: query: → filters: (find_record)")
+            i += 1
+            # Calculate dedent from the first non-blank child line
+            dedent: int | None = None
+            while i < len(lines):
+                inner = lines[i]
+                stripped = inner.rstrip("\n\r")
+                if not stripped.strip():
+                    out.append(inner)
+                    i += 1
+                    continue
+                inner_indent = len(inner) - len(inner.lstrip())
+                if inner_indent <= query_indent:
+                    break  # exited query: block
+                if dedent is None:
+                    dedent = inner_indent - query_indent
+                # Skip default logic: AND and limit: 30
+                if (re.match(r"^\s*logic:\s*AND\s*$", stripped)
+                        and inner_indent - query_indent <= 2):
+                    i += 1
+                    continue
+                if (re.match(r"^\s*limit:\s*30\s*$", stripped)
+                        and inner_indent - query_indent <= 2):
+                    i += 1
+                    continue
+                # Skip __selectFields — wire-internal; the normalizer strips
+                # it from query: when checkboxFields is false (the default).
+                if (re.match(r"^\s*__selectFields:", stripped)
+                        and inner_indent - query_indent <= 2):
+                    i += 1
+                    continue
+                # Dedent the line by the fixed offset
+                d = dedent if dedent > 0 else 0
+                out.append(inner[d:] if d > 0 else inner)
+                i += 1
+            continue
+        out.append(line)
+        i += 1
+    lines = out
+
     return "".join(lines), changes
 
 

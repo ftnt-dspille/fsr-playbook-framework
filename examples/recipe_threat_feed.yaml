@@ -156,8 +156,6 @@ playbooks:
           recordTags: []
           threatTypes: []
           killChainPhases: []
-        __recommend: []
-        step_variables: []
         # MOCK MODE: even with `useMockOutput=true / globalMock=false`,
         # IngestBulkFeed still executes live unless it has its own
         # `mock_result`. Fill in a stub success payload here while

@@ -6,7 +6,6 @@ setup:
   - kind: create_record
     module: alerts
     fields:
-      name: fsrpb_e2e_on_update_seed
       severity: Medium
       status: Open
     capture_as: alert
