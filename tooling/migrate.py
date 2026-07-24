@@ -18,17 +18,36 @@ Transforms (applied in order, all are safe on already-migrated files):
     ``collection:`` on update was the record IRI but collided with
     create_record's module-IRI ``collection`` (the #1 record-CRUD footgun).
 
+3b. ``collection: /api/3/<m>`` on ``create_record`` → ``module: <m>``
+    ``collection: /api/3/upsert/<m>`` → ``module: <m>`` + ``is_upsert: true``.
+    Non-``/api/3/`` collections pass through (canonical escape hatch).
+
 4.  ``resource:`` on ``create_record``/``update_record`` → ``fields:``
     ``fields:`` is the friendly alias; ``resource:`` was an FSR API term.
 
 5.  ``type: CyopsUtilices`` → ``type: utilities`` (if present).
     The editor's raw canonical is never the friendly surface.
+
+6.  Wire-internal default fields stripped (``step_variables: []``,
+    ``fieldOperation: []``, ``tagsOperation: Overwrite``, ``__recommend: []``,
+    ``_showJson: false``, default ``owner_detail``/``email_notification``).
+
+7.  ``query:`` on ``find_record`` → ``filters:``/``limit:``/``logic:``.
+    Default ``logic: AND`` / ``limit: 30`` and ``__selectFields`` are skipped.
+
+8.  Wire ``owner_detail:`` on ``manual_input`` → friendly ``assign_to:``
+    (``assignedToTeam`` → ``team:``, ``assignedToPerson`` → ``person:``).
+    Wire ``email_notification:`` → friendly ``email:``
+    (``smtpParameters[0]`` → ``recipients``/``subject``/``body``/``from``).
+    Defaults (``isAssigned: false`` / ``enabled: false``) already stripped
+    by step 6; only real assignment/email data is converted here.
 """
 from __future__ import annotations
 
 import argparse
 import re
 from pathlib import Path
+from typing import Any
 
 # Step types that use `resource:` as the record-payload wire key.
 _RECORD_CRUD_TYPES = frozenset({"create_record", "update_record"})
@@ -70,6 +89,7 @@ def _strip_arguments_wrapper(lines: list[str]) -> list[str]:
             j = i + 1
             dedent: int | None = None
             in_block_scalar = False
+            scalar_key_indent: int = 0
             while j < len(lines):
                 nxt = lines[j]
                 nxt_stripped = nxt.lstrip()
@@ -87,21 +107,17 @@ def _strip_arguments_wrapper(lines: list[str]) -> list[str]:
                 # Detect block-scalar start: `key: |` or `key: >`
                 if re.match(r"^\s*\S.*:\s*[|>]\s*$", nxt):
                     in_block_scalar = True
+                    scalar_key_indent = nxt_indent
                     dedented = nxt[dedent:] if len(nxt) >= dedent else nxt.lstrip()
                     out.append(dedented)
                     j += 1
                     continue
                 # If inside a block scalar, keep the line as-is (don't dedent
                 # literal content — its indentation is semantically load-bearing).
-                # A block scalar ends when a line at or below the key's indent
-                # appears; the nxt_indent <= base_indent check above handles
-                # that for lines outside the arguments block, but a sibling
-                # key inside the block also ends the scalar.
+                # A block scalar ends when a line at or below the key's
+                # original indent appears — that's a sibling key, not content.
                 if in_block_scalar:
-                    # Block scalar ends when a line's post-dedent indent is at
-                    # or below the key's dedented indent (step level).
-                    key_indent = nxt_indent - dedent
-                    if key_indent <= base_indent:
+                    if nxt_indent <= scalar_key_indent:
                         in_block_scalar = False
                     else:
                         out.append(nxt)  # literal content — no dedent
@@ -216,6 +232,24 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
                 if nl != line:
                     changes.append("collection: → record: (update_record)")
                 line = nl
+            elif current_type == "create_record":
+                # collection: /api/3/<m> → module: <m>
+                # collection: /api/3/upsert/<m> → module: <m> + is_upsert: true
+                # non-/api/3/ collection passes through (canonical escape hatch)
+                m = re.match(
+                    r'^(\s+)collection:\s*["\']?/api/3/upsert/([^"\'\s]+)["\']?\s*$',
+                    line)
+                if m:
+                    line = (f"{m.group(1)}module: {m.group(2)}\n"
+                            f"{m.group(1)}is_upsert: true\n")
+                    changes.append("collection: → module: (create_record, upsert)")
+                else:
+                    m = re.match(
+                        r'^(\s+)collection:\s*["\']?/api/3/([^"\'\s]+)["\']?\s*$',
+                        line)
+                    if m:
+                        line = f"{m.group(1)}module: {m.group(2)}\n"
+                        changes.append("collection: → module: (create_record)")
             nl = re.sub(r"^(\s+)resource:", r"\1fields:", line)
             if nl != line:
                 changes.append("resource: → fields:")
@@ -299,7 +333,198 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
         i += 1
     lines = out
 
+    # 8. D1: wire owner_detail:/email_notification: → friendly assign_to:/email:
+    # on manual_input steps. The C2 patterns above already stripped the
+    # default (isAssigned: false / enabled: false) envelopes; what remains
+    # is real assignment/email data that should use the friendly keys.
+    lines = _transform_manual_input_wire_blocks(lines, changes)
+
     return "".join(lines), changes
+
+
+def _transform_manual_input_wire_blocks(
+    lines: list[str], changes: list[str],
+) -> list[str]:
+    """Convert wire ``owner_detail:``/``email_notification:`` blocks to
+    friendly ``assign_to:``/``email:`` on manual_input steps.
+
+    Mirrors the decompiler's reverse (``_decompile_step`` D1 section).
+    Uses ``yaml.safe_load`` on the extracted block to robustly parse the
+    nested structure (``assignedToTeam`` can be a list of dicts with
+    ``iri``/``teamname``, a list of strings, or a bare string).
+    Comments inside the block are consumed by the YAML parser — they
+    describe the wire shape being replaced, so losing them is correct.
+    """
+    out: list[str] = []
+    current_type: str | None = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if re.match(r"^\s*-\s+(type|name):", line):
+            current_type = _step_type_after(lines, i)
+
+        if current_type == "manual_input":
+            stripped = line.lstrip()
+            indent = len(line) - len(stripped)
+
+            # owner_detail: → assign_to:
+            if re.match(r"^\s*owner_detail:\s*$", line):
+                block, end = _extract_block(lines, i, indent)
+                replacement = _owner_detail_to_assign_to(block, indent, changes)
+                if replacement is not None:
+                    out.extend(replacement)
+                    i = end
+                    continue
+
+            # email_notification: → email:
+            if re.match(r"^\s*email_notification:\s*$", line):
+                block, end = _extract_block(lines, i, indent)
+                replacement = _email_notification_to_email(block, indent, changes)
+                if replacement is not None:
+                    out.extend(replacement)
+                    i = end
+                    continue
+
+        out.append(line)
+        i += 1
+    return out
+
+
+def _extract_block(
+    lines: list[str], start: int, block_indent: int,
+) -> tuple[list[str], int]:
+    """Extract the indented block starting at ``start``.
+
+    Returns (block_lines, next_index_after_block).
+    """
+    block = [lines[start]]
+    j = start + 1
+    while j < len(lines):
+        nxt = lines[j]
+        nxt_stripped = nxt.lstrip()
+        if nxt_stripped == "" or nxt_stripped.startswith("#"):
+            block.append(nxt)
+            j += 1
+            continue
+        nxt_indent = len(nxt) - len(nxt_stripped)
+        if nxt_indent <= block_indent:
+            break
+        block.append(nxt)
+        j += 1
+    return block, j
+
+
+def _owner_detail_to_assign_to(
+    block: list[str], indent: int, changes: list[str],
+) -> list[str] | None:
+    """Convert a wire ``owner_detail:`` block to friendly ``assign_to:``."""
+    import yaml as _yaml
+
+    dedented = _dedent_block(block)
+    try:
+        data = _yaml.safe_load(dedented)
+    except Exception:
+        return None
+    od = data.get("owner_detail") if isinstance(data, dict) else None
+    if not isinstance(od, dict):
+        return None
+
+    is_default = (
+        od.get("isAssigned") is False
+        and not any(
+            od.get(k) for k in
+            ("assignedToPerson", "assignedToTeam", "assignedToRecord")
+        )
+    )
+    if is_default:
+        return None  # C2 already stripped it
+
+    assign_out: dict[str, Any] = {}
+    if od.get("assignedToPerson"):
+        assign_out["person"] = od["assignedToPerson"]
+    team = od.get("assignedToTeam")
+    if isinstance(team, list) and team:
+        first = team[0]
+        if isinstance(first, dict):
+            assign_out["team"] = first.get("teamname", first.get("iri", ""))
+        else:
+            assign_out["team"] = first
+    elif isinstance(team, str) and team:
+        assign_out["team"] = team
+    if od.get("assignedToRecord"):
+        assign_out["record_field"] = True
+    if not assign_out:
+        return None
+
+    changes.append("owner_detail: → assign_to: (manual_input)")
+    friendly = _yaml.dump(
+        {"assign_to": assign_out},
+        default_flow_style=False, indent=2, sort_keys=False,
+    )
+    return _indent_block(friendly, indent)
+
+
+def _email_notification_to_email(
+    block: list[str], indent: int, changes: list[str],
+) -> list[str] | None:
+    """Convert a wire ``email_notification:`` block to friendly ``email:``."""
+    import yaml as _yaml
+
+    dedented = _dedent_block(block)
+    try:
+        data = _yaml.safe_load(dedented)
+    except Exception:
+        return None
+    en = data.get("email_notification") if isinstance(data, dict) else None
+    if not isinstance(en, dict):
+        return None
+
+    is_default = (
+        en.get("enabled") is False
+        and not en.get("smtpParameters")
+    )
+    if is_default:
+        return None  # C2 already stripped it
+
+    email_out: dict[str, Any] = {}
+    if "enabled" in en:
+        email_out["enabled"] = en["enabled"]
+    params = en.get("smtpParameters") or []
+    if params and isinstance(params[0], dict):
+        p = params[0]
+        if p.get("to") is not None:
+            email_out["recipients"] = p["to"]
+        for k in ("subject", "body", "from"):
+            if p.get(k) is not None:
+                email_out[k] = p[k]
+    if not email_out:
+        return None
+
+    changes.append("email_notification: → email: (manual_input)")
+    friendly = _yaml.dump(
+        {"email": email_out},
+        default_flow_style=False, indent=2, sort_keys=False,
+    )
+    return _indent_block(friendly, indent)
+
+
+def _dedent_block(block: list[str]) -> str:
+    """Dedent a block to column 0 for YAML parsing."""
+    min_indent = min(
+        (len(l) - len(l.lstrip())) for l in block if l.strip()
+    )
+    return "\n".join(
+        l[min_indent:] if l.strip() else l for l in block
+    )
+
+
+def _indent_block(text: str, indent: int) -> list[str]:
+    """Re-indent a YAML string to the given indent level."""
+    prefix = " " * indent
+    return [
+        prefix + line if line.strip() else line
+        for line in text.splitlines(keepends=True)
+    ]
 
 
 def migrate_file(path: Path, dry_run: bool = False) -> list[str]:
