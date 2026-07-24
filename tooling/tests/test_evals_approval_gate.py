@@ -69,7 +69,10 @@ def _reset_state():
     os.environ.pop("EVAL_APPROVAL_POLICY", None)
 
 
-def test_suspend_is_default():
+def test_suspend_is_default(monkeypatch):
+    # This exercises the suspend→card gate, not connector existence — neutralize
+    # the (real) unknown-connector bounce so the placeholder connector still cards.
+    monkeypatch.setattr(_tools, "_run_op_absent_connector_error", lambda c, o: None)
     out = _tools.dispatch("run_op", {"connector": "__x__", "op": "__y__"})
     assert out.get("pending_approval") is True
 
