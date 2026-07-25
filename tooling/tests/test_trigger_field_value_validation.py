@@ -529,3 +529,314 @@ class TestEmptyValue:
             assert not value_errors
         finally:
             conn.close()
+
+
+class TestPicklistIRIValues:
+    """Object-typed filters carry canonical /api/3/picklists/<uuid> IRIs."""
+
+    def test_object_typed_iri_value_passes(self):
+        """A canonical picklist IRI (as emitted for object-typed filters)
+        should be accepted, not flagged as 'not in picklist'."""
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            row = conn.execute(
+                "SELECT p.item_iri, p.item_value FROM picklists p "
+                "JOIN module_fields m ON m.picklist_name = p.list_name "
+                "WHERE m.module_name='alerts' AND m.field_name='severity' "
+                "LIMIT 1"
+            ).fetchone()
+            assert row, "catalog has no severity picklist IRI to test against"
+            iri, label = row[0], row[1]
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "object",
+                "field": "severity",
+                "value": iri,
+                "_value": {"@id": iri, "display": label, "itemValue": label},
+                "operator": "eq",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_errors = [e for e in errors if ".value" in e.path]
+            assert not value_errors, (
+                f"valid picklist IRI {iri!r} should pass; got {value_errors!r}"
+            )
+        finally:
+            conn.close()
+
+    def test_bogus_iri_warns(self):
+        """An IRI-shaped value not in the picklist should still warn."""
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "object",
+                "field": "severity",
+                "value": "/api/3/picklists/00000000-0000-0000-0000-000000000000",
+                "operator": "eq",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_warnings = [
+                e for e in errors if ".value" in e.path
+                and e.severity == "warning"
+            ]
+            assert len(value_warnings) == 1
+            assert "not in picklist" in value_warnings[0].message
+        finally:
+            conn.close()
+
+    def test_iri_in_list_passes(self):
+        """Array-typed picklist filter with IRI values should pass."""
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            row = conn.execute(
+                "SELECT p.item_iri FROM picklists p "
+                "JOIN module_fields m ON m.picklist_name = p.list_name "
+                "WHERE m.module_name='alerts' AND m.field_name='severity' "
+                "LIMIT 1"
+            ).fetchone()
+            assert row
+            iri = row[0]
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "array",
+                "field": "severity",
+                "value": [iri],
+                "operator": "in",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_errors = [e for e in errors if ".value" in e.path]
+            assert not value_errors
+        finally:
+            conn.close()
+
+
+class TestValueIrrelevantOperators:
+    """isnull/isnotnull/changed carry placeholder values that must not be type-checked."""
+
+    def test_isnull_on_integer_with_placeholder_skips(self):
+        """`isnull` with a placeholder string on an integer field must not warn."""
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "datetime",
+                "field": "dueBy",  # integer-typed (epoch) on alerts
+                "value": "true",   # FSR designer placeholder for isnull
+                "operator": "isnull",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            assert not errors, (
+                f"isnull placeholder should not type-check; got {errors!r}"
+            )
+        finally:
+            conn.close()
+
+    def test_isnotnull_on_integer_with_placeholder_skips(self):
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "primitive",
+                "field": "ackDate",
+                "value": "not-a-number",
+                "operator": "isnotnull",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_errors = [e for e in errors if ".value" in e.path]
+            assert not value_errors
+        finally:
+            conn.close()
+
+    def test_eq_on_integer_still_type_checks(self):
+        """A non-placeholder operator must still type-check the value."""
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "primitive",
+                "field": "ackDate",
+                "value": "not-a-number",
+                "operator": "eq",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_warnings = [
+                e for e in errors if ".value" in e.path
+                and "not a valid integer" in e.message
+            ]
+            assert len(value_warnings) == 1
+        finally:
+            conn.close()
+
+    def test_isnull_on_picklist_field_skips_value(self):
+        """`isnull` on a picklist field with a placeholder must skip picklist check."""
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "object",
+                "field": "severity",
+                "value": "true",
+                "operator": "isnull",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_errors = [e for e in errors if ".value" in e.path]
+            assert not value_errors
+        finally:
+            conn.close()
+
+
+class TestBooleanValidation:
+    """Boolean field value validation (previously unvalidated)."""
+
+    def test_boolean_true_passes(self):
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            for val in [True, False, "true", "false", "True", "False", 1, 0, "1", "0"]:
+                errors: list[CompileError] = []
+                filters = [{
+                    "type": "primitive",
+                    "field": "resolvedAutomatedly",
+                    "value": val,
+                    "operator": "eq",
+                }]
+                validator.validate_trigger_filters(
+                    filters, "alerts", "p.when", errors
+                )
+                value_errors = [e for e in errors if ".value" in e.path]
+                assert not value_errors, f"value={val!r} should pass"
+        finally:
+            conn.close()
+
+    def test_boolean_invalid_value_warns(self):
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "primitive",
+                "field": "resolvedAutomatedly",
+                "value": "maybe",
+                "operator": "eq",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_warnings = [
+                e for e in errors if ".value" in e.path
+                and "boolean" in e.message
+            ]
+            assert len(value_warnings) == 1
+            assert "maybe" in value_warnings[0].message
+        finally:
+            conn.close()
+
+    def test_boolean_list_validates_each(self):
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "primitive",
+                "field": "resolvedAutomatedly",
+                "value": [True, "maybe"],
+                "operator": "in",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            bad = [e for e in errors if "maybe" in e.message]
+            assert len(bad) == 1
+            assert "value[1]" in bad[0].message
+        finally:
+            conn.close()
+
+    def test_boolean_jinja_deferred(self):
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "primitive",
+                "field": "resolvedAutomatedly",
+                "value": "{{ vars.flag }}",
+                "operator": "eq",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_errors = [e for e in errors if ".value" in e.path]
+            assert not value_errors
+        finally:
+            conn.close()
+
+
+class TestTagFilters:
+    """Array tag filters (template: tags) reference /api/3/tags/, not module_fields."""
+
+    def test_tag_template_skips_field_existence(self):
+        """recordTags is a system field not in module_fields; tag filters must
+        not produce a 'field does not exist' false positive."""
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "array",
+                "field": "recordTags",
+                "value": ["/api/3/tags/FortiRecon", "/api/3/tags/EASM"],
+                "module": "recordTags",
+                "operator": "in_all",
+                "template": "tags",
+                "OPERATOR_KEY": "$",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            assert not errors, (
+                f"tag filter should skip validation; got {errors!r}"
+            )
+        finally:
+            conn.close()
+
+    def test_non_tag_array_field_still_validated(self):
+        """An array filter without template: tags should still check field existence."""
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "array",
+                "field": "totallyBogusField",
+                "value": ["x"],
+                "operator": "in",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            field_errors = [e for e in errors if ".field" in e.path]
+            assert len(field_errors) == 1
+            assert "totallyBogusField" in field_errors[0].message
+        finally:
+            conn.close()

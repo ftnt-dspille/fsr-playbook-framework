@@ -22,7 +22,16 @@ class FieldValueValidator:
 
     Initialized with a sqlite3 connection; methods validate trigger leaf
     filters (field existence, value type/picklist membership).
+
+    Operators where the ``value`` is semantically meaningless
+    (``isnull`` / ``isnotnull`` / ``changed``) skip value validation — FSR's
+    own designer emits a placeholder (e.g. ``"true"``) there, and flagging it
+    as a type mismatch is a false positive.
     """
+
+    _VALUE_IRRELEVANT_OPS: frozenset[str] = frozenset({
+        "isnull", "isnotnull", "changed",
+    })
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -83,7 +92,9 @@ class FieldValueValidator:
         errors: list[CompileError],
     ) -> None:
         """Validate a field name and (if found) its value."""
-        # Query the field definition
+        if filt.get("template") == "tags":
+            return
+
         row = self.conn.execute(
             "SELECT field_name, type, picklist_name FROM module_fields "
             "WHERE module_name=? AND field_name=?",
@@ -91,13 +102,11 @@ class FieldValueValidator:
         ).fetchone()
 
         if not row:
-            # Unknown field — suggest alternatives
             known = [r[0] for r in self.conn.execute(
                 "SELECT field_name FROM module_fields WHERE module_name=?",
                 (module_name,),
             ).fetchall()]
             if not known:
-                # Module has no fields in catalog (shouldn't happen if module exists)
                 return
 
             sug = difflib.get_close_matches(field, known, n=1, cutoff=0.6)
@@ -115,25 +124,23 @@ class FieldValueValidator:
             ))
             return
 
-        # Field exists — validate its value
+        operator = filt.get("operator")
+        if operator in self._VALUE_IRRELEVANT_OPS:
+            return
+
         field_type = row["type"]
         picklist_name = row["picklist_name"]
 
         value = filt.get("value")
 
-        # Wildcard/substring operators (like/contains) carry `%`-wrapped
-        # partial values, not exact field values — exact picklist/type checks
-        # would spuriously reject them, so skip value validation for those.
         if isinstance(value, str) and "%" in value:
             return
 
-        # Validate value based on field type
         if picklist_name:
             self._validate_picklist_value(
                 value, picklist_name, field, path, errors
             )
         else:
-            # Non-picklist field — type-check the value
             self._validate_field_value(value, field_type, field, path, errors)
 
     def _validate_picklist_value(
@@ -144,20 +151,23 @@ class FieldValueValidator:
         path: str,
         errors: list[CompileError],
     ) -> None:
-        """Validate that a value (or list of values) exists in the picklist."""
+        """Validate that a value (or list of values) exists in the picklist.
+
+        Object-typed picklist filters carry the canonical
+        ``/api/3/picklists/<uuid>`` IRI as ``value`` (not the display label),
+        so a value is accepted when it matches either an ``item_value`` (the
+        friendly label) or an ``item_iri`` (the canonical IRI) in the warmed
+        ``picklists`` table. The suggestion list shows labels, since those are
+        what an author writes.
+        """
         if value is None or value == "":
-            # Null/empty is valid for nullable fields (isnull/isnotnull checks)
             return
         if isinstance(value, str) and ("{{" in value or "{%" in value):
-            # Jinja template — defer to runtime
             return
         if isinstance(value, list) and not value:
-            # Empty list is valid
             return
 
-        # Value(s) to check
         values_to_check = value if isinstance(value, list) else [value]
-        # Filter out Jinja expressions and non-strings
         values_to_check = [
             v for v in values_to_check
             if isinstance(v, str) and not ("{{" in v or "{%" in v)
@@ -166,31 +176,35 @@ class FieldValueValidator:
         if not values_to_check:
             return
 
-        valid = {r[0] for r in self.conn.execute(
-            "SELECT item_value FROM picklists WHERE list_name=?",
+        rows = self.conn.execute(
+            "SELECT item_value, item_iri FROM picklists WHERE list_name=?",
             (picklist_name,),
-        ).fetchall()}
+        ).fetchall()
+        valid_values = {r[0] for r in rows if r[0]}
+        valid_iris = {r[1] for r in rows if r[1]}
 
-        if not valid:
-            # Empty picklist — catalog may not be warmed
+        if not valid_values and not valid_iris:
             return
 
         for v in values_to_check:
-            if v not in valid:
-                sug = difflib.get_close_matches(v, list(valid), n=1, cutoff=0.6)
-                errors.append(CompileError(
-                    code=ErrorCode.BAD_VALUE,
-                    message=(
-                        f"value {v!r} is not in picklist {picklist_name!r} "
-                        f"for field {field!r} (valid: "
-                        f"{', '.join(sorted(valid)[:8])}"
-                        f"{'…' if len(valid) > 8 else ''})"
-                    ),
-                    path=f"{path}.value",
-                    near=sug[0] if sug else None,
-                    suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
-                    severity="warning",
-                ))
+            if v in valid_values or v in valid_iris:
+                continue
+            sug = difflib.get_close_matches(
+                v, list(valid_values) or list(valid_iris), n=1, cutoff=0.6,
+            )
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"value {v!r} is not in picklist {picklist_name!r} "
+                    f"for field {field!r} (valid: "
+                    f"{', '.join(sorted(valid_values)[:8])}"
+                    f"{'…' if len(valid_values) > 8 else ''})"
+                ),
+                path=f"{path}.value",
+                near=sug[0] if sug else None,
+                suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+                severity="warning",
+            ))
 
     def _validate_field_value(
         self,
@@ -277,6 +291,46 @@ class FieldValueValidator:
                     message=(
                         f"field {field!r} is type text; "
                         f"value {value!r} is not a string"
+                    ),
+                    path=f"{path}.value",
+                    severity="warning",
+                ))
+
+        elif field_type == "boolean":
+            _BOOL_STRINGS = {"true", "false", "1", "0"}
+
+            def _is_booly(v: Any) -> bool:
+                if isinstance(v, bool):
+                    return True
+                if isinstance(v, int) and not isinstance(v, bool) and v in (0, 1):
+                    return True
+                return (
+                    isinstance(v, str)
+                    and v.strip().lower() in _BOOL_STRINGS
+                )
+
+            if isinstance(value, list):
+                for i, v in enumerate(value):
+                    if isinstance(v, str) and ("{{" in v or "{%" in v):
+                        continue
+                    if not _is_booly(v):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"field {field!r} is type boolean; "
+                                f"value[{i}] {v!r} is not a valid boolean "
+                                f"(use true/false or 1/0)"
+                            ),
+                            path=f"{path}.value",
+                            severity="warning",
+                        ))
+            elif not _is_booly(value):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        f"field {field!r} is type boolean; "
+                        f"value {value!r} is not a valid boolean "
+                        f"(use true/false or 1/0)"
                     ),
                     path=f"{path}.value",
                     severity="warning",
