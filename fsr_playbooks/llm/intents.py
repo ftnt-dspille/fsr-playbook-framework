@@ -43,6 +43,19 @@ BUILD_ONLY_TOOLS = frozenset({
     "emit_enhancement_offer",
 })
 
+# Tools that only make sense when an OPEN playbook exists to edit — the enhance
+# verify+write pair. A from-scratch CREATE (build intent, no playbook mounted)
+# has nothing to enhance, yet the build slice = full registry minus TRIAGE_ONLY,
+# so it still advertises these. A drifting model can then terminate a create via
+# emit_enhancement_offer (stop=awaiting_enhancement_offer) instead of delivering
+# a NEW playbook via emit_playbook_offer. The connector's _intent_drop_set gates
+# this set out of a no-open-playbook build; EnhanceDeliveryGuard is keyed on the
+# SAME names (asserted in a test) so the guard and the advertised slice can never
+# drift. This is a SUBSET of BUILD_ONLY_TOOLS — dropping it never touches triage.
+ENHANCE_ONLY_TOOLS = frozenset({
+    "verify_enhancement", "emit_enhancement_offer",
+})
+
 # Triage-only tools dropped from the build slice (ROADMAP §4, three-pillar
 # plan Track C5): the live alert/incident investigation + containment-staging
 # surface. Build mode authors playbooks — it discovers ops with
@@ -227,6 +240,7 @@ def tools_for_intent(intent: str) -> list[dict[str, Any]]:
 
 __all__ = [
     "INTENTS", "DEFAULT_INTENT", "BUILD_ONLY_TOOLS", "TRIAGE_ONLY_TOOLS",
+    "ENHANCE_ONLY_TOOLS",
     "resolve_intent", "load_intent_prompt", "tools_for_intent",
     "classify_message", "gate_directive",
     "TRIVIAL", "CONTINUE", "DIRECTIVE",

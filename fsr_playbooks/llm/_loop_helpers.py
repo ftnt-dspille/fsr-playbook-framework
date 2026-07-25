@@ -706,9 +706,15 @@ _ENHANCE_OFFER_TOOL = "emit_enhancement_offer"
 class EnhanceDeliveryGuard:
     """Tracks whether an enhance turn verified an edit but never delivered it.
 
-    Fires only when the offer tool is in the advertised slice (enhance mode) —
-    build-new-playbook and triage turns never advertise it, so the guard is
-    inert there.
+    Fires only when the offer tool is in the advertised slice AND a
+    verify_enhancement passed. Triage never advertises the offer tool. A build
+    turn WITH an open playbook (enhance) advertises it; a from-scratch CREATE
+    build does NOT — the connector's _intent_drop_set drops ENHANCE_ONLY_TOOLS
+    when no playbook is mounted (see fsr_playbooks.llm.intents.ENHANCE_ONLY_TOOLS).
+    So the guard is inert on triage and on create, and active on enhance —
+    exactly where a verified edit could be narrated instead of delivered.
+    (The earlier "build-new-playbook never advertises it" claim was wrong: the
+    build slice DID advertise the offer tool until that gate was added.)
     """
 
     def __init__(self) -> None:

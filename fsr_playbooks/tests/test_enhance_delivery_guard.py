@@ -6,8 +6,18 @@ pin the detector's contract: it fires exactly when a verify passed and no offer
 followed, only in enhance mode, and at most once.
 """
 from fsr_playbooks.llm._loop_helpers import (
-    EnhanceDeliveryGuard, _ENHANCE_OFFER_TOOL,
+    EnhanceDeliveryGuard, _ENHANCE_OFFER_TOOL, _ENHANCE_VERIFY_TOOL,
 )
+from fsr_playbooks.llm.intents import ENHANCE_ONLY_TOOLS
+
+
+def test_guard_names_match_the_canonical_enhance_set():
+    # The connector's _intent_drop_set gates ENHANCE_ONLY_TOOLS out of a
+    # from-scratch create; this guard keys on the same two names. If they ever
+    # drift, the guard could fire on a turn whose slice no longer carries the
+    # offer tool (or vice versa). One canonical source, asserted here.
+    assert {_ENHANCE_VERIFY_TOOL, _ENHANCE_OFFER_TOOL} == set(ENHANCE_ONLY_TOOLS)
+
 
 ENHANCE_SLICE = {_ENHANCE_OFFER_TOOL, "verify_enhancement", "get_step_type"}
 BUILD_NEW_SLICE = {"emit_playbook_offer", "verify_playbook"}  # no offer tool
