@@ -45,6 +45,11 @@ class CompileError:
     suggestion: Optional[str] = None
     near: Optional[str] = None  # "did you mean X" candidate
     severity: str = "error"     # "error" blocks compilation; "warning" does not
+    # Fine-grained sub-tag for codes shared across many sites (notably
+    # `bad_value`). Lets a caller toggle e.g. picklist-drift or param-type
+    # checks individually via `disable_checks` without renaming the coarse
+    # `code`. `None` for the vast majority of diagnostics.
+    check: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -54,4 +59,5 @@ class CompileError:
             "suggestion": self.suggestion,
             "near": self.near,
             "severity": self.severity,
+            "check": self.check,
         }

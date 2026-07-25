@@ -267,6 +267,7 @@ def _check_code_snippet(s: Step, pi: int, si: int) -> list[CompileError]:
             message=f"code_snippet {(s.name or s.id)!r}: {f.message}",
             path=f"playbooks[{pi}].steps[{si}].arguments.code (snippet line {f.lineno})",
             suggestion=f.suggestion,
+            check="snippet_sandbox",
         ))
     return out
 

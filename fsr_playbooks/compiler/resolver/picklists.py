@@ -124,6 +124,7 @@ class PicklistMixin:
             near=sug[0] if sug else None,
             suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
             severity="warning" if is_placeholder else "error",
+            check="picklist_drift",
         ))
         return value
 

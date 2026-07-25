@@ -501,6 +501,7 @@ class ConnectorArgsMixin:
                         message=msg,
                         path=f"{path}.arguments.params.{p_name}",
                         suggestion=suggestion,
+                        check="param_type",
                     ))
             # Scalar-type validation: integer / decimal / boolean.
             # Same skip-Jinja rule as enum. We only flag literal values
@@ -552,6 +553,7 @@ class ConnectorArgsMixin:
                                         "reorder the filter chain so "
                                         f"{cons!r} sees the type it "
                                         "needs, or drop one of them"),
+                                    check="param_type",
                                 ))
                         inferred = infer_terminal_observed_type(p_val, self.conn)
                         if inferred is not None:
@@ -574,6 +576,7 @@ class ConnectorArgsMixin:
                                         "drop the trailing filter or "
                                         "replace it with one that yields "
                                         f"{target!r}"),
+                                    check="param_type",
                                 ))
                     continue
                 # Numeric: integer / decimal / numeric / "intger" (typo).
@@ -592,6 +595,7 @@ class ConnectorArgsMixin:
                                         "integer-shaped string, or a "
                                         "Jinja expression that yields "
                                         "an int"),
+                            check="param_type",
                         ))
                 elif ptype_low in {"decimal", "numeric"}:
                     if isinstance(p_val, bool) or not _coerces_to_float(p_val):
@@ -605,6 +609,7 @@ class ConnectorArgsMixin:
                                 f"not coerce to a number"),
                             path=f"{path}.arguments.params.{p_name}",
                             suggestion="pass a number or numeric string",
+                            check="param_type",
                         ))
                 # Tier 2.3: observed_type validators for types Tier 1's
                 # widget pass doesn't cover (ipv4 / url / email /
@@ -627,6 +632,7 @@ class ConnectorArgsMixin:
                                 f"({type(p_val).__name__})"),
                             path=f"{path}.arguments.params.{p_name}",
                             suggestion=sug_tail,
+                            check="param_type",
                         ))
                 # Boolean: checkbox / boolean.
                 elif ptype_low in {"checkbox", "boolean"}:
@@ -642,6 +648,7 @@ class ConnectorArgsMixin:
                             path=f"{path}.arguments.params.{p_name}",
                             suggestion=("pass true / false (or 'true' / "
                                         "'false' as a string)"),
+                            check="param_type",
                         ))
 
         # Stamp the connector version onto the step (FSR JSON requires it).

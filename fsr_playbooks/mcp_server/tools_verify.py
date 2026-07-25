@@ -68,8 +68,15 @@ CHECK_GROUPS: dict[str, frozenset[str]] = {
         "loop_var_outside_for_each", "set_var_reserved_key"}),
     # Coarse: `bad_value` is shared by picklist-drift, literal param-type,
     # code-snippet sandbox bans, and reserved-key coercion. Skipping "value"
-    # turns off all of them.
+    # turns off all of them. The three fine groups below match on the
+    # `check` sub-tag instead, so a caller can silence just picklist drift
+    # (unavoidable when the catalog lags the box), just literal param-type
+    # nags, or just snippet-sandbox bans — without disabling the rest of
+    # `bad_value`. Sub-tag toggles are additive with `value`, never override it.
     "value": frozenset({"bad_value"}),
+    "picklist": frozenset({"picklist_drift"}),
+    "param_type": frozenset({"param_type"}),
+    "snippet": frozenset({"snippet_sandbox"}),
     # Usually fatal structural problems; offered for completeness.
     "structure": frozenset({
         "parse_error", "missing_field", "unknown_step_type",
@@ -653,7 +660,8 @@ def verify_playbook(
     if not cres.ok:
         compile_errors = [
             {"code": e.code.value, "message": e.message, "path": e.path,
-             "suggestion": e.suggestion, "severity": e.severity}
+             "suggestion": e.suggestion, "severity": e.severity,
+             "check": e.check}
             for e in cres.errors
         ]
         # Promote compile errors directly into required_fixes — caller
@@ -877,12 +885,16 @@ def _finalize(checks_run, required_fixes, warnings, evidence,
     suppressed: list[dict[str, Any]] = []
     if disabled_codes:
         kept_fixes, kept_warnings = [], []
+        # A diagnostic is suppressed if EITHER its coarse `code` or its
+        # fine-grained `check` sub-tag is in the disabled set — so `value`
+        # (code) and `picklist`/`param_type`/`snippet` (check) both work.
+        def _suppressed(d: dict[str, Any]) -> bool:
+            return (d.get("code") in disabled_codes
+                    or d.get("check") in disabled_codes)
         for fx in required_fixes:
-            (suppressed if fx.get("code") in disabled_codes
-             else kept_fixes).append(fx)
+            (suppressed if _suppressed(fx) else kept_fixes).append(fx)
         for w in warnings:
-            (suppressed if w.get("code") in disabled_codes
-             else kept_warnings).append(w)
+            (suppressed if _suppressed(w) else kept_warnings).append(w)
         required_fixes, warnings = kept_fixes, kept_warnings
         evidence["suppressed"] = suppressed
         evidence["disabled_checks"] = {
