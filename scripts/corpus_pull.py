@@ -20,6 +20,7 @@ from pathlib import Path
 os.environ.setdefault("FSRPB_DEV", "1")
 
 from pyfsr import FortiSOAR  # noqa: E402
+from pyfsr.pagination import extract_members  # noqa: E402
 
 from fsr_playbooks._db import default_db_path  # noqa: E402
 from fsr_playbooks.compiler import compile_yaml  # noqa: E402
@@ -52,7 +53,7 @@ print(f"box={client.appliance if hasattr(client, 'appliance') else ENV}", flush=
 # steps[]/routes[], and the decompiler would see an empty graph.
 page = client.get("/api/3/workflows",
                   params={"$limit": LIMIT, "$relationships": "true"})
-rows = page.get("hydra:member") if isinstance(page, dict) else page
+rows = extract_members(page) if isinstance(page, dict) else page
 print(f"pulled {len(rows)} workflows", flush=True)
 
 ok = 0

@@ -209,7 +209,8 @@ def compile_yaml(
     # Reference lint (warning-only): catch a bad `vars.steps.X.foo` offline.
     # Runs last, on a fully-resolved IR, and never blocks — see reference_lint.
     if reference_lint_enabled:
-        all_warnings.extend(reference_lint(coll, existing=all_warnings))
+        all_warnings.extend(reference_lint(coll, existing=all_warnings,
+                                           db_path=str(db_path)))
     enrich_diagnostics(coll, all_warnings)
 
     return CompileResult(fsr_json=emit(coll), errors=all_warnings, ir=coll)

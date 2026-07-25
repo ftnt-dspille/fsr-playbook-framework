@@ -20,6 +20,7 @@ from fsr_playbooks.compiler.decompiler import decompile_to_yaml
 from fsr_playbooks._db import PACKAGED_SLIM_DB
 
 from pyfsr import FortiSOAR
+from pyfsr.pagination import extract_members
 
 BOX = "https://fortisoar.example.com:13000"
 AUTH = ("<your-username>", "<your-password>")  # noqa: S105
@@ -29,7 +30,7 @@ client = FortiSOAR(BOX, AUTH, verify_ssl=False)
 # Step type lookup
 STEP_TYPES = {}
 _st = client.get("/api/3/workflow_step_types", params={"$limit": 200})
-for r in (_st if isinstance(_st, list) else _st.get("hydra:member", [])):
+for r in (_st if isinstance(_st, list) else (extract_members(_st) or [])):
     STEP_TYPES[r["uuid"]] = r["name"]
 
 def st_name(step):
@@ -44,7 +45,7 @@ def st_name(step):
 print("Scanning for playbooks with CyopsUtilites steps...")
 wfs = client.get("/api/3/workflows", params={"$limit": 500, "$relationships": True})
 if isinstance(wfs, dict):
-    wfs = wfs.get("hydra:member", [])
+    wfs = extract_members(wfs) or []
 
 candidates = []
 for wf in wfs:

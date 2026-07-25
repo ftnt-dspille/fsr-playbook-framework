@@ -48,6 +48,7 @@ _REFERENCE_CODES = frozenset({
 def reference_lint(
     coll: "Collection",
     existing: Optional[list[CompileError]] = None,
+    db_path: Optional[str] = None,
 ) -> list[CompileError]:
     """Return compile warnings for unresolvable ``vars.steps.*`` references.
 
@@ -72,9 +73,16 @@ def reference_lint(
         return []
 
     out: list[CompileError] = []
+    import sqlite3
+    conn: sqlite3.Connection | None = None
+    if db_path:
+        try:
+            conn = sqlite3.connect(db_path)
+        except Exception:  # noqa: BLE001
+            conn = None
     for pb in coll.playbooks:
         try:
-            result = walk_playbook(coll, pb.name)
+            result = walk_playbook(coll, pb.name, conn=conn)
         except Exception:  # noqa: BLE001 - a walker hiccup must not break compile
             continue
         for d in result.diagnostics:
@@ -92,4 +100,6 @@ def reference_lint(
                 suggestion=d.suggestion,
                 severity="warning",
             ))
+    if conn is not None:
+        conn.close()
     return out

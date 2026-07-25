@@ -1048,12 +1048,17 @@ def _next_step(step: dict, taken_branch: str | None,
     return branches[first_key]
 
 
-def _infer_output_shape(value: Any) -> dict[str, Any]:
+def _infer_output_shape(value: Any, _depth: int = 0) -> dict[str, Any]:
     """Summarize a simulated step output so downstream analyzer checks
     can reason about what keys exist, what types they are, and a small
     sample without re-walking the full payload.
 
     Used by render-path analyzer (RENDER_PATH_VALIDATOR_PLAN.md C2/C5/C6).
+
+    Recurses up to two levels into nested dicts (and list-of-dict heads) so
+    that a typo in a *nested* key — ``vars.steps.Fetch.data.summray`` — is
+    catchable instead of silently passing once the top-level ``data`` key
+    matches. Deeper nesting degrades to opaque (no false positives).
     """
     def _t(v: Any) -> str:
         if v is None: return "null"
@@ -1066,21 +1071,34 @@ def _infer_output_shape(value: Any) -> dict[str, Any]:
         return type(v).__name__
 
     if isinstance(value, dict):
+        nested: dict[str, dict[str, Any]] = {}
+        if _depth < 2:
+            for k, v in value.items():
+                if isinstance(v, dict):
+                    nested[k] = _infer_output_shape(v, _depth + 1)
+                elif (isinstance(v, list) and v
+                        and isinstance(v[0], dict)):
+                    nested[k] = _infer_output_shape(v[0], _depth + 1)
         return {
             "kind": "dict",
             "top_keys": sorted(value.keys()),
             "types": {k: _t(v) for k, v in value.items()},
             "sample": {k: (v if not isinstance(v, (dict, list)) else _t(v))
                        for k, v in list(value.items())[:8]},
+            "nested": nested,
         }
     if isinstance(value, list):
         head = value[0] if value else None
+        item_shape: dict[str, Any] | None = None
+        if _depth < 2 and isinstance(head, dict):
+            item_shape = _infer_output_shape(head, _depth + 1)
         return {
             "kind": "list",
             "length": len(value),
             "item_type": _t(head),
             "item_keys": (sorted(head.keys())
                           if isinstance(head, dict) else []),
+            "item_shape": item_shape,
         }
     return {"kind": _t(value), "value": value if isinstance(value,
             (str, int, float, bool, type(None))) else str(value)[:120]}
