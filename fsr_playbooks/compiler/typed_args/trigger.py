@@ -242,10 +242,21 @@ def _leaf_to_filter(
                 path=opath,
             ))
             return None
-        # Preserved byte-for-byte from the imperative normalizer. NOTE: the live
-        # designer emits `_value: {"@id": null, …}`; the historical emitter omits
-        # `@id`. Left as-is to keep emit byte-identical — see the fidelity TODO
-        # in docs/plans/PLAYBOOK_PYDANTIC_TYPING_PLAN.md.
+        # Neutral default for the FRIENDLY hand-authored `op: changed` path only.
+        # The decompile→emit path never reaches here — it passes `_value` through
+        # verbatim (traced 2026-07-25: a corpus `changed` filter round-trips
+        # byte-identical, `@id` and all), so the corpus is unaffected by this
+        # constant.
+        #
+        # Evidence (64 real `changed` filters in the live-captured corpus): the
+        # designer's shape is FIELD-TYPE dependent and internally inconsistent —
+        # picklist-backed fields get `type: object` with `_value.@id` set to
+        # either "" or null; non-picklist fields get `type: primitive` with
+        # `_value: null`. There is therefore NO single correct constant to emit
+        # here, and the earlier "just add `@id: null`" TODO would be wrong for the
+        # primitive and `@id: ""` cases. Whether the omitted `@id` actually
+        # affects trigger *firing* (vs. being cosmetic) needs live-fire on a box
+        # to settle; until then this neutral object shape is left as-is.
         return {
             "type": "object", "field": leaf.field, "value": None,
             "_value": {"display": "", "itemValue": ""},
