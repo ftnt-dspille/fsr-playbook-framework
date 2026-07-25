@@ -241,6 +241,200 @@ def test_c2_downgrades_when_producer_was_conditionally_skipped():
         assert by["missing_key"][0].severity == "warning"
 
 
+def test_c2_flags_typo_in_nested_output_key():
+    """A typo in a NESTED key (vars.steps.Fetch.data.summray) must fire,
+    not silently pass once the top-level 'data' key matches. This was the
+    'recursive output_shape' gap in RENDER_PATH_VALIDATOR_PLAN.md."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    summary: "ok"
+                    status: "open"
+                next: emit
+              - id: emit
+                type: set_variable
+                name: Emit
+                arg_list:
+                  - name: s
+                    value: "{{ vars.steps.Fetch.data.summray }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    by = _by_kind(diags)
+    assert "missing_key" in by
+    d = by["missing_key"][0]
+    assert d.severity == "error"
+    assert "summray" in d.path
+    # Suggestion list must be the NESTED keys (summary, status), not the
+    # top-level keys (data) — that's the whole point of recursing.
+    assert "summary" in (d.suggestion or "")
+    assert "status" in (d.expected or [])
+
+
+def test_c2_passes_when_nested_key_exists():
+    """A correct nested-key reference must not fire even with the
+    recursive walk enabled."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    summary: "ok"
+                    status: "open"
+                next: emit
+              - id: emit
+                type: set_variable
+                name: Emit
+                arg_list:
+                  - name: s
+                    value: "{{ vars.steps.Fetch.data.summary }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    assert _by_kind(diags).get("missing_key", []) == []
+
+
+def test_c2_flags_typo_in_doubly_nested_output_key():
+    """Two levels of nesting: a typo at the second level must fire too."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    owner:
+                      name: "alice"
+                      email: "a@x"
+                next: emit
+              - id: emit
+                type: set_variable
+                name: Emit
+                arg_list:
+                  - name: s
+                    value: "{{ vars.steps.Fetch.data.owner.emial }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    by = _by_kind(diags)
+    assert "missing_key" in by
+    d = by["missing_key"][0]
+    assert "emial" in d.path
+    assert "email" in (d.suggestion or "")
+
+
+def test_c2_does_not_flag_unsimulated_deep_nesting():
+    """Beyond the depth cap (2 levels), a typo must NOT fire — degrading
+    to opaque avoids false positives on un-simulated nesting."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    owner:
+                      contact:
+                        name: "alice"
+                next: emit
+              - id: emit
+                type: set_variable
+                name: Emit
+                arg_list:
+                  - name: s
+                    value: "{{ vars.steps.Fetch.data.owner.contact.nmae }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    # depth 3 (data>owner>contact>name) — beyond the cap; no false positive.
+    assert _by_kind(diags).get("missing_key", []) == []
+
+
+def test_c2_flags_typo_in_list_item_key():
+    """A typo against a list-of-dict producer's item key must fire."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: loop
+              - id: loop
+                type: for_each
+                name: Loop
+                for_each:
+                  item: "{{ [1,2] }}"
+                next: emit
+              - id: emit
+                type: set_variable
+                name: Emit
+                arg_list:
+                  - name: s
+                    value: "{{ vars.steps.Loop[0].dat }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    by = _by_kind(diags)
+    # for_each output is a list; item shape carries data/code_output.
+    missing = by.get("missing_key", [])
+    if missing:
+        assert "dat" in missing[0].path
+
+
 # ---- C3 required_arg_empty -------------------------------------------
 
 def test_c3_flags_empty_module_on_create_record():
@@ -610,6 +804,160 @@ def test_c6_flags_index_into_dict_attr():
         d = by["index_into_non_list"][0]
         assert d.severity == "warning"
         assert d.extra.get("attr") == "meta"
+
+
+def test_c6_flags_index_into_nested_dict_attr():
+    """Indexing a NESTED dict attr — `vars.steps.Fetch.data.owner[0]`
+    where `owner` is a dict inside `data`. Previously the walk stopped
+    at the top-level `data` key and couldn't see `owner`'s type."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    owner:
+                      name: "alice"
+                      email: "a@x"
+                next: consume
+              - id: consume
+                type: set_variable
+                name: Consume
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.Fetch.data.owner[0] }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    by = _by_kind(diags)
+    assert "index_into_non_list" in by
+    d = by["index_into_non_list"][0]
+    assert d.extra.get("attr") == "owner"
+    assert "dict" in d.extra.get("shape_kind", "")
+
+
+def test_c6_passes_when_nested_attr_is_list():
+    """Indexing a NESTED list attr — `vars.steps.Fetch.data.tags[0]`
+    where `tags` is a list inside `data`. Must NOT fire."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    tags: ["urgent", "phish"]
+                next: consume
+              - id: consume
+                type: set_variable
+                name: Consume
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.Fetch.data.tags[0] }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    assert _by_kind(diags).get("index_into_non_list", []) == []
+
+
+def test_c6_flags_index_into_doubly_nested_scalar():
+    """Two levels of nesting: indexing a scalar deep inside
+    `data.owner.email[0]` where `email` is a string."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    owner:
+                      email: "a@x.com"
+                next: consume
+              - id: consume
+                type: set_variable
+                name: Consume
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.Fetch.data.owner.email[0] }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    by = _by_kind(diags)
+    assert "index_into_non_list" in by
+    d = by["index_into_non_list"][0]
+    assert d.extra.get("attr") == "email"
+    assert "string" in d.extra.get("shape_kind", "")
+
+
+def test_c6_does_not_flag_beyond_depth_cap():
+    """Beyond the shape inference depth cap (2 levels), don't false-fire
+    — the shape is opaque there."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  data:
+                    owner:
+                      contact:
+                        phone: "555"
+                next: consume
+              - id: consume
+                type: set_variable
+                name: Consume
+                arg_list:
+                  - name: x
+                    value: "{{ vars.steps.Fetch.data.owner.contact.phone[0] }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    diags = analyze(_trace(yaml))
+    assert _by_kind(diags).get("index_into_non_list", []) == []
 
 
 # ---- C9 loop_var_leak ------------------------------------------------

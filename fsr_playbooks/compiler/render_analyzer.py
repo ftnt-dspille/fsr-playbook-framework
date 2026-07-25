@@ -26,6 +26,7 @@ Severity:
 """
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
@@ -190,9 +191,10 @@ def _c2_missing_key(trace: list[dict[str, Any]],
             # segments[0] == 'steps', segments[1] == producer; from
             # segments[2:] onward we're walking into the output.
             sub_segments = segments[2:]
-            missing_at = _check_path_against_shape(shape, sub_segments)
-            if missing_at is None:
+            result = _check_path_against_shape(shape, sub_segments)
+            if result is None:
                 continue
+            missing_at, valid_keys = result
             # Downgrade severity when the producer's output shape
             # isn't trustworthy: either we couldn't simulate it
             # (default_empty) or it's gated by a runtime condition
@@ -202,7 +204,6 @@ def _c2_missing_key(trace: list[dict[str, Any]],
                 or prod_rec.get("conditionally_executed") is True
             )
             severity = "warning" if weak_provenance else "error"
-            top_keys = shape.get("top_keys") or shape.get("item_keys") or []
             out.append(Diagnostic(
                 kind="missing_key",
                 severity=severity,
@@ -211,9 +212,9 @@ def _c2_missing_key(trace: list[dict[str, Any]],
                 location=ref.get("location", ""),
                 message=(
                     f"key {missing_at!r} not in {producer!r}'s output "
-                    f"(known keys: {top_keys[:8]})"),
-                suggestion=_suggest_close_key(missing_at, top_keys),
-                expected=top_keys,
+                    f"(known keys: {valid_keys[:8]})"),
+                suggestion=_suggest_close_key(missing_at, valid_keys),
+                expected=valid_keys,
                 actual=missing_at,
                 extra={
                     "producer_step": producer,
@@ -224,14 +225,36 @@ def _c2_missing_key(trace: list[dict[str, Any]],
     return out
 
 
-def _check_path_against_shape(shape: dict[str, Any],
-                              segments: list[str]) -> str | None:
+def _is_subscript_segment(seg: str) -> bool:
+    """True when a path segment is a numeric subscript (``"0"``) rather
+    than an attribute name. The render-paths extractor encodes
+    ``vars.steps.X[0]`` as segments ``[…, "0"]`` — a bare digit string,
+    not ``"[0]"``."""
+    return seg.isdigit() if isinstance(seg, str) else False
+
+
+def _check_path_against_shape(
+    shape: dict[str, Any], segments: list[str],
+) -> tuple[str, list[str]] | None:
     """Walk the producer's output_shape against a list of attribute
-    segments. Return the first segment that's missing, or None if the
-    chain resolves cleanly. Stops walking once the shape becomes
-    opaque (e.g. nested dict whose keys aren't recorded)."""
+    segments. Return ``(missing_at, valid_keys)`` for the first segment
+    that's missing (valid_keys are the siblings at that level, for a
+    precise diagnostic + close-key suggestion), or ``None`` if the chain
+    resolves cleanly. Numeric subscript segments (``"0"``) are skipped
+    — they're indexing, not attribute access, and C6 handles
+    index-into-non-list. Stops walking once the shape becomes opaque
+    (no nested shape recorded for a key) — never flags deeper than the
+    shape can see, to avoid false positives on un-simulated nesting."""
     cur = shape
-    for seg in segments:
+    for i, seg in enumerate(segments):
+        if not isinstance(seg, str):
+            return None
+        if _is_subscript_segment(seg):
+            if isinstance(cur, dict) and cur.get("kind") == "list":
+                item_shape = cur.get("item_shape")
+                if isinstance(item_shape, dict):
+                    cur = item_shape
+            continue
         if not isinstance(cur, dict):
             return None  # opaque; can't check further
         kind = cur.get("kind")
@@ -240,17 +263,20 @@ def _check_path_against_shape(shape: dict[str, Any],
             if not top_keys:
                 return None  # empty / unknown — give it the benefit
             if seg not in top_keys:
-                return seg
-            # We don't recurse into nested shapes (only top-level
-            # types are recorded); stop here without flagging deeper
-            # segments.
-            return None
+                return seg, top_keys
+            nested = cur.get("nested") or {}
+            if seg in nested:
+                cur = nested[seg]
+                continue
+            return None  # no nested shape for this key; can't check deeper
         if kind == "list":
-            # Bare attribute access on a list (no [N]) is suspicious
-            # but C6 (Phase 5) handles index-into-non-list cleanly.
             item_keys = cur.get("item_keys") or []
             if item_keys and seg not in item_keys:
-                return seg
+                return seg, item_keys
+            item_shape = cur.get("item_shape")
+            if isinstance(item_shape, dict):
+                cur = item_shape
+                continue
             return None
         # scalar / null / unknown — opaque
         return None
@@ -269,6 +295,13 @@ def _suggest_close_key(needle: str, haystack: list[str]) -> str:
     near = [k for k in haystack if n in k.lower() or k.lower() in n]
     if near:
         return f"did you mean {near[0]!r}?"
+    # Edit-distance fallback — catches transpositions (summray→summary)
+    # and single-char typos the substring heuristic misses.
+    close = difflib.get_close_matches(n, [k.lower() for k in haystack],
+                                      n=1, cutoff=0.7)
+    if close:
+        match = next(k for k in haystack if k.lower() == close[0])
+        return f"did you mean {match!r}?"
     return ""
 
 
@@ -464,6 +497,62 @@ def _c4_picklist_drift(trace: list[dict[str, Any]],
 # C6 index_into_non_list
 # ---------------------------------------------------------------------
 
+def _resolve_shape_at(
+    shape: dict[str, Any], attr_chain: list[str],
+) -> tuple[str, dict[str, Any]] | None:
+    """Walk an attr chain into nested output shapes, returning
+    ``(type_str, shape_at_target)`` at the final attr, or ``None`` if
+    the chain can't be resolved (missing key, or nesting too deep for
+    the shape to see). ``type_str`` is the type tag from ``types``/
+    ``item_type``; ``shape_at_target`` is the nested shape dict (or
+    the top shape if the chain is empty)."""
+    if not attr_chain:
+        return "", shape
+    cur = shape
+    for i, attr in enumerate(attr_chain):
+        if not isinstance(cur, dict):
+            return None
+        kind = cur.get("kind")
+        if kind == "dict":
+            top_keys = cur.get("top_keys") or []
+            if attr not in top_keys:
+                return None
+            types = cur.get("types") or {}
+            t = types.get(attr, "")
+            nested = cur.get("nested") or {}
+            if attr in nested:
+                cur = nested[attr]
+            elif i < len(attr_chain) - 1:
+                # Can't walk deeper — no nested shape recorded
+                return None
+            else:
+                # Last attr; return its type and the current shape
+                return t, cur
+        elif kind == "list":
+            item_keys = cur.get("item_keys") or []
+            if item_keys and attr not in item_keys:
+                return None
+            item_shape = cur.get("item_shape")
+            if isinstance(item_shape, dict):
+                cur = item_shape
+            elif i < len(attr_chain) - 1:
+                return None
+            else:
+                return cur.get("item_type", ""), cur
+        else:
+            return None
+    # Followed the last attr into a nested shape — return its type
+    if isinstance(cur, dict):
+        kind = cur.get("kind", "")
+        if kind == "dict":
+            return "dict", cur
+        if kind == "list":
+            return "list", cur
+        if kind in ("string", "int", "float", "bool", "null"):
+            return kind, cur
+    return None
+
+
 def _c6_index_non_list(trace: list[dict[str, Any]],
                        by_jkey: dict[str, dict[str, Any]]) -> list[Diagnostic]:
     """Flag `vars.steps.X.Y[N]` (or `[*]`) when the producer's
@@ -471,6 +560,10 @@ def _c6_index_non_list(trace: list[dict[str, Any]],
     `'dict' object is not subscriptable` at runtime. The render path
     walker records subscripts on `segments` as the literal `"[0]"`-
     shaped strings; we read them off the consumed_paths entry.
+
+    Walks into nested shapes (up to the inference depth cap) so that
+    `vars.steps.Fetch.data.owner[0]` where ``owner`` is a nested dict
+    also fires, not just top-level attributes.
     """
     out: list[Diagnostic] = []
     for rec in trace:
@@ -481,32 +574,40 @@ def _c6_index_non_list(trace: list[dict[str, Any]],
             segments = ref.get("segments") or []
             if not segments:
                 continue
-            # Find a subscript that isn't the first segment — `X[N]` on
-            # the producer key itself is fine (means "first record of
-            # the step's output list").
+            # Find a numeric subscript segment after position 0 —
+            # `X[0]` on the producer key itself is fine (means "first
+            # record of the step's output list"). The render-paths
+            # extractor encodes `[0]` as the bare digit string "0".
             sub_idx = next(
                 (i for i, s in enumerate(segments)
-                 if isinstance(s, str) and s.startswith("[")),
+                 if isinstance(s, str) and _is_subscript_segment(s)),
                 None,
             )
-            if sub_idx is None or sub_idx == 0:
+            if sub_idx is None or sub_idx <= 1:
                 continue
             producer = ref.get("source_step_id", "")
             prod_rec = by_jkey.get(producer)
             if prod_rec is None:
                 continue
             shape = prod_rec.get("output_shape")
-            if not isinstance(shape, dict) or shape.get("kind") != "dict":
+            if not isinstance(shape, dict):
                 continue
-            # Walk to the attr being indexed.
-            cur_top_keys = shape.get("top_keys") or []
+            # Walk the attr chain (segments before the subscript, minus
+            # 'steps' and the producer name) into the nested shape.
             attr_chain = [s for s in segments[:sub_idx]
-                          if isinstance(s, str) and not s.startswith("[")]
+                          if isinstance(s, str) and not _is_subscript_segment(s)]
+            # Drop 'steps' and producer name from the front.
+            if len(attr_chain) >= 2 and attr_chain[0] == "steps":
+                attr_chain = attr_chain[2:]
+            elif attr_chain:
+                attr_chain = attr_chain[1:]
             target = attr_chain[-1] if attr_chain else None
-            if target is None or target not in cur_top_keys:
+            if target is None:
                 continue
-            types = shape.get("types") or {}
-            t = types.get(target, "")
+            resolved = _resolve_shape_at(shape, attr_chain)
+            if resolved is None:
+                continue
+            t, _ = resolved
             if t in {"list", "tuple"} or t == "":
                 continue
             out.append(Diagnostic(
