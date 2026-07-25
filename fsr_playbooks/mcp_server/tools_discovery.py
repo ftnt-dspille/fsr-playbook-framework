@@ -1466,20 +1466,18 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
                           "requires_record", "run_mode"],
         "note": (
             "Manual / designer trigger. With NO `module:` it's a pure "
-            "designer trigger (cybersponse.abstract_trigger). With a "
-            "`module:` set it becomes a record-context Execute action "
-            "(cybersponse.action) — `button_label:` is what the user "
-            "sees in the Execute menu (NOT the step name). "
-            "`run_mode: per_record` (default) or `once_for_all`."
+            "designer trigger. With a `module:` set it becomes a "
+            "record-context Execute action — `button_label:` is what the "
+            "user sees in the Execute menu (NOT the step name). "
+            "`run_mode: per_record` (default) or `once_for_all`. Keys go "
+            "at the step level (no `arguments:` wrapper)."
         ),
         "example": {
             "type": "start",
             "name": "Run",
-            "arguments": {
-                "module": "alerts",
-                "button_label": "Enrich This Alert",
-                "run_mode": "per_record",
-            },
+            "module": "alerts",
+            "button_label": "Enrich This Alert",
+            "run_mode": "per_record",
         },
     },
     "start_on_create": {
@@ -1495,13 +1493,11 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         ),
         "example": {
             "type": "start_on_create",
-            "arguments": {
-                "module": "alerts",
-                "when": {
-                    "logic": "AND",
-                    "filters": [{"field": "name", "op": "contains",
-                                 "value": "phish"}],
-                },
+            "module": "alerts",
+            "when": {
+                "logic": "AND",
+                "filters": [{"field": "name", "op": "contains",
+                             "value": "phish"}],
             },
         },
     },
@@ -1514,23 +1510,20 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         ),
         "example": {
             "type": "start_on_update",
-            "arguments": {
-                "module": "alerts",
-                "when": {
-                    "logic": "AND",
-                    "filters": [{"field": "status", "op": "changed"}],
-                },
+            "module": "alerts",
+            "when": {
+                "logic": "AND",
+                "filters": [{"field": "status", "op": "changed"}],
             },
         },
     },
     "set_variable": {
         "accepted_keys_step_level": ["vars", "message", "record"],
         "shape": (
-            "Variables go under a step-level `vars:` mapping (not under "
-            "`arguments:`). The parser hoists `vars:` into the wire-form "
-            "`arg_list`. Optional `message:` posts a comment to the "
-            "triggered record's collaboration panel; `record:` is only "
-            "needed when the playbook has no triggered record."
+            "Variables go under a step-level `vars:` mapping. Optional "
+            "`message:` posts a comment to the triggered record's "
+            "collaboration panel; `record:` is only needed when the "
+            "playbook has no triggered record."
         ),
         "message_block": {
             "shape": (
@@ -1594,9 +1587,6 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "do_not_use": [
             "set: / values: / variables: at step level — only `vars:` is "
             "the recognized sugar key",
-            "putting variables under `arguments:` — use step-level `vars:`",
-            "arg_list: [{name, value}, ...] at step level — legacy wire "
-            "form, the parser writes it for you",
             "putting message:{} keys under arguments: — `message:` is a "
             "step-level sibling of `vars:`",
         ],
@@ -1630,7 +1620,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
     },
     "connector": {
         "accepted_keys": ["connector", "operation", "config", "params",
-                          "agent", "version", "pickFromTenant"],
+                          "agent", "version"],
         "note": (
             "Always look up the operation first via "
             "find_operation/get_op_schema — `params` keys are validated "
@@ -1652,12 +1642,10 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "example": {
             "type": "connector",
             "name": "Query VirusTotal",
-            "arguments": {
-                "connector": "virustotal",
-                "operation": "query_ip",
-                "config": "",
-                "params": {"ip": "{{ vars.input.params.ip }}"},
-            },
+            "connector": "virustotal",
+            "operation": "query_ip",
+            "config": "",
+            "params": {"ip": "{{ vars.input.params.ip }}"},
             "output_ref_example": "{{ vars.steps.Query_VirusTotal.data.reputation }}",
         },
     },
@@ -1665,9 +1653,8 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "accepted_keys": [],
         "example": {"type": "stop", "name": "End"},
         "note": (
-            "Compiles to the connector handler's no_op (cyops_utilities). "
-            "Use as a decision-branch terminator instead of dangling "
-            "steps or filler set_variable."
+            "Terminal no-op step. Use as a decision-branch terminator "
+            "instead of dangling steps or filler set_variable."
         ),
     },
     "end": {
@@ -1676,63 +1663,67 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "note": "Alias for stop.",
     },
     "find_record": {
-        "accepted_keys": ["module", "query", "partial"],
+        "accepted_keys": ["module", "filters", "limit", "logic",
+                          "relationships", "partial"],
         "note": (
-            "Returns a hydra envelope. Records are at "
+            "Flat `filters:` / `limit:` / `logic:` are friendly keys that "
+            "compile to the wire `query:` envelope (a raw `query:` is still "
+            "accepted for back-compat). Keys go at the step level (no "
+            "`arguments:` wrapper). Returns a hydra envelope: records are at "
             "`vars.steps.<name>['hydra:member']`, NOT `.records`. "
             "`partial: true` returns first page only."
         ),
-        "query_shape": (
-            "{logic: AND|OR, filters: [{field, operator, value}, ...]}"
+        "filters_shape": (
+            "list of {field, operator, value} — operator is one of "
+            "eq/neq/gt/gte/lt/lte/in/contains/like. `logic: AND|OR` "
+            "(default AND) joins them; `limit:` caps results (default 30)."
         ),
         "example": {
             "type": "find_record",
             "name": "find",
-            "arguments": {
-                "module": "indicators",
-                "query": {
-                    "logic": "AND",
-                    "filters": [{"field": "value", "operator": "eq",
-                                 "value": "{{ vars.input.params.indicator }}"}],
-                },
-                "partial": True,
-            },
+            "module": "indicators",
+            "filters": [{"field": "value", "operator": "eq",
+                         "value": "{{ vars.input.params.indicator }}"}],
+            "limit": 30,
+            "logic": "AND",
+            "partial": True,
         },
     },
     "create_record": {
-        "accepted_keys": ["module", "resource"],
+        "accepted_keys": ["module", "fields", "operation", "is_upsert"],
         "note": (
-            "`module:` is the friendly module name (alerts, incidents, "
-            "indicators, ...) — compiler converts to the IRI form. "
-            "`resource:` is a flat dict of {field: value}."
+            "`module:` (required) is the friendly module name (alerts, "
+            "incidents, indicators, ...) — compiler converts to the IRI "
+            "form. `fields:` is a flat dict of {field: value} (the friendly "
+            "alias for the wire `resource:` key). Keys go at the step level "
+            "(no `arguments:` wrapper)."
         ),
         "example": {
             "type": "create_record",
             "name": "Create alert",
-            "arguments": {
-                "module": "alerts",
-                "resource": {
-                    "name": "Phishing - {{ vars.input.params.subject }}",
-                    "severity": "{{ 'High' | picklist('severity') }}",
-                },
+            "module": "alerts",
+            "fields": {
+                "name": "Phishing - {{ vars.input.params.subject }}",
+                "severity": "{{ 'High' | picklist('severity') }}",
             },
         },
     },
     "update_record": {
-        "accepted_keys": ["module", "record", "resource"],
+        "accepted_keys": ["module", "record", "fields", "operation"],
         "note": (
             "`module:` names the module being updated. `record:` is the "
             "RECORD IRI to update — usually "
-            "`\"{{ vars.input.records[0]['@id'] }}\"`."
-            "usually `\"{{ vars.input.records[0]['@id'] }}\"`. Don't "
-            "confuse the two."
+            "`\"{{ vars.input.records[0]['@id'] }}\"`. `fields:` is a flat "
+            "dict of {field: value} to set (the friendly alias for the wire "
+            "`resource:` key). Keys go at the step level (no `arguments:` "
+            "wrapper)."
         ),
         "example": {
             "type": "update_record",
             "name": "Update alert severity",
             "module": "alerts",
             "record": "{{ vars.input.records[0]['@id'] }}",
-            "resource": {
+            "fields": {
                 "severity": "{{ 'Critical' | picklist('severity') }}",
             },
         },
@@ -1740,25 +1731,36 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
     "delay": {
         "accepted_keys": ["seconds", "minutes", "hours", "days"],
         "note": (
-            "Provide one or more units; the compiler builds the canonical "
-            "TimeBased rule with the instance-wide resume_playbook channel."
+            "Pauses the playbook for the given duration. Provide one or "
+            "more units at the step level (no `arguments:` wrapper); the "
+            "compiler sums them."
         ),
         "example": {
             "type": "delay",
             "name": "Wait",
-            "arguments": {"minutes": 5},
+            "minutes": 5,
         },
     },
     "manual_input": {
-        "accepted_keys_arguments": ["title", "description", "inputs"],
+        "accepted_keys": ["title", "description", "inputs", "assign_to",
+                          "email"],
         "accepted_keys_step_level": ["options"],
         "shape": (
-            "Prompt body (title, description, inputs) goes under "
-            "`arguments:`. Branch buttons go under a STEP-LEVEL `options:` "
-            "list (NOT under `arguments:`). Each option carries its own "
-            "`next:` — do not use a step-level `branches:` dict."
+            "Prompt body keys (title, description, inputs) and optional "
+            "`assign_to:` / `email:` go at the STEP LEVEL (no `arguments:` "
+            "wrapper). Branch buttons go under a STEP-LEVEL `options:` list. "
+            "Each option carries its own `next:` — do not use a step-level "
+            "`branches:` dict."
         ),
-        "type_value": "InputBased (only valid value; omit to let compiler fill)",
+        "assign_to_shape": (
+            "route the prompt to a team or person: `assign_to: {team: "
+            "\"SOC - Security\"}` or `{person: \"admin\"}`, or "
+            "`{record_field: true}` to use the triggered record's owner."
+        ),
+        "email_shape": (
+            "notify the assignee by email: `email: {enabled: true, subject: "
+            "\"...\", recipients: [...], body: \"...\"}`."
+        ),
         "options_shape": (
             "list of {display, next, primary?} dicts (`option:` is accepted as "
             "a synonym — the parser rewrites the surface key `display` to "
@@ -1769,17 +1771,16 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "example": {
             "type": "manual_input",
             "name": "Triage Decision",
-            "arguments": {
-                "title": "Confirm triage",
-                "description": "Review the alert details and approve.",
-                "inputs": [
-                    {"name": "comment", "kind": "textarea",
-                     "label": "Analyst comment", "required": True},
-                    {"name": "severity", "kind": "select",
-                     "label": "Severity",
-                     "options": ["Low", "Medium", "High"]},
-                ],
-            },
+            "title": "Confirm triage",
+            "description": "Review the alert details and approve.",
+            "assign_to": {"team": "SOC - Security"},
+            "inputs": [
+                {"name": "comment", "kind": "textarea",
+                 "label": "Analyst comment", "required": True},
+                {"name": "severity", "kind": "select",
+                 "label": "Severity",
+                 "options": ["Low", "Medium", "High"]},
+            ],
             "options": [
                 {"display": "Approve", "primary": True, "next": "Act"},
                 {"display": "Reject", "next": "Drop"},
@@ -1806,7 +1807,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "example": {
             "type": "code_snippet",
             "name": "Compute",
-            "arguments": {"code": "result = inputs['x'] * 2"},
+            "code": "result = inputs['x'] * 2",
         },
     },
     "workflow_reference": {
@@ -1822,18 +1823,36 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "example": {
             "type": "workflow_reference",
             "name": "Call Score Multiplier",
-            "arguments": {
-                "target": "FSRPB Score Multiplier",
-                "arguments": {"score": "{{ vars.input.params.base_score }}"},
-            },
+            "target": "FSRPB Score Multiplier",
+            "arguments": {"score": "{{ vars.input.params.base_score }}"},
         },
     },
     "approval": {
-        "accepted_keys": "pass-through (canonical FSR Approval shape)",
+        "accepted_keys": ["resource", "response_mapping", "timeout",
+                          "collection"],
         "note": (
-            "No friendly form yet. Use the canonical Approval wire shape "
-            "from `args_schema_json` / `examples`."
+            "Legacy human-approval step. Keys go at the step level (no "
+            "`arguments:` wrapper). `resource:` is the approval-record body "
+            "(the compiler defaults `collection:` to `approvals`); set "
+            "`approvaldescription:` for the prompt text, and optionally "
+            "`assignedTo` / `owners`. `timeout:` (seconds) and "
+            "`response_mapping:` pass through. "
+            "PREFER a `manual_input` step with `is_approval: true` for a new "
+            "approval gate: `type: approval` creates an approval record but "
+            "no manual-wf-input, so it is NOT programmatically resumable "
+            "(the run pauses and cannot be answered via the API)."
         ),
+        "resource_shape": (
+            "{approvaldescription: \"Approve?\", assignedTo?: [<team/person "
+            "IRI>], owners?: [...]}"
+        ),
+        "example": {
+            "type": "approval",
+            "name": "Manager Approval",
+            "resource": {
+                "approvaldescription": "Approve blocking {{ vars.input.params.ip }}?",
+            },
+        },
     },
 }
 
@@ -2015,7 +2034,6 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
             return {
                 "name": st["name"],
                 "label": st.get("label"),
-                "occurrences": st.get("occurrences"),
                 "markdown": _render_step_type_md(
                     ff_key, _FRIENDLY_FORMS[ff_key], st
                 ),
@@ -2044,9 +2062,13 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
                         f"verbose=True for full payload>"
                     )
         st["examples"] = examples
+        # Wire-classification noise the LLM never authors against — strip in
+        # BOTH modes (verbose keeps the wire *schemas* below, just not these).
+        for k in ("uuid", "category", "occurrences"):
+            st.pop(k, None)
         if not verbose:
             # Strip null / internal fields the LLM doesn't author against.
-            for k in ("uuid", "category", "description", "common_pitfalls",
+            for k in ("description", "common_pitfalls",
                       "ui_schema_json", "args_schema_json"):
                 if st.get(k) in (None, "", {}):
                     st.pop(k, None)
