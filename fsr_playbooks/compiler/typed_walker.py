@@ -20,6 +20,7 @@ diagnostics, plus a flat list of per-branch issues using the
 from __future__ import annotations
 
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -158,8 +159,11 @@ def _shape_to_src_tag(shape: Shape | None) -> str | None:
     if kind == "scalar":
         stype = shape.get("type")
         return {
-            "integer": "int", "float": "float", "boolean": "bool",
-            "string": "str", "null": "null",
+            "integer": "int", "int": "int",
+            "float": "float",
+            "boolean": "bool", "bool": "bool",
+            "string": "str", "str": "str",
+            "null": "null",
         }.get(stype) if isinstance(stype, str) else None
     return None
 
@@ -391,8 +395,17 @@ _LIT_FLOAT_RE = re.compile(
     r"\s*-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\s*\Z")
 
 
-def _infer_literal_shape(value: Any) -> Shape:
-    """Static type of a set_variable value, per the Phase 1b matrix."""
+def _infer_literal_shape(value: Any, conn: sqlite3.Connection | None = None) -> Shape:
+    """Static type of a set_variable value, per the Phase 1b matrix.
+
+    When ``conn`` is supplied, pure-Jinja values with a known terminal
+    filter (e.g. ``{{ x | length }}`` → int) are typed via
+    :func:`jinja_typing.infer_terminal_observed_type` — closing the
+    Tier 3.5 gap where ``set_variable: v: "{{ x | length }}"`` was
+    typed ``any`` instead of ``int``. Without a ``conn`` the filter
+    signature table is unavailable, so Jinja values degrade to ``any``
+    (the established behavior).
+    """
     # Native (non-string) values: the engine keeps these as-is.
     if isinstance(value, bool):
         return _shape_scalar("boolean")
@@ -410,9 +423,20 @@ def _infer_literal_shape(value: Any) -> Shape:
         return _shape_scalar("any")
 
     s = value
-    # Jinja present: the engine renders THEN re-coerces (e.g. "{{ '123' }}"
-    # → int 123). Can't predict statically without resolving the expr → any.
+    # Jinja present: the engine renders THEN re-coerces. If the value
+    # is a pure-Jinja expression with a known terminal filter AND we
+    # have a DB connection for the filter signature table, claim the
+    # terminal type statically. Otherwise degrade to ``any`` — we
+    # can't predict the type without resolving the expression.
     if "{{" in s or "{%" in s:
+        if conn is not None:
+            try:
+                from .jinja_typing import infer_terminal_observed_type
+                obs = infer_terminal_observed_type(s, conn)
+                if obs is not None:
+                    return _shape_scalar(obs)
+            except Exception:  # noqa: BLE001
+                pass
         return _shape_scalar("any")
     if s in _LIT_BOOL_TOKENS:
         return _shape_scalar("boolean")
@@ -452,30 +476,30 @@ def _set_variable_value_map(step: Step) -> dict[str, Any]:
     if isinstance(arg_list, list):
         out: dict[str, Any] = {}
         for item in arg_list:
-            if isinstance(item, dict) and "name" in item:
-                out[str(item["name"])] = item.get("value", "")
+            if isinstance(item, dict):
+                # Canonical arg_list form uses "key"; older forms may use "name".
+                k = item.get("key") or item.get("name")
+                if k:
+                    out[str(k)] = item.get("value", "")
         return out
     # Flat form (post-normalize): every key except structural handoffs.
     return {k: v for k, v in a.items()
             if k not in {"arg_list", "step_variables", "message"}}
 
 
-def _synth_set_variable_shape(step: Step) -> Shape:
+def _synth_set_variable_shape(
+    step: Step, conn: sqlite3.Connection | None = None,
+) -> Shape:
     """`set_variable.arg_list` is a list of {key, value} dicts (canonical)
     or a friendly `vars:` mapping. Either way the output is
-    `vars.steps.<step>.<key>`."""
-    a = step.arguments
+    `vars.steps.<step>.<key>`. Each key is typed via
+    :func:`_infer_literal_shape` so that ``{{ x | length }}`` yields
+    ``integer`` (not ``any``) when the filter signature table is
+    available — closing the Tier 3.5 gap."""
     keys: dict[str, Shape] = {}
-    arg_list = a.get("arg_list") or a.get("vars") or {}
-    if isinstance(arg_list, list):
-        for entry in arg_list:
-            if isinstance(entry, dict):
-                k = entry.get("key") or entry.get("name")
-                if k:
-                    keys[str(k)] = _shape_scalar("any")
-    elif isinstance(arg_list, dict):
-        for k in arg_list:
-            keys[str(k)] = _shape_scalar("any")
+    value_map = _set_variable_value_map(step)
+    for k, v in value_map.items():
+        keys[str(k)] = _infer_literal_shape(v, conn)
     return _shape_object(keys)
 
 
@@ -543,6 +567,7 @@ def _synth_step_shape(
     module_fields_fn: ModuleFieldsFn | None,
     op_safety_fn: OpSafetyFn | None,
     wf_ref_shapes: dict[str, Shape] | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> Shape:
     """Return the *output* shape for one step, ignoring branching."""
     # A `for_each` step runs its body once per element and FSR collects the
@@ -560,7 +585,8 @@ def _synth_step_shape(
         inner = _synth_step_shape(
             dataclasses.replace(step, for_each=None),
             probe=probe, module_fields_fn=module_fields_fn,
-            op_safety_fn=op_safety_fn, wf_ref_shapes=wf_ref_shapes)
+            op_safety_fn=op_safety_fn, wf_ref_shapes=wf_ref_shapes,
+            conn=conn)
         return _shape_list(inner)
 
     t = step.type
@@ -574,7 +600,7 @@ def _synth_step_shape(
     if t == "manual_input":
         return _synth_manual_input_shape(step)
     if t == "set_variable":
-        return _synth_set_variable_shape(step)
+        return _synth_set_variable_shape(step, conn)
     if t == "find_record":
         rec = _module_record_shape(_step_module(step), module_fields_fn)
         return _shape_list(rec)
@@ -818,6 +844,7 @@ def _validate_branch_jinja(
     pb: Playbook, ids: list[str], typed_env: dict[str, Shape],
     branch_name: str, param_type_fn: ParamTypeFn | None = None,
     param_shapes: dict[str, Shape] | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> tuple[list[Diagnostic], dict[str, Shape], list[dict[str, Any]]]:
     by_id = {s.id: s for s in pb.steps}
     jinja_key_lookup = {_jinja_key(s): s for s in pb.steps}
@@ -854,7 +881,7 @@ def _validate_branch_jinja(
         # step chaining is permitted), so seed them before validating refs.
         if s.type == "set_variable":
             for vn, vv in _set_variable_value_map(s).items():
-                var_env[vn] = _infer_literal_shape(vv)
+                var_env[vn] = _infer_literal_shape(vv, conn)
         # Branch-scoped `vars.<name>` reference checks for this step.
         diags.extend(_check_toplevel_vars(
             s, branch_name, var_env, var_defs, ids_set, pos))
@@ -1291,6 +1318,7 @@ def walk_playbook(
     module_fields_fn: ModuleFieldsFn | None = None,
     op_safety_fn: OpSafetyFn | None = None,
     param_type_fn: ParamTypeFn | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> WalkResult:
     """Walk every branch of the named playbook (or the first one) and
     return typed envs + Jinja-reference diagnostics."""
@@ -1321,6 +1349,7 @@ def walk_playbook(
         per_step[s.id] = _synth_step_shape(
             s, probe=probe, module_fields_fn=module_fields_fn,
             op_safety_fn=op_safety_fn, wf_ref_shapes=wf_ref_shapes,
+            conn=conn,
         )
 
     branch_paths = _enumerate_branches(pb)
@@ -1340,7 +1369,7 @@ def walk_playbook(
             typed_env[_jinja_key(step)] = per_step[step.id]
         label = _branch_label(pb, ids)
         diags, var_env, type_decisions = _validate_branch_jinja(
-            pb, ids, typed_env, label, param_type_fn, param_shapes)
+            pb, ids, typed_env, label, param_type_fn, param_shapes, conn)
         branches.append(BranchResult(
             name=label, step_ids=ids,
             typed_env=typed_env, var_env=var_env, diagnostics=diags,

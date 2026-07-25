@@ -203,3 +203,154 @@ def test_never_defined_left_to_validator():
     w = _walk(text)
     novel = {"var_read_before_definition", "var_defined_other_branch"}
     assert not [d for d in w.diagnostics if d.code in novel]
+
+
+# ---- Tier 3.5: terminal-type inference for set_variable Jinja values --------
+
+def _walk_with_conn(text: str):
+    """Walk with a DB connection so infer_terminal_observed_type is active."""
+    import sqlite3
+    cres = compile_yaml(text, DB)
+    assert cres.ir is not None
+    conn = sqlite3.connect(str(DB))
+    try:
+        return walk_playbook(cres.ir, conn=conn)
+    finally:
+        conn.close()
+
+
+_TIER35_TYPED = """
+collection: t
+playbooks:
+  - name: Tier35
+    steps:
+      - name: start
+        type: start
+        next: SV
+      - name: SV
+        type: set_variable
+        next: End
+        vars:
+          count: "{{ vars.steps.start.input.records | length }}"
+          label: "{{ vars.steps.start.input.records[0].source }}"
+          number: "{{ '42' | int }}"
+          flagged: "{{ 'true' | bool }}"
+          textified: "{{ 42 | string }}"
+"""
+
+
+def test_set_variable_jinja_terminal_type_inferred():
+    """With a DB connection, pure-Jinja values with known terminal
+    filters are typed by their filter's declared output type, not 'any'."""
+    w = _walk_with_conn(_TIER35_TYPED)
+    env = w.branches[0].var_env
+    # | length → integer
+    assert env["count"]["type"] == "int", env["count"]
+    # | int → integer
+    assert env["number"]["type"] == "int", env["number"]
+    # | bool → boolean
+    assert env["flagged"]["type"] == "bool", env["flagged"]
+    # | string → string
+    assert env["textified"]["type"] == "str", env["textified"]
+    # No terminal filter → still 'any' (we don't claim the shape of a
+    # bare vars.steps.x.y reference — that's the walker's job)
+    assert env["label"]["type"] == "any", env["label"]
+
+
+def test_set_variable_jinja_without_conn_degrades_to_any():
+    """Without a DB connection, Jinja values degrade to 'any' — the
+    filter signature table is unavailable."""
+    w = _walk(_TIER35_TYPED)
+    env = w.branches[0].var_env
+    assert env["count"]["type"] == "any"
+    assert env["number"]["type"] == "any"
+
+
+def test_type_mismatch_through_set_variable_indirection():
+    """A set_variable producing int (via | length) fed into a connector
+    param typed ipv4 must fire type_mismatch — the core Tier 3.5 use case.
+    Uses a mock param_type_fn since the slim DB may not have the
+    connector's param types."""
+    text = """
+collection: t
+playbooks:
+  - name: Mismatch
+    steps:
+      - name: start
+        type: start
+        next: SV
+      - name: SV
+        type: set_variable
+        next: Call
+        vars:
+          count: "{{ vars.steps.start.input.records | length }}"
+      - name: Call
+        type: connector
+        connector: virustotal
+        operation: query_ip
+        params:
+          ip: "{{ vars.count }}"
+        next: End
+      - name: End
+        type: end
+"""
+    import sqlite3
+    cres = compile_yaml(text, DB)
+    assert cres.ir is not None
+    conn = sqlite3.connect(str(DB))
+    try:
+        def mock_param_type(connector, op, param):
+            if connector == "virustotal" and op == "query_ip" and param == "ip":
+                return "ipv4"
+            return None
+        w = walk_playbook(cres.ir, conn=conn, param_type_fn=mock_param_type)
+    finally:
+        conn.close()
+    mismatches = [d for d in w.diagnostics if d.code == "type_mismatch"]
+    assert len(mismatches) == 1, [d.code for d in w.diagnostics]
+    d = mismatches[0]
+    assert d.step == "call"
+    assert "ipv4" in d.message
+    assert "int" in d.message
+
+
+def test_type_match_through_set_variable_indirection_no_false_positive():
+    """A set_variable producing string (via | string) fed into a text
+    param must NOT fire — confirming the check isn't over-firing."""
+    text = """
+collection: t
+playbooks:
+  - name: Match
+    steps:
+      - name: start
+        type: start
+        next: SV
+      - name: SV
+        type: set_variable
+        next: Call
+        vars:
+          label: "{{ 42 | string }}"
+      - name: Call
+        type: connector
+        connector: virustotal
+        operation: query_ip
+        params:
+          ip: "{{ vars.label }}"
+        next: End
+      - name: End
+        type: end
+"""
+    w = _walk_with_conn(text)
+    mismatches = [d for d in w.diagnostics if d.code == "type_mismatch"]
+    assert mismatches == [], [d.message for d in mismatches]
+
+
+def test_per_step_shape_carries_inferred_types():
+    """_synth_set_variable_shape (used by per_step_shapes) should also
+    carry inferred types, not just var_env."""
+    w = _walk_with_conn(_TIER35_TYPED)
+    sv_shape = w.per_step_shapes.get("sv")
+    assert sv_shape is not None
+    keys = sv_shape.get("keys", {})
+    assert keys.get("count", {}).get("type") == "int", keys.get("count")
+    assert keys.get("label", {}).get("type") == "any", keys.get("label")
