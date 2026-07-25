@@ -254,9 +254,15 @@ def _leaf_to_filter(
         # either "" or null; non-picklist fields get `type: primitive` with
         # `_value: null`. There is therefore NO single correct constant to emit
         # here, and the earlier "just add `@id: null`" TODO would be wrong for the
-        # primitive and `@id: ""` cases. Whether the omitted `@id` actually
-        # affects trigger *firing* (vs. being cosmetic) needs live-fire on a box
-        # to settle; until then this neutral object shape is left as-is.
+        # primitive and `@id: ""` cases.
+        #
+        # And the payload is COSMETIC for `changed`: working deployed playbooks in
+        # the corpus carry `_value: null` on their `changed` triggers, so if the
+        # `_value` content were load-bearing for matching, those couldn't fire.
+        # The `changed` operator matches "field changed at all", independent of
+        # `_value`. So this neutral shape is functionally correct; the remaining
+        # diff vs. the designer is presentation-only, not worth a field-type-aware
+        # branch here. (Left as-is deliberately.)
         return {
             "type": "object", "field": leaf.field, "value": None,
             "_value": {"display": "", "itemValue": ""},
