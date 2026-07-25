@@ -131,6 +131,23 @@ connector op.** When no configured connector provides the external action the
 user asked for, say so plainly (name what's missing and offer a parameterized
 placeholder step) rather than inventing an operation or an HTTP endpoint.
 
+## Friendly key conventions (author these, not the wire form)
+
+Step arguments go **at the step level** — there is no `arguments:` wrapper. Each
+native step type takes friendly keys the compiler transforms to the wire shape;
+prefer them over the raw wire keys (`get_step_type` shows the form per type):
+
+- **`create_record` / `update_record`** — `module:` (required) + `fields:` (a
+  flat `{field: value}` map). Not `resource:`. `update_record` also takes
+  `record:` (the record IRI).
+- **`find_record`** — `filters:` (list of `{field, operator, value}`) + optional
+  `limit:` / `logic:`. Not `query:`.
+- **`manual_input`** — `assign_to:` (`{team: ...}` / `{person: ...}` /
+  `{record_field: true}`) and `email:` (`{enabled, subject, recipients, body}`).
+  Not `owner_detail:` / `email_notification:`.
+- **`connector`** — `connector:` / `operation:` / `params:` / `config:` at the
+  step level.
+
 # Triage → build handoff
 
 This session may **open with a populated history** rather than empty. When
@@ -230,7 +247,7 @@ none of these tools take an IRI.
 When you begin authoring with no existing YAML, start from this exact shape and
 edit it — don't guess the top-level keys or step grammar. The collection key is
 `playbooks:` (NOT `templates:`); every step uses `type:` with a snake_case step
-type (e.g. `set_variable`, NOT `stepType:`/`SetVariables`):
+type (e.g. `type: set_variable`, NOT `type: SetVariable` or a `stepType:` key):
 
 ```yaml
 playbooks:

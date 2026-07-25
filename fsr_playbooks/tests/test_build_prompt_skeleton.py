@@ -141,9 +141,10 @@ _NOT_TOOLS = {
     # The prompt's own example of a GUESSED op that does not exist. Naming it is
     # the point — it teaches the model not to invent it.
     "get_api_response",
-    # Native step types, resolved via get_step_type. Not tools.
-    "create_record", "update_record", "set_variable", "decision", "start", "end",
-    "connector",
+    # Native step types, resolved via get_step_type. Not tools. (`find_record`
+    # has a tool-shaped `find_` prefix but is a step type, not the MCP tool.)
+    "create_record", "update_record", "find_record", "set_variable", "decision",
+    "start", "end", "connector",
     # YAML keys / fields the prompt teaches.
     "playbooks", "templates", "type", "stepType", "next", "name", "id",
     "parameters", "module", "yaml_text", "before_yaml", "after_yaml",
