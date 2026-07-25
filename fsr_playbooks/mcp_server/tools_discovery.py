@@ -987,6 +987,13 @@ def get_op_schema(connector: str, op: str,
             # safe) and read the observed schema. (TRIAGE_BUILD_AUDIT_PLAN E3)
             for col in ("output_schema_json", "conditional_output_schema_json"):
                 result.pop(col, None)
+            # Wire-classification / UI-state columns the agent never authors
+            # against — pure noise in the verbose dump. (Phase C: the audit
+            # also named operationTitle/version/agent/pickFromTenant, but this
+            # DB's `operations` row carries none of those — only `category`
+            # plus the visible/enabled flags exist here.)
+            for col in ("category", "visible", "enabled"):
+                result.pop(col, None)
             if result.get("output_schema_observed"):
                 try:
                     result["output_schema_observed"] = json.loads(
