@@ -373,9 +373,26 @@ def _make_fn(
     credential; the on-box auth/refresh path does not apply)."""
     def fn(**kwargs: Any) -> Any:
         if url:
-            return client.mcp.call_tool_at(
+            raw = client.mcp.call_tool_at(
                 url, headers or {}, tool_name,
                 arguments=kwargs or None, verify=verify)
-        return client.mcp.call_tool(server, tool_name, arguments=kwargs or None)
+        else:
+            raw = client.mcp.call_tool(server, tool_name, arguments=kwargs or None)
+        return _envelope(raw)
     fn.__name__ = _make_name(server, tool_name)
     return fn
+
+
+def _envelope(raw: Any) -> Any:
+    """Normalize an MCP tool result to the dispatch tool-output contract (a dict
+    envelope, or a list of dict envelopes). FortiSOAR's native servers return
+    parsed JSON dicts, but an arbitrary EXTERNAL MCP tool may return a bare
+    string/number/None (its content block was plain text) — which trips the
+    fail-open "must be a dict envelope" warning. Wrap those in ``{"result": …}``
+    so the LLM sees a clean, consistent shape. Dicts and lists-of-dicts pass
+    through untouched."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list) and all(isinstance(x, dict) for x in raw):
+        return raw
+    return {"result": raw}

@@ -417,6 +417,35 @@ def test_external_mutating_tier_is_approval():
     assert T.REGISTRY["mcp_partner__lookup"].confirm_mode == "approve"
 
 
+def test_external_bare_string_result_wrapped_in_envelope():
+    """An external MCP tool may return a bare string (plain-text content block);
+    the dispatch tool-output contract wants a dict envelope. `_make_fn` wraps
+    scalars in `{"result": …}` so the LLM sees a clean shape; dicts pass through."""
+    class _MCP:
+        def supports_native_mcp(self): return True
+        def list_tools_at(self, url, headers, *, verify=None):
+            return EXT_TOOLS
+        def call_tool_at(self, url, headers, name, arguments=None, *, verify=None):
+            return "PARTNER-DB-HIT:foo"   # bare string, like a text-only server
+    class _C:
+        def supports_native_mcp(self): return True
+        mcp = _MCP()
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "tools": "*"}},
+                client_factory=lambda: _C())
+    M.ensure_initialized()
+    assert T.REGISTRY["mcp_partner__lookup"].fn(q="foo") == {"result": "PARTNER-DB-HIT:foo"}
+
+
+def test_dict_result_passes_through_unwrapped():
+    """A dict result (native servers) must NOT be double-wrapped."""
+    from fsr_playbooks.mcp_server.materializer import _envelope
+    assert _envelope({"status": "ok"}) == {"status": "ok"}
+    assert _envelope([{"a": 1}, {"b": 2}]) == [{"a": 1}, {"b": 2}]
+    assert _envelope("hi") == {"result": "hi"}
+    assert _envelope(None) == {"result": None}
+    assert _envelope([1, 2]) == {"result": [1, 2]}   # list of non-dicts → wrapped
+
+
 def test_external_and_onbox_servers_coexist():
     """An allowlist can mix an external URL server and the on-box gateway."""
     class _MixMCP:
