@@ -78,6 +78,14 @@ def configure(
     ``SAFE_TOOLS`` remain. ``client_factory`` is injectable for tests; in
     production it's left None and :func:`initialize` builds the live pyfsr
     client from env.
+
+    An entry may also point at an **external** MCP server (not the on-appliance
+    gateway) by adding a ``url`` and optional ``auth`` — e.g.
+    ``{"my_tools": {"url": "https://host/mcp/", "auth": {"bearer": "<tok>"},
+    "tools": "*", "tier": "read_only"}}``. External entries route through
+    pyfsr's ``list_tools_at`` / ``call_tool_at`` with the rule's own headers
+    (see :func:`_auth_headers`); the key becomes the tool-name prefix
+    (``mcp_my_tools__<tool>``).
     """
     global _allowlist, _client_factory, _initialized
     if mcp_allowlist is not None:
@@ -187,8 +195,20 @@ def _initialize_impl() -> None:
         tier_label = rule.get("tier", "read_only")
         tier = 3 if tier_label == "mutating" else 1
         allowed_tools = rule.get("tools", "*")
+        # External server: an allowlist rule may carry a ``url`` pointing at an
+        # MCP server that is NOT the on-appliance gateway (a partner tool, an
+        # internal service). When present we route enumeration + execution
+        # through pyfsr's lower-level ``*_at`` methods with the rule's own auth
+        # headers, instead of the credentialed on-box ``/mcp/<server>/`` path.
+        # ``server`` stays the operator's chosen name (→ ``mcp_<name>__<tool>``).
+        ext_url = rule.get("url")
+        ext_headers = _auth_headers(rule) if ext_url else None
+        ext_verify = rule.get("verify", True) if ext_url else None
         try:
-            tools = mcp.list_tools(server)
+            if ext_url:
+                tools = mcp.list_tools_at(ext_url, ext_headers or {}, verify=ext_verify)
+            else:
+                tools = mcp.list_tools(server)
         except Exception as exc:  # noqa: BLE001 - one bad server shouldn't abort the rest
             log.warning("MCP materializer: list_tools(%r) failed: %s", server, exc)
             continue
@@ -226,7 +246,8 @@ def _initialize_impl() -> None:
                 input_schema=(_tool_field(tool, "input_schema")
                               or _tool_field(tool, "inputSchema")
                               or {"type": "object", "properties": {}}),
-                fn=_make_fn(client, server, tname),
+                fn=_make_fn(client, server, tname,
+                            url=ext_url, headers=ext_headers, verify=ext_verify),
                 tier=tier,
                 confirm_mode="auto" if tier <= 1 else ("approve" if tier <= 3 else "step_up"),
             )
@@ -289,6 +310,39 @@ def _normalize_rule(rule: Any) -> dict[str, Any] | None:
     return {}
 
 
+def _auth_headers(rule: dict[str, Any]) -> dict[str, str]:
+    """Build the HTTP headers for an EXTERNAL MCP server from its allowlist rule.
+
+    Accepts the natural shorthands an operator would hand-write:
+
+    - ``"auth": {"headers": {"X-Api-Key": "…"}}`` → sent verbatim
+    - ``"auth": {"bearer": "<token>"}``          → ``Authorization: Bearer <token>``
+    - ``"auth": {"api_key": "<key>"}``           → ``Authorization: API-KEY <key>``
+      (FortiSOAR convention; override the scheme with ``"header"`` if the server
+      wants a different one, e.g. ``{"api_key": "k", "header": "X-Api-Key"}``)
+    - no ``auth`` / empty → ``{}`` (a public / unauthenticated server)
+
+    Kept permissive on purpose: a malformed auth block yields ``{}`` and the
+    server simply fails to list (logged upstream), never aborts the rest.
+    """
+    auth = rule.get("auth")
+    if not isinstance(auth, dict):
+        return {}
+    headers = auth.get("headers")
+    if isinstance(headers, dict):
+        return {str(k): str(v) for k, v in headers.items()}
+    bearer = auth.get("bearer")
+    if bearer:
+        return {"Authorization": f"Bearer {bearer}"}
+    api_key = auth.get("api_key")
+    if api_key:
+        header_name = auth.get("header")
+        if header_name:
+            return {str(header_name): str(api_key)}
+        return {"Authorization": f"API-KEY {api_key}"}
+    return {}
+
+
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 
 
@@ -300,12 +354,28 @@ def _make_name(server: str, tool_name: str) -> str:
     return f"mcp_{slug}__{tool_name}"
 
 
-def _make_fn(client: Any, server: str, tool_name: str) -> Callable[..., Any]:
+def _make_fn(
+    client: Any,
+    server: str,
+    tool_name: str,
+    *,
+    url: str | None = None,
+    headers: dict[str, str] | None = None,
+    verify: Any = None,
+) -> Callable[..., Any]:
     """Closure the LLM dispatches against. ``dispatch`` calls ``fn(**raw_args)``
     with the LLM's tool-use args; we forward them as the MCP ``arguments``
     dict. Each call opens a fresh MCP session (connect, initialize, call,
-    disconnect) — simple + safe; the client re-auths once on a 401/403."""
+    disconnect) — simple + safe; the client re-auths once on a 401/403.
+
+    When ``url`` is set the tool lives on an EXTERNAL server: route through
+    ``call_tool_at`` with the rule's own headers (the external server owns its
+    credential; the on-box auth/refresh path does not apply)."""
     def fn(**kwargs: Any) -> Any:
+        if url:
+            return client.mcp.call_tool_at(
+                url, headers or {}, tool_name,
+                arguments=kwargs or None, verify=verify)
         return client.mcp.call_tool(server, tool_name, arguments=kwargs or None)
     fn.__name__ = _make_name(server, tool_name)
     return fn

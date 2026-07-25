@@ -302,3 +302,138 @@ def test_bad_rule_does_not_abort_other_servers():
     M.ensure_initialized()
     assert "mcp_soc__get_alert" in T.REGISTRY
     assert "mcp_utility__now" in T.REGISTRY
+
+
+# --- external MCP server support (M1) -----------------------------------------
+
+def _stub_ext_client(tools_by_url):
+    """Stub whose ``.mcp.list_tools_at(url, headers)`` / ``.call_tool_at(...)``
+    return the tools registered for ``url`` and record the (url, headers, verify)
+    they were invoked with. ``list_tools`` (on-box gateway) is present but raises
+    so a mis-route to it is caught by a test rather than passing silently."""
+    calls = {}
+
+    class _MCP:
+        def list_tools(self, server):
+            raise AssertionError(f"external rule wrongly routed to on-box list_tools({server!r})")
+        def call_tool(self, server, name, arguments=None):
+            raise AssertionError(f"external rule wrongly routed to on-box call_tool({server!r})")
+        def list_tools_at(self, url, headers, *, verify=None):
+            calls["list"] = {"url": url, "headers": headers, "verify": verify}
+            return tools_by_url.get(url, [])
+        def call_tool_at(self, url, headers, name, arguments=None, *, verify=None):
+            calls["call"] = {"url": url, "headers": headers, "name": name,
+                             "args": arguments, "verify": verify}
+            return {"called": name, "url": url, "args": arguments}
+
+    class _Client:
+        def supports_native_mcp(self):
+            return True
+        mcp = _MCP()
+    client = _Client()
+    client.calls = calls  # type: ignore[attr-defined]
+    return client
+
+
+EXT_URL = "https://partner.example.com/mcp/"
+EXT_TOOLS = [{"name": "lookup", "description": "external lookup",
+              "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}}}]
+
+
+def test_external_url_routes_to_list_tools_at_with_bearer():
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "auth": {"bearer": "tok123"},
+                                           "tools": "*", "tier": "read_only"}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+    assert "mcp_partner__lookup" in T.REGISTRY
+    assert M.SERVER_MAP["mcp_partner__lookup"] == ("partner", "lookup")
+    assert client.calls["list"]["url"] == EXT_URL
+    assert client.calls["list"]["headers"] == {"Authorization": "Bearer tok123"}
+
+
+def test_external_call_routes_to_call_tool_at():
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "auth": {"bearer": "tok123"}}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+    res = T.REGISTRY["mcp_partner__lookup"].fn(q="abc")
+    assert res == {"called": "lookup", "url": EXT_URL, "args": {"q": "abc"}}
+    assert client.calls["call"]["headers"] == {"Authorization": "Bearer tok123"}
+    assert client.calls["call"]["name"] == "lookup"
+
+
+def test_external_api_key_default_scheme():
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "auth": {"api_key": "K"}}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+    assert client.calls["list"]["headers"] == {"Authorization": "API-KEY K"}
+
+
+def test_external_api_key_custom_header():
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL,
+                                           "auth": {"api_key": "K", "header": "X-Api-Key"}}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+    assert client.calls["list"]["headers"] == {"X-Api-Key": "K"}
+
+
+def test_external_raw_headers_passthrough():
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL,
+                                           "auth": {"headers": {"X-Custom": "v", "X-Two": "w"}}}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+    assert client.calls["list"]["headers"] == {"X-Custom": "v", "X-Two": "w"}
+
+
+def test_external_no_auth_is_empty_headers():
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "tools": "*"}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+    assert "mcp_partner__lookup" in T.REGISTRY
+    assert client.calls["list"]["headers"] == {}
+
+
+def test_external_verify_flag_defaults_true_and_overrides():
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "verify": False}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+    assert client.calls["list"]["verify"] is False
+    T.REGISTRY["mcp_partner__lookup"].fn(q="x")
+    assert client.calls["call"]["verify"] is False
+
+
+def test_external_mutating_tier_is_approval():
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "tier": "mutating"}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+    assert T.TOOL_TIERS["mcp_partner__lookup"] == 3
+    assert T.REGISTRY["mcp_partner__lookup"].confirm_mode == "approve"
+
+
+def test_external_and_onbox_servers_coexist():
+    """An allowlist can mix an external URL server and the on-box gateway."""
+    class _MixMCP:
+        def list_tools(self, server):
+            return SOC_TOOLS if server == "soc" else []
+        def call_tool(self, server, name, arguments=None):
+            return {"onbox": name}
+        def list_tools_at(self, url, headers, *, verify=None):
+            return EXT_TOOLS
+        def call_tool_at(self, url, headers, name, arguments=None, *, verify=None):
+            return {"ext": name}
+    class _C:
+        def supports_native_mcp(self): return True
+        mcp = _MixMCP()
+    M.configure(mcp_allowlist={"soc": {"tools": "*"},
+                               "partner": {"url": EXT_URL, "tools": "*"}},
+                client_factory=lambda: _C())
+    M.ensure_initialized()
+    assert "mcp_soc__get_alert" in T.REGISTRY
+    assert "mcp_partner__lookup" in T.REGISTRY
