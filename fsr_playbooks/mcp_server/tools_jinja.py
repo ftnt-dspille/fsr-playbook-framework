@@ -320,3 +320,177 @@ def find_jinja_example(filter: str | None = None,
                 f"get_jinja_filters for the canonical name."
             )
     return out
+
+
+# ---------------------------------------------------------------------------
+# E3: Jinja expression generator — suggest patterns for a task
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def suggest_jinja(
+    task: str,
+    context: str | None = None,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Suggest Jinja expression patterns for a task an agent needs to implement.
+
+    Instead of guessing at Jinja syntax, an AI agent that's authoring a
+    playbook describes the task (e.g. ``"resolve a picklist IRI in a query
+    body"``) and gets back real-world patterns from 8,500+ expressions mined
+    from 1,800+ live playbooks — each with its source playbook, filter chain,
+    and variable access paths.
+
+    Args:
+        task: natural-language description of what the Jinja expression needs
+            to do (e.g. ``"resolve picklist IRI"``, ``"loop over records and
+            filter by severity"``, ``"format date as ISO 8601"``)
+        context: optional extra context (e.g. ``"AlertState picklist in a
+            query Record State step"``) — narrows the search
+        limit: max patterns to return (default 5)
+
+    Returns:
+        ``{patterns: [{raw, kind, filters_csv, vars_csv, from_playbook,
+        from_step, occurrences}], filter_hints: [{name, signature, doc}],
+        count}``
+
+        Each pattern is a real Jinja block from a live playbook. The
+        ``filter_hints`` section lists filters mentioned in the matched
+        patterns with their signatures, so the agent can learn the exact
+        parameter shapes without a separate lookup.
+
+    Example:
+        An agent asks ``suggest_jinja("resolve picklist IRI in query body")``
+        and gets back patterns like
+        ``{{"AlertState" | picklist("Indicator Extracted", "@id")}}``
+        with the hint that ``picklist`` takes a ``key`` parameter where
+        ``"@id"`` returns the IRI string.
+    """
+    # Build a search query from the task + context
+    query_terms: list[str] = []
+    # Extract likely filter/keyword tokens from the task
+    task_lower = task.lower()
+    # Map common task phrases to filter names
+    _TASK_FILTER_MAP = {
+        "picklist": "picklist",
+        "iri": "picklist",
+        "date": "arrow",
+        "time": "arrow",
+        "json": "tojson",
+        "to_json": "tojson",
+        "base64": "b64encode",
+        "encode": "b64encode",
+        "regex": "regex_replace",
+        "replace": "regex_replace",
+        "split": "split",
+        "join": "join",
+        "length": "length",
+        "count": "length",
+        "default": "default",
+        "flatten": "flatten",
+        "map": "map",
+        "select": "selectattr",
+        "filter": "selectattr",
+        "sort": "sort",
+        "group": "groupby",
+        "query": "json_query",
+        "yaql": "yaql",
+    }
+    for phrase, filter_name in _TASK_FILTER_MAP.items():
+        if phrase in task_lower:
+            query_terms.append(filter_name)
+
+    # Also add any context-provided filter names
+    if context:
+        for word in context.lower().split():
+            if len(word) > 2:
+                query_terms.append(word)
+
+    with _db() as conn:
+        # Strategy 1: Search jinja_filter_usage by filter name
+        usage_rows: list[dict[str, Any]] = []
+        if query_terms:
+            placeholders = ",".join("?" * len(query_terms))
+            usage_rows = _rows(
+                conn,
+                f"""SELECT filter_name, expression, from_playbook, from_step,
+                           step_type, occurrences
+                    FROM jinja_filter_usage
+                    WHERE filter_name IN ({placeholders})
+                    ORDER BY occurrences DESC LIMIT ?""",
+                (*query_terms, limit * 3),
+            )
+
+        # Strategy 2: Full-text search jinja_expressions
+        # Build LIKE conditions for each word in the task
+        words = [w for w in task.replace(",", " ").split() if len(w) > 2]
+        if context:
+            words.extend(w for w in context.replace(",", " ").split() if len(w) > 2)
+        expr_rows: list[dict[str, Any]] = []
+        if words:
+            like_conditions = " OR ".join(
+                ["raw LIKE '%' || ? || '%'" for _ in words]
+            )
+            expr_rows = _rows(
+                conn,
+                f"""SELECT raw, kind, filters_csv, vars_csv,
+                           from_playbook, from_step, step_type, occurrences
+                    FROM jinja_expressions
+                    WHERE {like_conditions}
+                    ORDER BY occurrences DESC, length(raw) ASC LIMIT ?""",
+                (*words, limit * 2),
+            )
+
+        # Merge and deduplicate by raw expression
+        seen: set[str] = set()
+        patterns: list[dict[str, Any]] = []
+        for row in usage_rows:
+            raw = row.get("expression") or ""
+            if raw and raw not in seen:
+                seen.add(raw)
+                patterns.append({
+                    "raw": raw,
+                    "kind": "expr",
+                    "filters_csv": row.get("filter_name"),
+                    "from_playbook": row.get("from_playbook"),
+                    "from_step": row.get("from_step"),
+                    "occurrences": row.get("occurrences", 1),
+                })
+        for row in expr_rows:
+            raw = row.get("raw") or ""
+            if raw and raw not in seen:
+                seen.add(raw)
+                patterns.append(row)
+        patterns = patterns[:limit]
+
+        # Collect filter hints from the matched patterns
+        filter_names: set[str] = set()
+        for p in patterns:
+            fcsv = p.get("filters_csv") or ""
+            for f in fcsv.split(","):
+                f = f.strip()
+                if f and f not in ("", "None"):
+                    filter_names.add(f)
+
+        filter_hints: list[dict[str, Any]] = []
+        if filter_names:
+            placeholders = ",".join("?" * len(filter_names))
+            hint_rows = _rows(
+                conn,
+                f"""SELECT name, signature, description,
+                           output_type_declared, curated_doc
+                    FROM jinja_macros
+                    WHERE name IN ({placeholders})""",
+                tuple(filter_names),
+            )
+            for h in hint_rows:
+                filter_hints.append({
+                    "name": h.get("name"),
+                    "signature": h.get("signature"),
+                    "doc": (h.get("curated_doc") or h.get("description") or "")[:300],
+                })
+
+        return {
+            "patterns": patterns,
+            "filter_hints": filter_hints,
+            "count": len(patterns),
+        }

@@ -2190,3 +2190,130 @@ def _shape_run(m: dict) -> dict:
         "pk": pk,
         "source": m.get("_source"),  # "live" or "historical"
     }
+
+
+# ---------------------------------------------------------------------------
+# E2: Playbook test harness — run_and_wait + execution_context in one call
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def run_playbook_test(
+    playbook: str,
+    collection: str | None = None,
+    record: str | None = None,
+    input: dict[str, Any] | None = None,
+    timeout_s: int = 120,
+    audit_window_s: int = 60,
+) -> dict[str, Any]:
+    """Trigger a deployed playbook, wait for completion, and return a full
+    diagnostic package: per-step status with timing, failure details, and
+    audit-log context showing what else changed on the record during the run.
+
+    This is the one-call test harness for AI-driven playbook development.
+    After compiling and deploying a playbook, call this to run it and get
+    everything needed to debug in a single response.
+
+    Args:
+        playbook: workflow name OR uuid OR ``Collection:Name`` shorthand
+        collection: collection name to disambiguate duplicate workflow names
+        record: ``"<module>:<uuid>"`` for record-action triggers; omit for
+            manual-trigger (designer Run button) style
+        input: trigger params (mapped to ``vars.input.params.<k>``)
+        timeout_s: max seconds to wait for terminal status (default 120)
+        audit_window_s: seconds of buffer around the run window for
+            concurrent-change detection (default 60)
+
+    Returns:
+        ``{ok, status, task_id, wf_pk, steps: [{name, status, duration_ms, is_slow}],
+        failure: {failing_step, error_message} | null,
+        audit_context: {concurrent_changes, other_playbooks, summary},
+        slow_steps: [...]}``
+
+        ``ok`` is True only when status == "finished". On failure, ``failure``
+        carries the first failing step + error. ``audit_context`` shows what
+        other playbooks or manual actions changed the same record during the
+        run — key for debugging race conditions and unexpected state.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
+    try:
+        from probes._env import get_client, get_config
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"import failed: {e!r}"}
+    if not get_config().is_live():
+        return {"ok": False, "error": "FSR instance not configured"}
+    client = get_client()
+
+    # Resolve the playbook
+    try:
+        pb = client.playbooks.resolve(playbook, collection=collection)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"resolve failed: {e!r}"}
+    if not pb:
+        return {"ok": False, "error": f"no playbook matching {playbook!r}"}
+
+    # Trigger + wait using pyfsr's run_and_wait
+    try:
+        if record:
+            if ":" not in record:
+                return {"ok": False, "error": "record must be '<module>:<uuid>'"}
+            module, rec_uuid = record.split(":", 1)
+            result = client.playbooks.run_and_wait(
+                pb["name"],
+                collection=collection,
+                record_uuid=rec_uuid,
+                module=module,
+                timeout=timeout_s,
+            )
+        else:
+            result = client.playbooks.run_and_wait(
+                pb["name"],
+                collection=collection,
+                inputs=input or {},
+                timeout=timeout_s,
+            )
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"run failed: {e!r}"}
+
+    # Build the step summaries with timing
+    steps = []
+    for s in result.steps:
+        steps.append({
+            "name": s.name or "(unnamed)",
+            "status": s.status,
+            "duration_ms": s.duration_ms,
+            "is_slow": s.is_slow,
+        })
+
+    # Build failure details
+    failure = None
+    if result.failure:
+        failure = {
+            "failing_step": result.failure.failing_step,
+            "error_message": result.failure.error_message,
+        }
+
+    # Get audit context if we have a run pk
+    audit_ctx = None
+    if result.pk:
+        try:
+            ctx = client.audit.execution_context(
+                result.pk, window_seconds=audit_window_s
+            )
+            audit_ctx = {
+                "concurrent_changes": len(ctx.concurrent_changes),
+                "other_playbooks": ctx.other_playbooks,
+                "summary": ctx.summary(),
+            }
+        except Exception:  # noqa: BLE001 — audit is enrichment
+            pass
+
+    return {
+        "ok": result.succeeded,
+        "status": result.status,
+        "task_id": result.task_id,
+        "wf_pk": result.pk,
+        "steps": steps,
+        "slow_steps": [s["name"] for s in steps if s["is_slow"]],
+        "failure": failure,
+        "audit_context": audit_ctx,
+    }
