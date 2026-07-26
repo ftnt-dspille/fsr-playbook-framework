@@ -324,6 +324,13 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
                         and inner_indent - query_indent <= 2):
                     i += 1
                     continue
+                # Skip sort: [] (empty sort list — not a valid find_record
+                # step-level key; the query DSL sort is handled by the
+                # compiler's Query object, not by a step-level sort: key)
+                if (re.match(r"^\s*sort:\s*\[\]\s*$", stripped)
+                        and inner_indent - query_indent <= 2):
+                    i += 1
+                    continue
                 # Dedent the line by the fixed offset
                 d = dedent if dedent > 0 else 0
                 out.append(inner[d:] if d > 0 else inner)
