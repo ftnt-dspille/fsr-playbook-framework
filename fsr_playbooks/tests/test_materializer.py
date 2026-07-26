@@ -389,6 +389,100 @@ def test_external_raw_headers_passthrough():
     assert client.calls["list"]["headers"] == {"X-Custom": "v", "X-Two": "w"}
 
 
+class _FakeTokenResp:
+    def __init__(self, token, expires_in=300):
+        self._body = {"access_token": token, "expires_in": expires_in}
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._body
+
+
+def _patch_token_endpoint(monkeypatch, token="MINTED", expires_in=300):
+    """Patch httpx.post (lazily imported inside _oauth2_bearer) with a counter."""
+    import httpx
+    calls = {"n": 0, "last": None}
+
+    def _post(url, data=None, verify=None, timeout=None):
+        calls["n"] += 1
+        calls["last"] = {"url": url, "data": data, "verify": verify}
+        return _FakeTokenResp(token, expires_in)
+
+    monkeypatch.setattr(httpx, "post", _post)
+    return calls
+
+
+def test_external_oauth2_mints_bearer_and_lists(monkeypatch):
+    M._OAUTH_CACHE.clear()
+    calls = _patch_token_endpoint(monkeypatch, token="tokABC")
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {
+        "url": EXT_URL,
+        "auth": {"oauth2": {"token_url": "https://siem/oauth/token",
+                            "client_id": "cid", "client_secret": "sec",
+                            "verify": False}},
+        "tools": "*", "tier": "read_only"}},
+        client_factory=lambda: client)
+    M.ensure_initialized()
+    assert calls["n"] == 1                                   # minted exactly once
+    assert calls["last"]["data"]["grant_type"] == "client_credentials"
+    assert client.calls["list"]["headers"] == {"Authorization": "Bearer tokABC"}
+
+
+def test_external_oauth2_token_is_cached_across_calls(monkeypatch):
+    M._OAUTH_CACHE.clear()
+    calls = _patch_token_endpoint(monkeypatch, token="tokCACHE", expires_in=300)
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL,
+        "auth": {"oauth2": {"token_url": "https://siem/oauth/token",
+                            "client_id": "cid", "client_secret": "sec"}}}},
+        client_factory=lambda: client)
+    M.ensure_initialized()                                    # mint #1 (list)
+    T.REGISTRY["mcp_partner__lookup"].fn(q="x")               # call-time headers
+    T.REGISTRY["mcp_partner__lookup"].fn(q="y")               # again
+    assert calls["n"] == 1                                    # still cached, no re-mint
+    assert client.calls["call"]["headers"] == {"Authorization": "Bearer tokCACHE"}
+
+
+def test_external_oauth2_refreshes_when_expired(monkeypatch):
+    M._OAUTH_CACHE.clear()
+    # Token already within the skew window ⇒ next resolve must re-mint.
+    calls = _patch_token_endpoint(monkeypatch, token="tokFRESH", expires_in=300)
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL,
+        "auth": {"oauth2": {"token_url": "https://siem/oauth/token",
+                            "client_id": "cid", "client_secret": "sec"}}}},
+        client_factory=lambda: client)
+    M.ensure_initialized()                                    # mint #1
+    # Force the cached token to look already-expired.
+    key = ("https://siem/oauth/token", "cid")
+    tok, _ = M._OAUTH_CACHE[key]
+    M._OAUTH_CACHE[key] = (tok, 0.0)
+    T.REGISTRY["mcp_partner__lookup"].fn(q="x")               # must re-mint
+    assert calls["n"] == 2
+    assert client.calls["call"]["headers"] == {"Authorization": "Bearer tokFRESH"}
+
+
+def test_external_oauth2_mint_failure_is_empty_headers(monkeypatch):
+    M._OAUTH_CACHE.clear()
+    import httpx
+
+    def _boom(*a, **k):
+        raise RuntimeError("token endpoint down")
+
+    monkeypatch.setattr(httpx, "post", _boom)
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL,
+        "auth": {"oauth2": {"token_url": "https://siem/oauth/token",
+                            "client_id": "cid", "client_secret": "sec"}}}},
+        client_factory=lambda: client)
+    # Fail-soft: no crash, headers empty (server just won't authenticate).
+    M.ensure_initialized()
+    assert client.calls["list"]["headers"] == {}
+
+
 def test_external_no_auth_is_empty_headers():
     client = _stub_ext_client({EXT_URL: EXT_TOOLS})
     M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "tools": "*"}},
