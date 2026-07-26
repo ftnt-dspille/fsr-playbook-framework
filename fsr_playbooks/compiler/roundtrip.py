@@ -75,7 +75,27 @@ def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
     trigger_name = (steps_by_uuid.get(trigger_uuid) or {}).get("name")
 
     raw_params = wf.get("parameters") or []
-    params = sorted(raw_params) if isinstance(raw_params, list) else []
+    if isinstance(raw_params, list):
+        params = [p for p in raw_params if isinstance(p, str)]
+    else:
+        params = []
+
+    # Union in the trigger step's inputVariables — the decompiler does the
+    # same (decompiler.py:1174-1182). FSR is inconsistent: some playbooks
+    # have an empty top-level `parameters` but declare inputs on the trigger
+    # step. Without this union the normalizer sees fewer params than the
+    # decompiler produced, and every such workflow false-fails round-trip.
+    trigger_step = steps_by_uuid.get(trigger_uuid) or {}
+    trigger_args = trigger_step.get("arguments") or {}
+    seen = set(params)
+    for iv in trigger_args.get("inputVariables") or []:
+        if not isinstance(iv, dict):
+            continue
+        pname = iv.get("name")
+        if isinstance(pname, str) and pname and pname not in seen:
+            seen.add(pname)
+            params.append(pname)
+    params = sorted(params)
 
     return {
         "name": wf.get("name"),
