@@ -1310,6 +1310,50 @@ def _validate_jinja_filter_chains(pb: Playbook) -> list[Diagnostic]:
     return diags
 
 
+def _check_undefined_bare_names(pb: Playbook) -> list[Diagnostic]:
+    """Phase 0 — undefined bare-name detection via Jinja AST.
+
+    Walks every step's ``arguments`` and ``for_each`` Jinja templates
+    and flags bare ``Name`` nodes (``ctx='load'``) that aren't in the
+    known set (Jinja2 builtins + FSR globals + locally-defined names
+    like loop variables).  This catches references like
+    ``{{ items | length }}`` where ``items`` is never defined — the
+    existing ``_check_undefined_vars`` only matches ``vars.<name>``
+    regex patterns, so bare names go unchecked.
+
+    Playbook-level (not branch-aware) because the check is purely
+    syntactic — the name is either defined or it isn't, independent
+    of which branch you're on.
+    """
+    from .jinja_render import find_undefined_bare_names
+    diags: list[Diagnostic] = []
+    scan_fields = ("arguments", "for_each")
+    for s in pb.steps:
+        for field_name in scan_fields:
+            container = getattr(s, field_name, None)
+            if not container:
+                continue
+            for sub, val in _walk_strings(container):
+                if not isinstance(val, str) or "{{" not in val:
+                    continue
+                for name, _lineno in find_undefined_bare_names(val):
+                    diags.append(Diagnostic(
+                        code="jinja_undefined_variable",
+                        message=(
+                            f"bare name {name!r} in step {s.id!r} is not "
+                            f"defined — not a vars.* reference, not an "
+                            f"FSR global, and not a loop variable. It "
+                            f"will evaluate empty at runtime"),
+                        step=s.id, path=f"{field_name}.{sub}",
+                        severity="warning",
+                        suggestion=(
+                            f"prefix with vars. if it's a set_variable "
+                            f"output (vars.{name}), or define it with a "
+                            f"set_variable step"),
+                    ))
+    return diags
+
+
 def walk_playbook(
     coll: Collection,
     playbook_name: str | None = None,
@@ -1359,6 +1403,7 @@ def walk_playbook(
     # not branch-level — emitting it once per step prevents the same
     # diagnostic firing in every branch the step appears on.
     all_diags: list[Diagnostic] = _validate_jinja_filter_chains(pb)
+    all_diags.extend(_check_undefined_bare_names(pb))
 
     for ids in branch_paths:
         typed_env: dict[str, Shape] = {}

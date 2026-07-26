@@ -42,6 +42,7 @@ _REFERENCE_CODES = frozenset({
     "missing_field_on_step_output",  # X exists but doesn't expose .foo
     "var_read_before_definition",    # vars.<name> used before any step sets it
     "var_defined_other_branch",      # vars.<name> only set on a sibling branch
+    "jinja_undefined_variable",      # bare name (not vars.*) never defined
 })
 
 
@@ -93,8 +94,13 @@ def reference_lint(
                 continue  # already flagged by an earlier check
             seen_tokens.update(tokens)
             path = f"{pb.name}.{d.step}" if d.step else pb.name
+            # Map the walker's internal code to the right ErrorCode.
+            if d.code == "jinja_undefined_variable":
+                err_code = ErrorCode.JINJA_UNDEFINED_VARIABLE
+            else:
+                err_code = ErrorCode.BAD_VAR_REFERENCE
             out.append(CompileError(
-                code=ErrorCode.BAD_VAR_REFERENCE,
+                code=err_code,
                 message=d.message,
                 path=path,
                 suggestion=d.suggestion,

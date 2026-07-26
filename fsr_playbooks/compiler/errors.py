@@ -32,6 +32,10 @@ class ErrorCode(str, Enum):
     # *warning* by the compile-time reference lint (typed_walker) so a wrong
     # cross-step reference is caught offline instead of only on a live run.
     BAD_VAR_REFERENCE = "bad_var_reference"
+    # Bare Jinja name (not a vars.* reference) that isn't defined in the
+    # context — e.g. ``{{ items | length }}`` where ``items`` is never
+    # defined. Emitted as a warning by the typed walker's AST-based check.
+    JINJA_UNDEFINED_VARIABLE = "jinja_undefined_variable"
     INSTANCE_MISMATCH = "instance_mismatch"  # catalog warmed from a different SOAR
     STALE_CATALOG = "stale_catalog"          # catalog is behind the live SOAR
     INTERNAL = "internal"                    # tooling/install fault, not the YAML
