@@ -331,6 +331,12 @@ class AnthropicProvider:
         except Exception:
             import logging
             logging.exception("%s call failed", stop_reason_label)
+            yield ErrorEvent(
+                message=(
+                    "hit max tool budget; summary failed — see "
+                    "history above"
+                ),
+            )
 
     async def stream(
         self,

@@ -38,9 +38,17 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any, Callable
 
 log = logging.getLogger(__name__)
+
+# OAuth2 client_credentials token cache for external MCP servers whose auth rule
+# carries an ``oauth2`` block. Keyed by (token_url, client_id) → (token, expiry).
+# The materializer captures headers at build time AND recomputes them per call
+# (see _make_fn), so a cached-then-refreshed token flows to both list + call.
+_OAUTH_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
+_OAUTH_SKEW_S = 60.0  # refresh this many seconds BEFORE the token actually expires
 
 # Cap so a misconfigured allow-list can't flood the LLM tool list (the platform
 # model gates per-server; this is a backstop). Logged when hit — no silent drop.
@@ -247,7 +255,8 @@ def _initialize_impl() -> None:
                               or _tool_field(tool, "inputSchema")
                               or {"type": "object", "properties": {}}),
                 fn=_make_fn(client, server, tname,
-                            url=ext_url, headers=ext_headers, verify=ext_verify),
+                            url=ext_url, headers=ext_headers, verify=ext_verify,
+                            rule=rule if ext_url else None),
                 tier=tier,
                 confirm_mode="auto" if tier <= 1 else ("approve" if tier <= 3 else "step_up"),
             )
@@ -310,6 +319,55 @@ def _normalize_rule(rule: Any) -> dict[str, Any] | None:
     return {}
 
 
+def _oauth2_bearer(cfg: dict[str, Any]) -> str | None:
+    """Return a valid access token for an OAuth2 client_credentials rule,
+    minting a fresh one (and caching it to expiry) when none is cached or the
+    cached one is within ``_OAUTH_SKEW_S`` of expiring.
+
+    Rule shape (all under ``auth.oauth2``)::
+
+        {"token_url": "https://host/.../oauth/token",
+         "client_id": "...", "client_secret": "...",
+         "scope": "optional", "verify": false,
+         "grant_type": "client_credentials"}   # default
+
+    Fail-soft: any error returns ``None`` (the server then simply fails to
+    list/call and is logged upstream — never aborts the other servers)."""
+    token_url = cfg.get("token_url") or cfg.get("url")
+    client_id = cfg.get("client_id")
+    client_secret = cfg.get("client_secret")
+    if not (token_url and client_id and client_secret):
+        log.warning("MCP oauth2: rule missing token_url/client_id/client_secret")
+        return None
+
+    key = (str(token_url), str(client_id))
+    cached = _OAUTH_CACHE.get(key)
+    if cached and time.time() < cached[1] - _OAUTH_SKEW_S:
+        return cached[0]
+
+    try:
+        import httpx
+        data = {"grant_type": cfg.get("grant_type", "client_credentials"),
+                "client_id": client_id, "client_secret": client_secret}
+        if cfg.get("scope"):
+            data["scope"] = cfg["scope"]
+        r = httpx.post(str(token_url), data=data,
+                       verify=bool(cfg.get("verify", False)), timeout=20)
+        r.raise_for_status()
+        body = r.json()
+        token = body.get("access_token")
+        if not token:
+            log.warning("MCP oauth2: token response had no access_token")
+            return None
+        # expires_in is seconds; default to a conservative 5 min if absent.
+        ttl = float(body.get("expires_in", 300))
+        _OAUTH_CACHE[key] = (token, time.time() + ttl)
+        return token
+    except Exception as exc:  # noqa: BLE001 - fail-soft, logged, never abort
+        log.warning("MCP oauth2: token mint failed for %s: %s", token_url, exc)
+        return None
+
+
 def _auth_headers(rule: dict[str, Any]) -> dict[str, str]:
     """Build the HTTP headers for an EXTERNAL MCP server from its allowlist rule.
 
@@ -331,6 +389,13 @@ def _auth_headers(rule: dict[str, Any]) -> dict[str, str]:
     headers = auth.get("headers")
     if isinstance(headers, dict):
         return {str(k): str(v) for k, v in headers.items()}
+    # OAuth2 client_credentials: mint + cache + auto-refresh a bearer so a
+    # short-lived token (e.g. FortiSIEM's) never goes stale mid-session. Placed
+    # before the static ``bearer`` branch so an oauth2 rule wins.
+    oauth2 = auth.get("oauth2") or auth.get("client_credentials")
+    if isinstance(oauth2, dict):
+        tok = _oauth2_bearer(oauth2)
+        return {"Authorization": f"Bearer {tok}"} if tok else {}
     bearer = auth.get("bearer")
     if bearer:
         return {"Authorization": f"Bearer {bearer}"}
@@ -362,6 +427,7 @@ def _make_fn(
     url: str | None = None,
     headers: dict[str, str] | None = None,
     verify: Any = None,
+    rule: dict[str, Any] | None = None,
 ) -> Callable[..., Any]:
     """Closure the LLM dispatches against. ``dispatch`` calls ``fn(**raw_args)``
     with the LLM's tool-use args; we forward them as the MCP ``arguments``
@@ -370,11 +436,15 @@ def _make_fn(
 
     When ``url`` is set the tool lives on an EXTERNAL server: route through
     ``call_tool_at`` with the rule's own headers (the external server owns its
-    credential; the on-box auth/refresh path does not apply)."""
+    credential). Headers are recomputed from ``rule`` at CALL time (falling back
+    to the build-time ``headers``) so an auto-refreshing oauth2 bearer is never
+    stale for a long-lived worker — the cache in ``_oauth2_bearer`` makes the
+    common (unexpired) case a dict rebuild, not a network round-trip."""
     def fn(**kwargs: Any) -> Any:
         if url:
+            call_headers = _auth_headers(rule) if rule is not None else (headers or {})
             raw = client.mcp.call_tool_at(
-                url, headers or {}, tool_name,
+                url, call_headers, tool_name,
                 arguments=kwargs or None, verify=verify)
         else:
             raw = client.mcp.call_tool(server, tool_name, arguments=kwargs or None)
