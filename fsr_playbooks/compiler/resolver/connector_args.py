@@ -20,6 +20,13 @@ from ..typed_args.steps import (
 )
 
 
+# UUID pattern for cross-collection target: detection.
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
 # Observed-type validators (Tier 2.3). Each returns True iff the value
 # is acceptable under that type. All accept native Python types straight
 # through and fall back to coercion attempts on strings. None of them
@@ -753,6 +760,15 @@ class ConnectorArgsMixin:
         if target_name:
             target_pb = pb_by_name.get(target_name)
             if target_pb is None:
+                # Check if target is a UUID — cross-collection reference.
+                # Accept it and let the emitter expand to /api/3/workflows/<uuid>.
+                # Parameter validation is skipped (can't introspect the target
+                # playbook's parameters from another collection offline).
+                if _UUID_RE.match(str(target_name)):
+                    # Cross-collection UUID reference — can't introspect the
+                    # target playbook's parameters offline; accept and let
+                    # the emitter expand to /api/3/workflows/<uuid>.
+                    return
                 sug = difflib.get_close_matches(target_name, list(pb_by_name), n=1, cutoff=0.6)
                 errors.append(CompileError(
                     code=ErrorCode.UNKNOWN_NEXT_STEP,  # close enough — unknown ref

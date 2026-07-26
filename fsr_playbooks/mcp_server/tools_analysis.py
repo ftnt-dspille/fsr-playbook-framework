@@ -234,20 +234,29 @@ def step_through_playbook(yaml_text: str,
             cur = by_id[nxt_id]
             continue
 
-        # Step-level skip condition. Most step types (record CRUD,
-        # connector ops, set_variable, code_snippet) accept a
-        # ``condition`` arg — when it renders falsy, FSR skips the
-        # step entirely and downstream refs see an empty value. The
-        # analyzer downgrades missing_key severity on skipped
-        # producers, since they might not have run at runtime either.
-        skip_condition = rendered.get("condition")
-        if skip_condition not in (None, "") and not _truthy(skip_condition):
+        # Step-level skip conditions. Two gate keys with the same
+        # semantics: ``when`` (universal envelope guard) and
+        # ``condition`` (step-type-specific arg). When either renders
+        # falsy, FSR skips the step entirely and downstream refs see an
+        # empty value. The analyzer downgrades missing_key severity on
+        # skipped producers, since they might not have run at runtime
+        # either. Check ``when`` first (it's the universal guard) then
+        # ``condition`` (some step types accept it as an arg).
+        _gate_key = None
+        _gate_val = None
+        for _k in ("when", "condition"):
+            _v = rendered.get(_k)
+            if _v not in (None, "") and not _truthy(_v):
+                _gate_key = _k
+                _gate_val = _v
+                break
+        if _gate_key is not None:
             step_record["conditionally_executed"] = True
             step_record["status"] = "skipped"
             step_record["simulated_from"] = "computed"
             step_record["note"] = (
-                f"step-level condition resolved to {skip_condition!r}; "
-                "FSR will bypass this step at runtime")
+                f"step-level {_gate_key} resolved to "
+                f"{_gate_val!r}; FSR will bypass this step at runtime")
             step_record["rendered_args"] = rendered
             step_record["output"] = {}
             step_record["output_shape"] = _infer_output_shape({})
@@ -352,7 +361,7 @@ def step_through_playbook(yaml_text: str,
             # (what the emitter writes out and what step-through sees
             # when fed raw draft YAML). Render the source-form values
             # too so chained refs resolve.
-            sim_output: dict[str, Any] = {}
+            sim_output = {}
             arg_list = rendered.get("arg_list") or []
             if isinstance(arg_list, list) and arg_list:
                 for item in arg_list:
@@ -499,6 +508,37 @@ def step_through_playbook(yaml_text: str,
                 step_record["output_top_keys"] = sorted(sim_output.keys())
         step_record["output"] = sim_output
         step_record["output_shape"] = _infer_output_shape(sim_output)
+
+        # do_until retry-loop evaluation. FSR re-runs the step up to
+        # ``retries`` times until ``condition`` becomes truthy. In
+        # simulation the output won't change between retries (we're
+        # not actually re-executing), so we evaluate the condition
+        # once and report whether it would be satisfied. The condition
+        # typically references the step's own output via
+        # ``vars.steps.<self>.output…``, so it must be evaluated AFTER
+        # the output is placed in vars_ctx.
+        du = rendered.get("do_until")
+        if isinstance(du, dict) and isinstance(du.get("condition"), str):
+            du_cond = du["condition"]
+            du_retries = du.get("retries") or 0
+            try:
+                du_result = _render_walk(du_cond)
+                du_satisfied = _truthy(du_result)
+            except Exception:  # noqa: BLE001
+                du_satisfied = False
+                du_result = None
+            step_record["do_until"] = {
+                "satisfied": du_satisfied,
+                "retries": du_retries,
+                "note": (
+                    "condition met on first attempt"
+                    if du_satisfied else
+                    (f"condition not met; would retry up to "
+                     f"{du_retries} more time(s)"
+                     if du_retries else
+                     "condition not met and no retries remaining")),
+            }
+
         trace.append(step_record)
 
         # 3) Advance. For Decision steps, use the auto-evaluated branch

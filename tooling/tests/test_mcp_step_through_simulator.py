@@ -548,3 +548,187 @@ def test_unsafe_connector_op_returns_simulated_placeholder():
     assert "connector" not in whr["params"]
     assert "operation" not in whr["params"]
     assert by["blk"].get("simulated_from") == "unsafe_placeholder"
+
+
+# ---- Phase 1.5: when / do_until --------------------------------------
+
+def test_when_falsy_skips_step():
+    """A step with ``when: "false"`` should be skipped — output is
+    empty and downstream sees nothing."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: gated
+              - id: gated
+                type: set_variable
+                name: Gated
+                when: "false"
+                arg_list:
+                  - name: x
+                    value: hello
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    r = mcp_server.step_through_playbook(yaml)
+    by = _trace_by_id(r)
+    assert by["gated"]["status"] == "skipped"
+    assert by["gated"]["output"] == {}
+    assert "when" in by["gated"]["note"]
+
+
+def test_when_truthy_executes_step():
+    """A step with ``when: "true"`` should execute normally."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: gated
+              - id: gated
+                type: set_variable
+                name: Gated
+                when: "true"
+                arg_list:
+                  - name: x
+                    value: hello
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    r = mcp_server.step_through_playbook(yaml)
+    by = _trace_by_id(r)
+    assert by["gated"]["status"] != "skipped"
+    assert by["gated"]["output"] == {"x": "hello"}
+
+
+def test_when_takes_precedence_over_condition():
+    """Both ``when`` and ``condition`` checked; ``when`` is evaluated
+    first (universal envelope guard)."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: gated
+              - id: gated
+                type: set_variable
+                name: Gated
+                when: "false"
+                condition: "true"
+                arg_list:
+                  - name: x
+                    value: hello
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    r = mcp_server.step_through_playbook(yaml)
+    by = _trace_by_id(r)
+    assert by["gated"]["status"] == "skipped"
+    assert "when" in by["gated"]["note"]
+
+
+def test_do_until_satisfied_on_first_attempt():
+    """When do_until.condition is truthy after the first run, the
+    step record marks it as satisfied."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: retried
+              - id: retried
+                type: set_variable
+                name: Retried
+                do_until:
+                  condition: "true"
+                  retries: 3
+                  delay: 5
+                arg_list:
+                  - name: x
+                    value: hello
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    r = mcp_server.step_through_playbook(yaml)
+    by = _trace_by_id(r)
+    du = by["retried"].get("do_until")
+    assert du is not None
+    assert du["satisfied"] is True
+    assert du["retries"] == 3
+
+
+def test_do_until_not_satisfied_reports_retries():
+    """When do_until.condition is falsy, the step record notes that
+    it would retry."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: retried
+              - id: retried
+                type: set_variable
+                name: Retried
+                do_until:
+                  condition: "false"
+                  retries: 5
+                arg_list:
+                  - name: x
+                    value: hello
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    r = mcp_server.step_through_playbook(yaml)
+    by = _trace_by_id(r)
+    du = by["retried"].get("do_until")
+    assert du is not None
+    assert du["satisfied"] is False
+    assert du["retries"] == 5
+    assert "retry" in du["note"].lower()
+
+
+def test_do_until_absent_no_record():
+    """Steps without do_until should not have a do_until key."""
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: sv
+              - id: sv
+                type: set_variable
+                name: SV
+                arg_list:
+                  - name: x
+                    value: hello
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    r = mcp_server.step_through_playbook(yaml)
+    by = _trace_by_id(r)
+    assert "do_until" not in by["sv"]

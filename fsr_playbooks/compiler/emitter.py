@@ -19,6 +19,7 @@ the bambenek round-trip test depends on.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -26,6 +27,17 @@ from typing import Any
 from .ir import Annotation, Collection, Step
 
 _NS = uuid.UUID("00000000-0000-0000-0000-000000000fc1")  # FSR-compiler namespace
+
+# UUID pattern for cross-collection target: detection.
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _is_uuid(val: Any) -> bool:
+    """True when ``val`` looks like a standard FortiSOAR UUID."""
+    return isinstance(val, str) and bool(_UUID_RE.match(val))
 
 
 def _u(*parts: str) -> str:
@@ -255,10 +267,17 @@ def emit(collection: Collection) -> dict[str, Any]:
             # drop the friendly key from emitted JSON.
             if s.type == "workflow_reference" and isinstance(s.arguments, dict):
                 target = s.arguments.pop("target", None)
-                if target and target in wf_uuid_by_name:
-                    s.arguments["workflowReference"] = (
-                        f"/api/3/workflows/{wf_uuid_by_name[target]}"
-                    )
+                if target:
+                    if target in wf_uuid_by_name:
+                        # Local in-collection reference → deterministic UUID.
+                        s.arguments["workflowReference"] = (
+                            f"/api/3/workflows/{wf_uuid_by_name[target]}"
+                        )
+                    elif _is_uuid(target):
+                        # Cross-collection UUID reference → pass through as IRI.
+                        s.arguments["workflowReference"] = (
+                            f"/api/3/workflows/{target}"
+                        )
             # manual_input: each response option needs a `step_iri` that
             # points at the next step. Map by branch label (DecisionBased
             # multi-option) or fall back to the step's `next:` (the only
