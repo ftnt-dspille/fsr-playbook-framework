@@ -1073,6 +1073,14 @@ def _finalize_tool_output(name: str, result: Any) -> Any:
     return validate_tool_output(name, result)
 
 
+# Authoring tools whose sole/primary artifact is `yaml_text`. Used by the
+# run-vs-author redirect in dispatch(): calling one with a `playbook` NAME but
+# no YAML means the model meant to RUN, not author (see the guard below).
+_AUTHORING_YAML_TOOLS = frozenset({
+    "verify_playbook", "validate_yaml", "compile_yaml",
+})
+
+
 def dispatch(
     name: str, arguments: dict[str, Any], *, _internal: bool = False,
     session_id: str | None = None
@@ -1142,6 +1150,51 @@ def dispatch(
                     _parsed = None
                 if isinstance(_parsed, dict):
                     raw_args["params"] = _parsed
+
+    # Run-vs-author redirect (language-agnostic, keyed on the CALL SHAPE, not
+    # the analyst's words). When the analyst asks to *run* an already-deployed
+    # playbook by name, models (esp. gpt-4.1-mini) reliably mis-route to an
+    # authoring tool — they call verify_playbook/validate_yaml/compile_yaml with
+    # a `playbook` NAME but no YAML to work on, because those tools also take a
+    # `playbook` arg. There is nothing to author (yaml_text is blank), so this
+    # shape is nonsensical for authoring and unambiguous for "run it". Short-
+    # circuit with a tool_result that names the right tool, so the model self-
+    # corrects to run_playbook in the next step. No natural-language parsing —
+    # works regardless of the language the request was phrased in.
+    if name in _AUTHORING_YAML_TOOLS:
+        _pb = raw_args.get("playbook")
+        _yaml = raw_args.get("yaml_text")
+        if (isinstance(_pb, str) and _pb.strip()
+                and not (isinstance(_yaml, str) and _yaml.strip())):
+            _pbname = _pb.strip()
+            # FORCING redirect (Lever 1). A passive tool_result telling the model
+            # to "call run_playbook instead" is unreliable — gpt-4.1-mini gets the
+            # message and wanders into authoring/investigation anyway. So we don't
+            # ask: re-dispatch run_playbook ourselves, through the SAME tier gate
+            # (tier-3 still yields the approval envelope, so nothing runs
+            # un-approved). The mis-call becomes the run; model compliance is
+            # irrelevant. run_playbook isn't in _AUTHORING_YAML_TOOLS, so this
+            # recursion can't re-trip the guard.
+            if REGISTRY.get("run_playbook") is not None:
+                res = dispatch("run_playbook", {"playbook": _pbname},
+                               _internal=_internal, session_id=session_id)
+                if isinstance(res, dict):
+                    res.setdefault("_redirected_from", name)
+                return res
+            # No run_playbook in the registry (shouldn't happen in the build
+            # slice): fall back to an advisory so the turn still explains itself.
+            return {
+                "ok": False,
+                "code": "run_not_author",
+                "error": (
+                    f"No YAML was provided to {name}, so there is nothing to "
+                    f"author or verify. It looks like you want to RUN the "
+                    f"already-deployed playbook '{_pbname}'. Call "
+                    f"run_playbook(playbook='{_pbname}') to execute it."
+                ),
+                "redirect_tool": "run_playbook",
+                "playbook": _pbname,
+            }
 
     # Validate tool arguments using pydantic models if available.
     # Validation errors don't fail the dispatch — they're surfaced as
