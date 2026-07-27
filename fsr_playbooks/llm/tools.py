@@ -264,6 +264,51 @@ def _op_presence(connector: str, op: str) -> tuple[bool, bool]:
         return False, False
 
 
+# ── Pre-card validators ──────────────────────────────────────────────────────
+# A tier-3+ call is normally suspended into an approval card WITHOUT the tool
+# body ever running — so an argument that cannot possibly work (a connector that
+# exists nowhere, a playbook name the model invented) reaches the analyst as a
+# card that *looks* legitimate and can only fail after approval. A pre-card
+# validator gets the args just before the envelope is built and may return an
+# error dict to short-circuit: the model sees an actionable, self-correctable
+# result instead, and no human is asked to approve a no-op.
+#
+# Contract: ``fn(args: dict) -> dict | None``. Return ``None`` to fall through to
+# normal carding. MUST be fail-open — any uncertainty (transport blip, missing
+# catalog) returns ``None``, because refusing a legitimate action is worse than
+# carding a doomed one. Registered out-of-tree by the connector, which owns the
+# live clients these checks need (see `fsr_soc_triage.registry`).
+_PRECARD_VALIDATORS: dict[str, Any] = {}
+
+
+def set_precard_validator(tool_name: str, fn: Any) -> None:
+    """Register (or replace) the pre-card validator for ``tool_name``."""
+    _PRECARD_VALIDATORS[tool_name] = fn
+
+
+def _precard_error(name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    """Run ``name``'s pre-card validator, if any. Never raises — a validator
+    that blows up must not take the dispatch down with it (it would turn a
+    runnable action into a hard error), so it degrades to normal carding."""
+    fn = _PRECARD_VALIDATORS.get(name)
+    if fn is None:
+        return None
+    try:
+        out = fn(dict(args or {}))
+    except Exception:  # noqa: BLE001 — fail-open: fall through to the card.
+        logging.getLogger(__name__).debug(
+            "pre-card validator for '%s' raised; falling through to card", name,
+            exc_info=True)
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def _run_op_precard(args: dict[str, Any]) -> dict[str, Any] | None:
+    """Built-in pre-card validator for ``run_op`` (the original of this class)."""
+    return _run_op_absent_connector_error(
+        (args or {}).get("connector") or "", (args or {}).get("op") or "")
+
+
 def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | None:
     """Clean `unknown_connector` bounce for a `run_op` whose connector isn't real.
 
@@ -317,6 +362,10 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
             "to a configured one, or consolidate what you already have.",
         ],
     }
+
+
+# The one built-in validator. Connector-owned tools register their own.
+set_precard_validator("run_op", _run_op_precard)
 
 
 def _op_name_is_destructive(op: str) -> bool:
@@ -1070,6 +1119,30 @@ def dispatch(
     approved = bool(raw_args.pop("_approved", False)) if _internal else False
     summary = raw_args.pop("_summary", None)
 
+    # Models frequently STRINGIFY object-valued args — `params` is shown as JSON
+    # in the tool docs, so they send run_op(params='{"indicator":"1.2.3.4"}')
+    # instead of a dict. Neither the arg gate (Optional[dict]) nor the tool fn
+    # accepts a string: the gate bounced it ("params: Input should be a valid
+    # dictionary") and, when it slipped past, the op ran with NO params and the
+    # connector rejected it ("IOC/ID Value not Provided"). A live enrich-then-
+    # block turn burned ~10 calls on this and never enriched. Parse a JSON-string
+    # object back to a dict HERE — before validation and tier-resolution, both of
+    # which read `params`. Same "accept the shape the model emits" class as the
+    # GetRecordArgs / SearchModuleRecordsArgs gates.
+    if name == "run_op":
+        _p = raw_args.get("params")
+        if isinstance(_p, str):
+            _s = _p.strip()
+            if not _s:
+                raw_args.pop("params", None)  # empty string ⇒ no params
+            else:
+                try:
+                    _parsed = json.loads(_s)
+                except (ValueError, TypeError):
+                    _parsed = None
+                if isinstance(_parsed, dict):
+                    raw_args["params"] = _parsed
+
     # Validate tool arguments using pydantic models if available.
     # Validation errors don't fail the dispatch — they're surfaced as
     # tool results so the model can see and potentially fix bad args.
@@ -1144,18 +1217,16 @@ def dispatch(
             return {"ok": False, "code": "user_denied",
                     "reason": f"Eval policy '{policy}' denied tier-{tier} action."}
 
-        # About to card this call. A `run_op` against a connector that exists
-        # nowhere must bounce a clean `unknown_connector` (like the dedicated
-        # wrappers do) instead of a misleading approval card the model can't act
-        # on — but only HERE, after grants/policy: a granted or eval-approved
-        # call still executes and lets run_op surface its own store error.
-        if name == "run_op":
-            absent = _run_op_absent_connector_error(
-                (raw_args or {}).get("connector") or "",
-                (raw_args or {}).get("op") or "")
-            if absent is not None:
-                _record_audit(name, raw_args, tier, "unknown_connector")
-                return absent
+        # About to card this call. An argument that cannot possibly work must
+        # bounce a clean, self-correctable error instead of a misleading approval
+        # card — a `run_op` on a connector that exists nowhere, a `run_playbook`
+        # on a name the model invented. Only HERE, after grants/policy: a granted
+        # or eval-approved call still executes and surfaces its own store error.
+        precard = _precard_error(name, raw_args)
+        if precard is not None:
+            _record_audit(name, raw_args, tier,
+                          str(precard.get("code") or "precard_rejected"))
+            return precard
 
         approval_id = uuid.uuid4().hex
         envelope = {
