@@ -1907,7 +1907,13 @@ def run_playbook(playbook: str,
                  follow: bool = True,
                  timeout_s: int = 180,
                  use_mock_output: bool = False) -> dict[str, Any]:
-    """Trigger a deployed playbook and (optionally) poll until terminal.
+    """Run / execute / trigger an EXISTING deployed playbook by name, and
+    (optionally) poll until terminal. THIS is the tool for any "run the
+    playbook <name>", "execute the deployed playbook <name>", or "trigger the
+    existing playbook <name>" request — the platform resolves the named
+    playbook and launches it. Do NOT author YAML or call verify_playbook /
+    validate_yaml / compile_yaml for such a request; those are for building a
+    NEW playbook, not running one that already exists.
 
     Args:
         playbook: workflow name OR uuid OR `Collection:Name` shorthand
