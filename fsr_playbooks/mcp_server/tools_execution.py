@@ -418,7 +418,14 @@ def _live_healthcheck(client, connector: str, version: str,
         except Exception:  # noqa: BLE001
             pass
         if not data:
-            return {"status": "error", "message": f"healthcheck request failed: {exc!r}"}
+            # The probe itself failed (timeout / network / unreachable
+            # endpoint) — we did NOT get an authoritative verdict from the
+            # vendor. Tag it `_probe_failed` so callers can fail open and NOT
+            # cache it: persisting a probe hiccup as "error" would poison the
+            # 5-min unhealthy TTL and silently drop containment/enrichment ops
+            # even after the connector recovers.
+            return {"status": "error", "_probe_failed": True,
+                    "message": f"healthcheck request failed: {exc!r}"}
 
     # When the healthcheck signals it couldn't find a local config (agent-
     # proxied connector) or returns an async response, fall back to the agents
@@ -430,6 +437,12 @@ def _live_healthcheck(client, connector: str, version: str,
     )
     if _needs_agent_fallback:
         return _healthcheck_via_agents(client, connector, version)
+    # Reached the endpoint but got no usable status (e.g. non-2xx with an
+    # unparseable body) — same as a probe failure: not an authoritative
+    # unhealthy verdict, so tag it and let callers fail open rather than cache.
+    if not (isinstance(data, dict) and data.get("status")):
+        return {"status": "error", "_probe_failed": True,
+                "message": "healthcheck returned no status"}
     return data
 
 
@@ -473,11 +486,19 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
         agent_id = row.get("_agent_id") or ""
         config_ids = _row_config_ids(row)
         verdicts: list[str] = []
+        any_authoritative = False
         # Per-config healthchecks (when we can see individual config UUIDs).
         for cid in config_ids:
             hc = _live_healthcheck(client, name, version, cid, agent_id=agent_id)
             status = hc.get("status")
-            _store_health(name, version, status, hc.get("message") or "", config=cid)
+            # A probe failure (timeout / unreachable) is not an authoritative
+            # verdict — don't cache it (would poison the unhealthy TTL and drop
+            # ops after recovery). Still record the status locally so the
+            # summary/aggregate reflects this pass.
+            if not hc.get("_probe_failed"):
+                _store_health(name, version, status, hc.get("message") or "",
+                              config=cid)
+                any_authoritative = True
             verdicts.append(status)
             checked += 1
         # Connector-level (default) verdict. When we enumerated configs, the
@@ -485,11 +506,17 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
         if config_ids:
             agg = next((v for v in verdicts if _is_healthy_status(v)),
                        verdicts[0] if verdicts else "unknown")
-            _store_health(name, version, agg, "aggregate of per-config checks")
+            # Only cache the aggregate if at least one config gave an
+            # authoritative answer; an all-probe-failed connector must not
+            # leave a cached unhealthy '' row.
+            if any_authoritative:
+                _store_health(name, version, agg,
+                              "aggregate of per-config checks")
         else:
             hc = _live_healthcheck(client, name, version, agent_id=agent_id)
             agg = hc.get("status")
-            _store_health(name, version, agg, hc.get("message") or "")
+            if not hc.get("_probe_failed"):
+                _store_health(name, version, agg, hc.get("message") or "")
             checked += 1
         if _is_healthy_status(agg):
             healthy += 1
@@ -860,6 +887,14 @@ def _preflight_connector(client, connector: str,
     if health is None:
         hc = _live_healthcheck(client, connector, version, config_id,
                                agent_id=agent_id)
+        if hc.get("_probe_failed"):
+            # The healthcheck probe itself failed (timeout / unreachable
+            # endpoint), which is NOT an authoritative "connector down"
+            # verdict. Don't cache it (would block ops for the 5-min unhealthy
+            # TTL even after recovery) and fail OPEN — let the op run. If the
+            # upstream really is down the op fails loudly on its own, rather
+            # than a probe hiccup manufacturing a capability gap here.
+            return None
         status = hc.get("status")
         message = hc.get("message") or hc.get("error") or ""
         _store_health(connector, version, status, message, config=config_id)

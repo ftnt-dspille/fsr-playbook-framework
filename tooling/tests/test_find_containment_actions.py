@@ -45,6 +45,39 @@ def test_find_containment_actions_filters_to_destructive(monkeypatch):
     assert "get_blocked_ip" not in ops and "unblock_ip" not in ops
 
 
+def test_find_containment_probe_failure_fails_open(monkeypatch):
+    """A healthcheck probe *failure* (timeout / unreachable endpoint) must NOT
+    drop a configured containment op — the gate must fall back to the listing
+    status. Regression for the GA-demo repro where a timed-out warmup probe
+    cached an 'error' verdict and find_containment_actions returned count:0 on
+    a healthy box."""
+    if not _has("fortigate-firewall", "block_ip_new"):
+        pytest.skip("fortigate-firewall not in reference DB")
+    from fsr_playbooks.mcp_server import tools_execution as te
+
+    monkeypatch.setattr(cd, "list_configured_connectors", lambda **k: {
+        "configured": [{"name": "fortigate-firewall", "version": "1.0.0",
+                        "status": "Available"}],
+        "probed": k.get("probe"), "count": 1})
+    # Live client present, but every probe reports a failure (not a verdict).
+    monkeypatch.setattr(cd._shared, "_live_client", lambda: object())
+    monkeypatch.setattr(te, "_cached_health", lambda *a, **k: None)
+    stored: list = []
+    monkeypatch.setattr(te, "_store_health",
+                        lambda *a, **k: stored.append(a))
+    monkeypatch.setattr(te, "_live_healthcheck",
+                        lambda *a, **k: {"status": "error",
+                                         "_probe_failed": True})
+
+    out = cd.find_containment_actions(target_type="ip", probe=True)
+    assert out["ok"] is True
+    ops = {a["op"] for a in out["actions"]}
+    # Fail open: the op survives on its "Available" listing status...
+    assert "block_ip_new" in ops
+    # ...and the probe failure was NOT persisted (no cache poisoning).
+    assert stored == [], f"probe failure was cached: {stored}"
+
+
 def test_find_containment_actions_empty_when_no_response_connector(monkeypatch):
     # Intel-only configured set → no containment, with a guiding message.
     monkeypatch.setattr(cd, "list_configured_connectors", lambda **k: {

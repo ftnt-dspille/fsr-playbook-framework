@@ -404,7 +404,12 @@ def _healthcheck_many(
     per_probe: dict[str, dict[str, Any]] = {}
 
     def _probe(
-            target: Union[tuple[str, str], tuple[str, str, str]]) -> tuple[str, str]:
+            target: Union[tuple[str, str], tuple[str, str, str]]
+    ) -> tuple[str, Any]:
+        # Returns (name, status); status is None to signal "no authoritative
+        # verdict" (probe failure / exception) — such connectors are OMITTED
+        # from the result dict so the gate falls back to the listing status
+        # (fail open) instead of dropping a valid action on a probe hiccup.
         name, version = target[0], target[1]
         agent_id = target[2] if len(target) > 2 else ""
         t0 = _time.perf_counter()
@@ -419,16 +424,26 @@ def _healthcheck_many(
             return name, str(cached.get("status") or "error")
         try:
             hr = _live_healthcheck(client, name, version, agent_id=agent_id)
+            if hr.get("_probe_failed"):
+                # Probe hiccup, not an authoritative unhealthy verdict: don't
+                # cache it and return None so it's omitted from `out` → the
+                # gate trusts the listing status rather than dropping the op.
+                per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                                   "src": "probe_failed"}
+                return name, None
             status = str(hr.get("status") or "error")
             _store_health(name, version, status,
                           hr.get("message") or hr.get("error") or "", config="")
             per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
                                "src": "live"}
             return name, status
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
+            # A thread-level failure is also not an authoritative verdict —
+            # fail open (omit from `out`) rather than returning an "error:"
+            # string that the gate would treat as unhealthy and drop.
             per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
                                "src": "error"}
-            return name, f"error:{e!r}"
+            return name, None
 
     out: dict[str, str] = {}
     timed_out: list[str] = []
@@ -441,7 +456,11 @@ def _healthcheck_many(
     try:
         for fut in as_completed(list(fut_to_name), timeout=deadline_s):
             name, status = fut.result()
-            out[name] = status
+            # status is None on a probe failure / thread error — omit it so the
+            # caller falls back to the listing status (fail open), same as a
+            # connector whose future never landed within the deadline.
+            if status is not None:
+                out[name] = status
     except Exception:  # noqa: BLE001 — concurrent.futures.TimeoutError and friends
         pass
     finally:
