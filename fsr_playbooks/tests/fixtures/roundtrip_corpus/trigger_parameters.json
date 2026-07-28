@@ -1,0 +1,75 @@
+{
+  "_intent": "LOSSY CLASS #2 (real F4 shape) \u2014 parameters declared on the trigger's inputVariables with an empty top-level list",
+  "envelope": {
+    "data": [
+      {
+        "@id": "/api/3/workflow_collections/00000000-0000-0000-0000-000000000000",
+        "@type": "WorkflowCollection",
+        "createDate": 1700000000,
+        "createUser": "/api/3/people/admin",
+        "description": "",
+        "modifyDate": 1700000001,
+        "modifyUser": "/api/3/people/admin",
+        "name": "Corpus",
+        "owners": [],
+        "recordTags": [],
+        "uuid": "00000000-0000-0000-0000-000000000000",
+        "versions": [],
+        "visible": true,
+        "workflows": [
+          {
+            "@id": "/api/3/workflows/11111111-1111-1111-1111-111111111111",
+            "createDate": 1700000000,
+            "description": "",
+            "isActive": true,
+            "modifyDate": 1700000001,
+            "name": "Action - Domain - Unblock",
+            "owners": [],
+            "parameters": [],
+            "recordTags": [],
+            "routes": [],
+            "steps": [
+              {
+                "@id": "/api/3/workflow_steps/step-0",
+                "arguments": {
+                  "inputVariables": [
+                    {
+                      "label": "actionReason",
+                      "name": "actionReason",
+                      "type": "string"
+                    },
+                    {
+                      "label": "inputIndicatorValue",
+                      "name": "inputIndicatorValue",
+                      "type": "string"
+                    }
+                  ],
+                  "resources": [
+                    "indicators"
+                  ],
+                  "route": "177547a1-b3cb-47ca-a186-743a675a79c4",
+                  "title": "Action - Domain - Unblock"
+                },
+                "name": "Start",
+                "stepType": {
+                  "@id": "/api/3/workflow_step_types/f4ca4d1c-8b1c-4a2a-9b53-9d0a2a5a1a11",
+                  "uuid": "f4ca4d1c-8b1c-4a2a-9b53-9d0a2a5a1a11"
+                },
+                "uuid": "e77eec41-6212-468a-9128-63a2cead869c"
+              },
+              {
+                "@id": "/api/3/workflow_steps/step-1",
+                "arguments": {},
+                "name": "Add note",
+                "stepType": "/api/3/workflow_step_types/f4ca4d1c-8b1c-4a2a-9b53-9d0a2a5a1a22",
+                "uuid": "5f8ddf88-42e8-4b69-aff4-9fc07775a234"
+              }
+            ],
+            "triggerStep": "/api/3/workflow_steps/e77eec41-6212-468a-9128-63a2cead869c",
+            "versions": []
+          }
+        ]
+      }
+    ]
+  }
+}

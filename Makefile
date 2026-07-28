@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release corpus-gate corpus-gen
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -135,6 +135,14 @@ lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
 #  without fsr_playbooks, so its whole suite errors on ModuleNotFound.)
 VENV_PY  := $(CURDIR)/.venv/bin/python
 CONNECTOR_DIR := ../ConnectorsV2/fsr-playbook-builder
+
+corpus-gate: ## round-trip fidelity gate over the committed corpus (box-free). CORPUS_DIR=… MIN_PASS=… to measure a real box pull
+	FSRPB_DEV=1 $(VENV_PY) scripts/corpus_gate.py \
+	  $(if $(CORPUS_DIR),--corpus-dir $(CORPUS_DIR),) \
+	  $(if $(MIN_PASS),--min-pass $(MIN_PASS),)
+
+corpus-gen: ## regenerate the committed round-trip corpus fixtures
+	FSRPB_DEV=1 $(VENV_PY) scripts/gen_roundtrip_corpus.py
 
 mypy: ## mypy type-check over fsr_playbooks/compiler (default config; not --strict)
 	$(VENV_PY) -m mypy

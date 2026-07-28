@@ -1,0 +1,147 @@
+{
+  "_intent": "Clean baseline \u2014 a plain linear playbook with no lossy structures",
+  "envelope": {
+    "data": [
+      {
+        "@id": "/api/3/workflow_collections/00000000-0000-0000-0000-000000000000",
+        "@type": "WorkflowCollection",
+        "createDate": 1700000000,
+        "createUser": "/api/3/people/admin",
+        "description": "",
+        "image": null,
+        "modifyDate": 1700000001,
+        "modifyUser": "/api/3/people/admin",
+        "name": "Corpus",
+        "owners": [],
+        "recordTags": [],
+        "uuid": "00000000-0000-0000-0000-000000000000",
+        "versions": [],
+        "visible": true,
+        "workflows": [
+          {
+            "@id": "/api/3/workflows/11111111-1111-1111-1111-111111111111",
+            "@type": "Workflow",
+            "aliasName": null,
+            "collection": "/api/3/workflow_collections/461fd6e9-2085-55f3-a7e4-941e0f73d8f4",
+            "createDate": 1700000000,
+            "debug": false,
+            "description": "",
+            "groups": [],
+            "isActive": true,
+            "isEditable": true,
+            "isPrivate": false,
+            "lastModifyDate": 1785240522,
+            "modifyDate": 1700000001,
+            "name": "Simple Note",
+            "owners": [],
+            "parameters": [],
+            "playbookOrigin": null,
+            "priority": null,
+            "recordTags": [],
+            "remoteExecutableFlag": 0,
+            "routes": [
+              {
+                "@type": "WorkflowRoute",
+                "group": null,
+                "isExecuted": false,
+                "label": null,
+                "name": "Start -> Set A",
+                "sourceStep": "/api/3/workflow_steps/563675af-a2bd-5458-acba-cb4ac8dd25a3",
+                "targetStep": "/api/3/workflow_steps/0b43f52e-82ed-545c-8113-613635042dd4",
+                "uuid": "f3c0a8fe-b1ee-50bf-bfc2-a39f157dc9e3"
+              },
+              {
+                "@type": "WorkflowRoute",
+                "group": null,
+                "isExecuted": false,
+                "label": null,
+                "name": "Set A -> Set B",
+                "sourceStep": "/api/3/workflow_steps/0b43f52e-82ed-545c-8113-613635042dd4",
+                "targetStep": "/api/3/workflow_steps/89186a05-0706-51bf-93fd-a93aa8d56722",
+                "uuid": "e979fd2f-f378-5d11-9468-83820681059b"
+              }
+            ],
+            "singleRecordExecution": false,
+            "steps": [
+              {
+                "@id": "/api/3/workflow_steps/step-0",
+                "@type": "WorkflowStep",
+                "arguments": {
+                  "__triggerLimit": true,
+                  "fieldbasedtrigger": {
+                    "filters": [],
+                    "limit": 30,
+                    "logic": "AND",
+                    "sort": []
+                  },
+                  "resource": "alerts",
+                  "resources": [
+                    "alerts"
+                  ],
+                  "step_variables": {
+                    "input": {
+                      "records": [
+                        "{{vars.input.records[0]}}"
+                      ]
+                    }
+                  },
+                  "triggerOnReplicate": false,
+                  "triggerOnSource": true
+                },
+                "description": null,
+                "group": null,
+                "left": "200",
+                "name": "Start",
+                "status": null,
+                "stepType": {
+                  "@id": "/api/3/workflow_step_types/ea155646-3821-4542-9702-b246da430a8d",
+                  "uuid": "ea155646-3821-4542-9702-b246da430a8d"
+                },
+                "top": "120",
+                "uuid": "563675af-a2bd-5458-acba-cb4ac8dd25a3"
+              },
+              {
+                "@id": "/api/3/workflow_steps/step-1",
+                "@type": "WorkflowStep",
+                "arguments": {
+                  "a": "1"
+                },
+                "description": null,
+                "group": null,
+                "left": "200",
+                "name": "Set A",
+                "status": null,
+                "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+                "top": "250",
+                "uuid": "0b43f52e-82ed-545c-8113-613635042dd4"
+              },
+              {
+                "@id": "/api/3/workflow_steps/step-2",
+                "@type": "WorkflowStep",
+                "arguments": {
+                  "b": "2"
+                },
+                "description": null,
+                "group": null,
+                "left": "200",
+                "name": "Set B",
+                "status": null,
+                "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+                "top": "380",
+                "uuid": "89186a05-0706-51bf-93fd-a93aa8d56722"
+              }
+            ],
+            "synchronous": false,
+            "tag": "",
+            "triggerStep": "/api/3/workflow_steps/563675af-a2bd-5458-acba-cb4ac8dd25a3",
+            "uuid": "8fa389fa-248a-5e62-afb0-06c75cc1d18c",
+            "versions": []
+          }
+        ]
+      }
+    ],
+    "exported_tags": [],
+    "macros": [],
+    "type": "workflow_collections"
+  }
+}
