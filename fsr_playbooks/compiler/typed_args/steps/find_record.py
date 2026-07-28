@@ -7,14 +7,28 @@ A friendly find_record step is authored as::
       - field: value
         operator: eq
         value: "{{ vars.input.params.indicator_value }}"
-    limit: 30            # optional, default 30
+    limit: 1000          # optional, default 30
     logic: AND           # optional, default AND
     partial: true        # optional, default true
+    sort:                # optional
+      - field: createDate
+        direction: DESC
+    select: [name, status]   # optional field projection
 
 The handler is ``find_data(module, query, partial=True, **kw)``.
-``filters:`` / ``limit:`` / ``logic:`` are friendly keys that compile
-to the wire ``query:`` envelope; the raw ``query:`` key is still
-accepted for back-compat. This layer is validation-only for the scalar
+``filters:`` / ``limit:`` / ``logic:`` / ``sort:`` / ``select:`` are
+friendly keys that compile to the wire ``query:`` envelope; the raw
+``query:`` key is still accepted for back-compat.
+
+Two of these do not end up where a reader would expect, because the
+platform ignores them in the obvious place:
+
+* ``limit:`` is additionally appended to the module as ``?$limit=N``.
+  The body value alone is ignored at execution -- every shipped Solution
+  Pack playbook carries the suffix, and a body-only limit silently
+  truncates the result set to 30 rows.
+* ``select:`` sets ``checkboxFields: true`` alongside the projection,
+  because the editor deletes ``__selectFields`` when that flag is false. This layer is validation-only for the scalar
 fields; the friendly→canonical transform lives in the normalizer's
 ``_normalize_find_record_args``.
 """
@@ -36,7 +50,7 @@ class FindRecordArgs(StrictArgs):
     boolean flags. `filters`/`limit`/`logic` are the friendly form that
     compiles to the wire `query:` envelope. `query` is the raw wire form
     (still accepted). `extra="allow"` because sibling/canonical keys ride
-    through untouched — the resolver's `_check_unknown_keys` has already
+    through untouched -- the resolver's `_check_unknown_keys` has already
     rejected anything genuinely unknown.
     """
 
@@ -50,6 +64,9 @@ class FindRecordArgs(StrictArgs):
     limit: Optional[int] = None
     logic: Optional[str] = None
     relationships: Optional[bool] = None
+    sort: Optional[list] = None
+    select: Optional[list] = None
+    max_relations: Optional[int] = None
 
 
 def expand_find_record(

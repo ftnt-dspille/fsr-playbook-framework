@@ -1,4 +1,4 @@
-"""NormalizerMixin — step argument normalization and step type dispatching."""
+"""NormalizerMixin -- step argument normalization and step type dispatching."""
 from __future__ import annotations
 
 import sqlite3
@@ -52,6 +52,54 @@ from ..typed_args.steps import expand_approval as _expand_approval_typed
 from ..typed_args.steps import expand_ingest_bulk_feed as _expand_ingest_bulk_feed_typed
 # field/value validation for trigger filters against the warmed catalog.
 from ..typed_args import FieldValueValidator
+
+
+def _rewrite_query_filter_ops(
+    query: Any, path: str, errors: list[CompileError],
+) -> None:
+    """Rewrite substring operators on a record-step query filter, in place.
+
+    The `/api/query/<module>` layer has no scalar `contains` -- the same gap the
+    field-based trigger has, so this reuses the trigger's rewrite table and
+    wildcard wrapper rather than growing a second vocabulary. `contains` on a
+    record step does not merely fail to match: on 8.0 it returns HTTP 500, and
+    so do `startswith`/`sw`. `like` with an explicit `%` is the one substring
+    match the query layer honours::
+
+        {"field": "description", "operator": "like", "_operator": "like",
+         "value": "%test%", "type": "primitive"}
+
+    Both `operator` and `_operator` are rewritten: the platform reads the
+    former and the designer reads the latter, and a step where they disagree
+    renders with the wrong operator selected in the UI.
+    """
+    if not isinstance(query, dict):
+        return
+    filters = query.get("filters")
+    if not isinstance(filters, list):
+        return
+    for i, f in enumerate(filters):
+        if not isinstance(f, dict):
+            continue
+        orig = f.get("operator") or f.get("_operator")
+        if not isinstance(orig, str):
+            continue
+        key = orig.lower()
+        if key not in _TRIGGER_OP_REWRITE:
+            continue
+        op, wrap = _TRIGGER_OP_REWRITE[key]
+        value, changed = _wrap_like_value(f.get("value"), wrap)
+        f["operator"] = op
+        f["_operator"] = op
+        if changed:
+            f["value"] = value
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE, severity="warning",
+            message=(f"operator {orig!r} has no scalar FSR equivalent "
+                     f"-- compiling to {op!r} with a {wrap}-wrapped "
+                     f"`%` pattern (SQL LIKE)"),
+            path=f"{path}.query.filters[{i}].operator",
+        ))
 
 
 class NormalizerMixin:
@@ -120,7 +168,7 @@ class NormalizerMixin:
             sug = self.suggest_step_type(step.type)
             # Common authoring mistake: `type: for_each` (or `forEach`,
             # `for-each`, `foreach`). `for_each` is a step *modifier*,
-            # not a step type — surface that explicitly so the agent
+            # not a step type -- surface that explicitly so the agent
             # doesn't waste turns guessing alternative step names.
             if step.type and step.type.lower().replace("-", "_") in {
                 "for_each", "foreach"
@@ -129,7 +177,7 @@ class NormalizerMixin:
                     "for_each is a step modifier, not a step type. "
                     "Remove `type: for_each` and instead attach a "
                     "`for_each:` block (sibling to `arguments:`) on the "
-                    "step you want to iterate — e.g. `type: "
+                    "step you want to iterate -- e.g. `type: "
                     "create_record` / `update_record` / "
                     "`workflow_reference` with `for_each: {item: '{{ "
                     "vars.list }}', parallel: false}`."
@@ -145,7 +193,7 @@ class NormalizerMixin:
                 errors.append(CompileError(
                     code=ErrorCode.UNKNOWN_STEP_TYPE,
                     message=(
-                        "`insert_record` was removed — it was a legacy alias "
+                        "`insert_record` was removed -- it was a legacy alias "
                         "for `create_record` (both compile to InsertData). Use "
                         "`type: create_record` instead."
                     ),
@@ -220,7 +268,7 @@ class NormalizerMixin:
         # `stop` / `end` synthesize the canonical Utils: No Operation call,
         # then fall through to connector arg resolution. `utilities` (the
         # editor's "Utilities" palette entry) is the same connector-family
-        # alias, but defaults ONLY `connector` — the author picks the utility
+        # alias, but defaults ONLY `connector` -- the author picks the utility
         # op (convert_json_to_csv, make_cyops_request, …); it then falls
         # through to connector arg resolution like the rest. `send_email` is
         # the same kind of alias, but defaults BOTH `connector: smtp` and
@@ -248,7 +296,7 @@ class NormalizerMixin:
         if step.type == "connector" or step.type in (
                 "stop", "end", "delete_record", "utilities", "send_email"):
             self._resolve_connector_args(step, path, errors)
-            # message block still applies to connector steps — fall through.
+            # message block still applies to connector steps -- fall through.
         elif step.type == "workflow_reference":
             self._resolve_workflow_reference_args(step, path, errors, pb_by_name or {})
         elif step.type == "trigger_tenant_playbook":
@@ -257,7 +305,7 @@ class NormalizerMixin:
             self._normalize_set_variable_args(step, path, errors)
         elif step.type == "start":
             self._normalize_start_args(step)
-        # decision: no further ref-checking in v1 — args are free-form jinja.
+        # decision: no further ref-checking in v1 -- args are free-form jinja.
 
         # message: posts a collaboration comment after the step runs.
         # Supported on all step types except delay (Wait) and set_api_keys,
@@ -279,15 +327,15 @@ class NormalizerMixin:
 
         Friendly inputs:
           module:           single module name (or modules: [list])
-          button_label:     Trigger Button Label — what the user sees in the
+          button_label:     Trigger Button Label -- what the user sees in the
                             Execute menu. Defaults to blank, in which case FSR
                             shows the *playbook* name (NOT the step name).
                             Don't reuse the step's `name:` for this; that field
                             names the canvas node, not the button.
           requires_record:  bool, default True. False = "Does not require record
-                            input to run" — button shows on the module listing's
+                            input to run" -- button shows on the module listing's
                             Execute menu but no record context is passed.
-          run_mode:         'per_record' (default) | 'once_for_all' — when
+          run_mode:         'per_record' (default) | 'once_for_all' -- when
                             requires_record=True, controls whether the playbook
                             fires once per selected record or once for all.
 
@@ -298,19 +346,19 @@ class NormalizerMixin:
         a = step.arguments if isinstance(step.arguments, dict) else {}
         # Scalar-flag type validation via the typed-args layer
         # (`typed_args.steps.expand_record_action`, model `RecordActionArgs`).
-        # Validation-only — it never mutates `a`; the canonical transform below
+        # Validation-only -- it never mutates `a`; the canonical transform below
         # (route uuid5, displayConditions, the noRecordExecution/
         # singleRecordExecution flag pair) stays here. Catches a mistyped
         # `run_mode`/`requires_record` that would otherwise silently mis-route.
         _expand_record_action_typed(a, path, errors)
-        # Trigger Button Label — separate from step.name. Empty means
+        # Trigger Button Label -- separate from step.name. Empty means
         # FSR will show the playbook name in the Execute menu.
         button_label = a.pop("button_label", None) or a.pop("title", None) or ""
         if not button_label and pb_name:
             button_label = pb_name
             errors.append(CompileError(
                 code=ErrorCode.MISSING_FIELD,
-                message=(f"`button_label:` not set on {step.type} — "
+                message=(f"`button_label:` not set on {step.type} -- "
                          f"defaulting to playbook name {pb_name!r}; set "
                          "`button_label:` explicitly to override"),
                 path=f"{path}.arguments.button_label",
@@ -327,7 +375,7 @@ class NormalizerMixin:
             modules = ["alerts", "incidents"]
             errors.append(CompileError(
                 code=ErrorCode.MISSING_FIELD,
-                message=(f"`module:` not set on {step.type} — defaulting to "
+                message=(f"`module:` not set on {step.type} -- defaulting to "
                          "[alerts, incidents]; set `module:` explicitly to "
                          "override"),
                 path=f"{path}.arguments.module",
@@ -367,7 +415,7 @@ class NormalizerMixin:
         a.setdefault("__triggerLimit", True)
         a.setdefault("executeButtonText", "Execute")
         a.setdefault("showToasterMessage", {"visible": False, "messageVisible": True})
-        # Empty per-module display filter — button shows for all records.
+        # Empty per-module display filter -- button shows for all records.
         a.setdefault("displayConditions",
                      {m: {"sort": [], "limit": 30, "logic": "AND", "filters": []}
                       for m in modules})
@@ -381,7 +429,7 @@ class NormalizerMixin:
 
         Friendly inputs:
           module:  single module name (or modules: [list]).
-          when:    optional fieldbasedtrigger filter — fires only when the
+          when:    optional fieldbasedtrigger filter -- fires only when the
                    query matches the post-write record state (the pre-delete
                    state for post_delete), OR (for post_update) when the listed
                    fields *changed*.
@@ -411,12 +459,12 @@ class NormalizerMixin:
         # (same setdefaults, same empty-default-to-[alerts, incidents] +
         # warning). `resolve_module_name` is threaded in as a callback because
         # module canonicalization needs the catalog. Already-set canonical
-        # keys win — the transform uses `setdefault`, never clobbering.
+        # keys win -- the transform uses `setdefault`, never clobbering.
         new = _expand_post_create_update_typed(
             a, step.type, path, errors, self.resolve_module_name,
         )
         if new is None:
-            return  # not a dict — leave step.arguments untouched
+            return  # not a dict -- leave step.arguments untouched
         # Field/value validation against the warmed catalog. Runs after the
         # filter tree is structurally valid. With multiple resolved modules a
         # field may legitimately exist on only some of them, so a finding is
@@ -436,12 +484,12 @@ class NormalizerMixin:
 
         Friendly inputs (exactly one targeting mode required):
           record:  a single record IRI ('/api/3/<module>/<uuid>') or '@id'
-                   jinja — deleted directly.
+                   jinja -- deleted directly.
           module + record_id:  build '/api/3/<module>/<record_id>'.
           module + query:  bulk delete via '/api/3/delete-with-query/<module>';
                    `query` is a filter dict {logic, filters:[…]} (json-encoded
                    into the request body) or a raw jinja/string body.
-          show_deleted:  bool — append '?$showDeleted=true' (default true for the
+          show_deleted:  bool -- append '?$showDeleted=true' (default true for the
                    query form, false for single-record).
           iri / method / body:  raw escape hatches (passed through verbatim).
         """
@@ -454,6 +502,9 @@ class NormalizerMixin:
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
+        # Bulk delete filters go through the same substring-operator rewrite as
+        # find_record's, before the query is json-encoded into the request body.
+        _rewrite_query_filter_ops(a.get("query"), path, errors)
         # Delegate the friendly→canonical transform to the typed-args layer
         # (`typed_args.steps.expand_delete_record`), which owns the
         # `DeleteRecordArgs` model. `resolve_module_name` is threaded in because
@@ -471,11 +522,11 @@ class NormalizerMixin:
         """Canonical args for ``cybersponse.api_call`` (the API-Endpoint trigger).
 
         Friendly inputs:
-          route:                  the endpoint name — becomes the URL path
+          route:                  the endpoint name -- becomes the URL path
                                   segment exposed at
                                   ``POST /api/triggers/1/<route>``.
           authentication_methods: optional. Defaults to **token-based**
-                                  (``[""]``) — the only mode that exposes
+                                  (``[""]``) -- the only mode that exposes
                                   the route at ``/api/triggers/1/<route>``
                                   (no ``deferred/`` prefix). The empty-string
                                   wire value is awkward to write and read, so
@@ -488,7 +539,7 @@ class NormalizerMixin:
         Trigger infrastructure fields (``__triggerLimit``, ``triggerOnSource``,
         ``triggerOnReplicate``, ``step_variables``) are auto-filled to the
         canonical shape FSR's designer emits, mirroring the other trigger step
-        types — so the minimal clean form
+        types -- so the minimal clean form
 
             - name: Start
               type: api_endpoint
@@ -514,7 +565,7 @@ class NormalizerMixin:
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
-        # Token-based is the sane default — it's the only auth mode that
+        # Token-based is the sane default -- it's the only auth mode that
         # exposes the playbook at `POST /api/triggers/1/<route>` (the
         # `deferred/`-prefixed modes aren't invokable that way). The wire
         # value is the awkward empty-string `[""]`; fill it so authors never
@@ -544,7 +595,7 @@ class NormalizerMixin:
         Silent no-op when there are no filters or no resolved modules. Each
         module is validated into its own bucket; a finding is promoted only
         when present for every module. Buckets are keyed by error `path`
-        (stable across modules for a given filter) — the messages embed the
+        (stable across modules for a given filter) -- the messages embed the
         module name and per-module valid lists, so they would never intersect.
         A field/value valid on any one module is therefore never flagged.
         """
@@ -587,15 +638,16 @@ class NormalizerMixin:
         - update_record (UpdateRecord):
             module → collectionType ('/api/3/<m>')
             record → collection    (the targeted record IRI; `collection:` is
-            rejected on update — it was the record IRI but collided with
+            rejected on update -- it was the record IRI but collided with
             create's module-IRI `collection`, the #1 record-CRUD footgun)
 
         `module:` is mandatory on create/update (an explicit canonical IRI key
         is an escape hatch). find_record's handler takes `module:` directly;
-        nothing to do there. Already-set canonical keys win — never clobber.
+        nothing to do there. Already-set canonical keys win -- never clobber.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"module", "mock_result", "condition", "record", "fields"}
+        _FRIENDLY = {"module", "mock_result", "condition", "record", "fields",
+                     "field_operations", "tags_operation", "operation", "link"}
         _CANONICAL = {
             "collection", "collectionType", "resource", "operation",
             "fieldOperation", "__recommend", "_showJson", "step_variables",
@@ -612,6 +664,73 @@ class NormalizerMixin:
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,
         ):
             return
+
+        # `field_operations: {recordTags: Append}` → wire `fieldOperation`.
+        #
+        # Per-field merge intent, as used by 349 of 370 update steps on a live
+        # 7.x box (almost always for recordTags). This maps the friendly key to
+        # the wire key; it does NOT promise the platform honours it.
+        #
+        # MEASURED, 8.0 lab box, 12 combinations of operation / fieldOperation /
+        # tagsOperation, writing recordTags=[Incoming] over a seeded
+        # [KeepMe, AlsoKeep]: every single one REPLACED the tag list. Append,
+        # Overwrite, Replace, fieldOperation Append/Overwrite/lowercase,
+        # tagsOperation OverwriteTags/AppendTags, and omitting the keys entirely
+        # all produced [Incoming]. Scalar fields were written in every case.
+        #
+        # So a `resource.recordTags` write is destructive on 8.0 regardless of
+        # these keys. Whether they bite on 7.x, or on relationship fields rather
+        # than tags, is NOT established -- do not tell authors this key protects
+        # existing tags until that is measured.
+        if "field_operations" in a and "fieldOperation" not in a:
+            fo = a.pop("field_operations")
+            if isinstance(fo, dict):
+                a["fieldOperation"] = fo
+            else:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=("`field_operations:` must be a mapping of "
+                             "field name → Append|Overwrite"),
+                    path=f"{path}.field_operations",
+                ))
+        else:
+            a.pop("field_operations", None)
+
+        # `tags_operation: OverwriteTags` → wire `tagsOperation`.
+        if "tags_operation" in a and "tagsOperation" not in a:
+            a["tagsOperation"] = a.pop("tags_operation")
+        else:
+            a.pop("tags_operation", None)
+
+        # `link: {indicators: [...]}` → `resource.__link`, the ONLY mechanism
+        # measured to actually append to a multi-value field.
+        #
+        # A plain `fields:` write replaces the collection outright (2 linked
+        # indicators + write 1 => 1 remain). `__link` adds without disturbing
+        # what is there (2 + link 1 => 3, and unrelated tags survive). It is
+        # what the platform's own escalation engine uses to attach alerts and
+        # assets to a case.
+        #
+        # Values may be bare uuids or IRIs. `__link` rides inside the `resource`
+        # payload because that dict becomes the PUT body.
+        _link = a.pop("link", None)
+        if _link is not None:
+            if isinstance(_link, dict):
+                res = a.setdefault("resource", {})
+                if isinstance(res, dict):
+                    res.setdefault("__link", _link)
+            else:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=("`link:` must be a mapping of relationship name → "
+                             "list of record uuids/IRIs to attach"),
+                    path=f"{path}.link",
+                ))
+
+        # NB: `operation:` enum drift is already checked by the corpus
+        # validator, which also supplies a near-match suggestion and skips
+        # Jinja-valued operations. Don't duplicate it here.
+
         # Delegate the friendly module->IRI transform to the typed-args layer
         # (`typed_args.steps.expand_record_crud`), which owns `RecordCrudArgs`.
         # `resolve_module_name` is threaded in because module canonicalization
@@ -645,7 +764,8 @@ class NormalizerMixin:
         An existing `query:` is still accepted (back-compat).
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"filters", "limit", "logic", "relationships"}
+        _FRIENDLY = {"filters", "limit", "logic", "relationships", "sort",
+                     "select", "max_relations"}
         _CANONICAL = {
             "module", "query", "partial", "mock_result", "condition",
             "step_variables", "checkboxFields",
@@ -655,16 +775,35 @@ class NormalizerMixin:
         )
         # Scalar-field type validation via the typed-args layer
         # (`typed_args.steps.expand_find_record`), which owns the `FindRecordArgs`
-        # model. Validation-only — runs before the friendly→canonical transform.
+        # model. Validation-only -- runs before the friendly→canonical transform.
         _expand_find_record_typed(a, path, errors)
 
         # Phase B1: friendly `filters:` → wire `query:` envelope.
         # Only transform when `filters:` is present AND `query:` is not
-        # (an explicit `query:` wins — back-compat for authored wire shapes).
+        # (an explicit `query:` wins -- back-compat for authored wire shapes).
         if isinstance(a.get("filters"), list) and "query" not in a:
             filters_in = a.pop("filters")
             limit = a.pop("limit", 30)
             logic = a.pop("logic", "AND")
+            # `sort:` -- authors write [{field, direction}]; the editor also
+            # persists `_fieldName`/`_fieldTitle` on each entry (observed on
+            # every sorted step in the shipped Solution Pack playbooks), so
+            # fill them in rather than emitting a half-populated row the
+            # designer would render blank.
+            sort_in = a.pop("sort", None)
+            wire_sort: list[dict[str, Any]] = []
+            for so in (sort_in or []):
+                if isinstance(so, str):
+                    so = {"field": so}
+                if not isinstance(so, dict):
+                    continue
+                fld = so.get("field")
+                wire_sort.append({
+                    "field": fld,
+                    "direction": (so.get("direction") or "ASC").upper(),
+                    "_fieldName": so.get("_fieldName", fld),
+                    "_fieldTitle": so.get("_fieldTitle", fld),
+                })
             wire_filters = []
             for f in filters_in:
                 if not isinstance(f, dict):
@@ -682,19 +821,79 @@ class NormalizerMixin:
                         wf.setdefault(k, v)
                 wire_filters.append(wf)
             a["query"] = {
-                "sort": [],
+                "sort": wire_sort,
                 "limit": limit,
                 "logic": logic,
                 "filters": wire_filters,
             }
+            # `select:` → query.__selectFields. The editor only persists that
+            # projection when checkboxFields is truthy (see the pop below), so
+            # asking for a projection has to turn the flag on -- otherwise the
+            # field list is silently discarded a few lines later and the step
+            # fetches full records.
+            select_in = a.pop("select", None)
+            if isinstance(select_in, (list, tuple)) and select_in:
+                a["query"]["__selectFields"] = list(select_in)
+                a["checkboxFields"] = True
             a.setdefault("checkboxFields", False)
+
+        # Substring operators (`contains`, `startswith`, …) → `like` with a
+        # wildcard-wrapped value. Runs after the friendly→wire transform so it
+        # covers both the `filters:` form and a hand-authored `query:`.
+        _rewrite_query_filter_ops(a.get("query"), path, errors)
 
         # `relationships: true` → append `?$relationships=true` to module
         if a.get("relationships") is True:
             mod = a.get("module")
-            if isinstance(mod, str) and "?$relationships=true" not in mod:
-                a["module"] = mod + "?$relationships=true"
+            if isinstance(mod, str) and "$relationships=true" not in mod:
+                a["module"] = mod + ("&" if "?" in mod else "?") + "$relationships=true"
             a.pop("relationships", None)
+
+        # `max_relations: N` → `&$fsr_max_relation_count=N`.
+        #
+        # Caps how many related records come back per relationship. The shipped
+        # playbooks pair it with `$relationships=true` in 60+ steps (values seen
+        # live: 10, 15, 100, 500, 1000, 5000, 10000), because expanding
+        # relationships without a cap can pull an unbounded child set -- the
+        # asset/identity link tables on a busy box run to hundreds of thousands
+        # of rows. Only meaningful alongside relationships.
+        _mrc = a.pop("max_relations", None)
+        if isinstance(_mrc, int):
+            mod = a.get("module")
+            if isinstance(mod, str) and "$fsr_max_relation_count=" not in mod:
+                a["module"] = mod + ("&" if "?" in mod else "?") + \
+                    f"$fsr_max_relation_count={_mrc}"
+            if "$relationships=true" not in str(a.get("module", "")):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="warning",
+                    message=(
+                        "`max_relations:` caps expanded relationships but "
+                        "`relationships: true` is not set -- the cap has no "
+                        "effect without relationship expansion"
+                    ),
+                    path=f"{path}.max_relations",
+                ))
+
+        # `limit:` must ALSO ride on the module as `?$limit=N`.
+        #
+        # query.limit alone is ignored at execution: the handler pages the
+        # module endpoint, and the page size comes from the query string, not
+        # the body. Live-verified by seeding a lab box with 120 matching
+        # records -- `query.limit: 5000` returned 30, and so did a `limit` at
+        # argument level; moving it onto the module returned all 120.
+        #
+        # This is a silent-wrong failure, which is why the limit is emitted in
+        # BOTH places: the body value keeps the wire shape faithful to what the
+        # editor round-trips, while the suffix is what actually takes effect.
+        # Without it a playbook validates clean, runs green, and quietly
+        # processes only the first 30 records.
+        _q = a.get("query")
+        _limit = _q.get("limit") if isinstance(_q, dict) else None
+        if isinstance(_limit, int) and _limit != 30:
+            mod = a.get("module")
+            if isinstance(mod, str) and "$limit=" not in mod:
+                a["module"] = mod + ("&" if "?" in mod else "?") + f"$limit={_limit}"
 
         # Editor rule (bundle line 34498): query.__selectFields only persists
         # when checkboxFields is truthy; otherwise the editor deletes it before
@@ -706,13 +905,13 @@ class NormalizerMixin:
     def _normalize_send_email_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
-        """Friendly SMTP email step — a `SendMail` connector-family alias.
+        """Friendly SMTP email step -- a `SendMail` connector-family alias.
 
         The connector/op defaults (`connector: smtp`, `operation: send_email`)
         are applied in the caller's connector-family defaulting block; this
         method owns only the unknown-key check + scalar type-validation. The
         smtp connector's `send_email` op takes `body`/`from` natively (no
-        rename — verified live on 8.0), so the friendly author surface is the
+        rename -- verified live on 8.0), so the friendly author surface is the
         flat email fields (`to`/`subject`/`body`/`from`/`cc`/`bcc`/
         `attachments`); `_resolve_connector_args` auto-lifts them into `params:`
         + stamps `version`/`operationTitle` from the catalog.
@@ -763,7 +962,7 @@ class NormalizerMixin:
     def _normalize_set_api_keys_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
-        """SetAPIKeys — `public_key`/`private_key` (both jinja-capable). No
+        """SetAPIKeys -- `public_key`/`private_key` (both jinja-capable). No
         compile-time transform; the controller only validates UI state."""
         a = step.arguments if isinstance(step.arguments, dict) else {}
         _CANONICAL = {"public_key", "private_key"}
@@ -838,16 +1037,16 @@ class NormalizerMixin:
         inputVariables shape.
 
         Friendly per-field keys:
-          name      — required; variable name (referenced after resume as
+          name      -- required; variable name (referenced after resume as
                       `vars.steps.<step_name>.input.<name>`)
-          kind      — required; one of text, textarea, richtext, email,
+          kind      -- required; one of text, textarea, richtext, email,
                       url, password, integer, checkbox, select, datetime,
                       json. Determines formType / dataType / templateUrl.
-          label     — display label; defaults to `name`
-          tooltip   — optional helper text
-          required  — bool, default false
-          default   — default value (literal or jinja)
-          options   — for kind=select; list of strings or jinja that
+          label     -- display label; defaults to `name`
+          tooltip   -- optional helper text
+          required  -- bool, default false
+          default   -- default value (literal or jinja)
+          options   -- for kind=select; list of strings or jinja that
                       resolves to a list
 
         Already-expanded entries (those carrying their own formType +
@@ -872,7 +1071,7 @@ class NormalizerMixin:
                     path=ipath,
                 ))
                 continue
-            # Pass-through escape hatch — if the author wrote the full
+            # Pass-through escape hatch -- if the author wrote the full
             # canonical shape (or anything close), trust them.
             if "formType" in item and "templateUrl" in item:
                 out.append(item)
@@ -938,13 +1137,13 @@ class NormalizerMixin:
                     errors.append(CompileError(
                         code=ErrorCode.BAD_VALUE,
                         message=(f"input field {name!r} looks like a {hint!r} "
-                                 f"value but kind is 'text' — switch to "
+                                 f"value but kind is 'text' -- switch to "
                                  f"kind: {hint} so FSR validates the format"),
                         path=f"{ipath}.kind",
                         severity="warning",
                     ))
             spec = self._INPUT_FIELD_KINDS[kind]
-            # Strict per-entry whitelist — surface obvious typos.
+            # Strict per-entry whitelist -- surface obvious typos.
             allowed = {"name", "kind", "type", "label", "tooltip",
                        "required", "default", "options", "module",
                        "picklist", "tooltip"}
@@ -999,7 +1198,7 @@ class NormalizerMixin:
                     errors.append(CompileError(
                         code=ErrorCode.MISSING_FIELD,
                         message=("`kind: lookup` needs `module: <name>` "
-                                 "(e.g. people, alerts, indicators) — FSR "
+                                 "(e.g. people, alerts, indicators) -- FSR "
                                  "keys the typeahead off this module"),
                         path=f"{ipath}.module",
                         suggestion="module: people",
@@ -1070,7 +1269,7 @@ class NormalizerMixin:
         a = step.arguments if isinstance(step.arguments, dict) else {}
         # Typed scalar-field validation (Phase 2, validation-only): catches a
         # wrong-typed title/flag/timeout as a clean BAD_VALUE before the
-        # friendly→canonical transform below. The transform itself stays here —
+        # friendly→canonical transform below. The transform itself stays here --
         # `expand_manual_input` never mutates and returns None. Model also backs
         # `emit_step_arg_schema("manual_input")`.
         _expand_manual_input_typed(a, path, errors)
@@ -1091,7 +1290,7 @@ class NormalizerMixin:
                 suggestion='use: input: { title: "...", options: [...] }',
             ))
             return
-        # Whitelist — friendly + canonical (incl. mode-driven extensions).
+        # Whitelist -- friendly + canonical (incl. mode-driven extensions).
         # Each canonical key is permitted at the syntax level; the
         # mode-aware co-presence checker below catches incoherent
         # combinations (e.g. external email keys in an internal-only
@@ -1103,7 +1302,7 @@ class NormalizerMixin:
             "owner_detail", "step_variables", "response_mapping",
             "email_notification", "inline_channel_list",
             "external_channel_list", "unauthenticated_input", "resources",
-            # Audience-mode + email-template keys (live in 13–142 of 168 MIs)
+            # Audience-mode + email-template keys (live in 13-142 of 168 MIs)
             "agent_id", "timeout", "inputExternalUser", "inputInternalUsers",
             "internal_email_subject", "external_email_subject",
             "customEmailExternal", "customEmailInternal",
@@ -1132,13 +1331,13 @@ class NormalizerMixin:
             return
         # MI mode is inferred: `inputs:` present → InputBased (form),
         # absent → DecisionBased (button-only). No `mode:` or `type:` key
-        # at the authoring level — the collision with step-level `type:`
+        # at the authoring level -- the collision with step-level `type:`
         # makes it impossible to hoist safely.
         if "type" in a:
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(
-                    "manual_input: `type:` is not settable — the "
+                    "manual_input: `type:` is not settable -- the "
                     "compiler infers InputBased when `inputs:` is "
                     "present and DecisionBased otherwise"
                 ),
@@ -1158,7 +1357,7 @@ class NormalizerMixin:
             recipients = email_friendly.get("recipients", [])
             if isinstance(recipients, str):
                 recipients = [recipients]
-            # smtpParameters: [{to, subject, body, from, cc, bcc}] — the wire shape.
+            # smtpParameters: [{to, subject, body, from, cc, bcc}] -- the wire shape.
             params: dict[str, Any] = {}
             if recipients:
                 params["to"] = recipients
@@ -1190,7 +1389,7 @@ class NormalizerMixin:
         description = a.pop("description", None) or title
         raw_options = a.pop("options", None) or [{"option": "Continue", "primary": True}]
         options: list[dict[str, Any]] = []
-        # Per-option `next:` — promote into the step's branch map so the
+        # Per-option `next:` -- promote into the step's branch map so the
         # emitter can resolve label → step_iri the same way it does for
         # decision steps. Previously the key was silently stripped, leaving
         # multi-button prompts with no targets. See audit §3.
@@ -1245,11 +1444,11 @@ class NormalizerMixin:
         # An approval gate is a DISTINCT FSR step type (`ApprovalManualInput`),
         # not merely an `is_approval` flag on a plain `ManualInput`. The two
         # share one dispatcher (`/wf/workflow/tasks/manual_input`) and render
-        # mode (`InputBased` + the is_approval overlay — see mi_output_catalog
+        # mode (`InputBased` + the is_approval overlay -- see mi_output_catalog
         # APPROVAL_MI_STEP_TYPES), differing only by the workflow_step_type the
         # step points at. Authors set `is_approval: true`; without ALSO swapping
         # the resolved step type, FSR keeps the ManualInput type and renders a
-        # plain input prompt — the flag ships but the row never becomes an
+        # plain input prompt -- the flag ships but the row never becomes an
         # approval gate (the accepted-then-discarded failure mode). Mirror the
         # `start`→`cybersponse.action` swap above: re-point the step type when
         # the flag is on. See MASTER_TRACKER 2026-07-17 follow-up (a).
@@ -1276,7 +1475,7 @@ class NormalizerMixin:
           - Audience: Internal vs External (open form to non-FSR users).
           - Assignment: owner_detail.isAssigned + exactly-one-target.
         """
-        # Context — `isRecordLinked` ↔ `record`.
+        # Context -- `isRecordLinked` ↔ `record`.
         is_linked = bool(a.get("isRecordLinked"))
         record = a.get("record")
         if is_linked and not record:
@@ -1299,7 +1498,7 @@ class NormalizerMixin:
                 suggestion="set isRecordLinked: true to attach the "
                            "prompt to the record",
             ))
-        # Audience — internal vs external. External = unauthenticated_input
+        # Audience -- internal vs external. External = unauthenticated_input
         # (link is publicly resolvable) OR inputExternalUser (form opens to
         # non-FSR users via channel).
         is_external = bool(a.get("unauthenticated_input")) or bool(a.get("inputExternalUser"))
@@ -1330,7 +1529,7 @@ class NormalizerMixin:
                 path=f"{path}.arguments.external_channel_list",
                 severity="warning",
             ))
-        # Assignment — owner_detail.isAssigned ↔ exactly-one-target.
+        # Assignment -- owner_detail.isAssigned ↔ exactly-one-target.
         raw_od = a.get("owner_detail")
         od = raw_od if isinstance(raw_od, dict) else {}
         is_assigned = bool(od.get("isAssigned"))
@@ -1379,7 +1578,7 @@ class NormalizerMixin:
             operationTitle, step_variables, pickFromTenant.
 
         config UUID is resolved offline from the warmed `connector_configs`
-        catalog table (Resolver.resolve_config_id) — no live lookup, no
+        catalog table (Resolver.resolve_config_id) -- no live lookup, no
         dev-only `tooling/` import. Already-canonical args
         (`connector`+`operation`+`params`) pass through untouched.
 
@@ -1443,7 +1642,7 @@ class NormalizerMixin:
         errors.append(CompileError(
             code=ErrorCode.MISSING_FIELD,
             message=(
-                "code_snippet step has an empty `python_function` — no code "
+                "code_snippet step has an empty `python_function` -- no code "
                 "to run"
             ),
             path=f"{path}.arguments.params.python_function",
@@ -1488,7 +1687,7 @@ class NormalizerMixin:
 
     def _normalize_start_args(self, step: Step) -> None:
         """abstract_trigger needs `arguments.step_variables.input.params`
-        populated even when the playbook takes no input — without it FSR's
+        populated even when the playbook takes no input -- without it FSR's
         runtime fails with `pop expected at most 1 argument, got 2` when it
         tries to extract the input shape (verified live 2026-05-03).
         Mirrors the canonical default observed in every live playbook.
@@ -1505,7 +1704,7 @@ class NormalizerMixin:
 
         The parser converts top-level `vars:` into `arguments.arg_list =
         [{name, value}, ...]`; we collapse that back into the flat shape
-        FSR expects on the wire. `arg_list` is an internal handoff key —
+        FSR expects on the wire. `arg_list` is an internal handoff key --
         users write `vars:` at the step level (parser rejects anything
         else for set_variable steps).
 
@@ -1521,7 +1720,7 @@ class NormalizerMixin:
         if new is not None:
             step.arguments = new
 
-    # FSR's built-in "Comment Type" picklist — drives the message kind on
+    # FSR's built-in "Comment Type" picklist -- drives the message kind on
     # the record's collaboration panel. Only the Comment value is used;
     # the IRI is stable across stock FSR installs (sourced from
     # `fsrpb picklist show "Comment Type"`). If a deployment customizes
@@ -1540,7 +1739,7 @@ class NormalizerMixin:
         # `tenant` is emitted by shipped Fortinet content (MSSP-aware comment
         # steps address the comment at a tenant). Confirmed against 400 stock
         # playbooks pulled from a live appliance: `tenant` is the ONLY key in
-        # real content outside this set, and it appears in 9 of them — so this
+        # real content outside this set, and it appears in 9 of them -- so this
         # was compiler strictness rejecting valid product output, not a content
         # bug. Widened on that evidence rather than on a remembered error.
         _ALLOWED = {"content", "tags", "type", "thread", "record", "records",
@@ -1563,7 +1762,7 @@ class NormalizerMixin:
                 path=f"{mpath}.content",
             ))
             return
-        # Wrap plain text in a <p> block — the FSR comment widget renders
+        # Wrap plain text in a <p> block -- the FSR comment widget renders
         # HTML and a bare string shows as one inline run.
         if "<" not in content:
             content = f"<p>{content}</p>"
@@ -1577,7 +1776,7 @@ class NormalizerMixin:
                 path=f"{mpath}.tags",
             ))
             return
-        # Live tag verification — if the reference store has been
+        # Live tag verification -- if the reference store has been
         # populated via `fsrpb probe modules` (which now also hydrates
         # the tags table), warn on names that don't exist on the FSR
         # instance. Skip the check when the table is empty or missing
@@ -1609,7 +1808,7 @@ class NormalizerMixin:
                         message=(
                             f"set_variable.message.tags: tag {t!r} not "
                             "found on the FSR instance; it will be "
-                            "auto-created on first use — confirm the "
+                            "auto-created on first use -- confirm the "
                             "spelling or pre-create the tag in the UI"
                         ),
                         path=f"{mpath}.tags",
@@ -1617,7 +1816,7 @@ class NormalizerMixin:
                     ))
                 tag_iris.append(f"/api/3/tags/{t}")
         msg_type_raw = msg.get("type")
-        # Live picklist lookup first — probe_modules hydrates the
+        # Live picklist lookup first -- probe_modules hydrates the
         # picklists table per-deployment, so deployments that customized
         # the Comment Type picklist resolve correctly here. The
         # _MESSAGE_TYPE_IRIS map is a fallback when the reference store
@@ -1660,7 +1859,7 @@ class NormalizerMixin:
         thread = bool(msg.get("thread", False))
         # Record IRI: friendly `record:` (single) → `records:` jinja
         # string. The wire field is `records:` (singular IRI value, not a
-        # list — FSR templates the IRI in directly).
+        # list -- FSR templates the IRI in directly).
         rec_single = msg.get("record")
         rec_explicit = msg.get("records")
         rec_value: str | None
@@ -1734,7 +1933,7 @@ class NormalizerMixin:
         visible when that parent's value equals condition_value. If the
         author provides a conditional param without satisfying its rule,
         FSR still ships the value but the field is hidden in the UI and
-        the operation typically rejects it at runtime — silent failures.
+        the operation typically rejects it at runtime -- silent failures.
 
         On first report, we emit the ROOT choice and complete feasible
         parameter sets (not layer-by-layer individual warnings), with
@@ -1761,7 +1960,7 @@ class NormalizerMixin:
             """Walk up the parent chain to the ROOT unsatisfied ancestor.
 
             A param is visible only if EVERY ancestor is satisfied, so the
-            useful thing to report is the highest unsatisfied one — the actual
+            useful thing to report is the highest unsatisfied one -- the actual
             choice the author has to make. Reporting the immediate parent
             instead is what made `block_ip` take two rounds to fix: `ip` needs
             `ip_type`, which needs `method`, and naming `ip_type` first just
@@ -1797,7 +1996,7 @@ class NormalizerMixin:
             for parent, cond in entries:
                 if parent in provided and str(provided[parent]) == str(cond):
                     return None  # visible
-            # Parent is visible but holds the WRONG value for this param —
+            # Parent is visible but holds the WRONG value for this param --
             # the author picked a branch and then set a param from a different
             # one. The parent is the gating choice.
             return parent_param
@@ -1809,7 +2008,7 @@ class NormalizerMixin:
             # Top-level param (parent is NULL) → always visible.
             if any(parent is None for parent, _ in entries):
                 continue
-            # Conditional — at least one rule must match the provided
+            # Conditional -- at least one rule must match the provided
             # parent value. If parent isn't provided, we can't satisfy.
             satisfied = False
             for parent, cond in entries:
@@ -1824,9 +2023,9 @@ class NormalizerMixin:
                 conflicts_by_parent.setdefault(gating, []).append(p_name)
 
             # Name the offending param specifically, alongside the consolidated
-            # root-choice message below. The two answer different questions —
+            # root-choice message below. The two answer different questions --
             # "which of my params is wrong" vs "what choice do I have to make"
-            # — and the consolidated one alone cannot say which param triggered
+            # -- and the consolidated one alone cannot say which param triggered
             # it when several are in play. This is the ONLY diagnostic that
             # fires when the gating parent IS provided but with a value from
             # another branch (method='Quarantine Based' + ip_block_policy),
@@ -1844,7 +2043,7 @@ class NormalizerMixin:
                 severity="error",
             ))
 
-        # One consolidated diagnostic per gating select — lists the full
+        # One consolidated diagnostic per gating select -- lists the full
         # feasible param neighborhood under each option so the agent can
         # converge in one fix instead of cascading turn-by-turn.
         for gating, conflicting in conflicts_by_parent.items():
@@ -1868,7 +2067,7 @@ class NormalizerMixin:
             )
             # Severity: a param-set conflict means FSR will hide the conflicting
             # params at runtime and likely reject the operation call. This is a
-            # fatal error from the authoring perspective — the code won't work.
+            # fatal error from the authoring perspective -- the code won't work.
             # We promote to severity="error" so ready_to_push accurately reflects
             # whether the playbook can execute. This is safe because
             # operation_param_rules already guards against false positives
@@ -1898,7 +2097,7 @@ class NormalizerMixin:
         The inverse of `_check_param_visibility`: there we reject a provided
         param whose gate is unsatisfied; here we reject a *missing* param that
         the chosen (or defaulted) parent value makes required. Visibility
-        cascades, so this walks the chain — e.g. block_ip_new(method='Policy
+        cascades, so this walks the chain -- e.g. block_ip_new(method='Policy
         Based') requires `ip_type` + `ip_block_policy`; ip_type='IPv4' then
         requires `ip`. A param with its own default_value is satisfied by the
         default (FSR pre-fills it) and is not flagged.
@@ -1953,7 +2152,7 @@ class NormalizerMixin:
             # deferred to the run_op preflight (_validate_op_params). But the
             # authoring flow (compile → verify_playbook → push) never runs that
             # preflight, so a missing top-level-required param compiled clean
-            # and verify_playbook reported ready_to_push=True — then FSR
+            # and verify_playbook reported ready_to_push=True -- then FSR
             # rejected the call at runtime. We now flag it here as an *error*
             # (conditional/gated misses below stay warnings).
             pure_top_level = all(parent is None for parent, _cond, _req in entries)

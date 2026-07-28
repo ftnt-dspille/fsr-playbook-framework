@@ -10,7 +10,7 @@ handler expects::
     update_record (UpdateRecord):
         module → collectionType  ('/api/3/<module>')
         record → collection      (the targeted record IRI)
-        (`collection:` is REJECTED on update_record — it carried the record
+        (`collection:` is REJECTED on update_record -- it carried the record
         IRI but collided with create_record's module-IRI `collection`, the #1
         record-CRUD footgun; use `record:` for the IRI and `module:` for the
         module.)
@@ -23,16 +23,16 @@ non-standard IRI and substitutes for `module:`.
 `RecordCrudArgs` types the scalar friendly/flag fields so a wrong-typed value is
 a clean `BAD_VALUE` (e.g. ``module: [1, 2]`` or ``is_upsert: "yes"``) instead of
 silently riding through to the runtime. `resource` (the record payload) stays
-untyped — it is an arbitrary field dict. `expand_record_crud` owns the
+untyped -- it is an arbitrary field dict. `expand_record_crud` owns the
 module→IRI transform, byte-for-byte with the imperative normalizer it replaces
 (same `setdefault` keys, same `/api/`-passthrough, same already-set-wins rule).
 
 Two pieces stay in the resolver, around this walk, because they are
 catalog-bound and run before/after the transform:
 
-* `_check_unknown_keys` (the strict friendly/canonical whitelist) — runs first.
+* `_check_unknown_keys` (the strict friendly/canonical whitelist) -- runs first.
 * `_resolve_picklist_friendly_tokens` (friendly picklist labels → IRIs in the
-  `resource` payload) — runs after, on the rewritten `step.arguments`.
+  `resource` payload) -- runs after, on the rewritten `step.arguments`.
 """
 from __future__ import annotations
 
@@ -55,9 +55,9 @@ class RecordCrudArgs(StrictArgs):
     the existing record by its natural key instead of appending a duplicate
     (pydantic coerces the usual ``true``/``1``/``"true"`` forms; ``"yes"`` is a
     clean BAD_VALUE). The natural key itself is carried on the ``resource`` as
-    ``sourceId`` (or ``externalId``) — the data-ingest convention. `resource`
+    ``sourceId`` (or ``externalId``) -- the data-ingest convention. `resource`
     (the record payload) and the canonical IRI keys ride through via
-    ``extra="allow"`` — the resolver's `_check_unknown_keys` has already rejected
+    ``extra="allow"`` -- the resolver's `_check_unknown_keys` has already rejected
     anything genuinely unknown, and `_resolve_picklist_friendly_tokens` rewrites
     payload labels after this walk.
     """
@@ -67,6 +67,9 @@ class RecordCrudArgs(StrictArgs):
     module: Optional[str] = None
     is_upsert: Optional[bool] = None
     record: Optional[str] = None
+    field_operations: Optional[dict] = None
+    link: Optional[dict] = None
+    tags_operation: Optional[str] = None
 
 
 def expand_record_crud(
@@ -81,7 +84,7 @@ def expand_record_crud(
     Returns the transformed dict, or ``None`` to leave `step.arguments`
     unchanged (when the input is not a dict). `resolve_module` is the resolver's
     ``resolve_module_name`` bound method, threaded in because module
-    canonicalization needs the catalog. Already-set canonical keys win — the
+    canonicalization needs the catalog. Already-set canonical keys win -- the
     transform uses `setdefault`, never clobbering an explicit `collection` /
     `collectionType`.
     """
@@ -93,16 +96,23 @@ def expand_record_crud(
 
     a = dict(args)
     # `fields:` is the friendly alias for the wire `resource:` key (the
-    # record payload). Authors think "set these fields" — `resource:` is
+    # record payload). Authors think "set these fields" -- `resource:` is
     # an FSR API term. Both compile to the same wire key; `resource:`
     # stays accepted for back-compat.
     if "fields" in a and "resource" not in a:
         a["resource"] = a.pop("fields")
+    elif isinstance(a.get("fields"), dict) and isinstance(a.get("resource"), dict):
+        # `link:` builds `resource` (as `resource.__link`) before this runs, so
+        # a step with BOTH keys must merge rather than discard `fields` --
+        # dropping it silently shipped an update that wrote nothing.
+        merged = dict(a.pop("fields"))
+        merged.update(a["resource"])       # explicit resource/__link wins
+        a["resource"] = merged
     else:
         a.pop("fields", None)
     # Phase A1: `record:` is the friendly key for update_record's record IRI
     # (it compiles to the wire `collection:`). `collection:` on update_record
-    # is rejected below — it was the record IRI but collided with create's
+    # is rejected below -- it was the record IRI but collided with create's
     # module-IRI `collection`, the #1 record-CRUD footgun.
     record_iri = a.pop("record", None)
 
@@ -116,7 +126,7 @@ def expand_record_crud(
             a.setdefault("collectionType", iri)
 
     if step_type == "update_record":
-        # `collection:` on update_record is the old/wire record-IRI key —
+        # `collection:` on update_record is the old/wire record-IRI key --
         # reject it so authors can't confuse create's module-IRI `collection`
         # with update's record-IRI `collection`. The decompiler emits `record:`
         # (not `collection:`), so a decompiled step never trips this.
@@ -127,7 +137,7 @@ def expand_record_crud(
                     "update_record: `collection:` was the record IRI; use "
                     "`record:` for the record IRI and `module:` for the module. "
                     "The wire `collection` key is reserved for create_record's "
-                    "module IRI — reusing it on update is the record-CRUD footgun."
+                    "module IRI -- reusing it on update is the record-CRUD footgun."
                 ),
                 path=f"{path}.arguments.collection",
                 suggestion="rename `collection:` to `record:`",
@@ -153,14 +163,14 @@ def expand_record_crud(
                 path=f"{path}.arguments.module",
             ))
 
-    # `is_upsert` is a friendly YAML lever, NOT a real InsertData wire arg —
+    # `is_upsert` is a friendly YAML lever, NOT a real InsertData wire arg --
     # pop it unconditionally so it never reaches the runtime. For create/insert
     # it routes the step at FortiSOAR's upsert endpoint so a re-run updates
     # the existing record by its natural key instead of appending a duplicate:
     #   collection `/api/3/<m>` -> `/api/3/upsert/<m>`
     #   operation defaults to `Overwrite` (the idempotent write op)
     # The natural key itself is carried on the resource as `sourceId`
-    # (or `externalId`) — the data-ingest convention (see the `data_ingest`
+    # (or `externalId`) -- the data-ingest convention (see the `data_ingest`
     # ruleset). An already-`/api/3/upsert/...` collection (or any non-`/api/3/`
     # collection) is left untouched. `update_record` is already a partial patch
     # by IRI/query, so `is_upsert` has no effect there beyond being dropped.

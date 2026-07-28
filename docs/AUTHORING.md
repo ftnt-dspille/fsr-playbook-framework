@@ -81,9 +81,9 @@ playbooks:
 | `set_variable` | Sets variables for downstream use. | `vars: {name: value, …}` |
 | `decision` | Branches based on conditions. | `conditions: [{display, when, next}]`, `default: <step>` |
 | `connector` | Calls a connector operation. | `connector`, `operation`, `params`, `config` |
-| `find_record` | Queries records from a module. | `module`, `filters: [{field, operator, value}]`, `limit`, `logic`, `relationships` |
+| `find_record` | Queries records from a module. | `module`, `filters: [{field, operator, value}]`, `limit`, `logic`, `sort`, `select`, `relationships`, `max_relations` |
 | `create_record` | Creates a new record. | `module` (required), `fields: {field: value}`, `operation`, `is_upsert` |
-| `update_record` | Updates an existing record. | `record` (IRI), `module` (required), `fields: {field: value}`, `operation` |
+| `update_record` | Updates an existing record. | `record` (IRI), `module` (required), `fields: {field: value}`, `link: {rel: [uuid]}` (append), `operation` |
 | `delete_record` | Deletes a record. | `record:`, or `module:` + `record_id:`, or `module:` + `filters:` (bulk); `show_deleted:` |
 | `manual_input` | Pauses for human input (form or buttons). | `title`, `description`, `options`, `inputs`, `email`, `assign_to`, `is_approval` |
 | `delay` | Waits for a duration or event. | `seconds` (or `minutes`/`hours`/`days`) |
@@ -121,7 +121,7 @@ These keys can be added to any step:
 
 | Key | Meaning |
 |-----|---------|
-| `when:` | Jinja boolean — the step runs only when truthy. On `start_on_create`/`start_on_update`: a field-based trigger filter (`{logic, filters: [{field, op, value}]}`). |
+| `when:` | Jinja boolean -- the step runs only when truthy. On `start_on_create`/`start_on_update`: a field-based trigger filter (`{logic, filters: [{field, op, value}]}`). |
 | `retry:` | Retry the step until a condition holds. Keys: `times`, `delay` (seconds), `until` (Jinja condition). |
 | `ignore_errors:` | Boolean. When `true`, a step failure doesn't halt the playbook. |
 | `apply_async:` | Boolean. Fire-and-forget execution. |
@@ -129,12 +129,12 @@ These keys can be added to any step:
 | `for_each:` | Loop the step over a list. See [Looping](#looping-a-step-over-a-list-for_each). |
 | `mock_result:` | The payload `--mock` runs return for this step. |
 | `set:` | Inline vars stamped after the step runs. Read as `vars.<name>` downstream. |
-| `with:` | Jinja path binding — alias a long `vars.steps.X.data.Y` path for the step's scope. See [with: binding](#with-jinja-path-binding). |
+| `with:` | Jinja path binding -- alias a long `vars.steps.X.data.Y` path for the step's scope. See [with: binding](#with-jinja-path-binding). |
 | `post_comment:` | Post a collaboration comment to the record. Sugar for `message: {content: "…"}`. |
 | `comment:` | A canvas sticky-note for humans; does not affect execution. |
 | `description:` | Free-form text shown in the step's detail pane. |
 
-### `with:` — Jinja path binding
+### `with:` -- Jinja path binding
 
 When a step references the same deep Jinja path many times, `with:`
 aliases it for the step's scope:
@@ -155,7 +155,7 @@ aliases it for the step's scope:
 - Word-boundary matching: `vars.info` matches in `{{ vars.info.adom }}`
   but **not** in `{{ vars.information }}`.
 
-### `message:` — posting a comment to the record
+### `message:` -- posting a comment to the record
 
 Works on any step type except `delay` and `set_api_keys`:
 
@@ -216,7 +216,7 @@ converted to underscores (case preserved):
 
 ### Setting variables
 
-**On a `set_variable` step** — use `vars:` at the step level:
+**On a `set_variable` step** -- use `vars:` at the step level:
 
 ```yaml
 - name: Capture
@@ -227,7 +227,7 @@ converted to underscores (case preserved):
     next_action: "escalate"
 ```
 
-**On any other step** — use `set:` to stamp vars after the step runs:
+**On any other step** -- use `set:` to stamp vars after the step runs:
 
 ```yaml
 - name: Fetch
@@ -243,7 +243,7 @@ converted to underscores (case preserved):
 
 ## Routing
 
-**Linear flow** — one step → next:
+**Linear flow** -- one step → next:
 
 ```yaml
 - name: Step A
@@ -254,7 +254,7 @@ converted to underscores (case preserved):
   type: end
 ```
 
-**Branching** — a decision routes to N possibilities:
+**Branching** -- a decision routes to N possibilities:
 
 ```yaml
 - name: Branch
@@ -269,7 +269,7 @@ converted to underscores (case preserved):
   default: Log Only           # optional implicit else
 ```
 
-**Manual input branching** — each option routes to a different step:
+**Manual input branching** -- each option routes to a different step:
 
 ```yaml
 - name: Approve Action?
@@ -306,7 +306,7 @@ Any step can run once per element of a list:
 
 - `for_each.item` is **required** and must evaluate to a list.
 - The current element is always `vars.item` (object items expose fields as `vars.item.<field>`).
-- `parallel: true` runs iterations concurrently — only safe with no shared state.
+- `parallel: true` runs iterations concurrently -- only safe with no shared state.
 - `__bulk: true` bypasses on-create/on-update playbook triggers. Use for high-volume feeds only.
 
 ## Step type details
@@ -333,11 +333,28 @@ Any step can run once per element of a list:
     - field: severity
       operator: eq
       value: High
-  limit: 200
+  limit: 200                      # see note below -- rides on the module
   logic: AND
+  sort:                           # optional
+    - field: createDate
+      direction: DESC             # ASC (default) | DESC
+  select: [name, status]          # optional field projection
   relationships: true             # optional; include related records
-  partial: true                  # optional; return first page only
+  max_relations: 100              # optional; cap per relationship
+  partial: true                   # optional; return first page only
 ```
+
+**`limit:` is emitted onto the module, not just the query.** The compiler
+writes `module: alerts?$limit=200` alongside `query.limit`, because the
+platform reads the page size from the query string and ignores the body value.
+Authored as above this is handled for you -- but if you hand-write a raw
+`query:` envelope with only `limit` inside it, the step silently returns **30
+rows** and reports success. Every shipped Solution Pack find step carries the
+suffix.
+
+`max_relations:` becomes `$fsr_max_relation_count=N` and only bites alongside
+`relationships: true`. Worth setting: expanding relationships uncapped on a
+busy module can pull an unbounded child set.
 
 ### `create_record` / `update_record`
 
@@ -363,6 +380,46 @@ Any step can run once per element of a list:
   operation: Replace
 ```
 
+#### Writing a multi-value field REPLACES it
+
+A `fields:` write to a collection field (`recordTags`, `indicators`, `assets`,
+any relationship) **discards whatever was already there**. To add without
+disturbing existing values, use `link:`:
+
+```yaml
+- name: Attach indicator
+  type: update_record
+  module: alerts
+  record: "{{ vars.item['@id'] }}"
+  link:                           # appends -- compiles to resource.__link
+    indicators: ["{{ vars.new_indicator_uuid }}"]
+  fields:                         # scalars can be written in the same step
+    status: /api/3/picklists/...
+```
+
+Measured on live 7.x and 8.0 appliances: seeding an alert with 2 indicators and
+writing 1 via `fields:` leaves **1**; linking 1 via `link:` leaves **3**, with
+unrelated tags untouched. `__link` is the same primitive the platform's own
+escalation engine uses to attach alerts and assets to a case.
+
+**`operation:` / `field_operations:` / `tags_operation:` do NOT control this.**
+They map to the wire keys `operation` / `fieldOperation` / `tagsOperation`,
+which 349 of 370 live update steps set -- but 15 combinations were tested across
+both versions and both field types (`Append`, `Overwrite`, `Replace`,
+per-field overrides, `OverwriteTags`, `AppendTags`, and omitting them entirely)
+and **every one replaced the collection**. The keys are accepted for wire
+fidelity; do not rely on them to preserve data. Use `link:`.
+
+To REMOVE a related record, the wire key is `__unlink` (measured: 2 linked
+indicators, unlink 1, leaves 1). There is no friendly key for it yet -- write it
+under `fields:`:
+
+```yaml
+  fields:
+    __unlink:
+      indicators: ["<uuid>"]
+```
+
 ### `delete_record`
 
 ```yaml
@@ -372,11 +429,44 @@ Any step can run once per element of a list:
   # or by module + ID:
   # module: alerts
   # record_id: "123"
-  # or bulk by filters:
+  # or bulk by filters -- NOTE: these go inside a `query:` envelope on this
+  # step (unlike find_record, `filters:`/`logic:` at step level are rejected):
   # module: alerts
-  # filters: [{field: status, operator: eq, value: Closed}]
+  # query:
+  #   logic: AND
+  #   filters: [{type: primitive, field: status, operator: eq, _operator: eq, value: Closed}]
   show_deleted: false             # optional
 ```
+
+**Bulk delete is not row-capped** -- 45 matching records were deleted in one
+run, with and without a `?$limit=` suffix. Unlike `find_record`, there is no
+30-row ceiling to work around.
+
+**A filter the platform rejects deletes nothing and still reports success.** A
+raw `contains` filter on `alerts.name` errors server-side on this platform; the
+step swallowed it, deleted 0 of 45, and the run finished green. Fail-safe in
+direction, but silent -- verify the count after a bulk delete rather than
+trusting the run status.
+
+### Substring filters: write `contains`, get `like`
+
+`/api/query/<module>` has no scalar `contains` -- sending one returns a 500, and
+so do `startswith` and `sw`. The only substring match it honours is `like` with
+an explicit `%` in the value. So on `find_record` and `delete_record` filters
+the compiler rewrites for you (with a warning), exactly as it already did for
+trigger `when:` conditions:
+
+| authored | compiled |
+|---|---|
+| `operator: contains`, `value: test` | `operator: like`, `value: %test%` |
+| `operator: startswith`, `value: test` | `operator: like`, `value: test%` |
+| `operator: endswith`, `value: test` | `operator: like`, `value: %test` |
+| `operator: notcontains`, `value: test` | `operator: notlike`, `value: %test%` |
+
+A value you wildcard yourself (`%already%`) is passed through untouched, so you
+can still write your own pattern. Both `operator` and `_operator` are set -- the
+platform reads the first and the designer reads the second, and a step where
+they disagree renders with the wrong operator selected.
 
 ### `manual_input`
 
@@ -529,7 +619,7 @@ The inbound HTTP body and query params are available at
 
 ## Playbook ownership
 
-By default a playbook is public — any team can run it. Restrict it:
+By default a playbook is public -- any team can run it. Restrict it:
 
 ```yaml
 playbooks:
@@ -555,7 +645,7 @@ fields:
 
 ## Comments and annotations
 
-**`comment:`** — sticky-note explaining a single step:
+**`comment:`** -- sticky-note explaining a single step:
 ```yaml
 - name: Find Alert
   type: find_record
@@ -565,7 +655,7 @@ fields:
   filters: [{field: uuid, operator: eq, value: "{{ vars.input.params.id }}"}]
 ```
 
-**`annotations:`** — free-floating notes or grouping blocks:
+**`annotations:`** -- free-floating notes or grouping blocks:
 ```yaml
 annotations:
   - id: explainer
@@ -597,7 +687,7 @@ All under `examples/` and validated by tests on every commit:
 
 | File | Pattern |
 |---|---|
-| `hello_connector.yaml` | start → set_variable → connector — minimum useful playbook |
+| `hello_connector.yaml` | start → set_variable → connector -- minimum useful playbook |
 | `decision_branch.yaml` | start → set_variable → decision → two branches |
 | `find_and_update.yaml` | start → find_record → update_record |
 | `manual_input_then_act.yaml` | start → manual_input → decision → branched action |
