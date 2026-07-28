@@ -114,6 +114,11 @@ def _register_builtins() -> None:
         register("openai", OpenAIProvider)
     except Exception:
         pass
+    try:
+        from .fortiai_proxy_provider import FortiAIProxyProvider
+        register("fortiai-proxy", FortiAIProxyProvider)
+    except Exception:
+        pass
 
 
 _register_builtins()

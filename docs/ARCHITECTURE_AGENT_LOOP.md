@@ -26,7 +26,8 @@ this is the contract. Everything here is verified against the code as of
 
 The agentic round-trip (`assistant text → tool_use → dispatch → tool_result
 → repeat`) runs **inside `provider.stream()`** (`anthropic_provider.py`,
-`openai_provider.py`, `lmstudio_provider.py`). `run_agent_turn`
+`openai_provider.py`, `lmstudio_provider.py`, `fortiai_proxy_provider.py`).
+`run_agent_turn`
 (`fsr_playbooks/llm/run_turn.py`) is the *consumer* of that event stream — it
 coalesces text, writes history rows, sniffs YAML, and returns a
 `TurnResult`. No front-end writes a loop.
@@ -52,6 +53,34 @@ session and calling `resume_agent_turn(provider, suspended, decision)`.
 | 3 | Tool slice | `fsr_playbooks.llm.intents.tools_for_intent(intent)` | `build` → `[]` (provider self-fills the full `SAFE_TOOLS` registry); `triage` → registry minus `BUILD_ONLY_TOOLS`. |
 | 4 | Trace | `fsr_playbooks.agent.skill_trace.set_active_trace(trace)` around the turn | Makes `run_op` / `emit_action_card` record `SkillCall`s into a per-session `SkillTrace`, which `build_playbook_from_trace` later compiles. Process-local active trace; `clear_active_trace()` in a `finally`. |
 | 5 | Approvals | `fsr_playbooks.llm.approvals` — `InMemoryApprovalGateway` / `SqliteApprovalGateway` | Implements `stash`/`peek`/`pop`/`clear`. HMAC-bound (`bind`/`verify`) so a tampered store fails closed. |
+
+### Providers
+
+| `llm_provider` | provider class | wire format | key custody | streaming |
+|---|---|---|---|---|
+| `anthropic` (connector default) | `AnthropicProvider` | Anthropic Messages API | `anthropic_api_key` (external) | yes (SSE) |
+| `openai` | `OpenAIProvider` | OpenAI Chat Completions | `openai_api_key` (external, or `base_url`→any OAI-compatible endpoint) | yes (SSE) |
+| `lmstudio` (web/MCP only) | `LMStudioProvider` | OpenAI Chat Completions (local) | env-backed (local server ignores it) | yes (SSE) |
+| `fortiai-proxy` | `FortiAIProxyProvider` | on-appliance `agent_chat_completions` via `/api/integration/execute/` | **none** (on-platform crudhub loopback) | **no** (one call per round-trip) |
+
+All four share the same `LLMProvider` protocol (`stream` / `resume` → `Event`
+stream) and the same HITL machinery (tier resolution, approval suspension,
+self-repair, forced assessment). Adding a backend is a *provider* addition,
+not a loop change — the contract is the loop boundary.
+
+#### On-appliance mode (`fortiai-proxy`)
+
+`fortiai-proxy` drives the agent loop against the on-appliance FortiAI
+gateway (`fortinet-fortiai-proxy` connector's `agent_chat_completions`
+operation). No external API key, no egress — suitable for air-gapped or
+egress-restricted boxes. The connector runs on-box; the provider reaches
+`/api/integration/execute/` via the crudhub loopback with no explicit auth.
+Non-streaming: the proxy has no SSE support, so the provider makes one HTTP
+call per LLM round-trip and the user sees no text until the full response
+arrives (sub-second for short answers; longer dead air for narratives is the
+trade-off). Tool calls are singular (one per response) and round-trip via
+flattened-text messages — the proxy rejects structured `tool`-role blocks.
+See `docs/plans/FORTIAI_PROXY_PROVIDER_PLAN.md` for the full wire contract.
 
 ## How each front-end wires them
 
