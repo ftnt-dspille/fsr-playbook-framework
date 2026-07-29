@@ -802,7 +802,15 @@ class OpenAIProvider:
                     # re-prepends system on resume.
                     suspended_session = _approvals.SuspendedSession(
                         approval_id=approval_id,
-                        session_id=session_id,
+                        # The CHAT session id, not `session_id` -- that local
+                        # is a per-stream trace id (uuid4().hex[:8]) used for
+                        # telemetry correlation. Stashing it here wrote a value
+                        # into suspended_sessions.session_id that could never
+                        # join to chat_sessions, so the monitor's Pending panel
+                        # showed an unresolvable session with a null intent and
+                        # user, and list_active_sessions could never derive
+                        # `waiting_approval` for any row.
+                        session_id=(tags or {}).get("session_id") or session_id,
                         tool=name,
                         tool_use_id=call_id,
                         args=args,

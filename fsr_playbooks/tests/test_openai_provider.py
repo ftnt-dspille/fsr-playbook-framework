@@ -169,6 +169,56 @@ def test_tier3_call_suspends_and_stashes_session():
                for m in stashed.history_snapshot)
 
 
+def test_stashed_session_id_is_the_chat_session_not_the_trace_id():
+    """`stream()` mints a per-call trace id (uuid4().hex[:8]) for telemetry
+    correlation. What gets stashed on the SuspendedSession must be the CALLER's
+    chat session id from tags -- the trace id keys nothing in the connector's
+    session store, so stashing it left the monitor's Pending panel pointing at
+    a session that could not be resolved (null intent, null user) and made
+    `waiting_approval` underivable for every live session."""
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="call_x",
+                                                  name="block_ip", args='{"ip":"1.2.3.4"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    gw = InMemoryApprovalGateway()
+    p = _provider(turn1, gateway=gw)
+    envelope = {"pending_approval": True, "approval_id": "appr_sid", "tier": 3,
+                "tool": "block_ip", "preview": {"ip": "1.2.3.4"},
+                "args_hash": "abc", "summary": "Block 1.2.3.4",
+                "requires_step_up": False}
+    with patch("fsr_playbooks.llm.openai_provider.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=3):
+        asyncio.run(_drain(p.stream(
+            system="sys", messages=[Message(role="user", content="block that ip")],
+            tools=_BLOCK_IP_TOOLS,
+            tags={"session_id": "sess-abc-1785336293381"})))
+    stashed = gw.peek("appr_sid")
+    assert stashed.session_id == "sess-abc-1785336293381"
+
+
+def test_stashed_session_id_falls_back_to_trace_id_without_tags():
+    """No caller session id (direct/unit use) -> keep the old behaviour rather
+    than stashing an empty string."""
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="call_x",
+                                                  name="block_ip", args='{"ip":"1.2.3.4"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    gw = InMemoryApprovalGateway()
+    p = _provider(turn1, gateway=gw)
+    envelope = {"pending_approval": True, "approval_id": "appr_nosid", "tier": 3,
+                "tool": "block_ip", "preview": {"ip": "1.2.3.4"},
+                "args_hash": "abc", "summary": "s", "requires_step_up": False}
+    with patch("fsr_playbooks.llm.openai_provider.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=3):
+        asyncio.run(_drain(p.stream(system="sys", messages=[
+            Message(role="user", content="block that ip")],
+            tools=_BLOCK_IP_TOOLS, tags={})))
+    stashed = gw.peek("appr_nosid")
+    assert stashed.session_id and len(stashed.session_id) == 8
+
+
 def test_resume_approve_redispatches_and_continues():
     """Resuming an approved suspension re-dispatches the gated tool with
     _approved=True, emits its ToolResultEvent, and re-enters the loop to
