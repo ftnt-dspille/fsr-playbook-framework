@@ -1,12 +1,12 @@
-"""fsrpb CLI — thin dispatcher over the compiler library.
+"""fsrpb CLI -- thin dispatcher over the compiler library.
 
 Subcommands:
-  refresh      — re-run probes and rebuild the reference store JSON
-  compile      — YAML playbook -> FSR WorkflowCollection JSON
-  validate     — YAML playbook -> structured errors (no JSON output)
-  decompile    — FSR JSON -> simplified YAML
-  roundtrip    — FSR JSON -> IR -> FSR JSON, semantic diff
-  explain      — describe a connector / step / module from the store
+  refresh      -- re-run probes and rebuild the reference store JSON
+  compile      -- YAML playbook -> FSR WorkflowCollection JSON
+  validate     -- YAML playbook -> structured errors (no JSON output)
+  decompile    -- FSR JSON -> simplified YAML
+  roundtrip    -- FSR JSON -> IR -> FSR JSON, semantic diff
+  explain      -- describe a connector / step / module from the store
 """
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     # Run through the parser so simplified-IR niceties (vars: →
     # arg_list:, name → id, top-level conditions/options hoisted into
     # arguments) match what the simulator expects. The parser
-    # requires a `collection:` field — synthesize one if absent so
+    # requires a `collection:` field -- synthesize one if absent so
     # users can analyze a playbooks-only file too.
     import yaml as _yaml
     raw = _yaml.safe_load(text) or {}
@@ -106,7 +106,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             print(f"  ✗ [parse/{e.code.value}] {e.message}", file=sys.stderr)
         return 1
     # Reserialize the parsed IR as YAML the simulator accepts. Each
-    # parsed step is a dataclass — convert via its .to_dict() (or
+    # parsed step is a dataclass -- convert via its .to_dict() (or
     # asdict if it's a plain dataclass).
     from dataclasses import asdict
     canonical_doc = {
@@ -181,7 +181,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
 
 def cmd_dump_step_params(args: argparse.Namespace) -> int:
-    """Audit known params per step type — writes one Markdown file
+    """Audit known params per step type -- writes one Markdown file
     per step type combining resolver allowlists + corpus observations
     + flagged gaps.
     """
@@ -224,7 +224,7 @@ def cmd_audit_shapes(args: argparse.Namespace) -> int:
 def cmd_purge(args: argparse.Namespace) -> int:
     """Hard-delete one or more playbooks (workflows) by name or UUID.
 
-    Targets the workflow record only — never the parent collection
+    Targets the workflow record only -- never the parent collection
     (which may hold unrelated playbooks) and never individual
     workflow_step rows (cascade is FSR's responsibility, not ours).
     """
@@ -322,7 +322,7 @@ def _resolve_or_create_collection(client, name: str) -> tuple[str | None, str]:
         return None, f"ambiguous:{len(exact)} collections named {name!r}"
     if len(exact) == 1:
         return exact[0].get("uuid"), "found"
-    # Not found — create. Minimal body; FSR fills in the rest.
+    # Not found -- create. Minimal body; FSR fills in the rest.
     try:
         cr = client.session.post(
             f"{client.base_url}/api/3/workflow_collections",
@@ -348,7 +348,7 @@ def _cmd_push_per_playbook(args, coll_entity: dict, client) -> int:
       3. Pre-check the deterministic uuid against the recycle bin via
          GET ?$showDeleted=true. If found (live or recycled), single-uuid
          hard-delete via DELETE /api/3/workflows/{uuid}?$hardDelete=true.
-         Scope is one uuid by URL — impossible to leak.
+         Scope is one uuid by URL -- impossible to leak.
       4. POST /api/3/workflows with the fresh body.
 
     Each workflow is independent; one failure doesn't abort the rest.
@@ -379,10 +379,10 @@ def _cmd_push_per_playbook(args, coll_entity: dict, client) -> int:
             continue
         # Re-anchor to the resolved target collection.
         wf["collection"] = target_iri
-        # Strip @id (FSR rejects on POST/PUT) — emitter sets it for some shapes.
+        # Strip @id (FSR rejects on POST/PUT) -- emitter sets it for some shapes.
         wf_body = {k: v for k, v in wf.items() if not k.startswith("@")}
 
-        # Pre-check via plain GET with $showDeleted=true — one HTTP per
+        # Pre-check via plain GET with $showDeleted=true -- one HTTP per
         # workflow, scope is the single uuid in the URL.
         try:
             pr = client.session.get(
@@ -451,13 +451,13 @@ def cmd_push(args: argparse.Namespace) -> int:
     """Compile YAML and POST/PUT the unwrapped collection to /api/3/workflow_collections.
 
     `/api/3/workflow_collections` is plain API Platform CRUD on the
-    `WorkflowCollection` entity — distinct from `/api/3/import_jobs`,
+    `WorkflowCollection` entity -- distinct from `/api/3/import_jobs`,
     which is for full configuration-bundle (Solution Pack) imports.
     Cascade-persist on the entity automatically writes nested
     `workflows[]` and their steps/routes.
 
     Mode semantics:
-      safe (default)    — preflight: classify every uuid the YAML would
+      safe (default)    -- preflight: classify every uuid the YAML would
                           write as fresh/live/recycled, restore any
                           recycled rows via PUT deletedAt:null, then
                           POST /api/3/bulkupsert/workflow_collections
@@ -466,16 +466,16 @@ def cmd_push(args: argparse.Namespace) -> int:
                           Doctrine cascade-persist 409s. No hard-delete.
                           Foreign workflows under the collection are
                           preserved. See ``python/preflight.py``.
-      create            — POST only. Fails with 409 if UUID/name collides
+      create            -- POST only. Fails with 409 if UUID/name collides
                           (live or soft-deleted).
-      update            — PUT only. Fails with 404 if no record.
-      upsert            — POST to `/api/3/bulkupsert/workflow_collections`.
+      update            -- PUT only. Fails with 404 if no record.
+      upsert            -- POST to `/api/3/bulkupsert/workflow_collections`.
                           NOTE: confirmed broken on FSR side (PHP 8 bugs
-                          in UpsertController.php at lines 89 and 258 —
+                          in UpsertController.php at lines 89 and 258 --
                           `array_key_exists` and array-index access used
                           on stdClass). Works only for fresh creates with
                           no existing match. Kept as opt-in for testing.
-      replace           — clean-slate hard-purge then POST. ``safe``
+      replace           -- clean-slate hard-purge then POST. ``safe``
                           mode handles all the recycle-bin cases that
                           historically required ``replace``; use this
                           only when you genuinely want a fresh-uuid
@@ -515,7 +515,7 @@ def cmd_push(args: argparse.Namespace) -> int:
 
     # Dispatch to per-playbook mode if the YAML used `into_collection:`
     # (or inherited the studio default). This path NEVER hard-deletes
-    # the collection — it only touches the listed workflows inside the
+    # the collection -- it only touches the listed workflows inside the
     # named target, leaving siblings untouched.
     target_mode = getattr(result.ir, "target_mode", "wrap")
     if target_mode == "per_playbook":
@@ -541,7 +541,7 @@ def cmd_push(args: argparse.Namespace) -> int:
         # Limitation: UpsertController.php:89 uses array_key_exists on a
         # stdClass which crashes when an existing soft-deleted record
         # matches by uuid/name. Caller should hard-purge first if that's
-        # the case — see _purge_soft_deleted().
+        # the case -- see _purge_soft_deleted().
         try:
             return True, client.post(
                 "/api/3/bulkupsert/workflow_collections", coll_entity,
@@ -552,14 +552,14 @@ def cmd_push(args: argparse.Namespace) -> int:
     def _purge_soft_deleted(scope: dict[str, list[str]] | None = None) -> bool:
         """Hard-purge by UUID, scope-locked to the YAML's own uuids.
 
-        Returns True on success; False on ABORT — caller MUST NOT proceed
+        Returns True on success; False on ABORT -- caller MUST NOT proceed
         to POST. Aborts on:
           - ``FSR_ALLOW_HARD_DELETE`` / ``FSR_ALLOW_E2E`` not set
           - scope exceeds ``MAX_*`` without ``--force-large-purge``
           - any per-batch delete HTTP/exception failure (no degraded purge)
 
         Scope is *strictly* the deterministic uuid5 set the compiler
-        emitted for THIS YAML — collection, workflows, steps, routes.
+        emitted for THIS YAML -- collection, workflows, steps, routes.
         Per ``emitter.py:132`` every child uuid is uuid5(collection_name,
         playbook_name, …); we don't need to discover anything from the
         server, which closes the historical scope-leak vector (an earlier
@@ -570,7 +570,7 @@ def cmd_push(args: argparse.Namespace) -> int:
         is only correct when you intentionally want a hard-delete +
         fresh-create with the same uuids.
         """
-        # Killswitch — required for any hard-delete path. Either
+        # Killswitch -- required for any hard-delete path. Either
         # FSR_ALLOW_HARD_DELETE (purpose-specific) or FSR_ALLOW_E2E
         # (existing destructive-ops opt-in) satisfies the gate.
         _truthy = ("1", "true", "yes")
@@ -586,7 +586,7 @@ def cmd_push(args: argparse.Namespace) -> int:
             return False
 
         # If caller passed a scope (typically from preflight classification),
-        # only delete those uuids — avoids 500s from trying to delete uuids
+        # only delete those uuids -- avoids 500s from trying to delete uuids
         # the server doesn't have. Otherwise fall back to the full YAML
         # uuid set (safe by construction: deterministic uuid5 from THIS
         # compile's YAML; cannot reference any other collection).
@@ -607,7 +607,7 @@ def cmd_push(args: argparse.Namespace) -> int:
                 for r in w.get("routes", []):
                     if r.get("uuid"):
                         route_uuids.append(r["uuid"])
-        # Batch cap — refuse runaway scopes.
+        # Batch cap -- refuse runaway scopes.
         MAX_WF, MAX_STEPS = 50, 500
         force_large = bool(getattr(args, "force_large_purge", False))
         if not force_large and (
@@ -621,7 +621,7 @@ def cmd_push(args: argparse.Namespace) -> int:
             )
             return False
 
-        # Bulk-delete just the collection — FSR cascades through
+        # Bulk-delete just the collection -- FSR cascades through
         # workflows → steps → routes via Doctrine's onDelete=CASCADE
         # on the FK columns. Empirically verified on 7.6.x: a single
         # ``DELETE /api/3/delete/workflow_collections?$hardDelete=true``
@@ -682,7 +682,7 @@ def cmd_push(args: argparse.Namespace) -> int:
           2. Restore any recycled rows via PUT ``deletedAt: null``.
              Required because ``bulkupsert`` has a PHP-8 stdClass bug
              on the recycle-bin resurrect path (UpsertController.php
-             line 89) — it only works for fresh + live records.
+             line 89) -- it only works for fresh + live records.
           3. Foreign-workflow check: if the target collection contains
              playbooks not in this YAML (e.g. added via the FSR UI
              after our last push), refuse. Empirically verified on
@@ -691,7 +691,7 @@ def cmd_push(args: argparse.Namespace) -> int:
              Override with ``--allow-foreign-loss``.
           4. ``POST /api/3/bulkupsert/workflow_collections`` with body
              ``[coll_entity]`` (the bulkupsert endpoint requires a list
-             — bare-object payloads hit UpsertController.php line 258:
+             -- bare-object payloads hit UpsertController.php line 258:
              "Cannot access offset of type string on string"). The
              controller recursively upserts children, sidestepping the
              Doctrine cascade-persist 409 we hit with plain PUT.
@@ -759,10 +759,10 @@ def cmd_push(args: argparse.Namespace) -> int:
                     f"restore failed for {len(errs)} row(s); aborting push"
                 ), "RESTORE_FAIL"
 
-        # Foreign-workflow check — BLOCKING by default. Empirically:
+        # Foreign-workflow check -- BLOCKING by default. Empirically:
         # bulkupsert replaces the collection's workflows[] with what we
         # send and Doctrine cascade-removes the rest (verified live on
-        # 7.6.x — a UI-injected foreign workflow returned 404 after
+        # 7.6.x -- a UI-injected foreign workflow returned 404 after
         # bulkupsert). Override with --allow-foreign-loss.
         coll_row = cls.get("workflow_collections", {}).get(coll_uuid)
         if coll_row and coll_row.status in ("live", "recycled"):
@@ -799,7 +799,7 @@ def cmd_push(args: argparse.Namespace) -> int:
                     f"collection {coll_uuid}"
                 ), "FOREIGN_PRESENT"
 
-        # Bulkupsert. List-wrapped — bare object hits line 258.
+        # Bulkupsert. List-wrapped -- bare object hits line 258.
         try:
             r = client.session.post(
                 f"{client.base_url}/api/3/bulkupsert/workflow_collections",
@@ -834,7 +834,7 @@ def cmd_push(args: argparse.Namespace) -> int:
         action = "BULKUPSERT"
     elif args.mode == "replace":
         # Explicit clean-slate hard-purge. Use only when `safe` won't do
-        # — typically recovery from corrupted orphan rows. Children are
+        # -- typically recovery from corrupted orphan rows. Children are
         # deterministic uuid5 so this only deletes uuids THIS YAML emits.
         if not _purge_soft_deleted():
             print(
@@ -898,14 +898,14 @@ def cmd_push(args: argparse.Namespace) -> int:
         if not wf_uuid:
             continue
         # Per the FSR Angular router (main.playbookDetail state at
-        # /playbooks/:id), :id is the workflow UUID — not the
+        # /playbooks/:id), :id is the workflow UUID -- not the
         # collection's. Verified against /js/app.min.*.js on the live
         # appliance: `Entity("workflows").get(e.id, …)`.
         url = f"{base}/playbooks/{wf_uuid}"
         # Confirm the API resource the SPA loads on that route actually
         # exists. /api/3/workflows/<uuid> is what the playbookDetail
         # state's resolver fetches; if it 404s the deep-link is dead.
-        # Hitting the SPA URL itself can't catch this — every path
+        # Hitting the SPA URL itself can't catch this -- every path
         # serves the same index.html and returns 200.
         api_url = f"{base}/api/3/workflows/{wf_uuid}"
         try:
@@ -990,7 +990,7 @@ def _fetch_live_collection(client, ident: str) -> dict | None:
 def _fetch_workflow_export(client, uuids: list[str]) -> list[dict]:
     """Bulk-fetch full Workflow records via /api/3/workflows?$export=true.
 
-    Each member in the result has steps/routes/groups expanded inline —
+    Each member in the result has steps/routes/groups expanded inline --
     the same shape collection-export produces, just per-workflow.
     """
     if not uuids:
@@ -1048,7 +1048,7 @@ def _fetch_workflow_with_refs(client, ident: str) -> dict | None:
     """Fetch one Workflow + transitive workflow_reference dependencies.
 
     Bundles them into a synthetic collection envelope keyed off the root
-    playbook's parent collection — so decompile produces a YAML where
+    playbook's parent collection -- so decompile produces a YAML where
     in-collection refs round-trip via local `target:` and cross-collection
     refs stay as IRIs. Cycles are broken by uuid de-dup.
     """
@@ -1109,7 +1109,7 @@ def _fetch_workflow_with_refs(client, ident: str) -> dict | None:
 
 
 def _decompile_to_yaml(coll, db_path: Path) -> str:
-    """Thin shim — kept for call-site stability; logic lives in
+    """Thin shim -- kept for call-site stability; logic lives in
     `compiler.decompiler.decompile_to_yaml` so the MCP recipe tool and
     the CLI emit identical YAML."""
     from fsr_playbooks.compiler.decompiler import decompile_to_yaml as _impl
@@ -1127,7 +1127,7 @@ def _resolve_ref_arg(arg: str) -> str:
     `https://198.51.100.10/playbooks/<uuid>` → extracts the UUID and, when the
     URL host differs from the configured FSR_BASE_URL, overrides it (via env,
     before get_config() is first called) so the pull targets the right box.
-    Auth still comes from the environment — set FSR_USERNAME/FSR_PASSWORD (or
+    Auth still comes from the environment -- set FSR_USERNAME/FSR_PASSWORD (or
     FSR_API_KEY) for that host if it isn't the default instance.
     """
     if "://" not in arg:
@@ -1292,7 +1292,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     # Optional: overlay per-step execution status from a past run, so we can
     # see which routes COULD have fired (source executed AND target executed)
     # vs which weren't traversed. Uses the same step_detail=true endpoint
-    # `fsrpb env` reads from — historical-steps is empty on some FSR
+    # `fsrpb env` reads from -- historical-steps is empty on some FSR
     # instances so fall back to name-based lookup.
     exec_status_by_uuid: dict[str, str] = {}
     exec_status_by_name: dict[str, str] = {}
@@ -1418,7 +1418,7 @@ def cmd_canvas_check(args: argparse.Namespace) -> int:
     """Sanity-check a live playbook's graph for canvas-rendering bugs.
 
     Catches the class of issue where the run/editor viewer shows step
-    boxes but no edges between them — orphan routes, missing layout
+    boxes but no edges between them -- orphan routes, missing layout
     coords, Decision branches without matching routes, duplicate or
     mismatched references. Pure data-shape lint; does not run anything.
     """
@@ -1448,7 +1448,7 @@ def cmd_canvas_check(args: argparse.Namespace) -> int:
         findings.append({"severity": severity, "code": code,
                          "message": message, **extra})
 
-    # 1. Steps missing layout coords — designer needs these to place nodes.
+    # 1. Steps missing layout coords -- designer needs these to place nodes.
     for s in steps:
         if s.get("top") is None or s.get("left") is None:
             add("error", "missing_layout",
@@ -1464,7 +1464,7 @@ def cmd_canvas_check(args: argparse.Namespace) -> int:
                     f"route {r.get('name')!r} {end}={iri} is not a step in this workflow",
                     route=r.get("name"))
 
-    # 3. Duplicate (source, target, label) triples — designer dedups silently
+    # 3. Duplicate (source, target, label) triples -- designer dedups silently
     #    and the second edge can vanish.
     seen: dict[tuple, str] = {}
     for r in routes:
@@ -1613,7 +1613,7 @@ def cmd_jinja(args: argparse.Namespace) -> int:
       --bind KEY=VALUE        Add/override a single value (repeatable)
 
     POST /api/wf/api/jinja-editor/ runs the template through the same engine
-    as FSR's playbook runtime — FSR-custom filters (`| tojson`, `| b64encode`,
+    as FSR's playbook runtime -- FSR-custom filters (`| tojson`, `| b64encode`,
     `| yaql`, …) all work. Use this to test that
     `{{ vars.steps.Get_organization.records[0].name }}` actually resolves
     against a real run before wiring it into the next step.
@@ -1721,7 +1721,7 @@ def cmd_env(args: argparse.Namespace) -> int:
             print(f"no workflow run found for task_id {ident!r}", file=sys.stderr)
             return 1
         pk_url = members[0].get("@id") or ""
-        # @id is `/wf/api/workflows/<pk>/` — needs `/api` prefix
+        # @id is `/wf/api/workflows/<pk>/` -- needs `/api` prefix
         url = client.base_url + "/api" + pk_url + "?step_detail=true"
     else:
         url = client.base_url + f"/api/wf/api/workflows/{ident}/?step_detail=true"
@@ -1767,13 +1767,13 @@ def cmd_health(args: argparse.Namespace) -> int:
         AND are active. One round-trip; the right starting point when
         deciding which connectors a playbook can actually call.
       - GET /api/integration/connectors/healthcheck/{name}/{version}/
-        Per-connector live status — {status, message, name, version,
+        Per-connector live status -- {status, message, name, version,
         config_id}. status="Available" = configured + reachable;
         "Disconnected" = configured but upstream is down; 404 = no config.
 
     Default: list configured + active. Use --probe to also healthcheck
     each one (slower; one HTTP call per connector). For a single
-    connector, pass its name as the positional arg — that always probes.
+    connector, pass its name as the positional arg -- that always probes.
     """
     from probes import _env  # type: ignore
     cfg = _env.get_config()
@@ -1783,7 +1783,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     client = _env.get_client()
 
     if args.connector:
-        # Specific connector — pick version from --version, or from the
+        # Specific connector -- pick version from --version, or from the
         # configured-and-active listing (multiple installed versions are
         # common, e.g. hello-world ships at 1.0.4 / 1.1.0 / 1.0.5 / 1.1.1).
         version = args.version
@@ -1803,7 +1803,7 @@ def cmd_health(args: argparse.Namespace) -> int:
                 return 1
             if len(candidates) > 1 and not version:
                 print(f"warning: {len(candidates)} versions of {args.connector!r} "
-                      f"are configured — pass --version to pick one. "
+                      f"are configured -- pass --version to pick one. "
                       f"Probing the first.", file=sys.stderr)
             version = candidates[0].get("version")
         targets = [{"name": args.connector, "version": version}]
@@ -1988,7 +1988,7 @@ def cmd_run_playbook(args: argparse.Namespace) -> int:
         )
 
     # /notrigger takes the workflow uuid in the URL.
-    # /action takes the trigger step's *route* uuid in the URL — different
+    # /action takes the trigger step's *route* uuid in the URL -- different
     # from the workflow uuid. The body's misleadingly-named `__uuid` is
     # the WORKFLOW uuid (not the record). `records[]` carries the record
     # IRI. Verified live 2026-05-03 against the FSR UI's Run-Action call.
@@ -2000,7 +2000,7 @@ def cmd_run_playbook(args: argparse.Namespace) -> int:
         route_uuid = _fetch_trigger_route_uuid(client, wf_uuid)
         if not route_uuid:
             print(f"could not find trigger.route on wf {wf_uuid[:8]} "
-                  f"— playbook trigger isn't a record-action style "
+                  f"-- playbook trigger isn't a record-action style "
                   f"(cybersponse.action). For abstract_trigger playbooks, "
                   f"omit --record.", file=sys.stderr)
             return 1
@@ -2045,7 +2045,7 @@ def cmd_run_playbook(args: argparse.Namespace) -> int:
         return 0
     task_id = (resp or {}).get("task_id") if isinstance(resp, dict) else None
     if not task_id:
-        print("(no task_id returned — cannot follow; --record async fires "
+        print("(no task_id returned -- cannot follow; --record async fires "
               "have no task_id)", file=sys.stderr)
         return 0
     return _follow_task(client, task_id, args.follow_timeout, args.follow_interval)
@@ -2054,13 +2054,13 @@ def cmd_run_playbook(args: argparse.Namespace) -> int:
 def _follow_task(client, task_id: str, timeout_s: int, interval_s: int) -> int:
     """Poll /api/wf/api/workflows/?task_id=<id>&parent_wf__isnull=True
     until terminal status, then print final record. See store entry for
-    /api/wf/api/workflows GET — Django-side polling endpoint, the
+    /api/wf/api/workflows GET -- Django-side polling endpoint, the
     canonical run-status surface (sister historical-workflows/<id>/
     currently 500s)."""
     import time
     # Terminal statuses per workflow/0052_historical_workflow.py migration
     # (HistoricalWorkflow choices). 'rejected' is workflow-level only;
-    # 'finished_with_error' is technically terminal too — it means the run
+    # 'finished_with_error' is technically terminal too -- it means the run
     # completed but at least one step errored. We treat it as terminal+failed.
     terminal = {"finished", "failed", "terminated", "skipped",
                 "finished_with_error", "rejected"}
@@ -2089,7 +2089,7 @@ def _follow_task(client, task_id: str, timeout_s: int, interval_s: int) -> int:
                 # On non-clean terminal: surface step-level diagnostics so
                 # the demo loop doesn't require manually re-running `fsrpb
                 # steps <task_id>` to find the failure.
-                print(_ansi(f"\nrun {status} — step diagnostics:", "31"),
+                print(_ansi(f"\nrun {status} -- step diagnostics:", "31"),
                       file=sys.stderr)
                 try:
                     sr = client.session.get(
@@ -2105,7 +2105,7 @@ def _follow_task(client, task_id: str, timeout_s: int, interval_s: int) -> int:
                 # fields. Fetch the full record by PK to get `result`
                 # (top-level "Error message") and embedded `steps[]` with
                 # per-step status (verified via UI request 2026-05-03).
-                # Note: @id is `/wf/api/workflows/<pk>/` — needs `/api`
+                # Note: @id is `/wf/api/workflows/<pk>/` -- needs `/api`
                 # prefix to hit the actual route.
                 full = rec
                 pk_url = rec.get("@id") or ""
@@ -2158,7 +2158,7 @@ def cmd_find(args: argparse.Namespace) -> int:
       - steps.arguments$like=%<text>%   (JSON LIKE on serialized arguments)
 
     Filters AND together. With no filter: lists every playbook on the
-    appliance — useful for piping into grep but rarely the goal.
+    appliance -- useful for piping into grep but rarely the goal.
     """
     from probes import _env  # type: ignore
 
@@ -2313,7 +2313,7 @@ def cmd_triggers(args: argparse.Namespace) -> int:
     """List manual-trigger playbooks via /api/workflows/actions.
 
     This is the same API the FSR UI uses to populate a record's
-    right-click "Execute" menu — manual-trigger playbooks (cybersponse.action
+    right-click "Execute" menu -- manual-trigger playbooks (cybersponse.action
     start step) optionally scoped to a module.
     """
     from probes import _env  # type: ignore
@@ -2404,7 +2404,7 @@ def _resolve_workflow_pk(client, *, task_id: str | None = None,
     """Resolve the integer workflow pk needed for manual-input PUT.
 
     Try task_id first; otherwise look up by manual-wf-input id (which
-    requires fetching the run that owns it — we use the encrypted token
+    requires fetching the run that owns it -- we use the encrypted token
     field on the input record as a hint to find the awaiting run).
     """
     if task_id:
@@ -2552,7 +2552,7 @@ def cmd_inputs_respond(args: argparse.Namespace) -> int:
       }
 
     Earlier we used PUT /manual-wf-input/<pk>/ which returns 200 but
-    does NOT actually resume the run — it only updates the record.
+    does NOT actually resume the run -- it only updates the record.
     """
     from probes import _env  # type: ignore
     cfg = _env.get_config()
@@ -2692,7 +2692,7 @@ def cmd_steps(args: argparse.Namespace) -> int:
             args_ = s.get("args") or {}
             if not (inp or res or args_):
                 continue
-            print(_ansi(f"\n— {s.get('name')} ({s.get('status')})", "1"))
+            print(_ansi(f"\n-- {s.get('name')} ({s.get('status')})", "1"))
             if args_: print(f"  args:   {json.dumps(args_, default=str)[:400]}")
             if inp:   print(f"  input:  {json.dumps(inp, default=str)[:400]}")
             if res:   print(f"  result: {json.dumps(res, default=str)[:400]}")
@@ -2714,7 +2714,7 @@ def _step_duration_ms(s: dict) -> str:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    """List recent import_jobs with their state — sanity check after a push."""
+    """List recent import_jobs with their state -- sanity check after a push."""
     from probes import _env  # type: ignore
 
     cfg = _env.get_config()
@@ -2771,10 +2771,10 @@ def cmd_picklist(args: argparse.Namespace) -> int:
     """Picklist exploration / resolution against the live FSR.
 
     Subcommands:
-      list                       — every picklist `listName.name`
-      show <name>                — items of one picklist
-      for-field <module> <field> — auto-discover picklist behind a field
-      resolve <value> [--name]   — friendly value -> IRI
+      list                       -- every picklist `listName.name`
+      show <name>                -- items of one picklist
+      for-field <module> <field> -- auto-discover picklist behind a field
+      resolve <value> [--name]   -- friendly value -> IRI
     """
     sub = args.picklist_cmd
     if sub == "list":
@@ -2856,13 +2856,13 @@ def cmd_demo_prep(args: argparse.Namespace) -> int:
     Wraps `probe_cleanup` to delete leftover `fsrpb` test collections
     (`Compiler Demo*`, `*__fsrpb_probe__*`, `Compiler Examples*`) and
     any extra glob the user passes via `--pattern`. Gated on the same
-    `FSR_ALLOW_E2E=true` envvar the probe enforces — accidental import
+    `FSR_ALLOW_E2E=true` envvar the probe enforces -- accidental import
     can't run this.
     """
     if os.environ.get("FSR_ALLOW_E2E", "").lower() not in (
         "1", "true", "yes",
     ):
-        print("FSR_ALLOW_E2E not set — refusing to mutate the live FSR. "
+        print("FSR_ALLOW_E2E not set -- refusing to mutate the live FSR. "
               "Set FSR_ALLOW_E2E=true and re-run.", file=sys.stderr)
         return 2
     extra = list(args.pattern or [])
@@ -2986,7 +2986,7 @@ def cmd_assert(args: argparse.Namespace) -> int:
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Run the Compiles+Runs success-ladder gate: structural + live prechecks.
 
-    Wraps the resolve_yaml MCP tool — useful for catching unresolved
+    Wraps the resolve_yaml MCP tool -- useful for catching unresolved
     picklists and missing connector installs before push, in CI, or in
     a pre-commit hook.
     """
@@ -3076,7 +3076,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     Useful for connector authors and for spot-checking what the static
     type validator will accept on each op. Reads `operation_params`
-    directly — no FSR calls. Phase 2.4 of STATIC_TYPE_VALIDATION_PLAN.
+    directly -- no FSR calls. Phase 2.4 of STATIC_TYPE_VALIDATION_PLAN.
     """
     import sqlite3
     from fsr_playbooks.mcp_server._shared import DB_PATH
@@ -3126,7 +3126,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"  {len(ops)} operation(s), {len(rows)} param(s)")
     cov = _doctor_coverage([dict(r) for r in rows])
     print(f"  typed: {cov['typed']}/{cov['total']} "
-          f"({cov['fraction']:.0%}) — "
+          f"({cov['fraction']:.0%}) -- "
           f"{cov['by_widget']} by widget, "
           f"{cov['by_name_or_probe']} by name/probe")
     print()
@@ -3139,7 +3139,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             continue
         print(f"  {op_name}")
         for r in by_op[op_name]:
-            obs = r["observed_type"] or "—"
+            obs = r["observed_type"] or "--"
             coerce = (f" coerces_from={r['coerces_from']}"
                       if r["coerces_from"] else "")
             indent = "    └─ " if r["parent_param_name"] else "    "
@@ -3627,7 +3627,7 @@ def cmd_runs(args: argparse.Namespace) -> int:
 
     Hits /api/wf/api/workflows/?status__in=...&parent_wf__isnull=True. Returns
     playbook name, task_id, status, modified timestamp, and the top-level
-    error message when the run failed — exactly what's needed to triage
+    error message when the run failed -- exactly what's needed to triage
     "my playbook is broken" without knowing which one.
     """
     from probes import _env  # type: ignore
@@ -3752,7 +3752,7 @@ def cmd_e2e(args: argparse.Namespace) -> int:
             print(f"no *.test.yaml files in {search_dir}", file=sys.stderr)
             return 2
 
-        # Pre-pass cleanup (controllable) — clears stale collections from
+        # Pre-pass cleanup (controllable) -- clears stale collections from
         # interrupted prior runs that would otherwise 409 on push.
         if not getattr(args, "no_cleanup", False):
             client = _env.get_client()
@@ -3813,12 +3813,12 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     """Audit what the SQLite reference store knows.
 
     Subcommands:
-      summary        — row counts per table, trust ratio, last probe runs,
+      summary        -- row counts per table, trust ratio, last probe runs,
                        attached api_examples_catalog status.
-      connectors     — list connectors with trust badges (filter via -q).
-      api-examples   — top products in the catalog by entry count.
-      stale          — probes that haven't run within --days (default 7).
-      search <q>     — cross-table search: connectors, ops, jinja, api examples.
+      connectors     -- list connectors with trust badges (filter via -q).
+      api-examples   -- top products in the catalog by entry count.
+      stale          -- probes that haven't run within --days (default 7).
+      search <q>     -- cross-table search: connectors, ops, jinja, api examples.
     """
     import json as _json
     import inventory as inv
@@ -3853,7 +3853,7 @@ def cmd_chat_stats(args: argparse.Namespace) -> int:
       2. Worst turns by output cost (output + uncached input).
       3. Tool-call cost ranking (which tools blew up context).
 
-    Use this to answer "what just spiked?" — the worst-turn rollup
+    Use this to answer "what just spiked?" -- the worst-turn rollup
     pinpoints the round-trip; the tool ranking pinpoints the payload.
     """
     import collections
@@ -3891,7 +3891,7 @@ def cmd_chat_stats(args: argparse.Namespace) -> int:
     for r in records:
         by_sess[r.get("session", "?")].append(r)
 
-    print(f"=== sessions ({len(by_sess)}) — log: {path}")
+    print(f"=== sessions ({len(by_sess)}) -- log: {path}")
     print(f"{'session':10} {'turns':>5} {'in':>7} {'out':>6} "
           f"{'cache_r':>8} {'cache_w':>8} {'max_hist':>9}  first_ts")
     for sid, rs in sorted(by_sess.items(),
@@ -3921,7 +3921,7 @@ def cmd_chat_stats(args: argparse.Namespace) -> int:
         tc_summary = ", ".join(
             f"{t['name']}({t['result_chars']})"
             for t in tcs[:5]
-        ) or "—"
+        ) or "--"
         print(f"{r.get('session',''):10} {r.get('turn',0):3d} "
               f"{r.get('input_tokens',0):7d} {r.get('output_tokens',0):6d} "
               f"{r.get('cache_read',0):8d} {r.get('history_chars',0):10d}  "
@@ -4011,7 +4011,7 @@ def _indent(text: str, prefix: str = "    ") -> str:
 
 def cmd_chat_transcript(args: argparse.Namespace) -> int:
     """Dump a clean chronological transcript of a chat session for
-    auditing — user messages, assistant text, tool calls, tool results,
+    auditing -- user messages, assistant text, tool calls, tool results,
     and the per-turn ladder snapshots that drive the in-app loop UI.
 
     Reads `web/backend/history.db.chat_messages` (and friends) via
@@ -4061,7 +4061,7 @@ def cmd_chat_transcript(args: argparse.Namespace) -> int:
         print(f"# last:     {s['ts_last']}")
     fb = s.get("feedback")
     if fb:
-        print(f"# feedback: {fb.get('rating')} — {fb.get('summary') or ''}")
+        print(f"# feedback: {fb.get('rating')} -- {fb.get('summary') or ''}")
     push = s.get("latest_push")
     if push:
         print(f"# pushed:   {push.get('collection_name')} ({push.get('ts')})")
@@ -4108,7 +4108,7 @@ def cmd_chat_transcript(args: argparse.Namespace) -> int:
             for r in rungs:
                 state = r.get("state")
                 tag = {"passed": "✓", "failed": "✗",
-                       "skipped": "–", "pending": "·"}.get(state, "·")
+                       "skipped": "-", "pending": "·"}.get(state, "·")
                 glyphs.append(f"{r.get('id', '?')[:5]}{tag}")
             print(
                 f"[{ts}] ladder  errs={snap.get('error_count')}"
@@ -4156,7 +4156,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
     """Run one or more reference-store probes against the live FSR instance.
 
     Each probe fetches a slice of FSR's metadata and writes it into
-    store/fsr_reference.db.  All probes are idempotent — re-running them
+    store/fsr_reference.db.  All probes are idempotent -- re-running them
     updates the store in place without destroying existing data.
 
     Examples:
@@ -4242,7 +4242,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_compile)
 
     sp = sub.add_parser("dump-step-params",
-        help="audit per-step-type params — writes Markdown reports")
+        help="audit per-step-type params -- writes Markdown reports")
     sp.add_argument("--out", default="docs/step_params",
                     help="output directory (default: docs/step_params)")
     sp.add_argument("--db", default=str(DEFAULT_DB),
@@ -4413,7 +4413,7 @@ def build_parser() -> argparse.ArgumentParser:
                          "then PUT or POST. No hard-delete on this path. "
                          "create: POST only (409 on UUID/name collision). "
                          "update: PUT in-place (preserves unmodeled fields). "
-                         "replace: hard-purge then POST — gated on "
+                         "replace: hard-purge then POST -- gated on "
                          "FSR_ALLOW_HARD_DELETE; use only for recovery.")
     sp.add_argument("--json", action="store_true", help="print response JSON to stdout")
     sp.add_argument("--force-large-purge", action="store_true",
@@ -4685,7 +4685,7 @@ def build_parser() -> argparse.ArgumentParser:
                     choices=["on-create", "on-update", "on-delete",
                              "pre-create", "pre-update", "pre-delete"],
                     help="playbooks listening to this record-event (requires --module)")
-    sp.add_argument("--module", help="module name (alerts, incidents, …) — used with --triggered-by")
+    sp.add_argument("--module", help="module name (alerts, incidents, …) -- used with --triggered-by")
     sp.add_argument("--writes-to", metavar="MODULE",
                     help="playbooks with create_record / update_record / approval against this module")
     sp.add_argument("--json", action="store_true", help="emit JSON")
@@ -4822,7 +4822,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser(
         "chat-transcript",
         help="dump a clean chronological transcript (user / assistant / tools / "
-             "ladder snapshots) for a chat session — for auditing",
+             "ladder snapshots) for a chat session -- for auditing",
     )
     sp.add_argument("session_id",
                     help="chat session id (from /api/history/sessions or "

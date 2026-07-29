@@ -1,7 +1,7 @@
 """Intermediate representation for FSR playbooks.
 
 The IR is what the parser produces and the emitter consumes. It is
-deliberately thin — closer to the YAML the human authored than the FSR
+deliberately thin -- closer to the YAML the human authored than the FSR
 JSON we emit. The emitter is responsible for synthesizing UUIDs, IRI
 references, layout coordinates, and other FSR-internal noise.
 """
@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 # FSR system picklist that backs a workflow's execution priority. The resolver
 # maps a playbook's `priority:` name (High/Medium/Low) to the live IRI by
-# querying the synced `picklists` table for this listName — so the emitted IRI
+# querying the synced `picklists` table for this listName -- so the emitted IRI
 # is always the running instance's own system value (probe_modules.py re-mines
 # the picklists table from /api/3/picklist_names), never a baked constant.
 PRIORITY_LIST_NAME = "WorkflowPriority"
@@ -62,7 +62,7 @@ class Annotation:
     """A sticky-note or visual block on the playbook canvas.
 
     Maps 1:1 to FSR's `WorkflowGroup` entity (table `workflow_groups`).
-    `kind` is the FSR `type` field — `note` (sticky comment), `block`
+    `kind` is the FSR `type` field -- `note` (sticky comment), `block`
     (bordered grouping that wraps steps), or `custom`.
     """
     id: str                          # local slug, unique within a playbook
@@ -96,15 +96,15 @@ class Playbook:
     # their step output without flipping a knob.
     debug: bool = False
     # Playbook visibility. FSR's `isPrivate` flag: when true the playbook is
-    # hidden from the UI catalog and — per the documented ownership model —
+    # hidden from the UI catalog and -- per the documented ownership model --
     # only executable by users/API keys whose owner teams intersect the
     # playbook's `owners`. Authored as `is_private: true` in YAML.
     is_private: bool = False
-    # Owner teams as authored — team NAMES (e.g. "TeamA") or IRIs
+    # Owner teams as authored -- team NAMES (e.g. "TeamA") or IRIs
     # (`/api/3/teams/<uuid>`). Names resolve to IRIs via the resolver's
     # `teams` table (when the reference catalog carries one); IRIs pass
     # through unchanged. An empty list (default) leaves the playbook
-    # unowned — FSR requires private playbooks to declare owners.
+    # unowned -- FSR requires private playbooks to declare owners.
     owners: list[str] = field(default_factory=list)
     # Resolver-filled: owners as IRI strings (`/api/3/teams/<uuid>`). When
     # the `teams` table is unsynced, this stays empty and `owners` is
@@ -119,7 +119,7 @@ class Playbook:
     priority_iri: Optional[str] = None
     trigger: str = "start"           # short-name short-cut for the trigger step type
     # Explicit trigger step id. If unset, emitter falls back to "first step
-    # whose type is 'start'". Decompiled playbooks always set this — they
+    # whose type is 'start'". Decompiled playbooks always set this -- they
     # might trigger on cybersponse.post_create, cybersponse.action, etc.
     trigger_step_id: Optional[str] = None
     # Input parameter names for this playbook. Callers pass values in
@@ -141,11 +141,11 @@ class Collection:
     description: str = ""
     visible: bool = True
     playbooks: list[Playbook] = field(default_factory=list)
-    # Push mode — toggled by which top-level YAML key was used:
-    #   "wrap"        — YAML used `collection: <name>`. The push replaces
+    # Push mode -- toggled by which top-level YAML key was used:
+    #   "wrap"        -- YAML used `collection: <name>`. The push replaces
     #                   the whole collection (cascade-removes foreigns
     #                   unless --allow-foreign-loss is set). Default.
-    #   "per_playbook"— YAML used `into_collection: <name>` (or omitted
+    #   "per_playbook"-- YAML used `into_collection: <name>` (or omitted
     #                   both and inherited the default target). The push
     #                   touches ONLY the listed playbooks inside the
     #                   target collection; siblings are preserved.

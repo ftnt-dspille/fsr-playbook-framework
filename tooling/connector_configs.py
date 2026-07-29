@@ -2,7 +2,7 @@
 
 Connector steps (incl. code_snippet, http, etc.) require a `config` UUID
 that points to a per-instance connector-configuration record. Configs
-are not part of compiled playbook JSON in any portable way — they're
+are not part of compiled playbook JSON in any portable way -- they're
 created out-of-band on each FSR box. This module:
 
   - Lists configurations for a connector (live, via /api/integration/connectors/).
@@ -64,7 +64,7 @@ def list_configurations(connector: str) -> list[dict]:
     if client is None:
         return []
     # The integration API is Django-REST: it paginates on `page_size`/`page`
-    # (default 30) — the crudhub's `$limit` is silently ignored here, which used
+    # (default 30) -- the crudhub's `$limit` is silently ignored here, which used
     # to cap this at the first 30 connectors. Filter by name server-side and
     # raise the page size so a connector past the default page is still found.
     r = client.session.get(

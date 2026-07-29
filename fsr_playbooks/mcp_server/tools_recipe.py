@@ -45,7 +45,7 @@ def _tools_triage_or_err():
 # `fsr_soc_triage.tools_triage.list_recent_failed_runs`, NOT a
 # `fsr_playbooks.mcp_server.tools_triage` the library can import, and it is not
 # registered in the library REGISTRY by name). So the library's one-shot
-# troubleshooter cannot import it directly — the connector injects it here at
+# troubleshooter cannot import it directly -- the connector injects it here at
 # import time, exactly as it does for the run_playbook auto-resolver
 # (`llm.tools.set_run_playbook_auto_resolver`). Absent a connector (bare
 # library), the troubleshooter degrades cleanly to `no_failed_run_provider`.
@@ -74,7 +74,7 @@ def assert_playbook_outcome(assertions: list[dict[str, Any]]) -> dict[str, Any]:
 
     Run a list of declarative assertions against the live FSR (typically
     after `run_playbook`/`dry_run_playbook`) to confirm the playbook did
-    what its description says it does — closes Level 5 of the success
+    what its description says it does -- closes Level 5 of the success
     ladder and gives the LLM-evaluation harness a deterministic scorer.
 
     Each assertion is a dict with one of three shapes:
@@ -153,7 +153,7 @@ def generate_recipe(
         kind: `threat-feed` or `data-ingest`.
         info_json_path: filesystem path to the connector's info.json
             (typically pulled out of the RPM cache).
-        target_module: data-ingest only — `alerts` (default) or
+        target_module: data-ingest only -- `alerts` (default) or
             `incidents`.
         fetch_op: explicit fetch op override (data-ingest); auto-detect
             scans the connector's ops by name when omitted.
@@ -161,7 +161,7 @@ def generate_recipe(
         severity_field, status_field: vendor fields carrying severity /
             status enum strings.
         severity_enum, status_enum: comma list of vendor enum values
-            (data-ingest only) — needed for the picklist-resolve macro.
+            (data-ingest only) -- needed for the picklist-resolve macro.
         config_uuid: connector configuration uuid; recipe ships
             `REPLACE_WITH_CONFIG_UUID` placeholder when omitted so the
             user can substitute post-import.
@@ -325,8 +325,8 @@ def diagnose_yaml_against_pb_execution(
     - `step_diagnostics`: one row per (step, arg_path, template) with
       `rendered` on success or `code` + `message` on render failure.
       Common codes: `step_missing` (a referenced `vars.steps.<key>` has
-      no entry in the run env — typo or unreached step), `render_error`
-      (Jinja engine threw — bad filter/expr), `attribute_missing` (the
+      no entry in the run env -- typo or unreached step), `render_error`
+      (Jinja engine threw -- bad filter/expr), `attribute_missing` (the
       template rendered "None" because a path traversed an empty leg).
     - `hints`: top-level suggestions distilled from the diagnostics
       (e.g. "step Foo references vars.steps.Bar but Bar didn't run").
@@ -337,7 +337,7 @@ def diagnose_yaml_against_pb_execution(
             of the failed (or completed) run to use as the env source.
     """
     # get_run_env is the library's OWN connector-agnostic run-env reader
-    # (tools_connector_discovery) — NOT the connector's tools_triage, which in
+    # (tools_connector_discovery) -- NOT the connector's tools_triage, which in
     # some connectors (fsr_soc_triage) does not export it, so the old
     # `tools_triage.get_run_env` path returned no_investigation_tools even on a
     # live box. This tool needs only the run env, never the triage module.
@@ -428,7 +428,7 @@ def diagnose_yaml_against_pb_execution(
         if key not in steps_in_env:
             hints.append(
                 f"step reference `vars.steps.{key}` has no entry in the "
-                f"run env — either {key!r} did not execute, or the step "
+                f"run env -- either {key!r} did not execute, or the step "
                 f"name in YAML doesn't match (use display name with "
                 f"spaces→underscores). Available: "
                 + (", ".join(available[:8]) or "(none)")
@@ -482,10 +482,10 @@ def why_did_playbook_fail(
     Returns:
         {ok, pb_execution, run_status, playbook_name, error_message,
          summary{total_templates, render_failures, referenced_step_keys},
-         step_diagnostics[], hints[]} — or {ok: False, code, message}
+         step_diagnostics[], hints[]} -- or {ok: False, code, message}
         on resolution failure.
     """
-    # Step 1 — resolve playbook_or_id to a concrete run.
+    # Step 1 -- resolve playbook_or_id to a concrete run.
     run_match: dict[str, Any] | None = None
     error_message: str | None = None
     if _looks_like_run_id(playbook_or_id):
@@ -524,7 +524,7 @@ def why_did_playbook_fail(
                         "matched run has no task_id/pk",
                         run=run_match)
 
-    # Step 2 — if YAML wasn't supplied, pull the live playbook + decompile.
+    # Step 2 -- if YAML wasn't supplied, pull the live playbook + decompile.
     if not yaml_text:
         try:
             sys.path.insert(0, str(REPO_ROOT / "tooling"))
@@ -540,7 +540,7 @@ def why_did_playbook_fail(
                         "live FSR not configured; pass yaml_text= explicitly")
         client = _env_mod.get_client()
         # We have a run; get the playbook name to pull the live YAML. Use the
-        # library's OWN get_run_env (tools_connector_discovery) — it is
+        # library's OWN get_run_env (tools_connector_discovery) -- it is
         # connector-agnostic and always present, unlike a connector tools_triage
         # module that may not export it.
         from .tools_connector_discovery import get_run_env as _get_run_env
@@ -565,7 +565,7 @@ def why_did_playbook_fail(
         except Exception as exc:  # noqa: BLE001
             return _err("decompile_failed", repr(exc), playbook=pb_name)
 
-    # Step 3 — diagnose. `diagnose_yaml_against_pb_execution` finds JINJA render
+    # Step 3 -- diagnose. `diagnose_yaml_against_pb_execution` finds JINJA render
     # failures; it says nothing about a RUNTIME step error (e.g. a create_record
     # that ran with no data → `insert_data() takes at least 2 positional
     # arguments`), which is exactly the class the linter-gap fixtures pin. So
@@ -577,9 +577,9 @@ def why_did_playbook_fail(
         # projection (status/failing_step/error_message) read from the full run
         # record, where the runtime error IS populated (the provider row's
         # error_message is often None for a just-failed live run). Enrichment
-        # only — guarded so an older pyfsr without it degrades to no enrichment,
+        # only -- guarded so an older pyfsr without it degrades to no enrichment,
         # never a tool failure. Keyed by playbook name (what we have); a bare
-        # run-id input skips this (rare — the model troubleshoots by name).
+        # run-id input skips this (rare -- the model troubleshoots by name).
         pb_for_failure = (playbook_or_id if not _looks_like_run_id(playbook_or_id)
                           else (run_match or {}).get("name"))
         rf = None
@@ -587,7 +587,7 @@ def why_did_playbook_fail(
             try:
                 from probes._env import get_client as _get_client
                 rf = _get_client().playbooks.why_failed(playbook=pb_for_failure)
-            except Exception:  # noqa: BLE001 — enrichment only; never fail the tool
+            except Exception:  # noqa: BLE001 -- enrichment only; never fail the tool
                 rf = None
         if rf is not None:
             if rf.failing_step and not result.get("failing_step"):

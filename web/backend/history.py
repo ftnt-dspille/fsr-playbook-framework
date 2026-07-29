@@ -1,9 +1,9 @@
-"""History store — sqlite-backed log of pushes + chat sessions.
+"""History store -- sqlite-backed log of pushes + chat sessions.
 
 One file, two writers (CLI `fsrpb push`, the chat backend), one reader
 (the `/api/history` endpoints). Schema is conservative: TEXT for
 timestamps (ISO-8601 UTC), TEXT for the YAML snapshot (gzip is overkill
-for ~50 KB rows). Writes are best-effort — telemetry must never break
+for ~50 KB rows). Writes are best-effort -- telemetry must never break
 the path it instruments.
 
 Tables:
@@ -119,7 +119,7 @@ CREATE INDEX IF NOT EXISTS chat_messages_session
 
 -- User feedback per chat session. One row per session; re-rating
 -- upserts. `rating` ∈ {up, down}. `summary` is the user's free-form
--- review notes — what worked, what broke, what to investigate.
+-- review notes -- what worked, what broke, what to investigate.
 -- `tags` is a comma-separated set of short labels (e.g. "wrong_step,
 -- missed_branch"); UI may build out of these later.
 -- One row per `verify_playbook` call. Lets us measure the agent loop's
@@ -305,7 +305,7 @@ def record_chat_turn(record: dict[str, Any]) -> None:
 # Cap any single message body at this many chars to keep the DB bounded
 # even when a tool returns a 200 KB JSON blob. The token-count row in
 # `chat_turns` already records the full size, so the cap here doesn't
-# lose accounting — only the textual replay tail.
+# lose accounting -- only the textual replay tail.
 _MESSAGE_CHAR_CAP = 64_000
 
 
@@ -739,7 +739,7 @@ def cost_by_playbook(limit: int = 50) -> list[dict[str, Any]]:
     out = []
     for r in rows:
         d = dict(r)
-        # Sum cost across each turn at the turn's actual model — this
+        # Sum cost across each turn at the turn's actual model -- this
         # is accurate even when a user switched providers mid-chat.
         # Older turns where `chat_turns.model` is NULL fall back to the
         # session's representative model (best effort).

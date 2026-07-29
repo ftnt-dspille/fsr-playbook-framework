@@ -4,9 +4,9 @@
 #
 # FSR canonical shapes (verified live 2026-05-03):
 #   find_record arguments:
-#     module:    'alerts'    — the module name. Suffix `?$limit=N`
+#     module:    'alerts'    -- the module name. Suffix `?$limit=N`
 #                              optional but the API Platform respects it.
-#     query:                  — query DSL
+#     query:                  -- query DSL
 #       logic:    'AND' | 'OR'
 #       filters:  [{type:'primitive', field, value, operator, _operator}]
 #       __selectFields: list of fields to fetch (optional)
@@ -48,6 +48,6 @@ playbooks:
         record: "{{ vars.steps.Find_target_alert[0]['@id'] }}"
         module: alerts
         fields:
-          description: "fsrpb e2e — stamped at {{ vars.task_id }}"
+          description: "fsrpb e2e -- stamped at {{ vars.task_id }}"
         operation: Replace
         step_variables: []

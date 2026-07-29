@@ -1,13 +1,13 @@
 # Runner smoke test. Pure logic, no external API. Severity flows through
 # real trigger input → set_variable → decision → branch → terminal.
 #
-# Demonstrates the `stop` short type — when a decision branch should do
+# Demonstrates the `stop` short type -- when a decision branch should do
 # nothing, write `type: stop` (compiles to `cyops_utilities.no_op`, the
 # canonical FSR "Utils: No Operation" idiom) instead of dangling or
 # filler set_variable steps.
 
 collection: FSRPB Demo Pure Logic
-description: Runner smoke test — branches on severity from trigger input.
+description: Runner smoke test -- branches on severity from trigger input.
 visible: true
 
 playbooks:

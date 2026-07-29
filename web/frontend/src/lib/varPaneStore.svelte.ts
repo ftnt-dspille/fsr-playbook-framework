@@ -12,7 +12,7 @@
 import type { VisualNode } from './api';
 
 export type VarPaneTarget = {
-  /** Stable identity — used to no-op blurs after a refocus. */
+  /** Stable identity -- used to no-op blurs after a refocus. */
   id: string;
   /** Short label rendered in the pane header so the user knows which
    *  field they're targeting (e.g. "set_variable severity"). */
@@ -91,7 +91,7 @@ class VarPaneStore {
   }
 
   /** Forward a picked path to the active target. No-op when nothing
-   *  is focused — the pane button row is hidden in that state anyway. */
+   *  is focused -- the pane button row is hidden in that state anyway. */
   insert(snippet: string) {
     this.target?.insert(snippet);
   }

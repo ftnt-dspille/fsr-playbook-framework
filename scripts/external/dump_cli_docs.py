@@ -2,7 +2,7 @@
 """Dump the fsrpb argparse tree to docs/CLI.md.
 
 Walks every (sub)parser in `cli.build_parser()` and emits a Markdown
-reference. Zero new dependencies — works off the parser objects we
+reference. Zero new dependencies -- works off the parser objects we
 already construct at runtime, so the doc never drifts from what the CLI
 actually accepts.
 
@@ -51,7 +51,7 @@ def _action_table(actions: Iterable[argparse.Action]) -> list[str]:
             meta.append(f"default: `{a.default}`")
         if a.required and a.option_strings:
             meta.append("required")
-        line = f"| {name} | {(a.help or '').replace('|', '\\|')} | {' · '.join(meta) or '—'} |"
+        line = f"| {name} | {(a.help or '').replace('|', '\\|')} | {' · '.join(meta) or '--'} |"
         rows.append(line)
     if not rows:
         return []
@@ -96,7 +96,7 @@ def _toc(parser: argparse.ArgumentParser) -> list[str]:
             help_text = (action.choices[name].description or "").strip().splitlines()
             lead = help_text[0] if help_text else ""
             anchor = f"#fsrpb-{name}".replace("_", "-")
-            lines.append(f"- [`fsrpb {name}`]({anchor}) — {lead}")
+            lines.append(f"- [`fsrpb {name}`]({anchor}) -- {lead}")
             # Second-level subcommands inline (one indent)
             for inner in sub._actions:
                 if not isinstance(inner, argparse._SubParsersAction):
@@ -114,7 +114,7 @@ def main() -> int:
     out.append("# fsrpb CLI reference")
     out.append("")
     out.append(
-        "_Auto-generated from `cli.build_parser()` — re-run "
+        "_Auto-generated from `cli.build_parser()` -- re-run "
         "`python3 scripts/external/dump_cli_docs.py` after touching the CLI."
     )
     out.append("")

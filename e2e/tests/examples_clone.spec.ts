@@ -18,7 +18,7 @@ import { deleteDraft, openDraft, API, APP } from './helpers';
 const EXAMPLE = 'decision_branch.yaml';
 const DRAFT = `__e2e_clone_${Date.now()}`;
 
-// No beforeAll seed — the test creates the draft via the UI. Only
+// No beforeAll seed -- the test creates the draft via the UI. Only
 // cleanup the draft afterwards in case the test left one behind.
 test.afterAll(async () => {
   await deleteDraft(DRAFT);
@@ -38,7 +38,7 @@ test('clone an example into a new draft, content matches the source', async ({ p
   await page.goto(APP);
 
   // Wait for the page to settle on the example. PlaybookHeader's Save
-  // button morphs to "Clone & Edit" when an example is active —
+  // button morphs to "Clone & Edit" when an example is active --
   // that's our signal that the active document is the example.
   const cloneBtn = page.getByRole('button', { name: 'Clone & Edit' });
   await expect(cloneBtn).toBeVisible({ timeout: 15_000 });

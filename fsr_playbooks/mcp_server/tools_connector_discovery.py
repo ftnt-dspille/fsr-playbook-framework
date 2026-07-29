@@ -64,7 +64,7 @@ def get_run_env(pb_execution: str) -> dict[str, Any]:
     # the run endpoint with step_detail, and returns a validated RunEnv
     # (name/env/status + steps keyed by display name). We only reshape it into
     # this tool's `vars.steps.<underscored name>` view. Do NOT reimplement the
-    # fetch with raw session calls — pyfsr owns the run API (typed + tested), and
+    # fetch with raw session calls -- pyfsr owns the run API (typed + tested), and
     # `get_execution()` alone returns a RunSummary without env/steps.
     try:
         re = client.playbooks.run_env(pb_execution)
@@ -125,12 +125,12 @@ _INTEL_TOKENS: tuple[str, ...] = (
 
 
 # Kept deliberately NARROWER than `_TARGET_KEYWORDS` in places ("address" /
-# "blacklist" are absent from `ip` on purpose — see _is_enrichment_op), but the
+# "blacklist" are absent from `ip` on purpose -- see _is_enrichment_op), but the
 # HOST family must name the same things both lists call a host. It didn't:
 # `collector` and `agent` were in the containment keywords and missing here, so
 # FortiEDR's `get_collector_list` was invisible to find_enrichment_actions. An
-# investigation therefore could not ask the obvious question — "does this host
-# even have an EDR agent, and what state is it in?" — and the host's absence
+# investigation therefore could not ask the obvious question -- "does this host
+# even have an EDR agent, and what state is it in?" -- and the host's absence
 # from EDR only surfaced when the containment action failed at execution time
 # with a 400.
 _INDICATOR_TOKENS: dict[str, tuple[str, ...]] = {
@@ -157,7 +157,7 @@ _ENRICHMENT_EXCLUDE_VERBS: tuple[str, ...] = (
     "re_analyze", "reanalyze", "re_scan", "rescan", "re-scan", "upload",
     "submit", "detonate", "create", "add_", "delete_", "remove_", "update_",
     "set_", "post_", "put_", "scan_", "_scan",
-    # `move_collectors` reassigns collector group membership — a mutation, and
+    # `move_collectors` reassigns collector group membership -- a mutation, and
     # never something to present to the analyst as a read-only lookup.
     "move_",
 )
@@ -205,8 +205,8 @@ def _is_enrichment_op(nm: str, title_l: str, target: str | None) -> bool:
     generic intel token (reputation/ioc/context/...) or names the requested
     indicator. With no target type we require the intel token, so the result
     stays bounded to clearly-intel ops. With a target type we ALSO reject ops
-    that name only a *different* indicator — `get_domain_reputation`,
-    `get_url_reputation`, `get_file_reputation` while enriching an IP — even
+    that name only a *different* indicator -- `get_domain_reputation`,
+    `get_url_reputation`, `get_file_reputation` while enriching an IP -- even
     though they carry an intel token, because they can't take this indicator.
     (`score` was dropped from the intel tokens and `address` from the ip
     tokens, so EPSS scoring and firewall `get_addresses` no longer slip in.)
@@ -223,7 +223,7 @@ def _is_enrichment_op(nm: str, title_l: str, target: str | None) -> bool:
     names_desired = any(k in hay for k in desired)
     other = _ALL_INDICATOR_TOKENS - set(desired)
     if any(k in hay for k in other) and not names_desired:
-        return False  # names only a different indicator — can't take this one
+        return False  # names only a different indicator -- can't take this one
     return generic or names_desired
 
 
@@ -232,7 +232,7 @@ def _connectors_that_could_enrich(
         exclude: set[str],
         limit: int = 4) -> list[dict[str, str]]:
     """Across the WHOLE catalog, connectors carrying an enrichment op matching
-    the target — minus the ones already configured. Turns an intel dead end
+    the target -- minus the ones already configured. Turns an intel dead end
     into a concrete "configure connector X" recommendation. Best-effort: []."""
     found: dict[str, str] = {}
     try:
@@ -284,7 +284,7 @@ def _required_params(conn: sqlite3.Connection, connector: str,
 
 def _param_sig(conn: sqlite3.Connection, connector: str,
                op: str) -> list[dict[str, Any]]:
-    """Full visible param signature WITH select options + labels — so the agent
+    """Full visible param signature WITH select options + labels -- so the agent
     picks valid param NAMES and valid select VALUES straight from the action
     finder, instead of guessing and bouncing off bad_params. Loop loop-998b86c1
     showed both failure modes the store could have prevented: the agent guessed
@@ -330,7 +330,7 @@ def _connectors_that_could_contain(
         exclude: set[str],
         limit: int = 4) -> list[dict[str, str]]:
     """Across the WHOLE reference catalog (not just configured connectors),
-    find connectors that carry a containment/response op matching the target —
+    find connectors that carry a containment/response op matching the target --
     minus the ones already configured. This turns a dead end into a concrete
     "configure connector X to enable this" recommendation. Best-effort: any DB
     hiccup returns []."""
@@ -374,7 +374,7 @@ def _healthcheck_many(
     vendors = minutes per call, on both the eval and the analyst's screen).
 
     Two bounds keep a hung vendor from blowing the turn:
-      • `_live_healthcheck` passes timeout=8 — but the ON-BOX crudhub session
+      • `_live_healthcheck` passes timeout=8 -- but the ON-BOX crudhub session
         SILENTLY IGNORES that kwarg, so an unresponsive vendor healthcheck runs
         unbounded on the box (this is what made find_enrichment_actions take
         ~2 min in export sess-ei6esw96: ~13 candidate connectors, cold cache).
@@ -386,7 +386,7 @@ def _healthcheck_many(
 
     When `timing` is provided it's populated with a per-probe breakdown
     (cache hits, live probes, timed-out connectors, slowest calls) so a slow
-    finder is self-diagnosing from its own tool result — there was no per-op
+    finder is self-diagnosing from its own tool result -- there was no per-op
     timing anywhere before, so a hang like the 2-min one above was un-triageable
     from the export alone.
 
@@ -407,7 +407,7 @@ def _healthcheck_many(
             target: Union[tuple[str, str], tuple[str, str, str]]
     ) -> tuple[str, Any]:
         # Returns (name, status); status is None to signal "no authoritative
-        # verdict" (probe failure / exception) — such connectors are OMITTED
+        # verdict" (probe failure / exception) -- such connectors are OMITTED
         # from the result dict so the gate falls back to the listing status
         # (fail open) instead of dropping a valid action on a probe hiccup.
         name, version = target[0], target[1]
@@ -438,7 +438,7 @@ def _healthcheck_many(
                                "src": "live"}
             return name, status
         except Exception:  # noqa: BLE001
-            # A thread-level failure is also not an authoritative verdict —
+            # A thread-level failure is also not an authoritative verdict --
             # fail open (omit from `out`) rather than returning an "error:"
             # string that the gate would treat as unhealthy and drop.
             per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
@@ -456,12 +456,12 @@ def _healthcheck_many(
     try:
         for fut in as_completed(list(fut_to_name), timeout=deadline_s):
             name, status = fut.result()
-            # status is None on a probe failure / thread error — omit it so the
+            # status is None on a probe failure / thread error -- omit it so the
             # caller falls back to the listing status (fail open), same as a
             # connector whose future never landed within the deadline.
             if status is not None:
                 out[name] = status
-    except Exception:  # noqa: BLE001 — concurrent.futures.TimeoutError and friends
+    except Exception:  # noqa: BLE001 -- concurrent.futures.TimeoutError and friends
         pass
     finally:
         for fut, name in fut_to_name.items():
@@ -489,19 +489,19 @@ def _healthcheck_many(
 def find_containment_actions(target_type: str = "", probe: bool = True,
                              limit: int = 25) -> dict[str, Any]:
     """List the containment/response actions that are CONFIGURED (and, with
-    probe, healthy) on this FortiSOAR instance — optionally for one indicator
+    probe, healthy) on this FortiSOAR instance -- optionally for one indicator
     type. Use this to STAGE containment instead of hunting connector-by-
     connector with find_connector/find_operation.
 
     Given a host to isolate, an IP to block, or a user to disable, one call
-    returns the destructive ops you can actually run here — with the connector,
-    op, category, the approval tier, and the required params — so you can go
+    returns the destructive ops you can actually run here -- with the connector,
+    op, category, the approval tier, and the required params -- so you can go
     straight to emit_action_card. Read-only: it discovers actions, it does not
     run them. Every action it returns is tier 3+ and MUST be staged via
     emit_action_card for analyst approval, never run silently.
 
     Args:
-        target_type: indicator to contain — one of ip/host/endpoint/user/url/
+        target_type: indicator to contain -- one of ip/host/endpoint/user/url/
             domain/hash/file/email/process. Empty returns every containment
             action across configured connectors.
         probe: healthcheck each configured connector (default True) and drop
@@ -522,7 +522,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                 "valid": sorted(_TARGET_KEYWORDS)}
 
     # 1. Configured + active connectors on the live box. NOTE: list WITHOUT
-    # probing — healthchecking all ~45 configured connectors here is the
+    # probing -- healthchecking all ~45 configured connectors here is the
     # latency trap (minutes on the live box). We narrow to the few connectors
     # that actually carry a matching containment op via the store first, then
     # healthcheck ONLY those (step 3).
@@ -593,7 +593,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                 "required_params": _required_params(conn, connector, op),
                 # Full param signature WITH select options so the agent calls
                 # run_op / emit_action_card with valid names AND valid select
-                # values directly — no guess, no bad_params round-trip.
+                # values directly -- no guess, no bad_params round-trip.
                 "params": _param_sig(conn, connector, op),
                 # When true, run_op routes this op through the agent force-fail
                 # wrap (~30-60s). Tell the user it runs on a FortiSOAR agent and
@@ -603,7 +603,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
 
     # 3. Scoped healthcheck: probe ONLY the connectors that carry a candidate
     # action (a handful), not all configured ones. Drop actions whose connector
-    # we actively probed and found unhealthy — so we never stage on a known-
+    # we actively probed and found unhealthy -- so we never stage on a known-
     # disconnected connector. But FAIL OPEN: if a connector couldn't be probed
     # (no version to scope the probe, or no live client), fall back to its
     # listing status rather than silently dropping a valid containment action.
@@ -694,23 +694,23 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
 def find_enrichment_actions(target_type: str = "", probe: bool = True,
                             limit: int = 25) -> dict[str, Any]:
     """List the read-only ENRICHMENT/intel lookups that are CONFIGURED (and,
-    with probe, healthy) on this FortiSOAR instance — optionally for one
+    with probe, healthy) on this FortiSOAR instance -- optionally for one
     indicator type. Use this to enrich an indicator instead of guessing op
     names or hunting connector-by-connector with find_connector/find_operation.
 
     Given an IP, domain, URL, hash, or email to enrich, ONE call returns the
-    reputation/context/IOC ops you can actually run here — with the connector,
-    the real op name, category, and the required params — so you can go straight
+    reputation/context/IOC ops you can actually run here -- with the connector,
+    the real op name, category, and the required params -- so you can go straight
     to run_op on each. This is the read-side mirror of find_containment_actions:
     every action it returns is tier <= 2 (read-only) and is meant to be RUN
     directly via run_op and summarized, NOT staged via emit_action_card.
 
     Fan out: the returned ops are independent, so issue their run_op calls
     together in one turn (the widget consolidates all sources for one indicator
-    into a single enrichment card — more sources = a richer verdict).
+    into a single enrichment card -- more sources = a richer verdict).
 
     Args:
-        target_type: indicator to enrich — one of ip/host/endpoint/user/url/
+        target_type: indicator to enrich -- one of ip/host/endpoint/user/url/
             domain/hash/file/email. Empty returns every intel lookup across
             configured connectors.
         probe: healthcheck each candidate connector (default True) and drop the
@@ -730,7 +730,7 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
                 "message": f"target_type {target_type!r} not recognized",
                 "valid": sorted(_TARGET_KEYWORDS)}
 
-    # 1. Configured + active connectors (no probe yet — narrow via the store
+    # 1. Configured + active connectors (no probe yet -- narrow via the store
     # first, healthcheck only the handful that carry a matching op in step 3).
     listing = list_configured_connectors(probe=False, verbose=True)
     if "error" in listing:
@@ -773,7 +773,7 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
                 continue
             # Decisive read guard (inverse of containment's tier>=3): only
             # surface ops the dispatch gate treats as read-only (tier <= 2).
-            # Drops anything that would force approval — we never present a
+            # Drops anything that would force approval -- we never present a
             # mutating op as enrichment.
             tier = _tier({"connector": connector, "op": op}) if _tier else 2
             if tier > 2:
@@ -790,14 +790,14 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
                 "required_params": _required_params(conn, connector, op),
                 # Full param signature WITH select options so the agent calls
                 # run_op / emit_action_card with valid names AND valid select
-                # values directly — no guess, no bad_params round-trip.
+                # values directly -- no guess, no bad_params round-trip.
                 "params": _param_sig(conn, connector, op),
                 "runs_on_agent": connector in agent_of,
             })
 
     # 3. Scoped healthcheck: probe ONLY the connectors carrying a candidate op.
     # Drop actions whose connector we actively probed and found unhealthy, but
-    # FAIL OPEN on a probe gap (no version / no live client) — never manufacture
+    # FAIL OPEN on a probe gap (no version / no live client) -- never manufacture
     # a dead end out of a configured op.
     probe_timing: dict[str, Any] = {}
     if probe and actions:
@@ -819,7 +819,7 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
         actions = kept
 
     # Rank by connector preference (high-signal TI first, AlienVault last),
-    # then name — so the preferred sources survive the `limit` cut instead of
+    # then name -- so the preferred sources survive the `limit` cut instead of
     # losing to alphabetical order. Then cap per connector so one chatty
     # connector can't crowd the slate out of the budget.
     actions.sort(key=lambda a: (a["deprecated"],
@@ -895,7 +895,7 @@ def list_configured_connectors(probe: bool = False,
                                only: set[str] | None = None) -> dict[str, Any]:
     """List connectors that are configured AND active on the live FSR instance.
 
-    A connector with no configuration cannot be called — it'll fail at runtime
+    A connector with no configuration cannot be called -- it'll fail at runtime
     even if it appears in `find_connector`. Use this BEFORE picking which
     connector to put in a playbook.
 
@@ -905,7 +905,7 @@ def list_configured_connectors(probe: bool = False,
             full probe is bounded by the slowest single vendor, not their sum.
         verbose: when True, include label, version, and config_count.
             Default returns only name + status to keep tool-result tokens low.
-        only: internal — when set, healthcheck just this subset of connector
+        only: internal -- when set, healthcheck just this subset of connector
             names (the rest keep their listing status). Lets callers that have
             already narrowed to a handful of relevant connectors avoid probing
             all ~45 configured ones. Not exposed to the agent.
@@ -931,12 +931,12 @@ def list_configured_connectors(probe: bool = False,
         # including ones whose config is INACTIVE. run_op's preflight
         # (_configured_rows → connector_details?configured=true&active=true) then
         # rejects those as `connector_not_configured`, so advertising them here as
-        # "Available" is a false positive — the agent calls them and wastes a turn
+        # "Available" is a false positive -- the agent calls them and wastes a turn
         # on a guaranteed failure (run 9 P1: whois-rdap listed Available, then
         # run_op rejected it). Filter through the SAME active-config source the
         # preflight uses so the listing only shows connectors that can actually
         # run. Fail open: if that source didn't resolve (returned nothing), keep
-        # the unfiltered pyfsr list rather than blanking the whole listing — the
+        # the unfiltered pyfsr list rather than blanking the whole listing -- the
         # preflight itself fails open on the same lookup, so we stay consistent.
         try:
             from .tools_execution import _configured_rows
@@ -992,7 +992,7 @@ def list_configured_connectors(probe: bool = False,
         out.append(item)
 
     # When `only` is given, healthcheck just that subset (the caller already
-    # knows which connectors are relevant — e.g. find_containment_actions has
+    # knows which connectors are relevant -- e.g. find_containment_actions has
     # filtered to the few with a matching op). Otherwise probe all configured.
     if probe:
         targets = [(n, v, name_agent.get(n, "")) for n, v in name_version.items()
@@ -1008,12 +1008,12 @@ def list_configured_connectors(probe: bool = False,
         "ok": True, "configured": out, "probed": probe, "count": len(out),
         # This lists only connectors with a SAVED configuration. Config-less
         # connectors (utilities such as cyops_utilities) run without one and do
-        # NOT appear here — their absence is NOT unavailability. Author their
+        # NOT appear here -- their absence is NOT unavailability. Author their
         # steps with `config: ''`; use find_connector to see `config_required`.
         "note": (
             "Only connectors with a saved configuration are listed. Config-less "
             "connectors (e.g. cyops_utilities and other utilities) are usable "
-            "without a config and won't appear here — author them with "
+            "without a config and won't appear here -- author them with "
             "`config: ''`. Absence here does not mean a connector is unavailable."
         ),
     }
@@ -1034,12 +1034,12 @@ def _build_run_filter_qs(*, modified_after: str | None,
     if modified_before:
         parts.append("modified_before=" + urllib.parse.quote(modified_before, safe=":"))
     if tags_include is not None:
-        # CSV like "system,testing" — keep commas unencoded.
+        # CSV like "system,testing" -- keep commas unencoded.
         parts.append("tags_include=" + urllib.parse.quote(tags_include, safe=","))
     if tags_exclude is not None:
         parts.append("tags_exclude=" + urllib.parse.quote(tags_exclude, safe=","))
     if user_iri:
-        # IRI like "/api/3/people/<uuid>" — keep slashes.
+        # IRI like "/api/3/people/<uuid>" -- keep slashes.
         parts.append("user=" + urllib.parse.quote(user_iri, safe="/"))
     return ("&" + "&".join(parts)) if parts else ""
 
@@ -1057,7 +1057,7 @@ def list_playbook_runs(playbook: str | None = None,
     """List runs of a single playbook, server-filtered by template_iri.
 
     Faster + more reliable than `list_recent_failed_runs(playbook=...)`
-    when you know which playbook you care about — the API uses
+    when you know which playbook you care about -- the API uses
     template_iri to do the filter on its side, so we don't waste a fetch
     of irrelevant rows.
 

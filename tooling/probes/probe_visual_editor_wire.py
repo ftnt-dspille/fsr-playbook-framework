@@ -1,18 +1,18 @@
 """Live-FSR verification of the four wire shapes the visual editor
 emits. Run after any change to the inspector that touches:
 
-  1. ``operator: changed``           — On-Update trigger predicate
-  2. ``operator: in_all``            — multi-value membership (trigger-only)
-  3. ``?$relationships=true``        — Find Record correlated toggle
-  4. ``?$fsr_max_relation_count=N``  — Find Record correlated max
+  1. ``operator: changed``           -- On-Update trigger predicate
+  2. ``operator: in_all``            -- multi-value membership (trigger-only)
+  3. ``?$relationships=true``        -- Find Record correlated toggle
+  4. ``?$fsr_max_relation_count=N``  -- Find Record correlated max
 
 Items 1 and 2 are trigger-only operators (verified against the
 trained corpus: 56 + 2 occurrences in `cybersponse.post_*` rows,
 zero in FindRecords). FSR's ``/api/query/<module>`` endpoint
-rejects them with 500 — that's by design, they only run inside the
+rejects them with 500 -- that's by design, they only run inside the
 trigger evaluator. So we verify them by **synthesising a one-step
 playbook**, compiling it through the real resolver, and pushing
-it via ``/api/integration/workflow_collections/`` — a 200 means
+it via ``/api/integration/workflow_collections/`` -- a 200 means
 FSR's compiler accepts the operator.
 
 Items 3 and 4 are ``GET /api/3/<module>`` URL params that are
@@ -80,7 +80,7 @@ def _push_yaml(yaml_text: str) -> tuple[bool, str]:
 
 def _purge_collection(client, name: str) -> None:
     """Best-effort: find the collection by name, hard-delete it.
-    Silent on errors — this is cleanup, not the test surface."""
+    Silent on errors -- this is cleanup, not the test surface."""
     try:
         url = (f"{client.base_url}/api/3/workflow_collections"
                f"?name={name}&$limit=10")
@@ -92,7 +92,7 @@ def _purge_collection(client, name: str) -> None:
             if iri:
                 client.session.delete(client.base_url + iri,
                                       verify=client.verify_ssl, timeout=30)
-    except Exception:  # noqa: BLE001 — cleanup best-effort
+    except Exception:  # noqa: BLE001 -- cleanup best-effort
         pass
 
 
@@ -187,25 +187,25 @@ def main() -> int:
         # run left the collection lying around.
         _purge_collection(client, PROBE_COLLECTION)
 
-        # 1. `changed` — On-Update trigger fires when the field's
+        # 1. `changed` -- On-Update trigger fires when the field's
         # value differs from the prior write. No `value:` side.
         checks.append(check_trigger_operator("changed", "name", ""))
 
-        # 2. `in_all` — multi-value membership. Use a known list-typed
+        # 2. `in_all` -- multi-value membership. Use a known list-typed
         # field on alerts. Empty array stays valid syntactically.
         checks.append(check_trigger_operator("in_all", "tags", ""))
 
         # Cleanup pushed collection.
         _purge_collection(client, PROBE_COLLECTION)
 
-    # 3. `?$relationships=true` — toggle for "Include correlated
+    # 3. `?$relationships=true` -- toggle for "Include correlated
     # records" on FindRecords. Inspector writes this into the
     # module URL.
     checks.append(check_url_param(client, args.module,
                                   "$limit=1&$relationships=true",
                                   "?$relationships=true"))
 
-    # 4. `?$fsr_max_relation_count=N` — cap on correlated records.
+    # 4. `?$fsr_max_relation_count=N` -- cap on correlated records.
     # Pair with $relationships=true since it's only meaningful when
     # relationships are expanded.
     checks.append(check_url_param(client, args.module,

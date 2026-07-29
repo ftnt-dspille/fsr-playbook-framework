@@ -84,7 +84,7 @@ playbooks:
 
 
 def test_owner_iri_passes_through_offline():
-    # IRIs need no `teams` table — works against the unsynced slim catalog.
+    # IRIs need no `teams` table -- works against the unsynced slim catalog.
     yaml = f"""
 collection: 00-test
 playbooks:
@@ -124,7 +124,7 @@ playbooks:
 
 def test_unsynced_teams_table_errors_on_name():
     # A team NAME against the unsynced slim catalog (no `teams` table) is a
-    # clear error — the compiler never silently emits a bare name on the wire.
+    # clear error -- the compiler never silently emits a bare name on the wire.
     yaml = """
 collection: 00-test
 playbooks:
@@ -242,7 +242,7 @@ playbooks:
 # clean form and never spell `[""]`.
 
 def test_api_endpoint_defaults_to_token_based_when_auth_omitted():
-    # Minimal clean form — `route` only. The compiler fills token-based
+    # Minimal clean form -- `route` only. The compiler fills token-based
     # auth (`[""]`) + the trigger-infra fields, so this compiles to the same
     # wire shape as the fully-specified `_TOKEN_TRIGGER` fixture below.
     yaml = """
@@ -275,7 +275,7 @@ playbooks:
 
 def test_api_endpoint_minimal_form_matches_explicit_token_fixture():
     # The minimal clean form must produce the SAME trigger arguments as the
-    # fully-specified token-based fixture — i.e. the defaults are exactly
+    # fully-specified token-based fixture -- i.e. the defaults are exactly
     # what an author would have written by hand.
     minimal = """
 collection: 00-test
@@ -302,7 +302,7 @@ playbooks:
 
 def test_api_endpoint_explicit_anonymous_is_preserved():
     # Explicit ["anonymous"] (No-Auth) is NOT overwritten by the token-based
-    # default — only the *omission* of authentication_methods defaults to [""].
+    # default -- only the *omission* of authentication_methods defaults to [""].
     yaml = """
 collection: 00-test
 playbooks:

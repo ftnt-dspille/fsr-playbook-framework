@@ -1,4 +1,4 @@
-"""probe_modules — populate modules / module_fields from a live FSR.
+"""probe_modules -- populate modules / module_fields from a live FSR.
 
 Live source:
   GET /api/3/staging_model_metadatas?$limit=...&$orderby=type&$relationships=true
@@ -14,7 +14,7 @@ Trust ladder:
   picklist values:     tested_pass via live_api_get (we read them directly)
 
 Local fallback:
-  fortisoar/schema.json (snapshot) — written as `seen` only.
+  fortisoar/schema.json (snapshot) -- written as `seen` only.
 """
 from __future__ import annotations
 
@@ -195,7 +195,7 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     # the picklists collection. Coarse-grained: a fresh/unchanged picklists
     # response skips the whole re-derive (all collections current); a refreshed
     # 200 wipes + re-derives everything (tags/teams/metadata are re-fetched on
-    # the refreshed path — the rare case). Per-collection ETags (tags /
+    # the refreshed path -- the rare case). Per-collection ETags (tags /
     # model_metadatas) are still recorded on the refreshed path; conditional_refetch
     # owns the picklists ETag + data_warmed_at, so the legacy recording below is
     # skipped for picklists on this path. The non-conditional path leaves the wipe
@@ -219,7 +219,7 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
             "AND method IN ('live_api_get','schema_json')"
         )
         picklist_items, picklist_lists, items_rows, n_pl = _parse_picklists(payload)
-        # picklists_etag stays None — conditional_refetch recorded it.
+        # picklists_etag stays None -- conditional_refetch recorded it.
     else:
         try:
             picklist_items, picklist_lists, items_rows, n_pl, picklists_etag = _load_picklists(client)
@@ -241,7 +241,7 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         notes=f"picklists={n_pl}, items={len(items_rows)}",
     )
 
-    # Tags catalog — drives compile-time validation of
+    # Tags catalog -- drives compile-time validation of
     # set_variable.message.tags so the agent can't ship a playbook that
     # silently creates a typo tag at runtime.
     tags_etag = None
@@ -275,7 +275,7 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     except Exception as e:  # noqa: BLE001
         errors.append(f"tags: {e!r}")
 
-    # Owner teams — populate the `teams` table so the resolver can map
+    # Owner teams -- populate the `teams` table so the resolver can map
     # playbook `owners:` friendly names to /api/3/teams/<uuid> IRIs.
     try:
         teams_resp = client.session.get(
@@ -374,7 +374,7 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
 
 def _stamp_provenance(conn: sqlite3.Connection, client) -> None:
     """Record which instance (+ version / publish watermark) this catalog was
-    warmed from, into ``_catalog_meta`` — drives the compile-time multi-instance
+    warmed from, into ``_catalog_meta`` -- drives the compile-time multi-instance
     guard and the Tier-0/Tier-1 freshness check. Best-effort: the two extra
     GETs are cheap and failure here must not fail the warmup."""
     from fsr_playbooks import _catalog_meta
@@ -382,13 +382,13 @@ def _stamp_provenance(conn: sqlite3.Connection, client) -> None:
     cfg = _env.get_config()
     fsr_version = None
     last_publish = None
-    try:  # public, no-auth, ~25 B — Tier-0 upgrade gate
+    try:  # public, no-auth, ~25 B -- Tier-0 upgrade gate
         v = client.get("/api/version")
         if isinstance(v, dict):
             fsr_version = v.get("version")
     except Exception:  # noqa: BLE001
         pass
-    try:  # appliance-wide publish watermark — Tier-1 gate
+    try:  # appliance-wide publish watermark -- Tier-1 gate
         p = client.get("/api/publish/error")
         if isinstance(p, dict):
             last_publish = p.get("last_publish_time")
@@ -482,7 +482,7 @@ def main() -> int:
             "  name TEXT PRIMARY KEY,"
             "  iri  TEXT NOT NULL)"
         )
-        # Owner teams — drives compile-time resolution of playbook `owners:`
+        # Owner teams -- drives compile-time resolution of playbook `owners:`
         # team names to /api/3/teams/<uuid> IRIs (so a private playbook can
         # be authored by team name, not raw UUID).
         conn.execute(

@@ -17,7 +17,7 @@
  * The conversion is lossy in one place: if the agent emitted assistant_text
  * AFTER a tool_result within the same turn (typical reply pattern), all of
  * that turn's assistant_text gets concatenated into one block, which mirrors
- * what live Chat.svelte does — assistant text accumulates while tools fire
+ * what live Chat.svelte does -- assistant text accumulates while tools fire
  * in parallel.
  */
 
@@ -76,7 +76,7 @@ export function messagesToTurns(messages: SavedMessage[]): ReplayTurn[] {
   // rows when persisted with the parent id). We fall back to call_id-by-order
   // for older rows that stored only the tool name.
   const toolByCallId = new Map<string, ReplayTool>();
-  // Pending tool_use rows by turn — used when the row's `name` IS the tool
+  // Pending tool_use rows by turn -- used when the row's `name` IS the tool
   // name (older logging) and we need to splice tool_result back to it by
   // sequence order rather than id.
   const toolsByTurnInOrder = new Map<number, ReplayTool[]>();
@@ -130,7 +130,7 @@ export function messagesToTurns(messages: SavedMessage[]): ReplayTurn[] {
   }
 
   // Drop any trailing empty assistant turns (e.g. recorded UsageEvent
-  // without text/tools — shouldn't happen but defensive).
+  // without text/tools -- shouldn't happen but defensive).
   return turns.filter(
     (t) => t.role === 'user' || t.text || (t.tools && t.tools.length > 0)
   );

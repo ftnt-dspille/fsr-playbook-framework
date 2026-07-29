@@ -164,7 +164,7 @@ def test_run_op_grant_scoped_by_op_key(monkeypatch, session_id):
 
     monkeypatch.setattr(tools_mod, "_resolve_tier", mock_resolve_tier)
 
-    # Grant for fortigate-firewall:block_ip (a real, catalogued connector — a
+    # Grant for fortigate-firewall:block_ip (a real, catalogued connector -- a
     # bogus name would now bounce as unknown_connector before ever carding).
     grant_tool_approval(
         session_id, "run_op", op_key="fortigate-firewall:block_ip", mode="once"

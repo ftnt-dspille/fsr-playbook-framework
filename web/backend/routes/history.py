@@ -1,4 +1,4 @@
-"""History routes — full chat replay, push log, user feedback.
+"""History routes -- full chat replay, push log, user feedback.
 
 The History tab needs to surface, per session:
   - the user's question + assistant text + every tool call
@@ -42,7 +42,7 @@ _YAML_FENCE_RE = re.compile(r"```yaml\s*\n([\s\S]*?)```", re.MULTILINE)
 
 def _derive_final_yaml(detail: dict[str, Any]) -> tuple[str | None, str | None]:
     """Pull the most recent YAML the session settled on. Priority:
-       1. push.source_yaml — what was actually deployed
+       1. push.source_yaml -- what was actually deployed
        2. last YAML-bearing tool_use's `yaml_text` argument
        3. last fenced ```yaml block in any assistant_text row
     Returns (yaml, source_label) or (None, None) if nothing found."""
@@ -94,7 +94,7 @@ class FeedbackBody(BaseModel):
     rating: str = Field(..., description="'up' or 'down'")
     summary: str | None = Field(
         None,
-        description="Free-form review notes — what worked, what broke, "
+        description="Free-form review notes -- what worked, what broke, "
                     "what a future session should investigate.",
     )
     tags: str | None = Field(

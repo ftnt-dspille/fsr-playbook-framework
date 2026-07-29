@@ -1,4 +1,4 @@
-"""Phase 6 — emit_playbook_offer + reviewable-draft summarizer (PLAN §5,
+"""Phase 6 -- emit_playbook_offer + reviewable-draft summarizer (PLAN §5,
 contract 2.6.0). The offer card's ops_summary/draft_steps are built from the
 recorded trace via the SAME deterministic compile the push uses, never
 hand-written by the model."""
@@ -171,7 +171,7 @@ def test_emit_playbook_offer_available_to_triage_agent():
     assert "emit_playbook_offer" in names
 
 
-# --- direct-build mode (§A — yaml-carrying offer, no trace needed) ----------
+# --- direct-build mode (§A -- yaml-carrying offer, no trace needed) ----------
 
 _BUILD_YAML = """\
 playbooks:

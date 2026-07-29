@@ -46,7 +46,7 @@ export function shapeToStub(shape: Shape | null | undefined): unknown {
     }
     case 'unknown':
       // Permissive object so chained attribute access in Jinja doesn't
-      // throw — Jinja will return ``Undefined`` only for *missing*
+      // throw -- Jinja will return ``Undefined`` only for *missing*
       // keys, but a JSON `null` triggers `'NoneType' has no attribute…`.
       return {};
     case 'none':

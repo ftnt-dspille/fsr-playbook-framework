@@ -8,7 +8,7 @@
  * presents the same list as a searchable popup.
  *
  * `match` is a free-form predicate (not a literal key string) so each
- * command owns its own matching logic — that handles modifier
+ * command owns its own matching logic -- that handles modifier
  * variations (Cmd/Ctrl), platform differences, and "only when input
  * focused" gating without growing a parser here.
  */
@@ -19,13 +19,13 @@ export type Command = {
   id: string;
   label: string;
   /** Human-readable shortcut text shown in the palette + help overlay
-   *  (e.g. `⌘S`, `Del`, `?`). Pure display — match() owns key logic. */
+   *  (e.g. `⌘S`, `Del`, `?`). Pure display -- match() owns key logic. */
   hotkey?: string;
   /** Predicate fired against window keydown events. Return true to run
    *  this command. Omit for palette-only commands. */
   match?: (ev: KeyboardEvent) => boolean;
   /** Opt-in to firing even when the user is typing in an input /
-   *  textarea / Monaco. Default false — most commands shouldn't eat
+   *  textarea / Monaco. Default false -- most commands shouldn't eat
    *  keystrokes meant for a field. Use for Esc-style close commands
    *  and Cmd+S-style global saves. */
   runInInputs?: boolean;
@@ -93,12 +93,12 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
   if (target.isContentEditable) return true;
   // Monaco renders an offscreen <textarea> that's caught above, but
-  // also flags itself with `.monaco-editor` ancestors — defensive guard.
+  // also flags itself with `.monaco-editor` ancestors -- defensive guard.
   return !!target.closest('.monaco-editor');
 }
 
 /** Format a modifier-aware hotkey for display, picking the platform's
- *  preferred symbol. Pure display — wiring uses `match()`. */
+ *  preferred symbol. Pure display -- wiring uses `match()`. */
 export function fmtHotkey(parts: string[]): string {
   const isMac = typeof navigator !== 'undefined'
     && /Mac|iPhone|iPad/.test(navigator.platform);

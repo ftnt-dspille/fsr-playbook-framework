@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Slim Monaco wrapper for arbitrary languages — used by code_snippet
+   * Slim Monaco wrapper for arbitrary languages -- used by code_snippet
    * (Python / Jinja-Python) and any future inspector field that needs
    * proper syntax highlighting + indentation. Mirrors `MonacoYaml`'s
    * lifecycle (init in onMount, dispose on unmount, parent→editor sync
@@ -100,18 +100,18 @@
       scrollBeyondLastLine: false,
       tabSize: 4,
       lineNumbers: compact ? 'off' : 'on',
-      // 3 chars handles up to line 999 — wide enough for any realistic
+      // 3 chars handles up to line 999 -- wide enough for any realistic
       // editor in this app and avoids the 5-char default's wasted gutter.
       lineNumbersMinChars: compact ? 0 : 3,
       lineDecorationsWidth: compact ? 0 : 4,
-      // Drop the glyph margin entirely — we don't use breakpoint /
+      // Drop the glyph margin entirely -- we don't use breakpoint /
       // debug glyphs, and it adds ~28 px of empty left padding that
       // crowds short editors.
       glyphMargin: false,
       folding: false,
       wordWrap: 'on',
       // Compact inline editors live in a sidebar that's too narrow to
-      // host Monaco's parameter-hints / suggest-details flyout — it
+      // host Monaco's parameter-hints / suggest-details flyout -- it
       // covers the very input the user is typing into. The full Jinja
       // test modal still shows them (compact=false). Hover tooltips on
       // identifiers stay on because they appear on demand, not on
@@ -122,7 +122,7 @@
         : undefined,
       // Render hover popovers (error tooltips, signature help, etc.)
       // at the document root so they aren't clipped by parent
-      // `overflow: hidden` containers — e.g. the JinjaTestModal's
+      // `overflow: hidden` containers -- e.g. the JinjaTestModal's
       // pane wrappers, which were chopping the "View Problem" popover.
       fixedOverflowWidgets: true,
       // In compact mode the editor is a single-line value field; the
@@ -159,7 +159,7 @@
     // resize the host. Without this the editor either stays at its
     // declared height (clipping wrapped lines) or paints a tiny scrollbar
     // for one extra line of Jinja. Min is derived from the declared
-    // `height` prop — convert rem to px via the host's computed font
+    // `height` prop -- convert rem to px via the host's computed font
     // size so 2.25rem doesn't hardcode 36 px.
     if (autoGrow) {
       const minPx = host.getBoundingClientRect().height || 36;

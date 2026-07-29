@@ -1,4 +1,4 @@
-# find_record + update_record — the canonical "look something up, mutate it"
+# find_record + update_record -- the canonical "look something up, mutate it"
 # pattern. Most ingestion playbooks look like this.
 #
 # `find_record` (handler `find_data`):

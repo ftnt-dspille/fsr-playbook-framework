@@ -9,7 +9,7 @@ def _strip_volatile(obj):
     """Recursively drop wall-clock fields so determinism checks don't flake
     when two compiles straddle a second boundary. `lastModifyDate` is stamped
     with the real time on purpose (wf-engine staleness diagnostics); it is not
-    part of what "deterministic" means here — UUIDs and structure are."""
+    part of what "deterministic" means here -- UUIDs and structure are."""
     if isinstance(obj, dict):
         return {k: _strip_volatile(v) for k, v in obj.items()
                 if k not in ("lastModifyDate", "createDate", "modifyDate")}

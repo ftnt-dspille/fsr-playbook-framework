@@ -1,7 +1,7 @@
-"""Phase 4 — decompiler fidelity for the universal step envelope.
+"""Phase 4 -- decompiler fidelity for the universal step envelope.
 
 On pull (FSR JSON → friendly YAML) the decompiler must surface the envelope
-wire keys back out of `arguments:` to the step surface — otherwise a
+wire keys back out of `arguments:` to the step surface -- otherwise a
 connector's `when`/`do_until`/`agent` round-trips as raw `arguments.when`,
 a shape the editor never compiles. Also covers per-step `description`
 round-trip and the `message: {content}` → `post_comment:` fold.
@@ -109,7 +109,7 @@ def test_pure_message_content_folds_to_post_comment():
 
 
 def test_enriched_message_kept_as_block():
-    """An enriched message (more than `content`) stays a full block — folding
+    """An enriched message (more than `content`) stays a full block -- folding
     to post_comment would drop tags/type/thread."""
     step = Step(id="c", type="set_variable", name="Comment",
                 arguments={"message": {"content": "<p>hi</p>", "tags": [],
@@ -142,7 +142,7 @@ def test_editor_noise_keys_stripped_on_decompile():
 def test_editor_noise_strip_is_lossless_round_trip():
     """A record-write step authored with the editor-noise keys compiles to a
     wire that carries them (they ride the record-write whitelist); on pull the
-    decompiler strips them, and the resulting friendly YAML recompiles clean —
+    decompiler strips them, and the resulting friendly YAML recompiles clean --
     i.e. dropping them never breaks the round-trip."""
     by_name = _roundtrip_steps(
         """
@@ -174,7 +174,7 @@ def test_action_trigger_decompiles_to_start():
     """A `start` step bound to a module compiles to the `cybersponse.action`
     canonical (ManualStart / Execute-menu trigger, uuid f414d039). The live box
     hands that canonical name back on pull, so the decompiler's reverse map must
-    resolve it to friendly `start` — not leak the raw canonical as the step's
+    resolve it to friendly `start` -- not leak the raw canonical as the step's
     `type`, which fails recompile validation as `no_trigger`.
 
     Guards the `_EXTRA_CANONICAL_TO_SHORT` overlay in decompiler.py. Round-trip
@@ -217,7 +217,7 @@ def _step_iri(uuid: str, idx: int = 1) -> str:
 
 def _action_trigger_json(resources, step_name="Triage"):
     """Build a minimal WorkflowCollection JSON whose trigger step is a
-    `cybersponse.action` (Execute-menu) step bound to `resources` — the wire
+    `cybersponse.action` (Execute-menu) step bound to `resources` -- the wire
     shape a live box hands back on pull. Carries NO `module` key; the module
     list lives only in `arguments.resources`."""
     return {
@@ -242,7 +242,7 @@ def _action_trigger_json(resources, step_name="Triage"):
                     {
                         "name": "End",
                         "uuid": _step_iri(_SET_VARIABLE, 8).rsplit("/", 1)[1],
-                        # SetVariable — a non-trigger terminal the slim DB models.
+                        # SetVariable -- a non-trigger terminal the slim DB models.
                         "stepType": f"/api/3/workflow_step_types/{_SET_VARIABLE}",
                         "arguments": {"vars": {"y": 1}},
                     },
@@ -254,7 +254,7 @@ def _action_trigger_json(resources, step_name="Triage"):
 
 def test_action_trigger_resources_lifted_to_module_on_pull():
     """A live `cybersponse.action` step serializes its module list as
-    `arguments.resources` (the canonical wire shape) — there is no `module` key.
+    `arguments.resources` (the canonical wire shape) -- there is no `module` key.
     The decompiler must lift `resources` back to a friendly step-level
     `module:` (single) / `modules:` (list) so recompile re-derives
     `cybersponse.action` via the normalizer's `start + module` rewrite.
@@ -285,7 +285,7 @@ def test_action_trigger_resources_lifted_to_module_on_pull():
         f"got modules={triage.get('modules')!r}")
 
     # Recompile must re-derive cybersponse.action (uuid f414d039), not the
-    # plain abstract_trigger (b348f017) — the lossy downgrade this guards.
+    # plain abstract_trigger (b348f017) -- the lossy downgrade this guards.
     res = compile_yaml(yaml.safe_dump(doc, sort_keys=False), PACKAGED_SLIM_DB)
     assert res.ok, [e.message for e in res.errors]
     step_types = {
@@ -324,7 +324,7 @@ def _full_action_trigger_json(resources, *, route=None, title=None,
                                display_conditions=None, step_name="Triage",
                                playbook_name="PB"):
     """A live-box-shaped `cybersponse.action` step with the full canonical arg
-    set the normalizer emits — the bloated form the decompiler must minimize."""
+    set the normalizer emits -- the bloated form the decompiler must minimize."""
     modules = [resources] if isinstance(resources, str) else list(resources)
     args = {
         "resources": modules,
@@ -374,7 +374,7 @@ def _full_action_trigger_json(resources, *, route=None, title=None,
 
 def test_manual_start_minimized_to_friendly_fields():
     """The decompiler must emit only the minimal friendly surface for an
-    action-trigger — `module` + a small `arguments:` of non-defaults — and
+    action-trigger -- `module` + a small `arguments:` of non-defaults -- and
     drop every canonical boilerplate key the normalizer re-derives."""
     doc = yaml.safe_load(decompile_to_yaml(
         _full_action_trigger_json("alerts", route="e94851e1-1184-4abb-a2b2-1ce8a48048e7",
@@ -432,7 +432,7 @@ def test_run_mode_once_for_all_round_trips():
 
 def test_route_preserved_when_present():
     """A live route UUID must survive decompile->recompile unchanged, and stay
-    under `arguments:` (a step-level route is silently dropped — the parser
+    under `arguments:` (a step-level route is silently dropped -- the parser
     hoist list does not include route)."""
     from fsr_playbooks.compiler import compile_yaml
 
@@ -448,7 +448,7 @@ def test_route_preserved_when_present():
 
 
 def test_route_omitted_when_absent():
-    """An action-trigger with no route decompiles without a `route` key — the
+    """An action-trigger with no route decompiles without a `route` key -- the
     normalizer regenerates the deterministic uuid5 on compile. (Authored
     playbooks have no route; this keeps their YAML clean.)"""
     j = _full_action_trigger_json("alerts")  # no route
@@ -460,7 +460,7 @@ def test_route_omitted_when_absent():
 def test_button_label_emitted_only_when_not_playbook_name():
     """The normalizer defaults the trigger button label (`title`) to the
     playbook name, so the decompiler emits `button_label` only when the
-    persisted label differs — otherwise the YAML would just repeat the name."""
+    persisted label differs -- otherwise the YAML would just repeat the name."""
     # title == playbook name -> dropped (default).
     j = _full_action_trigger_json("alerts", title="PB", playbook_name="PB")
     triage = yaml.safe_load(decompile_to_yaml(j, PACKAGED_SLIM_DB))["playbooks"][0]["steps"][0]

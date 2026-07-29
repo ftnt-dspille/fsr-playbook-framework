@@ -1,6 +1,6 @@
 """Hermetic tests for compiler.typed_walker.
 
-Synthetic IR — no DB, no parser, no live calls. Each test builds a
+Synthetic IR -- no DB, no parser, no live calls. Each test builds a
 Collection in Python and asserts on the walk result.
 """
 from __future__ import annotations
@@ -102,7 +102,7 @@ def test_missing_field_on_set_variable_output():
 
 
 def test_missing_field_case_mismatch_emits_did_you_mean():
-    """Regression: agent typed `.Known` but the field is `known` —
+    """Regression: agent typed `.Known` but the field is `known` --
     diagnostic should surface the exact case-corrected suggestion."""
     coll = _coll(
         Step(id="start", type="start", name="Start", next="set"),
@@ -265,7 +265,7 @@ def test_self_reference_non_universal_key_fails():
 
 def test_self_reference_in_step_variables_non_universal_key_ok():
     """step_variables runs AFTER the step executes, so self-references to
-    non-universal keys (like `data`) are legitimate — the step's full
+    non-universal keys (like `data`) are legitimate -- the step's full
     result is available for extraction. System playbooks use this idiom
     (e.g. Fetch Threat Intel Feed Modules details reads its own .data)."""
     coll = _coll(

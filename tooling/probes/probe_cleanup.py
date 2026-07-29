@@ -1,10 +1,10 @@
-"""probe_cleanup — find and delete leftover collections from `fsrpb` test runs.
+"""probe_cleanup -- find and delete leftover collections from `fsrpb` test runs.
 
 Targets collections whose names match patterns we control (so we don't risk
 deleting real user content):
-  - *__fsrpb_probe__*  — left by `probe_playbook_constraints`
-  - Compiler Demo*     — left by direct `fsrpb push` smoke tests
-  - <custom>           — pass --pattern to add more
+  - *__fsrpb_probe__*  -- left by `probe_playbook_constraints`
+  - Compiler Demo*     -- left by direct `fsrpb push` smoke tests
+  - <custom>           -- pass --pattern to add more
 
 Gated on `FSR_ALLOW_E2E=true` so accidental imports don't trigger deletion.
 

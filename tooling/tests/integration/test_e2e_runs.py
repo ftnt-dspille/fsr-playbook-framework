@@ -1,4 +1,4 @@
-"""End-to-end live tests — push a playbook, fire it, assert it finished.
+"""End-to-end live tests -- push a playbook, fire it, assert it finished.
 
 Marked `live`; deselect with `pytest -m "not live"` to skip when no
 appliance is configured. The tests drive everything through the
@@ -120,10 +120,10 @@ def test_stage3_input_param_jinja(env_configured):
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 — manual_input. Push, fire, find the pause, respond, assert
+# Stage 4 -- manual_input. Push, fire, find the pause, respond, assert
 # the run resumes and reaches `finished`. Requires the canonical
 # resume URL POST /api/wf/api/workflows/<wf_pk>/wfinput_resume/ with
-# {input, step_iri, step_id, manual_input_id} body — the PUT path was
+# {input, step_iri, step_id, manual_input_id} body -- the PUT path was
 # a red herring (returns 200 but doesn't actually resume).
 # ---------------------------------------------------------------------------
 
@@ -158,7 +158,7 @@ def test_stage4_manual_input_resume(env_configured):
 
 
 # ---------------------------------------------------------------------------
-# Stage 5 — manual_input authored in the FRIENDLY form (the F3 path): a
+# Stage 5 -- manual_input authored in the FRIENDLY form (the F3 path): a
 # MULTI-field prompt with a REQUIRED field. Asserts (a) the rendered form on
 # the appliance is non-empty and carries every declared field with the right
 # type + required flag (the exact regression F3 shipped silently), and (b) the
@@ -236,7 +236,7 @@ def test_stage5_manual_input_multi_field(env_configured):
     assert pending_id is not None, "manual_input never paused (no 'E2E multi gate')"
 
     # (a) The rendered form on the appliance must carry all three declared fields
-    # with the right type + required flag — the F3 assertion. A dropped `inputs:`
+    # with the right type + required flag -- the F3 assertion. A dropped `inputs:`
     # would surface here as an empty/short inputVariables list. Read it through
     # the typed pyfsr model: input["schema"] is a ManualInputSchema, its
     # inputVariables are ManualInputVariable objects.
@@ -283,7 +283,7 @@ def test_stage5_manual_input_multi_field(env_configured):
     assert env is not None and env.status == "finished", \
         f"expected finished, got {env.status if env else None}"
     assert cap_result is not None, (
-        "Capture step result never populated — is global playbook debug logging "
+        "Capture step result never populated -- is global playbook debug logging "
         "enabled? (the test sets it, but the appliance may override)")
     # The captured variables must equal exactly what the responder submitted.
     assert cap_result.get("got_severity") == "High", \

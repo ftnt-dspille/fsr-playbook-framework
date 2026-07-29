@@ -1,17 +1,17 @@
-# RECIPE TEMPLATE — Data Ingestion Wizard
+# RECIPE TEMPLATE -- Data Ingestion Wizard
 #
 # Pattern: three-playbook composition (Fetch / Create / Ingest) modeled
 # on the canonical FSR Data Ingestion Wizard. Targets the Alerts module.
 #
 # IMPORTANT: This recipe uses NON-bulk Create Record on the Alerts module
 # so on-create alert playbooks (enrichment, escalation, dedupe) fire
-# normally. Do NOT switch this to IngestBulkFeed / `__bulk: true` —
+# normally. Do NOT switch this to IngestBulkFeed / `__bulk: true` --
 # those bypass triggers and that's wrong for Alerts. (For threat-feed
 # ingestion, see recipe_threat_feed.yaml instead.)
 #
 # Error handling: every fallible step routes through a Decision gateway
 # that ends in `cyops_utilities.raise_exception` on the failure branch
-# with a descriptive message — never a silent fall-through.
+# with a descriptive message -- never a silent fall-through.
 #
 # Tags applied (recipe lints these): dataingestion + one of fetch|create|
 # ingest + <connector_api_name>. Replace todo_connector_api_name
@@ -20,7 +20,7 @@
 # Replace every TODO comment with the real value for your source.
 # Remove any TODO once it's resolved so this file lints clean.
 
-collection: "Recipe — TODO Connector Data Ingestion"
+collection: "Recipe -- TODO Connector Data Ingestion"
 description: Data Ingestion Wizard recipe (Fetch / Create / Ingest, Alerts module).
 visible: true
 
@@ -89,7 +89,7 @@ playbooks:
       - name: Any records
         type: decision
         comment: |
-          Error gateway — if the parent passed an empty array, fail loud
+          Error gateway -- if the parent passed an empty array, fail loud
           rather than silently looping zero times.
         conditions:
           - display: "yes"
@@ -105,12 +105,12 @@ playbooks:
         operation: raise_exception
         config: ""
         params:
-          msg: "Create called with empty ingestedData — Fetch returned no records."
+          msg: "Create called with empty ingestedData -- Fetch returned no records."
 
       - name: Create alert per item
         type: create_record
         comment: |
-          NON-bulk on purpose — on-create alert playbooks must fire.
+          NON-bulk on purpose -- on-create alert playbooks must fire.
           TODO adjust the resource field mapping below to match your
           source-record shape. Picklist values (severity, status,
           source) are friendly strings; the compiler resolves them
@@ -130,7 +130,7 @@ playbooks:
           sourceData: "{{ vars.item | toJSON }}"
   # ---------------------------------------------------------------- Ingest
   - name: "TODO Connector > Ingest"
-    description: Orchestrator — pulls Fetch, hands records to Create.
+    description: Orchestrator -- pulls Fetch, hands records to Create.
     is_active: true
     tag: "dataingestion, ingest, todo_connector_api_name"
     parameters: [env_setup, lastPullTime]

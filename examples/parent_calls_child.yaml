@@ -3,7 +3,7 @@ description: Two playbooks; the parent invokes the child with input parameters.
 
 playbooks:
   - name: Resolve Hostname
-    description: Child playbook — looks up an IP for a hostname.
+    description: Child playbook -- looks up an IP for a hostname.
     parameters:
       - hostname
       - dns_server
@@ -17,7 +17,7 @@ playbooks:
         vars:
           ip: "10.0.0.1  # would be {{vars.input.params.hostname}} resolved via {{vars.input.params.dns_server}}"
   - name: Add Host And Resolve
-    description: Parent — calls Resolve Hostname with input args.
+    description: Parent -- calls Resolve Hostname with input args.
     steps:
       - name: start
         type: start

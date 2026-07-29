@@ -35,7 +35,7 @@ def find_jinja_filter(q: str, limit: int = 15,
     Args:
         verbose: when True, include `curated_doc` (rich long-form notes
             for complex filters like json_query, picklist, fromIRI,
-            resolveRange) inline. Default omits it — fetch via
+            resolveRange) inline. Default omits it -- fetch via
             `get_filter_examples` once you've picked a filter.
     """
     with _db() as conn:
@@ -62,7 +62,7 @@ def find_jinja_filter(q: str, limit: int = 15,
         if rows:
             return rows
     # Never return a bare [] (AGENT_HARDENING_PLAN §H): fall back to the
-    # authoritative name catalog (jinja2 builtins ∪ FSR ∪ Ansible — the same
+    # authoritative name catalog (jinja2 builtins ∪ FSR ∪ Ansible -- the same
     # set validate_yaml checks against) so a real-but-uncorpused filter like
     # json_query is still discoverable, with near-name suggestions on a typo.
     return _catalog_fallback(q, limit)
@@ -77,7 +77,7 @@ def _catalog_fallback(q: str, limit: int) -> list[dict[str, Any]]:
     hits = sorted(n for n in _KNOWN_FILTERS if ql in n.lower())
     if not hits:
         hits = difflib.get_close_matches(q, _KNOWN_FILTERS, n=limit, cutoff=0.5)
-    note = ("no corpus entry — matched against the known-filter catalog "
+    note = ("no corpus entry -- matched against the known-filter catalog "
             "(jinja2 builtins + FSR + Ansible); the filter is valid but has "
             "no curated doc/examples here")
     return [{"name": n, "source": "catalog", "note": note} for n in hits[:limit]]
@@ -87,19 +87,19 @@ def find_jinja_pattern(q: str, kind: str | None = None,
                       limit: int = 12) -> list[dict[str, Any]]:
     """Search the live-corpus Jinja-block catalog by substring + kind.
 
-    Use this when you want to learn FSR idioms — `{% set x = vars.steps.foo %}`,
-    `{% for r in vars.input.records %}`, conditional guards, etc — instead of
+    Use this when you want to learn FSR idioms -- `{% set x = vars.steps.foo %}`,
+    `{% for r in vars.input.records %}`, conditional guards, etc -- instead of
     only looking up filters. The corpus contains ~7,800 unique blocks mined
     from 1,669 live workflows.
 
     Args:
         q: substring to match against the raw block, head, vars, or filter chain
-        kind: optional — restrict to one block kind. Useful values:
-            "expr"   — `{{ … }}` expression blocks (most common)
-            "set"    — `{% set var = … %}` assignments
-            "for"    — `{% for x in … %}` loops
-            "if"     — `{% if cond %}` guards (`elif` is a separate kind)
-            "macro"  — `{% macro name(args) %}` definitions
+        kind: optional -- restrict to one block kind. Useful values:
+            "expr"   -- `{{ … }}` expression blocks (most common)
+            "set"    -- `{% set var = … %}` assignments
+            "for"    -- `{% for x in … %}` loops
+            "if"     -- `{% if cond %}` guards (`elif` is a separate kind)
+            "macro"  -- `{% macro name(args) %}` definitions
             (omit kind to search across all)
         limit: max results (default 12, ordered by occurrences desc)
 
@@ -173,7 +173,7 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
     (`| tojson`, `| b64encode`, `| yaql`, etc.) all work.
 
     Args:
-        template: Jinja source — e.g. `"{{ vars.steps.Get_org.records[0].id }}"`.
+        template: Jinja source -- e.g. `"{{ vars.steps.Get_org.records[0].id }}"`.
         context: dict of variable bindings (e.g. `{"value": [1, 2, 3]}`).
         from_pb_execution: optional workflow PK (string of digits) or task_id UUID.
             When set, the run's `{vars: {...env, steps: {<Name_us>: result}}}`
@@ -181,7 +181,7 @@ def render_jinja(template: str, context: dict[str, Any] | None = None,
             on top so callers can override individual values for what-if tests.
 
     Returns:
-        `{output: <value>}` on success — value preserves its native type
+        `{output: <value>}` on success -- value preserves its native type
         (str, int, float, bool, list, dict). `{error: str}` if the engine
         errored (template syntax issues, missing var, etc).
 
@@ -258,10 +258,10 @@ def find_jinja_example(filter: str | None = None,
 
     At least one of `filter`, `var_path`, or `intent` must be set.
     - `filter`: filter name (`replace`, `tojson`, `picklist`,
-      `json_query`, …) — narrows to expressions using that filter.
+      `json_query`, …) -- narrows to expressions using that filter.
     - `var_path`: substring match against normalized `vars_csv`
       (e.g. `vars.input.records`, `vars.steps.fetch_alerts`).
-    - `intent`: substring against the raw expression — useful for
+    - `intent`: substring against the raw expression -- useful for
       finding patterns like `replace('T', ' ')` or
       `picklist('AlertStatus'`.
     - `step_type`: optional filter to expressions found in a given
@@ -323,7 +323,7 @@ def find_jinja_example(filter: str | None = None,
 
 
 # ---------------------------------------------------------------------------
-# E3: Jinja expression generator — suggest patterns for a task
+# E3: Jinja expression generator -- suggest patterns for a task
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -337,7 +337,7 @@ def suggest_jinja(
     Instead of guessing at Jinja syntax, an AI agent that's authoring a
     playbook describes the task (e.g. ``"resolve a picklist IRI in a query
     body"``) and gets back real-world patterns from 8,500+ expressions mined
-    from 1,800+ live playbooks — each with its source playbook, filter chain,
+    from 1,800+ live playbooks -- each with its source playbook, filter chain,
     and variable access paths.
 
     Args:
@@ -345,7 +345,7 @@ def suggest_jinja(
             to do (e.g. ``"resolve picklist IRI"``, ``"loop over records and
             filter by severity"``, ``"format date as ISO 8601"``)
         context: optional extra context (e.g. ``"AlertState picklist in a
-            query Record State step"``) — narrows the search
+            query Record State step"``) -- narrows the search
         limit: max patterns to return (default 5)
 
     Returns:

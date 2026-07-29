@@ -80,7 +80,7 @@ def resolve_picklist_value(value: str, picklist_name: str | None = None,
     Provide either `picklist_name`, or both `module` + `field` to
     auto-discover. Strings that already start with '/api/3/' pass
     through unchanged. Returns close-match suggestions when the value
-    isn't an exact itemValue — useful when the LLM authored an invalid
+    isn't an exact itemValue -- useful when the LLM authored an invalid
     value like 'In Progress' for AlertStatus (which only has Open,
     Investigating, Pending, Closed, Active, Re-Opened).
     """
@@ -92,7 +92,7 @@ def resolve_picklist_value(value: str, picklist_name: str | None = None,
     if pn is None and module and field:
         pn = picklist_name_for(client, module, field)
     if pn is None:
-        return {"error": "picklist_name unknown — provide it, or "
+        return {"error": "picklist_name unknown -- provide it, or "
                          "(module, field) for auto-discovery"}
     iri = resolve_iri(client, value, picklist_name=pn)
     if iri:

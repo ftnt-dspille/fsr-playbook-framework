@@ -184,7 +184,7 @@ def _all_tags(doc: dict) -> set[str]:
 
 def rule_tag_typos(doc: dict) -> Iterable[Issue]:
     """Catch common case/spelling typos on canonical ingestion tags.
-    These get past the wizard silently — the playbook just doesn't show up.
+    These get past the wizard silently -- the playbook just doesn't show up.
     """
     for ci, coll, wi, wf in _all_workflows(doc):
         for source_label, tags in (
@@ -263,7 +263,7 @@ def rule_connector_slug_uniform(doc: dict) -> Iterable[Issue]:
 
 def rule_collection_or_workflow_has_slug(doc: dict) -> Iterable[Issue]:
     """At least one of {collection.recordTags, every dataingestion workflow's
-    recordTags} should carry the connector slug — wizard discovery uses
+    recordTags} should carry the connector slug -- wizard discovery uses
     either. Some samples (AWS) leave the collection untagged but tag each
     workflow; others (TAXII2) tag the collection too. Both work.
     """
@@ -319,7 +319,7 @@ def rule_connector_param_visibility(doc: dict) -> Iterable[Issue]:
     JSON: when a connector op's params row carries `parent_param_name`,
     the provided params must include the parent with a matching
     `condition_value`. Otherwise FSR hides the field at runtime and the
-    op typically rejects the call — the same silent-failure mode that
+    op typically rejects the call -- the same silent-failure mode that
     bit chat-review session c44c6e36.
 
     No-ops when the reference store isn't available locally.
@@ -393,7 +393,7 @@ def rule_connector_param_visibility(doc: dict) -> Iterable[Issue]:
 
 def rule_three_workflow_split_or_env_setup(doc: dict) -> Iterable[Issue]:
     """A dataingestion collection should expose at least one workflow with
-    each of {fetch, create, ingest} as tags — distributed across workflows
+    each of {fetch, create, ingest} as tags -- distributed across workflows
     OR concentrated on a single workflow that also branches on env_setup.
     """
     for ci, coll in enumerate(doc.get("data", []) or []):

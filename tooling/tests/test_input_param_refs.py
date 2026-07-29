@@ -55,7 +55,7 @@ def test_bracket_form_declared_ok():
 
 def test_reserved_record_inputs_not_flagged():
     # vars.input.records / vars.input.record are built-in trigger inputs,
-    # not declared parameters — must not error.
+    # not declared parameters -- must not error.
     pb = _pb([], {"value": "{{ vars.input.records[0].iri }} {{ vars.input.record }}"})
     assert _validate(pb) == []
 

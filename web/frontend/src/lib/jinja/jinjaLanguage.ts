@@ -1,5 +1,5 @@
 /**
- * Jinja language definition for Monaco — tokenizer, language config,
+ * Jinja language definition for Monaco -- tokenizer, language config,
  * dark + light themes. Ported from the widget-jinja-editor widget.
  *
  * The tokenizer and the theme rule list are tightly coupled: tokens

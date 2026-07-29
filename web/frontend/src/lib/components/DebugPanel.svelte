@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Debug runner — drives stateful server-side debug sessions
+   * Debug runner -- drives stateful server-side debug sessions
    * (VISUAL_EDITOR_PLAN.md Phase 5.3-5.7).
    *
    *   ▶ Run     create a session and continue to done / breakpoint
@@ -17,7 +17,7 @@
    *
    * Breakpoints + watch paths + trigger input live in `debugStore`
    * so they survive drawer collapse and are visible to the canvas
-   * (red breakpoint dot on each node — VISUAL_EDITOR_PLAN 5.4 tail).
+   * (red breakpoint dot on each node -- VISUAL_EDITOR_PLAN 5.4 tail).
    */
   import { playbookStore } from '$lib/playbookStore.svelte';
   import { visualStore } from '$lib/visualEditStore.svelte';
@@ -65,7 +65,7 @@
 
   // When paused, what kind of step are we about to execute and what
   // branches does it expose? `pausedAt` is the step ID we will run
-  // on the next Step click — its outgoing `branch_kind === 'branch'`
+  // on the next Step click -- its outgoing `branch_kind === 'branch'`
   // edges are the choices.
   let pausedNode = $derived<VisualNode | null>(
     pausedAt ? (activeNodes.find((n) => n.id === pausedAt) ?? null) : null
@@ -78,7 +78,7 @@
       : []
   );
 
-  // Live vars tree for the Watch panel — stitched from the trace
+  // Live vars tree for the Watch panel -- stitched from the trace
   // outputs, mirroring both the raw step id and its space→underscore
   // jkey form so authors can paste whichever form they remembered.
   let liveVars = $derived(varsFromTrace(trace));
@@ -206,7 +206,7 @@
   }
 
   function formatWatchValue(v: unknown): string {
-    if (v === undefined) return '—';
+    if (v === undefined) return '--';
     if (v === null) return 'null';
     if (typeof v === 'string') return v;
     try { return JSON.stringify(v); } catch { return String(v); }
@@ -271,7 +271,7 @@
     </div>
   </div>
 
-  <!-- Trigger payload editor (5.7) — collapsed by default; expanded
+  <!-- Trigger payload editor (5.7) -- collapsed by default; expanded
        reveals a JSON editor that seeds `vars.input` on Run. Disabled
        once a session exists (would be ignored anyway). -->
   <details
@@ -360,7 +360,7 @@
           <div class="mt-1 rounded border border-dashed border-[var(--brand)] bg-[var(--brand)]/10 px-2 py-1.5 text-[11px] font-mono text-[var(--text-default)]">
             <div class="text-center">▶ paused at <strong>{pausedAt}</strong></div>
 
-            <!-- Branch chooser (5.4) — only shown when the paused step
+            <!-- Branch chooser (5.4) -- only shown when the paused step
                  is a decision / manual_input with branches. Click a
                  chip to step with `branch_choice_override` pinned. -->
             {#if pausedBranches.length > 0}
@@ -386,7 +386,7 @@
       {/if}
       </div>
 
-      <!-- Watch panel (5.5) — resolved client-side against the
+      <!-- Watch panel (5.5) -- resolved client-side against the
            stitched trace, so it updates after every Step / Run. -->
       <details
         class="shrink-0 border-t border-[var(--border-soft)] bg-[var(--bg-canvas)] p-2 text-[11px]"
@@ -450,7 +450,7 @@
         {#if selected.note}
           <p class="mb-3 text-xs italic text-[var(--text-muted)]">{selected.note}</p>
         {/if}
-        <!-- Output first — that's what downstream Jinja reads, so
+        <!-- Output first -- that's what downstream Jinja reads, so
              it's the primary debugging target. Step input below is
              collapsed by default; expand it to see the rendered
              prompt / args FSR would receive. -->

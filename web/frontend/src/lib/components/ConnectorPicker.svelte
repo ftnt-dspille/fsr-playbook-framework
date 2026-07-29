@@ -8,7 +8,7 @@
    * `onCommit` fires on three events: a list pick, Enter, or blur.
    * That keeps consumers like StepInspectorArgsTab from triggering
    * `get_op_schema` (or any other side-effect) on every partial value
-   * — which would otherwise flash "operation 'b' not found" before
+   * -- which would otherwise flash "operation 'b' not found" before
    * the user finished typing.
    */
   import { callMcpTool } from '../api';
@@ -23,7 +23,7 @@
   };
   let { value, placeholder = 'e.g. jira', ariaLabel = 'Connector', onCommit }: Props = $props();
 
-  // Internal input text — kept separate from the parent prop so that
+  // Internal input text -- kept separate from the parent prop so that
   // refreshing the dropdown can't fight a stale prop value. Synced
   // FROM the prop only when it changes externally (e.g. node switch).
   // svelte-ignore state_referenced_locally

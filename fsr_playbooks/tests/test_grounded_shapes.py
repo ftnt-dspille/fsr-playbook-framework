@@ -1,4 +1,4 @@
-"""Pilot gap D — measured output-shape oracle (compiler.grounded_shapes)."""
+"""Pilot gap D -- measured output-shape oracle (compiler.grounded_shapes)."""
 from __future__ import annotations
 
 from fsr_playbooks.compiler.grounded_shapes import (
@@ -27,7 +27,7 @@ def test_shape_from_nested_dict_models_code_snippet_output():
     co = shape["keys"]["data"]["keys"]["code_output"]
     assert co["keys"]["first"]["keys"]["join_key"] == {
         "kind": "scalar", "type": "string"}
-    # Crucially there is NO `.output` wrapper — E5 was a spurious .output level.
+    # Crucially there is NO `.output` wrapper -- E5 was a spurious .output level.
     assert "output" not in shape["keys"]
 
 
@@ -92,7 +92,7 @@ def test_store_observe_accumulates_optionality(tmp_path):
 # --------------------------------------------------------------------------- #
 # Closed-loop: a grounded code_snippet shape catches the pilot E5 `.output` bug.
 # The shape below is the EXACT envelope measured from live run 686525 on .205
-# (code-snippet:python_inline_code_editor) — pinned here so the test is offline.
+# (code-snippet:python_inline_code_editor) -- pinned here so the test is offline.
 # --------------------------------------------------------------------------- #
 
 _DEMO_CODE_SNIPPET_YAML = """
@@ -136,7 +136,7 @@ def test_grounded_probe_flags_spurious_output_path_E5():
         for b in base.branches for d in b.diagnostics)
 
     # With the grounded shape, `.output` (absent from the real envelope) is a
-    # hard error — the exact E5 failure the live run produced as greeting_text="".
+    # hard error -- the exact E5 failure the live run produced as greeting_text="".
     res = walk_playbook(coll, None, probe=grounded_probe(store))
     hits = [d for b in res.branches for d in b.diagnostics
             if d.code == "missing_field_on_step_output" and "output" in d.message]
@@ -191,7 +191,7 @@ def test_grounded_connector_op_valid_passes_bogus_flagged():
 # --------------------------------------------------------------------------- #
 # Sync workflow_reference: child's set_variable vars surface at
 # vars.steps.<refstep>.<childvar> (live-proven, run 686622). The walker
-# synthesizes this statically from the child playbook in the same collection —
+# synthesizes this statically from the child playbook in the same collection --
 # works on both parsed (target: name) and resolved (workflowReference: IRI) IR.
 # --------------------------------------------------------------------------- #
 
@@ -256,7 +256,7 @@ def test_async_workflow_reference_does_not_expose_child_vars():
          .replace("apply_async: false", "apply_async: true"))
     coll, _ = parse_yaml(y)
     res = walk_playbook(coll, "Parent")
-    # The same `.product` that PASSES on a sync ref must NOT pass on async —
+    # The same `.product` that PASSES on a sync ref must NOT pass on async --
     # the child's vars are not available from a fire-and-forget call.
     assert any(d.code == "missing_field_on_step_output"
                for b in res.branches for d in b.diagnostics)
@@ -317,7 +317,7 @@ def test_for_each_bare_attr_on_loop_step_is_hard_error():
 
 
 def test_for_each_indexed_iteration_access_is_clean():
-    # Indexing an iteration first (`[0].data`) is the correct access — the list
+    # Indexing an iteration first (`[0].data`) is the correct access -- the list
     # element is the per-iteration envelope, so `.data` resolves on the object.
     hits = [d for d in _for_each_diags(
         "{{ vars.steps.Loop_snippet[0].data }}")
@@ -326,7 +326,7 @@ def test_for_each_indexed_iteration_access_is_clean():
 
 
 def test_for_each_whole_list_read_is_clean():
-    # Reading the whole list (no attr access) is fine — e.g. to pass to a filter.
+    # Reading the whole list (no attr access) is fine -- e.g. to pass to a filter.
     hits = [d for d in _for_each_diags("{{ vars.steps.Loop_snippet }}")
             if d.code == "missing_field_on_step_output"]
     assert hits == []

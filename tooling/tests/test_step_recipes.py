@@ -5,7 +5,7 @@ The recipes ship as `steps_yaml` blocks with placeholder tokens like
 every recipe in a playbook scaffold that satisfies its `next:` targets,
 substitute placeholders with concrete values, and run the compiler.
 
-This guards against schema drift in the reference store — if a
+This guards against schema drift in the reference store -- if a
 connector op's param visibility rules change, the recipe should fail
 this test before it lands in front of an agent.
 """
@@ -93,7 +93,7 @@ def test_recipe_compiles_clean(recipe, db_path):
         f"recipe {recipe.name!r} failed to compile: "
         + "; ".join(str(e) for e in result.errors)
     )
-    # No visibility-cascade warnings — recipes must ship a coherent set.
+    # No visibility-cascade warnings -- recipes must ship a coherent set.
     bad_warnings = [
         w for w in result.warnings
         if w.code.value == "bad_value"

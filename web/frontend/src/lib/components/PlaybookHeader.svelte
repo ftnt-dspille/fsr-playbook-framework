@@ -12,7 +12,7 @@
   import { visualStore } from '$lib/visualEditStore.svelte';
   import { commands, fmtHotkey } from '$lib/commands.svelte';
 
-  // Cached hotkey display strings — fmtHotkey is platform-aware so the
+  // Cached hotkey display strings -- fmtHotkey is platform-aware so the
   // tooltips show ⌘S on macOS and Ctrl+S elsewhere automatically.
   const HK_SAVE = fmtHotkey(['Mod', 'S']);
   const HK_TOGGLE_MODE = fmtHotkey(['Mod', '/']);
@@ -25,7 +25,7 @@
      * Monaco buffer. When omitted, Save uses whatever is in
      * `playbookStore.currentYaml` already. */
     getActiveYaml?: () => Promise<string> | string;
-    /** Studio mode toggle — promoted into this header to reclaim the
+    /** Studio mode toggle -- promoted into this header to reclaim the
      * vertical row it used to occupy on its own. Optional so the
      * component still works on pages that don't have a mode toggle. */
     mode?: 'design' | 'cli';
@@ -40,14 +40,14 @@
   let saveAsName = $state('');
   let cloningExample: string | null = $state(null);
   let cloneDraftName = $state('');
-  // New-draft modal — replaces the old window.prompt() with a styled
+  // New-draft modal -- replaces the old window.prompt() with a styled
   // dialog that matches Save-As / Clone. Name + busy + inline error.
   let newOpen = $state(false);
   let newName = $state('');
   let newBusy = $state(false);
   let newError: string | null = $state(null);
   // Suggest a unique default each time the modal opens so the user can
-  // just hit Enter — bumps `untitled`, `untitled_2`, … against the
+  // just hit Enter -- bumps `untitled`, `untitled_2`, … against the
   // existing draft list.
   function suggestNewName(): string {
     const taken = new Set(playbookStore.state.drafts.map((d) => d.name));
@@ -89,7 +89,7 @@
   }
 
   // Re-render every 15s so "Saved Xs ago" stays roughly current. Cheap
-  // — the parent is the always-mounted header.
+  // -- the parent is the always-mounted header.
   let savedAgoTick = $state(0);
   $effect(() => {
     if (saveState !== 'saved-just-now' && lastSavedAt === null) return;
@@ -97,7 +97,7 @@
     return () => clearInterval(id);
   });
 
-  /** "Saved 3s ago" — coarse-grained so a clock-tick re-render isn't
+  /** "Saved 3s ago" -- coarse-grained so a clock-tick re-render isn't
    *  required for every second. */
   function savedAgo(ts: number | null): string {
     if (ts === null) return '';
@@ -111,7 +111,7 @@
 
   onMount(() => {
     void playbookStore.refresh();
-    // Listen for the global Cmd+P keybinding — the page dispatches a
+    // Listen for the global Cmd+P keybinding -- the page dispatches a
     // window event rather than lifting picker state up, which keeps
     // the picker logic colocated here.
     const onOpen = () => { pickerOpen = true; };
@@ -249,7 +249,7 @@
     </span>
   {:else if saveState === 'conflict'}
     <span class="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200"
-          title="Another tab saved this draft — resolve below">
+          title="Another tab saved this draft -- resolve below">
       Conflict
     </span>
   {:else if saveState === 'error'}
@@ -277,7 +277,7 @@
     onclick={onSave}
     disabled={saving || !active || (!isExample && !dirty)}
     title={isExample
-      ? `Examples are read-only — Clone & Edit (${HK_SAVE})`
+      ? `Examples are read-only -- Clone & Edit (${HK_SAVE})`
       : (dirty ? `Save current draft (${HK_SAVE})` : `No unsaved changes (${HK_SAVE})`)}
   >{isExample ? 'Clone & Edit' : (saving ? 'Saving…' : 'Save')}</button>
 
@@ -342,7 +342,7 @@
   {/if}
 
   <!-- Studio mode toggle (Design / CLI). Lives at the right end of the
-       header so the previous standalone toggle row goes away — saves
+       header so the previous standalone toggle row goes away -- saves
        a full row of vertical chrome on first paint. -->
   {#if mode && onModeChange}
     <div class="ml-auto inline-flex rounded border border-[var(--border-soft)] p-0.5"
@@ -370,7 +370,7 @@
     type="button"
     class="{mode && onModeChange ? '' : 'ml-auto'} inline-flex items-center gap-1 rounded border border-transparent px-1.5 py-0.5 text-[10px] text-[var(--text-faint)] hover:border-[var(--border-soft)] hover:text-[var(--text-muted)]"
     onclick={() => (commands.paletteOpen = true)}
-    title="Open command palette — searchable list of every shortcut"
+    title="Open command palette -- searchable list of every shortcut"
   >
     <kbd class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1 font-mono text-[10px]">{HK_PALETTE}</kbd>
     <span>commands</span>
@@ -384,7 +384,7 @@
   {/if}
 </div>
 
-<!-- Picker dropdown — two visually distinct buckets -->
+<!-- Picker dropdown -- two visually distinct buckets -->
 {#if pickerOpen}
   <div class="relative">
     <div class="absolute left-4 top-0 z-30 max-h-[28rem] w-[28rem] overflow-auto rounded-md border border-[var(--border-soft)] bg-[var(--bg-canvas)] shadow-xl">
@@ -440,7 +440,7 @@
 {/if}
 
 <!-- New-draft modal. Same visual language as Save-As / Clone so the
-     three flows feel like one family — beats the OS prompt(). -->
+     three flows feel like one family -- beats the OS prompt(). -->
 {#if newOpen}
   <div
     class="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 pt-[20vh]"
@@ -533,7 +533,7 @@
       <p class="mb-3 text-xs text-[var(--text-muted)]">
         Server head is now revision #{conflict.server_revision_id}
         (saved {fmtTs(conflict.server_updated_ts)}). Your local edits
-        are still in the editor — choose how to resolve.
+        are still in the editor -- choose how to resolve.
       </p>
       <div class="flex flex-col gap-2 text-xs">
         <button

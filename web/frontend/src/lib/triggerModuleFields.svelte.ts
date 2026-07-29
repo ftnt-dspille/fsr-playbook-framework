@@ -6,9 +6,9 @@
  * `/api/ref/modules/<m>/fields`.
  *
  * Public surface:
- *   - extractTriggerModule(yaml) — small line-based YAML scanner that
+ *   - extractTriggerModule(yaml) -- small line-based YAML scanner that
  *     finds the first trigger step's module name, or null.
- *   - triggerModuleFieldsStore.fieldsFor(module) — async, cached.
+ *   - triggerModuleFieldsStore.fieldsFor(module) -- async, cached.
  *
  * The store is intentionally async-aware: the Monaco completion
  * provider's `provideCompletionItems` is async, so an awaited fetch
@@ -24,7 +24,7 @@ function indentOf(line: string): number {
   return m ? m[1].length : -1;
 }
 
-/** Strip `?$limit=…` / other querystring tails — the bare module name
+/** Strip `?$limit=…` / other querystring tails -- the bare module name
  *  is what /api/ref/modules/<m>/fields expects. */
 function bareModule(s: string): string {
   const q = s.indexOf('?');
@@ -32,7 +32,7 @@ function bareModule(s: string): string {
 }
 
 /** Scan the YAML buffer for every distinct `globalVars.<name>` reference
- *  and return the sorted unique list. No backend dependency — purely
+ *  and return the sorted unique list. No backend dependency -- purely
  *  derives autocomplete from names the user has already typed.
  *  Stop-gap until /api/ref/global-vars (trained store) exists. */
 export function extractGlobalVarNames(yaml: string): string[] {
@@ -45,7 +45,7 @@ export function extractGlobalVarNames(yaml: string): string[] {
 }
 
 /** Find the first trigger step in the YAML and return its
- *  `arguments.module:` value, or null. Single-pass, no YAML parse —
+ *  `arguments.module:` value, or null. Single-pass, no YAML parse --
  *  we just scan for `type: start*` followed by an `arguments:` block
  *  containing `module:` at the same step's indent + 2. */
 export function extractTriggerModule(yaml: string): string | null {
@@ -99,7 +99,7 @@ async function fetchFields(module: string): Promise<string[]> {
   }
 }
 
-/** Live sample records from FSR — used by the picker to show real
+/** Live sample records from FSR -- used by the picker to show real
  *  field values alongside the path so authors can verify that
  *  `.severity` (or whatever they're about to reference) actually
  *  exists on the trigger's records. Keyed by module name. */
@@ -111,7 +111,7 @@ const sampleCache = new Map<string, Promise<Array<Record<string, unknown>>>>();
  *  so consumers re-render on change.
  *
  *  Persisted to localStorage keyed by module so the pick survives
- *  page reloads — without this, every refresh wipes the sample and
+ *  page reloads -- without this, every refresh wipes the sample and
  *  inline `→ RENDERS TO` previews go blank until the user re-picks.
  *  The "last picked module" is also stored so the active sample is
  *  restored even if the user opens the editor without first hitting
@@ -131,7 +131,7 @@ function loadInitialSample(): { picked: Record<string, unknown> | null; module: 
       return { picked: parsed as Record<string, unknown>, module: mod };
     }
   } catch {
-    // corrupt entry — fall through to empty state
+    // corrupt entry -- fall through to empty state
   }
   return { picked: null, module: '' };
 }
@@ -190,7 +190,7 @@ export const sampleRecordsStore = {
         }
       }
     } catch {
-      // quota / disabled storage — best-effort
+      // quota / disabled storage -- best-effort
     }
   },
   _reset(): void {
@@ -199,7 +199,7 @@ export const sampleRecordsStore = {
     sampleState.module = '';
     if (typeof localStorage === 'undefined') return;
     try {
-      // Wipe every fsrpb:sample-record:* key — covers test cleanup.
+      // Wipe every fsrpb:sample-record:* key -- covers test cleanup.
       const toDelete: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
@@ -213,7 +213,7 @@ export const sampleRecordsStore = {
 };
 
 
-/** FSR dynamic-variables ("globalVars") catalog — fetched once, cached.
+/** FSR dynamic-variables ("globalVars") catalog -- fetched once, cached.
  *  Backend route /api/ref/global-vars wraps FSR's
  *  /api/wf/api/dynamic-variable/?offset=0&limit=2147483647. */
 let globalVarsPromise: Promise<{ name: string; value: string | null }[]> | null = null;

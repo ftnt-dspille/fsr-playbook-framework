@@ -2,7 +2,7 @@
 
 The build model, asked to author a connector-action playbook (call a connector
 op, map its output onward into a record), failed 3/3 on 206 for two independent
-reasons — both fixed here:
+reasons -- both fixed here:
 
   * **params dropped.** It emitted `connector:`/`operation:`/`params:` at the
     step top level (siblings of `type:`) instead of under `arguments:`. The
@@ -11,8 +11,8 @@ reasons — both fixed here:
     (parser.py: `_STEP_KEYS_BY_TYPE['connector']` + the hoist loop.)
 
   * **`.data` envelope missing.** It referenced the op output as
-    `vars.steps.<step>.<field>`, but a connector result is an ENVELOPE —
-    `{data: <op output>, status, message, operation}` — so the field lives at
+    `vars.steps.<step>.<field>`, but a connector result is an ENVELOPE --
+    `{data: <op output>, status, message, operation}` -- so the field lives at
     `vars.steps.<step>.data.<field>`. The validator's `_step_output_top_keys`
     returned the op's `output_schema` keys as the *top-level* keys, which flagged
     the CORRECT `.data.<field>` path and blessed the broken bare one.
@@ -93,7 +93,7 @@ playbooks:
 
 
 def test_top_level_params_are_hoisted_not_dropped():
-    """The all-top-level shape the box model emits must compile — `params` is
+    """The all-top-level shape the box model emits must compile -- `params` is
     collected as a step-level arg alongside `connector`/`operation`, so the
     required param is present and no `missing_field` error fires."""
     errs = _errs(_ALL_TOP_LEVEL)
@@ -102,7 +102,7 @@ def test_top_level_params_are_hoisted_not_dropped():
 
 
 def test_correct_data_path_is_not_flagged():
-    """`vars.steps.<name>.data.<field>` is the real runtime path — it must NOT
+    """`vars.steps.<name>.data.<field>` is the real runtime path -- it must NOT
     draw an 'output keys' warning (the bug flagged exactly this correct path)."""
     warns = _warns(_errs(_nested("{{ vars.steps.Convert.data.minutes }}")))
     offenders = [e.message for e in warns
@@ -113,7 +113,7 @@ def test_correct_data_path_is_not_flagged():
 def test_bare_field_path_is_auto_fixed_to_the_envelope():
     """`vars.steps.<name>.<field>` (no `.data`) is the broken path the model
     used. Lever A now REWRITES it to `.data.<field>` (warn-and-fix) rather than
-    only warning — so the author is not merely steered, the pushed playbook is
+    only warning -- so the author is not merely steered, the pushed playbook is
     correct. Assert the fix notice is emitted (and no stale 'output keys' warn,
     since the ref is corrected before validate() runs)."""
     warns = _warns(_errs(_nested("{{ vars.steps.Convert.minutes }}")))
@@ -124,7 +124,7 @@ def test_bare_field_path_is_auto_fixed_to_the_envelope():
 
 
 # ── Lever A: compile-time output-path auto-correct ──────────────────────────
-# The grounding fix alone moved the S3 eval only 0→1/3 — the box model still
+# The grounding fix alone moved the S3 eval only 0→1/3 -- the box model still
 # wrote `.result` / `.outputs.result` / bare `.<field>`. This deterministic
 # compile-time repair rewrites them to `.data.<field>` when unambiguous, so the
 # pushed playbook works regardless of which output-path spelling the model
@@ -192,10 +192,10 @@ def test_envelope_status_key_is_left_untouched():
 
 
 # --------------------------------------------------------------------------
-# Missing `vars.` prefix — the third broken form, and the one that was SILENT.
+# Missing `vars.` prefix -- the third broken form, and the one that was SILENT.
 #
 # `{{ steps.Convert_Time.result }}` was observed in a live S3 run. FSR exposes
-# step output only under `vars`, so a bare `steps.` renders EMPTY at runtime —
+# step output only under `vars`, so a bare `steps.` renders EMPTY at runtime --
 # the same silent-blank failure as a dropped `.data`.
 #
 # It was invisible to every existing check because the whole reference lint
@@ -226,7 +226,7 @@ def test_bare_steps_prefix_warns():
 
 def test_bare_steps_prefix_for_unknown_step_is_left_alone():
     """Only a REAL connector step is repaired. An unresolvable name is left for
-    the reference lint's hard error — silently inventing a `vars.` prefix for a
+    the reference lint's hard error -- silently inventing a `vars.` prefix for a
     step that does not exist would turn a caught error into a runtime blank."""
     blob = _emit("{{ steps.Unknown_Step.result }}")
     assert "vars.steps.Unknown_Step" not in blob

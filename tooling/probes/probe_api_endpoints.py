@@ -1,7 +1,7 @@
-"""probe_api_endpoints — populate api_endpoints / api_endpoint_params.
+"""probe_api_endpoints -- populate api_endpoints / api_endpoint_params.
 
 Live source (preferred):
-    GET /api/3/  — Hydra root. API Platform returns a hydra:Collection whose
+    GET /api/3/  -- Hydra root. API Platform returns a hydra:Collection whose
     members enumerate every exposed `/api/3/{plural}` collection (and member
     URI templates for the per-record routes). Every entry becomes a row with
     method=live_api_get, status=tested_pass.
@@ -124,13 +124,13 @@ def _live_hydra(conn: sqlite3.Connection) -> tuple[int, list[str]]:
         try:
             # pyfsr's client.get() prepends base_url.
             root = client.get("/api/3/")
-        except Exception as e:  # noqa: BLE001 — capture for the audit row
+        except Exception as e:  # noqa: BLE001 -- capture for the audit row
             return 0, [f"GET /api/3/ failed: {e!r}"]
 
     # API Platform Hydra root is a hydra:Documentation-ish object; the simplest
     # signal of "this collection exists" is that the root response itself maps
     # collection slugs to URIs. Different FSR versions return slightly
-    # different shapes — handle the two we've seen, fall back to scanning for
+    # different shapes -- handle the two we've seen, fall back to scanning for
     # "@id" strings starting with "/api/3/".
     seen_collections: set[str] = set()
     if isinstance(root, dict):
@@ -197,7 +197,7 @@ def _live_hydra(conn: sqlite3.Connection) -> tuple[int, list[str]]:
         http_method="GET",
         service="php",
         source="hydra_root",
-        summary="Hydra root — enumerates exposed /api/3/{plural} collections.",
+        summary="Hydra root -- enumerates exposed /api/3/{plural} collections.",
         response_kind="hydra_collection",
     )
     conn.execute(
@@ -317,7 +317,7 @@ def main() -> int:
         # refreshed 200) so a fresh/unchanged outcome keeps existing rows.
         if not _env.is_conditional_enabled():
             wipe_probe_tables(conn, PROBE_NAME)
-            # Also wipe our verification rows for these kinds — re-derive from scratch.
+            # Also wipe our verification rows for these kinds -- re-derive from scratch.
             conn.execute(
                 "DELETE FROM verifications WHERE kind IN ('api_endpoint', 'api_endpoint_param')"
             )

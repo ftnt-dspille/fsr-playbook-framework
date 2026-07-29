@@ -1,7 +1,7 @@
 """find_jinja_filter must never return a bare [] (AGENT_HARDENING_PLAN §H).
 
-On a corpus miss it falls back to the authoritative name catalog — the same
-jinja2∪FSR∪Ansible set ``validate_yaml`` checks against (§G) — so discovery
+On a corpus miss it falls back to the authoritative name catalog -- the same
+jinja2∪FSR∪Ansible set ``validate_yaml`` checks against (§G) -- so discovery
 and validation can no longer disagree about whether a filter exists.
 """
 from fsr_playbooks.mcp_server.tools_jinja import _catalog_fallback

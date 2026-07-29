@@ -126,7 +126,7 @@ All errors use the `CompileError` accumulation model (warnings, not blocking):
 | Unknown field | `BAD_VALUE` | warning | "field 'serverity' does not exist on module 'alerts'" |
 | Invalid picklist value | `BAD_VALUE` | warning | "value 'Bad' is not in picklist 'Severity'" |
 | Type mismatch | `BAD_VALUE` | warning | "field 'ackDate' is type integer; value 'abc' is not valid" |
-| Empty catalog | (no error) | — | Silently passes (catalog may not be warmed) |
+| Empty catalog | (no error) | -- | Silently passes (catalog may not be warmed) |
 
 ## Catalog Dependencies
 

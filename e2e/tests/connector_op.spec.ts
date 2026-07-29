@@ -1,5 +1,5 @@
 /**
- * Connector-op authoring E2E — proves a user can wire a connector
+ * Connector-op authoring E2E -- proves a user can wire a connector
  * step's params via the dynamic-value helper, and the wiring round-
  * trips through autosave to the backend's draft store. Connector
  * params have a different inspector layout than set_variable rows,
@@ -63,7 +63,7 @@ test('connector op: wire dynamic value into params, autosave persists', async ({
   const pane = page.getByRole('dialog', { name: /variable tree pane/i });
   await expect(pane).toBeVisible();
 
-  // records[0] auto-expands once the trigger sample loads — pick
+  // records[0] auto-expands once the trigger sample loads -- pick
   // sourceIp directly via the leaf's insert-template title.
   await expect(pane.getByRole('button', { name: 'records[0]' })).toBeVisible();
   await pane.locator('button[title="Insert {{ vars.input.records[0].sourceIp }}"]').click();
@@ -76,7 +76,7 @@ test('connector op: wire dynamic value into params, autosave persists', async ({
   await pane.getByRole('button', { name: /close variable pane/i }).click();
   await expect(pane).toBeHidden();
 
-  // Reload — the wiring must survive a fresh page load (autosave already
+  // Reload -- the wiring must survive a fresh page load (autosave already
   // persisted; this asserts it actually re-hydrates correctly).
   await page.reload();
   await expect(page.getByText('Lookup IP', { exact: true })).toBeVisible({ timeout: 15_000 });

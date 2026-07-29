@@ -1,10 +1,10 @@
-# RECIPE TEMPLATE — Threat Intel Feed Ingestion
+# RECIPE TEMPLATE -- Threat Intel Feed Ingestion
 #
 # Pattern: Start → Configuration → Connector fetch → Set Variables (jinja
 # map) → Decision (any data?) → IngestBulkFeed | Raise Exception.
 #
 # Target module: threat_intel_feeds (the threat-feed module).
-# Bulk + trigger bypass is INTENTIONAL for feeds — per-indicator on-create
+# Bulk + trigger bypass is INTENTIONAL for feeds -- per-indicator on-create
 # playbooks would melt the system at feed volumes.
 #
 # Replace every TODO comment with the real value for your feed source.
@@ -13,7 +13,7 @@
 # Tags applied (recipe lints these): dataingestion, fetch, create,
 # <connector_api_name>. Adjust <connector_api_name> below.
 
-collection: "Recipe — TODO Connector > Fetch and Create"
+collection: "Recipe -- TODO Connector > Fetch and Create"
 description: Threat intel feed ingestion recipe (IngestBulkFeed pattern).
 visible: true
 
@@ -33,7 +33,7 @@ playbooks:
         next: Fetch indicators
         comment: |
           TODO replace picklist maps and feed-name. Picklist UUIDs MUST be
-          resolved live against the configured FSR — do not hand-paste
+          resolved live against the configured FSR -- do not hand-paste
           UUIDs from another instance, they will not match.
         vars:
           feed_source_name: "TODO replace with your feed display name"
@@ -59,7 +59,7 @@ playbooks:
           uses `cyops_utilities.get_picklist` as a structurally-valid
           placeholder so the recipe compiles and round-trips out of the
           box; it does NOT fetch a feed. Recipe rule: target connector
-          must already be installed on the configured FSR — verify with
+          must already be installed on the configured FSR -- verify with
           `fsrpb health <connector>` before running.
         connector: cyops_utilities
         operation: get_macro_list
@@ -71,7 +71,7 @@ playbooks:
         #
         # MOCK MODE: when the target connector isn't installed yet, you
         # can still validate the rest of this recipe's plumbing by
-        # filling in `mock_result` (a JSON STRING — yes, stringified)
+        # filling in `mock_result` (a JSON STRING -- yes, stringified)
         # with a representative feed-fetch payload, then triggering
         # with `fsrpb run-playbook --mock`. The runtime returns this
         # string in place of executing the connector op, while every
@@ -106,7 +106,7 @@ playbooks:
       - name: Any data
         type: decision
         comment: |
-          Error gateway — if the fetch produced nothing, raise so the
+          Error gateway -- if the fetch produced nothing, raise so the
           run is visibly red instead of silently no-op'ing.
         conditions:
           - display: "yes"
@@ -127,7 +127,7 @@ playbooks:
       - name: Ingest indicators
         type: ingest_bulk_feed
         comment: |
-          IngestBulkFeed — POSTs to /api/ingest-feeds/threat_intel_feeds.
+          IngestBulkFeed -- POSTs to /api/ingest-feeds/threat_intel_feeds.
           `__bulk: true` is intentional: per-indicator on-create playbooks
           must NOT fire for feed volumes. Adjust batch_size to match your
           feed's typical pull size (1000 is a safe default; up to ~8000

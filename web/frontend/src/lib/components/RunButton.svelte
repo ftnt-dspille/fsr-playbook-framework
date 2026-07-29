@@ -13,7 +13,7 @@
   const HK_PUSH = fmtHotkey(['Mod', 'Enter']);
 
   // We portal the open menu into <body> so its `position:fixed` children
-  // stack at the document root — otherwise an ancestor flex / overflow /
+  // stack at the document root -- otherwise an ancestor flex / overflow /
   // transform context can paint over the top of the menu (the inactive-
   // playbook banner lives inside the same `<main class=relative>`).
   let portalHost = $state<HTMLDivElement | null>(null);
@@ -52,16 +52,16 @@
     if (v === 'push') await playbookActions.push();
     else if (v === 'push_and_run' || v === 'live') await playbookActions.pushAndRun();
     else if (v === 'mock') {
-      // Mock-run isn't wired through playbookActions yet — surface a
+      // Mock-run isn't wired through playbookActions yet -- surface a
       // status message so the button isn't a no-op.
-      playbookActions.state.status = { kind: 'idle', msg: 'Mock run — not yet implemented' };
+      playbookActions.state.status = { kind: 'idle', msg: 'Mock run -- not yet implemented' };
     }
   }
 
   let primaryLabel = $derived(VARIANTS.find((v) => v.id === lastVariant)?.label ?? 'Run');
 
   // Anchor the menu with `fixed` coords computed from the caret button's
-  // bounding rect — escapes any `overflow-hidden` ancestor (the editor
+  // bounding rect -- escapes any `overflow-hidden` ancestor (the editor
   // toolbar / build bar both clip absolute children).
   let caretBtn = $state<HTMLButtonElement | null>(null);
   let menuTop = $state(0);

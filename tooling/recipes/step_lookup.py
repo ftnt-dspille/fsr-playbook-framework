@@ -78,7 +78,7 @@ def _score(recipe: StepRecipe, intent: str, connector: str | None) -> float:
     if not intent_l and not connector:
         return 0.0
     score = 0.0
-    # Connector match is a strong filter — when the user names a connector
+    # Connector match is a strong filter -- when the user names a connector
     # and the recipe binds to one, require an exact match (or skip).
     if connector and recipe.connector:
         if recipe.connector.lower() == connector.lower():

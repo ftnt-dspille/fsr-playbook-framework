@@ -1,5 +1,5 @@
 # create_record demo. The playbook itself creates an alert (rather than
-# the test sidecar's setup) — exercises the InsertData step type.
+# the test sidecar's setup) -- exercises the InsertData step type.
 #
 # Cleanup: the playbook tags the new alert's `description` with a known
 # fsrpb_e2e_create marker; the .test.yaml's cleanup_query then deletes

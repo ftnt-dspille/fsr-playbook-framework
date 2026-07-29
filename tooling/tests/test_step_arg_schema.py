@@ -1,4 +1,4 @@
-"""JSON Schema emission from typed step-arg models — G9.4.
+"""JSON Schema emission from typed step-arg models -- G9.4.
 
 Covers ``compiler/typed_args/schema.py``: modeled types emit a valid object
 schema exposing their fields; unmodeled types return ``None`` (not an empty

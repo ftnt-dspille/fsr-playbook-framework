@@ -27,4 +27,4 @@ pnpm install
 pnpm dev          # http://localhost:47822, proxies /api → :47821
 ```
 
-Health check: open `http://localhost:47822` — the header pill should go green when both processes are up.
+Health check: open `http://localhost:47822` -- the header pill should go green when both processes are up.

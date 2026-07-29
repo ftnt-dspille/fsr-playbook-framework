@@ -1,13 +1,13 @@
 # Releasing fsr_playbooks
 
 The published version comes **entirely from the git tag** (hatch-vcs). There is
-no version string to bump in any file — the old `fsr_playbooks/__init__.py`
+no version string to bump in any file -- the old `fsr_playbooks/__init__.py`
 `__version__ = "..."` and `packaging/.../pyproject.toml` version literals are
 gone. Tag, push, release. That's it.
 
 ## Cut a release
 
-**Standard path — one command:**
+**Standard path -- one command:**
 
 ```sh
 make release VERSION=0.4.23 NOTES="what changed"
@@ -16,16 +16,16 @@ make release VERSION=0.4.23 NOTES="what changed"
 `scripts/release.sh` guards the steps that drifted in the past: it refuses to run
 off `main` or with a dirty tree, refuses a `VERSION` that isn't strictly greater
 than PyPI's latest (PyPI rejects re-uploads), refuses an existing tag, runs the
-fast tests, then tags `vX.Y.Z`, pushes `main`+tag, and cuts the GitHub Release —
+fast tests, then tags `vX.Y.Z`, pushes `main`+tag, and cuts the GitHub Release --
 which triggers the `Publish to PyPI` workflow (`.github/workflows/publish.yml`,
-Trusted Publishing / OIDC — no stored token).
+Trusted Publishing / OIDC -- no stored token).
 
-> **Why a command, not manual steps:** the release once drifted — `v0.4.21` was
+> **Why a command, not manual steps:** the release once drifted -- `v0.4.21` was
 > tagged locally but never turned into a GitHub Release, so PyPI stalled at
 > `0.4.20` while the connector kept importing symbols only present in later
 > source. The connector's own build (`scripts/build.sh` →
 > `scripts/preflight_framework.py`) now hard-fails if its pinned `fsr-playbooks`
-> version doesn't provide the symbols it imports — so **publish the framework
+> version doesn't provide the symbols it imports -- so **publish the framework
 > first, then bump the connector pin.**
 
 Manual fallback (if `gh`/tooling is unavailable):
@@ -47,7 +47,7 @@ Publish**.
 
 PyPI rejects re-uploading an existing version, and the project's history drifted
 once (versions `0.4.9` and `0.4.10` were published from the old hardcoded
-`__version__` **without** matching git tags — tags stopped at `v0.4.8`). So the
+`__version__` **without** matching git tags -- tags stopped at `v0.4.8`). So the
 next tag must clear what's already on PyPI:
 
 > **The first hatch-vcs release must be `v0.4.11` or higher** (PyPI's latest is
@@ -65,7 +65,7 @@ but the source tree is at the repo root (`../../fsr_playbooks`), because the roo
   `exclude`, which is how `fsr_playbooks/tests/` is kept out of the wheel).
 - **If you add a new top-level module or subpackage under `fsr_playbooks/`, add
   it to that force-include manifest**, or it won't ship.
-  `fsr_playbooks/tests/test_packaging_manifest_complete.py` guards this — it fails
+  `fsr_playbooks/tests/test_packaging_manifest_complete.py` guards this -- it fails
   if the manifest drifts from the real tree.
 - We ship **wheels only**; the `..` source layout cannot produce a correct sdist.
 
@@ -75,7 +75,7 @@ but the source tree is at the repo root (`../../fsr_playbooks`), because the roo
   from installed dist metadata (`importlib.metadata`), which is frozen at install
   time:
   - If a `fsr_playbooks` dist is installed (`pip install -e packaging/fsr_playbooks`
-    or the published wheel), it reports that build's version — and an editable
+    or the published wheel), it reports that build's version -- and an editable
     install can read **stale** until you reinstall.
   - If only the root `fsrpb` dist is installed and no `fsr_playbooks` dist, or the
     tree is a raw checkout with nothing installed, it falls back to

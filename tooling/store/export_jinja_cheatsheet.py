@@ -1,4 +1,4 @@
-"""Generate `store/FSR_CUSTOM_JINJA.md` — agent-facing cheatsheet for the
+"""Generate `store/FSR_CUSTOM_JINJA.md` -- agent-facing cheatsheet for the
 filters / globals / tests that ship with FortiSOAR's workflow engine and
 aren't in stock Jinja2 or Ansible.
 
@@ -56,7 +56,7 @@ def _params_lines(params_json: str | None) -> list[str]:
         if p.get("description"):
             bits.append(p["description"])
         if bits:
-            line += " — " + ", ".join(bits)
+            line += " -- " + ", ".join(bits)
         out.append(line)
     return out
 
@@ -142,7 +142,7 @@ def build_cheatsheet(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path
     parts.append("")
     parts.append("**These filters / globals / tests are FortiSOAR-specific** "
                  "(modules `workflow.*` or `sealab.*`). They are *not* in stock Jinja2 "
-                 "or Ansible. Reach for these first when writing FSR playbook Jinja — "
+                 "or Ansible. Reach for these first when writing FSR playbook Jinja -- "
                  "they shortcut a lot of common date / IOC / connector-config patterns.")
     parts.append("")
     parts.append("For the full 170-filter / 15-global / 39-test catalog, query "
@@ -155,19 +155,19 @@ def build_cheatsheet(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path
     parts.append("```")
     parts.append("")
 
-    parts.append(f"## Globals — invoked as `name(args)`, no pipe ({len(globals_)})")
+    parts.append(f"## Globals -- invoked as `name(args)`, no pipe ({len(globals_)})")
     parts.append("")
     parts.append("Globals are callables in scope inside any `{{ ... }}`. They are *not* "
-                 "piped — call them directly.")
+                 "piped -- call them directly.")
     parts.append("")
     parts.extend(_section(globals_, invocation_template="{{{{ {name}(...) }}}}"))
 
-    parts.append(f"## Filters — invoked as `value | name(args)` ({len(filters)})")
+    parts.append(f"## Filters -- invoked as `value | name(args)` ({len(filters)})")
     parts.append("")
     parts.extend(_section(filters, invocation_template="{{{{ value | {name} }}}}"))
 
     if tests:
-        parts.append(f"## Tests — invoked as `value is name(args)` ({len(tests)})")
+        parts.append(f"## Tests -- invoked as `value is name(args)` ({len(tests)})")
         parts.append("")
         parts.extend(_section(tests, invocation_template="{{% if value is {name} %}}"))
 

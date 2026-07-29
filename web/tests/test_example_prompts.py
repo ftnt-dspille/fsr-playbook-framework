@@ -16,7 +16,7 @@ def test_returns_at_least_the_three_seed_tasks():
     assert isinstance(body, list)
     names = {p["name"] for p in body}
     # The original three tasks plus the Phase-3A expansion (15 total)
-    # — assert the seed three are always present so the picker keeps
+    # -- assert the seed three are always present so the picker keeps
     # working even if someone reorders / renumbers files.
     for must_have in ("hello_connector", "decision_branch",
                       "alert_action_var_chain"):

@@ -8,7 +8,7 @@
    *   ends so dragging an endpoint to a different node is discoverable.
    *   Default xyflow edges have no visible reconnect handles.
    * - Picks bezier vs smoothstep path based on direction (LR uses
-   *   smoothstep, TB uses bezier — matches the canvas's per-direction
+   *   smoothstep, TB uses bezier -- matches the canvas's per-direction
    *   `type` hint we used to pass at the edge level).
    */
   import {
@@ -26,7 +26,7 @@
   // xyflow flips `selected` on the EdgeProps when the user clicks the
   // edge. We use it to gate every interactive overlay (delete × +
   // reconnect anchors) since EdgeReconnectAnchor is portaled OUT of
-  // `.svelte-flow__edge` — descendant CSS gates don't reach it.
+  // `.svelte-flow__edge` -- descendant CSS gates don't reach it.
   let isSelected = $derived(!!(props as any).selected);
 
   function deleteEdge() {
@@ -41,7 +41,7 @@
   // Bezier curves naturally between any pair of handle positions, so it
   // looks clean in both TB and LR layouts and when the user has dragged
   // nodes off the auto-layout grid. Smoothstep only beats it when the
-  // source/target are perfectly orthogonal — which is rarely the case
+  // source/target are perfectly orthogonal -- which is rarely the case
   // after a few hand-edits.
   let pathInfo = $derived(
     getBezierPath({
@@ -79,7 +79,7 @@
 
 {#if isSelected}
   <!--
-    Mid-edge delete button — visible only when the edge is selected.
+    Mid-edge delete button -- visible only when the edge is selected.
     Saves a trip to the right-click context menu for the most common
     edit (drop a connection).
   -->
@@ -96,7 +96,7 @@
   <!--
     Reconnect handles at source + target endpoints. xyflow portals
     these out of the .svelte-flow__edge element, so descendant CSS
-    can't gate them — we conditionally render instead.
+    can't gate them -- we conditionally render instead.
   -->
   <EdgeReconnectAnchor
     type="source"
@@ -134,7 +134,7 @@
     cursor: grabbing;
   }
   :global(.fsrpb-edge-anchor--target) {
-    background: #f59e0b;            /* amber-500 — matches branch arrow */
+    background: #f59e0b;            /* amber-500 -- matches branch arrow */
   }
 
   /* Mid-edge × delete button. Same selection-only conditional render. */

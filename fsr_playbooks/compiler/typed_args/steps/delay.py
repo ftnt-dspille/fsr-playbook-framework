@@ -17,7 +17,7 @@ byte-for-byte for valid input (same delay-dict key order, same defaults, same
 
 The unknown-key strict-whitelist guard stays in the resolver
 (`_check_unknown_keys`, whose message is contract-tested) and runs *before* this
-walk — mirroring how `set_variable` keeps its parser handoff in the resolver.
+walk -- mirroring how `set_variable` keeps its parser handoff in the resolver.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class DelayArgs(StrictArgs):
     The four duration fields are optional ints (pydantic coerces `5` / `"5"`).
     `extra="allow"` because canonical/sibling keys (`type`, `step_variables`,
     `mock_result`, `condition`, `timeout`, an already-built `rule`/`delay`)
-    ride through to the wire shape untouched — the resolver's
+    ride through to the wire shape untouched -- the resolver's
     `_check_unknown_keys` has already rejected anything genuinely unknown.
     """
 
@@ -57,7 +57,7 @@ def expand_delay(
     """Expand friendly duration args into the canonical TimeBased rule shape.
 
     Returns the canonical dict, or ``None`` to leave `step.arguments` unchanged
-    — when the input is not a dict, is already canonical (`rule` + `delay`
+    -- when the input is not a dict, is already canonical (`rule` + `delay`
     present), or a duration value fails int validation (a `BAD_VALUE` is
     appended and the step is left for the author to fix).
     """
@@ -69,7 +69,7 @@ def expand_delay(
         return None
     # Author wrote the canonical nested `delay: {days,hours,minutes,seconds}`
     # but omitted the `rule`. Don't re-derive from (absent) friendly top-level
-    # keys — that would zero the durations. Preserve them and just fill the
+    # keys -- that would zero the durations. Preserve them and just fill the
     # event-resume rule + type defaults.
     if isinstance(args.get("delay"), dict):
         a = dict(args)

@@ -1,4 +1,4 @@
-"""mcp_server.step_through_playbook — simulator extensions for the
+"""mcp_server.step_through_playbook -- simulator extensions for the
 render-path validator (RENDER_PATH_VALIDATOR_PLAN.md Phase 1).
 
 Each test pins one provenance / step-type behavior so future drift on
@@ -387,7 +387,7 @@ def test_for_each_sequential_emits_list_of_per_iteration_dicts():
 def test_for_each_break_loop_includes_breaking_iteration():
     """Real-FSR semantics: break_loop runs AFTER the iteration's
     body, so [1,2,3,4,5] with break on item==3 produces 3 entries
-    not 2 — matches the captured probe fixture."""
+    not 2 -- matches the captured probe fixture."""
     yaml = textwrap.dedent("""\
         playbooks:
           - name: P
@@ -553,7 +553,7 @@ def test_unsafe_connector_op_returns_simulated_placeholder():
 # ---- Phase 1.5: when / do_until --------------------------------------
 
 def test_when_falsy_skips_step():
-    """A step with ``when: "false"`` should be skipped — output is
+    """A step with ``when: "false"`` should be skipped -- output is
     empty and downstream sees nothing."""
     yaml = textwrap.dedent("""\
         playbooks:

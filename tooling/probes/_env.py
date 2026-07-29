@@ -1,6 +1,6 @@
 """Load `.env` and build a ready-to-use pyfsr client.
 
-Probes call `get_client()` — they don't parse env vars themselves. Returns
+Probes call `get_client()` -- they don't parse env vars themselves. Returns
 None when the env is incomplete (no base URL or no auth), so each probe can
 fall back to local-only mode and stamp `seen` rows.
 """
@@ -72,7 +72,7 @@ class EnvConfig:
             return False
         return bool(self.api_key) or bool(self.username and self.password)
 
-    def auth(self):  # tuple | str | None — matches pyfsr's FortiSOAR(auth=...) shape
+    def auth(self):  # tuple | str | None -- matches pyfsr's FortiSOAR(auth=...) shape
         if self.api_key:
             return self.api_key
         if self.username and self.password:

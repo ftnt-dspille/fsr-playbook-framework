@@ -5,7 +5,7 @@ effective filter set is ``jinja2 builtins ∪ the Ansible filter namespace ∪
 FSR-custom``. The widget-derived catalog (``extract_jinja_filters.js``) only
 covers the palette the Jinja-editor widget lists, which omits most of the
 Ansible set (``json_query``, ``ternary``, ``to_json``, ``combine``, ``zip``…)
-— the §G false-positive source in AGENT_HARDENING_PLAN.md.
+-- the §G false-positive source in AGENT_HARDENING_PLAN.md.
 
 Run under an env that has the full ``ansible`` bundle (ansible-core +
 community collections), e.g.:
@@ -26,7 +26,7 @@ import sys
 
 # Collections plausibly present on an FSR box's Ansible engine. Random
 # vendor collections (ovirt, netapp, …) come with the full `ansible` bundle
-# in the dump env but are NOT on the appliance — including them would trade
+# in the dump env but are NOT on the appliance -- including them would trade
 # false positives for false negatives.
 _COLLECTIONS = ("ansible.builtin", "community.general")
 

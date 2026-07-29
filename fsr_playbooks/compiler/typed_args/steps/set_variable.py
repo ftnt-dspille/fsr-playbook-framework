@@ -32,7 +32,7 @@ from .._bridge import validate_args
 class ArgListEntry(StrictArgs):
     """One `{name, value}` assignment from the parser's `vars:` conversion.
 
-    `extra="allow"` because only `name`/`value` are consumed — any stray key
+    `extra="allow"` because only `name`/`value` are consumed -- any stray key
     on an entry is ignored, matching the imperative normalizer (which read
     `item["name"]` / `item.get("value", "")` and dropped the rest). `name`
     and `value` are `Any`: a YAML mapping key can be non-string, and the
@@ -50,8 +50,8 @@ class SetVariableArgs(StrictArgs):
 
     `arg_list` is the parser handoff; every other key is a sibling that
     survives into the flat wire dict (e.g. `step_variables`, `mock_result`,
-    `condition`). `extra="allow"` because variable names — and those
-    siblings — are arbitrary author-chosen keys.
+    `condition`). `extra="allow"` because variable names -- and those
+    siblings -- are arbitrary author-chosen keys.
     """
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
@@ -67,14 +67,14 @@ def expand_set_variable(
     Drop-in replacement for the imperative unwrap in
     `_normalize_set_variable_args`: returns the flat `{**vars, **siblings}`
     dict on success, or ``None`` to signal "leave step.arguments unchanged"
-    — exactly when the legacy code took its early `return` (no `arg_list`,
+    -- exactly when the legacy code took its early `return` (no `arg_list`,
     a non-list `arg_list`, or a malformed entry). Sibling keys win over a
     same-named variable, matching the legacy `{**unwrapped, **siblings}`.
     """
     if not isinstance(args, dict) or not isinstance(args.get("arg_list"), list):
         return None
     apath = f"{path}.arguments"
-    # Per-entry guard — preserved byte-for-byte (message + path + the
+    # Per-entry guard -- preserved byte-for-byte (message + path + the
     # leave-unchanged early-return). Defensive: the parser only ever builds
     # well-formed `{name, value}` entries, but decompile/pull paths can hand
     # us a raw IR, so keep the check.

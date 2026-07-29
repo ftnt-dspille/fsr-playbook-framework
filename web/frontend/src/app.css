@@ -3,9 +3,9 @@
 /* ---------------------------------------------------------------------------
  * Theme tokens
  * Three palettes are switchable via `data-theme` on <html>:
- *   forest  — current default (zinc canvas, teal brand, amber accent)
- *   cobalt  — navy canvas, electric-blue brand, lime status
- *   light   — bone canvas, dark text, teal brand
+ *   forest  -- current default (zinc canvas, teal brand, amber accent)
+ *   cobalt  -- navy canvas, electric-blue brand, lime status
+ *   light   -- bone canvas, dark text, teal brand
  *
  * Components consume the variables (--bg-canvas, --text-default, --brand,
  * etc.) so flipping data-theme updates the chrome without rebuilding any
@@ -26,7 +26,7 @@
   --color-accent-amber: #fbbf24;
 }
 
-/* Default (forest dark) — matches the previous palette so unswitched
+/* Default (forest dark) -- matches the previous palette so unswitched
    sessions look identical to before. */
 :root,
 :root[data-theme='forest'] {

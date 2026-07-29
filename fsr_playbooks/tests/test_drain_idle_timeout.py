@@ -1,4 +1,4 @@
-"""§2.2 — `drain_with_idle_timeout`: the shared live-streaming scaffolding.
+"""§2.2 -- `drain_with_idle_timeout`: the shared live-streaming scaffolding.
 
 Each provider's `stream()` pumps SDK deltas through this helper so text
 reaches the connector's chat_poll feed AS IT ARRIVES (not buffered to turn
@@ -32,7 +32,7 @@ def test_passthrough_in_order():
 
 def test_yields_live_before_producer_finishes():
     """A consumer must see an early item before the producer has emitted its
-    last — i.e. items are surfaced as produced, not collected then replayed."""
+    last -- i.e. items are surfaced as produced, not collected then replayed."""
     seen_first = asyncio.Event()
 
     async def _pump():

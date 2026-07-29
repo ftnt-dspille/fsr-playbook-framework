@@ -1,4 +1,4 @@
-"""F4 — re-pull stock playbooks from a live box and reproduce the compile failures.
+"""F4 -- re-pull stock playbooks from a live box and reproduce the compile failures.
 
 The original 10-playbook corpus was never saved (only the 5 clean ones became
 synthesized fixtures), so the offending YAML no longer exists locally. Widening
@@ -31,7 +31,7 @@ DB = default_db_path()
 # The local reference DB holds a fraction of the box's connectors, so
 # "unknown connector: 'x'" is a LOCAL GAP, not a compiler-strictness bug. F4 is
 # about the other classes (set_variable key allowlists, parameter shadowing),
-# which are connector-independent — so bucket the noise out rather than letting
+# which are connector-independent -- so bucket the noise out rather than letting
 # it drown the signal.
 def is_db_gap(msg: str) -> bool:
     return ("unknown connector" in msg
@@ -65,7 +65,7 @@ for wf in rows:
     name = wf.get("name") or wf.get("uuid")
     try:
         # decompile() takes a WorkflowCollection export envelope, not a bare
-        # workflow row — wrap each playbook as a one-workflow collection.
+        # workflow row -- wrap each playbook as a one-workflow collection.
         env = {"data": [{"name": "F4 pull", "description": "",
                          "visible": True, "workflows": [wf]}]}
         y = decompile_to_yaml(env, DB)
@@ -78,7 +78,7 @@ for wf in rows:
         res = compile_yaml(y, DB)
         # Only severity="error" blocks a compile. The result also carries
         # lint WARNINGS (missing button_label, absent mock_result, picklist
-        # IRIs the local DB cannot resolve) — counting those as failures
+        # IRIs the local DB cannot resolve) -- counting those as failures
         # would inflate "stock content does not compile" with style notes.
         errs = [e for e in (getattr(res, "errors", None) or [])
                 if getattr(e, "severity", "error") == "error"]
@@ -90,7 +90,7 @@ for wf in rows:
         msg = str(e)
         if is_db_gap(msg):
             db_gaps.append(name)
-            classes["(local DB gap — not a compiler bug)"] += 1
+            classes["(local DB gap -- not a compiler bug)"] += 1
             continue
         # Bucket by the shape of the message, not the specific identifier, so
         # the same class over different fields lands together.

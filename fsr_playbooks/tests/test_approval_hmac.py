@@ -1,4 +1,4 @@
-"""Phase 3.1 — HMAC-bound approvals.
+"""Phase 3.1 -- HMAC-bound approvals.
 
 The suspended-session store binds (approval_id, tool, args_hash, created_at)
 under a server secret at stash time. `verify()` recomputes the token at resume
@@ -78,7 +78,7 @@ def test_token_tamper_is_detected():
 
 def test_secret_from_env_is_stable_across_processes(monkeypatch):
     # With a fixed env secret, a token minted "before a restart" still
-    # verifies "after" — the property 3.2 relies on for persistence.
+    # verifies "after" -- the property 3.2 relies on for persistence.
     monkeypatch.setenv(A._SECRET_ENV, "stable-test-secret")
     s = _session()
     A.bind(s)

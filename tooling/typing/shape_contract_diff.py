@@ -6,15 +6,15 @@ The compiler passes each step body around as an untyped ``dict[str, Any]``
 that the key a *producer* stage writes is the key a *consumer* stage reads. The
 F3 bug was exactly this: the resolver emitted to
 ``arguments.input.schema.inputVariables`` while the reference lint read
-``arguments.inputVariables`` — a silent shape disagreement.
+``arguments.inputVariables`` -- a silent shape disagreement.
 
 This script statically extracts, per compiler stage, the set of string keys used
 in arg-dict-style accesses and classifies each as a READ or a WRITE. It then
 reports the dangerous asymmetries:
 
-  * PHANTOM READS  — a key read by a consumer stage but written by no producer
+  * PHANTOM READS  -- a key read by a consumer stage but written by no producer
     stage (the F3 signature: the reader is looking at the wrong key).
-  * DEAD WRITES    — a key written by a producer but read by no other stage
+  * DEAD WRITES    -- a key written by a producer but read by no other stage
     (authored data that never reaches a consumer = a silent drop candidate).
 
 It is a heuristic (string-key/AST, not a type system), so it over-reports; the
@@ -56,16 +56,16 @@ IGNORE_KEYS = {"name", "id", "type", "next", "kind"}
 
 # Phantom reads triaged 2026-06-30 as NOT latent-F3s (TYPING_GAP plan Pass 2
 # triage). Each is safe for one of two reasons the static AST pass can't model:
-#   * fallback-idiom — the consumer reads `a.get("friendly") or a.get("canonical")`,
+#   * fallback-idiom -- the consumer reads `a.get("friendly") or a.get("canonical")`,
 #     so the resolved key is covered even after the resolver renames the friendly
 #     one (typed_walker: module/modules, op/op_name, connector_name, vars).
-#   * passthrough — a native/friendly key authored directly into `arguments` that
+#   * passthrough -- a native/friendly key authored directly into `arguments` that
 #     the emitter faithfully serializes or transforms at emit time; no producer
 #     stage rewrites it, so "written by no stage" is expected, not a drop
 #     (emitter: target/when/mock_result/apply_async).
 # `inputs` is the real F3 and is already fixed (typed_walker reads the nested
 # canonical first); its lone remaining read is a tolerated fallback.
-# A NEW phantom read NOT in this set is what `--check` fails on — that is the
+# A NEW phantom read NOT in this set is what `--check` fails on -- that is the
 # signal that a fresh untyped cross-stage shape disagreement has appeared.
 ACCEPTED_PHANTOM: set[str] = {
     "__recommend",  # wire-internal default read by decompiler (stripped on pull)
@@ -182,11 +182,11 @@ def main() -> int:
         new = sorted(k for k in phantom if k not in ACCEPTED_PHANTOM)
         stale = sorted(ACCEPTED_PHANTOM - set(phantom))
         if new:
-            print("FAIL: new phantom read(s) — a consumer reads an arg key no "
+            print("FAIL: new phantom read(s) -- a consumer reads an arg key no "
                   "producer writes (latent F3). Triage, then add to "
                   "ACCEPTED_PHANTOM if safe:", file=sys.stderr)
             for k in new:
-                print(f"  - {k} — read by: {', '.join(sorted(phantom[k]))}",
+                print(f"  - {k} -- read by: {', '.join(sorted(phantom[k]))}",
                       file=sys.stderr)
             return 1
         if stale:
@@ -219,20 +219,20 @@ def main() -> int:
     out(f"Stages analyzed: {len(role)} "
         f"({len(producers)} producer, {len(consumers)} consumer)\n")
 
-    out("## PHANTOM READS — read by a consumer, written by no stage")
+    out("## PHANTOM READS -- read by a consumer, written by no stage")
     out("_The F3 signature: the reader is looking at a key nothing produces._\n")
     if phantom:
         for k in sorted(phantom):
-            out(f"- `{k}` — read by: {', '.join(sorted(phantom[k]))}")
+            out(f"- `{k}` -- read by: {', '.join(sorted(phantom[k]))}")
     else:
         out("- (none)")
     out("")
 
-    out("## DEAD WRITES — written by a producer, read by no other stage")
+    out("## DEAD WRITES -- written by a producer, read by no other stage")
     out("_Authored data that may never reach a consumer (silent-drop candidate)._\n")
     if dead:
         for k in sorted(dead):
-            out(f"- `{k}` — written by: {', '.join(sorted(dead[k]))}")
+            out(f"- `{k}` -- written by: {', '.join(sorted(dead[k]))}")
     else:
         out("- (none)")
     out("")

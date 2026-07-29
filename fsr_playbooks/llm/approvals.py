@@ -1,8 +1,8 @@
 """Suspended-session store for the HITL approval flow.
 
 When a provider loop hits a tier-3+ tool call, it stashes everything
-needed to resume — history snapshot, system prompt, tools list, tags,
-the pending tool_use id, and the original tool args — under the
+needed to resume -- history snapshot, system prompt, tools list, tags,
+the pending tool_use id, and the original tool args -- under the
 `approval_id` minted by `tools.dispatch`. A subsequent POST to
 `/api/approvals/{approval_id}` resolves the decision: on approve we
 re-dispatch with the internal `_approved=True` sentinel and patch the
@@ -12,7 +12,7 @@ single-use scope, so each entry is consumed (popped) on resolution.
 
 This is in-memory: the chat backend is single-process today. If we
 later run multiple workers, swap the dict for Redis or sqlite-backed
-storage — the public surface (`stash`, `pop`, `peek`) is small enough
+storage -- the public surface (`stash`, `pop`, `peek`) is small enough
 that the migration is mechanical.
 """
 from __future__ import annotations
@@ -60,15 +60,15 @@ _TTL_SECONDS = 600
 # the token no longer matches and resume fails closed.
 #
 # Secret resolution, in order:
-#   1. `FSR_APPROVAL_HMAC_KEY` env var — explicit, deployment-controlled.
+#   1. `FSR_APPROVAL_HMAC_KEY` env var -- explicit, deployment-controlled.
 #   2. A per-host key FILE (default ~/.fsr_approval_hmac_key, 0600), created once
 #      and read by every worker. This is what makes the persisted gateway work
 #      across FortiSOAR's MULTIPLE worker processes: chat_turn stashes a session
 #      on one worker and chat_resume pops it on another, so the token must verify
 #      under a secret ALL workers agree on. A per-process random key cannot do
-#      that — cross-worker resume fails closed with approval_not_found — which is
+#      that -- cross-worker resume fails closed with approval_not_found -- which is
 #      exactly the bug this replaces. The file also survives worker restarts.
-#   3. Per-process random key — last resort, only if the file can't be read or
+#   3. Per-process random key -- last resort, only if the file can't be read or
 #      created (e.g. a read-only FS). Degrades to the old cross-worker behavior
 #      rather than crashing.
 _SECRET_ENV = "FSR_APPROVAL_HMAC_KEY"
@@ -109,7 +109,7 @@ def _persistent_secret() -> bytes:
             finally:
                 os.close(fd)
         except FileExistsError:
-            # Another worker created it first — adopt its key.
+            # Another worker created it first -- adopt its key.
             key = bytes.fromhex(path.read_text().strip())
         _PERSISTENT_SECRET = key
         return key
@@ -233,18 +233,18 @@ class InMemoryApprovalGateway:
 
 
 class SqliteApprovalGateway:
-    """Phase 3.2 — sqlite-backed gateway so suspended HITL sessions survive a
+    """Phase 3.2 -- sqlite-backed gateway so suspended HITL sessions survive a
     worker restart. The web backend installs one at startup via
     `set_default_gateway`; the connector has its own equivalent in
     `storage.py`.
 
     Each op opens a short-lived connection (sqlite handles its own locking),
     so the gateway is cheap to construct and safe across threads. Sessions
-    are pickled — both writer and reader are this same process family, and an
+    are pickled -- both writer and reader are this same process family, and an
     attacker who can write our sqlite file already has code-exec; the HMAC
     binding (3.1) is what guards against *content* tampering. For tokens to
     survive a restart the process must run with a stable
-    `FSR_APPROVAL_HMAC_KEY` (else `verify()` fails closed afterward — safe,
+    `FSR_APPROVAL_HMAC_KEY` (else `verify()` fails closed afterward -- safe,
     the analyst just re-issues)."""
 
     _SCHEMA = (
@@ -270,7 +270,7 @@ class SqliteApprovalGateway:
                   (time.time() - _TTL_SECONDS,))
 
     def stash(self, s: SuspendedSession) -> None:
-        import pickle  # noqa: S403 — round-trips our own dataclass, same process family
+        import pickle  # noqa: S403 -- round-trips our own dataclass, same process family
         blob = pickle.dumps(s, protocol=pickle.HIGHEST_PROTOCOL)
         with self._lock, self._conn() as c:
             self._gc(c)
@@ -288,7 +288,7 @@ class SqliteApprovalGateway:
         ).fetchone()
         if row is None:
             return None
-        s = pickle.loads(row[0])  # noqa: S301 — our own file, see class docstring
+        s = pickle.loads(row[0])  # noqa: S301 -- our own file, see class docstring
         return None if s.expired() else s
 
     def peek(self, approval_id: str) -> SuspendedSession | None:

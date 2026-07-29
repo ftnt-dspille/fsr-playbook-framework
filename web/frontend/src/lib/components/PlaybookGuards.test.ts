@@ -35,7 +35,7 @@ describe('PlaybookGuards', () => {
     });
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('status')).toBeNull();
-    // The wrapper div is also conditional — should be absent.
+    // The wrapper div is also conditional -- should be absent.
     expect(container.querySelector('div.space-y-1')).toBeNull();
   });
 
@@ -70,7 +70,7 @@ describe('PlaybookGuards', () => {
 
   it('treats missing is_active the same as false', () => {
     // Shape the backend produces when the source YAML omits the
-    // key — `is_active` is undefined in the JSON. Default IR value
+    // key -- `is_active` is undefined in the JSON. Default IR value
     // is False, so this should still flag.
     render(PlaybookGuards, {
       props: { playbook: pb([trigger('t1'), nonTrigger('a')]) }
@@ -84,7 +84,7 @@ describe('PlaybookGuards', () => {
   it('does not flag inactive on playbooks without any trigger', () => {
     // A manual collection of utility-only playbooks (e.g. shared
     // "library" playbooks called via workflow_reference) doesn't
-    // need to be active in FSR's sense — flagging them would be noise.
+    // need to be active in FSR's sense -- flagging them would be noise.
     render(PlaybookGuards, {
       props: { playbook: pb([nonTrigger('a'), nonTrigger('b')], { is_active: false }) }
     });

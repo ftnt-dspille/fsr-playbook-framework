@@ -2,7 +2,7 @@
 
 The resolver already rejects a *provided* conditional param whose gate is
 unsatisfied (`_check_param_visibility`). This covers the inverse: a *missing*
-conditional param that the chosen (or defaulted) branch makes required — the
+conditional param that the chosen (or defaulted) branch makes required -- the
 block_ip_new shape (method='Policy Based' → ip_type, ip_block_policy required;
 ip_type='IPv4' → ip required). Warmup writes top-level parent/condition as empty
 strings, so the check must treat '' as "no parent".
@@ -184,7 +184,7 @@ def _consolidated(errs: list[CompileError]) -> CompileError:
     A round emits two kinds of finding: one per offending param ("`ip` is only
     valid when …", which says WHICH param is wrong) and one per gating select
     (the root choice + every feasible set, which says WHAT TO DO). Both are
-    useful and both arrive in the SAME round — the defect being guarded here
+    useful and both arrive in the SAME round -- the defect being guarded here
     was never "more than one message", it was needing more than one TURN.
     """
     hits = [e for e in errs if "feasible sets" in (e.suggestion or "").lower()]
@@ -241,7 +241,7 @@ def test_multi_layer_conflict_reported_in_single_pass():
         {"ip": "1.2.3.4", "ip_type": "IPv4"}
     )
 
-    # The ROOT (method) is named in this same round — the agent never has to
+    # The ROOT (method) is named in this same round -- the agent never has to
     # come back to discover a further layer.
     err = _consolidated(errs)
     assert "method" in err.message.lower()

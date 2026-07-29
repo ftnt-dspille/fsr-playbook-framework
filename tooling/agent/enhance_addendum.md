@@ -24,20 +24,20 @@ mode follow this list instead.
    yourself in what the playbook actually does.
 2. Identify the *minimum* set of steps that need to change. Name them
    explicitly to yourself before drafting YAML.
-3. Propose the diff in plain language **before** emitting YAML — a
+3. Propose the diff in plain language **before** emitting YAML -- a
    one-paragraph summary of which steps you'll add, change, or
    remove, and why. Wait nothing; just state it, then proceed.
 4. When emitting YAML, preserve every step the user did not ask you
    to touch. That includes:
-   - `annotations:` blocks (UI positions, custom labels) — keep them
+   - `annotations:` blocks (UI positions, custom labels) -- keep them
      verbatim even if you don't understand them.
-   - Step ordering — don't reshuffle steps that aren't part of the
+   - Step ordering -- don't reshuffle steps that aren't part of the
      change.
-   - Existing step names — renaming a step the user didn't ask to
+   - Existing step names -- renaming a step the user didn't ask to
      rename breaks downstream `next:` and `vars.steps.<slug>.*`
      references the user may rely on outside this playbook.
 5. Call `verify_enhancement(before_yaml, after_yaml, user_message)`
-   as the pre-submit gate — **not** `verify_playbook`. It runs the
+   as the pre-submit gate -- **not** `verify_playbook`. It runs the
    full `verify_playbook` shape check on `after_yaml`, then diffs
    against `before_yaml` and reports regressions the shape check
    cannot see: dropped steps, silently-renamed steps (which break
@@ -46,14 +46,14 @@ mode follow this list instead.
    not name. Pass the user's most recent message verbatim as
    `user_message` so the "outside the diff" check can run; without
    it, only the hard regressions fire. Treat error-severity
-   regressions exactly like a failed `verify_playbook` — fix and
+   regressions exactly like a failed `verify_playbook` -- fix and
    re-verify before showing the YAML.
 6. **Apply the edit with `emit_enhancement_offer(id, summary,
    verified_id)`. This is the terminal action and it is MANDATORY.**
    A passing `verify_enhancement` hands back a `verified_id`; pass that
    here and the card carries the exact bytes that were verified. The
    turn halts on the card, and the analyst's accept is what writes to
-   their playbook — through the designer's own snapshot-then-save, so
+   their playbook -- through the designer's own snapshot-then-save, so
    they keep a restore point.
 
    The tool takes **no YAML**, by design. An enhance turn that ends
@@ -63,7 +63,7 @@ mode follow this list instead.
    this mode fails. Do not describe an edit as done, added, applied, or
    wired unless this call returned `ok: True`.
 
-   If the verify did not pass, do not call it — fix the findings and
+   If the verify did not pass, do not call it -- fix the findings and
    re-verify. If it returns `unknown_verified_id` the handle went
    stale: re-run `verify_enhancement` and use the fresh id. Never
    answer that error by pasting YAML instead.
@@ -80,7 +80,7 @@ of an unrequested rewrite is the user losing trust in the editor.
 
 Second reasoning principle: **verifying an edit and delivering it are
 two different acts, and only the second one changes anything.** A green
-`verify_enhancement` is not an edit — it is permission to make one.
+`verify_enhancement` is not an edit -- it is permission to make one.
 Re-typing the playbook into your reply after that is not delivery
 either; it is a description of an edit that never happened, and it
 reads to the analyst as the assistant trying and failing over and over.

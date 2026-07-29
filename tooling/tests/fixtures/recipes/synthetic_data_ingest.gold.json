@@ -11,7 +11,7 @@
   "data": [
     {
       "@type": "WorkflowCollection",
-      "description": "Sample data ingestion playbooks for Synthetic Data Ingest. Clone before customizing \u2014 the sample collection is replaced on connector upgrade.",
+      "description": "Sample data ingestion playbooks for Synthetic Data Ingest. Clone before customizing -- the sample collection is replaced on connector upgrade.",
       "name": "Sample - Synthetic Data Ingest Data Ingestion - 1.0.0",
       "recordTags": [
         "synthetic_data_ingest"

@@ -19,14 +19,14 @@ Schema of one line:
       "stop_reason": "tool_use",
       "self_repair_turn": 0,
       "history_chars": 14_280,        # serialised messages[] before this turn
-      "history_est_tokens": 3570,     # chars/4 — rough eyeball
+      "history_est_tokens": 3570,     # chars/4 -- rough eyeball
       "tool_calls": [
         {"name": "validate_yaml", "result_chars": 4096,
          "result_est_tokens": 1024, "args_chars": 320}
       ]
     }
 
-Token estimates use the chars/4 heuristic — fine for spotting which
+Token estimates use the chars/4 heuristic -- fine for spotting which
 tool inflated context, useless for billing. Trust the API's
 `input_tokens` / `output_tokens` for actual cost.
 """
@@ -44,7 +44,7 @@ def default_log_path(override: "str | Path | None" = None) -> Path:
     connector derived from its own configuration) wins; otherwise the Studio
     backend's STUDIO_USAGE_LOG env var; otherwise the repo-root default.
 
-    In-platform connectors can't set process env vars — they pass `override`
+    In-platform connectors can't set process env vars -- they pass `override`
     (see operations._usage_log_path), so the env branch is Studio-only."""
     if override:
         return Path(override).expanduser()
@@ -62,7 +62,7 @@ def est_tokens(chars: int) -> int:
 
 
 def log_turn(record: dict[str, Any], path: "str | Path | None" = None) -> None:
-    """Append one JSON line. Failures are swallowed — telemetry must
+    """Append one JSON line. Failures are swallowed -- telemetry must
     never break the chat path. `path` overrides the default resolution (the
     connector passes a config-derived path; it has no env to read)."""
     try:

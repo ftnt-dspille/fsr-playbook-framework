@@ -1,13 +1,13 @@
 """Audit known params per step type by combining three sources:
 
-1. **Resolver allowlists** — what `compiler/resolver.py` accepts as
+1. **Resolver allowlists** -- what `compiler/resolver.py` accepts as
    friendly + canonical args per step type. Mirrored here so the
    audit tool doesn't have to AST-parse resolver.py. Keep in sync
    when those allowlists change.
-2. **Corpus observations** — `playbook_steps` arguments_json top-level
+2. **Corpus observations** -- `playbook_steps` arguments_json top-level
    key frequencies, grouped by `step_type_name`. Ground truth for
    what real FSR playbooks actually use.
-3. **Mismatches** — keys observed in the corpus but absent from both
+3. **Mismatches** -- keys observed in the corpus but absent from both
    allowlists. These are resolver gaps (the `condition`-on-everything
    discovery from 2026-05-08 was found exactly this way).
 
@@ -38,7 +38,7 @@ TYPE_NAME_TO_RESOLVER: dict[str, str] = {
     "UpdateRecord": "update_record",
     "FindRecords": "find_records",
     "InsertData": "create_record",
-    # No "DeleteRecord" canonical step type exists — delete_record compiles to a
+    # No "DeleteRecord" canonical step type exists -- delete_record compiles to a
     # Connectors step (cyops_utilities DELETE), so pulled deletes map via
     # "Connectors" above.
     "cybersponse.post_create": "start_on_create",
@@ -59,7 +59,7 @@ TYPE_NAME_TO_RESOLVER: dict[str, str] = {
 # Mirrors the `_FRIENDLY` / `_CANONICAL` sets in `compiler/resolver.py`
 # for each normalize function. Source-of-truth comment per entry.
 ALLOWLISTS: dict[str, dict[str, set[str]]] = {
-    # post_create / post_update — _normalize_post_create_update_args
+    # post_create / post_update -- _normalize_post_create_update_args
     # resolver.py:744
     "start_on_create": {
         "friendly":  {"module", "modules", "when", "mock_result", "condition"},
@@ -80,7 +80,7 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "__triggerLimit", "fieldbasedtrigger", "useMockOutput"},
     },
 
-    # api_endpoint — _normalize_api_endpoint_args
+    # api_endpoint -- _normalize_api_endpoint_args
     # (cybersponse.api_call; token-based auth default `[""]`)
     "start_on_api_call": {
         "friendly":  {"route", "authentication_methods", "mock_result",
@@ -89,7 +89,7 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "__triggerLimit", "useMockOutput", "version"},
     },
 
-    # record CRUD — _normalize_record_crud_args  resolver.py:869
+    # record CRUD -- _normalize_record_crud_args  resolver.py:869
     "create_record": {
         "friendly":  {"module", "mock_result", "condition"},
         "canonical": {"collection", "collectionType", "resource",
@@ -108,7 +108,7 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "operation", "fieldOperation", "step_variables",
                       "__bulk", "__recommend", "_showJson", "useMockOutput"},
     },
-    # delete_record — _normalize_delete_record_args. Compiles to a
+    # delete_record -- _normalize_delete_record_args. Compiles to a
     # cyops_utilities.make_cyops_request DELETE call (FSR has no dedicated
     # delete step type), so the canonical keys are the connector ones.
     "delete_record": {
@@ -119,14 +119,14 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "step_variables"},
     },
 
-    # code_snippet — resolver.py:1447
+    # code_snippet -- resolver.py:1447
     "code_snippet": {
         "friendly":  {"code", "python", "config", "mock_result", "condition"},
         "canonical": {"connector", "operation", "operationTitle", "params",
                       "pickFromTenant", "step_variables", "version"},
     },
 
-    # delay — resolver.py:1497
+    # delay -- resolver.py:1497
     "utils_delay": {
         "friendly":  {"seconds", "minutes", "hours", "days", "mock_result",
                       "condition"},
@@ -134,7 +134,7 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "step_variables", "version"},
     },
 
-    # connector — resolver.py:1829 (no _FRIENDLY / _CANONICAL set;
+    # connector -- resolver.py:1829 (no _FRIENDLY / _CANONICAL set;
     # uses _CONNECTOR_RESERVED + per-op param schemas)
     "connector": {
         "friendly":  set(),
@@ -143,19 +143,19 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "name", "mock_result", "useMockOutput", "condition"},
     },
 
-    # decision — _normalize_decision_args  resolver.py:1155
+    # decision -- _normalize_decision_args  resolver.py:1155
     "decision": {
         "friendly":  {"conditions"},
         "canonical": {"step_variables"},
     },
 
-    # manual_input — _normalize_manual_input_args  resolver.py:1194
+    # manual_input -- _normalize_manual_input_args  resolver.py:1194
     "manual_input": {
         "friendly":  {"title", "description", "options", "inputs"},
         "canonical": {"step_variables"},
     },
 
-    # workflow_reference — _resolve_workflow_reference_args  resolver.py:2003
+    # workflow_reference -- _resolve_workflow_reference_args  resolver.py:2003
     "workflow_reference": {
         "friendly":  {"target"},
         "canonical": {"workflowReference", "arguments", "apply_async",
@@ -163,7 +163,7 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "ignore_errors"},
     },
 
-    # send_email — _normalize_send_email_args  (SMTP SendEmail)
+    # send_email -- _normalize_send_email_args  (SMTP SendEmail)
     "send_email": {
         "friendly":  {"body", "from"},
         "canonical": {"to", "from_str", "content", "cc", "bcc", "subject",
@@ -171,19 +171,19 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
                       "params", "operation", "operationTitle", "step_variables"},
     },
 
-    # create_task — _normalize_create_task_args  (ManualTask, collection=tasks)
+    # create_task -- _normalize_create_task_args  (ManualTask, collection=tasks)
     "create_task": {
         "friendly":  set(),
         "canonical": {"collection", "resource", "step_variables", "message"},
     },
 
-    # set_api_keys — _normalize_set_api_keys_args  (SetAPIKeys)
+    # set_api_keys -- _normalize_set_api_keys_args  (SetAPIKeys)
     "set_api_keys": {
         "friendly":  set(),
         "canonical": {"public_key", "private_key"},
     },
 
-    # approval — _normalize_approval_args  (Approval, collection=approvals)
+    # approval -- _normalize_approval_args  (Approval, collection=approvals)
     "approval": {
         "friendly":  set(),
         "canonical": {"collection", "resource", "response_mapping", "timeout",
@@ -194,7 +194,7 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
 
 # Top-level keys every step accepts. `for_each` + `step_variables` sit at
 # the arguments root regardless of step type; the rest are the universal
-# step envelope (WIRE_SHAPE_GAP_PLAN Phase 3) — control-flow / execution
+# step envelope (WIRE_SHAPE_GAP_PLAN Phase 3) -- control-flow / execution
 # metadata FSR layers over every step type. Authors write the friendly
 # spellings (`retry`, `on_remote`, `post_comment`); the parser expands them
 # into these canonical keys, so the audit must accept them everywhere.
@@ -205,7 +205,7 @@ GLOBAL_RESERVED = {
 }
 
 
-# Per-resolver-type "open key" markers — these step types accept
+# Per-resolver-type "open key" markers -- these step types accept
 # *arbitrary* user keys at the arguments root, so unrecognized-key
 # detection produces noise. The note is rendered into each report
 # instead of a gap list.
@@ -213,7 +213,7 @@ OPEN_TYPES: dict[str, str] = {
     "set_variable": (
         "set_variable accepts arbitrary user-chosen variable names at "
         "the arguments root (each becomes a `vars.steps.<step>.<name>` "
-        "binding). Unrecognized-key detection is suppressed here — "
+        "binding). Unrecognized-key detection is suppressed here -- "
         "audit only the canonical fields."
     ),
     "connector": (
@@ -324,7 +324,7 @@ def render_audit_md(a: StepTypeAudit) -> str:
     for k, n in a.observed_keys.items():
         pct = (100.0 * n / a.total_steps) if a.total_steps else 0
         if not a.resolver_type:
-            tag = "—"
+            tag = "--"
         elif k in accepted:
             tag = "✓"
         else:
@@ -370,7 +370,7 @@ def write_audit_dir(out_dir: Path, db_path: Path) -> dict[str, Path]:
                  "| step_type | corpus rows | distinct keys | gaps |",
                  "|---|---:|---:|---:|"]
     for t, rows, keys, gaps in sorted(summary_rows):
-        gap_marker = f"**{gaps}**" if gaps else "—"
+        gap_marker = f"**{gaps}**" if gaps else "--"
         idx_lines.append(f"| [{t}]({t.replace('.', '_')}.md) | "
                          f"{rows:,} | {keys} | {gap_marker} |")
     (out_dir / "INDEX.md").write_text("\n".join(idx_lines) + "\n")

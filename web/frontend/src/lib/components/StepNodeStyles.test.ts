@@ -41,7 +41,7 @@ describe('StepNode CSS gates', () => {
     expect(STEP_NODE).toContain('aria-label="Add next step"');
     expect(STEP_NODE).toContain('fsrpb-add-next-menu');
     // Spawn handler must wire to the store with a predecessorId so the
-    // new node arrives connected — that is the whole point of G43.
+    // new node arrives connected -- that is the whole point of G43.
     expect(STEP_NODE).toMatch(/visualStore\.addNode[\s\S]*predecessorId:\s*node\.id/);
     // Quick-type list covers the common authoring shortcuts.
     for (const t of ['set_variable', 'connector', 'decision', 'manual_input', 'create_record', 'raise_exception']) {
@@ -51,7 +51,7 @@ describe('StepNode CSS gates', () => {
 
   it('G44: declares both source AND target handles on every side for best-path routing', () => {
     // pickHandles in PlaybookCanvas selects from these eight ids per
-    // node — one per side per type — so dropping any of them would
+    // node -- one per side per type -- so dropping any of them would
     // silently strand edges in the wrong direction.
     for (const id of ['top-s', 'top-t', 'right-s', 'right-t', 'bottom-s', 'bottom-t', 'left-s', 'left-t']) {
       expect(STEP_NODE).toContain(`id="${id}"`);

@@ -1,4 +1,4 @@
-# MCP Tools — fsrpb agent surface
+# MCP Tools -- fsrpb agent surface
 
 Auto-generated from `python/mcp_server.py` by `python/store/export_mcp_tools.py`. **Do not hand-edit.**
 
@@ -6,11 +6,11 @@ Auto-generated from `python/mcp_server.py` by `python/store/export_mcp_tools.py`
 
 ## Index
 
-- **Reference / lookup** — [`find_connector`](#find-connector), [`find_operation`](#find-operation), [`get_connector_source`](#get-connector-source), [`get_op_schema`](#get-op-schema), [`get_picklist`](#get-picklist), [`get_step_type`](#get-step-type), [`list_picklists`](#list-picklists), [`list_tags`](#list-tags), [`picklist_for_field`](#picklist-for-field), [`resolve_picklist_value`](#resolve-picklist-value), [`search_playbooks`](#search-playbooks)
-- **Jinja** — [`find_jinja_filter`](#find-jinja-filter), [`find_jinja_pattern`](#find-jinja-pattern), [`get_filter_examples`](#get-filter-examples), [`render_jinja`](#render-jinja)
-- **Compiler** — [`compile_yaml`](#compile-yaml), [`validate_yaml`](#validate-yaml)
-- **Authoring loop** — [`dry_run_playbook`](#dry-run-playbook), [`get_run_env`](#get-run-env), [`list_playbook_runs`](#list-playbook-runs), [`list_recent_failed_runs`](#list-recent-failed-runs), [`push_playbook`](#push-playbook), [`run_playbook`](#run-playbook)
-- **Live FSR** — [`healthcheck_connector`](#healthcheck-connector), [`list_configured_connectors`](#list-configured-connectors), [`run_op`](#run-op)
+- **Reference / lookup** -- [`find_connector`](#find-connector), [`find_operation`](#find-operation), [`get_connector_source`](#get-connector-source), [`get_op_schema`](#get-op-schema), [`get_picklist`](#get-picklist), [`get_step_type`](#get-step-type), [`list_picklists`](#list-picklists), [`list_tags`](#list-tags), [`picklist_for_field`](#picklist-for-field), [`resolve_picklist_value`](#resolve-picklist-value), [`search_playbooks`](#search-playbooks)
+- **Jinja** -- [`find_jinja_filter`](#find-jinja-filter), [`find_jinja_pattern`](#find-jinja-pattern), [`get_filter_examples`](#get-filter-examples), [`render_jinja`](#render-jinja)
+- **Compiler** -- [`compile_yaml`](#compile-yaml), [`validate_yaml`](#validate-yaml)
+- **Authoring loop** -- [`dry_run_playbook`](#dry-run-playbook), [`get_run_env`](#get-run-env), [`list_playbook_runs`](#list-playbook-runs), [`list_recent_failed_runs`](#list-recent-failed-runs), [`push_playbook`](#push-playbook), [`run_playbook`](#run-playbook)
+- **Live FSR** -- [`healthcheck_connector`](#healthcheck-connector), [`list_configured_connectors`](#list-configured-connectors), [`run_op`](#run-op)
 
 ---
 
@@ -49,9 +49,9 @@ get_connector_source(connector: str, file: str = 'operations.py') -> dict[str, A
 Fetch the Python source code for a connector from the live FSR instance.
 
 Returns the raw content of `operations.py` (or another file in the connector
-package — `connector.py`, `info.json`, `release_notes.md`).
+package -- `connector.py`, `info.json`, `release_notes.md`).
 
-**Use this sparingly** — only when the op name and parameter schema are not
+**Use this sparingly** -- only when the op name and parameter schema are not
 sufficient to understand what the connector actually does (e.g. undocumented
 side effects, ambiguous return shape, or a newly added op with no description).
 
@@ -74,13 +74,13 @@ get_op_schema(connector: str, op: str) -> dict[str, Any]
 Return the full parameter schema for a connector operation.
 
 Includes:
-- `params` — input parameters with required/type/picklist info
-- `output_schema_json` — static shape from the connector's info.json (may be
+- `params` -- input parameters with required/type/picklist info
+- `output_schema_json` -- static shape from the connector's info.json (may be
   absent or incomplete for many connectors)
-- `output_schema_observed` — live-run inferred shape from a real FSR execution;
+- `output_schema_observed` -- live-run inferred shape from a real FSR execution;
   populated by `run_op` the first time the op is exercised.  This is the most
   reliable source of truth for what the step actually returns.
-- `output_schema_hint` — set to "run run_op to observe real output" when neither
+- `output_schema_hint` -- set to "run run_op to observe real output" when neither
   schema is available, so callers know to execute the op once.
 
 ### `get_picklist`
@@ -108,12 +108,12 @@ Return schema and examples for a playbook step type.
 (`ManualInput`, `SetVariable`, `Decision`). Friendly short names
 map to their canonical form. The response includes a
 `friendly_form` block with the YAML-author-facing schema (the
-keys our compiler accepts) — prefer that over the wire-format
+keys our compiler accepts) -- prefer that over the wire-format
 `args_schema_json` when authoring YAML.
 
-By default the response is slim (~1–2 KB): the friendly_form
+By default the response is slim (~1-2 KB): the friendly_form
 suffices for authoring and raw corpus examples are omitted. Pass
-`verbose=True` for the full corpus dump (3 examples, no caps) —
+`verbose=True` for the full corpus dump (3 examples, no caps) --
 only useful when debugging an unusual case the friendly_form
 doesn't cover.
 
@@ -142,7 +142,7 @@ Backed by `GET /api/3/tags?$export=true`. The instance can have 10k+ tags
 when looking for workflow-noise tags like "system" or "testing".
 
 Args:
-    prefix: case-insensitive tag prefix (uses `uuid$like=<prefix>%` —
+    prefix: case-insensitive tag prefix (uses `uuid$like=<prefix>%` --
         the tag entity's primary key IS the tag string). Pass None to
         page through everything.
     limit: max tag names to return.
@@ -179,7 +179,7 @@ Resolve a friendly value (e.g. 'High') to a picklist IRI.
 Provide either `picklist_name`, or both `module` + `field` to
 auto-discover. Strings that already start with '/api/3/' pass
 through unchanged. Returns close-match suggestions when the value
-isn't an exact itemValue — useful when the LLM authored an invalid
+isn't an exact itemValue -- useful when the LLM authored an invalid
 value like 'In Progress' for AlertStatus (which only has Open,
 Investigating, Pending, Closed, Active, Re-Opened).
 
@@ -192,7 +192,7 @@ search_playbooks(q: str, limit: int = 10) -> list[dict[str, Any]]
 Full-text search over playbook patterns seen in production.
 
 Returns matching playbook names, collection names, and the connectors
-they use — useful for 'how do others do X' pattern mining.
+they use -- useful for 'how do others do X' pattern mining.
 
 ---
 
@@ -223,19 +223,19 @@ find_jinja_pattern(q: str, kind: str | None = None, limit: int = 12) -> list[dic
 
 Search the live-corpus Jinja-block catalog by substring + kind.
 
-Use this when you want to learn FSR idioms — `{% set x = vars.steps.foo %}`,
-`{% for r in vars.input.records %}`, conditional guards, etc — instead of
+Use this when you want to learn FSR idioms -- `{% set x = vars.steps.foo %}`,
+`{% for r in vars.input.records %}`, conditional guards, etc -- instead of
 only looking up filters. The corpus contains ~7,800 unique blocks mined
 from 1,669 live workflows.
 
 Args:
     q: substring to match against the raw block, head, vars, or filter chain
-    kind: optional — restrict to one block kind. Useful values:
-        "expr"   — `{{ … }}` expression blocks (most common)
-        "set"    — `{% set var = … %}` assignments
-        "for"    — `{% for x in … %}` loops
-        "if"     — `{% if cond %}` guards (`elif` is a separate kind)
-        "macro"  — `{% macro name(args) %}` definitions
+    kind: optional -- restrict to one block kind. Useful values:
+        "expr"   -- `{{ … }}` expression blocks (most common)
+        "set"    -- `{% set var = … %}` assignments
+        "for"    -- `{% for x in … %}` loops
+        "if"     -- `{% if cond %}` guards (`elif` is a separate kind)
+        "macro"  -- `{% macro name(args) %}` definitions
         (omit kind to search across all)
     limit: max results (default 12, ordered by occurrences desc)
 
@@ -272,7 +272,7 @@ Uses the same engine as FSR's playbook runtime, so FSR-custom filters
 (`| tojson`, `| b64encode`, `| yaql`, etc.) all work.
 
 Args:
-    template: Jinja source — e.g. `"{{ vars.steps.Get_org.records[0].id }}"`.
+    template: Jinja source -- e.g. `"{{ vars.steps.Get_org.records[0].id }}"`.
     context: dict of variable bindings (e.g. `{"value": [1, 2, 3]}`).
     from_pb_execution: optional workflow PK (string of digits) or task_id UUID.
         When set, the run's `{vars: {...env, steps: {<Name_us>: result}}}`
@@ -280,7 +280,7 @@ Args:
         on top so callers can override individual values for what-if tests.
 
 Returns:
-    `{output: <value>}` on success — value preserves its native type
+    `{output: <value>}` on success -- value preserves its native type
     (str, int, float, bool, list, dict). `{error: str}` if the engine
     errored (template syntax issues, missing var, etc).
 
@@ -336,7 +336,7 @@ Compile + push + run + auto-cleanup. The agent's full E2E loop in one tool.
 Args:
     yaml_text: full YAML source.
     playbook: workflow name to trigger after push (one playbook in the
-        collection — the agent picks which one).
+        collection -- the agent picks which one).
     input: trigger params (mapped to `vars.input.params.<k>`).
     timeout_s: poll timeout (default 180s).
     cleanup: hard-purge the collection after the run (default True).
@@ -389,7 +389,7 @@ list_playbook_runs(playbook: str | None = None, playbook_uuid: str | None = None
 List runs of a single playbook, server-filtered by template_iri.
 
 Faster + more reliable than `list_recent_failed_runs(playbook=...)`
-when you know which playbook you care about — the API uses
+when you know which playbook you care about -- the API uses
 template_iri to do the filter on its side, so we don't waste a fetch
 of irrelevant rows.
 
@@ -412,21 +412,21 @@ list_recent_failed_runs(limit: int = 20, playbook: str | None = None, include_fi
 List recent workflow runs (default: failures only) for triage.
 
 Use this when the user says "my playbook is broken" without naming
-the playbook — fetches the most recently-modified failed/errored
+the playbook -- fetches the most recently-modified failed/errored
 runs across the instance from BOTH the live and historical workflow
 tables (FSR purges live → historical every ~30-60 min).
 
 Args:
     limit: max rows to return (default 20)
     playbook: optional name filter (client-side substring match)
-    include_finished: include finished runs too (default False —
+    include_finished: include finished runs too (default False --
         failed/finished_with_error/terminated only)
     modified_after: ISO timestamp, e.g. "2026-05-01 05:00:00" (server-side)
     modified_before: ISO timestamp (server-side)
     tags_include: CSV of tag names to require (server-side)
     tags_exclude: CSV of tag names to exclude (default "system" to hide
         framework noise; pass "" to include them)
-    user_iri: full IRI like "/api/3/people/<uuid>" — filter by triggering
+    user_iri: full IRI like "/api/3/people/<uuid>" -- filter by triggering
         user (server-side)
 
 Returns:
@@ -491,8 +491,8 @@ is actually up before recommending an op to the user.
 
 Args:
     name: connector name
-    version: optional — when omitted, the first configured version is used
-    config: optional config UUID — required when the connector has more
+    version: optional -- when omitted, the first configured version is used
+    config: optional config UUID -- required when the connector has more
         than one configuration and you want a specific one
 
 Returns:
@@ -508,13 +508,13 @@ list_configured_connectors(probe: bool = False) -> dict[str, Any]
 
 List connectors that are configured AND active on the live FSR instance.
 
-A connector with no configuration cannot be called — it'll fail at runtime
+A connector with no configuration cannot be called -- it'll fail at runtime
 even if it appears in `find_connector`. Use this BEFORE picking which
 connector to put in a playbook.
 
 Args:
     probe: when True, also healthcheck each one (one HTTP call per
-        connector — slower but gives live "Available"/"Disconnected"
+        connector -- slower but gives live "Available"/"Disconnected"
         status). When False (default), just lists the configured set.
 
 Returns:
@@ -535,7 +535,7 @@ its real output.
 This is the authoritative way to discover what a step produces when
 info.json has no output_schema or the static schema is incomplete.
 
-**Guardrails** — operations are classified by their `category` field:
+**Guardrails** -- operations are classified by their `category` field:
 - `query / investigation / utilities` → **safe**, runs automatically.
 - `remediation / containment / management` → **destructive**, requires
   `confirm=True`.  The tool returns `{requires_confirmation: true}` when
@@ -555,8 +555,8 @@ On failure:
 - Returns `{ok: false, status: <str>, message: <str>}` with the FSR error.
 - Records `live_op_exec / tested_fail` so the store tracks the attempt.
 
-`params` — dict of input parameter values for the operation.
-`config` — optional connector config name (leave empty for the default config).
-`confirm` — set True to execute operations that are not auto-safe.
+`params` -- dict of input parameter values for the operation.
+`config` -- optional connector config name (leave empty for the default config).
+`confirm` -- set True to execute operations that are not auto-safe.
 
 ---

@@ -1,4 +1,4 @@
-"""LM Studio provider — tool-call delta accumulation, terminal turn,
+"""LM Studio provider -- tool-call delta accumulation, terminal turn,
 self-repair, error mapping. The OpenAI client is mocked so tests don't
 need an LM Studio instance.
 
@@ -70,7 +70,7 @@ def _provider_with_chunks(
     """Build a provider whose client returns chunks on each create() call.
 
     `chunks` may be a flat list (single turn) or a list-of-lists (one
-    list per expected turn — handed out in order via side_effect)."""
+    list per expected turn -- handed out in order via side_effect)."""
     if chunks and isinstance(chunks[0], list):
         streams = [_FakeStream(c) for c in chunks]
         create = AsyncMock(side_effect=streams)
@@ -135,7 +135,7 @@ def test_emits_usage_event_with_prompt_and_completion_tokens():
     usage = next(e for e in events if isinstance(e, UsageEvent))
     assert usage.input_tokens == 42
     assert usage.output_tokens == 7
-    # Cache fields are zero locally — LM Studio doesn't have prompt cache.
+    # Cache fields are zero locally -- LM Studio doesn't have prompt cache.
     assert usage.cache_read == 0 and usage.cache_write == 0
 
 
@@ -171,7 +171,7 @@ def test_accumulates_tool_call_args_across_deltas():
 
 
 def test_malformed_tool_args_become_empty_dict_not_crash():
-    """A model that emits non-JSON in arguments shouldn't kill the loop —
+    """A model that emits non-JSON in arguments shouldn't kill the loop --
     surface the failure as a bad-args tool result and keep going."""
     turn1 = [
         _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="c",

@@ -1,4 +1,4 @@
-"""mcp_server.get_connector_icon — three-tier cache (memory→disk→live).
+"""mcp_server.get_connector_icon -- three-tier cache (memory→disk→live).
 
 The live tier requires a configured FSR; we stub `_live_client` to keep
 the test offline. Disk persistence is verified by clearing the in-memory

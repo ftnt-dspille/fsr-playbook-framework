@@ -45,7 +45,7 @@
     diagError = null;
     loadingDiag = true;
     try {
-      // Use task_id (UUID) when present — most reliable for resolution.
+      // Use task_id (UUID) when present -- most reliable for resolution.
       const id = r.task_id || (r.pk != null ? String(r.pk) : '');
       if (!id) throw new Error('run has no task_id or pk');
       diag = await whyDidPlaybookFail(id);
@@ -196,7 +196,7 @@
       <div class="p-6">
         <h2 class="text-lg font-semibold mb-2">Could not diagnose</h2>
         <div class="text-rose-400 text-sm">
-          <code>{diag.code}</code> — {diag.message}
+          <code>{diag.code}</code> -- {diag.message}
         </div>
       </div>
     {:else if diag}
@@ -275,7 +275,7 @@
         {#if !diag.step_diagnostics?.length}
           <div class="text-[var(--text-faint)] text-sm">
             No per-step diagnostics. The run failed but the YAML's Jinja
-            rendered cleanly against the captured env — failure likely
+            rendered cleanly against the captured env -- failure likely
             originated in a connector op or remote side. Check the
             run's error_message above.
           </div>

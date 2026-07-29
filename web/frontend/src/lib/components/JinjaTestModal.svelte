@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Jinja test modal — opened from the editor toolbar's "ƒ Jinja"
+   * Jinja test modal -- opened from the editor toolbar's "ƒ Jinja"
    * button. Three-pane scratchpad mirroring the FortiSOAR widget's
    * view.html layout:
    *
@@ -8,7 +8,7 @@
    *
    * The Input pane is the *full* context handed to the engine, so
    * users can reference `vars.input.records[0]` etc. directly. We do
-   * NOT auto-derive it from the playbook here — for that there's the
+   * NOT auto-derive it from the playbook here -- for that there's the
    * inline preview inside set_variable rows. This modal is a clean
    * scratchpad with no assumed wiring.
    *
@@ -297,7 +297,7 @@
               value={pickedExampleId}
               onchange={loadExample}
               aria-label="Insert example template"
-              title="Replaces the template only — input JSON is preserved"
+              title="Replaces the template only -- input JSON is preserved"
             >
               <option value="">Insert example…</option>
               {#each templateExamples as t}

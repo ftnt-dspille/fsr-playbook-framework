@@ -1,4 +1,4 @@
-"""Eval harness — task x model matrix runner.
+"""Eval harness -- task x model matrix runner.
 
 Orchestrates: for each task, prompt each model, extract a YAML block,
 score it, and emit a structured matrix. Everything below the LLM call
@@ -176,7 +176,7 @@ def render_text(matrix: dict[str, Any]) -> str:
     # `example` is the orthogonal byte-equal check (matches the
     # hand-curated reference YAML in /examples/); the verify-behavior
     # columns measure agent discipline (did it call verify, did the
-    # final call return ready) — distinct from `verified`.
+    # final call return ready) -- distinct from `verified`.
     header = (f"{'model':<14} {'task':<28} "
               f"draft verified live example  vCalled vReady  score  ms")
     lines.append(header)
@@ -301,7 +301,7 @@ def delta_vs(prior: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
 
 def render_delta(d: dict[str, Any]) -> str:
     lines = [
-        f"Eval delta — prior {d.get('prior_run','?')} → "
+        f"Eval delta -- prior {d.get('prior_run','?')} → "
         f"current {d.get('current_run','?')}",
         "",
         f"{'model':<14} {'task':<28} {'before':>7} {'after':>7}  status",
@@ -347,8 +347,8 @@ def _render_md(matrix: dict[str, Any]) -> str:
     for r in matrix.get("rows", []):
         if "error" in r:
             lines.append(
-                f"| `{r['model']}` | `{r['task']}` | ERR | – | – | – | "
-                f"– | – | – | – | {r.get('elapsed_ms','-')} |"
+                f"| `{r['model']}` | `{r['task']}` | ERR | - | - | - | "
+                f"- | - | - | - | {r.get('elapsed_ms','-')} |"
             )
             continue
         lv = r.get("levels", {})
@@ -356,11 +356,11 @@ def _render_md(matrix: dict[str, Any]) -> str:
         def cell(level, _lv=lv):
             v = _lv.get(level, {})
             if v.get("skipped"):
-                return "–"
+                return "-"
             return "✓" if v.get("passed") else "✗"
 
         iters = lv.get("verify_iterations_until_ready", {}).get("iterations")
-        iters_str = "–" if lv.get(
+        iters_str = "-" if lv.get(
             "verify_iterations_until_ready", {}).get("skipped") else str(iters or 0)
         lines.append(
             f"| `{r['model']}` | `{r['task']}` | {cell('draft')} | "
@@ -374,7 +374,7 @@ def _render_md(matrix: dict[str, Any]) -> str:
     lines += ["", "## Per-model totals", ""]
     for m, s in matrix.get("summary", {}).items():
         lines.append(
-            f"- **{m}** — {s['score']}/{s['max']} "
+            f"- **{m}** -- {s['score']}/{s['max']} "
             f"({s['fraction']*100:.0f}%)"
         )
     return "\n".join(lines) + "\n"

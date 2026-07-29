@@ -2,8 +2,8 @@
 """Connector build + deploy MCP server (`fsr-deploy`).
 
 Exposes the `fsr-playbook-builder` connector's package + deploy pipeline to
-SOAR as MCP tools, so the whole loop — build the tarball, push it onto the
-live FortiSOAR box, confirm the rollout — is drivable from an agent.
+SOAR as MCP tools, so the whole loop -- build the tarball, push it onto the
+live FortiSOAR box, confirm the rollout -- is drivable from an agent.
 
 These are **write/heavy** operations (they mutate the live platform and bump
 versions), deliberately kept OUT of the read-only `fsr-read` server. `deploy`
@@ -106,7 +106,7 @@ def connector_status() -> dict[str, Any]:
 def connector_build(slim: bool = True, timeout_s: int = 300) -> dict[str, Any]:
     """Build the connector tarball (vendor fsr_playbooks + reference DB → .tgz).
 
-    Read-only w.r.t. the live box — it does NOT install. `slim=True` ships the
+    Read-only w.r.t. the live box -- it does NOT install. `slim=True` ships the
     truncated reference DB (warmup repopulates on the box). Returns the built
     tarball path + a log tail.
     """
@@ -135,7 +135,7 @@ def connector_deploy(
     """Build + install the connector onto the live SOAR box (bump → vendor →
     build → install → warmup → verify), via scripts/deploy.sh.
 
-    **Mutates the live platform** — requires `confirm=True`. Without it, returns
+    **Mutates the live platform** -- requires `confirm=True`. Without it, returns
     a dry-run summary of what would happen (no changes made).
 
     Args:

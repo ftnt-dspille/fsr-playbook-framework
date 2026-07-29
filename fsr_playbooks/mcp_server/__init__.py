@@ -4,17 +4,17 @@ Exposes the compiler + reference store as MCP tools for any agent
 (Claude Code, IDE plugins) to author FortiSOAR playbooks via tool use.
 
 Tools:
-  find_connector       — fuzzy-search 714 connectors by name/category/desc
-  find_operation       — list or search ops for a specific connector
-  get_op_schema        — full param schema + best available output shape
-  get_connector_source — fetch operations.py source code (cached after first fetch)
-  run_op               — execute one op live; infers + caches real output shape
-  get_step_type        — schema + examples for a playbook step type
-  find_jinja_filter    — search the Jinja filter catalog
-  render_jinja         — render a template against the live FSR endpoint
-  search_playbooks     — FTS over playbook_seen patterns
-  validate_yaml        — compiler dry-run → structured errors
-  compile_yaml         — compile YAML → FSR WorkflowCollection JSON string
+  find_connector       -- fuzzy-search 714 connectors by name/category/desc
+  find_operation       -- list or search ops for a specific connector
+  get_op_schema        -- full param schema + best available output shape
+  get_connector_source -- fetch operations.py source code (cached after first fetch)
+  run_op               -- execute one op live; infers + caches real output shape
+  get_step_type        -- schema + examples for a playbook step type
+  find_jinja_filter    -- search the Jinja filter catalog
+  render_jinja         -- render a template against the live FSR endpoint
+  search_playbooks     -- FTS over playbook_seen patterns
+  validate_yaml        -- compiler dry-run → structured errors
+  compile_yaml         -- compile YAML → FSR WorkflowCollection JSON string
 
 Run:
   python -m mcp_server                    (stdio transport, default)

@@ -1,7 +1,7 @@
 """find_connector must search EVERY word of a multi-word query, not just the first.
 
 Live-caught by the S3 build-persona eval (0/5). The ask named the connector the
-way a human would — "FortiSOAR Utilities" — but the right answer is
+way a human would -- "FortiSOAR Utilities" -- but the right answer is
 `cyops_utilities`, whose label is exactly "Utilities".
 
 The old implementation:
@@ -12,7 +12,7 @@ The old implementation:
         rows = <LIKE on w>
 
 "FortiSOAR Utilities" got zero whole-phrase hits, broadened on "FortiSOAR"
-alone, and returned `fortisoar-ml-engine` — a confident WRONG match, with the
+alone, and returned `fortisoar-ml-engine` -- a confident WRONG match, with the
 one word that would have found the right connector never searched. The build
 model then correctly reported "only FortiSOAR ML Engine is found similarly
 named" and declined to author: a right answer to a wrong tool result.
@@ -20,7 +20,7 @@ named" and declined to author: a right answer to a wrong tool result.
 Two defects, both covered here:
   1. only `words[0]` was searched;
   2. broadening ran only `if not rows`, so a single spurious whole-phrase hit
-     suppressed it — one bad hit was worse than no hits.
+     suppressed it -- one bad hit was worse than no hits.
 """
 import pytest
 
@@ -50,7 +50,7 @@ def test_later_word_match_survives_a_spurious_earlier_hit():
     """
     first_word_hits = _names("FortiSOAR")
     if not first_word_hits:
-        pytest.skip("this catalog has no 'FortiSOAR' match — nothing to suppress")
+        pytest.skip("this catalog has no 'FortiSOAR' match -- nothing to suppress")
     names = _names("FortiSOAR Utilities")
     assert "cyops_utilities" in names, (
         f"a first-word hit ({first_word_hits}) must not suppress later words; got {names}"
@@ -63,7 +63,7 @@ def test_single_word_and_exact_queries_are_unregressed():
 
 
 def test_short_words_do_not_drag_in_the_whole_catalog():
-    """Noise words ('to', 'of') are skipped — otherwise a natural-language ask
+    """Noise words ('to', 'of') are skipped -- otherwise a natural-language ask
     would substring-match nearly everything and bury the real answer.
 
     Asserted structurally: every result must be attributable to one of the
@@ -75,7 +75,7 @@ def test_short_words_do_not_drag_in_the_whole_catalog():
     for w in ("Convert", "String", "Time", "Minutes"):
         attributable |= set(_names(w, limit=50))
     assert phrase <= attributable, (
-        "results not attributable to any >2-char query word — a short word "
+        "results not attributable to any >2-char query word -- a short word "
         f"leaked into the search: {phrase - attributable}"
     )
 
@@ -88,7 +88,7 @@ def test_limit_is_respected_across_the_word_union():
 def test_true_miss_still_returns_a_suggestion():
     # Every token must be absent from the catalog. NB: ordinary-looking words
     # like "connector" ARE catalog tokens (connector-fsr-soc-assistant), and
-    # now that every word is searched they legitimately match — so a "miss"
+    # now that every word is searched they legitimately match -- so a "miss"
     # query has to avoid them.
     r = find_connector("zzqqx wibblefrotz plughxyzzy")
     assert not (r.get("matches") or [])

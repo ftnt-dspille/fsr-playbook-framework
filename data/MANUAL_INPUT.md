@@ -1,5 +1,5 @@
 ---
-title: Manual Input — Full Variant Catalog
+title: Manual Input -- Full Variant Catalog
 category: playbook-authoring
 status: reference
 source: live-verified
@@ -13,11 +13,11 @@ summary: 'Full variant catalog for ManualInput + ApprovalManualInput steps: 166 
   4 examples from live appliance + UI form-builder.'
 ---
 
-# Manual Input — full variant catalog
+# Manual Input -- full variant catalog
 
 Sources:
 - 166 `ManualInput` + 4 `ApprovalManualInput` step records on the live appliance (probed 2026-05-03 via `POST /api/query/workflow_steps`).
-- FSR UI bundle `fsr_src/app.unmin.js` — form-builder + manual-input editor.
+- FSR UI bundle `fsr_src/app.unmin.js` -- form-builder + manual-input editor.
 - `WorkflowStep` entity definition (PHP, see `store/incoming/recon_*/E_workflow_entities/WorkflowStep.php`).
 - Canonical resume flow in `store/QUERY_API.md` and the `fsrpb inputs` CLI in `python/cli.py`.
 
@@ -28,7 +28,7 @@ The `arguments.type` field switches the prompt's behavior:
 | `type` | Live count | Meaning |
 |---|---:|---|
 | `InputBased` | 140 | User submits a form (any inputVariables) and/or picks a button. Default for almost all flows. |
-| `DecisionBased` | 26 | Pure routing — user picks a button; **no input form is presented**. Each button is a branch. |
+| `DecisionBased` | 26 | Pure routing -- user picks a button; **no input form is presented**. Each button is a branch. |
 
 `is_approval: true` overlays the prompt with Approve/Reject styling but otherwise uses `InputBased` (the 4 `ApprovalManualInput` step-type records exist for legacy reasons; modern playbooks just set `is_approval=true` on a normal `ManualInput` step).
 
@@ -74,10 +74,10 @@ Stable across the corpus:
 
 - `option` is the button label the user clicks AND the value sent back as `response.response`.
 - `primary: true` styles the button as the default action.
-- `step_iri` is the next step that fires when this option is chosen — this is how `DecisionBased` branching is wired. Can be `null` (terminal — playbook ends after the answer).
+- `step_iri` is the next step that fires when this option is chosen -- this is how `DecisionBased` branching is wired. Can be `null` (terminal -- playbook ends after the answer).
 - Live counts: 82 steps with 1 option, 81 with 2, 3 with 3 options. Three or more options is rare.
 
-## 4. Assignment — `owner_detail`
+## 4. Assignment -- `owner_detail`
 
 ```jsonc
 "owner_detail": {
@@ -92,7 +92,7 @@ Stable across the corpus:
 
 Either `assignedToTeam`, `assignedToPerson`, `assignedToRecord`, or `assignedToField` should be populated when `isAssigned=true`. The four are mutually exclusive for routing.
 
-## 5. `input.schema.inputVariables` — the form
+## 5. `input.schema.inputVariables` -- the form
 
 **No example in the live corpus** uses inputVariables; all 166 ManualInput steps have `inputVariables: []`. So all observed prompts are button-only (decision/confirmation) flows.
 
@@ -157,9 +157,9 @@ The shape of a single inputVariable item (per UI bundle):
 "external_email_attachments": null
 ```
 
-Channel IRIs point at `picklist` records — likely a "Channels" picklist namespace in your appliance. List them via `GET /api/3/picklists?listName=…&name=…`.
+Channel IRIs point at `picklist` records -- likely a "Channels" picklist namespace in your appliance. List them via `GET /api/3/picklists?listName=…&name=…`.
 
-## 7. `timeout` — auto-route on no response
+## 7. `timeout` -- auto-route on no response
 
 ```jsonc
 "timeout": {
@@ -172,9 +172,9 @@ Channel IRIs point at `picklist` records — likely a "Channels" picklist namesp
 
 Total wait = `days + hours + minutes` (no seconds). 22/166 corpus steps use this, mostly with very short minute-range timeouts for testing or sub-1-hour SLA gates.
 
-## 8. Resume body — what gets sent back
+## 8. Resume body -- what gets sent back
 
-**CORRECTED 2026-05-03 after end-to-end test.** The earlier guidance to PUT `/api/wf/api/manual-wf-input/<pk>/` returns 200 but does **NOT** actually resume the playbook — it only updates the input record. The canonical mechanism (per `fsr_src/app.unmin.js:52478` + `:37731`) is:
+**CORRECTED 2026-05-03 after end-to-end test.** The earlier guidance to PUT `/api/wf/api/manual-wf-input/<pk>/` returns 200 but does **NOT** actually resume the playbook -- it only updates the input record. The canonical mechanism (per `fsr_src/app.unmin.js:52478` + `:37731`) is:
 
 ```
 POST /api/wf/api/workflows/<workflow_pk>/wfinput_resume/?format=json
@@ -195,14 +195,14 @@ Body:
 }
 ```
 
-`step_iri` carries the routing decision: it's the chosen option's `step_iri` from `response_mapping.options[]` — the step the playbook will run next. The **compiler must populate `step_iri`** on each option at emit time (auto-derived from the step's `next:` for single-option, `branches: {label: target}` for multi-option). Without it FSR's manual-input handler emits a malformed-URL error and the run fails.
+`step_iri` carries the routing decision: it's the chosen option's `step_iri` from `response_mapping.options[]` -- the step the playbook will run next. The **compiler must populate `step_iri`** on each option at emit time (auto-derived from the step's `next:` for single-option, `branches: {label: target}` for multi-option). Without it FSR's manual-input handler emits a malformed-URL error and the run fails.
 
-Verified live in `python/tests/integration/test_e2e_runs.py::test_stage4_manual_input_resume` — start → set_variable → manual_input(InputBased, single option) → terminal cycle, fired and resumed via `fsrpb run-playbook` + `fsrpb inputs respond`, finishes cleanly.
+Verified live in `python/tests/integration/test_e2e_runs.py::test_stage4_manual_input_resume` -- start → set_variable → manual_input(InputBased, single option) → terminal cycle, fired and resumed via `fsrpb run-playbook` + `fsrpb inputs respond`, finishes cleanly.
 
 **Other gotchas discovered live:**
 
 - `POST /api/wf/api/manual-wf-input/list_wfinput/` requires a **`limit` query parameter**. Without it the endpoint 500s. The UI uses `?format=json&limit=1`. Use a generous value (e.g., `limit=200`) for full enumeration.
-- DELETE on a stuck input record (`DELETE /api/wf/api/manual-wf-input/<pk>/`) returns 204 and silently terminates that prompt — useful for cleaning up orphaned awaiting runs from earlier failed resume attempts.
+- DELETE on a stuck input record (`DELETE /api/wf/api/manual-wf-input/<pk>/`) returns 204 and silently terminates that prompt -- useful for cleaning up orphaned awaiting runs from earlier failed resume attempts.
 - A single broken-state input record can cause `list_wfinput` to 500 when `limit` includes it; bisect to find the bad pk and DELETE.
 
 ## 9. CLI coverage
@@ -216,7 +216,7 @@ Auto-defaults: `--option` defaults to the primary, then the first option. `--var
 ## 10. Open probes (worth doing)
 
 - Build a test playbook with one of each `inputVariables[].type` to confirm the wire shape per type (especially `lookup`, `picklist`, `file`).
-- Submit through the unauthenticated link path — verify the public URL grammar.
+- Submit through the unauthenticated link path -- verify the public URL grammar.
 - Trigger a timeout and confirm the timeout step_iri is taken.
-- Probe `WorkflowViewSet.approval` action — likely a shortcut for `is_approval=true` prompts that takes `{decision: approve|reject, comment}`.
+- Probe `WorkflowViewSet.approval` action -- likely a shortcut for `is_approval=true` prompts that takes `{decision: approve|reject, comment}`.
 - Confirm what `inline_channel_list`/`external_channel_list` picklists look like when populated (none on dev corpus).

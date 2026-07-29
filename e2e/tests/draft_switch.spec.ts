@@ -58,7 +58,7 @@ test('typing into A then switching to B leaves B unpolluted', async ({ page }) =
   await expect(page.getByText('E2E A')).toBeVisible({ timeout: 15_000 });
 
   // Type a comment line by focusing the editor and inserting text.
-  // Monaco renders inside an iframe-like container — click first so it
+  // Monaco renders inside an iframe-like container -- click first so it
   // takes focus.
   const editor = page.locator('.monaco-editor').first();
   await editor.click();
@@ -75,7 +75,7 @@ test('typing into A then switching to B leaves B unpolluted', async ({ page }) =
   await picker.click();
   await page.getByRole('button', { name: new RegExp(DRAFT_B) }).first().click();
 
-  // The editor must now show draft B's content — and crucially, NOT
+  // The editor must now show draft B's content -- and crucially, NOT
   // A's edited line.
   await expect(page.getByText('E2E B')).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('.monaco-editor', { hasText: '# polluted by A' })).toHaveCount(0);

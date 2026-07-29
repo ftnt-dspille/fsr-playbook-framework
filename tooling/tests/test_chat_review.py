@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import chat_review  # noqa: E402
 
 
-# Schema mirrors web/backend/history.py — we only need the tables the
+# Schema mirrors web/backend/history.py -- we only need the tables the
 # detectors read. Using a minimal subset keeps the fixture small.
 _MINIMAL_SCHEMA = """
 CREATE TABLE chat_sessions (
@@ -192,7 +192,7 @@ def test_clean_session_no_findings(tmpdb: Path) -> None:
 
 
 def test_no_editor_update_detected(tmpdb: Path) -> None:
-    """Agent answered in prose only — no ```yaml block. From the user's
+    """Agent answered in prose only -- no ```yaml block. From the user's
     perspective the editor never updated."""
     conn = sqlite3.connect(tmpdb)
     _session(conn, "no_yaml")
@@ -211,7 +211,7 @@ def test_no_editor_update_detected(tmpdb: Path) -> None:
 
 def test_no_editor_update_only_for_authoring_intent(tmpdb: Path) -> None:
     """A chitchat turn ('explain my YAML') legitimately produces no new
-    YAML block — must not fire."""
+    YAML block -- must not fire."""
     conn = sqlite3.connect(tmpdb)
     _session(conn, "explain_only")
     _msg(conn, "explain_only", 1, 0, "user",
@@ -226,7 +226,7 @@ def test_no_editor_update_only_for_authoring_intent(tmpdb: Path) -> None:
 
 
 def test_yaml_in_wrong_fence_detected(tmpdb: Path) -> None:
-    """Agent put YAML in a plain ``` fence (no tag) — extractor misses
+    """Agent put YAML in a plain ``` fence (no tag) -- extractor misses
     it, editor doesn't update."""
     conn = sqlite3.connect(tmpdb)
     _session(conn, "wrong_fence")

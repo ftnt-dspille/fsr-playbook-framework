@@ -1,5 +1,5 @@
 /**
- * Shared Jinja render helper — used by both the Verify tab and inline
+ * Shared Jinja render helper -- used by both the Verify tab and inline
  * preview widgets (the set_variable value rows, etc.).
  *
  * One render context per call. Callers that need many renders against
@@ -67,7 +67,7 @@ export async function getJinjaContext(force = false): Promise<Record<string, unk
 }
 
 /** Render a single Jinja template through the live FSR engine.
- *  Returns a `RenderOutcome` — callers bind it to UI state directly. */
+ *  Returns a `RenderOutcome` -- callers bind it to UI state directly. */
 export async function renderJinja(template: string): Promise<RenderOutcome> {
   if (!isTemplateString(template)) return { kind: 'literal', value: String(template ?? '') };
   try {
@@ -84,7 +84,7 @@ export async function renderJinja(template: string): Promise<RenderOutcome> {
   }
 }
 
-/** Invalidate the cached context — call when the YAML buffer or the
+/** Invalidate the cached context -- call when the YAML buffer or the
  *  pinned sample changes and you want the next render to refetch. */
 export function invalidateJinjaContext(): void {
   cachedContext = null;

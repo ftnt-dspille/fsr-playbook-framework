@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Variable tree pane — flies in to the immediate left of the step
+   * Variable tree pane -- flies in to the immediate left of the step
    * inspector when a Jinja-accepting field is focused (or its `{x}`
    * button is clicked). Renders every variable in scope at the active
    * step as an expandable tree with inline `= value` previews from the
@@ -8,7 +8,7 @@
    *
    * Source toggle: "Mock / shape" uses the trigger module's catalog +
    * sample + typed_walker output (today's data). "Real run" is wired
-   * for a future plumb of per-run observed values — disabled with a
+   * for a future plumb of per-run observed values -- disabled with a
    * tooltip until the run-vars extraction backlog item lands.
    *
    * Clicking a leaf calls `varPaneStore.insert('{{ path }}')` which
@@ -39,18 +39,18 @@
   let filter = $state('');
 
   // Fetch recent runs the first time the user opens the Real-run tab.
-  // Filtered by the active playbook's name when available — FSR's
+  // Filtered by the active playbook's name when available -- FSR's
   // recent-runs endpoint accepts a template_iri filter, but we don't
   // have the IRI here, so we just fetch the appliance-wide recent
   // list and let the user pick. (Hooking up template_iri requires
-  // wiring deployment metadata through — separate follow-up.)
+  // wiring deployment metadata through -- separate follow-up.)
   $effect(() => {
     if (source !== 'run') return;
     if (runVarsStore.runs.length || runVarsStore.runsLoading) return;
     runVarsStore.loadRuns();
   });
 
-  /** Same scope walker VarPathPicker used — kept here so the pane is
+  /** Same scope walker VarPathPicker used -- kept here so the pane is
    *  self-contained and doesn't depend on the legacy picker code. */
   function collectAncestors(): VisualNode[] {
     if (!playbook || !node) return [];
@@ -94,7 +94,7 @@
   function hintColor(hint: string | undefined): string {
     if (!hint) return 'text-[var(--text-faint)]';
     const h = hint.toLowerCase();
-    // Sample-derived `= value` previews — infer color from the literal
+    // Sample-derived `= value` previews -- infer color from the literal
     // shape after the `=` so a record full of mixed types reads at a
     // glance (number-emerald, string-sky, null-italic, etc.).
     if (h.startsWith('=')) {
@@ -127,7 +127,7 @@
 
   /** Refresh typed shapes + module fields + globals + sample whenever
    *  the active step changes or the pane (re)opens. The pane is cheap
-   *  to leave mounted, so we don't gate on `open` — but we do skip
+   *  to leave mounted, so we don't gate on `open` -- but we do skip
    *  fetches when there is no step. */
   let triggerRecordFields = $state<string[] | null>(null);
   let triggerSample = $state<Record<string, unknown> | null>(null);
@@ -163,7 +163,7 @@
 
   // Auto-expand records[0] once a sample record is available so the
   // user lands on the useful drill-down without an extra click. Only
-  // happens when there's actually data to show — playbooks with no
+  // happens when there's actually data to show -- playbooks with no
   // pinned sample stay collapsed (the placeholder triplet isn't worth
   // an open slot of vertical space).
   let legendOpen = $state(false);
@@ -180,7 +180,7 @@
 
   // Lazy-load the globalVars catalog only when the user expands the
   // group. The list is long (dozens of env/tenant settings) and the
-  // call hits the FSR appliance — no point paying for it when most
+  // call hits the FSR appliance -- no point paying for it when most
   // sessions stay inside Input + Step outputs.
   $effect(() => {
     if (!expanded.has('g:globals') || globalsLoaded) return;
@@ -190,7 +190,7 @@
     });
   });
 
-  /** Tree node model — `children` is a thunk so deep paths only
+  /** Tree node model -- `children` is a thunk so deep paths only
    *  materialize when the user expands them. Keeps the render tight
    *  even on playbooks with dozens of typed steps. */
   type TreeNode = {
@@ -277,7 +277,7 @@
         hint = `= ${truncate(s, 50)}`;
       }
       // Build expandable children when the sample value is a nested
-      // object or list — picklist fields (`severity = {itemValue, @id,
+      // object or list -- picklist fields (`severity = {itemValue, @id,
       // …}`), `sourcedata = {…}`, attachments lists, etc. Lets the user
       // drill into `vars.input.records[0].severity.itemValue` directly
       // without typing the dotted path by hand.
@@ -351,7 +351,7 @@
         // params only shows when the playbook actually declares input
         // parameters (workflow_reference callers pass them in via
         // `arguments.arguments`). With no declared params, vars.input.params
-        // is always an empty dict at runtime — picking from it is dead code.
+        // is always an empty dict at runtime -- picking from it is dead code.
         const params = playbook?.parameters ?? [];
         if (params.length) {
           kids.push({
@@ -371,13 +371,13 @@
       }
     });
 
-    // Top-level set_variable outputs — FSR exposes these as
+    // Top-level set_variable outputs -- FSR exposes these as
     // `{{ vars.<name> }}` (NOT vars.steps.<step>.<name>); corpus-
     // verified, see jinja-picker-session-state memory.
     //
     // Scope to ancestor set_variable steps only. Keys produced by the
     // current step or by downstream steps can't be referenced from
-    // here at runtime — including them would let the user pick a path
+    // here at runtime -- including them would let the user pick a path
     // that fails to render. The backend's top_level_vars is global
     // (no owner info), so we re-derive the owners from the playbook
     // nodes by reading each set_variable's `vars:`/`arg_list:` keys.
@@ -465,7 +465,7 @@
       });
     }
 
-    // globalVars last — env/tenant settings from the FSR catalog. Long
+    // globalVars last -- env/tenant settings from the FSR catalog. Long
     // and rarely the first thing the user wants, so it sits at the
     // bottom and starts collapsed (see `expanded` init below).
     out.push({
@@ -498,9 +498,9 @@
     return out;
   });
 
-  // Expansion state — keyed by node.key so subtrees survive re-derives.
+  // Expansion state -- keyed by node.key so subtrees survive re-derives.
   // Groups default to open; everything else collapsed. Use a Set so the
-  // reactivity is unambiguous across Svelte 5 builds — bracket-assign
+  // reactivity is unambiguous across Svelte 5 builds -- bracket-assign
   // on a $state object with a previously-unseen key has tripped subtle
   // proxy issues in production bundles even though it worked in tests.
   let expanded = $state<Set<string>>(new Set(['g:input', 'g:vars', 'g:steps']));
@@ -510,7 +510,7 @@
     expanded = next;
   }
 
-  /** Filter test — substring match on label or full path. Returns
+  /** Filter test -- substring match on label or full path. Returns
    *  true if this node OR any descendant matches, so parents stay
    *  visible when a descendant matches. */
   function matches(n: TreeNode, q: string): boolean {
@@ -539,7 +539,7 @@
     if (n.isGroup) return true;
     if (n.children) {
       for (const c of n.children()) if (passesHideNull(c)) return true;
-      // Object/list parent whose children are all null — fall through
+      // Object/list parent whose children are all null -- fall through
       // to the leaf check; if the parent itself isn't null-flagged,
       // keep it so the user can still drill in.
       return !isNullLeaf(n);
@@ -637,7 +637,7 @@
   </div>
 
   {#if source === 'run'}
-    <!-- Run picker — populated lazily on first tab open. The detail
+    <!-- Run picker -- populated lazily on first tab open. The detail
          fetch happens on select; rows then show `= value` previews
          from the run's step traces (defensively probing the three
          field names FSR uses across versions). -->
@@ -666,7 +666,7 @@
               runVarsStore.selectRun(v ? Number(v) : null);
             }}
           >
-            <option value="">— pick a run —</option>
+            <option value="">-- pick a run --</option>
             {#each runVarsStore.runs as r (r.id)}
               <option value={r.id ?? ''}>
                 #{r.id} · {r.status ?? '?'} · {r.created?.slice(0, 19) ?? ''}

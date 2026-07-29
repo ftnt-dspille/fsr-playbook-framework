@@ -30,18 +30,18 @@ The fastest path. Recipes ship as ready-to-push YAML/JSON for two common pattern
 
 | What | Command | Output |
 |---|---|---|
-| Threat-feed ingestion (TAXII2-style — bulk feed → indicators) | `fsrpb generate-recipe --kind threat-feed --info-json <connector>/info.json` | full collection JSON, validates clean, push-ready |
+| Threat-feed ingestion (TAXII2-style -- bulk feed → indicators) | `fsrpb generate-recipe --kind threat-feed --info-json <connector>/info.json` | full collection JSON, validates clean, push-ready |
 | Data ingestion (alerts / incidents from a SIEM-style fetch op) | `fsrpb generate-recipe --kind data-ingest --info-json <connector>/info.json --target-module alerts` | full collection JSON |
 
 Behind the scenes the generator queries the live FSR for picklist UUIDs, prechecks that the target connector is installed, and binds output to its matching ruleset for self-validation. See [`store/RECIPES.md`](store/RECIPES.md) for the structural patterns.
 
 ### …explore a sample playbook and adapt it
 
-Working examples live in `examples/` — each has a `.yaml` source and a `.test.yaml` runner spec.
+Working examples live in `examples/` -- each has a `.yaml` source and a `.test.yaml` runner spec.
 
 | Sample | What it shows |
 |---|---|
-| `demo_pure_logic` | Set / decision / no external calls — fastest smoke |
+| `demo_pure_logic` | Set / decision / no external calls -- fastest smoke |
 | `demo_record_create` | Create a record, capture its uuid |
 | `demo_record_find_update` | Find a record, then update it |
 | `demo_for_each` | Iterate over a list of records |
@@ -74,9 +74,9 @@ Full scripted scenarios in [`DEMO.md`](DEMO.md).
 The killer demo. None of this loop is possible from the FSR Playbook Designer.
 
 Agent flow:
-1. `list_recent_failed_runs(limit=20)` — newest failures across the instance, **including historical** (FSR purges live → historical every ~30-60 min). Returns `task_id`, `name`, `status`, `error_message`, `source: live|historical`.
-2. `get_run_env(<pk>)` — rebuilds the live `{vars: {…env, steps: {Step_Name: result}}}` Jinja context from a real run. The shape mismatch (e.g. `.records` vs `.data`) is now obvious.
-3. `render_jinja('{{ vars.steps.X.field }}', from_pb_execution=<pk>)` — confirm the candidate fix resolves before committing.
+1. `list_recent_failed_runs(limit=20)` -- newest failures across the instance, **including historical** (FSR purges live → historical every ~30-60 min). Returns `task_id`, `name`, `status`, `error_message`, `source: live|historical`.
+2. `get_run_env(<pk>)` -- rebuilds the live `{vars: {…env, steps: {Step_Name: result}}}` Jinja context from a real run. The shape mismatch (e.g. `.records` vs `.data`) is now obvious.
+3. `render_jinja('{{ vars.steps.X.field }}', from_pb_execution=<pk>)` -- confirm the candidate fix resolves before committing.
 4. `fsrpb pull "<name>"` → edit YAML → `validate_yaml` → `push_playbook` → `run_playbook --follow`.
 
 Filter further with `modified_after`, `tags_include`, `tags_exclude="system"`, `user_iri="/api/3/people/<uuid>"` for noisy instances.
@@ -88,7 +88,7 @@ Filter further with `modified_after`, `tags_include`, `tags_exclude="system"`, `
 | Pull a live playbook to YAML | `fsrpb pull "<name>"` |
 | Pull a whole collection | `fsrpb pull-collection "<coll-name>"` |
 | Diff your YAML against the live version | `fsrpb diff "<name>"` |
-| Search across the corpus | MCP `search_playbooks(q)` — full-text over 1,669 live workflows |
+| Search across the corpus | MCP `search_playbooks(q)` -- full-text over 1,669 live workflows |
 | Decompile FSR JSON to YAML | `fsrpb decompile <coll.json>` |
 | Round-trip-test the compiler | `fsrpb roundtrip <coll.json>` |
 
@@ -110,7 +110,7 @@ Filter further with `modified_after`, `tags_include`, `tags_exclude="system"`, `
 
 | Step | Tool |
 |---|---|
-| Catch typos and structural errors | `validate_yaml(yaml_text)` — structured errors with "did you mean…" suggestions for connector / op / param / step-id / Jinja path / picklist value |
+| Catch typos and structural errors | `validate_yaml(yaml_text)` -- structured errors with "did you mean…" suggestions for connector / op / param / step-id / Jinja path / picklist value |
 | Convert to FSR JSON without pushing | `compile_yaml(yaml_text)` |
 | End-to-end dry run with auto-cleanup | `dry_run_playbook(yaml_text, playbook=…, input=…)` |
 
@@ -131,10 +131,10 @@ Filter further with `modified_after`, `tags_include`, `tags_exclude="system"`, `
 
 Four scripted scenarios in [`DEMO.md`](DEMO.md), each ~3-5 minutes:
 
-- **Demo A — Authoring from a vague ask**: connector discovery → op schema → YAML → validate → dry-run. Showcases the full loop without CLI hand-off.
-- **Demo B — Iterating on a broken draft**: paste typo'd YAML, agent uses validator's "did you mean" + `render_jinja(from_pb_execution=…)` to fix without guessing.
-- **Demo C — Triage and fix a broken playbook**: `list_recent_failed_runs` → `get_run_env` → spot shape mismatch → pull / edit / push / re-run. **Not possible in the FSR Designer.**
-- **Demo D — Reverse-engineer an existing playbook**: pull → narrate steps in plain English → cross-reference idioms via `find_jinja_pattern`.
+- **Demo A -- Authoring from a vague ask**: connector discovery → op schema → YAML → validate → dry-run. Showcases the full loop without CLI hand-off.
+- **Demo B -- Iterating on a broken draft**: paste typo'd YAML, agent uses validator's "did you mean" + `render_jinja(from_pb_execution=…)` to fix without guessing.
+- **Demo C -- Triage and fix a broken playbook**: `list_recent_failed_runs` → `get_run_env` → spot shape mismatch → pull / edit / push / re-run. **Not possible in the FSR Designer.**
+- **Demo D -- Reverse-engineer an existing playbook**: pull → narrate steps in plain English → cross-reference idioms via `find_jinja_pattern`.
 
 Pre-talk smoke: `fsrpb e2e all` runs all 11 demo fixtures end-to-end.
 
@@ -142,12 +142,12 @@ Pre-talk smoke: `fsrpb e2e all` runs all 11 demo fixtures end-to-end.
 
 ## Where to look next
 
-- [`AUTHORING.md`](AUTHORING.md) — the agent's authoring guide; per-step output-shape table; the `vars.steps.<Underscored_Step_Name>` rule
-- [`store/MCP_TOOLS.md`](store/MCP_TOOLS.md) — every MCP tool, auto-generated, with full signatures + docstrings
-- [`store/STEP_TYPES.md`](store/STEP_TYPES.md) — all 43 FSR step types with arg shapes
-- [`store/CONNECTORS.md`](store/CONNECTORS.md) — 714 connectors, 6,773 ops, signatures-as-cheatsheet
-- [`store/FSR_CUSTOM_JINJA.md`](store/FSR_CUSTOM_JINJA.md) — the 32 FortiSOAR-custom Jinja capabilities (grep this first for FSR-flavored Jinja)
-- [`store/JINJA_IDIOMS.md`](store/JINJA_IDIOMS.md) — 10 corpus-mined patterns
-- [`store/RECIPES.md`](store/RECIPES.md) — multi-step composition templates
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — the parser → resolver → validator → emitter pipeline
-- [`PRESENTATION_OUTLINE.md`](PRESENTATION_OUTLINE.md) — slide deck for the talk
+- [`AUTHORING.md`](AUTHORING.md) -- the agent's authoring guide; per-step output-shape table; the `vars.steps.<Underscored_Step_Name>` rule
+- [`store/MCP_TOOLS.md`](store/MCP_TOOLS.md) -- every MCP tool, auto-generated, with full signatures + docstrings
+- [`store/STEP_TYPES.md`](store/STEP_TYPES.md) -- all 43 FSR step types with arg shapes
+- [`store/CONNECTORS.md`](store/CONNECTORS.md) -- 714 connectors, 6,773 ops, signatures-as-cheatsheet
+- [`store/FSR_CUSTOM_JINJA.md`](store/FSR_CUSTOM_JINJA.md) -- the 32 FortiSOAR-custom Jinja capabilities (grep this first for FSR-flavored Jinja)
+- [`store/JINJA_IDIOMS.md`](store/JINJA_IDIOMS.md) -- 10 corpus-mined patterns
+- [`store/RECIPES.md`](store/RECIPES.md) -- multi-step composition templates
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) -- the parser → resolver → validator → emitter pipeline
+- [`PRESENTATION_OUTLINE.md`](PRESENTATION_OUTLINE.md) -- slide deck for the talk

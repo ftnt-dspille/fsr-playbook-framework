@@ -1,9 +1,9 @@
-"""probe_connector_configs — warm the per-instance `connector_configs` table.
+"""probe_connector_configs -- warm the per-instance `connector_configs` table.
 
 Connector-configuration records (the `config` UUID a connector step needs) are
 created out-of-band on each FSR box and are NOT portable, so they're warmed into
 the reference DB rather than shipped. The compiler reads them offline via
-``Resolver.resolve_config_id`` — never by importing this `tooling/` tree or
+``Resolver.resolve_config_id`` -- never by importing this `tooling/` tree or
 hitting the network. This probe is the only writer.
 
 Live source:

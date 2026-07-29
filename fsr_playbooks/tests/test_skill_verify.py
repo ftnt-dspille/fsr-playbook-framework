@@ -1,4 +1,4 @@
-"""Phase 4 — verify/repair loop over value-match wiring (PLAN §4)."""
+"""Phase 4 -- verify/repair loop over value-match wiring (PLAN §4)."""
 from __future__ import annotations
 
 from fsr_playbooks.agent.skill_trace import SkillTrace
@@ -41,7 +41,7 @@ def test_verify_wire_rejects_undefined_path():
 
 def test_bad_wire_is_repaired_to_literal():
     """A wire whose path can't resolve is demoted back to the literal and
-    recorded as a gap — never shipped as a dangling ref."""
+    recorded as a gap -- never shipped as a dangling ref."""
     t = _trace_enrich_then_block()
     # Inject a render_fn that fails the IP wire to simulate a bad path.
     def failing_render(template, context=None, **_):

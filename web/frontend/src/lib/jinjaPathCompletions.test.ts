@@ -49,7 +49,7 @@ describe('parsePathTail', () => {
   });
 
   it('tokenizes numeric index brackets; trailing identifier is the partial', () => {
-    // `[0].id` with no trailing delimiter means the user is mid-typing `id` —
+    // `[0].id` with no trailing delimiter means the user is mid-typing `id` --
     // for completion semantics, that's a partial filter, not a committed segment.
     expect(parsePathTail('[0].id')).toEqual({
       segments: [0],
@@ -182,7 +182,7 @@ describe('suggestForJinjaPath', () => {
     });
 
     it('does NOT shadow vars.steps or vars.input', () => {
-      // `vars.steps` and `vars.input` are reserved roots — the
+      // `vars.steps` and `vars.input` are reserved roots -- the
       // top-level-vars branch must yield to the steps branch.
       expect(suggestForJinjaPath('{{ vars.steps', { topLevelVars: { steps: { kind: 'scalar', type: 'any' } } })).toBeNull();
       expect(suggestForJinjaPath('{{ vars.input', { topLevelVars: { input: { kind: 'scalar', type: 'any' } } })).toBeNull();

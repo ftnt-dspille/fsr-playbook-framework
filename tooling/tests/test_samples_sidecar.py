@@ -1,4 +1,4 @@
-"""Sample-data sidecar (`# fsrpb:samples`) — extract/emit roundtrip,
+"""Sample-data sidecar (`# fsrpb:samples`) -- extract/emit roundtrip,
 coexistence with the layout block, and overlay into Jinja vars."""
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ def test_samples_and_layout_coexist_at_footer():
     out = from_visual(g, YAML_PLAIN)
     assert "# fsrpb:layout" in out
     assert "# fsrpb:samples" in out
-    # Footer order is layout then samples — stable across re-saves.
+    # Footer order is layout then samples -- stable across re-saves.
     assert out.find("# fsrpb:layout") < out.find("# fsrpb:samples")
     # Re-round-trip is stable.
     g2 = to_visual(out)
@@ -119,7 +119,7 @@ def test_samples_and_layout_coexist_at_footer():
 
 
 def test_samples_block_does_not_break_parsing():
-    """The compiler must continue to parse the YAML cleanly — samples
+    """The compiler must continue to parse the YAML cleanly -- samples
     live in comments and never reach the FSR push payload."""
     samples = {"Demo": {"get_ip_address": {"input": {"ip_address": "1.2.3.4"}}}}
     text = append_samples(YAML_PLAIN, samples)

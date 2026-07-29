@@ -1,4 +1,4 @@
-"""probe_corpus_audit — diff resolver whitelists against the live
+"""probe_corpus_audit -- diff resolver whitelists against the live
 playbook_steps corpus, plus audit ManualInput inputVariables tuples
 against the hardcoded _INPUT_FIELD_KINDS map.
 
@@ -10,11 +10,11 @@ Run quarterly (or after any normalizer/whitelist change) to catch:
   - Canonical keys in the resolver whitelists that never appear in any
     real playbook (suspect: probably a spec-only or dead key).
   - `(formType, dataType, type, templateUrl)` tuples on ManualInput
-    inputVariables that no friendly `kind:` projects to — these are
+    inputVariables that no friendly `kind:` projects to -- these are
     inputs authors can't currently express via the friendly form.
 
 Implements TODO items I13 (corpus shape audit) and I14 (auto-derive
-_INPUT_FIELD_KINDS — actually a drift check, since friendly kind names
+_INPUT_FIELD_KINDS -- actually a drift check, since friendly kind names
 have no in-corpus signal).
 """
 from __future__ import annotations
@@ -43,9 +43,9 @@ UNIVERSAL_STEP_KEYS: set[str] = {
 # Keyed by FSR's internal step_type_name (the column value in
 # playbook_steps.step_type_name). Update this map when the corresponding
 # _FRIENDLY / _CANONICAL set in the resolver changes. The audit's whole
-# job is to surface drift between these two — keep them paired.
+# job is to surface drift between these two -- keep them paired.
 #
-# Step types not listed here are reported as 'unclassified' — observed
+# Step types not listed here are reported as 'unclassified' -- observed
 # keys are still tallied but not diff'd against any expected set.
 EXPECTED_KEYS: dict[str, dict[str, set[str]]] = {
     "cybersponse.post_create": {
@@ -137,7 +137,7 @@ _FIELD_KIND_TUPLES: dict[str, tuple[str, str, str, str | None]] = {
     "multiselect": ("multiselect",       "dynamicList", "array",    "app/components/form/fields/dynamicList.html"),
     "picklist":   ("picklist",           "picklist",    "picklists","app/components/form/fields/typeahead.html"),
     "multiselectpicklist": ("multiselectpicklist", "picklist", "picklists", "app/components/form/fields/typeahead.html"),
-    # lookup `type` is the target module — wildcard-matched in the audit
+    # lookup `type` is the target module -- wildcard-matched in the audit
     "lookup":   ("lookup",   "lookup",   "*lookup*", "app/components/form/fields/typeahead.html"),
     "file":     ("file",     "file",     "string",   "app/components/form/fields/file.html"),
     "image":    ("image",    "file",     "string",   "app/components/form/fields/file.html"),
@@ -274,7 +274,7 @@ def render_markdown(step_report: dict[str, Any],
     lines.append("## Step argument keys vs resolver whitelists")
     lines.append("")
     for tname, e in step_report.items():
-        lines.append(f"### `{tname}` — {e['row_count']} rows, "
+        lines.append(f"### `{tname}` -- {e['row_count']} rows, "
                      f"{e['distinct_keys']} distinct keys")
         if e["status"] == "unclassified":
             lines.append("_no resolver normalizer; observed keys only_")

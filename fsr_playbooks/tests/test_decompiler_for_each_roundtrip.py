@@ -1,4 +1,4 @@
-"""The decompiler must emit `for_each:` — dropping it is silent data loss.
+"""The decompiler must emit `for_each:` -- dropping it is silent data loss.
 
 Found by mounting real playbooks pulled from a live appliance as offline
 fixtures: two of them looped (`for_each.item`), and the YAML that came back
@@ -9,7 +9,7 @@ lifted into a field nothing read.
 Why this class matters more than a normal fidelity gap: the widget saves the
 agent's LAST ```yaml fence back OVER the open record. So a pull -> ask the
 agent for one small edit -> push of a looping playbook silently rewrites
-"run this for every open incident" into "run it once, on nothing" — no error,
+"run this for every open incident" into "run it once, on nothing" -- no error,
 no diff the analyst would notice, and a control-flow change is not something
 they would think to re-check after a one-field edit.
 """
@@ -59,7 +59,7 @@ def test_for_each_survives_a_round_trip():
     """The behavioural bar: a loop that went in comes back out."""
     step = _roundtrip(_LOOPING)["Escalate Each"]
     assert "for_each" in step, (
-        "for_each was DROPPED — pull->edit->push would delete the loop and "
+        "for_each was DROPPED -- pull->edit->push would delete the loop and "
         "turn a per-record playbook into a single-shot one"
     )
     assert step["for_each"]["item"] == "{{ vars.steps.Find_Open }}"
@@ -67,7 +67,7 @@ def test_for_each_survives_a_round_trip():
 
 def test_for_each_options_are_not_lossy():
     """`parallel` / `condition` change what the loop DOES, so a partial
-    round-trip is its own defect — a loop that comes back without its guard
+    round-trip is its own defect -- a loop that comes back without its guard
     condition runs on records it was written to skip."""
     fe = _roundtrip(_LOOPING)["Escalate Each"]["for_each"]
     assert fe.get("parallel") is False
@@ -102,7 +102,7 @@ def test_recompiles_to_the_same_wire_for_each():
 
 def test_non_looping_steps_do_not_grow_a_for_each_key():
     """No-regression guard: the fix must not stamp an empty `for_each:` onto
-    every step — noise in the YAML the agent reads is its own cost."""
+    every step -- noise in the YAML the agent reads is its own cost."""
     by_name = _roundtrip(_LOOPING)
     assert "for_each" not in by_name["Find Open"]
     assert "for_each" not in by_name["Start"]

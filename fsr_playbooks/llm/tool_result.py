@@ -1,26 +1,26 @@
-"""P4 — the tool-output envelope contract.
+"""P4 -- the tool-output envelope contract.
 
 Every tool dispatched through `llm.tools.dispatch` returns its result straight
 back to the agent loop as a `tool_result` block. Historically the *shape* of
-that result was a de-facto convention — a dict, usually carrying some of
-``{ok, code, message, error, record, ...}`` — enforced nowhere. A tool that
+that result was a de-facto convention -- a dict, usually carrying some of
+``{ok, code, message, error, record, ...}`` -- enforced nowhere. A tool that
 returned a bare string or ``None`` would slip through and confuse the model (or
 the widget) downstream. This module turns that convention into a checked
 contract.
 
 **The contract.** A tool result is one of:
-  1. a **dict** — the standard envelope (status/error/payload keys below), OR
-  2. a **list of dicts** — a collection result (the ``find_*`` / ``search_*``
+  1. a **dict** -- the standard envelope (status/error/payload keys below), OR
+  2. a **list of dicts** -- a collection result (the ``find_*`` / ``search_*``
      tools return a ranked list of hit dicts).
 
-Anything else — a naked scalar (``str``/``int``/``bool``), ``None``, or a list
-whose members aren't dicts — is a contract violation: an untyped return the
+Anything else -- a naked scalar (``str``/``int``/``bool``), ``None``, or a list
+whose members aren't dicts -- is a contract violation: an untyped return the
 downstream can't reason about.
 
 **Roll-out posture (fail-open → strict).** `dispatch` validates every tool
 output through :func:`validate_tool_output`. By default it is *fail-open*: a
 violation is logged (so we can find and type the offenders) and the original
-result is returned unchanged — a validation bug must never break a live turn.
+result is returned unchanged -- a validation bug must never break a live turn.
 Setting ``FSRPB_STRICT_TOOL_OUTPUT`` to a truthy value flips it *strict*: a
 violation is replaced with a well-formed error envelope so the contract is hard.
 
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 class ToolResult(TypedDict, total=False):
     """The recognized keys of a dict-shaped tool envelope (all optional).
 
-    Documentation, not a runtime schema — a tool may carry domain payload keys
+    Documentation, not a runtime schema -- a tool may carry domain payload keys
     beyond these (e.g. ``record``, ``card``, ``schema``, ``runs``). The status
     trio ``ok``/``code``/``message`` and the ``error`` key are the cross-cutting
     convention every consumer keys off.
@@ -73,16 +73,16 @@ def describe_violation(name: str, result: Any) -> str:
     error envelopes). Assumes the caller already knows it's invalid."""
     if isinstance(result, list):
         return (f"tool '{name}' returned a list with non-dict member(s) "
-                f"(types: {sorted({type(i).__name__ for i in result})}) — "
+                f"(types: {sorted({type(i).__name__ for i in result})}) -- "
                 f"a collection result must be a list of dicts")
-    return (f"tool '{name}' returned a bare {type(result).__name__} — "
+    return (f"tool '{name}' returned a bare {type(result).__name__} -- "
             f"tool outputs must be a dict envelope or a list of dict envelopes")
 
 
 def _strict_mode() -> bool:
     """Whether the tool-output contract is enforced strictly (violations become
     error envelopes) vs fail-open (violations logged, result passed through).
-    Off by default — see the module docstring's roll-out posture."""
+    Off by default -- see the module docstring's roll-out posture."""
     raw = os.environ.get("FSRPB_STRICT_TOOL_OUTPUT")
     if raw is None:
         return False

@@ -1,4 +1,4 @@
-"""Render-path probe — capture how FSR actually executes for_each,
+"""Render-path probe -- capture how FSR actually executes for_each,
 break_loop, and step-level conditions, and save the resulting run
 envs as fixtures so the simulator can be tested against real
 behavior without a live FSR.
@@ -23,7 +23,7 @@ Requires `.env` with FSR_BASE_URL + auth, same as the other probes.
 
 The fixtures this writes are consumed by
 ``python/tests/test_render_path_fixtures.py``. Tests skip cleanly when
-the fixtures are absent — re-run this probe whenever a new construct
+the fixtures are absent -- re-run this probe whenever a new construct
 needs covering or when FSR semantics may have shifted.
 """
 from __future__ import annotations
@@ -360,7 +360,7 @@ SCENARIOS: list[Scenario] = [
         ),
     ),
 
-    # R4. Ref inside a for_each. 624 corpus rows do this — capture
+    # R4. Ref inside a for_each. 624 corpus rows do this -- capture
     #     what vars.steps.<ref_loop> looks like after iteration.
     Scenario(
         name="ref_inside_for_each",
@@ -404,7 +404,7 @@ SCENARIOS: list[Scenario] = [
         ),
     ),
 
-    # 5. for_each.condition — per-iteration filter. Iterate
+    # 5. for_each.condition -- per-iteration filter. Iterate
     #    [1,2,3,4,5] but only execute the body when item is even.
     #    Captures whether the result list contains all 5 entries
     #    (with skipped-iteration placeholders) or just the matching 2.
@@ -628,7 +628,7 @@ def main() -> int:
 
     cfg = _env.get_config()
     if not cfg.is_live():
-        _log("FSR_BASE_URL / auth not configured — see .env")
+        _log("FSR_BASE_URL / auth not configured -- see .env")
         return 2
     client = _env.get_client()
 

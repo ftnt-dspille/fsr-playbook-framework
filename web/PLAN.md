@@ -12,12 +12,12 @@ canonical: false
 summary: Plan for the web-based playbook studio.
 ---
 
-# FSR Playbook Studio — Web app plan
+# FSR Playbook Studio -- Web app plan
 
 **Status**: Phase 5 in progress (LLM-modular + history backend done; UI routes pending)
 **Owner**: Dylan
 **Last updated**: 2026-05-04
-**Supersedes**: UI + shipping sections of `../docs/archive/CHAT_APP_PLAN.md` (Streamlit). Inherits everything else from that doc — LLM context strategy, hard rules, tool dispatcher design, offline/live data buckets, risks. Read the archived plan first; this doc only covers the deltas for the SvelteKit + FastAPI stack.
+**Supersedes**: UI + shipping sections of `../docs/archive/CHAT_APP_PLAN.md` (Streamlit). Inherits everything else from that doc -- LLM context strategy, hard rules, tool dispatcher design, offline/live data buckets, risks. Read the archived plan first; this doc only covers the deltas for the SvelteKit + FastAPI stack.
 
 ---
 
@@ -26,7 +26,7 @@ summary: Plan for the web-based playbook studio.
 Browser app (Mac-local for v1, hostable later) that:
 
 1. Lets an LLM author FSR playbook YAML *live in a Monaco editor* while the user watches and chats.
-2. Drives the existing `fsrpb` toolchain — compile, push, run, env, jinja, browse — through the same 19 tools the MCP server already exposes.
+2. Drives the existing `fsrpb` toolchain -- compile, push, run, env, jinja, browse -- through the same 19 tools the MCP server already exposes.
 3. Makes the reference store (connectors / step types / Jinja idioms / recipes) browsable.
 4. Single user, single machine, single FSR instance for v1. Hostability is a Phase-6 concern.
 
@@ -47,9 +47,9 @@ Browser app (Mac-local for v1, hostable later) that:
 | Persistence | **SQLite** at `web/data/studio.db` | Chat sessions, run history, saved YAML drafts. |
 | Auth | **None** (bind `127.0.0.1`) | Single-user. Phase 6 adds shared-secret header for non-localhost. |
 
-**MCP reuse**: direct in-process import of the handler functions from `python/mcp_server.py` (decision deferred to me — picking direct import). Subprocess + MCP stdio is cleaner but doubles the moving parts and we already own both sides. If we later need true MCP isolation (multi-tenant hosting), refactor then.
+**MCP reuse**: direct in-process import of the handler functions from `python/mcp_server.py` (decision deferred to me -- picking direct import). Subprocess + MCP stdio is cleaner but doubles the moving parts and we already own both sides. If we later need true MCP isolation (multi-tenant hosting), refactor then.
 
-**Live-editing model**: full-buffer replace per assistant turn (decision deferred to me — picking buffer-replace). The model writes the whole YAML each turn; we diff in Monaco and apply. Token-streaming into the editor cell-by-cell looks magical but fights user edits and adds significant complexity. Revisit only if buffer-replace feels too static after Phase 3.
+**Live-editing model**: full-buffer replace per assistant turn (decision deferred to me -- picking buffer-replace). The model writes the whole YAML each turn; we diff in Monaco and apply. Token-streaming into the editor cell-by-cell looks magical but fights user edits and adds significant complexity. Revisit only if buffer-replace feels too static after Phase 3.
 
 ---
 
@@ -115,7 +115,7 @@ All endpoints scoped under `/api`. Errors as `{error: {code, message, details?}}
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/health` | `{fsr: ok|down, db: ok, llm: configured}` — pre-flight |
+| GET | `/api/health` | `{fsr: ok|down, db: ok, llm: configured}` -- pre-flight |
 | POST | `/api/chat` | SSE: streams `text`, `tool_use_start`, `tool_use_delta`, `tool_use_final`, `tool_result`, `done` events |
 | POST | `/api/yaml/validate` | → `{ok, errors: [{line, col, code, message, suggestion?}]}` |
 | POST | `/api/yaml/compile` | → `{ok, data?, errors?}` |
@@ -130,7 +130,7 @@ All endpoints scoped under `/api`. Errors as `{error: {code, message, details?}}
 | GET | `/api/ref/jinja?q=&kind=` | filter / macro / pattern search |
 | GET | `/api/sessions` / `POST` / `DELETE /{id}` | chat history CRUD |
 
-Tool dispatcher inside `/api/chat` calls the same function set described in `CHAT_APP_PLAN.md` §"Tool dispatcher" — no new design needed.
+Tool dispatcher inside `/api/chat` calls the same function set described in `CHAT_APP_PLAN.md` §"Tool dispatcher" -- no new design needed.
 
 ---
 
@@ -163,7 +163,7 @@ Tool dispatcher inside `/api/chat` calls the same function set described in `CHA
 | 1 | YAML validate + compile wired to Monaco markers. Action bar. | Editing `examples/hello_connector.yaml` underlines real errors. |
 | 2 | Chat (Anthropic, SSE streaming, tool-use). In-process tool dispatcher importing from `mcp_server.py`. Buffer-replace into Monaco. System prompt + live instance context per `CHAT_APP_PLAN.md`. | "Build a hello-world playbook" produces YAML in the editor; tool calls visible. |
 | 3 | Push + Run + Run viewer. SSE status stream. Jinja-render box on Run tab. | One click compiles → pushes → runs `examples/hello_connector.yaml` and shows the step tree. ✅ Push subprocess + Run SSE stream + Run page with logs and `vars` env viewer landed; structured step tree + Jinja-render box deferred to Phase 3.5. |
-| 4 | Browse tab — connectors / step types / jinja / recipes. Cross-links from chat tool calls into Browse. | Search + drill-down works; tool-call cards link to `/browse/connector/<name>`. |
+| 4 | Browse tab -- connectors / step types / jinja / recipes. Cross-links from chat tool calls into Browse. | Search + drill-down works; tool-call cards link to `/browse/connector/<name>`. |
 | 5 | History (sessions + runs). `LLMProvider` abstraction; OpenAI provider added. | Restart preserves chats; `.env` flag switches provider. **🟡 PARTIAL (2026-05-04):** `LLMProvider` abstraction landed (UsageEvent in the event union, factory + registry, `STUDIO_LLM_PROVIDER` env, `FakeProvider` for tests). History backend wired (push + chat-turn → `web/backend/history.db`, per-playbook `cost_by_playbook()`, chat↔push correlation via `~/.fsrpb/active_session`). **Still TODO:** OpenAI provider impl; `/api/history` FastAPI routes; Svelte `/history` UI (route stub already exists). |
 | 6 | Hosting prep. Auth header, Dockerfile, externalize FSR creds + LLM keys, CSP. | Runs behind a reverse proxy on a non-laptop host. |
 
@@ -183,7 +183,7 @@ These are not re-explained here. Read the source.
 
 ## Follow-ups captured during Phase 2/3
 
-- **TS port of the Python compiler** — for tighter Monaco integration (in-browser validate/compile, hover schema from the connector store, completion). Today the editor round-trips to FastAPI for every keystroke; that's fine on localhost but limiting. Plan a port of `python/compiler/` to TypeScript so it can ship as a Web Worker the editor talks to directly, with the FSR reference DB exported as a JSON bundle. Scope: parser → resolver → validator → emitter; reuse the same error codes so server-side and client-side diagnostics interleave cleanly. Land after Phase 5 unless live-editing latency becomes a real complaint.
+- **TS port of the Python compiler** -- for tighter Monaco integration (in-browser validate/compile, hover schema from the connector store, completion). Today the editor round-trips to FastAPI for every keystroke; that's fine on localhost but limiting. Plan a port of `python/compiler/` to TypeScript so it can ship as a Web Worker the editor talks to directly, with the FSR reference DB exported as a JSON bundle. Scope: parser → resolver → validator → emitter; reuse the same error codes so server-side and client-side diagnostics interleave cleanly. Land after Phase 5 unless live-editing latency becomes a real complaint.
 
 ## Phase 5 resume notes (2026-05-04)
 
@@ -202,11 +202,11 @@ These are not re-explained here. Read the source.
 
 ## Open questions to revisit (not blocking Phase 0)
 
-1. **Studio SQLite vs reference SQLite** — keep them separate (`web/data/studio.db` for chat/sessions, `store/fsr_reference.db` for the reference store, opened read-only). Simpler than one shared DB.
-2. **Monaco YAML schema** — feed our compiler-derived JSON Schema for `playbooks.yaml` into Monaco's YAML language service for hover/completion before we even talk to the LLM. Probably Phase 3+.
-3. **"Replay session" mode** for demos (from `CHAT_APP_PLAN.md` Day 3) — defer; live chat is the priority.
-4. **Multi-instance FSR** — single instance for v1; later use a dropdown bound to named connections in `.env`.
-5. **Cost / token meter** — surface in header pill alongside FSR / LLM status.
+1. **Studio SQLite vs reference SQLite** -- keep them separate (`web/data/studio.db` for chat/sessions, `store/fsr_reference.db` for the reference store, opened read-only). Simpler than one shared DB.
+2. **Monaco YAML schema** -- feed our compiler-derived JSON Schema for `playbooks.yaml` into Monaco's YAML language service for hover/completion before we even talk to the LLM. Probably Phase 3+.
+3. **"Replay session" mode** for demos (from `CHAT_APP_PLAN.md` Day 3) -- defer; live chat is the priority.
+4. **Multi-instance FSR** -- single instance for v1; later use a dropdown bound to named connections in `.env`.
+5. **Cost / token meter** -- surface in header pill alongside FSR / LLM status.
 
 ---
 
@@ -214,5 +214,5 @@ These are not re-explained here. Read the source.
 
 - Multi-user / RBAC.
 - Real-time co-edit (no Yjs/CRDT). Single-tab assumption.
-- Confirm-before-destructive UX for `run_op` / `push` (dev instance only — fine for now).
+- Confirm-before-destructive UX for `run_op` / `push` (dev instance only -- fine for now).
 - A widget version inside the FortiSOAR appliance UI (that's Phase 3 of the original arc, separate effort).

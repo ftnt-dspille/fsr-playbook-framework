@@ -4,7 +4,7 @@ A tier-3+ call is suspended into an approval card WITHOUT running the tool body,
 so an argument that cannot possibly work (a connector that exists nowhere, a
 playbook name the model invented) used to reach the analyst as a card that looks
 legitimate and can only fail *after* approval. Live: a ztpf session carded
-`run_playbook("Create Next SingleLo Interface")` — a step label, not a playbook.
+`run_playbook("Create Next SingleLo Interface")` -- a step label, not a playbook.
 
 A pre-card validator runs just before the envelope is built and may short-circuit
 with an actionable error. It must be fail-open: a validator that raises, or that
@@ -83,7 +83,7 @@ def test_validator_returning_non_dict_is_ignored(probe):
 
 def test_tier1_call_skips_validators_entirely(probe, monkeypatch):
     """Validators guard the CARD, not execution. A tier-1 tool never cards, so
-    it must run untouched — otherwise a validator becomes a second, silent
+    it must run untouched -- otherwise a validator becomes a second, silent
     authorization layer on read-only calls."""
     monkeypatch.setitem(tools_mod.TOOL_TIERS, "_precard_probe", 1)
     monkeypatch.setitem(
@@ -98,6 +98,6 @@ def test_tier1_call_skips_validators_entirely(probe, monkeypatch):
 
 
 def test_run_op_validator_is_registered_by_default():
-    """The original of this class stays wired — run_op on a connector that
+    """The original of this class stays wired -- run_op on a connector that
     exists nowhere must keep bouncing `unknown_connector`."""
     assert "run_op" in tools_mod._PRECARD_VALIDATORS

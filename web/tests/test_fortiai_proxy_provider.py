@@ -1,4 +1,4 @@
-"""FortiAI Proxy provider — non-streaming transport, tool-call round-trip,
+"""FortiAI Proxy provider -- non-streaming transport, tool-call round-trip,
 approval gate, error mapping. The httpx client is mocked so tests don't
 need a FortiSOAR appliance.
 

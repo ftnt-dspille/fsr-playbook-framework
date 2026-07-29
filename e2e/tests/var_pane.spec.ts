@@ -1,11 +1,11 @@
 /**
- * E2E for the Variable Tree pane — exercises the full stack:
+ * E2E for the Variable Tree pane -- exercises the full stack:
  *   browser → vite (frontend) → /api proxy → uvicorn (backend) → FSR stub
  *
  * What we assert end-to-end:
  *   1. Booting into a seeded draft renders the inspector + var pane
  *      when the user focuses a Jinja-accepting value field.
- *   2. The pane's tree is hydrated from the FSR stub — alerts module
+ *   2. The pane's tree is hydrated from the FSR stub -- alerts module
  *      fields show up under vars.input.records[0], including picklist
  *      values unwrapped via formatFsrValue (`severity = High`).
  *   3. Clicking a leaf inserts `{{ vars.input.records[0].severity }}`
@@ -33,7 +33,7 @@ test('Var pane: focus a value field, pick a leaf, YAML updates', async ({ page }
   await openDraft(page, DRAFT);
 
   // Wait for the canvas to render the seeded steps. The set_variable
-  // step ("Read Sev") becomes our target — click its node to open the
+  // step ("Read Sev") becomes our target -- click its node to open the
   // inspector. StepNode renders the step name as text in the canvas.
   const stepNode = page.getByText('Read Sev', { exact: true }).first();
   await expect(stepNode).toBeVisible({ timeout: 15_000 });
@@ -42,7 +42,7 @@ test('Var pane: focus a value field, pick a leaf, YAML updates', async ({ page }
   // Inspector flies in. Use the `{x}` VarPathPicker button (aria-label
   // "Insert variable") next to the set_variable's `severity` row to
   // claim the pane's insert target. This avoids racing Monaco's focus
-  // listener and the 150ms blur grace — the button-click path uses
+  // listener and the 150ms blur grace -- the button-click path uses
   // varPaneStore.toggle directly.
   const inspector = page.getByRole('dialog', { name: /step inspector/i });
   await expect(inspector).toBeVisible();
@@ -53,12 +53,12 @@ test('Var pane: focus a value field, pick a leaf, YAML updates', async ({ page }
 
   // records[0] is in the Input group (auto-expanded by default).
   // The records[0] node itself also auto-expands once the trigger's
-  // sample record loads — so we don't need to click an Expand button
+  // sample record loads -- so we don't need to click an Expand button
   // (which would be labeled "Collapse" by the time we'd find it).
   await expect(pane.getByRole('button', { name: 'records[0]' })).toBeVisible();
 
   // Click the records[0].severity leaf by its insert-template title.
-  // Playwright auto-scrolls the locator into view — no need to expand
+  // Playwright auto-scrolls the locator into view -- no need to expand
   // or scroll manually. Targeting by full path avoids matching the
   // set_variable's own `vars.severity` row that renders later.
   await pane
@@ -67,7 +67,7 @@ test('Var pane: focus a value field, pick a leaf, YAML updates', async ({ page }
 
   // The insert appended `{{ vars.input.records[0].severity }}` to the
   // set_variable row's value. Verify by reading the live YAML buffer
-  // via the API rather than scraping Monaco — round-trips through the
+  // via the API rather than scraping Monaco -- round-trips through the
   // visual→YAML serializer, which is the actual contract we care about.
   await waitForDraftYaml(DRAFT, (yaml) => yaml.includes('vars.input.records[0].severity'));
 });
@@ -75,7 +75,7 @@ test('Var pane: focus a value field, pick a leaf, YAML updates', async ({ page }
 test('Var pane: Real-run mode shows observed values from past runs', async ({ page }) => {
   await openDraft(page, DRAFT);
 
-  // Trigger a fresh verify BEFORE opening the inspector — once the
+  // Trigger a fresh verify BEFORE opening the inspector -- once the
   // inspector is open it overlays the toolbar and the More Actions
   // button is no longer clickable. Verify populates
   // jinjaShapesStore.topLevelVars so the pane's "vars" group renders
@@ -107,7 +107,7 @@ test('Var pane: Real-run mode shows observed values from past runs', async ({ pa
   const runPicker = pane.getByRole('combobox');
   await expect(runPicker).toBeVisible({ timeout: 10_000 });
 
-  // Pick run #9001 — its wf_step_logs entry for "Read Sev" produced
+  // Pick run #9001 -- its wf_step_logs entry for "Read Sev" produced
   // severity=critical, so observedAt('vars.severity') returns it.
   // `selectOption({label})` requires an exact string, so resolve the
   // exact label at runtime by scanning the rendered <option> texts.
@@ -123,6 +123,6 @@ test('Var pane: Real-run mode shows observed values from past runs', async ({ pa
   // value. This proves the full flow: run selection → detail fetch →
   // record-by-iri fetch → pane display. (Step-output assertions like
   // `= critical` would need an upstream set_variable to surface vars
-  // in the tree — see the iterative_authoring spec for that path.)
+  // in the tree -- see the iterative_authoring spec for that path.)
   await expect(pane.getByText('= aaaa-1111')).toBeVisible({ timeout: 10_000 });
 });

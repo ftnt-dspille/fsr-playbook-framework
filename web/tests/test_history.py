@@ -1,4 +1,4 @@
-"""history.py — push log, chat-turn log, per-playbook cost rollup,
+"""history.py -- push log, chat-turn log, per-playbook cost rollup,
 chat↔push correlation marker, YAML diff.
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ def test_record_push_round_trip():
 
 
 def test_record_push_failure_still_logs():
-    """Failed pushes are valuable history — record them too."""
+    """Failed pushes are valuable history -- record them too."""
     pid = history.record_push(
         source_path="examples/bad.yaml",
         coll_uuid="bad-coll", coll_name="Bad",
@@ -304,7 +304,7 @@ def test_delete_session_cascades_to_turns_messages_and_feedback():
 
 
 def test_get_session_derives_final_yaml_from_compile_tool_call():
-    """No push happened, but the agent ran compile_yaml — the route
+    """No push happened, but the agent ran compile_yaml -- the route
     should surface that yaml_text as final_yaml."""
     from fastapi.testclient import TestClient
     from backend.app import app
@@ -335,7 +335,7 @@ def test_get_session_derives_final_yaml_from_compile_tool_call():
     r = client.get("/api/history/sessions/fy-1")
     assert r.status_code == 200
     data = r.json()
-    # Most recent YAML-bearing tool wins — compile_yaml not validate_yaml.
+    # Most recent YAML-bearing tool wins -- compile_yaml not validate_yaml.
     assert data["final_yaml"] == "playbooks:\n  - name: Final\n"
     assert data["final_yaml_source"] == "tool: compile_yaml"
 

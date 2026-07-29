@@ -1,14 +1,14 @@
-"""probe_playbooks — populates step_types, step_examples, playbooks_seen, recipes.
+"""probe_playbooks -- populates step_types, step_examples, playbooks_seen, recipes.
 
 Merged from the planned probe_step_types + probe_playbook_patterns since
 they share the workflow_steps fetch.
 
 Live sources:
-  GET /api/3/workflow_step_types/?$limit=...        — step type catalog
-  GET /api/3/workflow_steps?$relationships=true     — every step instance
+  GET /api/3/workflow_step_types/?$limit=...        -- step type catalog
+  GET /api/3/workflow_steps?$relationships=true     -- every step instance
                                                        w/ stepType expanded
                                                        (≈7k rows on this box)
-  GET /api/3/workflows?$relationships=true&$limit=  — full playbook inventory
+  GET /api/3/workflows?$relationships=true&$limit=  -- full playbook inventory
                                                        w/ steps[] inline
 
 Trust ladder:
@@ -18,7 +18,7 @@ Trust ladder:
   recipes: tested_pass for the count, seen for the (yet-empty) yaml_template
 
 What we DON'T do here (deferred to v2 / dashboard work):
-  - Yaml templates per recipe — needs structural mining of step graphs
+  - Yaml templates per recipe -- needs structural mining of step graphs
   - Per-trigger drill into arguments.resources (`$exists=alerts` style filters)
     to bin recipes by module. Trivial to add via dot-notation filters once we
     decide the recipe taxonomy.

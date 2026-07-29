@@ -4,14 +4,14 @@ Usage:
     python -m probes.probe_recon_ingest <path-to-extracted-recon-dir>
 
 Reads:
-  A1_routes_full.txt           — Symfony route table
-  D1_function_map_live.json    — workflow.eval.FUNCTION_MAP dump
-  scripts/internal/workflow_urls.log    — Django workflow service url patterns (if present)
+  A1_routes_full.txt           -- Symfony route table
+  D1_function_map_live.json    -- workflow.eval.FUNCTION_MAP dump
+  scripts/internal/workflow_urls.log    -- Django workflow service url patterns (if present)
 
 Writes:
-  api_endpoints                — one row per route discovered
-  step_handlers                — augmented with module/qualname from live FUNCTION_MAP
-  verifications                — `recon_route_dump` rows for each new endpoint
+  api_endpoints                -- one row per route discovered
+  step_handlers                -- augmented with module/qualname from live FUNCTION_MAP
+  verifications                -- `recon_route_dump` rows for each new endpoint
 
 Idempotent: re-running on the same tarball updates existing rows in place.
 """
@@ -58,7 +58,7 @@ def parse_django_urls(text: str) -> list[dict]:
         if not m:
             continue
         path = m.group("path")
-        # Django logs come in as `wf/api/^foo/$` regex form — keep as-is for traceability
+        # Django logs come in as `wf/api/^foo/$` regex form -- keep as-is for traceability
         for method in m.group("methods").split(","):
             if method == "?":
                 continue
@@ -123,7 +123,7 @@ def ingest(recon_dir: Path) -> dict:
             except json.JSONDecodeError:
                 pass
 
-        # Django urls (optional — comes from older scripts/internal/dump_workflow_urls.py output)
+        # Django urls (optional -- comes from older scripts/internal/dump_workflow_urls.py output)
         for p in [recon_dir / "G2_workflow_urlconfs.txt",
                   Path("scripts/internal/workflow_urls.log")]:
             if p.exists():

@@ -1,11 +1,11 @@
 /**
- * Theme store. Three options today — `forest` (zinc + teal, default),
+ * Theme store. Three options today -- `forest` (zinc + teal, default),
  * `cobalt` (navy + electric blue), `light` (bone + teal). Persisted via
  * localStorage; re-applied to <html data-theme="..."> on mount.
  *
  * Light mode covers the chrome (header, drawer, primitives) cleanly.
  * Pages with hardcoded zinc-* Tailwind classes still feel dark in light
- * mode — migrating them is a separate pass.
+ * mode -- migrating them is a separate pass.
  */
 export type ThemeId = 'forest' | 'cobalt' | 'aurora' | 'light';
 
@@ -44,7 +44,7 @@ class ThemeStore {
     try {
       window.localStorage.setItem(STORAGE_KEY, id);
     } catch {
-      /* private browsing / quota — non-fatal */
+      /* private browsing / quota -- non-fatal */
     }
   }
 }

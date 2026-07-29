@@ -15,5 +15,5 @@
     {"tool": "run_op", "connector": "virustotal", "args_contains": ["192.168.77.30"], "label": "VirusTotal on internal RFC1918 IP 192.168.77.30"},
     {"tool": "run_op", "connector": "shodan", "args_contains": ["192.168.77.30"], "label": "Shodan on internal RFC1918 IP 192.168.77.30"}
   ],
-  "notes": "Incident-level investigation: the source 192.168.77.30 is internal, so the value is correlating the rolled-up alerts and scoping blast radius, not external TI on an RFC1918 address. Pinned to a real live incident UUID. (search_module_records is the triage tool for finding related rows; a get_record on alerts would not satisfy this fact, which is intentional — the pivot is a search, not a known-UUID fetch.)"
+  "notes": "Incident-level investigation: the source 192.168.77.30 is internal, so the value is correlating the rolled-up alerts and scoping blast radius, not external TI on an RFC1918 address. Pinned to a real live incident UUID. (search_module_records is the triage tool for finding related rows; a get_record on alerts would not satisfy this fact, which is intentional -- the pivot is a search, not a known-UUID fetch.)"
 }

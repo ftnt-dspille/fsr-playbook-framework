@@ -1,8 +1,8 @@
 /**
  * Unified active-playbook store for Studio.
  *
- * Replaces the per-mode ownership of "the active YAML" — yamlStore.text
- * for CLI and visualStore.filePath/source.yaml for Design — with one
+ * Replaces the per-mode ownership of "the active YAML" -- yamlStore.text
+ * for CLI and visualStore.filePath/source.yaml for Design -- with one
  * authoritative document that both modes read from and write to.
  *
  * The actual YAML byte stream lives here. visualStore still owns the
@@ -36,7 +36,7 @@ type ActiveDoc = {
   kind: PlaybookKind;
   name: string;
   /** YAML on disk / latest saved revision. The source of truth for
-   * "what's been persisted" — `dirty` derives from comparing against
+   * "what's been persisted" -- `dirty` derives from comparing against
    * this snapshot. */
   savedYaml: string;
   /** Live editor buffer. Both modes read/write this. */
@@ -97,7 +97,7 @@ const state = $state<State>({
 });
 
 // --- Save mutation machine (module-scoped because it's mechanical
-// timing state — not part of the reactive surface). ---
+// timing state -- not part of the reactive surface). ---
 const SAVE_DEBOUNCE_MS = 5000;
 const SAVE_MAX_RETRIES = 5;
 const SAVED_FADE_MS = 3000;
@@ -107,7 +107,7 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let fadeTimer: ReturnType<typeof setTimeout> | null = null;
 let inFlight = false;
 let retryAttempt = 0;
-/** Options the current run started with — reused for retry / queued
+/** Options the current run started with -- reused for retry / queued
  *  re-runs so the same getLatestYaml / reason / auto flag stick. */
 let currentOpts: SaveOpts = {};
 let onlineListenerAttached = false;
@@ -140,7 +140,7 @@ async function runSave(opts: SaveOpts): Promise<{ ok: boolean; message?: string 
   }
   if (!state.active) return { ok: false, message: 'no playbook loaded' };
   if (state.active.kind === 'example') {
-    return { ok: false, message: 'examples are read-only — clone to a draft first' };
+    return { ok: false, message: 'examples are read-only -- clone to a draft first' };
   }
 
   // Let the caller (autosave from the page) flush a peer surface
@@ -200,7 +200,7 @@ async function runSave(opts: SaveOpts): Promise<{ ok: boolean; message?: string 
     inFlight = false;
 
     // 409: peer tab beat us. Park the buffer + server state in
-    // `state.conflict` for the resolution UI; don't retry — the user
+    // `state.conflict` for the resolution UI; don't retry -- the user
     // must choose Overwrite vs Reload.
     if (e instanceof ConflictError) {
       state.conflict = e.payload;
@@ -314,7 +314,7 @@ export const playbookStore = {
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem('fsrpb.last_opened', JSON.stringify({ kind, name }));
         }
-      } catch { /* localStorage full / disabled — fall back silently */ }
+      } catch { /* localStorage full / disabled -- fall back silently */ }
     } catch (e) {
       state.error = (e as Error).message;
     } finally {
@@ -333,14 +333,14 @@ export const playbookStore = {
       if (v && (v.kind === 'draft' || v.kind === 'example') && typeof v.name === 'string') {
         return v;
       }
-    } catch { /* corrupted — ignore */ }
+    } catch { /* corrupted -- ignore */ }
     return null;
   },
 
   /** Update the live buffer. Cheap; called on every keystroke or graph
    * mutation. Does NOT persist. `source` is a free-form tag (e.g.
    * "monaco", "visual-render", "revision-restore") that exists for
-   * future telemetry / debugging — it does not affect behavior. */
+   * future telemetry / debugging -- it does not affect behavior. */
   replaceYaml(next: string, _source?: string): void {
     if (!state.active) return;
     if (state.active.yaml === next) return;
@@ -352,7 +352,7 @@ export const playbookStore = {
    *  enter 'error'), then returns. Goes through the same retry-aware
    *  state machine the autosave uses.
    *
-   *  Used by the manual Save button — autosave should call
+   *  Used by the manual Save button -- autosave should call
    *  `requestSave` instead so rapid edits coalesce. */
   async save(opts: { reason?: string; auto?: boolean; getLatestYaml?: () => Promise<string> } = {}): Promise<{ ok: boolean; message?: string }> {
     clearTimer(debounceTimer);
@@ -502,7 +502,7 @@ export const playbookStore = {
    *  `$effect` calls attach to that component's lifecycle.
    *
    *  @param opts.getLatestYaml Returns the freshest YAML across all
-   *    editor surfaces — the page passes a mode-aware getter that
+   *    editor surfaces -- the page passes a mode-aware getter that
    *    renders the Design canvas when active. Defaults to
    *    `currentYaml`.
    *  @param opts.onActiveLoaded Fires when the active doc identity
@@ -524,7 +524,7 @@ export const playbookStore = {
 
     // Autosave: any source of dirtiness (CLI keystroke or visual edit)
     // arms the save mutation. The mutation owns debounce timing,
-    // single-flight, retries, and error state — this effect just says
+    // single-flight, retries, and error state -- this effect just says
     // "there's work to do".
     $effect(() => {
       const dirty = visualStore.state.dirty || this.dirty;
@@ -555,7 +555,7 @@ export const playbookStore = {
   },
 
   /** Clear the active doc (used by replay flows / explicit "new").
-   *  Also cancels any in-flight or scheduled save — the buffer is
+   *  Also cancels any in-flight or scheduled save -- the buffer is
    *  gone, so there's nothing left to persist. */
   reset(): void {
     clearTimer(debounceTimer); debounceTimer = null;

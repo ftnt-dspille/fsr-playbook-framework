@@ -15,7 +15,7 @@ from typing import Any
 
 # Per-turn OUTPUT-token ceiling, shared by every provider loop.
 #
-# This was a hardcoded 4096 in all three providers — not configurable, not
+# This was a hardcoded 4096 in all three providers -- not configurable, not
 # per-intent. A whole real playbook plus the prose that introduces it does not
 # fit in 4096 output tokens, so a build turn physically could not return its
 # document intact: the reply came back cut off mid-word with the token-cap stop
@@ -23,7 +23,7 @@ from typing import Any
 # is a product limit, not a test artifact.
 #
 # Raised UNIFORMLY rather than per-intent because a cap is a ceiling, not an
-# allocation — you are billed on the tokens actually emitted, so a triage turn
+# allocation -- you are billed on the tokens actually emitted, so a triage turn
 # that answers in 300 tokens costs exactly the same under a 16k ceiling as
 # under a 4k one. A per-intent budget would buy nothing, and would require
 # plumbing `intent` down into the provider, which is deliberately unaware of it.
@@ -63,7 +63,7 @@ _IDEMPOTENT_TOOLS: frozenset[str] = frozenset({
 _YAML_BODY_TOOLS: frozenset[str] = frozenset({"validate_yaml", "compile_yaml"})
 _YAML_BODY_KEEP_LATEST = 1
 
-# §2.3 output budgeting — cap oversized tool *result* bodies. A single large
+# §2.3 output budgeting -- cap oversized tool *result* bodies. A single large
 # result (e.g. verify_playbook ~47KB, duplicate-enrichment ~40KB) is neither an
 # idempotent dup nor a yaml arg body, so the two passes above never touch it; a
 # short chain of them blows the context window. We keep the most recent
@@ -92,12 +92,12 @@ def shrink_history(history: list[Any]) -> int:
     most recent assistant + tool_result blocks stay byte-identical so
     Anthropic's prompt cache is preserved):
 
-    1. Idempotent tool dedup — for whitelisted read-only tools, when the
+    1. Idempotent tool dedup -- for whitelisted read-only tools, when the
        same (name, args) appears more than once, replace later
        tool_result blocks with a stub pointing at the first call. The
        agent still sees the call happened; it doesn't re-pay for the
        body.
-    2. YAML body cap — for `validate_yaml`/`compile_yaml`, replace the
+    2. YAML body cap -- for `validate_yaml`/`compile_yaml`, replace the
        `yaml_text` argument in older tool_use blocks with a stub. Only
        the latest call needs the full body; the agent repairs from
        there.
@@ -158,7 +158,7 @@ def shrink_history(history: list[Any]) -> int:
                 continue
             stub = (
                 f'{{"_cached_dup_of": "{orig}", '
-                f'"note": "identical args to an earlier call this session — '
+                f'"note": "identical args to an earlier call this session -- '
                 f'reuse that result"}}'
             )
             if old != stub:
@@ -187,11 +187,11 @@ def shrink_history(history: list[Any]) -> int:
                 body = inp.get("yaml_text")
                 if not isinstance(body, str) or len(body) < 200:
                     continue
-                stub = "<elided — superseded by a later validate_yaml call>"
+                stub = "<elided -- superseded by a later validate_yaml call>"
                 saved += len(body) - len(stub)
                 inp["yaml_text"] = stub
 
-    # Pass 3 — §2.3 cap oversized tool_result bodies. Collect every
+    # Pass 3 -- §2.3 cap oversized tool_result bodies. Collect every
     # tool_result with an over-threshold string body, in history order, then
     # clip all but the most recent `_RESULT_KEEP_LATEST` of them. Already-clipped
     # bodies are under the threshold so they're skipped (fixed point).
@@ -213,7 +213,7 @@ def shrink_history(history: list[Any]) -> int:
         clipped = len(body) - _RESULT_HEAD_CHARS - _RESULT_TAIL_CHARS
         new_body = (
             body[:_RESULT_HEAD_CHARS]
-            + f"\n… [+{clipped} chars capped by the output budgeter — "
+            + f"\n… [+{clipped} chars capped by the output budgeter -- "
               f"a later turn superseded this result] …\n"
             + body[-_RESULT_TAIL_CHARS:]
         )
@@ -234,14 +234,14 @@ MAX_TOOL_TURNS = 16
 # turn is roughly one extra LLM round-trip; 2 keeps cost bounded.
 MAX_SELF_REPAIR_TURNS = 2
 
-# §2.8 — cap on read-only (tier ≤ 2) tool calls dispatched concurrently
+# §2.8 -- cap on read-only (tier ≤ 2) tool calls dispatched concurrently
 # within a single turn. `dispatch`/`run_op` are sync and touch shared
 # state (the connector requests session, in-process health/config caches,
 # sqlite), so we bound fan-out rather than letting a turn open arbitrarily
 # many upstream sockets at once.
 MAX_PARALLEL_TOOLS = 8
 
-# §2.2 — wall-clock deadline for a single Anthropic stream round-trip.
+# §2.2 -- wall-clock deadline for a single Anthropic stream round-trip.
 # A stalled network or overloaded upstream can block the `async for`
 # indefinitely; this caps it so the turn fails cleanly instead of hanging.
 # Overrideable via ANTHROPIC_STREAM_TIMEOUT_SECS env for local testing.
@@ -260,13 +260,13 @@ async def drain_with_idle_timeout(pump, *, timeout: float):
     streamed delta to the consumer (and thus the connector's ``chat_poll``
     feed) the instant the upstream yields it, while still failing cleanly if
     the upstream stalls. Buffering the whole round-trip just to wrap it in one
-    ``asyncio.wait_for`` — the old approach — defeated live streaming (the
+    ``asyncio.wait_for`` -- the old approach -- defeated live streaming (the
     answer only appeared on turn completion). This helper keeps that timeout
     guarantee without the buffering, so the per-delta plumbing lives in ONE
     place and each provider only supplies its SDK-specific ``pump``.
 
     Mechanics: ``pump`` runs as a background task feeding a queue; the consumer
-    reads the queue under ``asyncio.wait_for(timeout)`` (3.9-compatible — no
+    reads the queue under ``asyncio.wait_for(timeout)`` (3.9-compatible -- no
     ``asyncio.timeout()``).
 
     - Items from ``pump`` are re-yielded verbatim (the provider tags them,
@@ -321,7 +321,7 @@ async def drain_with_idle_timeout(pump, *, timeout: float):
 # All three fire only on triage-specific tool names, so build flows (whose tool
 # slice excludes them) are unaffected.
 
-# Containment-staging tools — refused until the hunt floor is met.
+# Containment-staging tools -- refused until the hunt floor is met.
 _CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
     "find_containment_actions", "emit_action_card",
 })
@@ -332,7 +332,7 @@ _CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
 # MUTABLE on purpose, same Option-A posture as `intents.TRIAGE_ONLY_TOOLS`: the
 # connector registers its own read-only hunt tools at import
 # (`fsr_soc_triage.registry`) and extends this set with them. An explicit list
-# alone silently under-counts every tool the framework doesn't know by name —
+# alone silently under-counts every tool the framework doesn't know by name --
 # which is exactly how a real GA investigation that ran `fmg_get_device_status`,
 # `fmg_get_ha_status`, `fmg_get_policy_package_status` and
 # `faz_search_device_events` scored **0 of 3** evidence calls and left
@@ -361,7 +361,7 @@ def credit_as_investigation(*names: str) -> None:
     triage registry so its hunt tools aren't invisible to the floor)."""
     _INVESTIGATION_TOOLS.update(n for n in names if n)
 # Discovery tools that return their full set in one shot FOR A GIVEN INDICATOR
-# TYPE — a second call with the SAME target_type is pure waste, but these tools
+# TYPE -- a second call with the SAME target_type is pure waste, but these tools
 # are `target_type`-scoped (ip/domain/hash/endpoint/…) and filter their result
 # by it, so a call for `ip` and a call for `endpoint` are DISTINCT and both
 # legitimate. The call-once guard therefore keys on (name, target_type), not
@@ -377,7 +377,7 @@ def _call_once_sig(name: str, args: Any) -> str:
     tt = str((args or {}).get("target_type") or "").strip().lower()
     return f"{name}\x00{tt}"
 # External threat-intel connectors that should never be pointed at an internal
-# (RFC1918 / loopback / link-local) IP — enriching a private source IP against
+# (RFC1918 / loopback / link-local) IP -- enriching a private source IP against
 # public TI is the forbidden pivot the eval fixtures encode.
 _TI_CONNECTOR_TOKENS: tuple[str, ...] = (
     "virustotal", "shodan", "ipqualityscore", "abuseipdb",
@@ -411,12 +411,12 @@ def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
 
 class TriageDiscipline:
     """Per-session triage guard. ``evaluate(name, args)`` atomically checks the
-    three discipline rules and, when the call is allowed, records it — returning
+    three discipline rules and, when the call is allowed, records it -- returning
     a guard envelope (``{"ok": False, …}``) to short-circuit dispatch or ``None``
     to proceed. ONE atomic call so the read-only parallel batch (dispatched
     across threads via ``asyncio.to_thread``) can't race the counter/seen-set.
 
-    Attempts — not successes — count toward the hunt floor, so a config gap or a
+    Attempts -- not successes -- count toward the hunt floor, so a config gap or a
     failing enrichment can't deadlock the floor (the model still gets credit for
     trying to investigate, and MAX_TOOL_TURNS bounds the loop).
 
@@ -444,11 +444,11 @@ class TriageDiscipline:
         self._capabilities = capabilities  # None or a Capabilities instance
         # Authoring/build turns don't triage a live alert. `find_containment_actions`
         # is DISCOVERY ("which ops could block an IP?") that a build agent
-        # legitimately uses while authoring — so the hunt-floor investigation gate
+        # legitimately uses while authoring -- so the hunt-floor investigation gate
         # (no containment before N evidence calls) must not fire on it here. The
         # gate stays fully intact for triage (authoring=False). Actual staging
         # (`emit_action_card`) isn't in the build tool-slice at all, so nothing
-        # containment is being STAGED — only discovered.
+        # containment is being STAGED -- only discovered.
         self._authoring = authoring
         # Seed invest_attempts from state if provided
         if state is not None and hasattr(state, "invest_attempts"):
@@ -461,12 +461,12 @@ class TriageDiscipline:
             self._called.update(state.called_once_sigs)
         # Hunt floor is permanently satisfied if state says so
         self._hunt_floor_met = state is not None and getattr(state, "hunt_floor_met", False)
-        # How many distinct evidence tools remain before the floor lifts —
+        # How many distinct evidence tools remain before the floor lifts --
         # surfaced in the block message so the model knows it's making progress.
         self._lock = threading.Lock()
 
     def _check_locked(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
-        # 0. Capability guard (§E) — this session already learned the connector
+        # 0. Capability guard (§E) -- this session already learned the connector
         # is unavailable (not configured / unhealthy); don't burn a live
         # re-probe on it. `list_configured_connectors` success (the analyst's
         # "Re-check & continue") clears the entry via note_result.
@@ -487,7 +487,7 @@ class TriageDiscipline:
                     "connector": connector,
                     "reason": reason,
                     "error": (
-                        f"Skipped: `{connector}` {why} — you already learned "
+                        f"Skipped: `{connector}` {why} -- you already learned "
                         f"this earlier in the session, so the call was NOT "
                         f"re-attempted. Do not retry it. Either pick a "
                         f"configured alternative (`list_configured_connectors` "
@@ -496,7 +496,7 @@ class TriageDiscipline:
                         f"fix the connector and resume."
                     ),
                 }
-        # 1. Forbidden pivot — external TI on an internal-only IP.
+        # 1. Forbidden pivot -- external TI on an internal-only IP.
         if name == "run_op":
             connector = str((args or {}).get("connector") or "").lower()
             if any(tok in connector for tok in _TI_CONNECTOR_TOKENS):
@@ -509,7 +509,7 @@ class TriageDiscipline:
                         "error": (
                             f"Skipped: {connector} is an EXTERNAL threat-intel "
                             f"lookup and the only IP in this call is internal "
-                            f"(RFC1918) — {sorted(internal)[0]}. Private/internal "
+                            f"(RFC1918) -- {sorted(internal)[0]}. Private/internal "
                             f"addresses have no public TI reputation; enriching "
                             f"them wastes budget and pollutes the verdict. Pivot "
                             f"on internal hosts via the SIEM/CMDB context ops "
@@ -517,7 +517,7 @@ class TriageDiscipline:
                             f"connectors for EXTERNAL, routable indicators."
                         ),
                     }
-        # 2. Call-once discovery — the set is returned in one shot PER
+        # 2. Call-once discovery -- the set is returned in one shot PER
         # target_type. Block only a repeat of the SAME (name, target_type);
         # a different indicator type is a distinct, legitimate call.
         if (name in _CALL_ONCE_DISCOVERY
@@ -529,14 +529,14 @@ class TriageDiscipline:
                 "kind": "guard_redirect",
                 "call_once_guard": True,
                 "error": (
-                    f"STOP calling `{name}`{scope} — you already called it this "
+                    f"STOP calling `{name}`{scope} -- you already called it this "
                     f"session{scope} and it returns the FULL set for that "
                     f"indicator type in one shot. Do not repeat it{scope}. Act on "
                     f"the result you already have: pick an op from it and proceed. "
                     f"(A DIFFERENT target_type is allowed.)"
                 ),
             }
-        # 3. Hunt floor — no containment before real investigation. Prescriptive:
+        # 3. Hunt floor -- no containment before real investigation. Prescriptive:
         # weak models re-spam a blocked tool when told "retry later", so name the
         # ONE next call to make and forbid re-calling the blocked tool.
         if (name in _CONTAINMENT_STAGING_TOOLS
@@ -562,7 +562,7 @@ class TriageDiscipline:
                 "investigation_calls": self.invest_attempts,
                 "required": self.floor,
                 "error": (
-                    f"Do NOT call `{name}` yet — it was NOT executed. You've run "
+                    f"Do NOT call `{name}` yet -- it was NOT executed. You've run "
                     f"{self.invest_attempts} of {self.floor} required "
                     f"investigation steps; staging containment now would act on "
                     f"an alert you haven't scoped. Do NOT repeat this call. Your "
@@ -574,7 +574,7 @@ class TriageDiscipline:
 
     def evaluate(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
         """Atomic check-and-record. Returns a guard envelope (block) or None
-        (allowed — and the call is recorded as dispatched)."""
+        (allowed -- and the call is recorded as dispatched)."""
         with self._lock:
             guard = self._check_locked(name, args or {})
             if guard is not None:
@@ -607,10 +607,10 @@ class TriageDiscipline:
         when the discipline has no capabilities state.
 
         - ``run_op`` failing with ``connector_not_configured`` /
-          ``connector_unhealthy`` marks the connector unavailable — the next
+          ``connector_unhealthy`` marks the connector unavailable -- the next
           ``run_op`` against it short-circuits instead of re-probing.
         - ``run_op`` succeeding confirms the connector (and clears any stale
-          unavailable entry — a connector fixed mid-session works again).
+          unavailable entry -- a connector fixed mid-session works again).
         - ``list_configured_connectors`` succeeding clears ALL unavailable
           entries: it's the re-check gesture (capability-gap "Re-check &
           continue"), and a still-broken connector re-records itself on the
@@ -680,19 +680,19 @@ def compile_errors(yaml_text: str) -> str | None:
 
 # ─────────────────────── enhance-delivery guard ──────────────────────
 #
-# The enhance turn's terminal action — `emit_enhancement_offer` — is the ONLY
+# The enhance turn's terminal action -- `emit_enhancement_offer` -- is the ONLY
 # thing that applies a verified edit to the playbook the analyst has open.
 # System-prompt prose calls it "the MANDATORY terminal action", but a weak
 # model routinely VERIFIES the edit (gets `ready_to_push: True` + a
 # `verified_id`) and then, instead of calling the tool, writes a sentence like
 # "Call emit_enhancement_offer with verified_id abc… to apply this" and ends
-# the turn. From the analyst's seat nothing changed — the exact live failure
+# the turn. From the analyst's seat nothing changed -- the exact live failure
 # the offer tool was built to remove, resurfacing one layer up (narrated, not
 # fenced). Grading it offline (`score_enhance_delivery`) catches it after the
 # fact; this guard catches it structurally, in the loop, the same way the P1
 # forced-assessment guard guarantees a written close.
 #
-# This is a DETECTOR only — model-agnostic, no I/O. Each provider feeds it every
+# This is a DETECTOR only -- model-agnostic, no I/O. Each provider feeds it every
 # executed tool result via `note_result`, and at the terminal exit asks
 # `outstanding()` whether a verify passed with no offer to follow. If so the
 # provider runs ONE `tool_choice`-pinned round forcing the call (and overrides
@@ -709,9 +709,9 @@ class EnhanceDeliveryGuard:
     Fires only when the offer tool is in the advertised slice AND a
     verify_enhancement passed. Triage never advertises the offer tool. A build
     turn WITH an open playbook (enhance) advertises it; a from-scratch CREATE
-    build does NOT — the connector's _intent_drop_set drops ENHANCE_ONLY_TOOLS
+    build does NOT -- the connector's _intent_drop_set drops ENHANCE_ONLY_TOOLS
     when no playbook is mounted (see fsr_playbooks.llm.intents.ENHANCE_ONLY_TOOLS).
-    So the guard is inert on triage and on create, and active on enhance —
+    So the guard is inert on triage and on create, and active on enhance --
     exactly where a verified edit could be narrated instead of delivered.
     (The earlier "build-new-playbook never advertises it" claim was wrong: the
     build slice DID advertise the offer tool until that gate was added.)

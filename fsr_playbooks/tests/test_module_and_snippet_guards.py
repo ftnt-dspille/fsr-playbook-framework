@@ -1,9 +1,9 @@
 """Guards for two silent-pass bugs (see code-snippet-overload repro):
 
 1. An empty code_snippet `python_function` used to compile green and deploy
-   a no-op snippet — now a blocking error.
+   a no-op snippet -- now a blocking error.
 2. A trigger / record-CRUD `module:` was copied verbatim, so a UI-label
-   'Alerts' shipped as a resource that never matched — now case-fixed to the
+   'Alerts' shipped as a resource that never matched -- now case-fixed to the
    canonical lowercase type name with a warning, against the shipped slim
    module-name catalog.
 """
@@ -59,7 +59,7 @@ playbooks:
 
 
 def test_startswith_autocorrects_to_anchored_like():
-    # `startswith` is no longer blocked — it auto-corrects to an anchored
+    # `startswith` is no longer blocked -- it auto-corrects to an anchored
     # `like 'repro%'` pattern (forgiving authoring) with a warning.
     yaml_text = """
 collection: 00-test
@@ -197,7 +197,7 @@ def test_notcontains_rewrites_to_notlike_with_wildcards():
 
 
 def test_like_bare_value_is_auto_wrapped_with_warning():
-    # `like malware` (no wildcard) matches exactly and silently never fires —
+    # `like malware` (no wildcard) matches exactly and silently never fires --
     # auto-wrap to `%malware%` and warn.
     import json
     res, blocking = _errs(_trigger_with_op("like"))

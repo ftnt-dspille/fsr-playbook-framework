@@ -1,4 +1,4 @@
-"""§2.6 — cycle detection before _compute_predecessors.
+"""§2.6 -- cycle detection before _compute_predecessors.
 
 Verifies that:
   1. _has_cycle correctly identifies cyclic and acyclic playbooks.
@@ -87,7 +87,7 @@ def test_cycle_error_reported():
 
 def test_no_spurious_predecessor_error_on_cycle():
     """With a cycle, _check_jinja_paths short-circuits. StepA references StepB
-    which is technically a 'forward' reference in the cyclic graph — without
+    which is technically a 'forward' reference in the cyclic graph -- without
     the guard we'd get a BAD_VALUE reachability error even though this is
     exactly the kind of 'works at runtime' pattern FSR supports in loops."""
     res = compile_yaml(_CYCLIC_YAML, DB)

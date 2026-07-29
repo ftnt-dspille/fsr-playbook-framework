@@ -47,7 +47,7 @@ confirm() {  # confirm "prompt" -> returns 0 for yes (default yes; auto-yes when
 say "1/6  toolchain (uv)"
 if command -v uv >/dev/null 2>&1; then
     ok "uv $(uv --version 2>/dev/null | awk '{print $2}')"
-elif command -v brew >/dev/null 2>&1 && confirm "uv not found — install via brew?"; then
+elif command -v brew >/dev/null 2>&1 && confirm "uv not found -- install via brew?"; then
     brew install uv || die "brew install uv failed"
     ok "uv installed"
 else
@@ -65,7 +65,7 @@ else
         git clone "$repo" "$PYFSR_DIR" || die "clone failed: $repo"
         ok "cloned pyfsr"
     else
-        warn "skipped — 'make sync' will fail without ../pyfsr (set PYFSR_REPO or clone it manually)"
+        warn "skipped -- 'make sync' will fail without ../pyfsr (set PYFSR_REPO or clone it manually)"
     fi
 fi
 
@@ -93,12 +93,12 @@ else
             [ -f "$src" ] || die "no file at: $src"
             mkdir -p "$ROOT/data"; cp "$src" "$DB"; ok "copied DB into data/" ;;
         b|B)
-            [ -f "$ROOT/.env" ] || { warn ".env needed to reach a live box — set it up in step 5 first, then re-run with choice [b]"; }
-            say "    building reference store (fsrpb probe --all) — needs live FSR creds in .env"
+            [ -f "$ROOT/.env" ] || { warn ".env needed to reach a live box -- set it up in step 5 first, then re-run with choice [b]"; }
+            say "    building reference store (fsrpb probe --all) -- needs live FSR creds in .env"
             uv run fsrpb probe --all || die "probe failed (check .env creds / box reachability)"
             ok "reference store built" ;;
         *)
-            warn "skipped — reference/discovery tools and some fsr_playbooks tests need the DB" ;;
+            warn "skipped -- reference/discovery tools and some fsr_playbooks tests need the DB" ;;
     esac
 fi
 
@@ -115,19 +115,19 @@ elif confirm "create .env from .env.example now? (offline work doesn't need it)"
     rm -f "$ROOT/.env.bak"
     ok ".env created (edit it any time)"
 else
-    warn "skipped — copy .env.example to .env when you need live access"
+    warn "skipped -- copy .env.example to .env when you need live access"
 fi
 
 # --- 6. green-check -------------------------------------------------------
 say "6/6  green-check (framework core test suite)"
 if uv run python -m pytest fsr_playbooks/tests/ -q; then
     echo
-    ok "BOOTSTRAP COMPLETE — framework core is green."
+    ok "BOOTSTRAP COMPLETE -- framework core is green."
     echo "    Next: 'fsrpb verify examples/<file>.yaml', or open this repo in an MCP"
     echo "    client (.mcp.json auto-registers fsr-read + fsrpb). See docs/FRAMEWORK_HANDOFF.md."
 else
     echo
-    warn "core tests did not fully pass — most often the reference DB is missing (step 4)."
+    warn "core tests did not fully pass -- most often the reference DB is missing (step 4)."
     warn "Provide the DB and re-run 'make bootstrap'. See docs/FRAMEWORK_HANDOFF.md."
     exit 1
 fi

@@ -110,7 +110,7 @@ describe('StepDraftModal', () => {
       diagnostics: [
         { severity: 'warning', code: 'no_default',
           path: 'steps[0].arguments.conditions',
-          message: 'no default branch — orphan when no condition matches',
+          message: 'no default branch -- orphan when no condition matches',
           suggestion: '' }
       ]
     });

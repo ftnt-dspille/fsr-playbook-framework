@@ -1,5 +1,5 @@
 /**
- * MonacoCode — the slim wrapper used for code_snippet's Python/Jinja
+ * MonacoCode -- the slim wrapper used for code_snippet's Python/Jinja
  * editor (and any future non-YAML inspector field). Mirrors
  * MonacoYaml's prop-sync semantics but without YAML completion/hover.
  *
@@ -28,7 +28,7 @@ const realCreate = monaco.editor.create;
   return inst;
 };
 
-describe('MonacoCode — prop wiring', () => {
+describe('MonacoCode -- prop wiring', () => {
   beforeEach(() => {
     createSpy.mockClear();
     setValueSpy.mockClear();
@@ -80,7 +80,7 @@ describe('MonacoCode — prop wiring', () => {
     const { rerender } = render(MonacoCode, {
       props: { value: 'one', onInput }
     });
-    // Mock seeds value via create() opts — no setValue at mount.
+    // Mock seeds value via create() opts -- no setValue at mount.
     await waitFor(() => expect(createSpy).toHaveBeenCalled());
     onInput.mockClear();
     setValueSpy.mockClear();

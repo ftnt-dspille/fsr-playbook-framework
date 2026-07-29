@@ -1,4 +1,4 @@
-"""Phase 7.3 — detect skipped authoring tools (discipline post-turn check).
+"""Phase 7.3 -- detect skipped authoring tools (discipline post-turn check).
 
 The system prompt tells the agent to call ``get_step_type`` before
 drafting non-trivial step types and ``find_connector`` /

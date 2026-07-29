@@ -2,7 +2,7 @@
   /**
    * `?` cheat-sheet overlay. Reads the same command registry the
    * palette and keybindings use, so adding a new command surfaces
-   * here automatically — no separate doc to maintain.
+   * here automatically -- no separate doc to maintain.
    */
   import { commands } from '../commands.svelte';
 

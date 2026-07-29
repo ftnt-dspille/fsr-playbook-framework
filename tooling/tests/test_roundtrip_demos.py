@@ -2,7 +2,7 @@
 
 Catches regressions where a friendly-form authoring change diverges from
 the canonical wire form on the second emission. The compiled FSR JSON is
-the round-trip surface — same property the published `roundtrip` tool
+the round-trip surface -- same property the published `roundtrip` tool
 checks.
 """
 from pathlib import Path
@@ -25,7 +25,7 @@ def _yaml_fixtures() -> list[Path]:
 
 
 def _sidecarless_fixtures() -> list[Path]:
-    """Examples without a .test.yaml partner — the smoke set from TODO #5."""
+    """Examples without a .test.yaml partner -- the smoke set from TODO #5."""
     out = []
     for p in sorted(EXAMPLES.glob("*.yaml")):
         if p.name.startswith("demo_"):

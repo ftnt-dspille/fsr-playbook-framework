@@ -1,20 +1,20 @@
-"""Dynamic tool surface — materialize FortiSOAR 8.0 native-MCP-gateway tools as
+"""Dynamic tool surface -- materialize FortiSOAR 8.0 native-MCP-gateway tools as
 first-class ``ToolSpec``\\ s in the LLM :data:`~fsr_playbooks.llm.tools.REGISTRY`.
 
 The widget-drawer triage agent's tool surface was static and hand-curated (one
 Python wrapper per op in ``tools_noc.py`` / ``tools_triage.py``). This module
 replaces that model: at session start it asks the platform's **native MCP
-gateway** (``client.mcp`` — ``/mcp/*``, shipped FortiSOAR 8.0.0+) which tools
+gateway** (``client.mcp`` -- ``/mcp/*``, shipped FortiSOAR 8.0.0+) which tools
 exist on the servers the operator allow-listed, and materializes each as a
 ``ToolSpec`` whose ``fn`` routes back through ``client.mcp.call_tool``. The
-agent's tool surface *is* the configured-capability surface — an unconfigured
+agent's tool surface *is* the configured-capability surface -- an unconfigured
 connector's tool simply isn't registered, so the agent can't call it (the
 ``unknown_connector`` thrash the 0.4.37 prompt rules policed becomes
 structurally impossible, and those rules become transitional).
 
 ``server`` is one of the 4 built-ins (``"modules"``, ``"playbooks"``,
 ``"soc"``, ``"utility"``) or ``"connector:<name>"`` for an installed
-connector's auto-generated MCP server — so registered-MCP-server tools (Power
+connector's auto-generated MCP server -- so registered-MCP-server tools (Power
 1) *and* configured-connector-op tools (Power 2) flow through one substrate.
 
 Discovery + execution both live on the live pyfsr ``FortiSOAR`` client
@@ -24,7 +24,7 @@ new transport. The on-box worker reaches ``/mcp/*`` via the env-creds client
 Hydra REST, not MCP streamable-HTTP). ``make mcp-bridge-check`` proves
 reachability.
 
-Safety model (mirrors the platform's ``memory.yaml`` allow-list — no
+Safety model (mirrors the platform's ``memory.yaml`` allow-list -- no
 auto-discovery): the connector calls :func:`configure` with an explicit
 per-server allow-list at session setup; default empty → nothing materialized →
 no behavior change on upgrade. Each allow-list entry declares the server
@@ -32,7 +32,7 @@ read-only (→ tier 1, auto-run) or mutating (→ tier 3, approval card).
 
 Phase-0 probe (``make mcp-bridge-check``) confirmed the substrate live on 8.0:
 ``list_tools`` returns ``[{"name", "description", "input_schema"}, ...]`` with
-full JSON schemas — passed straight into ``ToolSpec``.
+full JSON schemas -- passed straight into ``ToolSpec``.
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ _OAUTH_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
 _OAUTH_SKEW_S = 60.0  # refresh this many seconds BEFORE the token actually expires
 
 # Cap so a misconfigured allow-list can't flood the LLM tool list (the platform
-# model gates per-server; this is a backstop). Logged when hit — no silent drop.
+# model gates per-server; this is a backstop). Logged when hit -- no silent drop.
 _MAX_TOOLS = 80
 
 # materialized tool name → (server, tool_name). Used by the trace→playbook
@@ -74,7 +74,7 @@ def configure(
 
     Called by the connector at session setup, from its config record. Safe to
     call repeatedly: each kwarg that is passed is applied, and one that is
-    omitted is preserved (merge, not replace) — so the connector's two-phase
+    omitted is preserved (merge, not replace) -- so the connector's two-phase
     wiring works: ``register_mcp_materializer()`` sets ``client_factory`` at
     import time, then ``_apply_mcp_allowlist(config)`` sets ``mcp_allowlist``
     per turn without clobbering the factory. :func:`reset` clears everything
@@ -88,7 +88,7 @@ def configure(
     client from env.
 
     An entry may also point at an **external** MCP server (not the on-appliance
-    gateway) by adding a ``url`` and optional ``auth`` — e.g.
+    gateway) by adding a ``url`` and optional ``auth`` -- e.g.
     ``{"my_tools": {"url": "https://host/mcp/", "auth": {"bearer": "<tok>"},
     "tools": "*", "tier": "read_only"}}``. External entries route through
     pyfsr's ``list_tools_at`` / ``call_tool_at`` with the rule's own headers
@@ -122,7 +122,7 @@ def ensure_initialized() -> None:
     """Lazy, idempotent materialization. Called from ``anthropic_tools`` /
     ``openai_tools`` so materialized tools appear in the LLM's tool list on the
     first turn. No-op if already initialized; never raises (a failure logs and
-    leaves REGISTRY unchanged — the curated SAFE_TOOLS keep working)."""
+    leaves REGISTRY unchanged -- the curated SAFE_TOOLS keep working)."""
     global _initialized
     if _initialized:
         return
@@ -139,7 +139,7 @@ def ensure_initialized() -> None:
 
 def _load_allowlist_from_env() -> None:
     """Fallback: read the allowlist from ``FSRPB_MCP_ALLOWLIST`` (JSON) so the
-    materializer can be activated without a code-level ``configure()`` call —
+    materializer can be activated without a code-level ``configure()`` call --
     the operator sets it in the worker env. Dormant when unset (default)."""
     global _allowlist
     import json
@@ -224,7 +224,7 @@ def _initialize_impl() -> None:
             continue
         # Sort by name before registering. The gateway's list_tools() ordering is
         # not contractual, and REGISTRY insertion order IS the order the tool
-        # array goes on the wire — which is part of the provider prompt-cache
+        # array goes on the wire -- which is part of the provider prompt-cache
         # prefix. An ordering wobble between two turns rewrites those bytes and
         # busts the cache (OpenAI matches the prefix exactly; reads are 90% off,
         # so a silent miss is a ~10x input-cost regression that raises no error).
@@ -232,7 +232,7 @@ def _initialize_impl() -> None:
         for tool in tools:
             # pyfsr's native client returns MCPTool pydantic models (dict-style
             # access via _Lenient), while the built-in servers / tests hand back
-            # plain dicts. Accept either — a strict ``isinstance(tool, dict)``
+            # plain dicts. Accept either -- a strict ``isinstance(tool, dict)``
             # gate silently skipped every live tool (bridge never materialized).
             tname = _tool_field(tool, "name")
             if not tname:
@@ -332,7 +332,7 @@ def _oauth2_bearer(cfg: dict[str, Any]) -> str | None:
          "grant_type": "client_credentials"}   # default
 
     Fail-soft: any error returns ``None`` (the server then simply fails to
-    list/call and is logged upstream — never aborts the other servers)."""
+    list/call and is logged upstream -- never aborts the other servers)."""
     token_url = cfg.get("token_url") or cfg.get("url")
     client_id = cfg.get("client_id")
     client_secret = cfg.get("client_secret")
@@ -432,13 +432,13 @@ def _make_fn(
     """Closure the LLM dispatches against. ``dispatch`` calls ``fn(**raw_args)``
     with the LLM's tool-use args; we forward them as the MCP ``arguments``
     dict. Each call opens a fresh MCP session (connect, initialize, call,
-    disconnect) — simple + safe; the client re-auths once on a 401/403.
+    disconnect) -- simple + safe; the client re-auths once on a 401/403.
 
     When ``url`` is set the tool lives on an EXTERNAL server: route through
     ``call_tool_at`` with the rule's own headers (the external server owns its
     credential). Headers are recomputed from ``rule`` at CALL time (falling back
     to the build-time ``headers``) so an auto-refreshing oauth2 bearer is never
-    stale for a long-lived worker — the cache in ``_oauth2_bearer`` makes the
+    stale for a long-lived worker -- the cache in ``_oauth2_bearer`` makes the
     common (unexpired) case a dict rebuild, not a network round-trip."""
     def fn(**kwargs: Any) -> Any:
         if url:
@@ -457,7 +457,7 @@ def _envelope(raw: Any) -> Any:
     """Normalize an MCP tool result to the dispatch tool-output contract (a dict
     envelope, or a list of dict envelopes). FortiSOAR's native servers return
     parsed JSON dicts, but an arbitrary EXTERNAL MCP tool may return a bare
-    string/number/None (its content block was plain text) — which trips the
+    string/number/None (its content block was plain text) -- which trips the
     fail-open "must be a dict envelope" warning. Wrap those in ``{"result": …}``
     so the LLM sees a clean, consistent shape. Dicts and lists-of-dicts pass
     through untouched."""

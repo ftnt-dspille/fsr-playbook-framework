@@ -15,7 +15,7 @@ summary: 'Derived from 119 collections / 1596 playbooks (2026-05-03): prioritize
 
 # Step-type frequency in the FSR playbook corpus
 
-Derived from `pb_examples/all_fsr_evoke_playbooks.json` — 119 collections,
+Derived from `pb_examples/all_fsr_evoke_playbooks.json` -- 119 collections,
 **1,596 playbooks** total, generated 2026-05-03. Used to prioritise which
 step types the e2e test harness must exercise.
 
@@ -81,28 +81,28 @@ all record-context triggers).
 Tag legend: ✅ covered by an existing green fixture · 🔴 not covered.
 
 ### Triggers
-1. ✅ `abstract_trigger` / `start` — `demo_pure_logic` + `demo_virustotal_ip`.
-2. 🔴 `cybersponse.action` — half the corpus. Needs a fixture that
+1. ✅ `abstract_trigger` / `start` -- `demo_pure_logic` + `demo_virustotal_ip`.
+2. 🔴 `cybersponse.action` -- half the corpus. Needs a fixture that
    triggers via record IRI (`fsrpb run-playbook ... --record alerts:<uuid>`).
    The e2e runner needs `--record` support; today it only does
    `/notrigger`.
-3. 🔴 `post_update` / `post_create` — event-driven. E2E test needs to
+3. 🔴 `post_update` / `post_create` -- event-driven. E2E test needs to
    `POST /api/3/<module>` (or PUT) to provoke the trigger, then poll for
    a child workflow run. Trickier than `/notrigger`.
-4. 🔴 `api_call` — external HTTP trigger. Lower priority (0.6 %).
+4. 🔴 `api_call` -- external HTTP trigger. Lower priority (0.6 %).
 
 ### Main steps
-1. 🔴 `workflow_reference` — 34 % of playbooks. Needs parent+child
+1. 🔴 `workflow_reference` -- 34 % of playbooks. Needs parent+child
    fixture; compiler already supports `target: <name>`. High priority.
-2. 🔴 `find_record` (17 %) and `update_record` (21 %) — touch real
+2. 🔴 `find_record` (17 %) and `update_record` (21 %) -- touch real
    module records. Need a fixture that inserts a tagged test record,
    finds it, updates it, asserts, deletes. Combined fixture covers both.
-3. 🔴 `create_record` (15 %) — covered by the find/update fixture above.
-4. 🔴 `manual_input` (9 %) — half-async. The runner needs a "pause for
+3. 🔴 `create_record` (15 %) -- covered by the find/update fixture above.
+4. 🔴 `manual_input` (9 %) -- half-async. The runner needs a "pause for
    manual input → respond → resume" mode. CLI tools `inputs list/show/
    respond` already exist; e2e runner needs to glue them in.
-5. 🔴 `cyops_utilities` non-`no_op` ops (28 %) — `extract_artifacts_new`,
+5. 🔴 `cyops_utilities` non-`no_op` ops (28 %) -- `extract_artifacts_new`,
    `evaluate_email_template`, `make_cyops_request`, `attach_indicators`,
    `format_richtext`, `convert_to_json`. One fixture per top-3.
-6. 🔴 `delay` (2 %) — trivial.
-7. 🔴 `code_snippet` (1.5 %) — Python inside a step.
+6. 🔴 `delay` (2 %) -- trivial.
+7. 🔴 `code_snippet` (1.5 %) -- Python inside a step.

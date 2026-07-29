@@ -4,7 +4,7 @@ Drives the REAL triage agent loop (`fsr_playbooks.llm.run_turn.run_agent_turn`
 + `AnthropicProvider`) against a live FortiSOAR record, using the same
 triage system prompt and tool slice the connector ships. It prints the
 agent's pivots (every tool call), the final analyst-facing text, and any
-staged action card — i.e. a watchable "investigate this alert and stage
+staged action card -- i.e. a watchable "investigate this alert and stage
 containment" run.
 
 This is intentionally thin: it reuses production code paths so what you
@@ -42,7 +42,7 @@ def _default_prompt(record: str) -> str:
         "related activity across alerts/indicators/assets/identities, enrich any "
         "EXTERNAL indicators with the threat-intel connectors, and correlate what "
         "you find into a short verdict. If containment is warranted, stage it for "
-        "analyst approval with emit_action_card — do not execute it yourself."
+        "analyst approval with emit_action_card -- do not execute it yourself."
     )
 
 
@@ -152,7 +152,7 @@ def main() -> None:
                                             if not record.startswith("/") else record)
 
     print("=" * 72)
-    print("LIVE HUNT — triage agent")
+    print("LIVE HUNT -- triage agent")
     print("=" * 72)
     print(f"model:  {args.model}")
     print(f"prompt: {prompt}\n\nPRE-FLIGHT + PIVOTS:")
@@ -163,7 +163,7 @@ def main() -> None:
     print(f"\nstop_reason: {out['stop_reason']}  ·  {len(out['trace'])} tool call(s)")
     print(f"TIMING: total {out['total_s']}s  =  tools {out['tool_s']}s  +  "
           f"model/other {out['model_s']}s")
-    # Per-pivot breakdown, slowest first — shows what to optimize.
+    # Per-pivot breakdown, slowest first -- shows what to optimize.
     slow = sorted([e for e in out["trace"] if "exec_s" in e],
                   key=lambda e: e["exec_s"], reverse=True)
     if slow:

@@ -1,4 +1,4 @@
-"""Compile-time reference lint — catch a bad ``vars.steps.X.foo`` offline.
+"""Compile-time reference lint -- catch a bad ``vars.steps.X.foo`` offline.
 
 The typed walker (:mod:`fsr_playbooks.compiler.typed_walker`) already resolves
 every ``vars.steps.<step>.<key>`` reference against the statically-synthesized
@@ -6,16 +6,16 @@ output shapes of the steps that produce them (``manual_input`` →
 ``.input.<name>``, ``set_variable`` vars, ``workflow_reference`` child output,
 …). Until now that power only ran in the heavy MCP *verify* path. This module
 wires the **reference-existence** subset of that walk into the default compile so
-the common foot-gun — a reference to a step that doesn't exist, runs too late, or
-doesn't expose the key you asked for — is flagged at compile time as a
+the common foot-gun -- a reference to a step that doesn't exist, runs too late, or
+doesn't expose the key you asked for -- is flagged at compile time as a
 **warning** (never blocking; the runtime may still accept shapes the static walk
 can't fully model).
 
 Only high-confidence, shape-independent codes are surfaced (see
 ``_REFERENCE_CODES``); type-flow / picklist heuristics stay in the verify path.
 The walk runs without resolver hooks, so it relies on the statically-known step
-shapes — exactly the cross-step / parent→child references this is meant to catch
-— and degrades silently on anything it can't model.
+shapes -- exactly the cross-step / parent→child references this is meant to catch
+-- and degrades silently on anything it can't model.
 """
 from __future__ import annotations
 
@@ -29,11 +29,11 @@ if TYPE_CHECKING:
 
 # `vars.steps.<step>.<path>` token, used to dedupe against checks (e.g. the
 # validator's intra-playbook jinja-reference check) that already flagged the
-# same reference — both embed the token verbatim in their message.
+# same reference -- both embed the token verbatim in their message.
 _VARS_STEPS_TOKEN = re.compile(r"vars\.steps\.[A-Za-z0-9_]+(?:[.\[][^\s'\"]*)?")
 
 # typed_walker Diagnostic codes that mean "this vars.steps.* reference can't
-# resolve" — independent of connector/module probing, so safe to surface from a
+# resolve" -- independent of connector/module probing, so safe to surface from a
 # plain offline compile. Type-flow codes (type_mismatch, non_list_indexed, …)
 # need probed shapes to avoid false positives and stay in the verify path.
 _REFERENCE_CODES = frozenset({

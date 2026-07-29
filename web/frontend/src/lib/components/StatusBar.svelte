@@ -4,7 +4,7 @@
    * header health pills so the global top-nav doesn't fight for
    * horizontal space with environment indicators.
    *
-   * Each segment is clickable — backend refreshes the probe, FSR
+   * Each segment is clickable -- backend refreshes the probe, FSR
    * surfaces the configured base URL, LLM links into Settings.
    */
   import { onMount } from 'svelte';

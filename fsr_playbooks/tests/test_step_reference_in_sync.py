@@ -1,6 +1,6 @@
 """The AUTHORING.md step reference was removed in favor of a clean
 hand-authored guide that doesn't expose wire-internal shapes. The
-generated block tests are retired — the doc is now the sole source of
+generated block tests are retired -- the doc is now the sole source of
 truth and is hand-maintained.
 
 The alias-coverage test still runs: every short type alias must appear
@@ -24,5 +24,5 @@ def test_every_short_type_alias_documented():
     for short, canonical in SHORT_TYPE_TO_FSR.items():
         if canonical in oracle:
             assert f"`{short}`" in text, (
-                f"{short} missing from AUTHORING.md — add it to the step type table"
+                f"{short} missing from AUTHORING.md -- add it to the step type table"
             )

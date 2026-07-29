@@ -1,11 +1,11 @@
-"""Typed-args model for `delete_record` steps — registry contract, the
+"""Typed-args model for `delete_record` steps -- registry contract, the
 friendly→canonical transform (the three targeting modes + showDeleted rule),
 and the new scalar validation (`show_deleted` wrong-typed → clean BAD_VALUE).
 
 delete_record compiles to a `cyops_utilities.make_cyops_request` DELETE connector
 step, so the byte-identical contract is the authoring path (test_delete_record.py);
 these tests pin the typed layer directly. `expand_delete_record` takes the
-resolver's `resolve_module_name` as a callback — here a passthrough identity."""
+resolver's `resolve_module_name` as a callback -- here a passthrough identity."""
 from __future__ import annotations
 
 from fsr_playbooks.compiler import compile_yaml

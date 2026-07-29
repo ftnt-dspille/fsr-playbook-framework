@@ -7,7 +7,7 @@ tool_result history rows, YAML sniffing for downstream consumers,
 mid-stream tag mutation when the assistant validates/compiles a YAML
 body, and first-UsageEvent retroactive user-message logging.
 
-Consumers — the web SSE route, the FortiSOAR connector — supply two
+Consumers -- the web SSE route, the FortiSOAR connector -- supply two
 optional adapters:
 
 - `on_event`: called for every emitted event before any side effects.
@@ -16,7 +16,7 @@ optional adapters:
 - `history_sink`: persistence target. Optional; without one, no rows
   are written and the function just collects the transcript.
 
-The "loop" itself — the tool_use → tool_result agentic round-trip —
+The "loop" itself -- the tool_use → tool_result agentic round-trip --
 already lives inside `provider.stream()`. This module is the
 *consumer* of that stream.
 """
@@ -50,7 +50,7 @@ async def _total_timeout(delay: float):
 
     ``asyncio.timeout()`` is 3.11+, so on 3.10 we arm a one-shot loop timer
     that cancels the current task when ``delay`` elapses and re-raise that as
-    ``TimeoutError`` — matching the contract the call site relies on. On 3.11+
+    ``TimeoutError`` -- matching the contract the call site relies on. On 3.11+
     we delegate to the stdlib implementation.
     """
     if hasattr(asyncio, "timeout"):
@@ -79,7 +79,7 @@ async def _total_timeout(delay: float):
 
 # Tool names whose `yaml_text` argument should re-tag the turn with the
 # playbook collection name + sha. Kept here (not in the consumer) because
-# the tag mutation is what stamps subsequent UsageEvents — moving it out
+# the tag mutation is what stamps subsequent UsageEvents -- moving it out
 # of the stream-consumer loop would break that invariant.
 _YAML_TAGGING_TOOLS = ("validate_yaml", "compile_yaml")
 
@@ -175,7 +175,7 @@ def _yaml_tags(yaml_text: Optional[str]) -> dict[str, Any]:
     """Pull the playbook collection name + content hash out of YAML.
     Standalone duplicate of web/backend/routes/chat.py's helper so
     fsr_playbooks has no dependency on the web app. Behavior must stay in
-    sync — both compute a 12-char sha-256 prefix and pull
+    sync -- both compute a 12-char sha-256 prefix and pull
     `^collection:` line by name."""
     if not yaml_text:
         return {}
@@ -231,7 +231,7 @@ async def run_agent_turn(
         text / tool_use / tool_result events are persisted from the
         very first round-trip. When omitted, the function waits for
         the first UsageEvent (provider-generated id) before persisting
-        anything — this mirrors web/backend/routes/chat.py behavior
+        anything -- this mirrors web/backend/routes/chat.py behavior
         and means the first round's assistant text lives in the SSE
         stream only, not in history.db. The connector pre-supplies
         the widget's session id to avoid that gap.
@@ -382,7 +382,7 @@ async def run_agent_turn(
 
     except Exception as exc:  # noqa: BLE001
         result.error = f"{type(exc).__name__}: {exc}"
-        # An exception terminates the stream — that's the real terminal
+        # An exception terminates the stream -- that's the real terminal
         # state regardless of whatever stop_reason the last UsageEvent
         # carried.
         result.stop_reason = "stream_error"
@@ -442,7 +442,7 @@ async def resume_agent_turn(
         await _fire_event_callback(on_event, err_ev)
         return result
 
-    # §2.3 — Surface skipped tools. Tool calls that were in the same assistant
+    # §2.3 -- Surface skipped tools. Tool calls that were in the same assistant
     # turn as the approval-gated call but never ran are recorded in
     # suspended.remaining_tool_calls. Emit synthetic ToolUseEvent +
     # ToolResultEvent pairs now so the SSE stream, history_sink, and transcript

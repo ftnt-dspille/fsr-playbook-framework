@@ -27,7 +27,7 @@ def search_playbooks(q: str, limit: int = 10,
                      verbose: bool = False) -> list[dict[str, Any]]:
     """Full-text search over playbook patterns seen in production.
 
-    Returns matching playbook names + collections — useful for 'how do
+    Returns matching playbook names + collections -- useful for 'how do
     others do X' pattern mining.
 
     Args:
@@ -107,7 +107,7 @@ def review_chat_session(session_id: str) -> dict[str, Any]:
 def review_recent_thumbs_down(limit: int = 10) -> dict[str, Any]:
     """Sweep the most recent thumbs-down sessions and run the chat-review
     pattern detectors against each. Useful for "what's been going wrong
-    recently?" — returns one row per session with its headline + top 3
+    recently?" -- returns one row per session with its headline + top 3
     findings, plus a cross-session pattern frequency map.
 
     Returns:
@@ -172,7 +172,7 @@ def find_step_examples(step_type: str,
     Backed by `probe_playbook_steps`, which indexes every step from every
     FSR playbook JSON export on disk (SP bundles + store/incoming drops).
     Use this when tightening linting/validation to mine real-world
-    argument shapes — e.g. "show me every ManualInput that uses
+    argument shapes -- e.g. "show me every ManualInput that uses
     formType=lookup" or "every Decision with a timeout block".
 
     Args:
@@ -180,10 +180,10 @@ def find_step_examples(step_type: str,
                    'SetVariable', 'Connectors'.
         contains:  optional substring matched against the raw
                    arguments_json (case-sensitive). Examples:
-                       'ipv4'                 — any ipv4 input
-                       '"formType": "lookup"' — any lookup-typed field
-                       '"default": true'      — any default branch
-                       '"timeout":'           — any step with a timeout
+                       'ipv4'                 -- any ipv4 input
+                       '"formType": "lookup"' -- any lookup-typed field
+                       '"default": true'      -- any default branch
+                       '"timeout":'           -- any step with a timeout
         limit:     max rows (default 20).
 
     Returns: list of {step_name, playbook_name, source, source_path, arguments}.
@@ -207,7 +207,7 @@ def find_step_examples(step_type: str,
 
 
 # ---------------------------------------------------------------------------
-# find_step_recipe — prebuilt + validated step fragments
+# find_step_recipe -- prebuilt + validated step fragments
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -219,7 +219,7 @@ def find_step_recipe(intent: str = "",
 
     Each recipe is a small block of one or more steps that is known to
     compile clean (CI-validated). Use this BEFORE drafting common
-    patterns from scratch — it eliminates the validate-fix-validate
+    patterns from scratch -- it eliminates the validate-fix-validate
     cascade for things like:
 
       - manual_input as the trigger (no `start` step)
@@ -230,10 +230,10 @@ def find_step_recipe(intent: str = "",
     Args:
         intent: natural-language description of what you're trying to
                 build, e.g. "block an ip on fortigate using a policy".
-        connector: optional filter — only return recipes bound to this
+        connector: optional filter -- only return recipes bound to this
                    connector (e.g. 'fortigate-firewall'). Generic
                    recipes (no connector binding) still match.
-        step_type: optional filter — only recipes that include this step
+        step_type: optional filter -- only recipes that include this step
                    type (e.g. 'manual_input', 'connector', 'set_variable').
         limit: max recipes to return (default 5).
 
@@ -252,7 +252,7 @@ def find_step_recipe(intent: str = "",
             "Each `steps_yaml` block is paste-ready. Replace placeholders "
             "(<UPPER_CASE> tokens) with your values; update step names "
             "and `next:` targets to fit your playbook. Recipes are "
-            "compile-validated — no validation cascade if you keep the "
+            "compile-validated -- no validation cascade if you keep the "
             "selected param values consistent with the recipe's group."
         ),
     } if matches else {

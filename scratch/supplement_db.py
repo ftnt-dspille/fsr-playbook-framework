@@ -106,4 +106,4 @@ for p in extra_params:
 warmed.commit()
 warmed.close()
 slim.close()
-print("Done — DB supplemented")
+print("Done -- DB supplemented")

@@ -1,11 +1,11 @@
-"""Phase 2 (STATIC_TYPE_FLOW_PLAN) — branch-local vars.<name> typing + scoping.
+"""Phase 2 (STATIC_TYPE_FLOW_PLAN) -- branch-local vars.<name> typing + scoping.
 
 The walker now (a) infers each set_variable output's type from its value using
 the live Phase 1b coercion matrix and carries it per branch in `var_env`, and
 (b) emits branch-scoped scoping diagnostics that the whole-playbook
 validator._check_undefined_vars cannot: read-before-define, defined-on-other-
 branch, and loop-var-outside-for_each. The never-defined-anywhere case stays
-with the validator (disjoint — no double report).
+with the validator (disjoint -- no double report).
 """
 from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
@@ -253,12 +253,12 @@ def test_set_variable_jinja_terminal_type_inferred():
     # | string → string
     assert env["textified"]["type"] == "str", env["textified"]
     # No terminal filter → still 'any' (we don't claim the shape of a
-    # bare vars.steps.x.y reference — that's the walker's job)
+    # bare vars.steps.x.y reference -- that's the walker's job)
     assert env["label"]["type"] == "any", env["label"]
 
 
 def test_set_variable_jinja_without_conn_degrades_to_any():
-    """Without a DB connection, Jinja values degrade to 'any' — the
+    """Without a DB connection, Jinja values degrade to 'any' -- the
     filter signature table is unavailable."""
     w = _walk(_TIER35_TYPED)
     env = w.branches[0].var_env
@@ -268,7 +268,7 @@ def test_set_variable_jinja_without_conn_degrades_to_any():
 
 def test_type_mismatch_through_set_variable_indirection():
     """A set_variable producing int (via | length) fed into a connector
-    param typed ipv4 must fire type_mismatch — the core Tier 3.5 use case.
+    param typed ipv4 must fire type_mismatch -- the core Tier 3.5 use case.
     Uses a mock param_type_fn since the slim DB may not have the
     connector's param types."""
     text = """
@@ -316,7 +316,7 @@ playbooks:
 
 def test_type_match_through_set_variable_indirection_no_false_positive():
     """A set_variable producing string (via | string) fed into a text
-    param must NOT fire — confirming the check isn't over-firing."""
+    param must NOT fire -- confirming the check isn't over-firing."""
     text = """
 collection: t
 playbooks:

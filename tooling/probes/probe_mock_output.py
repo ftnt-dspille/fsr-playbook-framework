@@ -6,7 +6,7 @@ chain whose connector targets recorded-future, which is unconfigured on the
 dev FSR), triggers it with --mock, then reads the run env and asserts the
 set_variable's stamped fields match the embedded mock_result payload.
 
-Without --mock, the connector step would fail with a no-config error — so a
+Without --mock, the connector step would fail with a no-config error -- so a
 green run is itself partial proof that mocking fired. The downstream
 set_variable assertion is the conclusive check that the mocked payload was
 actually exposed to subsequent steps.
@@ -45,7 +45,7 @@ def _log(msg: str) -> None:
 def main() -> int:
     cfg = _env.get_config()
     if not cfg.is_live():
-        _log("FSR_BASE_URL / auth not configured in .env — cannot run live probe")
+        _log("FSR_BASE_URL / auth not configured in .env -- cannot run live probe")
         return 2
     client = _env.get_client()
 
@@ -87,7 +87,7 @@ def main() -> int:
     body = {
         "input": {},
         "request": {"data": {}},
-        # globalMock MUST be false — with it true, IngestBulkFeed (and likely
+        # globalMock MUST be false -- with it true, IngestBulkFeed (and likely
         # other custom handlers) ignore mock_result and run live anyway.
         # useMockOutput=true alone is what makes mock_result apply uniformly.
         "useMockOutput": True,
@@ -183,7 +183,7 @@ def main() -> int:
                 _log(f"Capture mock result: {json.dumps(s.get('result'), indent=2)[:800]}")
         return 1
 
-    _log("PASS — mocked_result was substituted and downstream set_variable saw it")
+    _log("PASS -- mocked_result was substituted and downstream set_variable saw it")
     return 0
 
 

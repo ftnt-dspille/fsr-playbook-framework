@@ -11,7 +11,7 @@ Transforms (applied in order, all are safe on already-migrated files):
 1.  ``type: insert_record`` → ``type: create_record``
     The legacy alias was removed; it now hard-errors.
 
-2.  ``arguments:`` wrapper removed — children hoisted to step level.
+2.  ``arguments:`` wrapper removed -- children hoisted to step level.
     Phase G dropped the ``arguments:`` wrapper on every step type.
 
 3.  ``collection:`` on ``update_record`` → ``record:``
@@ -60,11 +60,11 @@ def _step_type_after(lines: list[str], idx: int) -> str | None:
     ``type: x`` line following the list-item dash.
     """
     for i in range(idx, min(idx + 10, len(lines))):
-        # `- type: x` — type: on the list-item line itself
+        # `- type: x` -- type: on the list-item line itself
         m = re.match(r"^\s*-\s+type:\s*(\S+)", lines[i])
         if m:
             return m.group(1).rstrip(":")
-        # `    type: x` — type: on a subsequent line
+        # `    type: x` -- type: on a subsequent line
         m = re.match(r"^\s+type:\s*(\S+)", lines[i])
         if m:
             return m.group(1).rstrip(":")
@@ -76,7 +76,7 @@ def _strip_arguments_wrapper(lines: list[str]) -> list[str]:
 
     Handles 2-space and 4-space indentation. Blank lines and comments
     inside the block are preserved. Content of literal block scalars
-    (``key: |``) and folded scalars (``key: >``) is NOT dedented — it is
+    (``key: |``) and folded scalars (``key: >``) is NOT dedented -- it is
     literal text where indentation is semantically load-bearing.
     """
     out: list[str] = []
@@ -113,14 +113,14 @@ def _strip_arguments_wrapper(lines: list[str]) -> list[str]:
                     j += 1
                     continue
                 # If inside a block scalar, keep the line as-is (don't dedent
-                # literal content — its indentation is semantically load-bearing).
+                # literal content -- its indentation is semantically load-bearing).
                 # A block scalar ends when a line at or below the key's
-                # original indent appears — that's a sibling key, not content.
+                # original indent appears -- that's a sibling key, not content.
                 if in_block_scalar:
                     if nxt_indent <= scalar_key_indent:
                         in_block_scalar = False
                     else:
-                        out.append(nxt)  # literal content — no dedent
+                        out.append(nxt)  # literal content -- no dedent
                         j += 1
                         continue
                 dedented = nxt[dedent:] if len(nxt) >= dedent else nxt.lstrip()
@@ -165,8 +165,8 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
 
     # 2b. After hoisting, drop keys that were valid under arguments: but
     # collide with step-level IR keys. The compiler re-derives these:
-    #   - `name:` (connector display label — re-derived from the catalog)
-    #   - `type: InputBased`/`DecisionBased` (MI mode — inferred from
+    #   - `name:` (connector display label -- re-derived from the catalog)
+    #   - `type: InputBased`/`DecisionBased` (MI mode -- inferred from
     #     `inputs:` presence/absence per Phase G)
     # The step-level `name:`/`type:` appear right after the `- type:` list
     # item; a `name:`/`type:` that appears LATER (after other args like
@@ -177,7 +177,7 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
     seen_other_key = False
     for i, line in enumerate(lines):
         if re.match(r"^\s*-\s+(type|name):", line):
-            # New step starts — reset tracking
+            # New step starts -- reset tracking
             seen_step_type = False
             seen_other_key = False
             current_type_val = _step_type_after(lines, i)
@@ -318,13 +318,13 @@ def _transform_text(text: str) -> tuple[str, list[str]]:
                         and inner_indent - query_indent <= 2):
                     i += 1
                     continue
-                # Skip __selectFields — wire-internal; the normalizer strips
+                # Skip __selectFields -- wire-internal; the normalizer strips
                 # it from query: when checkboxFields is false (the default).
                 if (re.match(r"^\s*__selectFields:", stripped)
                         and inner_indent - query_indent <= 2):
                     i += 1
                     continue
-                # Skip sort: [] (empty sort list — not a valid find_record
+                # Skip sort: [] (empty sort list -- not a valid find_record
                 # step-level key; the query DSL sort is handled by the
                 # compiler's Query object, not by a step-level sort: key)
                 if (re.match(r"^\s*sort:\s*\[\]\s*$", stripped)
@@ -359,7 +359,7 @@ def _transform_manual_input_wire_blocks(
     Uses ``yaml.safe_load`` on the extracted block to robustly parse the
     nested structure (``assignedToTeam`` can be a list of dicts with
     ``iri``/``teamname``, a list of strings, or a bare string).
-    Comments inside the block are consumed by the YAML parser — they
+    Comments inside the block are consumed by the YAML parser -- they
     describe the wire shape being replaced, so losing them is correct.
     """
     out: list[str] = []
@@ -574,7 +574,7 @@ def migrate_path(target: str, dry_run: bool = False) -> int:
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
-    """`fsrpb migrate` — rewrite playbook YAMLs to the current friendly surface."""
+    """`fsrpb migrate` -- rewrite playbook YAMLs to the current friendly surface."""
     count = migrate_path(args.path, dry_run=args.dry_run)
     verb = "would change" if args.dry_run else "changed"
     print(f"\n{verb} {count} file(s)")

@@ -2,7 +2,7 @@
   /**
    * "Describe what you want" modal for AI-driven step authoring.
    *
-   * Reusable across every step type the drafter supports — the
+   * Reusable across every step type the drafter supports -- the
    * inspector's launcher button passes `stepType`, the active
    * `module` (when applicable), and the node's current `arguments`.
    * The modal manages prompt entry → backend round-trip → diff
@@ -18,7 +18,7 @@
     onApply: (next: Record<string, unknown>) => void;
     /** Called when the user closes/cancels. */
     onClose: () => void;
-    /** Active module name for trigger / record_crud step types — the
+    /** Active module name for trigger / record_crud step types -- the
      * drafter uses it to pull schema + picklists. Optional. */
     module?: string | null;
   };
@@ -221,14 +221,14 @@
                     </span>
                     {d.message}
                     {#if d.suggestion}
-                      <span class="text-[var(--text-muted)]"> — {d.suggestion}</span>
+                      <span class="text-[var(--text-muted)]"> -- {d.suggestion}</span>
                     {/if}
                   </li>
                 {/each}
               </ul>
               {#if errs.length > 0}
                 <p class="mt-1 text-[10px] text-rose-700 dark:text-rose-400">
-                  Apply will still write the args — the compiler runs again on save.
+                  Apply will still write the args -- the compiler runs again on save.
                   Edit the proposal first if you'd rather start clean.
                 </p>
               {/if}

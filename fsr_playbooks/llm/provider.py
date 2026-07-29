@@ -55,7 +55,7 @@ class ApprovalRequestEvent:
     `POST /api/approvals/{approval_id}` arrives with the decision.
 
     `tool_use_id` is the Anthropic tool_use block id that triggered the
-    request — frontend matches it back onto the assistant turn so the
+    request -- frontend matches it back onto the assistant turn so the
     approval card renders inline with the call it gates."""
     approval_id: str
     tool_use_id: str
@@ -88,7 +88,7 @@ class ToolCallUsage:
     args_chars: int
     result_chars: int
     # Server-side wall-time (ms) of this tool's dispatch (None if unmeasured).
-    # Folded into chat_turns.tool_calls_json for later profiling — answers
+    # Folded into chat_turns.tool_calls_json for later profiling -- answers
     # "which tool was slow" from the authoritative turn record.
     duration_ms: int | None = None
 
@@ -120,7 +120,7 @@ class UsageEvent:
 
 # NOTE: typing.Union, not PEP 604 `X | Y`. This is a runtime assignment
 # (a type alias), so the `|` operator would execute at import time and
-# raise TypeError on Python 3.9 — the FortiSOAR runtime baseline. The
+# raise TypeError on Python 3.9 -- the FortiSOAR runtime baseline. The
 # `from __future__ import annotations` above only defers *annotations*,
 # not this expression. Keep it Union-form for 3.9 compatibility.
 Event = Union[
@@ -155,7 +155,7 @@ class LLMProvider(Protocol):
         execution for that turn) so consumers can attribute cost
         independently of the provider.
 
-        `tags` is opaque to the provider — it just round-trips it on
+        `tags` is opaque to the provider -- it just round-trips it on
         the UsageEvent so the route handler can stamp e.g. the active
         playbook collection name.
 

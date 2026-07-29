@@ -1,7 +1,7 @@
 """Self-teaching diagnostics (PLAYBOOK_AUTHORING_DX_PLAN 0b).
 
 When a compile error lands on one of the step types authors most often mis-shape
-— ``manual_input``, ``workflow_reference`` (incl. its ``retry:`` do-until form) —
+-- ``manual_input``, ``workflow_reference`` (incl. its ``retry:`` do-until form) --
 attach a minimal **compiling** YAML example to the error's ``suggestion``. The
 error channel is the most reliable place an agent will read, so the fix travels
 *with* the diagnostic instead of living in a guide the agent never opens.

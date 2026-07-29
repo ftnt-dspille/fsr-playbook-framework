@@ -1,6 +1,6 @@
 /**
  * Tests for the Monaco completion *provider* registered by
- * registerYamlCompletions — context-sensitive trigger regexes,
+ * registerYamlCompletions -- context-sensitive trigger regexes,
  * findConnectorAbove walk semantics, and result shape (insertText,
  * snippet rule, kind, range).
  *
@@ -87,7 +87,7 @@ function eolPosition(lines: string[], lineNumber: number) {
   return { lineNumber, column: (lines[lineNumber - 1] ?? '').length + 1 };
 }
 
-describe('registerYamlCompletions — trigger regexes', () => {
+describe('registerYamlCompletions -- trigger regexes', () => {
   let provider: any;
   beforeEach(() => {
     provider = captureProvider().provider;
@@ -268,7 +268,7 @@ describe('registerYamlCompletions — trigger regexes', () => {
         lineNumber: 1,
         column: col
       });
-      // Filters list — `upper` / `default` from the mock; NOT `data` / `severity`.
+      // Filters list -- `upper` / `default` from the mock; NOT `data` / `severity`.
       const labels = r.suggestions.map((s: any) => s.label);
       expect(labels).toContain('upper');
       expect(labels).not.toContain('severity');

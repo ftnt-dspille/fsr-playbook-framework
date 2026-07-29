@@ -10,7 +10,7 @@ surface. For each scenario:
      round-trip (operator tokens, URL params, branch labels,
      trigger field paths …).
 
-This is the test that catches resolver/emitter drift end-to-end —
+This is the test that catches resolver/emitter drift end-to-end --
 unit tests on either side miss bugs that only show up when FSR
 re-canonicalises what we sent.
 
@@ -163,7 +163,7 @@ def _purge(client, name: str = PROBE_COLLECTION_PREFIX) -> None:
                     json={"ids": wf_uuids},
                     verify=client.verify_ssl, timeout=30,
                 )
-    except Exception:  # noqa: BLE001 — cleanup best-effort
+    except Exception:  # noqa: BLE001 -- cleanup best-effort
         pass
 
 
@@ -222,7 +222,7 @@ def first_filter_leaf(args: dict, key: str = "fieldbasedtrigger") -> dict | None
 def _yaml_two_triggers(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — two trigger options"
+        description: "round-trip probe -- two trigger options"
         playbooks:
           - name: "rt_two_triggers"
             description: "manual + on-create both route to one set_variable"
@@ -247,7 +247,7 @@ def _check_two_triggers(coll: dict) -> bool | str:
     """This scenario verifies a *negative* claim: the compiler must
     reject the two-trigger playbook (FSR allows exactly one trigger
     per workflow). The scenario harness inverts: a successful push
-    here is a regression — we WANT the compile_failure path."""
+    here is a regression -- we WANT the compile_failure path."""
     wf = workflow_by_name(coll, "rt_two_triggers")
     if wf is not None:
         return "two-trigger playbook unexpectedly pushed; FSR allows only one"
@@ -257,7 +257,7 @@ def _check_two_triggers(coll: dict) -> bool | str:
 def _yaml_on_create_nested_filter(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — on-create with nested AND/OR"
+        description: "round-trip probe -- on-create with nested AND/OR"
         playbooks:
           - name: "rt_on_create_nested"
             description: "fires on alerts where severity is high OR critical AND escalated is not yes"
@@ -326,7 +326,7 @@ def _check_on_create_nested(coll: dict) -> bool | str:
 def _yaml_on_update_changed(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — on-update with `changed` operator"
+        description: "round-trip probe -- on-update with `changed` operator"
         playbooks:
           - name: "rt_on_update_changed"
             description: "fires when an alert's status field changes"
@@ -373,7 +373,7 @@ def _check_changed_operator(coll: dict) -> bool | str:
 def _yaml_find_record_correlated(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — find_record with $relationships URL params"
+        description: "round-trip probe -- find_record with $relationships URL params"
         playbooks:
           - name: "rt_find_correlated"
             description: "find alerts with correlated records, capped at 5"
@@ -420,7 +420,7 @@ def _check_find_correlated(coll: dict) -> bool | str:
 def _yaml_decision_branches(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — decision with 3 conditions + default"
+        description: "round-trip probe -- decision with 3 conditions + default"
         playbooks:
           - name: "rt_decision_three_way"
             description: "high → escalate; medium → ack; default → log"
@@ -455,12 +455,12 @@ def _yaml_decision_branches(coll: str) -> str:
 def _yaml_on_create_fires(coll: str, marker: str) -> str:
     """Fires when a record is created with `name == <marker>`. The
     playbook's only step after the trigger sets a vars value, which
-    we don't actually need to read — we just want to confirm the run
+    we don't actually need to read -- we just want to confirm the run
     transitioned to `finished` (i.e. the trigger fired AND completed).
     """
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — on_create fires + completes"
+        description: "round-trip probe -- on_create fires + completes"
         playbooks:
           - name: "rt_on_create_fires"
             description: "fires on alerts where name matches the marker"
@@ -526,7 +526,7 @@ def _fire_and_check(client, coll_name: str, marker: str,
     try:
         # 4. Poll for a workflow run instance scoped to this template
         # IRI. The runner polls by task_id for /notrigger flows, but
-        # event-driven on-create triggers don't issue a task_id —
+        # event-driven on-create triggers don't issue a task_id --
         # FSR's internal subscriber spawns the run, and we have to
         # query by `template_iri` (the workflow IRI itself).
         poll_url = (
@@ -566,7 +566,7 @@ def _fire_and_check(client, coll_name: str, marker: str,
 def _yaml_manual_input(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — manual_input with multiple form fields + buttons"
+        description: "round-trip probe -- manual_input with multiple form fields + buttons"
         playbooks:
           - name: "rt_manual_input"
             description: "approve/reject prompt + two free-text fields"
@@ -626,7 +626,7 @@ def _check_manual_input(coll: dict) -> bool | str:
 def _yaml_workflow_reference(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — workflow_reference with input mapping"
+        description: "round-trip probe -- workflow_reference with input mapping"
         playbooks:
           - name: "rt_wfref_child"
             description: "child: multiply input.base by 10"
@@ -690,7 +690,7 @@ def _check_workflow_reference(coll: dict) -> bool | str:
 def _yaml_ingest_bulk_feed(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — ingest_bulk_feed with batch_size + __bulk"
+        description: "round-trip probe -- ingest_bulk_feed with batch_size + __bulk"
         playbooks:
           - name: "rt_ingest_bulk"
             description: "fake feed → IngestBulkFeed; __bulk:true must survive"
@@ -753,7 +753,7 @@ def _check_ingest_bulk_feed(coll: dict) -> bool | str:
 def _yaml_update_record_picklist(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — update_record with friendly picklist + Append"
+        description: "round-trip probe -- update_record with friendly picklist + Append"
         playbooks:
           - name: "rt_update_picklist"
             description: "find alert by name, set status via friendly picklist token, Append tag"
@@ -781,7 +781,7 @@ def _yaml_update_record_picklist(coll: str) -> str:
                 collection: "{{{{ vars.steps.Find[0]['@id'] }}}}"
                 collectionType: /api/3/alerts
                 resource:
-                  # Friendly token — the resolver rewrites to the
+                  # Friendly token -- the resolver rewrites to the
                   # canonical /api/3/picklists/<uuid> IRI.
                   status: "Closed"
                   recordTags: ["fsrpb-rt"]
@@ -827,7 +827,7 @@ def _check_update_record_picklist(coll: dict) -> bool | str:
 def _yaml_find_record_sort(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "round-trip probe — find_record with $sort + __selectFields"
+        description: "round-trip probe -- find_record with $sort + __selectFields"
         playbooks:
           - name: "rt_find_sort"
             description: "sorted projection survives FSR canonicalisation"
@@ -879,7 +879,7 @@ def _check_find_record_sort(coll: dict) -> bool | str:
 # ── Negative / compile-failure scenarios ─────────────────────────────
 # Each is (name, yaml_fn, expected_error_code_substring). The harness
 # asserts the compiler rejects the YAML AND that at least one error
-# contains the expected code/substring — so it isn't enough to fail
+# contains the expected code/substring -- so it isn't enough to fail
 # for the wrong reason.
 
 
@@ -887,7 +887,7 @@ def _yaml_neg_unreachable_step(coll: str) -> str:
     # 'Orphan' is not referenced by any step's `next:`.
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "negative — unreachable step"
+        description: "negative -- unreachable step"
         playbooks:
           - name: "rt_neg_unreachable"
             steps:
@@ -906,7 +906,7 @@ def _yaml_neg_unreachable_step(coll: str) -> str:
 def _yaml_neg_duplicate_step_name(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "negative — duplicate step names"
+        description: "negative -- duplicate step names"
         playbooks:
           - name: "rt_neg_dup_name"
             steps:
@@ -925,7 +925,7 @@ def _yaml_neg_duplicate_step_name(coll: str) -> str:
 def _yaml_neg_dangling_next(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "negative — next points at non-existent step"
+        description: "negative -- next points at non-existent step"
         playbooks:
           - name: "rt_neg_dangling"
             steps:
@@ -941,7 +941,7 @@ def _yaml_neg_dangling_next(coll: str) -> str:
 def _yaml_neg_no_trigger(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "negative — no start/trigger step"
+        description: "negative -- no start/trigger step"
         playbooks:
           - name: "rt_neg_no_trigger"
             steps:
@@ -954,7 +954,7 @@ def _yaml_neg_no_trigger(coll: str) -> str:
 def _yaml_neg_decision_two_defaults(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "negative — decision with two default branches"
+        description: "negative -- decision with two default branches"
         playbooks:
           - name: "rt_neg_two_defaults"
             steps:
@@ -981,7 +981,7 @@ def _yaml_neg_norway_branch(coll: str) -> str:
     # Python booleans; the linter should flag it.
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "negative — Norway problem in decision display"
+        description: "negative -- Norway problem in decision display"
         playbooks:
           - name: "rt_neg_norway"
             steps:
@@ -1006,7 +1006,7 @@ def _yaml_neg_norway_branch(coll: str) -> str:
 def _yaml_neg_unknown_step_type(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "negative — unknown step type"
+        description: "negative -- unknown step type"
         playbooks:
           - name: "rt_neg_unknown_type"
             steps:
@@ -1021,7 +1021,7 @@ def _yaml_neg_unknown_step_type(coll: str) -> str:
 def _yaml_neg_unknown_picklist(coll: str) -> str:
     return textwrap.dedent(f"""\
         collection: "{coll}"
-        description: "negative — unknown picklist label in update_record.resource"
+        description: "negative -- unknown picklist label in update_record.resource"
         playbooks:
           - name: "rt_neg_unknown_picklist"
             steps:
@@ -1064,7 +1064,7 @@ def _check_decision_branches(coll: dict) -> bool | str:
 
 # Tuple shape: (name, yaml_fn, check_fn, expect_compile_failure?)
 # `expect_compile_failure=True` means the scenario passes when the
-# compiler rejects the YAML — used for negative tests where we're
+# compiler rejects the YAML -- used for negative tests where we're
 # asserting the resolver's guards work.
 SCENARIOS = [
     ("two_triggers", _yaml_two_triggers, _check_two_triggers, True),
@@ -1104,7 +1104,7 @@ NEGATIVE_SCENARIOS = [
 
 # Live-fire scenarios: push + actually trigger + verify the run hit
 # `finished` state. Slower (60s timeout per) and produces real records
-# on the live FSR — kept separate from the structural-only SCENARIOS
+# on the live FSR -- kept separate from the structural-only SCENARIOS
 # above so a quick run can skip them.
 LIVE_FIRE_SCENARIOS = [
     ("on_create_fires_and_completes",
@@ -1150,7 +1150,7 @@ def run_one(client, name: str,
 def run_negative(name: str,
                  yaml_fn: Callable[[str], str],
                  expected_substr: str) -> dict:
-    """Compile-only — assert the compiler rejects with the expected
+    """Compile-only -- assert the compiler rejects with the expected
     error code/message substring. Never pushes to FSR.
     """
     try:
@@ -1203,7 +1203,7 @@ def main() -> int:
     print(f"Round-tripping against {client.base_url}\n")
 
     results: list[dict] = []
-    # One up-front purge — each scenario uses its own unique collection
+    # One up-front purge -- each scenario uses its own unique collection
     # name (`PROBE_COLLECTION_PREFIX + scenario`), so per-scenario
     # purging isn't needed during the run; we only have to clear any
     # leftovers from a prior interrupted run before we start.
@@ -1215,7 +1215,7 @@ def main() -> int:
             continue
         results.append(run_one(client, name, yaml_fn, check_fn, expect_fail))
 
-    # Negative scenarios — compile-only, no FSR round-trip.
+    # Negative scenarios -- compile-only, no FSR round-trip.
     for name, yaml_fn, expected in NEGATIVE_SCENARIOS:
         if args.only and name not in args.only:
             continue

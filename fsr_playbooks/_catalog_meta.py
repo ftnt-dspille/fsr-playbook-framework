@@ -1,13 +1,13 @@
-"""Catalog provenance & freshness metadata — the ``_catalog_meta`` table.
+"""Catalog provenance & freshness metadata -- the ``_catalog_meta`` table.
 
 The offline compiler reads a cached reference DB (see :mod:`fsr_playbooks._db`).
 That cache is *warmed* from one specific live SOAR. Two failure classes follow:
 
-1. **Cross-instance mistakes** — compiling against a catalog warmed from a
+1. **Cross-instance mistakes** -- compiling against a catalog warmed from a
    *different* SOAR. Instance A's picklist IRIs / connector configs mis-resolve
    on B, producing a playbook that looks valid but silently misbehaves. Today
    this is a silent-wrong-answer class.
-2. **Staleness** — the live SOAR drifts (a publish adds a module/field, a
+2. **Staleness** -- the live SOAR drifts (a publish adds a module/field, a
    picklist value is edited) after the catalog was warmed.
 
 ``_catalog_meta`` is a small key/value table that records *where* and *when* the
@@ -65,7 +65,7 @@ def get(conn: sqlite3.Connection, key: str, default: str | None = None) -> str |
             "SELECT value FROM _catalog_meta WHERE key = ?", (key,)
         ).fetchone()
     except sqlite3.OperationalError:
-        # Table absent on an old/slim DB — treat as unstamped.
+        # Table absent on an old/slim DB -- treat as unstamped.
         return default
     if row is None:
         return default
@@ -150,7 +150,7 @@ def record_data_warmed_at(conn: sqlite3.Connection) -> None:
 # The capture side (record_etag / record_data_warmed_at) is written by the
 # warmup probes. These read-side helpers let a conditional-refetch consumer
 # decide *whether* to refetch (TTL) and *how* (If-None-Match with the stored
-# ETag). They are pure — no network — so they ship in the wheel alongside the
+# ETag). They are pure -- no network -- so they ship in the wheel alongside the
 # multi-instance guard.
 
 DEFAULT_TTL_SECONDS = 24 * 60 * 60  # 1 day
@@ -172,7 +172,7 @@ def is_ttl_expired(
     """True when the Tier-2 catalog is stale and a refresh should be considered.
 
     Stale means: never warmed (no ``data_warmed_at``), the stamp is unparseable
-    (treat as expired — better to refetch than trust a corrupt timestamp), or
+    (treat as expired -- better to refetch than trust a corrupt timestamp), or
     the warm is at least ``ttl_seconds`` old. A timestamp without an explicit
     offset is assumed UTC (matches :func:`_utcnow`).
     """
@@ -196,9 +196,9 @@ def check_instance(conn: sqlite3.Connection, base_url: str) -> tuple[str, str, s
 
     Returns ``(status, stamped_label, stamped_hash)`` where status is one of:
 
-    - ``"ok"``        — the catalog was warmed from this instance.
-    - ``"mismatch"``  — warmed from a *different* instance (silent-wrong risk).
-    - ``"unstamped"`` — catalog carries no instance stamp (slim/unwarmed DB);
+    - ``"ok"``        -- the catalog was warmed from this instance.
+    - ``"mismatch"``  -- warmed from a *different* instance (silent-wrong risk).
+    - ``"unstamped"`` -- catalog carries no instance stamp (slim/unwarmed DB);
                         nothing to validate against, so callers pass silently.
     """
     stamped_hash = get(conn, "base_url_hash") or ""
@@ -216,7 +216,7 @@ def instance_guard(conn: sqlite3.Connection, errors: list) -> None:
 
     The intended target is read from ``$FSR_BASE_URL`` (the same var the warmup
     tooling uses). When it is unset there is no "intended" instance to compare
-    against, so this is a no-op — offline compiles stay clean. When set:
+    against, so this is a no-op -- offline compiles stay clean. When set:
 
     - mismatch → a *warning* by default (the author may genuinely intend to
       compile portable, stable-only playbooks), escalated to a blocking *error*

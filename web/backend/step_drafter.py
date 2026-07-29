@@ -15,7 +15,7 @@ Design choices for the MVP:
 
 * **One ground-truth schema example per step type.** The model gets
   three things in its system prompt: (1) what the step does, (2) the
-  canonical wire shape — drawn from the same corpus that powers
+  canonical wire shape -- drawn from the same corpus that powers
   ``step_examples``, (3) the user's intent. The output schema is
   enforced via the existing JSON-mode contract on the provider.
 
@@ -39,7 +39,7 @@ DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
 
 
 # Per-step-type "what does this step do" intro the model reads first.
-# Keep terse — the corpus examples below carry the structural detail.
+# Keep terse -- the corpus examples below carry the structural detail.
 STEP_INTROS: dict[str, str] = {
     "decision":
         "Branches the playbook on Jinja predicates. Args go under "
@@ -101,10 +101,10 @@ STEP_INTROS: dict[str, str] = {
     "start_on_update":
         "Trigger that fires when a record is updated. Same shape as "
         "start_on_create. The `is_changed` operator is unique to update "
-        "triggers — emits a leaf with no `value`, gated on any change "
+        "triggers -- emits a leaf with no `value`, gated on any change "
         "to that field.",
     "start":
-        "Manual / designer trigger — runs on demand against `resource`.",
+        "Manual / designer trigger -- runs on demand against `resource`.",
     "manual_action":
         "Trigger that fires when an analyst clicks an action button on "
         "a record.",
@@ -144,7 +144,7 @@ def extract_json(text: str) -> dict[str, Any] | None:
 def _format_field_catalog(fields: list[dict[str, Any]]) -> str:
     """Compact, model-friendly rendering of a module's field list.
 
-    One field per line: ``name (type, [picklist=…]) — title``. We
+    One field per line: ``name (type, [picklist=…]) -- title``. We
     truncate after 60 fields so the prompt stays bounded on wide
     modules like ``alerts`` (which has 90+).
     """
@@ -158,7 +158,7 @@ def _format_field_catalog(fields: list[dict[str, Any]]) -> str:
             bits.append("REQUIRED")
         title = f.get("title")
         if title and title.strip() and title.strip() != f.get("name"):
-            bits.append(f"— {title}")
+            bits.append(f"-- {title}")
         line = " ".join(bits)
         if f.get("picklist_options"):
             try:
@@ -194,7 +194,7 @@ def build_system_prompt(step_type: str, module: str | None,
     output contract.
     """
     intro = STEP_INTROS.get(step_type,
-        f"Author a `{step_type}` step. Output JSON only — see contract below.")
+        f"Author a `{step_type}` step. Output JSON only -- see contract below.")
 
     sections: list[str] = [
         f"You are drafting a single FortiSOAR playbook step of type "
@@ -202,7 +202,7 @@ def build_system_prompt(step_type: str, module: str | None,
         f"\n## What this step does\n{intro}",
     ]
 
-    # Module schema — only relevant for trigger / find_record / record CRUD.
+    # Module schema -- only relevant for trigger / find_record / record CRUD.
     if module:
         if not DB_PATH.exists():
             module_block = f"(module catalog unavailable; module name is `{module}`)"
@@ -230,7 +230,7 @@ def build_system_prompt(step_type: str, module: str | None,
             )
         sections.append(f"\n## Schema\n{module_block}")
 
-    # Corpus examples — pulled from the same data store the Examples
+    # Corpus examples -- pulled from the same data store the Examples
     # tab uses so the model sees real production patterns.
     if DB_PATH.exists() and step_type in STEP_TYPE_TO_CORPUS:
         with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as c:
@@ -253,7 +253,7 @@ def build_system_prompt(step_type: str, module: str | None,
         "\n## Output contract\n"
         "Return ONE valid JSON object. No prose, no fences, no commentary.\n"
         "The object IS the proposed `arguments:` block for the step.\n"
-        "Use the friendly authoring shape where the step type has one — the\n"
+        "Use the friendly authoring shape where the step type has one -- the\n"
         "compiler resolver will expand to canonical FSR form.\n"
         "Prefer values from picklist enumerations when the field has them.\n"
         "Use `{{ vars.input.records[0].<field> }}` for record-bound values\n"
@@ -279,7 +279,7 @@ def validate_proposed_args(step_type: str,
     missing trigger on a fragment that wasn't meant to be a complete
     playbook) doesn't pollute the diff.
 
-    Returns a list — empty on clean validate. Each entry has
+    Returns a list -- empty on clean validate. Each entry has
     ``{severity, code, path, message, suggestion}``. Wraps any
     compiler-side import failure in a single ``severity: 'unknown'``
     diagnostic so the route handler can render it gracefully.
@@ -299,7 +299,7 @@ def validate_proposed_args(step_type: str,
             "suggestion": "",
         }]
 
-    # Use the YAML emitter to produce the step body — naive json.dumps
+    # Use the YAML emitter to produce the step body -- naive json.dumps
     # would quote keys and break compatibility with the parser. PyYAML
     # is already a dependency for the compiler so it's a safe import.
     import yaml as _yaml
@@ -403,7 +403,7 @@ async def draft_step_args(
     diagnostics: list[dict[str, Any]] = []
     try:
         diagnostics = validate_proposed_args(step_type, parsed)
-    except Exception as exc:  # noqa: BLE001 — best-effort validation
+    except Exception as exc:  # noqa: BLE001 -- best-effort validation
         diagnostics = [{
             "severity": "unknown",
             "code": "validate_crash",

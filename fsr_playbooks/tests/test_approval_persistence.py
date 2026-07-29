@@ -1,4 +1,4 @@
-"""Phase 3.2 — sqlite-backed approval gateway (restart durability).
+"""Phase 3.2 -- sqlite-backed approval gateway (restart durability).
 
 A SuspendedSession stashed by one gateway instance must be readable by a
 fresh instance over the same db file (simulating a worker restart), and the

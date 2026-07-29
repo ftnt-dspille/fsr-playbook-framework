@@ -10,13 +10,13 @@ target.
 byte-for-byte: it promotes each `{option, next}` into the step's branch map
 and strips `next` from the emitted condition (the emitter later injects
 `step_iri`/`step_name`). The cleaned conditions are rebuilt from the ORIGINAL
-dicts — not the typed model — so key order and content stay byte-identical
+dicts -- not the typed model -- so key order and content stay byte-identical
 (a `model_dump` would inject `None` defaults and reorder keys).
 
 The `DecisionCondition` model adds the structural check the imperative path
 lacked: a mistyped condition key (`nxt:`, `whne:`, `defualt:`) silently
 dropped the branch wiring before; `extra="forbid"` now catches it at compile
-time. The check is additive — output is still built leniently, matching the
+time. The check is additive -- output is still built leniently, matching the
 legacy behaviour for valid playbooks (zero corpus-emit diff).
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ class DecisionCondition(StrictArgs):
     `display`/`when` were rewritten to `option`/`condition` by the parser;
     `next` is the branch target (promoted to `step.branches`, then stripped);
     `default` flags the else row. `step_iri`/`step_name` are listed so a
-    round-tripped condition stays lax under `extra="forbid"` — the emitter
+    round-tripped condition stays lax under `extra="forbid"` -- the emitter
     injects them and they don't normally reach the resolver, but accepting
     them keeps the model tolerant of real exported input.
     """
@@ -71,8 +71,8 @@ def expand_decision(
 
     Drop-in for the imperative `_normalize_decision_args`: mutates `args` in
     place (cleaning `conditions`) and `branches` (option → next, via
-    `setdefault`), then returns `args`. Returns ``None`` — leaving everything
-    untouched — when `args` is empty / not a dict, or `conditions` is not a
+    `setdefault`), then returns `args`. Returns ``None`` -- leaving everything
+    untouched -- when `args` is empty / not a dict, or `conditions` is not a
     list, matching the legacy early-returns. Non-dict condition entries pass
     through verbatim.
     """

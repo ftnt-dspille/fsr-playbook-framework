@@ -1,12 +1,12 @@
 """`get_op_schema` must teach output BINDING, not just input params.
 
 A weak authoring model (haiku on GA) drove the correct build sequence but
-bound a connector op's whole envelope — `vars.steps.X.data` — into an alert
+bound a connector op's whole envelope -- `vars.steps.X.data` -- into an alert
 description, which renders as `Array`/`[object Object]` instead of the scalar.
 Root cause: the envelope rule (`.data.<field>`) lived only in
 `get_step_type("connector")`, which the build sequence skips; `get_op_schema`
 (which it DOES call) surfaced no output guidance. These pins keep the binding
-hint present and, critically, CORRECT — never inventing a `.data.<field>` that
+hint present and, critically, CORRECT -- never inventing a `.data.<field>` that
 isn't real (that would just swap one wrong binding for another).
 """
 from __future__ import annotations
@@ -19,14 +19,14 @@ from fsr_playbooks.mcp_server.tools_discovery import (
 
 
 def test_static_schema_keys_are_data_fields():
-    # Static output schema `{"minutes": ""}` — untyped, but its key IS the
+    # Static output schema `{"minutes": ""}` -- untyped, but its key IS the
     # real `.data` field the author must bind to.
     assert _output_field_names({"output_schema_json": '{"minutes": ""}'}) == ["minutes"]
 
 
 def test_observed_flat_envelope_is_not_treated_as_data_fields():
     # A run-derived schema that captured the flattened envelope
-    # (status/message siblings) must NOT surface those as `.data.<field>` —
+    # (status/message siblings) must NOT surface those as `.data.<field>` --
     # that would teach `vars.steps.X.data.status` when status is an envelope
     # sibling. No explicit nested `data` object → no field claim.
     observed = '{"status": "str", "message": "str", "policyId": "str"}'

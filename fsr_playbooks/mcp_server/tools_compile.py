@@ -23,7 +23,7 @@ DB_PATH = _shared.DB_PATH
 # Single source of truth: `_FRIENDLY_FORMS` lives in `tools_discovery` (the
 # richer, actively-maintained copy that `get_step_type` renders). Re-exported
 # here so the compile-path consumers that import it from this module (and the
-# package `__init__`) stay in lockstep — no second copy to drift.
+# package `__init__`) stay in lockstep -- no second copy to drift.
 from .tools_discovery import _FRIENDLY_FORMS  # noqa: F401,E402 (re-export)
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
     compiles but the graph linter raised non-blocking issues (e.g.
     unreachable step, missing default branch), the response is
     `{ok: true, warnings: [...]}`. Treat warnings as authoring bugs
-    to fix before declaring done — they don't block compile but they
+    to fix before declaring done -- they don't block compile but they
     almost always mean the playbook won't behave correctly at runtime.
     """
     try:
@@ -56,7 +56,7 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
     # §F: the compiler auto-corrects known foot-guns (set_variable
     # namespace refs, `vars.input.<p>` missing `.params.`, `stop`→`end`,
     # …) on its internal IR, but the agent only got a warning describing
-    # each rewrite — re-authoring the YAML by hand cost a full
+    # each rewrite -- re-authoring the YAML by hand cost a full
     # validate→fix→validate round-trip per foot-gun in live sessions.
     # Hand back the corrected source text instead.
     corrected: dict[str, Any] = {}
@@ -76,13 +76,13 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
                     ],
                     "auto_fix_note": (
                         "Known foot-guns were auto-corrected in "
-                        "`corrected_yaml` — adopt it as your working copy "
+                        "`corrected_yaml` -- adopt it as your working copy "
                         "instead of re-applying each warning by hand. It "
                         "fixes only the listed items; any other errors "
                         "still need your attention."
                     ),
                 }
-    except Exception:  # noqa: BLE001 — advisory affordance, never block validation
+    except Exception:  # noqa: BLE001 -- advisory affordance, never block validation
         corrected = {}
 
     if result.ok:
@@ -148,7 +148,7 @@ def _pick_next_fix(errors: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
-# resolve_yaml — static-resolve check + live prechecks
+# resolve_yaml -- static-resolve check + live prechecks
 # ---------------------------------------------------------------------------
 
 _PICKLIST_LITERAL = re.compile(
@@ -223,7 +223,7 @@ def resolve_yaml(yaml_text: str) -> dict[str, Any]:
       }
 
     When no live FSR is configured the structural gate still runs and
-    `prechecks` is reported as skipped — failure here is not retroactively
+    `prechecks` is reported as skipped -- failure here is not retroactively
     fatal (the agent can re-run when an FSR is reachable).
     """
     structural = validate_yaml(yaml_text)
@@ -290,7 +290,7 @@ def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
     """Compile a YAML playbook to FortiSOAR WorkflowCollection JSON.
 
     Returns `{ok: true, summary: {workflows, steps, uuid, name}}` by
-    default — the agent rarely needs the full JSON body, just a
+    default -- the agent rarely needs the full JSON body, just a
     confirmation that compile succeeds. Pass `verbose=True` to also get
     the importable FSR JSON string under `json`.
 
@@ -333,7 +333,7 @@ def build_playbook_from_trace(
     guard_containment: bool = True,
 ) -> dict[str, Any]:
     """Compile a playbook from the session's typed action trace instead of
-    hand-authoring YAML (SKILL_BASED_PLAYBOOK_PLAN §3–5).
+    hand-authoring YAML (SKILL_BASED_PLAYBOOK_PLAN §3-5).
 
     This is the flag-gated trace-compiler entry point: the agent already
     ran the connector ops during triage, so their real outputs were
@@ -345,7 +345,7 @@ def build_playbook_from_trace(
 
     Args:
       trace_json: the serialized `SkillTrace` (`SkillTrace.to_json()`).
-        **Leave empty** in normal agent use — the session's recorded trace
+        **Leave empty** in normal agent use -- the session's recorded trace
         is read from the active recorder automatically. Pass a value only
         to compile an externally-supplied trace (tests, batch tooling).
       name: the playbook display name.
@@ -355,7 +355,7 @@ def build_playbook_from_trace(
       module: friendly module name (alerts, incidents, …) to bind the
         playbook's start trigger to, so it runs as a manual Execute-menu
         trigger on that module's record listing. **Leave empty** in normal
-        agent use — it's read from the trace's recorded triage module
+        agent use -- it's read from the trace's recorded triage module
         (stamped by the connector when it opened the session). Pass a value
         only to override or to compile an externally-supplied trace.
 
@@ -383,7 +383,7 @@ def build_playbook_from_trace(
     if len(trace) == 0:
         return _err(
             "empty_trace",
-            "no recorded actions in the trace — nothing to compile",
+            "no recorded actions in the trace -- nothing to compile",
             suggestions=["fall back to the hand-author build path"],
         )
 
@@ -440,6 +440,6 @@ def build_playbook_from_trace(
 
 
 # ---------------------------------------------------------------------------
-# push / run / dry-run — closes the agent's authoring loop without dropping
+# push / run / dry-run -- closes the agent's authoring loop without dropping
 # out to the CLI. All three mutate state on the live FSR instance.
 # ---------------------------------------------------------------------------

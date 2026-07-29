@@ -16,7 +16,7 @@ step_types:
 notes: |
   Replace <APPROVE_STEP> and <REJECT_STEP> with the actual step names you
   branch to. The Jinja in `description` references the prior input step's
-  ID — if your prior step is named differently, update `Collect_Input`
+  ID -- if your prior step is named differently, update `Collect_Input`
   (note: spaces in step names become underscores).
 steps_yaml: |
   - type: manual_input

@@ -5,7 +5,7 @@ For each collection envelope in the corpus, run the semantic round-trip
 (`fsr_playbooks.compiler.roundtrip.roundtrip`): wire JSON -> IR -> wire JSON,
 projected onto compiler-owned semantic fields (per-step type/arguments/for_each,
 routing graph, declared parameters), and diffed against the original. A dropped
-field is data loss — the widget saves the agent's last ```yaml fence back OVER
+field is data loss -- the widget saves the agent's last ```yaml fence back OVER
 the record, so any field the decompiler cannot read is deleted from the
 customer's playbook. See docs/plans/playbook-compiler-fidelity-and-agent-surface.md.
 
@@ -16,7 +16,7 @@ Corpus source (first that resolves):
 
 The committed corpus is synthesized and expected to pass 100%. Point
 `--corpus-dir` at a real box pull (F4-style, `?$relationships=true`) to measure
-the corpus rate; there `--min-pass` is the ratchet — a fix that regresses a
+the corpus rate; there `--min-pass` is the ratchet -- a fix that regresses a
 different field drops the count and fails the gate (R2 in the plan).
 
 Fixture shape: either a bare `{"data":[...]}` envelope, or `{"envelope": {...}}`
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  ✗ {name}:\n      {detail}")
 
     if passed < floor:
-        print(f"corpus-gate: FAIL — {passed} < floor {floor} "
+        print(f"corpus-gate: FAIL -- {passed} < floor {floor} "
               f"(a field stopped surviving the round-trip)", file=sys.stderr)
         return 1
     print("corpus-gate: PASS")

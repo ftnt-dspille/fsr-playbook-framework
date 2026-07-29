@@ -1,4 +1,4 @@
-"""G3 wiring — the Tier-2 ``conditional_refetch`` opt-in is actually consumed by
+"""G3 wiring -- the Tier-2 ``conditional_refetch`` opt-in is actually consumed by
 the real probes (``probe_connector_configs`` / ``probe_api_endpoints`` /
 ``probe_modules``), not just exercised in isolation by ``test_conditional_refetch``.
 
@@ -8,7 +8,7 @@ correctness property the wiring adds: the probe's tables are NOT wiped on a
 skip never empties the catalog. Default-off (``FSR_CONDITIONAL_REFETCH`` unset)
 keeps the legacy always-re-pull path.
 
-Mock client + in-memory DB built from the shipped ``schema.sql`` — no live SOAR.
+Mock client + in-memory DB built from the shipped ``schema.sql`` -- no live SOAR.
 """
 from __future__ import annotations
 
@@ -185,7 +185,7 @@ def test_connector_configs_disabled_uses_legacy_path(conn, monkeypatch):
     probe = probe_connector_configs  # bound from the module-level import
 
     monkeypatch.setattr(_env, "is_conditional_enabled", lambda: False)
-    # NOTE: _live (not main) doesn't wipe on the legacy path — main owns the
+    # NOTE: _live (not main) doesn't wipe on the legacy path -- main owns the
     # unconditional wipe. So no pre-seed; we assert the fetch+write+ETag only.
 
     calls = {"conditional": 0}
@@ -291,7 +291,7 @@ def _seed_api_endpoint(conn):
 def _modules_client():
     """A mock client whose tags/teams/metadata GETs return empty members, and
     version/publish/count GETs return benign values. Picklists is NOT routed
-    here — the conditional path supplies it via conditional_refetch."""
+    here -- the conditional path supplies it via conditional_refetch."""
     empty = _Resp({"hydra:member": []})
     return _MockClient(
         session_routes={  # client.session.get(url, ...)
@@ -375,7 +375,7 @@ def test_modules_error_keeps_catalog(conn, cond_enabled, monkeypatch):
 
 def _ensure_modules_probe_tables(conn):
     # tags/teams are created by probe_modules.main() (CREATE TABLE IF NOT
-    # EXISTS), not schema.sql — ensure they exist for direct _live calls.
+    # EXISTS), not schema.sql -- ensure they exist for direct _live calls.
     conn.execute("CREATE TABLE IF NOT EXISTS tags (name TEXT PRIMARY KEY, iri TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS teams (name TEXT PRIMARY KEY, iri TEXT NOT NULL)")
     conn.commit()

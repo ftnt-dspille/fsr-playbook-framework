@@ -1,7 +1,7 @@
 /**
  * Recently-picked connector ops per connector, persisted to
  * localStorage. The OperationPicker uses this to float frequently/recently
- * chosen ops to the top — a tiny user-preference store, no backend.
+ * chosen ops to the top -- a tiny user-preference store, no backend.
  *
  * Score model: each pick adds 1 to a frequency counter, capped at 10.
  * On lookup, the score is `freq * decay(ageDays)` where decay halves
@@ -31,7 +31,7 @@ function write(s: Store): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   } catch {
-    /* quota — drop silently */
+    /* quota -- drop silently */
   }
 }
 

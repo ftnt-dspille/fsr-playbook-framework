@@ -25,7 +25,7 @@
 
   let host: HTMLDivElement;
   // editor / monaco / model are $state so the effects below re-run after
-  // onMount finishes — without this, the value-sync effect captures
+  // onMount finishes -- without this, the value-sync effect captures
   // `editor === undefined` on its first run, never tracks `value`, and
   // never fires on subsequent prop changes.
   let editor = $state<any>(null);
@@ -54,7 +54,7 @@
       // they anchor to the cursor line in document flow. `true` uses
       // position:fixed, which lands in the wrong place when an ancestor
       // creates a containing block (transform / filter / backdrop-filter)
-      // — which our `.glass` header does globally.
+      // -- which our `.glass` header does globally.
       fixedOverflowWidgets: false
     });
     modelRef = editor.getModel();

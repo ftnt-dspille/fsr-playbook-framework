@@ -2,7 +2,7 @@
  * Combined YAML + Jinja Monarch tokenizer.
  *
  * Monaco's default YAML tokenizer paints `{{ ... }}` as plain string
- * content — no syntax help for templates embedded in playbook YAML.
+ * content -- no syntax help for templates embedded in playbook YAML.
  * This module replaces the YAML tokenizer with one that dispatches
  * into Jinja states (`{{ }}`, `{% %}`, `{# #}`) and emits the same
  * token names the Jinja theme uses (punctuation.expression, keyword,
@@ -10,7 +10,7 @@
  *
  * Coverage for the YAML side is intentionally pragmatic: keys,
  * scalars, comments, anchors/refs, block / flow markers, and quoted
- * strings — enough to match Monaco's default look-and-feel for the
+ * strings -- enough to match Monaco's default look-and-feel for the
  * kinds of YAML this app edits (FortiSOAR playbook YAML). It is NOT a
  * full YAML 1.2 reference tokenizer.
  *
@@ -44,7 +44,7 @@ export const yamlJinjaTokens = {
 
   tokenizer: {
     root: [
-      // Jinja delimiters — dispatch into dedicated states.
+      // Jinja delimiters -- dispatch into dedicated states.
       [/{%-?/, { token: 'punctuation.control', next: '@jinjaTag' }],
       [/{{-?/, { token: 'punctuation.expression', next: '@jinjaExpression' }],
       [/{#/, { token: 'comment.documentation', next: '@jinjaComment' }],
@@ -75,13 +75,13 @@ export const yamlJinjaTokens = {
       // Date / time
       [/\d{4}-\d{2}-\d{2}([Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?(( ?[+-]\d{2}:\d{2})|Z)?)?/, 'number.date'],
 
-      // Map keys — must come before comments so `key #` works.
+      // Map keys -- must come before comments so `key #` works.
       [/(".*?"|'.*?'|[^#'"\s][^#:]*?)([ \t]*)(:)( |$)/, ['type', 'white', 'operators', 'white']],
 
       // Strings
       { include: '@flowScalars' },
 
-      // Plain scalar — keyword / generic
+      // Plain scalar -- keyword / generic
       [/[^#]+?(?=[,\]}]|\s+#|$)/, {
         cases: {
           '@keywords': 'keyword',

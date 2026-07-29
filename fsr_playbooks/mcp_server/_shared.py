@@ -116,7 +116,7 @@ def _capability_gap_suggestion(
     what's missing, why, concrete fix steps, a resume button, and optional
     tips / manual fallbacks. The agent forwards this straight into
     `emit_capability_gap_card` (see system_prompt_triage.md). Returns the
-    kwargs dict only — the emitter adds `type` and validates."""
+    kwargs dict only -- the emitter adds `type` and validates."""
     card: dict[str, Any] = {
         "id": id,
         "missing": missing,
@@ -201,7 +201,7 @@ def _validate_op_exists(connector: str, op: str) -> dict[str, Any] | None:
 
     Returns an `unknown_operation` error envelope (with near-match
     suggestions) when the connector HAS operations catalogued but `op`
-    isn't among them — so a hallucinated/typo'd op name becomes an
+    isn't among them -- so a hallucinated/typo'd op name becomes an
     actionable error the agent can self-correct against, instead of an
     opaque `execution_failed` after the user has already approved it.
 
@@ -252,14 +252,14 @@ def _validate_op_exists(connector: str, op: str) -> dict[str, Any] | None:
 
 # Param types whose value is constrained to an options_json picklist.
 _SELECT_TYPES = {"select", "multiselect", "picklist", "radio"}
-# Param types we type-check (loosely — FSR coerces strings → ints/bools at
+# Param types we type-check (loosely -- FSR coerces strings → ints/bools at
 # execute, so we only reject values that can't possibly coerce).
 _INT_TYPES = {"integer", "number"}
 _BOOL_TYPES = {"checkbox", "boolean", "bool"}
 
 
 def _is_jinja(val: Any) -> bool:
-    """A value the agent left as a template (`{{vars.x}}`) — we can't
+    """A value the agent left as a template (`{{vars.x}}`) -- we can't
     validate its concrete content, so membership/type checks must skip it."""
     return isinstance(val, str) and "{{" in val and "}}" in val
 
@@ -270,7 +270,7 @@ def _auto_remap_params(params: dict[str, Any] | None,
 
     When a call had EXACTLY ONE unknown param and the op has EXACTLY ONE
     missing-required param, the unknown was almost certainly meant for that
-    required slot — a semantic alias `difflib` can't catch by spelling
+    required slot -- a semantic alias `difflib` can't catch by spelling
     (`ip`→`value`, `host`→`hostName`, `srcIP`→`source_ip_value`). These are the
     misses that wasted ~8 run_op calls in export sess-vtd15c5v. Return
     `{params, from, to}` with the corrected params, or None when it's not the
@@ -304,7 +304,7 @@ def _validate_op_params(connector: str, op: str,
 
     Mirrors `_validate_op_exists`: catches typo'd/unknown params, missing
     required params, and select values outside the option set BEFORE the op
-    runs — so a malformed call surfaces as an actionable `bad_params` error
+    runs -- so a malformed call surfaces as an actionable `bad_params` error
     the agent self-corrects against, instead of an opaque post-approval
     `execution_failed` (or, worse, an approval card the analyst signs off on
     that then fails).
@@ -318,7 +318,7 @@ def _validate_op_params(connector: str, op: str,
     Conditional sub-params are resolved from submitted parent values, so
     required checks only apply to the active branch. Values left as Jinja
     templates are skipped for membership/type (we can't see their runtime
-    content). Type checks are deliberately loose — FSR coerces `"5"`→5 and
+    content). Type checks are deliberately loose -- FSR coerces `"5"`→5 and
     `"true"`→bool at execute, so we only reject values that cannot coerce at
     all.
     """
@@ -557,7 +557,7 @@ def _infer_shape(value: Any, _depth: int = 0) -> Any:
         # Collapse a large homogeneous map (e.g. VirusTotal query_ip's
         # last_analysis_results: ~90 AV engines, EVERY value shaped
         # {method,engine_name,category,result}). Echoing all 90 keys bloated the
-        # run_op tool result by tens of KB with zero added signal — the agent
+        # run_op tool result by tens of KB with zero added signal -- the agent
         # only needs the per-entry shape and the count, not the vendor roster.
         # Keep one representative entry + a count sentinel.
         if len(shaped) > 12:
@@ -619,7 +619,7 @@ def _invalidate_live_client() -> None:
 
     A long-running process (the local-dev sidecar, or a box worker that
     doesn't recycle for days) holds the cached session past the FSR token's
-    TTL — every live call then fails `http_401` forever with no recovery,
+    TTL -- every live call then fails `http_401` forever with no recovery,
     which reads to the agent as "this record doesn't exist" and burns a
     tool-call budget retrying every arg permutation before giving up
     (see LOCAL_DEV P3 triage-quality investigation, 2026-07-05). Callers
@@ -642,7 +642,7 @@ def live_request_with_reauth(method: str, client: Any, url: str, **kwargs):
     `http_401` forever.
 
     `kwargs` is whatever the caller would pass to `client.session.<method>`
-    besides `verify` (e.g. `json=body` for a POST) — `verify` is resolved
+    besides `verify` (e.g. `json=body` for a POST) -- `verify` is resolved
     against whichever client actually makes the call, since a refreshed
     client could in principle carry a different `verify_ssl`.
 
@@ -661,12 +661,12 @@ def live_request_with_reauth(method: str, client: Any, url: str, **kwargs):
 
 
 def live_get_with_reauth(client: Any, url: str):
-    """GET variant of `live_request_with_reauth` — see its docstring."""
+    """GET variant of `live_request_with_reauth` -- see its docstring."""
     return live_request_with_reauth("get", client, url)
 
 
 def live_post_with_reauth(client: Any, url: str, **kwargs):
-    """POST variant of `live_request_with_reauth` — see its docstring."""
+    """POST variant of `live_request_with_reauth` -- see its docstring."""
     return live_request_with_reauth("post", client, url, **kwargs)
 
 
@@ -690,7 +690,7 @@ def _safe_op_category(connector: str, op: str) -> str:
 #
 # The reference catalog is a SNAPSHOT, refreshed only by an explicit warmup.
 # Its staleness check is emptiness-only, so a connector installed AFTER the last
-# warm is invisible until someone re-ships — and every tool that resolves
+# warm is invisible until someone re-ships -- and every tool that resolves
 # through the store then tells the agent, with total confidence, that a
 # connector the box actually has "does not exist".
 #
@@ -716,7 +716,7 @@ def set_live_catalog_probe(fn: "Any") -> None:
     """Register the connector callable that lists connector names live on the box.
 
     Signature: ``fn() -> set[str] | list[str] | None``. Return ``None`` (or
-    raise) when the box can't be reached — callers then fall back to the
+    raise) when the box can't be reached -- callers then fall back to the
     catalog's own answer rather than inventing one. Implementations are
     expected to cache; this is called on the miss path of user-facing tools.
     """
@@ -728,14 +728,14 @@ def box_has_connector(connector: str) -> bool | None:
     """Does the BOX have ``connector``, regardless of the catalog?
 
     ``True``/``False`` when the box answered; ``None`` when we could not ask
-    (no probe registered, or the probe failed). ``None`` is not ``False`` — the
+    (no probe registered, or the probe failed). ``None`` is not ``False`` -- the
     caller must not upgrade "couldn't check" into "isn't there".
     """
     if _LIVE_CATALOG_PROBE is None or not connector:
         return None
     try:
         names = _LIVE_CATALOG_PROBE()
-    except Exception:  # noqa: BLE001 — a diagnostic must never raise
+    except Exception:  # noqa: BLE001 -- a diagnostic must never raise
         return None
     if names is None:
         return None
@@ -749,8 +749,8 @@ def stale_catalog_hint(connector: str) -> dict[str, Any] | None:
     """An error-envelope fragment when ``connector`` is on the box but NOT in
     the catalog; ``None`` otherwise (including "couldn't check").
 
-    Callers merge this into their ``unknown_connector`` envelope so the agent —
-    and the analyst reading the transcript — see the real cause instead of a
+    Callers merge this into their ``unknown_connector`` envelope so the agent --
+    and the analyst reading the transcript -- see the real cause instead of a
     phantom "doesn't exist".
     """
     if box_has_connector(connector) is not True:
@@ -759,7 +759,7 @@ def stale_catalog_hint(connector: str) -> dict[str, Any] | None:
         "code": "stale_catalog",
         "message": (
             f"connector {connector!r} IS installed on this FortiSOAR instance "
-            f"but is missing from the reference catalog — the catalog was "
+            f"but is missing from the reference catalog -- the catalog was "
             f"warmed before it was installed. This is a catalog staleness "
             f"problem, NOT a missing connector."
         ),

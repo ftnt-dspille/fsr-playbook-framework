@@ -1,13 +1,13 @@
-"""probe_jinja — populate jinja_macros (filters) + jinja_context_vars.
+"""probe_jinja -- populate jinja_macros (filters) + jinja_context_vars.
 
 Sources, in priority order:
 
-  1. widget_constants — `widget-jinja-editor/widget/widgetAssets/js/constants/
+  1. widget_constants -- `widget-jinja-editor/widget/widgetAssets/js/constants/
      jinjaFilters.constants.js` (49 filters, comprehensive metadata). Loaded
      via a small Node helper because the file is an IIFE that expects a
      `window` global. Status `seen` only.
 
-  2. live_api_render — for each filter, render a tiny `{{ value | filter }}`
+  2. live_api_render -- for each filter, render a tiny `{{ value | filter }}`
      template via the FSR Jinja-render endpoint. The endpoint URL isn't
      documented; we discover it by trying a list of candidates with the
      widget's known call shape: POST { template, values }.
@@ -164,7 +164,7 @@ def _load_filters_from_widget(conn: sqlite3.Connection) -> tuple[int, list[str]]
 #   "    abs                  Absolute value of a number    jinja2_docs"
 # Filter name is the first token, possibly with parens: "attr(x)", "batch(n)",
 # "combine(dict_x,\nrecursive=False)" (multiline). We capture name only and let
-# the description carry the args info — ingesting precise param shapes from
+# the description carry the args info -- ingesting precise param shapes from
 # the PDF is more brittle than it's worth; the live render verifies behavior.
 _PDF_ROW = __import__("re").compile(
     r"^\s{4,6}([a-zA-Z][a-zA-Z0-9_]*)(?:\([^)]*\))?\s{2,}"
@@ -197,7 +197,7 @@ def _load_filters_from_pdf(conn: sqlite3.Connection) -> tuple[int, list[str]]:
         if name.lower() == "filter":
             continue
         # Honor existing rows: don't clobber a richer widget_constants entry
-        # with a sparse PDF row — only INSERT if name is new.
+        # with a sparse PDF row -- only INSERT if name is new.
         existing = conn.execute(
             "SELECT 1 FROM jinja_macros WHERE name = ?", (name,),
         ).fetchone()
@@ -246,7 +246,7 @@ def _discover_endpoint(conn: sqlite3.Connection, client) -> str | None:
                 """INSERT OR IGNORE INTO api_endpoints
                    (path_pattern, http_method, service, source, summary, response_kind)
                    VALUES (?, 'POST', 'wf', 'manual',
-                           'Jinja template render — discovered via probe_jinja',
+                           'Jinja template render -- discovered via probe_jinja',
                            'json')""",
                 (path,),
             )
@@ -257,7 +257,7 @@ def _discover_endpoint(conn: sqlite3.Connection, client) -> str | None:
                 notes=f"upper('x')='{raw[:30]}'",
             )
             return path
-        # 404/route-not-found is the normal case — don't log.
+        # 404/route-not-found is the normal case -- don't log.
     return None
 
 
@@ -270,7 +270,7 @@ def _verify_filter_renders(
     we store them in jinja_macros.output_type_observed.
 
     Filters that need specific input (e.g. dictsort needs a dict, batch needs
-    a linecount arg) fail here — that's information too: tested_fail rows
+    a linecount arg) fail here -- that's information too: tested_fail rows
     record the error so agents know the limitation.
     """
     passed = failed = 0
@@ -373,7 +373,7 @@ def _infer_param_shapes(conn: sqlite3.Connection) -> tuple[int, int]:
             )
             updated_required += 1
         elif status == "tested_pass":
-            # No required positional args — leave detail-of-optional-args TBD
+            # No required positional args -- leave detail-of-optional-args TBD
             # (would need backend introspection to know names + defaults).
             conn.execute(
                 "UPDATE jinja_macros SET parameters_json = ? WHERE name = ?",
@@ -409,7 +409,7 @@ def main() -> int:
             else:
                 errs.append("render endpoint not discovered; tried "
                             f"{len(RENDER_CANDIDATES)} candidates")
-        # Backfill parameter shapes from error messages — zero extra calls.
+        # Backfill parameter shapes from error messages -- zero extra calls.
         inferred_required, inferred_empty = _infer_param_shapes(conn)
 
         notes = json.dumps({

@@ -6,12 +6,12 @@
    * Two checks today; both stem from real failures the round-trip
    * probe surfaced (see `python/probes/probe_round_trip.py`):
    *
-   *   1. Multi-trigger detected — FSR allows exactly one trigger per
+   *   1. Multi-trigger detected -- FSR allows exactly one trigger per
    *      playbook. The compiler rejects this, but only at save time;
    *      surfacing it here catches it the moment the user drops the
    *      second trigger on the canvas.
    *
-   *   2. Trigger playbook is inactive — `is_active: false` ships
+   *   2. Trigger playbook is inactive -- `is_active: false` ships
    *      cleanly to FSR but the trigger never fires (the IR default is
    *      False, easy to miss). Catching it here saves the user from
    *      "I pushed it, why didn't it fire?" debugging.
@@ -29,7 +29,7 @@
 
   let multiTrigger = $derived(triggers.length > 1);
   // Inactive guard only fires when the playbook actually has a
-  // trigger — manual collections without a trigger don't need to be
+  // trigger -- manual collections without a trigger don't need to be
   // "active" in FSR's sense and would generate noise otherwise.
   let inactiveTriggerPlaybook = $derived(
     !!playbook && triggers.length > 0 && playbook.is_active === false
@@ -47,7 +47,7 @@
           Multiple triggers ({triggers.length})
         </span>
         <span class="text-rose-700 dark:text-rose-400">
-          — FSR allows exactly one trigger per playbook. The compiler
+          -- FSR allows exactly one trigger per playbook. The compiler
           will reject this on save. Delete one of:
         </span>
         <span class="font-mono">
@@ -64,7 +64,7 @@
           Playbook is inactive
         </span>
         <span class="text-amber-800 dark:text-amber-300">
-          — the trigger will not fire on push. Add
+          -- the trigger will not fire on push. Add
           <code class="font-mono">is_active: true</code>
           under <code class="font-mono">{playbook.name}</code> in YAML
           (or the playbook header) to enable.

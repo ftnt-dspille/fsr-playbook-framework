@@ -1,4 +1,4 @@
-"""Typed-args model for `code_snippet` steps — registry contract, expand parity,
+"""Typed-args model for `code_snippet` steps -- registry contract, expand parity,
 and the new clean-error behaviour."""
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def test_non_string_code_is_clean_bad_value():
 
 
 def test_empty_code_handled_by_resolver():
-    # expand_code_snippet does not check for empty code — that's the resolver's job.
+    # expand_code_snippet does not check for empty code -- that's the resolver's job.
     errs: list[CompileError] = []
     out = expand_code_snippet({}, "p.steps[0]", errs)
     assert out is not None

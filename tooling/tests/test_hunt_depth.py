@@ -1,9 +1,9 @@
-"""B2 — hunt depth/breadth gate (Chat Intelligence Plan).
+"""B2 -- hunt depth/breadth gate (Chat Intelligence Plan).
 
 `_score_investigation_quality` emits a `hunt_depth` gate when a fixture defines
 a `hunt_chain`: an ordered list of pivot stages (fact-matchers) the agent should
 traverse from the seed IOC. Depth = stages reached; breadth = distinct connectors
-exercised. Pure, offline, deterministic — it belongs in `make chat-fast`.
+exercised. Pure, offline, deterministic -- it belongs in `make chat-fast`.
 
 The reference scenario is the seeded multi-hop chain
 smithDesktop -> 10.50.60.70 -> 102.220.160.21.
@@ -69,7 +69,7 @@ def test_full_chain_passes():
 
 
 def test_shallow_hunt_fails_default_min_depth():
-    # Reaches only the host, never pivots to the IP chain — depth 2 < 4.
+    # Reaches only the host, never pivots to the IP chain -- depth 2 < 4.
     trace = _trace_through("incident", "host")
     g = _gate(trace, {"hunt_chain": CHAIN})
     assert not g["passed"] and g["depth"] == 2
@@ -83,7 +83,7 @@ def test_lowered_min_depth_passes_partial():
 
 
 def test_breadth_floor_can_fail_a_deep_but_narrow_hunt():
-    # Reaches all 4 stages but only one connector — breadth gate trips.
+    # Reaches all 4 stages but only one connector -- breadth gate trips.
     trace = _trace_through("incident", "host", "internal", "external")
     g = _gate(trace, {"hunt_chain": CHAIN, "min_hunt_breadth": 2})
     assert not g["passed"] and g["breadth"] == 1 and g["depth"] == 4

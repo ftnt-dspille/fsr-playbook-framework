@@ -1,7 +1,7 @@
 """Agent-facing assets: the externalized system prompt + helpers.
 
-Kept inside the `python/` tree (not `web/`) so non-web frontends —
-CLI agents, the eval harness, the MCP-driven Claude Code session —
+Kept inside the `python/` tree (not `web/`) so non-web frontends --
+CLI agents, the eval harness, the MCP-driven Claude Code session --
 can load the SAME prompt without depending on the web backend.
 """
 from __future__ import annotations
@@ -31,7 +31,7 @@ def load_system_prompt(intent: Intent = "build") -> str:
     workflow" with the minimal-diff rules; intent is detected at
     chat-start by `web/backend/routes/chat.py`.
 
-    Callers MUST NOT inline this content — pull it through this
+    Callers MUST NOT inline this content -- pull it through this
     helper so the cached prefix stays byte-stable. Note the cache
     prefix is identical between build and enhance (static block +
     main prompt); only the appended addendum changes, so cache hits

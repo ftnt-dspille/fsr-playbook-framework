@@ -25,17 +25,17 @@ _(no resolver mapping or no allowlists declared)_
 
 | key | count | % of rows | accepted? |
 |---|---:|---:|---|
-| `connector` | 525 | 100.0% | — |
-| `operation` | 525 | 100.0% | — |
-| `operationTitle` | 525 | 100.0% | — |
-| `params` | 525 | 100.0% | — |
-| `step_variables` | 525 | 100.0% | — |
-| `version` | 525 | 100.0% | — |
-| `when` | 50 | 9.5% | — |
-| `for_each` | 30 | 5.7% | — |
-| `ignore_errors` | 22 | 4.2% | — |
-| `message` | 10 | 1.9% | — |
-| `config` | 7 | 1.3% | — |
-| `do_until` | 2 | 0.4% | — |
-| `mock_result` | 2 | 0.4% | — |
-| `name` | 1 | 0.2% | — |
+| `connector` | 525 | 100.0% | -- |
+| `operation` | 525 | 100.0% | -- |
+| `operationTitle` | 525 | 100.0% | -- |
+| `params` | 525 | 100.0% | -- |
+| `step_variables` | 525 | 100.0% | -- |
+| `version` | 525 | 100.0% | -- |
+| `when` | 50 | 9.5% | -- |
+| `for_each` | 30 | 5.7% | -- |
+| `ignore_errors` | 22 | 4.2% | -- |
+| `message` | 10 | 1.9% | -- |
+| `config` | 7 | 1.3% | -- |
+| `do_until` | 2 | 0.4% | -- |
+| `mock_result` | 2 | 0.4% | -- |
+| `name` | 1 | 0.2% | -- |

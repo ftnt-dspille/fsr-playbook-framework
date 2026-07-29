@@ -31,7 +31,7 @@ def test_unknown_connector_blocks_without_lax(db_path):
 
 
 def test_lax_codes_accepts_value_string(db_path):
-    # The friendly `.value` string used to never match — now it demotes.
+    # The friendly `.value` string used to never match -- now it demotes.
     r = compile_yaml(_YAML, db_path, lax_codes={"unknown_connector"})
     assert r.ok, r.errors
 

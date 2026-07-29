@@ -58,7 +58,7 @@ def _path_to_line(text: str, path: str) -> int:
     finding the nth `- id:` line under the relevant playbook's `steps:`.
     Returns 1 if we can't pin it down.
 
-    NOTE: extract ONLY the `steps[N]` index — paths like
+    NOTE: extract ONLY the `steps[N]` index -- paths like
     `playbooks[0].steps[2].arguments.conditions[0]` carry trailing
     indices for the option/condition that aren't step indices. Reading
     the last `[N]` would mis-attribute the marker to step 0.
@@ -228,7 +228,7 @@ def _err_to_marker(text: str, e) -> Marker:
         if misplaced_line is not None:
             key = e.path.rsplit(".", 1)[-1]
             suggestion = (
-                f"found {key!r} at the step level (line {misplaced_line}) — "
+                f"found {key!r} at the step level (line {misplaced_line}) -- "
                 f"indent it under `arguments:` so it's `arguments.{key}`"
             )
     return Marker(
@@ -295,11 +295,11 @@ def compile_(body: YamlIn) -> dict[str, Any]:
 
 @router.post("/shapes")
 def shapes(body: YamlIn) -> dict[str, Any]:
-    """Fast typed-walker pass over the buffer — used by the variable
+    """Fast typed-walker pass over the buffer -- used by the variable
     picker / Monaco completions to surface real step output shapes
     without forcing the user to run the full verify_playbook gate.
 
-    No live probe, no diagnostics — just `per_step_jinja_shapes` and a
+    No live probe, no diagnostics -- just `per_step_jinja_shapes` and a
     flag per step indicating *why* its shape is unknown so the picker
     can prompt the user to verify (or otherwise enrich) it.
     """
@@ -322,7 +322,7 @@ def shapes(body: YamlIn) -> dict[str, Any]:
 
     shapes_by_jkey: dict[str, dict[str, Any]] = {}
     # Top-level vars created by `set_variable` steps. FSR exposes these
-    # as `vars.<name>` (NOT `vars.steps.<step>.<name>` — the corpus
+    # as `vars.<name>` (NOT `vars.steps.<step>.<name>` -- the corpus
     # makes this clear: `{{vars.cicd_env}}`, `{{vars.source_control_base_url}}`).
     top_level_vars: dict[str, dict[str, Any]] = {}
     needs_verify: list[dict[str, str]] = []
@@ -346,7 +346,7 @@ def shapes(body: YamlIn) -> dict[str, Any]:
                 if isinstance(k, str) and k:
                     entries.append((k, v))
         for k, _v in entries:
-            # We don't (yet) infer the value's type from the literal —
+            # We don't (yet) infer the value's type from the literal --
             # set_variable values are often Jinja templates whose type
             # depends on the rendered output. Mark as `any`.
             top_level_vars[k] = {"kind": "scalar", "type": "any"}

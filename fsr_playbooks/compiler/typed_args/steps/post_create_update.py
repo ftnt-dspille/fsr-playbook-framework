@@ -1,18 +1,18 @@
 """Typed model for `start_on_create` / `start_on_update` / `start_on_delete`
-arguments — the field-based post-write record triggers (FSR handlers
+arguments -- the field-based post-write record triggers (FSR handlers
 ``cybersponse.post_create`` / ``post_update`` / ``post_delete``).
 
 These are the record-family trigger step types authored with a friendly
 ``module:`` (single name or ``modules:`` list) plus an optional ``when:``
 filter that fires only when the query matches the post-write record state
-(the pre-delete state for post_delete), or — for post_update — when the
+(the pre-delete state for post_delete), or -- for post_update -- when the
 listed fields *changed*.
 
 `PostCreateUpdateArgs` types the scalar friendly ``module`` field so a
 wrong-typed value is a clean ``BAD_VALUE`` (e.g. ``module: [1, 2]``)
 instead of silently riding through to the runtime. ``modules`` (a list),
 ``when`` (a filter dict), and the canonical keys ride through via
-``extra="allow"`` — the resolver's ``_check_unknown_keys`` has already
+``extra="allow"`` -- the resolver's ``_check_unknown_keys`` has already
 rejected anything genuinely unknown, and ``_validate_trigger_fields``
 re-checks the filter against the catalog after this walk.
 
@@ -24,14 +24,14 @@ byte-for-byte with the imperative normalizer it replaces:
 * the ``step_variables``/``triggerOnSource``/``triggerOnReplicate``/
   ``__triggerLimit`` setdefaults,
 * ``when:`` -> ``fieldbasedtrigger`` via the typed trigger layer's
-  ``expand_when`` (pure — no catalog), else the empty-filter default.
+  ``expand_when`` (pure -- no catalog), else the empty-filter default.
 
 Two pieces stay in the resolver, around this walk, because they are
 catalog-bound and run before/after the transform:
 
-* ``_check_unknown_keys`` (the strict friendly/canonical whitelist) — runs first.
+* ``_check_unknown_keys`` (the strict friendly/canonical whitelist) -- runs first.
 * ``_validate_trigger_fields`` (filter fields/values vs the warmed modules
-  table) — runs after, on the rewritten ``step.arguments``.
+  table) -- runs after, on the rewritten ``step.arguments``.
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ class PostCreateUpdateArgs(StrictArgs):
     ``module`` is the target module type name (a string, or a Jinja string
     that renders to one). ``modules`` (the list form), ``when`` (the filter
     dict), ``mock_result``/``condition`` (escape hatches) and the canonical
-    keys ride through ``extra="allow"`` — the resolver's
+    keys ride through ``extra="allow"`` -- the resolver's
     ``_check_unknown_keys`` has already rejected anything genuinely unknown,
     and ``_validate_trigger_fields`` re-checks the filter after this walk.
     """
@@ -75,7 +75,7 @@ def expand_post_create_update(
     unchanged (when the input is not a dict). ``resolve_module`` is the
     resolver's ``resolve_module_name`` bound method, threaded in because
     module canonicalization needs the catalog. Canonical keys already set by
-    the author win — the transform uses ``setdefault``, never clobbering an
+    the author win -- the transform uses ``setdefault``, never clobbering an
     explicit ``resource``/``resources``/``fieldbasedtrigger``/``step_variables``.
     """
     if not isinstance(args, dict):
@@ -97,7 +97,7 @@ def expand_post_create_update(
         modules = ["alerts", "incidents"]
         errors.append(CompileError(
             code=ErrorCode.MISSING_FIELD,
-            message=(f"`module:` not set on {step_type} — defaulting to "
+            message=(f"`module:` not set on {step_type} -- defaulting to "
                      "[alerts, incidents]; set `module:` explicitly to "
                      "override"),
             path=f"{path}.arguments.module",

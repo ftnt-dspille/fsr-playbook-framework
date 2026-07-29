@@ -5,7 +5,7 @@
    * `onInsert` closure as the active insert target.
    *
    * The popover-style picker this component used to host has been
-   * replaced by the pane — see VarTreePane.svelte + varPaneStore.
+   * replaced by the pane -- see VarTreePane.svelte + varPaneStore.
    * Props kept the same so call sites don't churn (`node` / `playbook`
    * / `shapes` are unused here now but consumed by the pane via
    * varPaneStore.node + the playbook store).
@@ -34,7 +34,7 @@
 
   let { node, playbook, wrap = true, shapes: _shapes, label, onInsert }: Props = $props();
 
-  // Stable identity for this picker instance — lets the store decide
+  // Stable identity for this picker instance -- lets the store decide
   // whether a blur event should close the pane or whether a refocus
   // already swapped targets. Cheap; created once per mount.
   const id = `vpp-${Math.random().toString(36).slice(2, 10)}`;
@@ -49,7 +49,7 @@
 
   function onClick() {
     // Keep the inspector's node in sync so the pane scopes ancestors
-    // correctly — clicking the button is a hard signal we want THIS
+    // correctly -- clicking the button is a hard signal we want THIS
     // step's scope, even if a focus event hasn't fired.
     varPaneStore.node = node;
     varPaneStore.toggle(target());

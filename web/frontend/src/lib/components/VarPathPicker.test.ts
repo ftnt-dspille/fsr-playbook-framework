@@ -24,7 +24,7 @@ const meNode: VisualNode = {
 };
 
 describe('VarPathPicker (pane-driver)', () => {
-  // The popover-based picker was replaced by VarTreePane — this
+  // The popover-based picker was replaced by VarTreePane -- this
   // component is now a thin {x} button that toggles the global pane
   // and registers its onInsert closure as the active target.
 

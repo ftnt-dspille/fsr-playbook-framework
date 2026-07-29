@@ -152,7 +152,7 @@ def test_usage_event_appends_to_jsonl(client, tmp_path):
 
 def test_session_cost_estimate_present(client):
     """Cost is computed at read time from PRICING_USD_PER_MTOK. The
-    fake model name doesn't match the table — null cost is fine; we
+    fake model name doesn't match the table -- null cost is fine; we
     just want to verify the field is on the response."""
     client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     sess = history_db.get_chat_session("testsess")
@@ -191,7 +191,7 @@ def test_yaml_sha_changes_when_content_changes(client):
     # FakeProvider hardcodes it. Check both rows; their yaml_sha differs.
     sess = history_db.get_chat_session("testsess")
     shas = {t.get("yaml_sha") for t in sess["turns"]}
-    # Two posts, but turn=1 is the same primary key — REPLACE leaves
+    # Two posts, but turn=1 is the same primary key -- REPLACE leaves
     # only the latest. Verify that the latest sha is from the second
     # request (post-edit).
     assert sess["turns"][0]["yaml_sha"] is not None
@@ -224,7 +224,7 @@ def test_active_session_marker_written_during_stream(client, tmp_path):
     """The CLI's `fsrpb push` reads this file to stamp pushes with
     the chat that authored them. It's deleted on stream end."""
     marker = tmp_path / "active_session"
-    # Use a long-running iter so we can peek mid-stream — easier to
+    # Use a long-running iter so we can peek mid-stream -- easier to
     # just assert that after the request it's been cleaned up.
     client.post("/api/chat", json={
         "messages": [{"role": "user", "content": "hi"}],

@@ -21,7 +21,7 @@ const YAML_A = 'collection: "a"\nplaybooks:\n- name: a\n  steps:\n  - name: s\n 
 const YAML_B = 'collection: "b"\nplaybooks:\n- name: b\n  steps:\n  - name: s\n    type: start\n';
 
 function stubFetch() {
-  // Stub draft GETs only — open() does network IO.
+  // Stub draft GETs only -- open() does network IO.
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes('/api/playbooks/draft/A')) {
@@ -60,7 +60,7 @@ beforeEach(() => {
   playbookStore.reset();
 });
 
-describe('page wiring — draft switch', () => {
+describe('page wiring -- draft switch', () => {
   it('switching to a freshly-loaded draft displays that draft\'s yaml', async () => {
     const api = mountHarness();
     await playbookStore.open('draft', 'A');
@@ -79,7 +79,7 @@ describe('page wiring — draft switch', () => {
     await playbookStore.open('draft', 'A');
     flushSync();
 
-    // Simulate the user typing — this is what the previous bug exploited:
+    // Simulate the user typing -- this is what the previous bug exploited:
     // an effect on `yaml` also wrote to playbookStore, so when the
     // active-sync effect later swapped state.active to B, the stale
     // `yaml` got written into B's slot.
@@ -93,7 +93,7 @@ describe('page wiring — draft switch', () => {
     await playbookStore.open('draft', 'B');
     flushSync();
 
-    // The freshly-loaded B yaml must be intact — NOT polluted by A's
+    // The freshly-loaded B yaml must be intact -- NOT polluted by A's
     // edited buffer.
     expect(api.getYaml()).toBe(YAML_B);
     expect(playbookStore.state.active?.name).toBe('B');
@@ -102,7 +102,7 @@ describe('page wiring — draft switch', () => {
   });
 });
 
-describe('page wiring — dirty propagation', () => {
+describe('page wiring -- dirty propagation', () => {
   it('typing marks the active draft dirty', async () => {
     const api = mountHarness();
     await playbookStore.open('draft', 'A');
@@ -129,7 +129,7 @@ describe('page wiring — dirty propagation', () => {
   });
 });
 
-describe('page wiring — store↔editor round-trip', () => {
+describe('page wiring -- store↔editor round-trip', () => {
   it('mutating playbookStore externally updates the local yaml', async () => {
     const api = mountHarness();
     // Simulate a programmatic write (e.g. revision restore, replay

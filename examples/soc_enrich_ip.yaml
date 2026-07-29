@@ -1,10 +1,10 @@
-# SOC — Enrich IP via Yeti (threat intel) + NetBox (asset ownership routing).
+# SOC -- Enrich IP via Yeti (threat intel) + NetBox (asset ownership routing).
 #
 # Connectors: http "SOC Yeti" + http "SOC NetBox" (registered by
 # tools/fsr_register_http_configs.py --no-verify-ssl).
-# The "SOC Yeti" config carries Authorization: Bearer — no in-playbook auth exchange.
+# The "SOC Yeti" config carries Authorization: Bearer -- no in-playbook auth exchange.
 #
-# Stanford ISO demo: shows federated IT routing — the playbook automatically
+# Stanford ISO demo: shows federated IT routing -- the playbook automatically
 # determines which IT org owns the victim asset and routes accordingly.
 #
 # Alert fields (c2_beacon_outbound scenario):
@@ -12,7 +12,7 @@
 #   destinationIp = C2 attacker (203.0.113.66, Yeti-seeded as known-bad)
 
 collection: SOC Enrichment
-description: IP enrichment with federated IT ownership routing — Yeti threat intel + NetBox asset lookup.
+description: IP enrichment with federated IT ownership routing -- Yeti threat intel + NetBox asset lookup.
 visible: true
 
 playbooks:
@@ -92,7 +92,7 @@ playbooks:
         message:
           type: comment
           content: >
-            <p><strong>⚠ Threat Confirmed</strong> — destination IP
+            <p><strong>⚠ Threat Confirmed</strong> -- destination IP
             <strong>{{ vars.input.records[0].destinationIp }}</strong> is flagged
             malicious in Yeti (tags: <strong>{{ vars.yeti_tags }}</strong>).<br>
             Victim asset <strong>{{ vars.input.records[0].sourceIp }}</strong>
@@ -156,7 +156,7 @@ playbooks:
         message:
           type: comment
           content: >
-            <p>Asset owner <strong>unknown</strong> — not found in NetBox.
+            <p>Asset owner <strong>unknown</strong> -- not found in NetBox.
             Escalated to <strong>Central SOC (iso-soc@stanford.edu)</strong>
             for manual ownership determination and containment.</p>
 
@@ -167,7 +167,7 @@ playbooks:
         message:
           type: comment
           content: >
-            <p><strong>✓ No Threat Intel Match</strong> — destination IP
+            <p><strong>✓ No Threat Intel Match</strong> -- destination IP
             <strong>{{ vars.input.records[0].destinationIp }}</strong> has no
             hits in Yeti. Victim asset
             <strong>{{ vars.input.records[0].sourceIp }}</strong>

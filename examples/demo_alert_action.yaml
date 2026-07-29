@@ -1,5 +1,5 @@
 # Record-context trigger demo (cybersponse.action). Half of all
-# real-world FSR playbooks fire this way — right-click an alert,
+# real-world FSR playbooks fire this way -- right-click an alert,
 # pick "Execute". The playbook receives the record at vars.input.records[0]
 # and stamps a verdict.
 #
@@ -8,7 +8,7 @@
 # triggerOnSource, etc.) auto-filled.
 
 collection: FSRPB Demo Alert Action
-description: Right-click action on alerts — read severity, decide, stamp.
+description: Right-click action on alerts -- read severity, decide, stamp.
 visible: true
 
 playbooks:

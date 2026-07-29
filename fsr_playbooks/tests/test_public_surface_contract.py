@@ -1,7 +1,7 @@
 """Frozen public-surface contract (REORG_PLAN Phase 0).
 
 The FortiSOAR SOC connector (`connector-fsr-soc-assistant`) imports ~50 deep
-paths into this library. REORG_PLAN names these "surface A" — the authoring /
+paths into this library. REORG_PLAN names these "surface A" -- the authoring /
 runtime code that STAYS in `fsr_playbooks` and must remain importable at stable
 paths through every later refactor phase.
 
@@ -12,7 +12,7 @@ sees the break.
 
 It intentionally does NOT assert the surface-B triage/execution modules
 (`llm.triage_*`, `mcp_server.tools_{execution,agent,triage,noc}`,
-`_live_crudhub`) — those carve out to the connector in Phase 1, so pinning them
+`_live_crudhub`) -- those carve out to the connector in Phase 1, so pinning them
 here would fight that move. See REORG_PLAN section 0 for the A/B split.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ import pytest
 # Surface-A module paths the connector imports. Each must stay importable.
 SURFACE_A_MODULES = [
     "fsr_playbooks",
-    # compiler — the authoring core (no LLM, no transport)
+    # compiler -- the authoring core (no LLM, no transport)
     "fsr_playbooks.compiler",
     "fsr_playbooks.compiler.typed_walker",
     "fsr_playbooks.compiler.parser",
@@ -39,7 +39,7 @@ SURFACE_A_MODULES = [
     "fsr_playbooks.compiler.decompiler",
     "fsr_playbooks.compiler.skill_compiler",
     "fsr_playbooks.compiler.skill_verify",
-    # llm — generic runtime + build-agent assist (NOT triage_*)
+    # llm -- generic runtime + build-agent assist (NOT triage_*)
     "fsr_playbooks.llm",
     "fsr_playbooks.llm.provider",
     "fsr_playbooks.llm.run_turn",
@@ -54,16 +54,16 @@ SURFACE_A_MODULES = [
     "fsr_playbooks.agent",
     "fsr_playbooks.agent.skill_trace",
     "fsr_playbooks.protocols",
-    # mcp_server — authoring delivery only
+    # mcp_server -- authoring delivery only
     "fsr_playbooks.mcp_server",
     "fsr_playbooks.mcp_server.tools_compile",
     "fsr_playbooks.mcp_server._shared",
     "fsr_playbooks.mcp_server._sim_fixtures",
     "fsr_playbooks.mcp_server._sim_client",
     "fsr_playbooks.mcp_server.tools_discovery",
-    # connector & playbook-run discovery — shared authoring/triage surface
+    # connector & playbook-run discovery -- shared authoring/triage surface
     "fsr_playbooks.mcp_server.tools_connector_discovery",
-    # execution facade — the stable run/healthcheck surface the carved-out
+    # execution facade -- the stable run/healthcheck surface the carved-out
     # triage cluster imports (RECONCILIATION_PLAN Phase 1, D4=(a))
     "fsr_playbooks.execution_api",
 ]
@@ -122,7 +122,7 @@ def test_openai_provider_path_resolves_when_dep_present():
     """`openai_provider` is surface A but kept lazy (optional `openai` dep).
 
     When `openai` is installed the module must import; when it isn't, the path
-    is allowed to raise ImportError on the dep only — never vanish structurally.
+    is allowed to raise ImportError on the dep only -- never vanish structurally.
     """
     pytest.importorskip("openai")
     importlib.import_module("fsr_playbooks.llm.openai_provider")

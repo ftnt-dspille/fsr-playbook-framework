@@ -1,6 +1,6 @@
 """Typed-args model for the post-write record-trigger step types
-(`start_on_create` / `start_on_update` / `start_on_delete` — FSR handlers
-``cybersponse.post_create`` / ``post_update`` / ``post_delete``) — registry
+(`start_on_create` / `start_on_update` / `start_on_delete` -- FSR handlers
+``cybersponse.post_create`` / ``post_update`` / ``post_delete``) -- registry
 contract, the friendly module->resource/resources transform (single + list
 forms, empty-default-to-[alerts, incidents] + warning, per-item catalog
 resolve), the when->fieldbasedtrigger expansion, and the new scalar
@@ -9,7 +9,7 @@ validation (`module` wrong-typed -> clean BAD_VALUE).
 These steps emit to fixed-field trigger wire, so the byte-identical contract
 is pinned by the corpus round-trip + wire-shape suites; here we pin the typed
 layer directly. `expand_post_create_update` takes the resolver's
-`resolve_module_name` as a callback — here a passthrough identity (no catalog)
+`resolve_module_name` as a callback -- here a passthrough identity (no catalog)
 or a recorder (to assert per-item invocation)."""
 from __future__ import annotations
 

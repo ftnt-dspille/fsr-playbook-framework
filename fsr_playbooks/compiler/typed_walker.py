@@ -66,7 +66,7 @@ class BranchResult:
     typed_env: dict[str, Shape]            # vars.steps.<jinja_key> -> Shape
     var_env: dict[str, Shape] = field(default_factory=dict)  # vars.<name> -> Shape
     diagnostics: list[Diagnostic] = field(default_factory=list)
-    # Phase 5 — every connector-param source→target decision on this branch
+    # Phase 5 -- every connector-param source→target decision on this branch
     # (passes included), for the troubleshooting trace export.
     type_decisions: list[dict[str, Any]] = field(default_factory=list)
 
@@ -120,7 +120,7 @@ ParamTypeFn = Callable[[str, str, str], Optional[str]]
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 — source→target type comparison.
+# Phase 4 -- source→target type comparison.
 # STATIC_TYPE_FLOW_PLAN.md §"Phase 4". The half that knows *source* shapes
 # (this walker) finally meets the half that knows *target* types (resolver,
 # via ParamTypeFn). Two evidence-sound rules ship here:
@@ -130,7 +130,7 @@ ParamTypeFn = Callable[[str, str, str], Optional[str]]
 #        an integer param). String/any/null sources stay permissive because
 #        FSR's runtime string coercion (the Phase 1b matrix) makes them
 #        broadly acceptable, and the connector-param ingestion-coercion
-#        matrix (Open Q #2) is not yet probed — so we never hard-error on a
+#        matrix (Open Q #2) is not yet probed -- so we never hard-error on a
 #        case the runtime might coerce.
 # ---------------------------------------------------------------------------
 
@@ -148,7 +148,7 @@ def _shape_to_src_tag(shape: Shape | None) -> str | None:
 
     Returns 'list' / 'dict' for structures, an 'int'/'float'/'bool'/'str'/
     'null' scalar tag, or None when the source is too vague to judge
-    (scalar 'any', unknown, none) — None means "skip, don't guess"."""
+    (scalar 'any', unknown, none) -- None means "skip, don't guess"."""
     if not isinstance(shape, dict):
         return None
     kind = shape.get("kind")
@@ -231,7 +231,7 @@ def _pure_single_ref(value: Any) -> tuple[str, str, str] | None:
     (the last for `vars.input.params.<name>`), or None.
 
     Filtered refs (`{{ x | int }}`) and interpolations (`a {{ x }} b`) are
-    skipped here — the resolver's Tier 3 already validates the former, and
+    skipped here -- the resolver's Tier 3 already validates the former, and
     string interpolation coerces to str so there's nothing to mismatch."""
     if not isinstance(value, str):
         return None
@@ -262,7 +262,7 @@ _VARS_STEPS_RE = re.compile(
     r"((?:\.[A-Za-z_][A-Za-z0-9_]*|\[\s*(?:\d+|'[^']*'|\"[^\"]*\")\s*\])*)"
 )
 _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
-# Top-level `vars.<name>` (NOT vars.steps / vars.input — those are reserved
+# Top-level `vars.<name>` (NOT vars.steps / vars.input -- those are reserved
 # structural namespaces handled elsewhere). First segment only.
 _VARS_TOPLEVEL_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_]*)")
 # Output keys FSR adds to every step's `vars.steps.<key>` envelope.
@@ -346,7 +346,7 @@ def _synth_manual_input_shape(step: Step) -> Shape:
     `vars.steps.<step>.input.<name>`.
 
     Read the canonical resolved location first
-    (`arguments.input.schema.inputVariables`) — by the time the reference lint
+    (`arguments.input.schema.inputVariables`) -- by the time the reference lint
     runs, the resolver has moved the declared fields there and popped the
     friendly `inputs:`/top-level `inputVariables`. Falling through to those
     keeps any pre-resolve caller working. With this populated, a downstream read
@@ -400,7 +400,7 @@ def _infer_literal_shape(value: Any, conn: sqlite3.Connection | None = None) -> 
 
     When ``conn`` is supplied, pure-Jinja values with a known terminal
     filter (e.g. ``{{ x | length }}`` → int) are typed via
-    :func:`jinja_typing.infer_terminal_observed_type` — closing the
+    :func:`jinja_typing.infer_terminal_observed_type` -- closing the
     Tier 3.5 gap where ``set_variable: v: "{{ x | length }}"`` was
     typed ``any`` instead of ``int``. Without a ``conn`` the filter
     signature table is unavailable, so Jinja values degrade to ``any``
@@ -426,7 +426,7 @@ def _infer_literal_shape(value: Any, conn: sqlite3.Connection | None = None) -> 
     # Jinja present: the engine renders THEN re-coerces. If the value
     # is a pure-Jinja expression with a known terminal filter AND we
     # have a DB connection for the filter signature table, claim the
-    # terminal type statically. Otherwise degrade to ``any`` — we
+    # terminal type statically. Otherwise degrade to ``any`` -- we
     # can't predict the type without resolving the expression.
     if "{{" in s or "{%" in s:
         if conn is not None:
@@ -495,7 +495,7 @@ def _synth_set_variable_shape(
     `vars.steps.<step>.<key>`. Each key is typed via
     :func:`_infer_literal_shape` so that ``{{ x | length }}`` yields
     ``integer`` (not ``any``) when the filter signature table is
-    available — closing the Tier 3.5 gap."""
+    available -- closing the Tier 3.5 gap."""
     keys: dict[str, Shape] = {}
     value_map = _set_variable_value_map(step)
     for k, v in value_map.items():
@@ -507,7 +507,7 @@ def _workflow_reference_output_shape(child: Playbook) -> Shape:
     """Output shape of a SYNC `workflow_reference` to `child`.
 
     Live ground truth (run 686622): a synchronous child's `set_variable` vars
-    merge into the *reference step's* result namespace — i.e. `vars.steps.<ref
+    merge into the *reference step's* result namespace -- i.e. `vars.steps.<ref
     step>.<childvar>` resolves to the child's var (NOT top-level `vars.<var>`).
     So the reference step's shape is the union of every `set_variable` key the
     child defines. Keys are typed `any` (the child's values are dynamic).
@@ -571,9 +571,9 @@ def _synth_step_shape(
 ) -> Shape:
     """Return the *output* shape for one step, ignoring branching."""
     # A `for_each` step runs its body once per element and FSR collects the
-    # per-iteration results into a LIST — `vars.steps.<loop step>` is a list of
+    # per-iteration results into a LIST -- `vars.steps.<loop step>` is a list of
     # the normal per-iteration envelopes, NOT a bare envelope (live-grounded:
-    # run on .205 — a looped code_snippet yields
+    # run on .205 -- a looped code_snippet yields
     # `[{data:{code_output:…},status,…}, …]`, and reading `.data` on it
     # resolves to "" at runtime). Compute the per-iteration shape with
     # for_each cleared, then wrap. `__bulk` loops (IngestBulkFeed) aggregate
@@ -607,11 +607,11 @@ def _synth_step_shape(
     if t in {"create_record", "update_record"}:
         return _module_record_shape(_step_module(step), module_fields_fn)
     if t in {"code_snippet"}:
-        # The body returns arbitrary Python, so we can't infer the shape — but
+        # The body returns arbitrary Python, so we can't infer the shape -- but
         # a grounded probe (measured from a real run via grounded_shapes) knows
         # the connector's envelope: {data: {code_output: …}, status, message,
         # operation}. Consult it so refs like `vars.steps.X.output` (which the
-        # envelope does NOT have — pilot E5) get flagged. The code-snippet
+        # envelope does NOT have -- pilot E5) get flagged. The code-snippet
         # connector/op are fixed regardless of authoring shape.
         if probe:
             try:
@@ -623,7 +623,7 @@ def _synth_step_shape(
                 # The envelope ({data, status, message, operation}) is stable
                 # across snippets, but `data.code_output` is the user's payload
                 # (any shape). Keep the envelope check (catches `.output` and
-                # wrong top-level keys — pilot E5) without over-claiming the
+                # wrong top-level keys -- pilot E5) without over-claiming the
                 # snippet-defined inner value, which would false-positive on a
                 # snippet that returns a structured code_output.
                 return _code_snippet_envelope(probed)
@@ -858,11 +858,11 @@ def _validate_branch_jinja(
     type_decisions: list[dict[str, Any]] = []  # Phase 5 trace
     visible: set[str] = set()  # jinja_keys that have run by the time we visit this step
 
-    # Phase 2 — branch-local `vars.<name>` typing + scoping. var_env grows as
+    # Phase 2 -- branch-local `vars.<name>` typing + scoping. var_env grows as
     # the walk passes each predecessor set_variable on THIS branch; a ref is
     # validated against the env *before* its own step. `var_defs` (whole-pb)
     # lets us tell "defined later on this branch" (read-before-def) from
-    # "defined only on another branch" — the never-defined-anywhere case is
+    # "defined only on another branch" -- the never-defined-anywhere case is
     # left to validator._check_undefined_vars (disjoint, no double-report).
     var_env: dict[str, Shape] = {}
     var_defs: dict[str, set[str]] = {}
@@ -885,7 +885,7 @@ def _validate_branch_jinja(
         # Branch-scoped `vars.<name>` reference checks for this step.
         diags.extend(_check_toplevel_vars(
             s, branch_name, var_env, var_defs, ids_set, pos))
-        # Phase 4 — source→target type check on connector params that are a
+        # Phase 4 -- source→target type check on connector params that are a
         # pure reference to a step output or set_variable var.
         if param_type_fn is not None and s.type in {"connector", "connector_op"}:
             diags.extend(_check_connector_param_types(
@@ -902,7 +902,7 @@ def _validate_branch_jinja(
                     rest = m.group(2) or ""
                     if key == _jinja_key(s):
                         # self-reference: only universal keys are valid, EXCEPT
-                        # inside step_variables — that mapping runs AFTER the
+                        # inside step_variables -- that mapping runs AFTER the
                         # step executes, so the full result (including non-
                         # universal keys like `data`) is available for
                         # extraction. System playbooks use this idiom to pull
@@ -988,7 +988,7 @@ def _validate_branch_jinja(
                             msg = (f"vars.steps.{key}{rest} in step "
                                    f"{s.id!r}: {bad_attr!r} not in known "
                                    f"shape of "
-                                   f"{target.id if target else key!r} — "
+                                   f"{target.id if target else key!r} -- "
                                    f"keys are case-sensitive. Did you "
                                    f"mean {case_match!r}?")
                         else:
@@ -1036,22 +1036,22 @@ def _validate_branch_jinja(
                             ]
                             if "hydra:member" in obj_keys:
                                 suggestion = (
-                                    " — this resolves to a Hydra "
+                                    " -- this resolves to a Hydra "
                                     "envelope; index the inner list: "
                                     "`vars.steps.{0}['hydra:member'][0]"
                                     "`".format(key))
                             elif list_keys:
                                 suggestion = (
-                                    " — this is an object; the list-"
+                                    " -- this is an object; the list-"
                                     "valued keys are: "
                                     f"{', '.join(list_keys[:5])}")
                             else:
                                 suggestion = (
-                                    " — this is an object, not a list. "
+                                    " -- this is an object, not a list. "
                                     "Use `.<attr>` instead of `[…]`")
                         elif kind in ("scalar", "any"):
                             suggestion = (
-                                " — this is a scalar; drop the index")
+                                " -- this is a scalar; drop the index")
                         diags.append(Diagnostic(
                             code="non_list_indexed",
                             message=(f"vars.steps.{key}{rest} in step "
@@ -1078,7 +1078,7 @@ def _validate_branch_jinja(
                             message=(
                                 f"vars.steps.{key}{rest} in step {s.id!r}: "
                                 f"{key!r} is a for_each loop, so its output is "
-                                f"a LIST of per-iteration results — `.{bad_attr}`"
+                                f"a LIST of per-iteration results -- `.{bad_attr}`"
                                 f" on the list resolves to empty at runtime. "
                                 f"Index an iteration "
                                 f"(`vars.steps.{key}[0]{rest}`) or map over the "
@@ -1127,7 +1127,7 @@ def _check_toplevel_vars(
                 name = m.group(1)
                 if name in _RESERVED_VARS_KEYS or name in seen:
                     continue
-                # `vars.item` is the per-iteration loop binding — live only
+                # `vars.item` is the per-iteration loop binding -- live only
                 # inside a step that carries for_each (proven Phase 1a).
                 if name == "item":
                     if not has_for_each:
@@ -1135,7 +1135,7 @@ def _check_toplevel_vars(
                         diags.append(Diagnostic(
                             code="loop_var_outside_for_each",
                             message=(f"vars.item read in step {s.id!r} which "
-                                     f"has no for_each — the loop binding is "
+                                     f"has no for_each -- the loop binding is "
                                      f"only live inside the looping step; "
                                      f"elsewhere it is undefined"),
                             step=s.id, branch=branch_name,
@@ -1143,7 +1143,7 @@ def _check_toplevel_vars(
                         ))
                     continue
                 if name in var_env:
-                    continue  # defined+visible on this branch — ok (typed)
+                    continue  # defined+visible on this branch -- ok (typed)
                 defs = var_defs.get(name)
                 if not defs:
                     continue  # never defined anywhere → validator handles it
@@ -1155,7 +1155,7 @@ def _check_toplevel_vars(
                         code="var_read_before_definition",
                         message=(f"vars.{name} read in step {s.id!r} but its "
                                  f"defining set_variable runs later on this "
-                                 f"branch — it will be empty here"),
+                                 f"branch -- it will be empty here"),
                         step=s.id, branch=branch_name,
                         path=f"arguments.{sub}", severity="warning",
                     ))
@@ -1164,7 +1164,7 @@ def _check_toplevel_vars(
                         code="var_defined_other_branch",
                         message=(f"vars.{name} read in step {s.id!r} but is "
                                  f"only defined on a different branch (not on "
-                                 f"{branch_name!r}) — it will be empty here"),
+                                 f"{branch_name!r}) -- it will be empty here"),
                         step=s.id, branch=branch_name,
                         path=f"arguments.{sub}", severity="warning",
                     ))
@@ -1172,7 +1172,7 @@ def _check_toplevel_vars(
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 — connector param source→target type check
+# Phase 4 -- connector param source→target type check
 # ---------------------------------------------------------------------------
 
 def _check_connector_param_types(
@@ -1202,7 +1202,7 @@ def _check_connector_param_types(
         if ref is None:
             # A literal value (not a reference) is validated against the param
             # widget type by the resolver's Tier-1/2.3 passes
-            # (connector_args.py) at *compile* time — more precisely than this
+            # (connector_args.py) at *compile* time -- more precisely than this
             # walker could (it models the actual `int()`/`float()` coercion,
             # e.g. flags `"abc"`→int but allows `"007"`). Compile errors
             # short-circuit before the walk, so there's nothing to add here.
@@ -1271,7 +1271,7 @@ def _validate_jinja_filter_chains(pb: Playbook) -> list[Diagnostic]:
     like `| length | upper` regardless of context. Pure regex walk; no
     branch awareness needed since the diagnostic is purely syntactic.
 
-    Uses `_HAND_CURATED` only (no DB) — the curated map covers ~90 of
+    Uses `_HAND_CURATED` only (no DB) -- the curated map covers ~90 of
     the most common filters and the resolver's connector-arg path
     handles the long tail with DB lookup.
     """
@@ -1311,18 +1311,18 @@ def _validate_jinja_filter_chains(pb: Playbook) -> list[Diagnostic]:
 
 
 def _check_undefined_bare_names(pb: Playbook) -> list[Diagnostic]:
-    """Phase 0 — undefined bare-name detection via Jinja AST.
+    """Phase 0 -- undefined bare-name detection via Jinja AST.
 
     Walks every step's ``arguments`` and ``for_each`` Jinja templates
     and flags bare ``Name`` nodes (``ctx='load'``) that aren't in the
     known set (Jinja2 builtins + FSR globals + locally-defined names
     like loop variables).  This catches references like
-    ``{{ items | length }}`` where ``items`` is never defined — the
+    ``{{ items | length }}`` where ``items`` is never defined -- the
     existing ``_check_undefined_vars`` only matches ``vars.<name>``
     regex patterns, so bare names go unchecked.
 
     Playbook-level (not branch-aware) because the check is purely
-    syntactic — the name is either defined or it isn't, independent
+    syntactic -- the name is either defined or it isn't, independent
     of which branch you're on.
     """
     from .jinja_render import find_undefined_bare_names
@@ -1341,7 +1341,7 @@ def _check_undefined_bare_names(pb: Playbook) -> list[Diagnostic]:
                         code="jinja_undefined_variable",
                         message=(
                             f"bare name {name!r} in step {s.id!r} is not "
-                            f"defined — not a vars.* reference, not an "
+                            f"defined -- not a vars.* reference, not an "
                             f"FSR global, and not a loop variable. It "
                             f"will evaluate empty at runtime"),
                         step=s.id, path=f"{field_name}.{sub}",
@@ -1380,7 +1380,7 @@ def walk_playbook(
             message=f"playbook {playbook_name!r} not found in collection",
         )], per_step_shapes={})
 
-    # Phase 3 — seed `vars.input.params.<name>` shapes from declared types.
+    # Phase 3 -- seed `vars.input.params.<name>` shapes from declared types.
     param_shapes: dict[str, Shape] = {}
     for pname, decl in (getattr(pb, "parameter_types", None) or {}).items():
         sh = _param_type_to_shape(decl)
@@ -1400,7 +1400,7 @@ def walk_playbook(
     by_id = {s.id: s for s in pb.steps}
     branches: list[BranchResult] = []
     # Tier 3 filter-chain check is playbook-level (purely syntactic),
-    # not branch-level — emitting it once per step prevents the same
+    # not branch-level -- emitting it once per step prevents the same
     # diagnostic firing in every branch the step appears on.
     all_diags: list[Diagnostic] = _validate_jinja_filter_chains(pb)
     all_diags.extend(_check_undefined_bare_names(pb))

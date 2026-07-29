@@ -2,12 +2,12 @@
 
 When the analyst asks to *run* an already-deployed playbook by name, models
 (esp. gpt-4.1-mini) reliably mis-route to an authoring tool: they call
-`verify_playbook(yaml_text="", playbook="<Name>")` — a `playbook` NAME with no
+`verify_playbook(yaml_text="", playbook="<Name>")` -- a `playbook` NAME with no
 YAML to author. Live on 8.0 this was 0/3: every "run the playbook <name>" turn
 picked verify_playbook and fabricated/blank-parsed YAML instead of run_playbook.
 
-The fix is language-agnostic — it keys on the tool-CALL SHAPE (blank yaml_text +
-a playbook name), never on the analyst's words — so it works no matter what
+The fix is language-agnostic -- it keys on the tool-CALL SHAPE (blank yaml_text +
+a playbook name), never on the analyst's words -- so it works no matter what
 language the request was phrased in.
 
 The redirect is FORCING, not advisory: a tool_result that merely *tells* the
@@ -80,7 +80,7 @@ def test_blank_yaml_plus_playbook_name_forces_the_run(spy_verify, spy_run):
 
 def test_redirect_still_passes_through_the_tier_gate(spy_verify):
     """With the REAL run_playbook (tier 3), the redirect yields the approval
-    envelope — forcing the route must not force execution past the gate."""
+    envelope -- forcing the route must not force execution past the gate."""
     out = dispatch("verify_playbook", {"yaml_text": "", "playbook": "Get Latest NIST-NVD CVE Details"})
     assert out.get("_redirected_from") == "verify_playbook"
     assert out.get("pending_approval") is True
@@ -119,7 +119,7 @@ def test_real_yaml_authoring_is_not_intercepted(spy_verify):
 
 def test_verify_without_playbook_name_is_not_intercepted(spy_verify):
     """Blank yaml but NO playbook name is an ordinary authoring error path,
-    not a run request — let the tool report it, don't redirect."""
+    not a run request -- let the tool report it, don't redirect."""
     out = dispatch("verify_playbook", {"yaml_text": ""})
     assert out.get("code") != "run_not_author"
     assert len(spy_verify) == 1

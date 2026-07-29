@@ -44,7 +44,7 @@ beforeEach(() => {
   (globalThis as any).fetch = fetchSpy;
 });
 
-describe('registerYamlHover — enclosing-type discovery', () => {
+describe('registerYamlHover -- enclosing-type discovery', () => {
   const YAML = [
     '  - id: s1',
     '    type: connector',

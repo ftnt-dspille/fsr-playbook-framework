@@ -32,16 +32,16 @@ LEVER_MAP: dict[str, str] = {
                                  "(hunt ended without a card)",
     "<forbidden>": "system_prompt_triage.md forbidden-pivot rule "
                    "(fired an internal-source TI lookup)",
-    # Hunt depth/breadth (Track B2) — placeholder until the gate lands; the
+    # Hunt depth/breadth (Track B2) -- placeholder until the gate lands; the
     # lever is already known so a future red gate is self-documenting.
     "hunt_depth": "system_prompt_triage.md §Hunting instincts "
                   "(too few lateral pivots from the seed IOC)",
     # Build-metric gates (emitted by score_build_metrics, also surfaced on
-    # investigation drives) — same triage-prompt levers, no `investigation_` prefix.
+    # investigation drives) -- same triage-prompt levers, no `investigation_` prefix.
     "tool_budget": "system_prompt_triage.md §pivot-discipline + 2.8 parallel "
                    "dispatch (too many total tool calls)",
     "no_spiral": "system_prompt_triage.md 2.8 parallel dispatch / §pivot-discipline "
-                 "(too many of the SAME tool back-to-back — batch run_op enrichment "
+                 "(too many of the SAME tool back-to-back -- batch run_op enrichment "
                  "in one dispatch instead of one IOC at a time)",
     # ---- build / triage->build fidelity track -> system_prompt_build.md ----
     "draft": "system_prompt_build.md §Canonical skeleton "
@@ -62,7 +62,7 @@ LEVER_MAP: dict[str, str] = {
     "matches_example": "system_prompt_build.md §Canonical skeleton "
                        "(compiled IR diverged from the reference example)",
     "live_tested": "system_prompt_build.md §Canonical skeleton "
-                   "(dry-run did not reach a terminal state — check trigger/wiring)",
+                   "(dry-run did not reach a terminal state -- check trigger/wiring)",
     # ---- HITL approval behaviour -> tools.py tier gate + triage prompt ----
     "appropriate_approval_requests": "fsr_playbooks/llm/tools.py tier/approval gate + "
                                      "system_prompt_triage.md containment rules "
@@ -73,4 +73,4 @@ LEVER_MAP: dict[str, str] = {
 def lever_for(key: str) -> str:
     """Return the prompt-lever hint for a gate name, or a fallback prompting a
     manual trace inspection when the gate isn't mapped yet."""
-    return LEVER_MAP.get(key, "unmapped — inspect trace")
+    return LEVER_MAP.get(key, "unmapped -- inspect trace")

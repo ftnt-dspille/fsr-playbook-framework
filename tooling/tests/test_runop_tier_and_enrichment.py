@@ -1,14 +1,14 @@
 """Regression tests for the two framework fixes that came out of the
 investigation-calibration run (3/5 → diagnose):
 
-  Fix #1 — `_tier_for_run_op` must NOT escalate a guessed/mistyped op to
+  Fix #1 -- `_tier_for_run_op` must NOT escalate a guessed/mistyped op to
   human approval. A non-existent op on a *known* connector can't run, so it
   should dispatch (tier 1) and let `run_op` self-correct with
-  `unknown_operation` — instead of suspending the hunt behind an approval
+  `unknown_operation` -- instead of suspending the hunt behind an approval
   prompt (the c2 failure: a guessed `virustotal.ip_reputation` halted the run
   before the deliverable card could be staged).
 
-  Fix #2 — `_is_enrichment_op` selects indicator-lookup ops (the read-side
+  Fix #2 -- `_is_enrichment_op` selects indicator-lookup ops (the read-side
   mirror of the containment classifier) without an op-name allow-list, so it
   generalizes to any connector: keep reputation/query/IOC lookups, drop the
   write-ish `re_analyze` / `upload` / `scan` and schema/widget plumbing that
@@ -38,7 +38,7 @@ def test_guessed_op_on_known_connector_does_not_escalate():
     """A mistyped op on a connector we have a catalog for stays tier 1 so it
     dispatches to a self-correcting unknown_operation, not an approval halt."""
     # `virustotal` is in the catalog; `ip_reputation` is not a real op (the
-    # exact c2 guess — the real op is `query_ip`).
+    # exact c2 guess -- the real op is `query_ip`).
     assert _op_presence("virustotal", "ip_reputation") == (False, True)
     assert _tier_for_run_op({"connector": "virustotal", "op": "ip_reputation"}) == 1
 
@@ -63,7 +63,7 @@ def test_unknown_connector_stays_conservative():
 # carry the catalog category `investigation` but are flagged `unsafe` in
 # op_safety. The category-first ordering used to downgrade them to tier 2
 # (auto-allow, no approval card) and they were dropped from
-# find_containment_actions' tier>=3 guard — so "isolate this host" would run
+# find_containment_actions' tier>=3 guard -- so "isolate this host" would run
 # ungated. An `unsafe` safety verdict must escalate to tier 4 regardless of a
 # catch-all category.
 
@@ -145,7 +145,7 @@ def test_unknown_connector_lands_mid_band():
 @requires_db
 def test_classifier_matches_db_shape():
     """Smoke test against the real catalog: VT's classified-safe lookups all
-    pass, its re-analyze/upload ops all fail — no allow-list involved."""
+    pass, its re-analyze/upload ops all fail -- no allow-list involved."""
     con = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
     try:
         ops = {op: title for op, title in con.execute(

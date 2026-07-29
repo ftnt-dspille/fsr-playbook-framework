@@ -2,7 +2,7 @@
 
 The typed walker synthesizes a `Shape` for each step so it can validate
 `vars.steps.<step>.<path>` references. For connector ops it can only do this
-when a `ProbeCallback` supplies the shape — otherwise the op degrades to
+when a `ProbeCallback` supplies the shape -- otherwise the op degrades to
 `{kind: unknown}` and every downstream reference goes unchecked. The pilot's E5
 (`output.data.code_output` vs `data.code_output`) is exactly the failure that
 slips through when the output shape is *inferred or unknown* rather than
@@ -25,7 +25,7 @@ walker's `probe` hook. The flow:
 
 `shape_from_value` is pure and offline-testable. The store is a plain JSON
 sidecar so captures accumulate across sessions; `merge_shape` unions keys seen
-across runs and marks any key absent from some observation as `optional` — that
+across runs and marks any key absent from some observation as `optional` -- that
 optionality is the seed for the data-presence checks (gap A of the type work).
 """
 from __future__ import annotations
@@ -81,7 +81,7 @@ def _list_item_shape(items: list, depth: int) -> Shape:
     """Fold a list's elements into one item shape by merging element shapes.
 
     An empty list yields `any` (we can't measure an item type from zero
-    samples — and that's honest: downstream `[0]` access may be undefined).
+    samples -- and that's honest: downstream `[0]` access may be undefined).
     """
     if not items:
         return _scalar("any")
@@ -93,14 +93,14 @@ def _list_item_shape(items: list, depth: int) -> Shape:
 
 
 # --------------------------------------------------------------------------- #
-# Merge — union two shapes observed for the same producer across runs.
+# Merge -- union two shapes observed for the same producer across runs.
 # --------------------------------------------------------------------------- #
 
 def merge_shape(a: Shape, b: Shape) -> Shape:
     """Combine two observed shapes for the same producer into one.
 
     - object ∪ object: union of keys. A key present in only one observation is
-      marked `"optional": true` (it may be absent at runtime — the seed for
+      marked `"optional": true` (it may be absent at runtime -- the seed for
       data-presence checks). Each key's value shape is merged recursively.
     - list ∪ list: merge item shapes.
     - scalar ∪ scalar (same type): unchanged; differing types widen to `any`.
@@ -143,7 +143,7 @@ def merge_shape(a: Shape, b: Shape) -> Shape:
 
 
 # --------------------------------------------------------------------------- #
-# Store — a JSON sidecar mapping "connector:op" → measured Shape.
+# Store -- a JSON sidecar mapping "connector:op" → measured Shape.
 # --------------------------------------------------------------------------- #
 
 def _key(connector: str, op: str) -> str:
@@ -171,7 +171,7 @@ class GroundedShapeStore:
         if p.exists():
             try:
                 data = json.loads(p.read_text()) or {}
-            except Exception:  # noqa: BLE001 — a corrupt sidecar shouldn't crash compile
+            except Exception:  # noqa: BLE001 -- a corrupt sidecar shouldn't crash compile
                 data = {}
         return cls(data, path=p)
 

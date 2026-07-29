@@ -1,14 +1,14 @@
 <script lang="ts">
   /**
-   * Floating Jinja toolbar — filter palette, snippets, and example
+   * Floating Jinja toolbar -- filter palette, snippets, and example
    * templates for any Monaco editor that hosts Jinja-bearing text
    * (YAML playbook buffer, set_variable rows, code_snippet bodies).
    *
    * Three panes, switched via a tab strip:
-   *   - Filters  — searchable list grouped by category, click inserts
+   *   - Filters  -- searchable list grouped by category, click inserts
    *                `| name(…)` at the cursor with parameter snippet stops.
-   *   - Snippets — `if`, `for`, `macro`, etc. Click inserts.
-   *   - Templates— full template + input pair examples; click pastes the
+   *   - Snippets -- `if`, `for`, `macro`, etc. Click inserts.
+   *   - Templates-- full template + input pair examples; click pastes the
    *                template into the editor. The caller may pass
    *                `onLoadTemplate` to receive (template, input) so it
    *                can also seed an input pane.
@@ -26,7 +26,7 @@
     editor: any;
     monaco: any;
     /** Optional callback invoked when the user picks a template. The
-     *  caller decides what to do with the example input JSON — e.g.
+     *  caller decides what to do with the example input JSON -- e.g.
      *  seed a side preview pane, store it in jinjaShapesStore, etc. */
     onLoadTemplate?: (tpl: JinjaTemplateExample) => void;
   };
@@ -177,7 +177,7 @@
     }
   }
 
-  /** Replace the editor buffer with this filter's example template —
+  /** Replace the editor buffer with this filter's example template --
    *  mirrors the widget's `insertFilterExample`. */
   function tryFilterExample(sig: FilterSignature) {
     if (!editor) return;
@@ -203,7 +203,7 @@
     class="whitespace-nowrap rounded border px-2 py-0.5 text-[11px] font-medium leading-none shadow-sm"
     style="background: var(--bg-panel, #0c0c0f); border-color: var(--border-soft, #1d1d22); color: var(--text-default, #e4e4e7); height: 24px;"
     onclick={toggleOpen}
-    title="Jinja toolbar — filters, snippets, templates"
+    title="Jinja toolbar -- filters, snippets, templates"
   >
     {open ? '✕' : 'ƒ'} Jinja
   </button>

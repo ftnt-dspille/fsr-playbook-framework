@@ -1,4 +1,4 @@
-"""probe_playbook_constraints — discover FSR's workflow_collection import endpoint.
+"""probe_playbook_constraints -- discover FSR's workflow_collection import endpoint.
 
 Strategy: compile our `examples/hello_connector.yaml` to a minimal FSR
 JSON, then POST it to a series of candidate endpoints until one accepts
@@ -32,7 +32,7 @@ from .common import (
 
 PROBE_NAME = "probe_playbook_constraints"
 
-# (path, payload_shape) — "envelope" sends the export-style outer wrapper,
+# (path, payload_shape) -- "envelope" sends the export-style outer wrapper,
 # "entity" sends the unwrapped collection (what API Platform CRUD expects).
 CANDIDATE_PATHS: list[tuple[str, str]] = [
     ("/api/3/workflow_collections", "entity"),       # API Platform standard create
@@ -190,7 +190,7 @@ def main() -> int:
         if winner_path:
             print(f"[{PROBE_NAME}] import endpoint: POST {winner_path}")
         else:
-            print(f"[{PROBE_NAME}] no candidate path accepted the payload — "
+            print(f"[{PROBE_NAME}] no candidate path accepted the payload -- "
                   f"see verifications for failure details")
     return 0
 

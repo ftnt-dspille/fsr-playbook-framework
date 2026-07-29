@@ -3,7 +3,7 @@
  *
  * The filter shape is the same nested AND/OR tree the FSR query API
  * uses (see `store/QUERY_API.md` §2.2). We turn it into one short
- * sentence the user can read at a glance — "on create of high-severity
+ * sentence the user can read at a glance -- "on create of high-severity
  * phishing alerts that aren't escalated" instead of dumping the JSON.
  *
  * No LLM. Same code path will later feed the AI step builder so the
@@ -58,7 +58,7 @@ function valueLabel(leaf: Leaf): string {
     if (display && display.trim()) return display;
   }
   if (typeof v === 'string') {
-    // Strip Jinja braces for readability — the user knows it's a
+    // Strip Jinja braces for readability -- the user knows it's a
     // template binding when they wrote it.
     const t = v.trim();
     if (/^\{\{.*\}\}$/.test(t)) return t.replace(/^\{\{\s*|\s*\}\}$/g, '');

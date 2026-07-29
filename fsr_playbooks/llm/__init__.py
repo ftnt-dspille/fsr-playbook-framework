@@ -22,13 +22,13 @@ from .run_turn import (
 
 # --- Frozen public surface (REORG_PLAN Phase 0) ---------------------------
 # Generic LLM runtime consumed by the connector at stable paths. NOTE:
-# triage_* modules are deliberately NOT part of this surface — they carve out
+# triage_* modules are deliberately NOT part of this surface -- they carve out
 # to the connector in REORG_PLAN Phase 1 (surface B). Keep this block
 # authoring/runtime-only.
 #
 # Only `provider` is re-exported eagerly: it is dependency-light and free of
 # import-time side effects. `intents`, `approvals`, `anthropic_provider`, and
-# `openai_provider` stay lazy submodule paths — `anthropic_provider` builds the
+# `openai_provider` stay lazy submodule paths -- `anthropic_provider` builds the
 # tool REGISTRY at import time, which must run AFTER the mcp_server discovery
 # tools register, and `openai_provider` carries the optional `openai` dep. The
 # connector imports all of them as `fsr_playbooks.llm.<name>` submodule paths

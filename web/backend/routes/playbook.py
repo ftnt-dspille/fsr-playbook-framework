@@ -1,6 +1,6 @@
 """Push + run + env endpoints.
 
-Subprocesses `python -m cli` from the existing fsr-playbook-framework repo —
+Subprocesses `python -m cli` from the existing fsr-playbook-framework repo --
 reuses all the tested push/run logic (idempotent push, --follow polling,
 env rebuild). Streams live output through SSE for the run endpoint.
 """
@@ -39,7 +39,7 @@ def _cli_env() -> dict[str, str]:
     env["PYTHONPATH"] = (
         str(TOOLING_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     )
-    # Belt-and-braces — even with -W, some libs print to stderr directly.
+    # Belt-and-braces -- even with -W, some libs print to stderr directly.
     env.setdefault("PYTHONWARNINGS", "ignore")
     return env
 
@@ -74,7 +74,7 @@ def _scrub(text: str) -> str:
 
 class PushIn(BaseModel):
     text: str
-    # Default mirrors `python -m cli push` — `safe` runs preflight + bulk-
+    # Default mirrors `python -m cli push` -- `safe` runs preflight + bulk-
     # upsert and never hard-purges. `replace` is opt-in and requires
     # FSR_ALLOW_HARD_DELETE on the backend.
     mode: str = "safe"
@@ -91,7 +91,7 @@ class PushOut(BaseModel):
 def push(body: PushIn) -> PushOut:
     if body.mode not in ("safe", "replace", "create", "update", "upsert"):
         raise HTTPException(400, "mode must be safe|replace|create|update|upsert")
-    # Fail fast when FSR isn't configured — without this the user
+    # Fail fast when FSR isn't configured -- without this the user
     # waits for the 120 s subprocess timeout before getting feedback.
     try:
         from probes import _env  # type: ignore
@@ -99,7 +99,7 @@ def push(body: PushIn) -> PushOut:
             return PushOut(
                 ok=False,
                 stdout="",
-                stderr="FSR_BASE_URL / auth not configured in .env — "
+                stderr="FSR_BASE_URL / auth not configured in .env -- "
                        "push has nothing to push to.",
                 exit_code=2,
             )

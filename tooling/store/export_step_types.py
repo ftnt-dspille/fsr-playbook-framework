@@ -1,4 +1,4 @@
-"""Generate `store/STEP_TYPES.md` — agent cheatsheet for FortiSOAR playbook
+"""Generate `store/STEP_TYPES.md` -- agent cheatsheet for FortiSOAR playbook
 step types, ordered by real-world frequency on the live instance.
 
 Each step type entry shows:
@@ -78,7 +78,7 @@ def build_step_types_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> P
                  "instance. The top of this list is what real playbooks reach for first.")
     parts.append("")
     parts.append("**Schema completeness caveat**: the `arguments` blob shown per step "
-                 "type is what the API returned — it's a partial schema (often just a "
+                 "type is what the API returned -- it's a partial schema (often just a "
                  "`script` pointer + pre-bound args). To get canonical Python signatures "
                  "for each step's celery handler, run `scripts/internal/dump_step_types.py` on "
                  "the FSR appliance and ingest the result. Until then, the **examples** "

@@ -1,5 +1,5 @@
 """OpenAI provider must accept Anthropic-shaped tools (the connector
-advertises that shape for triage) and emit the OpenAI function envelope —
+advertises that shape for triage) and emit the OpenAI function envelope --
 regression for the live 400 'Missing required parameter: tools[0].type'."""
 from fsr_playbooks.llm.openai_provider import _normalize_tools
 

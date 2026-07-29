@@ -7,8 +7,8 @@
 #
 # What it runs (per staged YAML under examples/ or matching *.yaml in
 # a known recipe path):
-#   1. fsrpb validate              — compiler errors + linter rules
-#   2. fsrpb resolve --json (best  — connector-installed + picklist
+#   1. fsrpb validate              -- compiler errors + linter rules
+#   2. fsrpb resolve --json (best  -- connector-installed + picklist
 #      effort; skipped offline)      checks against the live FSR
 #
 # All checks are read-only; nothing mutates the FSR.
@@ -21,7 +21,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 PY="${ROOT}/python/cli.py"
 
 if [[ ! -f "$PY" ]]; then
-  echo "fsrpb pre-commit: cli.py not found at $PY — skipping" >&2
+  echo "fsrpb pre-commit: cli.py not found at $PY -- skipping" >&2
   exit 0
 fi
 

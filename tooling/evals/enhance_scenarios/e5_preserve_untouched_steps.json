@@ -11,5 +11,5 @@
     ],
     "expect_regression_warning": "step_renamed_silently"
   },
-  "notes": "An EXPLICITLY requested rename. verify_enhancement flags renames as an error-severity regression because they break external vars.steps.<slug>.* consumers — so the agent must surface that consequence rather than either silently doing it or refusing."
+  "notes": "An EXPLICITLY requested rename. verify_enhancement flags renames as an error-severity regression because they break external vars.steps.<slug>.* consumers -- so the agent must surface that consequence rather than either silently doing it or refusing."
 }

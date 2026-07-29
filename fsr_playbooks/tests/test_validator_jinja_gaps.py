@@ -3,9 +3,9 @@
 Two checks that previously let a broken playbook compile clean (and
 verify_playbook report ready_to_push=True):
 
-  * #3 malformed Jinja delimiters — an unclosed ``{{`` / mismatched ``{%`` →
+  * #3 malformed Jinja delimiters -- an unclosed ``{{`` / mismatched ``{%`` →
     *error* (the template fails at runtime; nearly zero false-positive risk).
-  * #2 undefined ``vars.<name>`` — a local var no SetVariable ever defines →
+  * #2 undefined ``vars.<name>`` -- a local var no SetVariable ever defines →
     *warning* (vars are playbook-global; surface the suspicion without
     hard-blocking on a possible false positive).
 """

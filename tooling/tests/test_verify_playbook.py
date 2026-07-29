@@ -80,17 +80,17 @@ def test_unreachable_step_reference_blocks_push():
     """)
     res = verify_playbook(yaml_text=yaml)
     codes = {f["code"] for f in res["required_fixes"]}
-    # `a` is on the yes branch; `b` is on the no branch — the compiler
+    # `a` is on the yes branch; `b` is on the no branch -- the compiler
     # catches it as `bad_value` (unreachable Jinja ref) and the walker
     # would otherwise emit `unreachable_step_reference`. Either is fine
-    # — the point is it gets blocked.
+    # -- the point is it gets blocked.
     assert codes & {"unreachable_step_reference", "bad_value"}
     assert res["ready_to_push"] is False
 
 
 def test_live_probe_off_no_blanket_warning():
     """When live_probe=False is the requested mode we should NOT emit a
-    blanket warning — it just clutters every result with noise and
+    blanket warning -- it just clutters every result with noise and
     teaches the agent to ignore warnings. Specific stale-shape refs
     still surface as `unknown_shape_downstream_reference`."""
     yaml = _yaml("""
@@ -131,7 +131,7 @@ def test_next_actions_listed_when_blocked():
 
 
 def test_type_trace_written_and_pathed():
-    """Phase 5 — verify_playbook persists a trace file and returns its path;
+    """Phase 5 -- verify_playbook persists a trace file and returns its path;
     verbose folds the per-branch decisions into evidence, lean mode omits
     them (but still writes the file)."""
     import json
@@ -165,7 +165,7 @@ def test_type_trace_written_and_pathed():
 
 
 def test_lean_typed_walk_carries_counts_not_step_ids():
-    """§B — lean evidence must not inline per-branch step-id lists."""
+    """§B -- lean evidence must not inline per-branch step-id lists."""
     yaml = _yaml("""
         collection: TestCol
         playbooks:
@@ -188,7 +188,7 @@ def test_lean_typed_walk_carries_counts_not_step_ids():
 
 
 def test_duplicate_warnings_are_deduped_with_count():
-    """§B — identical (code, message) diagnostics collapse to one + count."""
+    """§B -- identical (code, message) diagnostics collapse to one + count."""
     from fsr_playbooks.mcp_server.tools_verify import _dedupe_diagnostics
 
     warnings = [
@@ -206,7 +206,7 @@ def test_duplicate_warnings_are_deduped_with_count():
 
 
 def test_compile_failure_evidence_is_count_only():
-    """§B — the compile error list lives in required_fixes; evidence must
+    """§B -- the compile error list lives in required_fixes; evidence must
     not repeat it."""
     res = verify_playbook(yaml_text="collection: X\nplaybooks:\n  - name: P\n")
     assert res["ready_to_push"] is False

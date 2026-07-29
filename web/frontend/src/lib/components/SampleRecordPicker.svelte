@@ -5,7 +5,7 @@
    * Loads recent records from FSR for the given module and lets the
    * author pin one as the canonical sample. Once pinned, the variable
    * picker uses its real field values as the preview alongside
-   * `vars.input.records[0].*` paths — so the author can validate
+   * `vars.input.records[0].*` paths -- so the author can validate
    * field existence and see real values without running the playbook.
    */
   import { sampleRecordsStore } from '../triggerModuleFields.svelte';
@@ -30,7 +30,7 @@
     runsError = null;
     try {
       const rs = await fetchRecentRuns(undefined, 10);
-      // Only show runs that touched this module — others won't give
+      // Only show runs that touched this module -- others won't give
       // us a useful sample for vars.input.records[0].
       runs = rs.filter((r) =>
         r.records.some((iri) => iri.includes(`/api/3/${module}/`))
@@ -52,7 +52,7 @@
       // sample, (b) the full run detail so we can (in a follow-up) pull
       // step variables / outputs and seed jinjaShapesStore with REAL
       // observed types. For now we just stash the detail under the
-      // module's pick — surfacing it is a small UX add.
+      // module's pick -- surfacing it is a small UX add.
       const [rec, _detail] = await Promise.all([
         fetchRecordByIri(iri),
         run.id != null ? fetchRunDetail(run.id) : Promise.resolve(null)
@@ -160,12 +160,12 @@
       </div>
       <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
         {#if runs.length > 0}
-          Iterating on a real run? Pin its record below — the picker
+          Iterating on a real run? Pin its record below -- the picker
           will preview actual values for
           <code class="font-mono">{`{{ vars.input.records[0].* }}`}</code>.
           Or pick any recent <code class="font-mono">{module}</code> for greenfield work.
         {:else}
-          Building from scratch — pin a representative
+          Building from scratch -- pin a representative
           <code class="font-mono">{module}</code> record so the variable picker
           shows real field values for
           <code class="font-mono">{`{{ vars.input.records[0].* }}`}</code>.
@@ -215,7 +215,7 @@
             From a real run <span class="ml-1 text-[9px] font-normal normal-case text-[var(--text-faint)]">recommended</span>
           </div>
           <p class="mt-0.5 text-[10px] text-[var(--text-faint)]">
-            FSR workflow history — pin the record an actual run fired on.
+            FSR workflow history -- pin the record an actual run fired on.
             Best for iterating on a live playbook.
           </p>
           {#if runsLoading}
@@ -238,7 +238,7 @@
                       <span class="text-[10px] text-[var(--text-faint)]">{fmtRunTime(run.created)}</span>
                     </div>
                     <div class="text-[10px] text-[var(--text-faint)]">
-                      {run.status ?? '?'} · <code class="font-mono">{iri ? iri.split('/').slice(-1)[0] : '—'}</code>
+                      {run.status ?? '?'} · <code class="font-mono">{iri ? iri.split('/').slice(-1)[0] : '--'}</code>
                     </div>
                   </button>
                 </li>

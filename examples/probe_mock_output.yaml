@@ -22,7 +22,7 @@ playbooks:
         next: Fetch mocked
 
       - name: Fetch mocked
-        # recorded-future-feed.get_riskrules — chosen because it's
+        # recorded-future-feed.get_riskrules -- chosen because it's
         # unlikely to be configured on the dev FSR. Without --mock,
         # this step fails with "no configuration"; with --mock the
         # runtime returns the mock_result string verbatim.

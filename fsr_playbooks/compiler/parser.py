@@ -1,7 +1,7 @@
 """YAML -> IR parser.
 
 Strict-ish: missing required fields produce CompileErrors with paths.
-We don't try to validate references here — that's the resolver's job.
+We don't try to validate references here -- that's the resolver's job.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ _PARAM_TYPE_VOCAB = {
 }
 
 # Top-level step keys the parser actually consumes. Anything else on a step
-# mapping is silently dropped by the parse below — which is how a `create_record`
+# mapping is silently dropped by the parse below -- which is how a `create_record`
 # authored with `module:`/`resource:`/`data:` written as *siblings* of `type:`
 # (instead of under `arguments:`) compiles clean yet runs with empty arguments
 # and crashes at runtime (`insert_data() takes at least 2 positional arguments`).
@@ -33,9 +33,9 @@ _PARAM_TYPE_VOCAB = {
 # set so the drop is visible before a push, not a runtime surprise.
 #
 # `branches`/`id` have their own dedicated rejections earlier in the loop;
-# `unlabeled_next` is the decompiler's lossy escape hatch — both are listed here
+# `unlabeled_next` is the decompiler's lossy escape hatch -- both are listed here
 # so the generic check never double-reports or fires on decompiled YAML.
-# Step-level keys that are NOT step arguments — they're IR Step fields or
+# Step-level keys that are NOT step arguments -- they're IR Step fields or
 # sugar keys the parser transforms into arguments. Everything else at step
 # level is collected as a step argument directly (Phase G: the `arguments:`
 # wrapper is gone; all args are hoisted to the step's top level).
@@ -212,7 +212,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
         if "uid" in pb_raw:
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
-                message="playbook.uid is not allowed — identify playbooks by `name:` only",
+                message="playbook.uid is not allowed -- identify playbooks by `name:` only",
                 path=f"{pb_path}.uid",
             ))
             continue
@@ -249,7 +249,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
                     message=(
-                        "step.id is not allowed — identify steps by `name:` "
+                        "step.id is not allowed -- identify steps by `name:` "
                         "only; references in `next:` use the name verbatim"
                     ),
                     path=f"{sp}.id",
@@ -300,14 +300,14 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     path=f"{sp}.type",
                 ))
 
-            # Phase G: all step args are at the step's top level — the
+            # Phase G: all step args are at the step's top level -- the
             # `arguments:` wrapper is gone. Collect every non-IR, non-sugar
             # key as a step argument.
             if "arguments" in s_raw:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
                     message=(
-                        "the `arguments:` wrapper is no longer used — "
+                        "the `arguments:` wrapper is no longer used -- "
                         "hoist all step arguments to the step's top level "
                         "(e.g. `module:`, `connector:`, `operation:` etc. "
                         "are step-level keys now, not nested under arguments:)"
@@ -354,7 +354,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 continue
 
             # Step-level cross-cutting keys (mock_result, when, module,
-            # ignore_errors, etc.) are already in `args` — Phase G collects
+            # ignore_errors, etc.) are already in `args` -- Phase G collects
             # all non-reserved step-level keys as args directly. The sugar
             # handlers below transform friendly keys (set:, retry:, etc.)
             # into their canonical wire equivalents in `args`.
@@ -365,7 +365,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                         code=ErrorCode.BAD_VALUE,
                         message=(
                             "step.set: conflicts with step_variables "
-                            "(both compile to arguments.step_variables) — pick one"
+                            "(both compile to arguments.step_variables) -- pick one"
                         ),
                         path=f"{sp}.set",
                     ))
@@ -378,7 +378,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 else:
                     args["step_variables"] = dict(s_raw["set"])
 
-            # Universal-envelope sugar — friendly spellings of the wire keys
+            # Universal-envelope sugar -- friendly spellings of the wire keys
             # hoisted above, translated here so the resolver/emitter only ever
             # see the canonical shape. Each guards against colliding with the
             # canonical key it expands to.
@@ -391,7 +391,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 if "do_until" in args:
                     errors.append(CompileError(
                         code=ErrorCode.BAD_VALUE,
-                        message=("step.retry and do_until both set — they "
+                        message=("step.retry and do_until both set -- they "
                                  "compile to the same `do_until` block; pick one"),
                         path=f"{sp}.retry",
                     ))
@@ -432,7 +432,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 if "agent" in args:
                     errors.append(CompileError(
                         code=ErrorCode.BAD_VALUE,
-                        message=("step.on_remote and agent both set — they "
+                        message=("step.on_remote and agent both set -- they "
                                  "compile to the same `agent`; pick one"),
                         path=f"{sp}.on_remote",
                     ))
@@ -461,7 +461,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 if "message" in args:
                     errors.append(CompileError(
                         code=ErrorCode.BAD_VALUE,
-                        message=("step.post_comment and message both set — "
+                        message=("step.post_comment and message both set -- "
                                  "they compile to the same `message` block; "
                                  "pick one"),
                         path=f"{sp}.post_comment",
@@ -498,14 +498,14 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                             severity="warning",
                             message=(
                                 f"decision branch label parsed as YAML "
-                                f"boolean (Norway problem) — coerced to "
+                                f"boolean (Norway problem) -- coerced to "
                                 f"{label!r}; quote bare yes/no/on/off in "
                                 f"`display:` to avoid this"
                             ),
                             path=f"{sp}.conditions",
                         ))
                     _norway_warnings.clear()
-                # Step-level `default: <step_id>` sugar — synthesizes an
+                # Step-level `default: <step_id>` sugar -- synthesizes an
                 # Else default-condition row that targets that step. Pairs
                 # with the non-default conditions[] entries; surfaces in
                 # `step.branches` via the resolver's normalizer.
@@ -522,7 +522,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                             message=(
                                 "decision step has both a step-level "
                                 "`default:` and a default-flagged entry in "
-                                "`conditions:` — keep only one"
+                                "`conditions:` -- keep only one"
                             ),
                             path=f"{sp}.default",
                         ))
@@ -545,7 +545,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                             severity="warning",
                             message=(
                                 f"manual_input option label parsed as YAML "
-                                f"boolean (Norway problem) — coerced to "
+                                f"boolean (Norway problem) -- coerced to "
                                 f"{label!r}; quote bare yes/no/on/off in "
                                 f"`display:` to avoid this"
                             ),
@@ -556,12 +556,12 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 # step-level keys (guides/playbook-yaml-reference.md), same as
                 # `options:`. Hoist them into `arguments:` so the resolver's
                 # `_normalize_manual_input_args` (which reads `a.pop("inputs")`
-                # etc.) actually sees them — otherwise step-level `inputs:` is
+                # etc.) actually sees them -- otherwise step-level `inputs:` is
                 # silently dropped and the prompt ships with an empty form
                 # (`inputVariables: []`), `title`/`description` falling back to
                 # the step name. `is_approval` rides along too so the approval
                 # gate can be flagged next to the step (the normalizer reads it
-                # off arguments to re-point the step type — see
+                # off arguments to re-point the step type -- see
                 # `_normalize_manual_input_args`). Conflict-guard mirrors the
                 # global hoist.
                 for hk in ("inputs", "title", "description", "is_approval"):
@@ -591,7 +591,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
                     message=(
-                        "step-level `branches:` is not allowed — write "
+                        "step-level `branches:` is not allowed -- write "
                         "`next:` on each entry of `conditions:` (decision) "
                         "or `options:` (manual_input)"
                     ),
@@ -602,7 +602,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 # Warn-and-fix: a bare step-level `next:` on a Decision is
                 # ambiguous (FSR's designer needs an explicit `default: true`
                 # row to render the else edge with a label). Rather than
-                # hard-fail the compile, let the value through — the emitter
+                # hard-fail the compile, let the value through -- the emitter
                 # auto-synthesizes an "Else" default condition pointing at
                 # the same target. Match the user's standing preference for
                 # mechanical translation over prompt rules.
@@ -610,7 +610,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     code=ErrorCode.BAD_VALUE,
                     severity="warning",
                     message=(
-                        "decision step has a step-level `next:` — auto-"
+                        "decision step has a step-level `next:` -- auto-"
                         "synthesizing an `Else` default condition pointing "
                         "at that target"
                     ),
@@ -623,7 +623,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             for_each = None
             fe_raw = s_raw.get("for_each")
             # Host step types that never legitimately carry `for_each` in
-            # the live corpus (369 hits across 11 step types — these
+            # the live corpus (369 hits across 11 step types -- these
             # never appear). Looping a control-flow step would be a
             # nonsense or unsafe construct.
             _FOR_EACH_DISALLOWED_HOSTS = {
@@ -744,7 +744,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             # surface must produce the same wire shape. The shared emitter is a
             # faithful serializer and no longer normalizes for_each, so that a
             # decompiled (already-canonical) for_each round-trips byte-for-byte
-            # — the corpus carries inconsistent bulk shapes (some bulk loops
+            # -- the corpus carries inconsistent bulk shapes (some bulk loops
             # have no batch_size, some keep parallel) that no emit-time rule
             # could reproduce. See `_clean_step_arguments` + the round-trip gate.
             if isinstance(for_each, dict):
@@ -754,12 +754,12 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 else:
                     for_each.pop("batch_size", None)      # batch_size is a bulk-only key
 
-            # Phase H1: `with:` path binding — compile-time Jinja alias
+            # Phase H1: `with:` path binding -- compile-time Jinja alias
             # rewriting. Authors write `with: {info: "{{ vars.steps.X.data.
             # code_output }}"}` and then use `{{ vars.info.adom }}` in the
             # step's arguments. The parser rewrites `vars.info` → the bound
             # expression in all string values within `args`, resolving the
-            # alias at compile time. No wire output — purely an authoring
+            # alias at compile time. No wire output -- purely an authoring
             # convenience that produces the same wire as the expanded form.
             with_raw = s_raw.get("with")
             if with_raw is not None:
@@ -845,7 +845,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 s.next = _resolve_ref(s.next)
             s.branches = {k: _resolve_ref(v) for k, v in s.branches.items()}
             # Inline `next:` on decision conditions and manual_input options
-            # is promoted into step.branches by the resolver — pre-resolve
+            # is promoted into step.branches by the resolver -- pre-resolve
             # the string here so the resolver doesn't have to know names.
             if isinstance(s.arguments, dict):
                 conds = s.arguments.get("conditions")
@@ -895,10 +895,10 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             # LLM authors commonly write a rich list-of-dicts here
             # (`- name: ip\n  type: string\n  description: …`). The rule alone
             # cost a full authoring round-trip in live sessions, so the error
-            # carries a correct example — and, when the entries are
+            # carries a correct example -- and, when the entries are
             # recoverable, the exact mapping equivalent of what was written.
             msg = ("parameters must be a list of strings or a mapping "
-                   "{name: type} — e.g. `parameters: [ip, reason]` or "
+                   "{name: type} -- e.g. `parameters: [ip, reason]` or "
                    "`parameters: {ip: string, reason: string}`")
             if isinstance(params_in, list):
                 recovered = {
@@ -917,7 +917,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             ))
 
         # Capture the priority NAME as-authored (normalized to Title case).
-        # Optional — defaults to "High" so authored playbooks run at high
+        # Optional -- defaults to "High" so authored playbooks run at high
         # priority unless they opt down. Validation + IRI resolution happens in
         # the resolver against the live-synced `picklists` table (no DB here).
         priority_raw = pb_raw.get("priority")
@@ -989,7 +989,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             ))
 
         # Owner teams + private visibility. `owners` accepts team NAMES (the
-        # author-friendly form — "TeamA") or IRIs (`/api/3/teams/<uuid>`); the
+        # author-friendly form -- "TeamA") or IRIs (`/api/3/teams/<uuid>`); the
         # resolver converts names to IRIs via the warmed `teams` table. Coerce
         # to a list of strings.
         owners_raw = pb_raw.get("owners", []) or []
@@ -1004,7 +1004,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
 
         # Private visibility is DERIVED from owners, matching FSR's model: a
         # playbook with owner teams is private to those teams; a playbook with
-        # no owners is public (any team can run it — the SOAR default).
+        # no owners is public (any team can run it -- the SOAR default).
         # `is_private:` is an optional explicit override; when omitted it
         # follows `bool(owners)`. The SOAR invariant is enforced: no owners
         # => never private, even if `is_private: true` was written (warned).
@@ -1014,7 +1014,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             if explicit_private and is_private:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message=("`is_private: true` with no owners — a private "
+                    message=("`is_private: true` with no owners -- a private "
                              "playbook requires owner teams; emitting PUBLIC "
                              "(any team can run it, the SOAR default)"),
                     path=f"{pb_path}.is_private",
@@ -1026,7 +1026,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             name=pb_name,
             description=pb_raw.get("description", "") or "",
             tag=pb_raw.get("tag", "") or "",
-            # Defaults to active — authors almost never want to deploy an
+            # Defaults to active -- authors almost never want to deploy an
             # inactive playbook, and FSR's UI creates them active by default.
             # Set `is_active: false` explicitly to ship a disabled draft.
             is_active=bool(pb_raw.get("is_active", True)),

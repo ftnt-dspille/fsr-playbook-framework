@@ -1,4 +1,4 @@
-"""Trace → YAML compiler — wire a playbook from the typed action trace.
+"""Trace → YAML compiler -- wire a playbook from the typed action trace.
 
 Consumes a `SkillTrace` (the SkillCalls the agent executed during triage,
 SKILL_BASED_PLAYBOOK_PLAN §2) and emits FSRPB YAML by **value-match over
@@ -15,7 +15,7 @@ captured outputs** (§3) instead of the model guessing jinja paths:
    choice/manual-input values) is wired by the caller, not value-match.
 
 Value-match yields *candidate* wiring with possible false positives (a
-literal that happens to equal a prior output). That is fine — §4 verifies
+literal that happens to equal a prior output). That is fine -- §4 verifies
 each wire with `render_jinja`/`step_through_playbook` against the same
 captured outputs before push. This module does the deterministic part;
 verification is its own pass.
@@ -28,7 +28,7 @@ from .skills import get_skill
 from ..agent.skill_trace import SkillCall, SkillTrace
 
 
-# A param value is only trusted for value-match if it is non-trivial — short
+# A param value is only trusted for value-match if it is non-trivial -- short
 # ints, booleans, and tiny strings coincide across unrelated steps too often
 # (port 443, True, "yes"). IOC-shaped / structured / long values are safe.
 _MIN_STR_LEN = 4
@@ -101,7 +101,7 @@ def _find_value_path(output: Any, target: Any) -> Optional[str]:
 
 
 def _embeddable_scalars(output: Any) -> List[Tuple[str, str]]:
-    """`(scalar, path)` for distinctive, IOC-shaped string leaves of an output —
+    """`(scalar, path)` for distinctive, IOC-shaped string leaves of an output --
     the candidates for embedded (substring) wiring."""
     found: List[Tuple[str, str]] = []
 
@@ -200,7 +200,7 @@ def wire_inputs(
         if param in _SKIP_PARAMS or not _is_wirable_value(value):
             continue
         matched = False
-        # Most-recent producer first — closest dependency wins.
+        # Most-recent producer first -- closest dependency wins.
         for src in reversed(prior):
             suffix = _find_value_path(src.observed_output, value)
             if suffix is not None:
@@ -267,7 +267,7 @@ def wire_record_inputs(
 
     Caller guarantees a per-record (module-bound) trigger so
     ``vars.input.records[0]`` resolves at runtime. Returns
-    ``(record_vars, steps, first_step)`` — ``steps`` gains the Set Inputs
+    ``(record_vars, steps, first_step)`` -- ``steps`` gains the Set Inputs
     step at the front and ``first_step`` becomes ``"Set Inputs"`` when any
     IOC was parameterized; otherwise all three are returned unchanged.
     Mutates `gaps` in place (matched params are removed)."""
@@ -379,7 +379,7 @@ def insert_containment_guard(
     """Gate a containment op behind a malicious-verdict decision.
 
     A trace that enriches an IOC then contains it compiles to an UNCONDITIONAL
-    linear chain — re-running it would contain even when the enrichment comes
+    linear chain -- re-running it would contain even when the enrichment comes
     back clean (blocking a benign IP). When a recognized verdict signal exists in
     an enrichment step BEFORE the first containment op, synthesize:
 
@@ -506,7 +506,7 @@ def assemble_playbook(
     """Wrap the compiled steps into a full playbook doc (a `start` trigger
     that points at the first real step, then the value-matched steps).
 
-    When `module` is given (the module the investigation ran on — e.g.
+    When `module` is given (the module the investigation ran on -- e.g.
     ``alerts`` / ``incidents``), the start trigger is bound to that module
     so it resolves to a manual Execute-menu trigger (``cybersponse.action``)
     on the module's record listing, NOT a designer-only Referenced trigger
@@ -571,7 +571,7 @@ def _source_step_of(ref: str, jkey_to_name: Dict[str, str]) -> Optional[str]:
 def _wiring_label(wired: Dict[str, str], gaps: List[str],
                   jkey_to_name: Dict[str, str]) -> str:
     """Plain-English wiring summary for the reviewable-draft card (contract
-    §5, 2.6.0) — never raw jinja. Surfaces gaps as an explicit confirm-me."""
+    §5, 2.6.0) -- never raw jinja. Surfaces gaps as an explicit confirm-me."""
     parts: List[str] = []
     for param, ref in wired.items():
         src = _source_step_of(ref, jkey_to_name)
@@ -579,10 +579,10 @@ def _wiring_label(wired: Dict[str, str], gaps: List[str],
     if parts:
         label = "uses " + "; ".join(parts)
         if gaps:
-            label += f" — {', '.join(gaps)} needs confirming"
+            label += f" -- {', '.join(gaps)} needs confirming"
         return label
     if gaps:
-        return f"{', '.join(gaps)} could not be auto-wired — confirm before run"
+        return f"{', '.join(gaps)} could not be auto-wired -- confirm before run"
     return "uses fixed values"
 
 
@@ -590,7 +590,7 @@ def summarize_for_offer(
     trace: SkillTrace, compiled: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Build the contract v2.6.0 reviewable-draft fields (`ops_summary` +
-    `draft_steps`) from a compiled trace. Pure, no MCP/IO — the
+    `draft_steps`) from a compiled trace. Pure, no MCP/IO -- the
     `emit_playbook_offer` tool calls this so per-step wiring labels and
     verify badges are derived from the SAME deterministic compile the push
     uses, never hand-written by the model.

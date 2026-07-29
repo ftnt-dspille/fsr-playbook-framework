@@ -28,7 +28,7 @@ _NEEDS_TARGET = {"workflow_reference"}  # references another playbook
 def _scaffold(example: dict) -> str:
     """Wrap a friendly-form example in a minimal compilable playbook."""
     # The example may carry step-level keys (options:, conditions:,
-    # next:, …) alongside arguments — preserve them verbatim. The parser
+    # next:, …) alongside arguments -- preserve them verbatim. The parser
     # recognizes step-level options/conditions/vars/next/branches.
     # Phase G: hoist `arguments:` contents to step level.
     middle = dict(example)

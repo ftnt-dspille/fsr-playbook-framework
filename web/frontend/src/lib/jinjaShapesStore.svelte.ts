@@ -7,7 +7,7 @@
  * (VarPathPicker, future Monaco completion provider) read from here so
  * they don't each re-run verify_playbook.
  *
- * The store is intentionally tiny — a $state container plus two helpers:
+ * The store is intentionally tiny -- a $state container plus two helpers:
  *   - `setShapes(shapes)` to publish a fresh map (call this after every
  *      verify run; pass `{}` to clear).
  *   - `shapesFor(jinjaKey)` to fetch a single ancestor's Shape, returning
@@ -37,7 +37,7 @@ export const jinjaShapesStore = {
     return state.shapes;
   },
 
-  /** Top-level vars created by set_variable steps — accessed via
+  /** Top-level vars created by set_variable steps -- accessed via
    *  `vars.<name>` (NOT `vars.steps.<step>.<name>`). */
   get topLevelVars(): ShapeMap {
     return state.topLevelVars;
@@ -57,13 +57,13 @@ export const jinjaShapesStore = {
   },
 
   /** Look up one step's shape. Returns null if the store has no entry
-   *  — callers should fall back to step-family heuristics. */
+   *  -- callers should fall back to step-family heuristics. */
   shapesFor(jinjaKey: string): Shape | null {
     return state.shapes[jinjaKey] ?? null;
   },
 
   /** Refresh from the live YAML buffer via /api/yaml/shapes (typed
-   *  walker, no live probe). Deduped — calling twice with the same
+   *  walker, no live probe). Deduped -- calling twice with the same
    *  text is a no-op. Safe to call from picker-open handlers. */
   async refresh(yamlText: string): Promise<void> {
     if (!yamlText || yamlText === lastYaml) return;

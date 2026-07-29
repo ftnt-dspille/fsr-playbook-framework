@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Bottom output drawer — issues (markers + render-path + fix actions),
+   * Bottom output drawer -- issues (markers + render-path + fix actions),
    * compile JSON, and deploy logs. Mode-agnostic: shown under both
    * Design and CLI.
    *

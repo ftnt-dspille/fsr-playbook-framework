@@ -7,7 +7,7 @@ Powers the Examples tab on every step type. Reads ``playbook_steps``
      (``decision``, ``manual_input``, …) to the corpus's
      ``step_type_name`` (``Decision``, ``ManualInput``, …).
   2. Canonicalises each row's ``arguments_json`` into a structural
-     skeleton — keys, value *types*, and select enum values
+     skeleton -- keys, value *types*, and select enum values
      preserved; everything else (Jinja templates, free-text content,
      IRIs, UUIDs, large arrays) collapsed so semantically-identical
      bodies cluster together.
@@ -15,7 +15,7 @@ Powers the Examples tab on every step type. Reads ``playbook_steps``
      renders a one-line English summary so users see "what does this
      do" at a glance instead of parsing JSON.
 
-No LLM — same code path will later feed the AI step builder so the
+No LLM -- same code path will later feed the AI step builder so the
 model can read existing patterns in plain English.
 """
 from __future__ import annotations
@@ -140,7 +140,7 @@ def _skeleton_hash(args: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Per-step-type English summarisers. Each takes the representative
 # row's ``arguments`` dict and returns a one-liner. None of them call
-# out to the LLM — this is the deterministic ground truth the AI step
+# out to the LLM -- this is the deterministic ground truth the AI step
 # builder will later condition on.
 # ---------------------------------------------------------------------------
 

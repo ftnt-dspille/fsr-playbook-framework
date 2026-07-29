@@ -4,13 +4,13 @@ The compiler (§3) produces *candidate* wiring. This pass proves each wire
 before push, reusing the tools we already have rather than inventing a new
 validator:
 
-1. **Resolve check** — render every wired ref against the captured outputs
+1. **Resolve check** -- render every wired ref against the captured outputs
    (`skill_compiler.render_context`, keyed exactly like FSR runtime). A ref
    that doesn't evaluate to a defined value is a bad wire. Offline this
    uses a local StrictUndefined Jinja2 env; a caller with a live FSR engine
    can inject `render_fn=render_jinja` for stronger, runtime-identical
    evidence.
-2. **Static check** — assemble the playbook and run the existing
+2. **Static check** -- assemble the playbook and run the existing
    `parser.parse_yaml` + `validator.validate` (which calls
    `_check_jinja_paths`): undefined-reference / DAG-ordering detection
    across the step graph, no new code.
@@ -38,7 +38,7 @@ RenderFn = Callable[..., Dict[str, Any]]
 def _local_render(template: str, context: Optional[Dict[str, Any]] = None,
                   **_ignore: Any) -> Dict[str, Any]:
     """Offline Jinja render with StrictUndefined so a missing path raises
-    rather than silently rendering empty — that strictness is the point:
+    rather than silently rendering empty -- that strictness is the point:
     a wire that doesn't resolve must surface, not pass."""
     try:
         from jinja2 import Environment, StrictUndefined
@@ -111,9 +111,9 @@ def compile_and_verify(
     static path check on the repaired graph.
 
     Returns the §3 compile dict enriched with:
-      - `verified`: {step_name: {param: bool}} — resolve-check result.
-      - `repaired`: {step_name: [param,...]} — wires demoted to literals.
-      - `static_errors`: [str] — undefined/unreachable refs after repair.
+      - `verified`: {step_name: {param: bool}} -- resolve-check result.
+      - `repaired`: {step_name: [param,...]} -- wires demoted to literals.
+      - `static_errors`: [str] -- undefined/unreachable refs after repair.
       - `gaps` now also includes any repaired (un-wirable) params.
     """
     compiled = sc.compile_trace(trace, start_step=start_step)

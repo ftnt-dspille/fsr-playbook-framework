@@ -1,6 +1,6 @@
 """Audit surface for the SQLite reference store.
 
-Single source of truth for "what does the assistant know?" — both the
+Single source of truth for "what does the assistant know?" -- both the
 `fsrpb inventory` CLI and the planned `/api/ref/inventory` web route call
 into here. Read-only over the active reference DB plus the ATTACHed
 api_examples_catalog.
@@ -127,7 +127,7 @@ def _tokens_clause(fields: list[str], tokens: list[str]) -> tuple[str, list[str]
     """Build an AND-of-OR LIKE clause: every token must appear in at
     least one of the provided fields. So `ip address` matches rows
     where some field has 'ip' AND some (possibly different) field has
-    'address' — closer to user expectation than naive substring."""
+    'address' -- closer to user expectation than naive substring."""
     parts: list[str] = []
     params: list[str] = []
     for tok in tokens:
@@ -154,14 +154,14 @@ def cross_search(q: str, per_table_limit: int = 15) -> dict[str, list[dict[str, 
         return {}
     out: dict[str, list[dict[str, Any]]] = {}
     with open_db(create=False) as conn:
-        # Connectors — search name + label + description.
+        # Connectors -- search name + label + description.
         clause, params = _tokens_clause(
             ["name", "label", "description"], tokens)
         out["connectors"] = [dict(r) for r in conn.execute(
             f"SELECT name, version, category, label "
             f"FROM connectors WHERE {clause} LIMIT ?",
             (*params, per_table_limit))]
-        # Operations — name + title + description (and prefer the
+        # Operations -- name + title + description (and prefer the
         # connector's name match too).
         clause, params = _tokens_clause(
             ["op_name", "title", "description", "connector_name"], tokens)

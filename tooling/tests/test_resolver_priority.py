@@ -1,4 +1,4 @@
-"""TRIAGE_BUILD_AUDIT C2 — an unsynced WorkflowPriority picklist must not read
+"""TRIAGE_BUILD_AUDIT C2 -- an unsynced WorkflowPriority picklist must not read
 as an authoring bug. When the reference DB has zero priority rows we can't
 validate against anything, so priority is left unset SILENTLY (no bad_value
 warning); when rows DO exist, an unknown name still warns as before.

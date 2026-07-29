@@ -1,4 +1,4 @@
-"""Reference store endpoints — for editor autocompletion + Browse tab.
+"""Reference store endpoints -- for editor autocompletion + Browse tab.
 
 Read-only against ../store/fsr_reference.db. Cheap queries; no caching
 yet (the DB is local SQLite, sub-millisecond reads).
@@ -65,7 +65,7 @@ def list_recipes() -> list[dict[str, Any]]:
 
 @router.get("/step-args/{step_type}")
 def step_args_help(step_type: str) -> dict[str, Any]:
-    """Hover docs for a friendly step type — what `arguments:` accepts.
+    """Hover docs for a friendly step type -- what `arguments:` accepts.
 
     Powers the Monaco hover popup. Returns both the structured spec and
     a pre-rendered markdown blob so the frontend can show either.
@@ -97,7 +97,7 @@ def list_connectors(q: str = "", limit: int = 50) -> list[dict[str, Any]]:
 
 @router.get("/inventory")
 def inventory_summary() -> dict[str, Any]:
-    """Audit surface — what does the assistant know?
+    """Audit surface -- what does the assistant know?
 
     Powers the front-end inventory dashboard (the "we're not just an LLM"
     proof). Reads through `python.inventory` so the CLI and web stay in
@@ -133,7 +133,7 @@ def synthesize_http_step(entry_id: int, step_name: str = "Call API") -> dict[str
 
     Powers the "Insert as HTTP step" button on the Inventory dashboard.
     Calls through to the same deterministic synthesizer the MCP server
-    exposes — no LLM, just a catalog row → http_request step transform.
+    exposes -- no LLM, just a catalog row → http_request step transform.
     """
     import sys as _sys
     _py = REPO_ROOT / "tooling"
@@ -231,7 +231,7 @@ def list_modules() -> list[dict[str, Any]]:
             for r in rows]
 
 
-# Operator catalog per leaf-value type — trimmed from
+# Operator catalog per leaf-value type -- trimmed from
 # `store/QUERY_API.md` §2.1 to surface only the ops that make
 # semantic sense for the field type. Keeps the UI from offering
 # `like` on a boolean or `gt` on a picklist.
@@ -320,11 +320,11 @@ _GLOBAL_VARS_TTL = 60.0  # seconds; global vars change rarely
 
 @router.get("/global-vars")
 def list_global_vars() -> list[dict[str, Any]]:
-    """FSR global ("dynamic") variables — `globalVars.<name>` autocomplete.
+    """FSR global ("dynamic") variables -- `globalVars.<name>` autocomplete.
 
     Hits the live FSR at `/api/wf/api/dynamic-variable/`. Cached for
     60s so the editor doesn't pummel the appliance. Returns [] when
-    the env is offline or the request fails — callers fall back to a
+    the env is offline or the request fails -- callers fall back to a
     buffer-scrape of names already referenced in the YAML.
     """
     import time as _time
@@ -370,7 +370,7 @@ def recent_runs(
     """Last N playbook executions from FSR, optionally filtered to a
     single playbook. Used by the trigger-step sample picker so authors
     can pin "the record from the last run" without us needing to
-    persist anything ourselves — FSR's workflow execution history is
+    persist anything ourselves -- FSR's workflow execution history is
     already the source of truth.
 
     Returns each run with its record IRIs (when present). The picker
@@ -417,7 +417,7 @@ def recent_runs(
 
 @router.get("/run-detail/{run_id}")
 def run_detail(run_id: str) -> dict[str, Any]:
-    """Full FSR workflow execution detail — used to seed the editor
+    """Full FSR workflow execution detail -- used to seed the editor
     with the EXACT context a past run had (input records, step
     variables, step outputs). Lets authors iterate on a playbook
     against real production data without re-running anything.
@@ -451,7 +451,7 @@ def run_detail(run_id: str) -> dict[str, Any]:
             "modified": data.get("modified"),
             "name": data.get("playbookName") or data.get("name") or "",
             "records": data.get("records") or [],
-            # Step traces; field names vary by FSR version — we include
+            # Step traces; field names vary by FSR version -- we include
             # whichever the appliance returns so the frontend can probe.
             "wf_step_logs": data.get("wf_step_logs"),
             "step_logs": data.get("step_logs"),
@@ -491,7 +491,7 @@ def record_by_iri(iri: str) -> dict[str, Any]:
             if isinstance(v, list) and len(v) > 3:
                 out[k] = f"<list[{len(v)}]>"
             elif isinstance(v, dict) and "itemValue" in v:
-                out[k] = v  # picklist — keep so itemValue stays accessible
+                out[k] = v  # picklist -- keep so itemValue stays accessible
             elif isinstance(v, dict) and len(v) > 8:
                 out[k] = "<object>"
             else:
@@ -535,7 +535,7 @@ def sample_record(module: str, limit: int = 5) -> dict[str, Any]:
         # Drop large/noisy collections that overwhelm the picker. Keep
         # scalars + small dicts; preserve `@id` / `id` which authors use.
         # Picklist-shaped objects (have `itemValue`) are ALWAYS preserved
-        # — they're how FSR stores severity / status / type etc., and
+        # -- they're how FSR stores severity / status / type etc., and
         # the frontend renders their `itemValue` as the display value.
         def _clean(rec):
             if not isinstance(rec, dict):
@@ -545,7 +545,7 @@ def sample_record(module: str, limit: int = 5) -> dict[str, Any]:
                 if isinstance(v, list) and len(v) > 3:
                     out[k] = f"<list[{len(v)}]>"
                 elif isinstance(v, dict) and "itemValue" in v:
-                    out[k] = v  # picklist — keep as-is
+                    out[k] = v  # picklist -- keep as-is
                 elif isinstance(v, dict) and len(v) > 8:
                     out[k] = "<object>"
                 else:
@@ -561,7 +561,7 @@ def list_example_prompts() -> list[dict[str, Any]]:
     """Sample chat prompts for testing the agent.
 
     Sourced from `python/evals/tasks/*.json` so the eval corpus and the
-    UI picker stay in lockstep — adding a task file gives you a new
+    UI picker stay in lockstep -- adding a task file gives you a new
     option in the chat starter dropdown automatically.
     """
     import json as _json

@@ -21,7 +21,7 @@ Each entry is a dict shaped like:
 
 Why a hand-curated dict and not introspection? Friendly-form keys
 (`title`, `inputs`, `module`, step-level `options:`/`conditions:`)
-don't exist in the canonical JSON shape — they only live in the
+don't exist in the canonical JSON shape -- they only live in the
 resolver normalizers. The agent needs *authoring* docs, not runtime
 schema.
 """
@@ -60,7 +60,7 @@ _MANUAL_INPUT: dict[str, Any] = {
                         "image, json. `lookup` requires `module:`; "
                         "`picklist` requires `picklist:`."},
         {"name": "type", "required": False, "kind": "enum",
-         "description": "`InputBased` (default — form prompt) or "
+         "description": "`InputBased` (default -- form prompt) or "
                         "`DecisionBased` (button-only, no input form)."},
         {"name": "is_approval", "required": False, "kind": "bool",
          "description": "Style as Approve/Reject (UI overlay only)."},
@@ -125,7 +125,7 @@ _MANUAL_INPUT: dict[str, Any] = {
                         "exactly one of the four targets must be set."},
         # Other
         {"name": "timeout", "required": False, "kind": "dict",
-         "description": "`{days, hours, minutes, step_iri}` — auto-route "
+         "description": "`{days, hours, minutes, step_iri}` -- auto-route "
                         "to step_iri if no response within window."},
         {"name": "agent_id", "required": False, "kind": "uuid|null",
          "description": "Route prompt to a specific agent (multi-tenant)."},
@@ -149,7 +149,7 @@ _DECISION: dict[str, Any] = {
         "`conditions[]` is either a non-default branch (with `display`, "
         "`when`, `next`) or the single default fall-through "
         "(`default: true`, no `when`, with `next:` for the else target). "
-        "Do NOT use a step-level `branches:` dict — the parser hard-"
+        "Do NOT use a step-level `branches:` dict -- the parser hard-"
         "errors on it. `conditions:` may be written at the step level "
         "(sugar) or under `arguments:` (wire form)."
     ),
@@ -157,7 +157,7 @@ _DECISION: dict[str, Any] = {
         {"name": "conditions", "required": True, "kind": "list[dict]",
          "description": "List of branches. Each non-default entry: "
                         "`{display, when, next}`. The single default "
-                        "entry: `{display?, default: true, next}` — must "
+                        "entry: `{display?, default: true, next}` -- must "
                         "omit `when`."},
         {"name": "step_variables", "required": False, "kind": "list",
          "description": "Scratch vars exposed downstream."},
@@ -231,7 +231,7 @@ _CREATE_RECORD: dict[str, Any] = {
                         "fields with multi-value semantics."},
         {"name": "fieldOperation", "required": False, "kind": "dict"},
         {"name": "__bulk", "required": False, "kind": "bool",
-         "description": "Batch insert (still fires on-create triggers — "
+         "description": "Batch insert (still fires on-create triggers -- "
                         "different from `ingest_bulk_feed` which "
                         "intentionally bypasses them)."},
     ],
@@ -253,7 +253,7 @@ _INGEST_BULK_FEED: dict[str, Any] = {
     "summary": "High-volume threat-feed insertion via "
                "`/api/ingest-feeds/`. **Bypasses on-create playbook "
                "triggers** (intentional; do NOT use for alerts/"
-               "incidents where triggers must fire — use `create_record` "
+               "incidents where triggers must fire -- use `create_record` "
                "with `__bulk: true` for those).",
     "args": [
         {"name": "module", "required": True, "kind": "string",
@@ -351,7 +351,7 @@ def render_markdown(step_type: str) -> str | None:
     spec = get_help(step_type)
     if not spec:
         return None
-    out: list[str] = [f"### `{step_type}` — arguments", "", spec["summary"], ""]
+    out: list[str] = [f"### `{step_type}` -- arguments", "", spec["summary"], ""]
     if spec.get("args"):
         # Group by mode if any arg carries one.
         modes: dict[str, list[dict]] = {}
@@ -370,7 +370,7 @@ def render_markdown(step_type: str) -> str | None:
                 kind = a.get("kind", "")
                 desc = a.get("description", "")
                 out.append(f"- `{a['name']}` _{kind}_ · {req}"
-                           + (f" — {desc}" if desc else ""))
+                           + (f" -- {desc}" if desc else ""))
             out.append("")
         for mode, items in modes.items():
             out.append(f"**{mode} mode**")
@@ -380,7 +380,7 @@ def render_markdown(step_type: str) -> str | None:
                 kind = a.get("kind", "")
                 desc = a.get("description", "")
                 out.append(f"- `{a['name']}` _{kind}_ · {req}"
-                           + (f" — {desc}" if desc else ""))
+                           + (f" -- {desc}" if desc else ""))
             out.append("")
     if spec.get("examples"):
         out.append("**Examples**")

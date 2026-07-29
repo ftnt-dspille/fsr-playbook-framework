@@ -1,4 +1,4 @@
-"""Phase 1 — skill descriptor registry (SKILL_BASED_PLAYBOOK_PLAN §1).
+"""Phase 1 -- skill descriptor registry (SKILL_BASED_PLAYBOOK_PLAN §1).
 
 Pure-registry tests: the four demo-core skills exist, obey the 1:1
 step-type rule, and each `compile()` hook emits a YAML source-form step

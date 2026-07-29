@@ -174,7 +174,7 @@ describe('StepInspector', () => {
     // Connector op: no Branches section in Args.
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
-    // Branches is no longer a tab — it's folded into Args. The
+    // Branches is no longer a tab -- it's folded into Args. The
     // "Branches" heading is absent for connector_op nodes.
     expect(
       Array.from(document.querySelectorAll('.uppercase'))
@@ -193,7 +193,7 @@ describe('StepInspector', () => {
     (fetchNode.arguments.params as any).issue_key = '{{ vars.steps.set_x.x }}';
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-    // No standalone Render button anymore — rendered values come back
+    // No standalone Render button anymore -- rendered values come back
     // as part of step_test's Run-this-step response.
     await fireEvent.click(screen.getByRole('button', { name: /Run this step/ }));
     await waitFor(() => expect(screen.getAllByText(/JIR-1/).length).toBeGreaterThan(0));
@@ -215,7 +215,7 @@ describe('StepInspector', () => {
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-    // Auto-fires on tab open — no Load click required.
+    // Auto-fires on tab open -- no Load click required.
     await waitFor(() => screen.getByText('tested_pass'));
     expect(screen.getByText(/live_op_exec/)).toBeTruthy();
     expect(screen.getByText(/ran clean/)).toBeTruthy();
@@ -231,7 +231,7 @@ describe('StepInspector', () => {
     expect(screen.getAllByText(/JIR-1/).length).toBeGreaterThan(0);
   });
 
-  it('Verify tab no longer has a standalone Run (safe) button — step_test covers it', async () => {
+  it('Verify tab no longer has a standalone Run (safe) button -- step_test covers it', async () => {
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
     render(StepInspector, { props: { node: fetchNode, playbook: pb(), playbookIdx: 0 } });
     await fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
@@ -245,7 +245,7 @@ describe('StepInspector', () => {
   it('renames a branch label via the inline Branches section', async () => {
     const branchNode = pb().nodes.find((n) => n.id === 'branch')!;
     render(StepInspector, { props: { node: branchNode, playbook: pb(), playbookIdx: 0 } });
-    // Branches now renders inline beneath Args — no tab click needed.
+    // Branches now renders inline beneath Args -- no tab click needed.
     const labelInput = screen.getByDisplayValue('high');
     await fireEvent.input(labelInput, { target: { value: 'critical' } });
     const after = visualStore.state.graph!.playbooks[0].edges.find(
@@ -292,8 +292,8 @@ describe('StepInspector', () => {
     render(StepInspector, { props: { node, playbook: pb(), playbookIdx: 0 } });
     await waitFor(() => screen.getByText('issue_key'));
     const opInput = screen.getByLabelText('Operation') as HTMLInputElement;
-    // OperationPicker commits on Enter / blur — not on every keystroke
-    // — so the schema $effect doesn't fire mid-type. Type, then blur.
+    // OperationPicker commits on Enter / blur -- not on every keystroke
+    // -- so the schema $effect doesn't fire mid-type. Type, then blur.
     await fireEvent.input(opInput, { target: { value: 'list_tickets' } });
     await fireEvent.blur(opInput);
     await waitFor(() => {
@@ -338,7 +338,7 @@ describe('StepInspector', () => {
   it('Decision node shows Args (with inline Branches) as the default tab', async () => {
     const branchNode = pb().nodes.find((n) => n.id === 'branch')!;
     render(StepInspector, { props: { node: branchNode, playbook: pb(), playbookIdx: 0 } });
-    // Args is back for decision — it owns the inline Branches editor.
+    // Args is back for decision -- it owns the inline Branches editor.
     expect(screen.getByRole('button', { name: 'Args' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Examples' })).toBeTruthy();
     // Default-active tab is Args; the rename input for label "high" comes from the inline branches editor.
@@ -408,7 +408,7 @@ describe('StepInspector', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
     await waitFor(() => screen.getByText('Approve the action?'));
     // The word "approve" appears in the description, the node id
-    // banner, AND the button — assert ≥1 of each.
+    // banner, AND the button -- assert ≥1 of each.
     expect(screen.getAllByText('approve').length).toBeGreaterThan(0);
     expect(screen.getAllByText('reject').length).toBeGreaterThan(0);
   });
@@ -519,7 +519,7 @@ describe('StepInspector', () => {
       return prev(input, init);
     }) as any;
 
-    // Connector op with NO `method` set in args — pure default territory.
+    // Connector op with NO `method` set in args -- pure default territory.
     const fetchNode = pb().nodes.find((n) => n.id === 'fetch')!;
     fetchNode.arguments.operation = 'block_ip';
     fetchNode.arguments.params = {};
@@ -537,7 +537,7 @@ describe('StepInspector', () => {
     // The verbose `get_op_schema` response leaves default_value JSON-
     // encoded (e.g. `"\"Quarantine Based\""`). Without the unwrap, the
     // select shows the empty placeholder and conditional children stay
-    // hidden — exactly the screenshot the user reported.
+    // hidden -- exactly the screenshot the user reported.
     const prev = globalThis.fetch as any;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -586,7 +586,7 @@ describe('StepInspector', () => {
     // Mirrors the real fortigate-firewall:block_ip shape: `ip_type` is
     // gated on method=Policy Based but declares default_value="IPv4".
     // Under method=Quarantine Based, `ip_type` itself must be hidden,
-    // and its default must NOT leak — so `ip` (gated on ip_type=IPv4)
+    // and its default must NOT leak -- so `ip` (gated on ip_type=IPv4)
     // also stays hidden.
     const prev = globalThis.fetch as any;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -640,7 +640,7 @@ describe('StepInspector', () => {
     // method=Quarantine Based is the default → ip_addresses visible.
     expect(screen.getByText('ip_addresses')).toBeTruthy();
     // ip_type is gated on method=Policy Based → hidden, default doesn't leak.
-    // `ip` would only render if ip_type's "IPv4" default leaked — must NOT.
+    // `ip` would only render if ip_type's "IPv4" default leaked -- must NOT.
     // ip + ip_type both gated on Policy-Based path → both in Hidden bucket.
     const hiddenSummary = screen.getByText(/Hidden \(/);
     expect(hiddenSummary.textContent).toMatch(/Hidden \(2\)/);

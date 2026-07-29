@@ -15,7 +15,7 @@ summary: 'Patterns observed in 1,669 live FortiSOAR playbooks: how set/for/if ge
 
 # FSR Jinja Idioms
 
-Patterns observed in 1,669 live FortiSOAR playbooks. These are the **idioms** —
+Patterns observed in 1,669 live FortiSOAR playbooks. These are the **idioms** --
 how `{% set %}` / `{% for %}` / `{% if %}` get composed in real production
 playbooks. For per-filter docs run `mcp find_jinja_filter <name>` or see
 `get_filter_examples(<name>).curated_doc`. For raw corpus search use
@@ -35,7 +35,7 @@ playbooks. For per-filter docs run `mcp find_jinja_filter <name>` or see
 | `vars.item` | 125 | the current `{% for %}` loop item |
 | `vars.steps.<Name_us>` | many | a previous step's full result (see AUTHORING.md for naming rule) |
 
-`vars.input.records[0]` vs `[0]['@id']` — most playbooks need either the
+`vars.input.records[0]` vs `[0]['@id']` -- most playbooks need either the
 record body or its IRI; pick `[0]` when you need fields, `[0]['@id']` (or
 `[0]["@id"]`) when you need to pass an IRI to another step.
 
@@ -47,13 +47,13 @@ The Jinja idiom for "accumulate a list while iterating." Two equivalent
 forms in the corpus:
 
 ```jinja
-{# Form A — assignment-as-side-effect (8 corpus uses on iriList alone) #}
+{# Form A -- assignment-as-side-effect (8 corpus uses on iriList alone) #}
 {% set iriList = [] %}
 {% for r in vars.input.records %}
   {% set _ = iriList.append(r['@id']) %}
 {% endfor %}
 
-{# Form B — `do` extension, more explicit #}
+{# Form B -- `do` extension, more explicit #}
 {%- set addresses = [] -%}
 {%- for a in vars.input.params.address_list -%}
   {%- do addresses.append({"type": "fqdn", "address": a }) -%}
@@ -63,12 +63,12 @@ forms in the corpus:
 When to use which:
 - **Form A** works on stock Jinja (no `jinja2.ext.do` needed); the
   assignment-discard `set _ = …` is a common workaround pattern.
-- **Form B** is cleaner and what the FSR engine prefers — `{% do %}` is
+- **Form B** is cleaner and what the FSR engine prefers -- `{% do %}` is
   enabled by default. Use it when the playbook author cares about
   readability.
 
 Both compile to the same final list. **Don't** try `vars.iriList.append(...)`
-— `vars` is per-step-merged, not mutable across statements.
+-- `vars` is per-step-merged, not mutable across statements.
 
 ---
 
@@ -76,7 +76,7 @@ Both compile to the same final list. **Don't** try `vars.iriList.append(...)`
 
 ```jinja
 {%- set idx = {} -%}
-{# … or: {% set idx = dict() %} (10 corpus uses) — pure-Python dict() #}
+{# … or: {% set idx = dict() %} (10 corpus uses) -- pure-Python dict() #}
 {% for r in vars.input.records %}
   {% set _ = idx.update({r['@id']: r}) %}
 {% endfor %}
@@ -89,7 +89,7 @@ For cross-iteration counters (the Jinja for-loop scope quirk):
 {% for r in vars.input.records %}
   {%- set i.x = i.x + 1 -%}
 {% endfor %}
-{{ i.x }}    {# 9 corpus uses of the namespace pattern — Jinja's escape from for-scope #}
+{{ i.x }}    {# 9 corpus uses of the namespace pattern -- Jinja's escape from for-scope #}
 ```
 
 Without `namespace`, `{% set total = total + 1 %}` inside a `{% for %}`
@@ -108,15 +108,15 @@ The single most common conditional pattern (22+ uses):
 ```
 
 Variants seen in corpus:
-- `{% if vars.foundList | length != 0 %}` — explicit non-empty check (8 uses)
-- `{% if vars.attributes | length > 1 %}` — "more than one"
-- `{% if vars.SPF_Record | length == 0 %}` — empty check (negation)
+- `{% if vars.foundList | length != 0 %}` -- explicit non-empty check (8 uses)
+- `{% if vars.attributes | length > 1 %}` -- "more than one"
+- `{% if vars.SPF_Record | length == 0 %}` -- empty check (negation)
 
 Equivalent shorthand: `{% if vars.result %}` works for non-empty lists,
-non-empty dicts, non-zero numbers, and non-empty strings — the truthy
+non-empty dicts, non-zero numbers, and non-empty strings -- the truthy
 check. Use the `| length` form when you specifically care about the count.
 
-Also common: `{% if vars.input.records[0].tenant %}` (8 uses) — guard a
+Also common: `{% if vars.input.records[0].tenant %}` (8 uses) -- guard a
 single optional field on the trigger record before reading it.
 
 ---
@@ -230,9 +230,9 @@ the dotted path you passed). FSR sets a fresh `vars.item` per iteration.
 
 ---
 
-## 10. The `set _` mutation idiom — full example
+## 10. The `set _` mutation idiom -- full example
 
-This pulls together patterns 1–3 — accumulating an index of records by
+This pulls together patterns 1-3 -- accumulating an index of records by
 key, then iterating to look something up:
 
 ```jinja
@@ -245,7 +245,7 @@ key, then iterating to look something up:
 {# now idx[<email>] gives the full record #}
 ```
 
-The `| type_debug` filter tells you the runtime type of a value — use
+The `| type_debug` filter tells you the runtime type of a value -- use
 it when chaining a filter that expects one shape but the upstream might
 return something else.
 

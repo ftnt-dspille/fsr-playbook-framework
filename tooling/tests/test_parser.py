@@ -21,7 +21,7 @@ def test_yaml_syntax_error():
 def test_missing_collection_name_defaults_to_studio_target():
     """Omitting both `collection:` and `into_collection:` now defaults
     to per-playbook mode with the studio bucket as the target. This is
-    intentional — see preflight/per-playbook push docs."""
+    intentional -- see preflight/per-playbook push docs."""
     coll, errs = parse_yaml("playbooks:\n  - name: P\n    steps:\n      - name: s\n        type: start\n")
     assert coll is not None
     assert coll.name == "00 - FSR Studio"
@@ -31,7 +31,7 @@ def test_missing_collection_name_defaults_to_studio_target():
 
 def test_both_collection_keys_rejected():
     """Setting BOTH `collection:` (wrap mode) and `into_collection:`
-    (per-playbook mode) is an authoring error — the modes are mutually
+    (per-playbook mode) is an authoring error -- the modes are mutually
     exclusive."""
     text = (
         "collection: A\n"
@@ -211,7 +211,7 @@ playbooks:
 
 
 def test_arguments_wrapper_rejected():
-    # Phase G: `arguments:` wrapper is no longer used — hard error.
+    # Phase G: `arguments:` wrapper is no longer used -- hard error.
     text = """
 collection: A
 playbooks:
@@ -228,7 +228,7 @@ playbooks:
 
 
 def test_set_variable_with_bare_key_rejected():
-    # set_variable must use `vars:` — a bare key like `x: 1` is collected
+    # set_variable must use `vars:` -- a bare key like `x: 1` is collected
     # as an arg but the normalizer/typed-args reject it.
     text = """
 collection: A
@@ -265,7 +265,7 @@ playbooks:
 
 def test_decision_step_level_next_warns_and_synthesizes():
     """Bare step-level `next:` on a Decision is auto-converted to an
-    `Else` default condition by the emitter — parser emits a warning
+    `Else` default condition by the emitter -- parser emits a warning
     instead of hard-failing."""
     text = """
 collection: A
@@ -481,7 +481,7 @@ def test_unknown_step_key_collected_as_arg():
 
 
 def test_decompiler_escape_keys_not_flagged():
-    # `unlabeled_next` is the decompiler's lossy escape hatch — decompiled YAML
+    # `unlabeled_next` is the decompiler's lossy escape hatch -- decompiled YAML
     # carries it, so the new check must never fire on it. (`branches` has its
     # own dedicated rejection, exercised elsewhere.)
     coll, errs = _make_step(

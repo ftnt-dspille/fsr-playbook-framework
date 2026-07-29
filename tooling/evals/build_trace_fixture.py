@@ -4,7 +4,7 @@ Replays a *coherent* investigation through the real ``run_op`` tool in SIM mode
 with the skill-trace recorder installed, then dumps ``SkillTrace.to_json()``.
 
 Why replay instead of hand-authoring (the original method): a hand-written
-trace re-introduces the very failure mode the trace compiler removes — guessing
+trace re-introduces the very failure mode the trace compiler removes -- guessing
 each op's output shape and the cross-step value coincidences. The sim fixtures
 (``fsr_playbooks/mcp_server/_sim_fixtures.py``) encode a C2 investigation whose values
 are cross-referenced by construction (``_C2_IP`` shows up in
@@ -59,7 +59,7 @@ def _install_sim_bridge() -> None:
     te._CONFIGURED_CACHE["ts"] = 0.0
 
 
-# Each scenario is an ordered list of (connector, op, params, confirm) — exactly
+# Each scenario is an ordered list of (connector, op, params, confirm) -- exactly
 # what an analyst would pivot through. Only SIM-covered ops are used.
 _SCENARIOS: dict[str, list[tuple[str, str, dict[str, Any], bool]]] = {
     # Full C2 containment: incident → events → enrich the external IP and the
@@ -88,7 +88,7 @@ _SCENARIOS: dict[str, list[tuple[str, str, dict[str, Any], bool]]] = {
     # B4 triage→build: the live capability gate, offline. Mirrors the
     # `b4_triage_build` chat chain (scripts/_b4_chain.json on the connector):
     # triage an alert, enrich the external source IP against EVERY configured
-    # threat-intel connector, then stage containment on the malicious IP — the
+    # threat-intel connector, then stage containment on the malicious IP -- the
     # exact trace the connector compiles to prove build_fidelity
     # (action_coverage 1.0 + grounding 1.0). Pins that chain so a wiring or
     # staged-action regression surfaces here without a live box / Anthropic.
@@ -107,7 +107,7 @@ _SCENARIOS: dict[str, list[tuple[str, str, dict[str, Any], bool]]] = {
 def build_trace(scenario: str) -> str:
     """Replay one scenario through run_op (sim) with the recorder on; return the
     trace JSON. Raises if an op didn't execute cleanly (a broken sim fixture or a
-    preflight regression — we want that to fail loudly, not bake a bad fixture)."""
+    preflight regression -- we want that to fail loudly, not bake a bad fixture)."""
     from fsr_playbooks.agent import skill_trace as st
     from fsr_playbooks.mcp_server import tools_execution as te
 
@@ -153,7 +153,7 @@ def assert_cross_step_coincidence(trace_json: str) -> None:
     if not matched:
         raise RuntimeError(
             f"no cross-step coincidence: none of the containment params "
-            f"{list(params.values())} appear in any prior op output — fixture "
+            f"{list(params.values())} appear in any prior op output -- fixture "
             "would not exercise value-match wiring")
 
 

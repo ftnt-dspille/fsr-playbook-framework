@@ -1,5 +1,5 @@
 /**
- * Jinja filter signature library — drives three features:
+ * Jinja filter signature library -- drives three features:
  *   * inline completion after `|`
  *   * hover + signature-help popups
  *   * the Filter Library palette (search by name / description, grouped

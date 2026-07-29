@@ -1,4 +1,4 @@
-"""ConnectorArgsMixin — resolving connector and workflow reference arguments."""
+"""ConnectorArgsMixin -- resolving connector and workflow reference arguments."""
 from __future__ import annotations
 
 import difflib
@@ -30,11 +30,11 @@ _UUID_RE = re.compile(
 # Observed-type validators (Tier 2.3). Each returns True iff the value
 # is acceptable under that type. All accept native Python types straight
 # through and fall back to coercion attempts on strings. None of them
-# allocate beyond what Python's stdlib already costs — they run per
+# allocate beyond what Python's stdlib already costs -- they run per
 # param at compile time, so they need to stay cheap.
 
 _URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s]+$")
-# Pragmatic email regex — RFC 5322 is too permissive to be useful as a
+# Pragmatic email regex -- RFC 5322 is too permissive to be useful as a
 # *typo* check, which is the goal here. The pattern matches the
 # overwhelming-majority "local@host.tld" shape; anything weirder is
 # unlikely to be intentional in a connector param.
@@ -64,7 +64,7 @@ def _is_iso8601(v) -> bool:
 
     `fromisoformat` covers the standard variants that FSR connectors
     accept. Native datetime/date objects pass through. Epoch numbers
-    are *not* accepted here — those have their own observed_type
+    are *not* accepted here -- those have their own observed_type
     (`epoch_seconds` / `epoch_millis`); mixing them would dilute the
     diagnostic value.
     """
@@ -85,7 +85,7 @@ def _is_iso8601(v) -> bool:
 def _is_json_object(v) -> bool:
     """True if v is a dict (or a string that parses to a dict).
 
-    Connector params widget-typed `json` accept either form on the wire —
+    Connector params widget-typed `json` accept either form on the wire --
     the FSR runtime json.loads strings before passing through. List-of-
     items is handled separately via the `json_array` observed_type.
     """
@@ -152,7 +152,7 @@ def _param_target_observed_type(
 
 # Pairs where Tier 3's inferred terminal type is *acceptable* for the
 # param's target type even when not byte-identical. The resolver runs
-# in "claim mismatch" mode — silence is acceptance — so we only need
+# in "claim mismatch" mode -- silence is acceptance -- so we only need
 # to encode looseness, not strict equality.
 _COMPATIBLE_PAIRS: set[tuple[str, str]] = {
     ("int", "float"),       # FSR float fields accept ints
@@ -175,7 +175,7 @@ def _types_compatible(inferred: str, target: str) -> bool:
     The exact-match case is the common one (`| int` into integer widget).
     The `_COMPATIBLE_PAIRS` table covers the looseness FSR's runtime
     actually accepts (numeric promotion, str-of-anything passing
-    through). When in doubt, return True — false positives waste the
+    through). When in doubt, return True -- false positives waste the
     agent's loop budget.
     """
     if inferred == target:
@@ -188,7 +188,7 @@ def _types_compatible(inferred: str, target: str) -> bool:
 def _coerces_to_int(v) -> bool:
     """True if value is something the FSR runtime can pass to int().
     Native ints (excluding bool, which is treated separately) pass; bare
-    strings pass only if int(str) succeeds. Floats are rejected — author
+    strings pass only if int(str) succeeds. Floats are rejected -- author
     likely meant a decimal-typed param if they wrote 1.5."""
     if isinstance(v, bool):
         return False
@@ -392,7 +392,7 @@ class ConnectorArgsMixin:
                     code=ErrorCode.BAD_VALUE,
                     message=(
                         f"connector params {', '.join(repr(k) for k in lifted)} "
-                        f"were at `arguments:` top level — lifted into "
+                        f"were at `arguments:` top level -- lifted into "
                         f"`arguments.params:` (write them there directly)"
                     ),
                     path=f"{path}.arguments",
@@ -418,7 +418,7 @@ class ConnectorArgsMixin:
                 errors.append(CompileError(
                     code=ErrorCode.UNKNOWN_PARAM,
                     message=(
-                        f"no param schema in store for {connector}.{operation} — "
+                        f"no param schema in store for {connector}.{operation} -- "
                         f"params passed through unvalidated"
                     ),
                     path=f"{path}.arguments.params",
@@ -529,7 +529,7 @@ class ConnectorArgsMixin:
                 # validate the chain's terminal type against the param's
                 # target type without resolving the expression. Skip the
                 # static literal checks below either way for Jinja values
-                # — those are still resolved at runtime.
+                # -- those are still resolved at runtime.
                 if isinstance(p_val, str) and (
                         "{{" in p_val or "{%" in p_val):
                     if "{%" not in p_val:
@@ -539,7 +539,7 @@ class ConnectorArgsMixin:
                         )
                         # Tier 3.1: chain-internal validation. Catches
                         # bugs like `| int | upper` where the agent
-                        # mixed up the filter order — the integer
+                        # mixed up the filter order -- the integer
                         # output can't feed `upper`'s string input.
                         expr_inner = extract_pure_jinja(p_val)
                         if expr_inner is not None:
@@ -621,7 +621,7 @@ class ConnectorArgsMixin:
                 # Tier 2.3: observed_type validators for types Tier 1's
                 # widget pass doesn't cover (ipv4 / url / email /
                 # iso8601 / json_object / json_array). Only fires on
-                # `text`-widget params that the type probe lifted —
+                # `text`-widget params that the type probe lifted --
                 # numeric/bool/picklist widgets are already handled
                 # above.
                 elif ptype_low in {"text", "textarea", "richtext"}:
@@ -672,7 +672,7 @@ class ConnectorArgsMixin:
         # an empty list (observed in live exports).
         if "step_variables" not in a:
             a["step_variables"] = []
-        # Tenant/agent picker — false unless the playbook author wires a
+        # Tenant/agent picker -- false unless the playbook author wires a
         # multi-tenant config.
         if "pickFromTenant" not in a:
             a["pickFromTenant"] = False
@@ -684,12 +684,12 @@ class ConnectorArgsMixin:
         # recorded trace), which is what agent-bound connectors require. For
         # hand-authored steps that omit it (or explicitly pass `config: ""` to
         # mean "use the default"), fill the connector's default config UUID from
-        # the warmed `connector_configs` catalog table — so the step opens in
+        # the warmed `connector_configs` catalog table -- so the step opens in
         # the SOAR UI with a concrete configuration pinned and the playbook's
         # step state doesn't change on save. When the catalog has no config
         # for the connector (unwarmed slim DB, or the connector isn't configured
         # on the box), fall back to the `""` sentinel ("use the connector's
-        # default config") — the original behavior — so a portable/library
+        # default config") -- the original behavior -- so a portable/library
         # playbook compiled offline stays config-free.
         if not a.get("config"):
             cid = self.resolve_config_id(connector)
@@ -702,10 +702,10 @@ class ConnectorArgsMixin:
         """Validate workflow_reference (call-another-playbook) step arguments.
 
         Two ways to express the target in YAML:
-          - `target: <playbook_name>`  — looked up in same collection;
+          - `target: <playbook_name>`  -- looked up in same collection;
             emitter rewrites to /api/3/workflows/<uuid> via deterministic
             UUID synthesis.
-          - `workflowReference: /api/3/workflows/<uuid>` — pass-through for
+          - `workflowReference: /api/3/workflows/<uuid>` -- pass-through for
             cross-collection references (we can't validate further).
 
         Caller's `key: value` keys are validated against the
@@ -760,18 +760,18 @@ class ConnectorArgsMixin:
         if target_name:
             target_pb = pb_by_name.get(target_name)
             if target_pb is None:
-                # Check if target is a UUID — cross-collection reference.
+                # Check if target is a UUID -- cross-collection reference.
                 # Accept it and let the emitter expand to /api/3/workflows/<uuid>.
                 # Parameter validation is skipped (can't introspect the target
                 # playbook's parameters from another collection offline).
                 if _UUID_RE.match(str(target_name)):
-                    # Cross-collection UUID reference — can't introspect the
+                    # Cross-collection UUID reference -- can't introspect the
                     # target playbook's parameters offline; accept and let
                     # the emitter expand to /api/3/workflows/<uuid>.
                     return
                 sug = difflib.get_close_matches(target_name, list(pb_by_name), n=1, cutoff=0.6)
                 errors.append(CompileError(
-                    code=ErrorCode.UNKNOWN_NEXT_STEP,  # close enough — unknown ref
+                    code=ErrorCode.UNKNOWN_NEXT_STEP,  # close enough -- unknown ref
                     message=f"target playbook {target_name!r} not found in this collection",
                     path=f"{path}.arguments.target",
                     near=sug[0] if sug else None,

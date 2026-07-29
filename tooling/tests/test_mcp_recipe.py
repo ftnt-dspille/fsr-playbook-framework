@@ -77,7 +77,7 @@ def stub_generators(monkeypatch):
 @pytest.fixture
 def isolated_recipes_db(tmp_path, monkeypatch):
     """Point the MCP tool at a throwaway DB with just the recipes
-    table — keeps the suite from polluting the real reference DB."""
+    table -- keeps the suite from polluting the real reference DB."""
     db = tmp_path / "ref.db"
     with sqlite3.connect(db) as conn:
         conn.execute("""

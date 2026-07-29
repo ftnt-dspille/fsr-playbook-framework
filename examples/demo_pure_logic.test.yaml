@@ -1,17 +1,17 @@
 # Test sidecar for demo_pure_logic.yaml. Driven by `fsrpb e2e run`.
 #
 # Schema:
-#   fixture        — relative path to the YAML to compile + push
-#   playbook       — playbook name within the collection to trigger
-#   input          — parameter values for the run. Riden into the trigger
+#   fixture        -- relative path to the YAML to compile + push
+#   playbook       -- playbook name within the collection to trigger
+#   input          -- parameter values for the run. Riden into the trigger
 #                    body's `request.data`; FSR maps request.data.<k> →
 #                    vars.input.params.<k> at runtime.
-#   timeout_s      — overall budget for the run to reach a terminal status
+#   timeout_s      -- overall budget for the run to reach a terminal status
 #   expects:
-#     status       — required workflow.status (default: finished)
-#     vars         — exact-match dict checked against env.vars from get_run_env
-#     steps        — per-step assertions: name → {status?, result_contains?}
-#   cleanup        — true (default) to hard-purge the collection at the end
+#     status       -- required workflow.status (default: finished)
+#     vars         -- exact-match dict checked against env.vars from get_run_env
+#     steps        -- per-step assertions: name → {status?, result_contains?}
+#   cleanup        -- true (default) to hard-purge the collection at the end
 
 fixture: examples/demo_pure_logic.yaml
 playbook: Route Severity Pure

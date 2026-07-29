@@ -1,7 +1,7 @@
 """The enhance-mode write path: verified bytes are the delivered bytes.
 
 Enhance mode had no write path at all. `verify_enhancement` returned
-`ready_to_push: True` and then nothing happened — the only way an edit could
+`ready_to_push: True` and then nothing happened -- the only way an edit could
 reach the analyst's playbook was a regex in the widget scraping the LAST
 ```yaml fence out of the model's prose. Live, that lost the edit outright: the
 model verified one document and then re-typed three subtly different ones into
@@ -85,7 +85,7 @@ def test_offer_carries_the_exact_verified_bytes():
 
 
 def test_offer_takes_no_yaml_parameter():
-    """Structural guard — the failure mode returns the moment a `yaml`-ish
+    """Structural guard -- the failure mode returns the moment a `yaml`-ish
     parameter exists to pass a re-typed document through."""
     import inspect
     params = set(inspect.signature(emit_enhancement_offer).parameters)
@@ -107,7 +107,7 @@ def test_unknown_handle_is_a_typed_refusal_not_a_fallback():
     """A miss must never degrade into 'apply whatever the model has'.
 
     Cold worker, evicted entry, or a hallucinated id all land here. The only
-    correct answer is 'go re-verify' — the moment this returns a card built
+    correct answer is 'go re-verify' -- the moment this returns a card built
     from anything else, the binding is decorative.
     """
     out = emit_enhancement_offer(id="e1", summary="s", verified_id="0" * 16)
@@ -121,7 +121,7 @@ def test_a_retyped_document_cannot_be_delivered():
     """The live regression, expressed as a test.
 
     The model verifies AFTER, then "cleanly re-renders" it. The fingerprint of
-    that text is not a registered handle, so there is no way to ship it — which
+    that text is not a registered handle, so there is no way to ship it -- which
     is the difference between this design and one that merely asks the model
     not to re-type.
     """

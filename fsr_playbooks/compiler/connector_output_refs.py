@@ -1,26 +1,26 @@
 """Compile-time normalization of connector-output Jinja references.
 
-A connector step's result is an ENVELOPE — `{data: <op output>, status,
-message, operation}` — so an op output field is reached at
+A connector step's result is an ENVELOPE -- `{data: <op output>, status,
+message, operation}` -- so an op output field is reached at
 `vars.steps.<step>.data.<field>`, NOT `vars.steps.<step>.<field>`. The build
 model frequently drops the `.data` (writing `vars.steps.Convert.minutes`) or
-substitutes an alias (`.result`, `.outputs.result`) — all of which render EMPTY
+substitutes an alias (`.result`, `.outputs.result`) -- all of which render EMPTY
 at runtime. The S3 build-persona eval caught this on a live box: the connector
 op ran fine, but the record field it fed was blank.
 
 Because the envelope is a fixed, known shape, the fix is deterministic: rewrite
 the reference to the `.data.<field>` path whenever the target field is
 unambiguous. This is warn-and-fix (never blocks), mirroring the parser's
-step-key hoists and the decision-`next:` auto-synthesis — mechanical translation
+step-key hoists and the decision-`next:` auto-synthesis -- mechanical translation
 over prompt rules, which the box's gpt-4.1-class model follows far more reliably
 than a grounding sentence (a prose fix moved the eval only 0→1/3).
 
 Shape source, most-accurate first (per the "static schema is often incomplete;
 execution history is more accurate" reality):
 
-  1. the grounded-shape store — the op's output as MEASURED from a real run
+  1. the grounded-shape store -- the op's output as MEASURED from a real run
      (`grounded_shapes.json`, populated by the safe live-probe / ground CLI);
-  2. the static `output_schema` in the operations table — a last resort.
+  2. the static `output_schema` in the operations table -- a last resort.
 
 Only the `.data` *subkeys* are needed (to know the field names under the
 envelope); the envelope wrapper itself is universal and assumed.
@@ -36,14 +36,14 @@ from typing import Any, Optional
 from .errors import CompileError, ErrorCode
 from .ir import Collection
 
-# The connector envelope's own top-level keys — a reference whose first segment
+# The connector envelope's own top-level keys -- a reference whose first segment
 # is one of these is already correct and left untouched. Note `result` is NOT
 # here: FSR does not expose `.result` on a connector step, so `.result` is one of
 # the broken forms this pass repairs (the S3 run-3 failure).
 _ENVELOPE_KEYS = {"data", "status", "message", "operation"}
-# Truly universal per-step keys FSR adds regardless of handler — never rewrite.
+# Truly universal per-step keys FSR adds regardless of handler -- never rewrite.
 _UNIVERSAL_KEYS = {"id", "name", "uuid", "@id", "@type", "step_id"}
-# Aliases the model reaches for when it means "the op's output" — safe to
+# Aliases the model reaches for when it means "the op's output" -- safe to
 # collapse to `.data.<field>` only when the op has exactly one output field.
 _RESULT_ALIASES = {"result", "output", "outputs", "response", "results"}
 
@@ -62,7 +62,7 @@ def _store_data_subkeys(db_path: Path, connector: str, op: str) -> Optional[set[
         from .grounded_shapes import GroundedShapeStore
         store = GroundedShapeStore.load(Path(db_path).parent / "grounded_shapes.json")
         shape = store.shape_for(connector, op)
-    except Exception:  # noqa: BLE001 — never let grounding break a compile
+    except Exception:  # noqa: BLE001 -- never let grounding break a compile
         return None
     if not isinstance(shape, dict):
         return None
@@ -75,7 +75,7 @@ def _store_data_subkeys(db_path: Path, connector: str, op: str) -> Optional[set[
 
 
 def _schema_data_subkeys(conn: sqlite3.Connection, connector: str, op: str) -> Optional[set[str]]:
-    """`.data` subkeys from the static `output_schema` — a last resort (these
+    """`.data` subkeys from the static `output_schema` -- a last resort (these
     schemas are frequently incomplete or absent)."""
     try:
         row = conn.execute(
@@ -200,7 +200,7 @@ def _rewrite_string(text, step, steps_map, cache, db_path, conn, fixes) -> str:
 
         # PREFIX form first: `steps.<step>...` with the `vars.` dropped. FSR
         # exposes step output only under `vars`, so a bare `steps.` renders
-        # EMPTY — the same silent-blank failure as a missing `.data`, and an
+        # EMPTY -- the same silent-blank failure as a missing `.data`, and an
         # observed S3 authoring error.
         #
         # It must be normalized BEFORE the alias/bare-field passes below, both
@@ -209,7 +209,7 @@ def _rewrite_string(text, step, steps_map, cache, db_path, conn, fixes) -> str:
         #
         # This is also why the reference lint never flagged it: every check in
         # validator.py anchors on `\bvars\.steps\.`, so omitting `vars.` makes
-        # the mistake invisible to the machinery built to catch it — the one
+        # the mistake invisible to the machinery built to catch it -- the one
         # error that consists of not matching the anchor.
         def _prefix_sub(mobj):
             fixes.append(CompileError(
@@ -241,7 +241,7 @@ def _rewrite_string(text, step, steps_map, cache, db_path, conn, fixes) -> str:
                     path=f"{step.id}",
                 ))
                 return f"vars.steps.{sname}.data.{field}"
-            return mobj.group(0)  # ambiguous — leave for the reference lint
+            return mobj.group(0)  # ambiguous -- leave for the reference lint
 
         text = re.sub(
             rf"vars\.steps\.{s_re}\.({'|'.join(_RESULT_ALIASES)})\b(?:\.[A-Za-z_][A-Za-z0-9_]*)*",
@@ -263,7 +263,7 @@ def _rewrite_string(text, step, steps_map, cache, db_path, conn, fixes) -> str:
                     path=f"{step.id}",
                 ))
                 return f"vars.steps.{sname}.data.{first}"
-            return mobj.group(0)  # not a known field — don't guess
+            return mobj.group(0)  # not a known field -- don't guess
 
         text = re.sub(rf"vars\.steps\.{s_re}\.([A-Za-z_][A-Za-z0-9_]*)",
                       _field_sub, text)

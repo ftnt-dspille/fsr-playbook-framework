@@ -2,43 +2,43 @@
 
 Stages analyzed: 9 (3 producer, 6 consumer)
 
-## PHANTOM READS — read by a consumer, written by no stage
+## PHANTOM READS -- read by a consumer, written by no stage
 _The F3 signature: the reader is looking at a key nothing produces._
 
-- `apply_async` — read by: emitter.py, typed_walker.py
-- `connector_name` — read by: typed_walker.py
-- `inputs` — read by: typed_walker.py
-- `mock_result` — read by: emitter.py
-- `module` — read by: typed_walker.py
-- `modules` — read by: typed_walker.py
-- `op` — read by: typed_walker.py
-- `op_name` — read by: typed_walker.py
-- `target` — read by: emitter.py, typed_walker.py
-- `vars` — read by: typed_walker.py
-- `when` — read by: emitter.py
+- `apply_async` -- read by: emitter.py, typed_walker.py
+- `connector_name` -- read by: typed_walker.py
+- `inputs` -- read by: typed_walker.py
+- `mock_result` -- read by: emitter.py
+- `module` -- read by: typed_walker.py
+- `modules` -- read by: typed_walker.py
+- `op` -- read by: typed_walker.py
+- `op_name` -- read by: typed_walker.py
+- `target` -- read by: emitter.py, typed_walker.py
+- `vars` -- read by: typed_walker.py
+- `when` -- read by: emitter.py
 
-## DEAD WRITES — written by a producer, read by no other stage
+## DEAD WRITES -- written by a producer, read by no other stage
 _Authored data that may never reach a consumer (silent-drop candidate)._
 
-- `__triggerLimit` — written by: resolver/normalizers.py
-- `authentication_methods` — written by: resolver/normalizers.py
-- `collection` — written by: resolver/normalizers.py
-- `config` — written by: resolver/connector_args.py, resolver/normalizers.py
-- `content` — written by: resolver/normalizers.py
-- `displayConditions` — written by: resolver/normalizers.py
-- `email_notification` — written by: resolver/normalizers.py
-- `executeButtonText` — written by: resolver/normalizers.py
-- `from_str` — written by: resolver/normalizers.py
-- `is_approval` — written by: resolver/normalizers.py
-- `noRecordExecution` — written by: resolver/normalizers.py
-- `operationTitle` — written by: resolver/connector_args.py
-- `pickFromTenant` — written by: parser.py, resolver/connector_args.py
-- `showToasterMessage` — written by: resolver/normalizers.py
-- `singleRecordExecution` — written by: resolver/normalizers.py
-- `step_variables` — written by: parser.py, resolver/connector_args.py, resolver/normalizers.py
-- `triggerOnReplicate` — written by: resolver/normalizers.py
-- `triggerOnSource` — written by: resolver/normalizers.py
-- `version` — written by: resolver/connector_args.py
+- `__triggerLimit` -- written by: resolver/normalizers.py
+- `authentication_methods` -- written by: resolver/normalizers.py
+- `collection` -- written by: resolver/normalizers.py
+- `config` -- written by: resolver/connector_args.py, resolver/normalizers.py
+- `content` -- written by: resolver/normalizers.py
+- `displayConditions` -- written by: resolver/normalizers.py
+- `email_notification` -- written by: resolver/normalizers.py
+- `executeButtonText` -- written by: resolver/normalizers.py
+- `from_str` -- written by: resolver/normalizers.py
+- `is_approval` -- written by: resolver/normalizers.py
+- `noRecordExecution` -- written by: resolver/normalizers.py
+- `operationTitle` -- written by: resolver/connector_args.py
+- `pickFromTenant` -- written by: parser.py, resolver/connector_args.py
+- `showToasterMessage` -- written by: resolver/normalizers.py
+- `singleRecordExecution` -- written by: resolver/normalizers.py
+- `step_variables` -- written by: parser.py, resolver/connector_args.py, resolver/normalizers.py
+- `triggerOnReplicate` -- written by: resolver/normalizers.py
+- `triggerOnSource` -- written by: resolver/normalizers.py
+- `version` -- written by: resolver/connector_args.py
 
 ## Key x stage matrix (R=read, W=write)
 

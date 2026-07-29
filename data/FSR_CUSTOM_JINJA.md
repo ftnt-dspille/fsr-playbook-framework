@@ -18,7 +18,7 @@ summary: 170+ filters / 15 globals / 39 tests + signatures introspected from FSR
 
 Generated from `store/fsr_reference.db` by `python/store/export_jinja_cheatsheet.py`. Source-of-truth is the live FSR appliance via `inspect.signature()` introspection on the workflow service's Jinja Environment (`backend_introspect` method).
 
-**These filters / globals / tests are FortiSOAR-specific** (modules `workflow.*` or `sealab.*`). They are *not* in stock Jinja2 or Ansible. Reach for these first when writing FSR playbook Jinja — they shortcut a lot of common date / IOC / connector-config patterns.
+**These filters / globals / tests are FortiSOAR-specific** (modules `workflow.*` or `sealab.*`). They are *not* in stock Jinja2 or Ansible. Reach for these first when writing FSR playbook Jinja -- they shortcut a lot of common date / IOC / connector-config patterns.
 
 For the full 170-filter / 15-global / 39-test catalog, query `fsr_reference.db` directly:
 
@@ -28,9 +28,9 @@ SELECT name, signature, module FROM jinja_globals ORDER BY name;
 SELECT name, signature, module FROM jinja_tests   ORDER BY name;
 ```
 
-## Globals — invoked as `name(args)`, no pipe (5)
+## Globals -- invoked as `name(args)`, no pipe (5)
 
-Globals are callables in scope inside any `{{ ... }}`. They are *not* piped — call them directly.
+Globals are callables in scope inside any `{{ ... }}`. They are *not* piped -- call them directly.
 
 ### `currentDateMinus(days)`
 _sealab.jinja_
@@ -60,12 +60,12 @@ _sealab.jinja_
 _workflow.jinja_
 
 **Parameters:**
-- `years` — default: `0`
-- `months` — default: `0`
-- `days` — default: `0`
-- `hours` — default: `0`
-- `minutes` — default: `0`
-- `seconds` — default: `0`
+- `years` -- default: `0`
+- `months` -- default: `0`
+- `days` -- default: `0`
+- `hours` -- default: `0`
+- `minutes` -- default: `0`
+- `seconds` -- default: `0`
 
 **Usage:** `{{ getRelativeDate(...) }}`
 
@@ -78,7 +78,7 @@ _sealab.jinja_
 
 ---
 
-## Filters — invoked as `value | name(args)` (27)
+## Filters -- invoked as `value | name(args)` (27)
 
 ### `count_occurrence(data)`
 _workflow.jinja_
@@ -134,10 +134,10 @@ _workflow.jinja_
 **Parameters:**
 - `context`
 - `iri`
-- `indicator_types` — default: `None`
-- `indicator_reputations` — default: `None`
-- `indicator_values` — default: `None`
-- `include_related_records` — default: `False`
+- `indicator_types` -- default: `None`
+- `indicator_reputations` -- default: `None`
+- `indicator_values` -- default: `None`
+- `include_related_records` -- default: `False`
 
 **Usage:** `{{ value | find_indicators }}`
 
@@ -158,12 +158,12 @@ _workflow.jinja_
 _workflow.jinja_
 
 **Parameters:**
-- `years` — default: `0`
-- `months` — default: `0`
-- `days` — default: `0`
-- `hours` — default: `0`
-- `minutes` — default: `0`
-- `seconds` — default: `0`
+- `years` -- default: `0`
+- `months` -- default: `0`
+- `days` -- default: `0`
+- `hours` -- default: `0`
+- `minutes` -- default: `0`
+- `seconds` -- default: `0`
 
 **Usage:** `{{ value | getRelativeDate }}`
 
@@ -205,7 +205,7 @@ _workflow.jinja_
 
 **Parameters:**
 - `record_iri`
-- `base_uri` — default: `''`
+- `base_uri` -- default: `''`
 
 **Usage:** `{{ value | iriToLink }}`
 
@@ -216,11 +216,11 @@ _workflow.jinja_
 
 **Parameters:**
 - `data`
-- `row_fields` — default: `None`
-- `template` — default: `'Stylized with row selection'`
-- `display` — default: `'Horizontal'`
-- `styling` — default: `False`
-- `table_style` — default: `None`
+- `row_fields` -- default: `None`
+- `template` -- default: `'Stylized with row selection'`
+- `display` -- default: `'Horizontal'`
+- `styling` -- default: `False`
+- `table_style` -- default: `None`
 
 **Usage:** `{{ value | json2html }}`
 
@@ -232,7 +232,7 @@ _workflow.jinja_
 **Parameters:**
 - `record_iri`
 - `module`
-- `selected_fields` — default: `[]`
+- `selected_fields` -- default: `[]`
 
 **Usage:** `{{ value | loadRelationships }}`
 
@@ -242,8 +242,8 @@ _workflow.jinja_
 _workflow.jinja_
 
 **Parameters:**
-- `data` — type: `str`
-- `log_type` — type: `str`
+- `data` -- type: `str`
+- `log_type` -- type: `str`
 
 **Usage:** `{{ value | logParse }}`
 
@@ -308,8 +308,8 @@ _workflow.jinja_
 **Parameters:**
 - `context`
 - `name`
-- `value` — default: `None`
-- `key` — default: `None`
+- `value` -- default: `None`
+- `key` -- default: `None`
 
 **Usage:** `{{ value | picklist }}`
 

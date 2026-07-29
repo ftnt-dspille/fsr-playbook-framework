@@ -2,13 +2,13 @@
 """Seed a NOC alert into FortiSOAR from the scenario manifest.
 
 Reads ``scenario["alert"]`` from ``fsr_playbooks/mcp_server/noc_scenarios.json`` and
-POSTs it to the **alerts** module (``/api/3/alerts`` on this box — confirmed
+POSTs it to the **alerts** module (``/api/3/alerts`` on this box -- confirmed
 2026-06-10; see HANDOFF). Picklist-typed fields (severity, type, status, source)
 are resolved name -> IRI via ``picklists.resolve_module_fields`` when live.
 
 Pairs with:
-  * ``gen_fs_recipes.py`` — stands up the matching FS fault so FAZ/FMG reflect it.
-  * the SOC Assistant widget — open it on the printed IRI / deep-link to triage.
+  * ``gen_fs_recipes.py`` -- stands up the matching FS fault so FAZ/FMG reflect it.
+  * the SOC Assistant widget -- open it on the printed IRI / deep-link to triage.
 
 Usage:
     python python/seed_noc_alert.py --scenario vpn_tunnel_down --dry-run

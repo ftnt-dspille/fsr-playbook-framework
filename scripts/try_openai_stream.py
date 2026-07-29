@@ -35,7 +35,7 @@ async def main() -> int:
     prompt = " ".join(sys.argv[1:]) or "List three colors, one per line."
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
-        print("OPENAI_API_KEY not set — point at OpenAI or a local /v1 endpoint.")
+        print("OPENAI_API_KEY not set -- point at OpenAI or a local /v1 endpoint.")
         return 2
     provider = OpenAIProvider(
         model=os.environ.get("OPENAI_MODEL") or "gpt-4o-mini",
@@ -75,7 +75,7 @@ async def main() -> int:
     if text_events >= 2:
         print(">> PASS: text streamed incrementally (live).")
         return 0
-    print(">> note: <2 text events — short answer or non-streaming endpoint; "
+    print(">> note: <2 text events -- short answer or non-streaming endpoint; "
           "check the offsets above.")
     return 0
 

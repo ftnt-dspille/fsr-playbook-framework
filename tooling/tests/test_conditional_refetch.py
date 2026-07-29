@@ -1,4 +1,4 @@
-"""Tier-2 conditional refetch — ``probes.common.conditional_refetch``.
+"""Tier-2 conditional refetch -- ``probes.common.conditional_refetch``.
 
 Drives the TTL short-circuit + ``If-None-Match`` 304/200 protocol against a
 mock client (no live SOAR). Verifies the ETag/``data_warmed_at`` bookkeeping in

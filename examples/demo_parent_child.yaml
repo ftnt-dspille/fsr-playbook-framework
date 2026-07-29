@@ -12,7 +12,7 @@ visible: true
 
 playbooks:
   - name: FSRPB Score Multiplier
-    description: Child — multiplies an input by 10. Returns via vars.product.
+    description: Child -- multiplies an input by 10. Returns via vars.product.
     is_active: true
     parameters: [base]
     steps:
@@ -25,7 +25,7 @@ playbooks:
         vars:
           product: "{{ (vars.input.params.base | int) * 10 }}"
   - name: FSRPB Parent Caller
-    description: Parent — calls Score Multiplier with base=7, expects product=70.
+    description: Parent -- calls Score Multiplier with base=7, expects product=70.
     is_active: true
     parameters: [base]
     steps:

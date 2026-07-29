@@ -112,8 +112,8 @@ PROBE_TABLES: dict[str, tuple[str, ...]] = {
     "probe_playbooks": ("step_types", "step_examples", "playbooks_seen", "recipes"),
     "probe_jinja_backend": ("jinja_globals", "jinja_tests"),
     "probe_step_handlers": ("step_handlers",),
-    # probe_playbook_constraints owns no permanent rows — only writes
-    # verification records — so it has an empty table tuple.
+    # probe_playbook_constraints owns no permanent rows -- only writes
+    # verification records -- so it has an empty table tuple.
     "probe_playbook_constraints": (),
     "probe_cleanup": (),
     "probe_jinja_corpus": ("jinja_expressions", "jinja_filter_usage"),
@@ -121,7 +121,7 @@ PROBE_TABLES: dict[str, tuple[str, ...]] = {
     "probe_op_safety": ("op_safety",),
     # probe_param_types UPDATEs columns on operation_params in place,
     # plus owns the param_type_probes ledger. We don't wipe the ledger
-    # on every run — Phase 2.2 re-runs are deliberately incremental.
+    # on every run -- Phase 2.2 re-runs are deliberately incremental.
     "probe_param_types": (),
 }
 
@@ -130,7 +130,7 @@ def wipe_probe_tables(conn: sqlite3.Connection, probe_name: str) -> None:
     for table in PROBE_TABLES[probe_name]:
         conn.execute(f"DELETE FROM {table}")
     # FTS rows tagged with kind owned by this probe get cleared by the probe
-    # itself when it rewrites them — keep that explicit, not magical here.
+    # itself when it rewrites them -- keep that explicit, not magical here.
 
 
 def record_verification(
@@ -144,7 +144,7 @@ def record_verification(
     """Record a verification fact.
 
     Reminder: anything sourced from a local file (rpm info.json, schema.json,
-    fsr-schema.ts, widget constants) is `status='seen'` — it does NOT count as
+    fsr-schema.ts, widget constants) is `status='seen'` -- it does NOT count as
     trusted. Only live_* / playbook_e2e methods with status='tested_pass' make
     an entity trusted in `v_verification_state`.
     """
@@ -181,29 +181,29 @@ def conditional_refetch(
 
     Returns ``(outcome, payload)``:
 
-    - ``("fresh", None)``      — within TTL; no request made.
-    - ``("unchanged", None)``  — TTL expired, server returned **304** (ETag
+    - ``("fresh", None)``      -- within TTL; no request made.
+    - ``("unchanged", None)``  -- TTL expired, server returned **304** (ETag
       matched). ``data_warmed_at`` is bumped (content is still current).
-    - ``("refreshed", body)``  — TTL expired, server returned **200**. The new
+    - ``("refreshed", body)``  -- TTL expired, server returned **200**. The new
       ETag (if any) is recorded and ``data_warmed_at`` bumped; the caller is
       responsible for writing ``body`` into the catalog tables.
-    - ``("error", message)``   — the request failed or returned an unexpected
+    - ``("error", message)``   -- the request failed or returned an unexpected
       status; nothing is written.
 
-    Pure protocol/bookkeeping — the caller owns per-collection table writes,
+    Pure protocol/bookkeeping -- the caller owns per-collection table writes,
     which differ by shape (picklists vs connector_configs vs …).
 
     **Live behavior on FortiSOAR 8.0 (probed 2026-07-02 on .159):** the 304
     ``unchanged`` path is effectively dead. FSR's Hydra collections
     (``picklist_names`` / ``teams`` / ``staging_model_metadatas``) return an
-    ``ETag`` but **do not honor ``If-None-Match``** — a conditional GET always
+    ``ETag`` but **do not honor ``If-None-Match``** -- a conditional GET always
     comes back 200 with the full body, so this helper records the (re-)fetched
     ETag + bumps ``data_warmed_at`` and returns ``"refreshed"``. The non-Hydra
     endpoints (``/api/integration/connectors/`` / ``/api/3/``) return no ETag at
     all. So on FSR today the only working arm is the TTL ``fresh``
     short-circuit, which trades freshness (a catalog warmed again within the TTL
     window skips the fetch and may miss a just-published picklist value / field)
-    for fewer requests — which is why the wiring stays **opt-in / default OFF**.
+    for fewer requests -- which is why the wiring stays **opt-in / default OFF**.
     If a future FSR version honors ``If-None-Match``, the 304 arm revives with no
     code change.
     """

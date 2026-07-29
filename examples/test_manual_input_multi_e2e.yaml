@@ -1,6 +1,6 @@
 collection: FSRPB Manual-Input Multi Test
 description: |
-  Stage 5 — a manual_input prompt authored in the FRIENDLY form (step-level
+  Stage 5 -- a manual_input prompt authored in the FRIENDLY form (step-level
   title/description/options/inputs), so it exercises the parser hoist + the
   resolver's friendly→canonical transform (the F3 path). It collects MULTIPLE
   typed fields, one of them REQUIRED, then a downstream set_variable step reads
@@ -18,7 +18,7 @@ playbooks:
         next: Collect
 
       - name: Collect
-        # Friendly authoring — the compiler hoists these step-level keys into
+        # Friendly authoring -- the compiler hoists these step-level keys into
         # arguments and expands `inputs:` into canonical inputVariables. A
         # non-empty, correctly-typed form on the appliance is the F3 proof.
         type: manual_input
@@ -32,7 +32,7 @@ playbooks:
           - {name: ticket_id, kind: text, label: "Ticket ID"}
 
       - name: Capture
-        # Read the resumed values back out — proves the responder's data
+        # Read the resumed values back out -- proves the responder's data
         # reached the run. Referenced as vars.steps.<step_name>.input.<name>.
         type: set_variable
         vars:

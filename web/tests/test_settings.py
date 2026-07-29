@@ -53,7 +53,7 @@ def test_clear_api_key_with_none():
 
 
 def test_empty_string_api_key_rejected():
-    """Empty strings are footguns — make the caller pass None to mean
+    """Empty strings are footguns -- make the caller pass None to mean
     'clear'. Stops a UI bug from silently wiping a working key."""
     with pytest.raises(ValueError):
         _settings.save_provider("anthropic", api_key="")
@@ -120,8 +120,8 @@ def test_secrets_get_set_delete_roundtrip():
 
 
 def test_secrets_delete_is_idempotent():
-    """Deleting a non-existent key shouldn't raise — UI flows assume
+    """Deleting a non-existent key shouldn't raise -- UI flows assume
     'delete' is safe even if there's nothing to delete."""
     s = secrets_store.get_secrets()
     s.delete("never-set")
-    s.delete("never-set")  # noqa — second call must not raise
+    s.delete("never-set")  # noqa -- second call must not raise

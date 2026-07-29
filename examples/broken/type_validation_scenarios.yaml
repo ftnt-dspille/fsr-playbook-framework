@@ -5,7 +5,7 @@
 #
 # Each step deliberately misuses one connector param so the resolver
 # fires exactly one diagnostic. Anything that compiles clean here is
-# either (a) a check we don't have yet, or (b) a regression — re-look.
+# either (a) a check we don't have yet, or (b) a regression -- re-look.
 
 collection: TypeValidationScenarios
 playbooks:
@@ -68,7 +68,7 @@ playbooks:
         next: scen_jinja_skip
 
       # ----- Tier 1: Jinja value bypasses static check ------------
-      # No diagnostic should fire — the value is deferred to runtime.
+      # No diagnostic should fire -- the value is deferred to runtime.
       - name: scen_jinja_skip
         type: connector
         connector: aws-access-analyzer
@@ -101,7 +101,7 @@ playbooks:
       # abuseipdb.ip_lookup.ip is widget-typed `text` but has been
       # marked observed_type='ipv4' (seeded for this demo; in
       # production the live probe lifts this). The resolver now
-      # rejects non-IPv4 literals — agents that pass 'not-an-ip' or
+      # rejects non-IPv4 literals -- agents that pass 'not-an-ip' or
       # a hostname get a compile-time diagnostic instead of a runtime
       # connector failure.
       - name: scen_ipv4_bad
@@ -113,7 +113,7 @@ playbooks:
           days: 30
         next: scen_ipv4_jinja_skip
 
-      # Jinja-templated ipv4 value: deferred to runtime — no diagnostic.
+      # Jinja-templated ipv4 value: deferred to runtime -- no diagnostic.
       - name: scen_ipv4_jinja_skip
         type: connector
         connector: abuseipdb

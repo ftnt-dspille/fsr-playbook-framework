@@ -1,6 +1,6 @@
 """Registry binding a verification verdict to the exact bytes it blessed.
 
-Why this exists — a live failure, reproduced end to end on a real appliance.
+Why this exists -- a live failure, reproduced end to end on a real appliance.
 The analyst asked the agent to add a `manual_input` step to the playbook they
 had open. The agent called `verify_enhancement`, got back
 `ready_to_push: True`, and then **re-typed the playbook into chat three times**,
@@ -13,7 +13,7 @@ each rendering different from the verified one and from each other:
 
 The enhance path's only delivery channel is a regex in the widget that scrapes
 the LAST ```yaml fence out of the model's prose. So the analyst's Save applied
-fence #3 — YAML that no gate had ever seen — while the transcript recorded a
+fence #3 -- YAML that no gate had ever seen -- while the transcript recorded a
 green verification of something else entirely. From the analyst's seat the step
 simply never landed.
 
@@ -23,10 +23,10 @@ takes that id and *cannot* take YAML. The model never gets a chance to re-type
 the document, so verified and delivered are the same bytes by construction.
 
 Process-local and bounded. A verified id is only meaningful inside the turn
-that produced it — the connector runs the tool loop in-process, same as
+that produced it -- the connector runs the tool loop in-process, same as
 `agent.skill_trace`'s active-trace scope. A cold worker (or a connector
 upgrade, which recycles workers) simply misses, and a miss is a loud, typed
-`unknown_verified_id` telling the caller to re-verify — never a silent
+`unknown_verified_id` telling the caller to re-verify -- never a silent
 fallback to unverified text, which is the whole failure mode being closed.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ def remember(after_yaml: str, **meta: Any) -> str:
 
     `meta` rides along for the offer card to display (diff_summary, the
     before-fingerprint, warnings the analyst should still see). Callers should
-    only call this when the verdict actually passed — an id is a claim that
+    only call this when the verdict actually passed -- an id is a claim that
     these exact bytes cleared the gate.
     """
     vid = fingerprint(after_yaml)

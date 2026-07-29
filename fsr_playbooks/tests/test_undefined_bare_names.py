@@ -1,10 +1,10 @@
-"""Phase 0 (DYNAMIC_JINJA_RENDER_PLAN) — undefined bare-name detection via
+"""Phase 0 (DYNAMIC_JINJA_RENDER_PLAN) -- undefined bare-name detection via
 Jinja AST.
 
 The typed walker now parses each Jinja template and walks the AST for
 ``Name`` nodes with ``ctx='load'`` that aren't in the known set (Jinja2
 builtins + FSR globals + locally-defined names).  This catches
-``{{ items | length }}`` where ``items`` is never defined — the existing
+``{{ items | length }}`` where ``items`` is never defined -- the existing
 ``_check_undefined_vars`` only matches ``vars.<name>`` regex patterns.
 """
 from fsr_playbooks._db import default_db_path
@@ -31,25 +31,25 @@ def test_undefined_bare_name_caught():
 
 
 def test_vars_reference_not_flagged():
-    """``{{ vars.count | length }}`` — ``vars`` is always known."""
+    """``{{ vars.count | length }}`` -- ``vars`` is always known."""
     result = find_undefined_bare_names("{{ vars.count | length }}")
     assert result == []
 
 
 def test_known_global_not_flagged():
-    """``{{ arrow.now() }}`` — ``arrow`` is an FSR global."""
+    """``{{ arrow.now() }}`` -- ``arrow`` is an FSR global."""
     result = find_undefined_bare_names("{{ arrow.now() }}")
     assert result == []
 
 
 def test_jinja2_builtin_not_flagged():
-    """``{{ range(5) }}`` — ``range`` is a Jinja2 built-in."""
+    """``{{ range(5) }}`` -- ``range`` is a Jinja2 built-in."""
     result = find_undefined_bare_names("{{ range(5) }}")
     assert result == []
 
 
 def test_loop_variable_not_flagged():
-    """``{% for item in vars.steps.X.results %}{{ item }}{% endfor %}`` —
+    """``{% for item in vars.steps.X.results %}{{ item }}{% endfor %}`` --
     ``item`` is a loop variable, not undefined."""
     tpl = "{% for item in vars.steps.X.results %}{{ item }}{% endfor %}"
     result = find_undefined_bare_names(tpl)
@@ -57,14 +57,14 @@ def test_loop_variable_not_flagged():
 
 
 def test_set_variable_not_flagged():
-    """``{% set x = 42 %}{{ x }}`` — ``x`` is set-defined."""
+    """``{% set x = 42 %}{{ x }}`` -- ``x`` is set-defined."""
     tpl = "{% set x = 42 %}{{ x }}"
     result = find_undefined_bare_names(tpl)
     assert result == []
 
 
 def test_multiple_undefined_names():
-    """``{{ a + b }}`` — both ``a`` and ``b`` are undefined."""
+    """``{{ a + b }}`` -- both ``a`` and ``b`` are undefined."""
     result = find_undefined_bare_names("{{ a + b }}")
     names = [name for name, _ in result]
     assert "a" in names
@@ -72,7 +72,7 @@ def test_multiple_undefined_names():
 
 
 def test_dedup_same_name():
-    """``{{ items | length }} {{ items | upper }}`` — ``items`` reported once."""
+    """``{{ items | length }} {{ items | upper }}`` -- ``items`` reported once."""
     tpl = "{{ items | length }} {{ items | upper }}"
     result = find_undefined_bare_names(tpl)
     assert len(result) == 1

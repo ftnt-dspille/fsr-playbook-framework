@@ -8,10 +8,10 @@ byte-equality check. Output is a structured matrix the demo can publish as
 "LLM-agnostic by measurement, not claim."
 
 Sub-modules:
-  scoring   — pure scoring functions over a candidate YAML.
-  tasks     — declarative task fixtures (prompt + gold + assertions).
-  providers — pluggable model callables (anthropic, openai, lmstudio,
+  scoring   -- pure scoring functions over a candidate YAML.
+  tasks     -- declarative task fixtures (prompt + gold + assertions).
+  providers -- pluggable model callables (anthropic, openai, lmstudio,
               echo for hermetic testing).
-  harness   — task × model × score matrix runner.
+  harness   -- task × model × score matrix runner.
 """
 from __future__ import annotations

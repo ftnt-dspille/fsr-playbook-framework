@@ -90,7 +90,7 @@ playbooks:
 # a single "Dynamic List" field. The friendly `kind: select` reproduces that
 # field's wire tuple (formType/dataType=dynamicList, type=array). Reading a
 # field the form actually declares is clean; reading an undeclared field is
-# caught offline as a bad_var_reference — which only works once the step-level
+# caught offline as a bad_var_reference -- which only works once the step-level
 # `inputs:` hoist makes the declared fields visible to the lint.
 # ---------------------------------------------------------------------------
 _MI_FORM = """

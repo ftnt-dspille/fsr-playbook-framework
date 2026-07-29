@@ -1,5 +1,5 @@
-"""§2.7 — seq_in_turn alignment in run_agent_turn.
-§2.2 — stream timeout at the run_turn level (consumer-side safety net).
+"""§2.7 -- seq_in_turn alignment in run_agent_turn.
+§2.2 -- stream timeout at the run_turn level (consumer-side safety net).
 
 Verifies that history rows get consecutive seq values with no gaps when
 coalesce_text=True, and that a timed-out stream surfaces an ErrorEvent.
@@ -108,7 +108,7 @@ def test_seq_consecutive_text_then_tool():
 
 
 def test_seq_no_text_only_tool():
-    """No text, just tool calls — seq must still be consecutive."""
+    """No text, just tool calls -- seq must still be consecutive."""
     events = [
         _usage(),
         ToolUseEvent(call_id="c1", name="find_connector", arguments={}),
@@ -190,7 +190,7 @@ def test_run_turn_timeout_surfaces_error_event():
 
 
 # ---------------------------------------------------------------------------
-# resume_agent_turn — history keys on the caller's real session_id, not the
+# resume_agent_turn -- history keys on the caller's real session_id, not the
 # provider's synthetic SuspendedSession.session_id.
 # ---------------------------------------------------------------------------
 
@@ -228,7 +228,7 @@ def test_resume_history_keys_on_supplied_session_id():
 
     assert result.session_id == real
     assert sink.rows, "expected recorded resume-turn history rows"
-    # EVERY row keys on the real session id — none leak the synthetic id.
+    # EVERY row keys on the real session id -- none leak the synthetic id.
     assert {r.session_id for r in sink.rows} == {real}, \
         [r.session_id for r in sink.rows]
 

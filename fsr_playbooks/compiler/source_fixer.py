@@ -7,12 +7,12 @@ the editor's normal undo stack).
 
 Each fix is a `Fix` record with:
 - `line` / `col` / `end_line` / `end_col`  (1-based, inclusive line numbers,
-  exclusive end column — matches Monaco's `Range` shape minus the +1)
+  exclusive end column -- matches Monaco's `Range` shape minus the +1)
 - `original`     the substring being replaced (for sanity checks)
 - `replacement`  the new substring
 - `code`         a stable code (e.g. `stop_to_end`)
 - `message`      one-line explanation
-- `severity`     always "warning" — these are foot-guns, not errors
+- `severity`     always "warning" -- these are foot-guns, not errors
 
 Skipped on purpose: Decision-`next:`-without-default. That fix is a
 structural YAML insertion (synthesize a `conditions[]` entry) and the
@@ -84,7 +84,7 @@ def _fix_stop_to_end(text: str) -> list[Fix]:
 
 # --- (2) `vars.input.<param>` → `vars.input.params.<param>` ----------------
 
-# Reserved tail tokens we never rewrite — `params`, `records`, `record` are
+# Reserved tail tokens we never rewrite -- `params`, `records`, `record` are
 # legitimate input shapes.
 _INPUT_RESERVED = {"params", "records", "record"}
 
@@ -114,7 +114,7 @@ def _fix_input_param_refs(text: str, declared_params: list[str]) -> list[Fix]:
                     text, m, repl_fmt,
                     "input_param_ref",
                     (f"declared parameter {p!r} lives at "
-                     f"`vars.input.params.{p}` — bare form evaluates to "
+                     f"`vars.input.params.{p}` -- bare form evaluates to "
                      f"empty at runtime"),
                 ))
     return out
@@ -157,10 +157,10 @@ def _strip_quotes(s: str) -> tuple[str, str, str]:
 
 def _fix_step_name_charset(text: str) -> list[Fix]:
     """Rewrite step `name:` values that contain characters outside
-    `[A-Za-z0-9 _]` — the FSR designer rejects these on save. Substitutes
+    `[A-Za-z0-9 _]` -- the FSR designer rejects these on save. Substitutes
     runs of disallowed chars with `_`. Conservative: only fires when the
     surrounding line clearly looks like a step `name:` (we can't know
-    structure without parsing, so a `playbook.name` may also match — but
+    structure without parsing, so a `playbook.name` may also match -- but
     those are typically clean strings, so the regex stays harmless).
     """
     out: list[Fix] = []
@@ -171,7 +171,7 @@ def _fix_step_name_charset(text: str) -> list[Fix]:
             continue
         # Rewrite disallowed runs to `_`. Keep quotes if the source had
         # them; add quotes when the new value still contains spaces and
-        # the source was unquoted (defensive — current substitution
+        # the source was unquoted (defensive -- current substitution
         # never introduces quote-requiring chars, but keeps shape stable).
         fixed = re.sub(r"[^A-Za-z0-9 _]+", "_", inner).strip("_")
         if not fixed or fixed == inner:
@@ -198,7 +198,7 @@ _LIST_ITEM_RE = re.compile(r"-\s+(\S[^\s#]*)")
 
 
 def _sniff_parameters(text: str) -> list[str]:
-    """Pull declared playbook `parameters:` from the source — both the
+    """Pull declared playbook `parameters:` from the source -- both the
     flow `[a, b]` and block `- a\n  - b` forms. Best-effort; the IR
     rewriter in resolver.py is authoritative."""
     out: list[str] = []
@@ -244,7 +244,7 @@ class _SetVarStep:
 def _sniff_set_variable_steps(text: str) -> list[_SetVarStep]:
     """Walk the YAML once via `yaml.compose` to collect every set_variable
     step's name + declared keys + per-key source marks. Returns an empty
-    list if the YAML doesn't parse — source_fixer is best-effort, so a
+    list if the YAML doesn't parse -- source_fixer is best-effort, so a
     half-typed buffer just yields no fixes."""
     try:
         root = yaml.compose(text)
@@ -330,7 +330,7 @@ def _sniff_set_variable_steps(text: str) -> list[_SetVarStep]:
         ))
 
     # Find every `steps:` sequence under any playbook and feed each item
-    # to _walk_step. Cheap recursive walk — depth is bounded by IR shape.
+    # to _walk_step. Cheap recursive walk -- depth is bounded by IR shape.
     def _hunt(node):
         if isinstance(node, yaml.MappingNode):
             for k, v in node.value:
@@ -355,7 +355,7 @@ def _reserved_keys() -> set[str]:
 
 
 def _safe_rename(old: str, taken: set[str]) -> str:
-    """Mirror of `Resolver._safe_rename` — keep replacements aligned so
+    """Mirror of `Resolver._safe_rename` -- keep replacements aligned so
     the source-fix replacement matches what the IR rewriter would pick."""
     for cand in (f"{old}_var", f"my_{old}", f"{old}_value", f"{old}_2"):
         if cand not in taken:
@@ -377,7 +377,7 @@ def _fix_set_var_reserved_keys(
     reserved = _reserved_keys()
     # Track aggregate renames across the file so the matching reference
     # rewriter can find them. (Two set_var steps with the same reserved
-    # key both get the same `<key>_var` replacement — that's fine; the
+    # key both get the same `<key>_var` replacement -- that's fine; the
     # references are top-level `vars.<key>` either way.)
     renames: dict[str, str] = {}
 
@@ -405,7 +405,7 @@ def _fix_set_var_reserved_keys(
     if not renames:
         return out
 
-    # Rewrite every `vars.<old>` (any access form) in the source —
+    # Rewrite every `vars.<old>` (any access form) in the source --
     # except `vars.steps.*` (step-output namespace) and
     # `vars.input.*` (trigger-input namespace), neither of which the
     # SetVariable rename touches.
@@ -453,7 +453,7 @@ def _fix_set_var_step_namespace(
         for k in sv.keys:
             esc_k = re.escape(k)
             # Pick the post-rename name for the replacement target if the
-            # key was reserved — keeps source coherent if both fixers run
+            # key was reserved -- keeps source coherent if both fixers run
             # together. (The reserved-key fixer also rewrites bare
             # `vars.<old>`, but that pattern excludes `vars.steps.*`,
             # so we resolve the new name here.)
@@ -470,7 +470,7 @@ def _fix_set_var_step_namespace(
                         "set_var_step_namespace",
                         (
                             f"`vars.steps.{sv.jkey}.{k}` evaluates to empty "
-                            f"at runtime — set_variable outputs live at "
+                            f"at runtime -- set_variable outputs live at "
                             f"top-level `vars.{new_k}`"
                         ),
                     ))

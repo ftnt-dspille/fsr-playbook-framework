@@ -1,7 +1,7 @@
 """Argument validation against the operation parameter schema (Phase 1.1).
 
-A malformed (connector, op, params) call — unknown/typo'd param, missing
-required field, or a select value outside the option set — must surface as
+A malformed (connector, op, params) call -- unknown/typo'd param, missing
+required field, or a select value outside the option set -- must surface as
 an actionable `bad_params` error BEFORE the op runs and BEFORE an approval
 card is rendered, so the agent self-corrects instead of the analyst signing
 off on a call that then fails at execute. Covered at the offline store
@@ -238,7 +238,7 @@ def _add_schema_columns(store, *, static=None, observed=None):
 
 def test_get_op_schema_excludes_untyped_static_output_schema(store, monkeypatch):
     """E3: the static FortiSOAR output schema is untyped scaffolding and must
-    never be surfaced — only the run-derived observed schema is trustworthy."""
+    never be surfaced -- only the run-derived observed schema is trustworthy."""
     from fsr_playbooks.mcp_server import tools_discovery as td
 
     monkeypatch.setattr(td._shared, "DB_PATH", store)

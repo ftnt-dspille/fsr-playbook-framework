@@ -1,4 +1,4 @@
-"""Phase 3 — trace→YAML compiler with value-match wiring (PLAN §3)."""
+"""Phase 3 -- trace→YAML compiler with value-match wiring (PLAN §3)."""
 from __future__ import annotations
 
 import yaml
@@ -67,7 +67,7 @@ def test_embedded_match_respects_token_boundaries():
 
 
 def test_embedded_skips_plain_words():
-    """An unstructured word (no digit/separator) is too coincidental to embed —
+    """An unstructured word (no digit/separator) is too coincidental to embed --
     `Germany` appearing in both a prior output and a later literal is not wired."""
     t = SkillTrace()
     t.record_run_op("c", "first", {}, {"country": "Germany"})

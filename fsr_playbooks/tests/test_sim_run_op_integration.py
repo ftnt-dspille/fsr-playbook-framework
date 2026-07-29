@@ -2,8 +2,8 @@
 
 Binds the simulated client onto the same seam the connector's
 `simulation_mode` bridge uses (`probes._env.get_client`), then calls the real
-`run_op` tool. This exercises the uncommitted WIP — the connector preflight /
-healthcheck gate and the enrichment-output summarizer — against the sim
+`run_op` tool. This exercises the uncommitted WIP -- the connector preflight /
+healthcheck gate and the enrichment-output summarizer -- against the sim
 substrate, with NO live FortiSOAR and NO Anthropic.
 """
 from __future__ import annotations

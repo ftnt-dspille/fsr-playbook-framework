@@ -1,14 +1,14 @@
-"""Generate `store/RECIPES.md` — copy-paste YAML templates for the patterns
+"""Generate `store/RECIPES.md` -- copy-paste YAML templates for the patterns
 agents actually need.
 
 Three sources stitched together:
-  1. The hand-curated `examples/*.yaml` — the canonical "this works" set.
-  2. The `recipes` table — trigger-pattern frequency, mined from
+  1. The hand-curated `examples/*.yaml` -- the canonical "this works" set.
+  2. The `recipes` table -- trigger-pattern frequency, mined from
      `probe_playbooks`. Useful for "which trigger should I pick".
-  3. The `playbooks_seen` connector-frequency rollup — "what real playbooks
+  3. The `playbooks_seen` connector-frequency rollup -- "what real playbooks
      orchestrate" so agents have a sense of the common-case shapes.
 
-Don't write recipes that copy logic from `STEP_TYPES.md` — that file already
+Don't write recipes that copy logic from `STEP_TYPES.md` -- that file already
 has per-step examples. RECIPES.md is for *multi-step compositions*.
 """
 from __future__ import annotations
@@ -24,28 +24,28 @@ EXAMPLES_DIR = REPO_ROOT / "examples"
 
 EXAMPLE_HEADERS: dict[str, dict[str, str]] = {
     "hello_connector.yaml": {
-        "title": "Hello world — start → set_variables → connector",
+        "title": "Hello world -- start → set_variables → connector",
         "use_when": "Smoke-testing the compiler end-to-end, or as the skeleton "
                     "of a one-off automation. Three steps and you're done.",
     },
     "decision_branch.yaml": {
-        "title": "Decision branch — route by condition",
+        "title": "Decision branch -- route by condition",
         "use_when": "Any time the next step depends on data: severity tiers, "
                     "indicator types, IOC categories, approval/deny.",
     },
     "find_and_update.yaml": {
-        "title": "Find and update — the canonical mutation pattern",
+        "title": "Find and update -- the canonical mutation pattern",
         "use_when": "Look up a record by query, then mutate it. Most ingestion "
                     "playbooks reduce to this. Pair with a Decision branch on "
                     "the find_record result count to handle no-match.",
     },
     "manual_input_then_act.yaml": {
-        "title": "Manual input — pause for human approval",
+        "title": "Manual input -- pause for human approval",
         "use_when": "Approval flows. Bot proposes an action, user confirms via "
                     "the FSR UI before the next step runs.",
     },
     "parent_calls_child.yaml": {
-        "title": "Parent calls child — playbook composition",
+        "title": "Parent calls child -- playbook composition",
         "use_when": "Reusable subroutines. Anything called from more than one "
                     "place should live in a child playbook + workflow_reference.",
     },
@@ -85,7 +85,7 @@ def build_recipes_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path
     parts.append(
         "Generated from `examples/*.yaml` + `store/fsr_reference.db` by "
         "`python/store/export_recipes.py`. Recipes are *multi-step* "
-        "compositions — for per-step shape see `STEP_TYPES.md`, for connector "
+        "compositions -- for per-step shape see `STEP_TYPES.md`, for connector "
         "ops see `CONNECTORS.md`."
     )
     parts.append("")
@@ -138,7 +138,7 @@ def build_recipes_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path
         step_type = r["name"].removeprefix("trigger:")
         parts.append(
             f"| `{step_type}` | {r['source_playbook']} | "
-            f"{trigger_use_when.get(step_type, '—')} |"
+            f"{trigger_use_when.get(step_type, '--')} |"
         )
     parts.append("")
     parts.append("---")
@@ -148,7 +148,7 @@ def build_recipes_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path
     parts.append("")
     parts.append(
         "Top connectors invoked by real playbooks on the connected instance. "
-        "Use this to ground recipe choice — if a connector dominates the table, "
+        "Use this to ground recipe choice -- if a connector dominates the table, "
         "examples for it likely exist in `pb_examples/all_fsr_evoke_playbooks.json` "
         "and can be pulled with `fsrpb pull` for read-only inspection."
     )

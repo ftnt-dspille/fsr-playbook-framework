@@ -1,4 +1,4 @@
-"""LLM provider settings — split-store: non-secret JSON + secrets in keyring.
+"""LLM provider settings -- split-store: non-secret JSON + secrets in keyring.
 
 Layout:
   web/data/settings.json:
@@ -34,7 +34,7 @@ from typing import Any
 from .secrets_store import get_secrets
 
 
-# web/data/ — sibling of backend/, gitignored.
+# web/data/ -- sibling of backend/, gitignored.
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 SETTINGS_PATH = DATA_DIR / "settings.json"
 
@@ -57,7 +57,7 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
     # OpenAI defaults are env-overridable so a deployment can point the
     # provider at any OpenAI-compatible endpoint (vLLM/Together/Groq, e.g.
     # gpt-oss-120b) without touching the Settings UI. A value saved in the
-    # UI still wins — these only fill the blanks (see _provider_block).
+    # UI still wins -- these only fill the blanks (see _provider_block).
     "openai": {
         "base_url": (os.environ.get("OPENAI_ENDPOINT")
                      or os.environ.get("STUDIO_OPENAI_BASE_URL")

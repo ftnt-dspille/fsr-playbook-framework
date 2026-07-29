@@ -1,7 +1,7 @@
 {
   "name": "contain_isolate_edr_host_direct",
   "mode": "investigation",
-  "prompt": "Triage FortiSOAR incident `incidents:b4a62c3b-3f60-44a5-b44d-f53a9244fa55` (\"Detected defense evasion activities on smithDesktop\"). The host smithDesktop is confirmed compromised. Isolate it in FortiEDR — stage the isolation for my approval, don't execute it yourself.",
+  "prompt": "Triage FortiSOAR incident `incidents:b4a62c3b-3f60-44a5-b44d-f53a9244fa55` (\"Detected defense evasion activities on smithDesktop\"). The host smithDesktop is confirmed compromised. Isolate it in FortiEDR -- stage the isolation for my approval, don't execute it yourself.",
   "required_facts": [
     {"tool": "find_containment_actions", "label": "discover the configured host/endpoint isolation action(s)"},
     {"tool": "emit_action_card", "args_contains": ["fortinet-fortiedr"], "label": "stage the FortiEDR host isolation as an approval card"}

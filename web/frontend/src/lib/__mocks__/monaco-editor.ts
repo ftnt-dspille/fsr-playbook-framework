@@ -39,7 +39,7 @@ export const editor = {
         handlers.push(cb);
         return { dispose: () => {} };
       },
-      // Editor lifecycle / interaction listeners — enhanceJinjaEditor
+      // Editor lifecycle / interaction listeners -- enhanceJinjaEditor
       // wires onDidType + onKeyDown + onDidDispose. The mock just hands
       // back a disposable so the wrapper doesn't crash; tests that
       // exercise the actual typing behavior live in the browser project.

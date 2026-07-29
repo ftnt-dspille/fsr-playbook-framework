@@ -1,9 +1,9 @@
-"""B4 — triage→build fidelity scorer (Chat Intelligence Plan).
+"""B4 -- triage→build fidelity scorer (Chat Intelligence Plan).
 
 `scoring.score_build_fidelity` grades whether a built playbook automates what
 the investigation actually did: every connector op in the playbook must be one
 the trace exercised (grounding), and the staged response action must appear as
-a step (action_coverage). These are pure, offline, deterministic checks — they
+a step (action_coverage). These are pure, offline, deterministic checks -- they
 belong in `make chat-fast`.
 """
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""probe_step_handlers — ingest workflow.eval.FUNCTION_MAP signatures.
+"""probe_step_handlers -- ingest workflow.eval.FUNCTION_MAP signatures.
 
 Source: `store/incoming/function_map.json`, produced by running
 `scripts/internal/dump_function_map.py` on the FSR appliance.
@@ -6,13 +6,13 @@ Source: `store/incoming/function_map.json`, produced by running
 The 43 step types exposed by `/api/3/workflow_step_types/` carry an
 `args_schema_json.script` field of the form `/wf/workflow/tasks/<name>`,
 where `<name>` is a key in the live `workflow.eval.FUNCTION_MAP` dict
-(44 entries — covers all step types plus a few internal helpers like
+(44 entries -- covers all step types plus a few internal helpers like
 `add_one`, `no_op`, `panic`).
 
 That callable is the canonical handler. Its `inspect.signature()` is
 the source of truth for what `arguments` a step must provide. The
 existing `step_types.args_schema_json` only carries a script pointer
-plus a few pre-bound args — useful, but not enough for validation.
+plus a few pre-bound args -- useful, but not enough for validation.
 
 Trust: backend_introspect / tested_pass.
 """

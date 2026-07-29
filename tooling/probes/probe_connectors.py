@@ -1,4 +1,4 @@
-"""probe_connectors — populate connectors / operations / operation_params.
+"""probe_connectors -- populate connectors / operations / operation_params.
 
 Live source (preferred):
   GET  /api/integration/connectors/?page_size=1000&active=true
@@ -13,7 +13,7 @@ Trust ladder (per Dylan's rule, local sources never become trusted):
   Operations only become tested_pass once exercised via /api/integration/execute/.
 
 Local fallback (only runs when live unavailable):
-  fortisoar-rpm-extracted/*/info.json — written as `seen` via rpm_info_json.
+  fortisoar-rpm-extracted/*/info.json -- written as `seen` via rpm_info_json.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ from .common import (
     record_verification,
 )
 
-# Public Fortinet repo — provides RPMs for every published connector,
+# Public Fortinet repo -- provides RPMs for every published connector,
 # whether or not it's installed on the local FSR instance.
 FORTINET_REPO_BASE = "https://repo.fortisoar.fortinet.com"
 FORTINET_REPO_INDEX = f"{FORTINET_REPO_BASE}/connectors/info/connectors.json"
@@ -51,7 +51,7 @@ LIST_PARAMS = {"page_size": 1000, "active": "true"}
 # ----------------------- helpers -----------------------
 
 def _strip_icons(rec: dict) -> dict:
-    """Remove the base64 icon blobs — they bloat the DB by ~10× per row."""
+    """Remove the base64 icon blobs -- they bloat the DB by ~10× per row."""
     return {k: v for k, v in rec.items() if k not in ("icon_small", "icon_large")}
 
 
@@ -142,7 +142,7 @@ def _upsert_connector_from_detail(conn: sqlite3.Connection, rec: dict, source: s
         return
     info_blob = json.dumps(_strip_icons(rec))
     # UPSERT (not INSERT OR REPLACE) so we preserve columns this tier doesn't
-    # populate — rpm_fingerprint (set by _repo_rpm) and source_code (set lazily
+    # populate -- rpm_fingerprint (set by _repo_rpm) and source_code (set lazily
     # by mcp_server.get_connector_source). With OR REPLACE those would silently
     # null on every overlapping write.
     conn.execute(
@@ -239,7 +239,7 @@ def _live(conn: sqlite3.Connection) -> tuple[int, list[str]]:
         method="live_api_get", status="tested_pass",
         notes=f"totalItems={listing.get('totalItems')}",
     )
-    # Promote /api/3/connectors to tested_fail — Hydra advertises but it 404s
+    # Promote /api/3/connectors to tested_fail -- Hydra advertises but it 404s
     # on this instance; useful provenance so future probes don't try it again.
     record_verification(
         conn, kind="api_endpoint",
@@ -348,7 +348,7 @@ def _live_catalog(conn: sqlite3.Connection) -> tuple[int, list[str]]:
         for sp in members:
             sp_id = str(sp.get("uuid") or sp.get("@id") or sp.get("name"))
             if sp_id in seen_ids:
-                # Server returned an item we already processed — pagination
+                # Server returned an item we already processed -- pagination
                 # is looping. Bail out before we double-count.
                 continue
             seen_ids.add(sp_id)
@@ -361,7 +361,7 @@ def _live_catalog(conn: sqlite3.Connection) -> tuple[int, list[str]]:
             if not name:
                 continue
 
-            # Installed rows always win — they already have full data from _live.
+            # Installed rows always win -- they already have full data from _live.
             existing = conn.execute(
                 "SELECT source FROM connectors WHERE name = ?",
                 (name,),
@@ -373,7 +373,7 @@ def _live_catalog(conn: sqlite3.Connection) -> tuple[int, list[str]]:
                 skipped_installed += 1
                 continue
 
-            # Try the full detail endpoint first — it returns operations with
+            # Try the full detail endpoint first -- it returns operations with
             # parameters even for non-installed connectors on most FSR versions.
             detail = _fetch_connector_detail(client, name, version)
             if detail and isinstance(detail, dict) and detail.get("operations"):
@@ -428,7 +428,7 @@ def _live_catalog(conn: sqlite3.Connection) -> tuple[int, list[str]]:
 # ----------------------- repo RPM tier -----------------------
 
 def _fetch_repo_index() -> dict | None:
-    """Fetch /connectors/info/connectors.json — index of every published RPM."""
+    """Fetch /connectors/info/connectors.json -- index of every published RPM."""
     try:
         import ssl
         ctx = ssl.create_default_context()
@@ -462,7 +462,7 @@ _RPM_DIR_LISTING: list[str] | None = None
 
 
 def _rpm_dir_listing() -> list[str]:
-    """Cached scrape of /connectors/x86_64/ — used to recover from stale
+    """Cached scrape of /connectors/x86_64/ -- used to recover from stale
     buildNumbers in connectors.json (the index sometimes points at builds
     that have been replaced; the actual file lives under a different number).
     """
@@ -529,13 +529,13 @@ def _repo_rpm(conn: sqlite3.Connection, only_missing_params: bool = True) -> tup
 
     Targets connectors that need ingest. A connector needs ingest if EITHER:
       - it lacks params (the live API can't return params for uninstalled
-        connectors — but the RPM info.json has the full schema), OR
+        connectors -- but the RPM info.json has the full schema), OR
       - it has no rpm_fingerprint yet (so the diff layer can populate one).
     The fingerprint check inside the loop short-circuits the extract+ingest
     when the cached RPM matches what we already have in the DB.
     """
     if shutil.which("bsdtar") is None:
-        return 0, ["bsdtar not found — install libarchive (macOS: built-in; Linux: yum install bsdtar)"]
+        return 0, ["bsdtar not found -- install libarchive (macOS: built-in; Linux: yum install bsdtar)"]
     index = _fetch_repo_index()
     if not index:
         return 0, ["repo connectors.json fetch failed"]
@@ -572,7 +572,7 @@ def _repo_rpm(conn: sqlite3.Connection, only_missing_params: bool = True) -> tup
             print(f"    .. {i}/{len(targets)} processed ({upserts} upserts, {skipped} unchanged)")
         rpm_path = RPM_CACHE_DIR / rpm_full
         if not _download_rpm(rpm_full, rpm_path):
-            # Index buildNumber stale — resolve the actual file by prefix.
+            # Index buildNumber stale -- resolve the actual file by prefix.
             alt = _resolve_rpm_by_prefix(name, version)
             if alt and alt != rpm_full:
                 rpm_path = RPM_CACHE_DIR / alt

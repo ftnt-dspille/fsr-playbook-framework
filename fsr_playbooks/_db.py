@@ -2,12 +2,12 @@
 
 Resolution order (first hit wins):
 
-1. ``$FSRPB_DB`` — explicit override (e.g. a warmed, instance-specific DB).
-2. ``<repo>/data/fsr_reference.db`` — the in-repo probed cache (dev: full ~65 MB,
+1. ``$FSRPB_DB`` -- explicit override (e.g. a warmed, instance-specific DB).
+2. ``<repo>/data/fsr_reference.db`` -- the in-repo probed cache (dev: full ~65 MB,
    gitignored). Present only in a source checkout.
-3. ``fsr_playbooks/_data/fsr_reference.db`` — the packaged slim catalog shipped in
+3. ``fsr_playbooks/_data/fsr_reference.db`` -- the packaged slim catalog shipped in
    the wheel. Stable tables only (step types/handlers, jinja, recipes, api
-   endpoints, plus the ``modules`` *name* catalog — module type names are
+   endpoints, plus the ``modules`` *name* catalog -- module type names are
    globally stable for an FSR version and carry no per-install UUIDs); the
    UUID-bearing per-install tables (connectors/operations/picklists) ship empty.
 
@@ -15,7 +15,7 @@ A fresh ``pip install fsr_playbooks`` has (3): enough to compile playbooks that
 reference solely the stable catalog AND to validate/canonicalize module names
 offline (e.g. ``Alerts`` → ``alerts``). A playbook that references a live
 connector op / picklist needs ``warmup`` against a target SOAR (which sources
-the data through pyfsr) to fill those tables first — until then the resolver
+the data through pyfsr) to fill those tables first -- until then the resolver
 reports a clear ``CompileError`` (it does NOT fall back to a live lookup).
 ``warmup`` also overwrites the baseline ``modules`` catalog with the target's
 own set, picking up any custom modules.
@@ -56,7 +56,7 @@ def warmup_write_path() -> Path:
 
     Warmup replaces the reference DB's connector/operation tables with a target
     SOAR's *installed* catalog. Run in a source checkout with ``$FSRPB_DB``
-    unset, that write lands on ``REPO_PROBED_DB`` — the full dev corpus — and a
+    unset, that write lands on ``REPO_PROBED_DB`` -- the full dev corpus -- and a
     small box (e.g. 21 connectors) silently overwrites hundreds, reddening the
     tooling gate and degrading the compiler's grounding. This has bitten us.
 
@@ -64,11 +64,11 @@ def warmup_write_path() -> Path:
     box catalog should resolve their write target through this function instead
     of ``default_db_path()``:
 
-      * ``$FSRPB_DB`` set  → write there (a scratch/instance DB — the right habit);
+      * ``$FSRPB_DB`` set  → write there (a scratch/instance DB -- the right habit);
       * otherwise          → refuse, unless ``$FSRPB_ALLOW_DEV_DB_CLOBBER=1`` is
         set to deliberately rebuild the dev cache in place.
 
-    Read paths are unaffected — they keep using ``default_db_path()``.
+    Read paths are unaffected -- they keep using ``default_db_path()``.
     """
     env = os.environ.get("FSRPB_DB")
     if env:

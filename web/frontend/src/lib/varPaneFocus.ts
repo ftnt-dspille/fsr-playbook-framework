@@ -1,7 +1,7 @@
 /**
  * Helper that wires any Jinja-accepting input to the variable tree
  * pane via its focus/blur events. Each call produces a one-shot
- * `{ id, onfocus, onblur }` triple — drop the events onto the input
+ * `{ id, onfocus, onblur }` triple -- drop the events onto the input
  * and the pane will claim/release this field as its insert target
  * automatically.
  *
@@ -27,7 +27,7 @@ export type AttachOptions = {
   /** Short label shown in the pane header so the user knows which
    *  field is being targeted. Defaults to "(field)". */
   label?: string;
-  /** Default true — strip the `{{ }}` wrapper before handing the
+  /** Default true -- strip the `{{ }}` wrapper before handing the
    *  snippet to `insert` when set to false. Matches VarPathPicker's
    *  `wrap` prop semantics. */
   wrap?: boolean;

@@ -1,6 +1,6 @@
 """Wheel-only operation guard (Phase 9 item 4).
 
-The compiler must run from the installed wheel alone — it must never import the
+The compiler must run from the installed wheel alone -- it must never import the
 dev-only ``tooling/`` tree (e.g. the old ``connector_configs`` module) at
 compile time, and config-UUID resolution must read the warmed
 ``connector_configs`` catalog table instead.

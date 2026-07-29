@@ -86,7 +86,7 @@ def _plausible_name_matches(q: str, all_names: list[str],
     thing spelled differently. Plain edit distance is not that test: at the old
     cutoff (0.45) "siem" scored against "smtp"/"imap" and "crowdstrike" against
     "cyops_utilities", and the tool presented those as "did you mean…?". The
-    model relayed them to the analyst as real findings — a wrong answer is far
+    model relayed them to the analyst as real findings -- a wrong answer is far
     more expensive here than no answer, because it sends the whole turn down a
     false path (LIVE: sessions sess-ykhuxc3g / sess-x0csi5cf).
 
@@ -101,7 +101,7 @@ def _plausible_name_matches(q: str, all_names: list[str],
     stem: "fortianalyzer" and "fortigate-cloud" share "forti", which on a bare
     >=4 test made every Fortinet connector a near match for every other one.
     Measuring against the LONGER string additionally stops a short token from
-    being easy to match — "fortianalyzer" vs the token "fortiai" shares 6 chars,
+    being easy to match -- "fortianalyzer" vs the token "fortiai" shares 6 chars,
     which is 86% of "fortiai" but only 46% of the query, and they are unrelated
     products. Real typos (fortgate → fortigate-firewall) still land via ratio.
 
@@ -192,7 +192,7 @@ def find_connector(q: str, limit: int = 15,
         #
         #  1. Broadening searched `words[0]` ONLY. "FortiSOAR Utilities" got zero
         #     whole-phrase hits, broadened on "FortiSOAR" alone, and returned
-        #     `fortisoar-ml-engine` — a confident WRONG match. The word that
+        #     `fortisoar-ml-engine` -- a confident WRONG match. The word that
         #     would have found the right connector was never searched. The model
         #     then correctly reported "only FortiSOAR ML Engine is found
         #     similarly named" and declined to author: a right answer to a wrong
@@ -204,7 +204,7 @@ def find_connector(q: str, limit: int = 15,
         # So: always broaden, and merge. Whole-phrase matches keep their rank
         # (they are the stronger signal); word matches append, deduped by name.
         # Multi-word queries are the human default ("FortiSOAR Utilities",
-        # "Convert String Time to Minutes") — every word gets a look.
+        # "Convert String Time to Minutes") -- every word gets a look.
         words = [w for w in q.split() if len(w) > 2]  # skip "to"/"of"/"a" noise
         if words:
             seen = {r["name"] for r in rows}
@@ -251,7 +251,7 @@ def find_connector(q: str, limit: int = 15,
         out: dict[str, Any] = {"matches": rows}
         if config_less:
             out["note"] = (
-                f"{config_less} need NO configuration — they are usable as-is; "
+                f"{config_less} need NO configuration -- they are usable as-is; "
                 "author the connector step with `config: ''`. They will NOT "
                 "appear in list_configured_connectors (that lists only "
                 "connectors with a saved config); absence there does NOT mean "
@@ -272,7 +272,7 @@ def find_connector(q: str, limit: int = 15,
             #    the agent onto the wrong vendor. Check the box before
             #    suggesting. (LIVE: find_connector("fortianalyzer") answered
             #    "did you mean fortinet-fortiedr?" while FortiAnalyzer WAS
-            #    installed — see _shared.stale_catalog_hint.)
+            #    installed -- see _shared.stale_catalog_hint.)
             stale = _shared.stale_catalog_hint(q.strip())
             if stale is not None:
                 out["suggestion"] = stale["message"]
@@ -280,13 +280,13 @@ def find_connector(q: str, limit: int = 15,
                 out["stale_catalog"] = True
                 return out
 
-            # 2. Otherwise suggest — but only on real evidence, and never in a
+            # 2. Otherwise suggest -- but only on real evidence, and never in a
             #    voice that implies the guess is correct.
             close = _plausible_name_matches(q, all_names)
             if close:
                 out["suggestion"] = (
                     f"no connector matches {q!r} in the catalog. Names with a "
-                    f"similar SPELLING: {close} — these are spelling guesses, "
+                    f"similar SPELLING: {close} -- these are spelling guesses, "
                     f"not capability matches. Verify one is actually what you "
                     f"want before using it."
                 )
@@ -294,12 +294,12 @@ def find_connector(q: str, limit: int = 15,
             else:
                 # Saying nothing beats saying something wrong. The old difflib
                 # pass (cutoff 0.45, no token evidence) answered "siem" with
-                # ['smtp', 'imap'] and "crowdstrike" with ['cyops_utilities'] —
+                # ['smtp', 'imap'] and "crowdstrike" with ['cyops_utilities'] --
                 # confident nonsense that the model then faithfully relayed to
                 # the analyst as if it were a finding.
                 out["suggestion"] = (
                     f"no connector matching {q!r} is present in this "
-                    f"instance's catalog — it is most likely not installed. "
+                    f"instance's catalog -- it is most likely not installed. "
                     f"Do NOT substitute a different vendor's connector; report "
                     f"the capability as unavailable."
                 )
@@ -324,7 +324,7 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
     suggests near-matching ops so the agent doesn't loop guessing.
 
     When the query matches exactly one op, the response also embeds a
-    slim `schema` — skip the follow-up `get_op_schema` call in that
+    slim `schema` -- skip the follow-up `get_op_schema` call in that
     case. Multi-match responses stay terse so the agent can still
     disambiguate before pulling a schema.
 
@@ -387,7 +387,7 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                 (connector,),
             )]
             if not all_ops:
-                # Connector is itself unknown — bigger problem.
+                # Connector is itself unknown -- bigger problem.
                 out["suggestion"] = (
                     f"connector {connector!r} has no operations in the "
                     f"reference store. Verify the connector name with "
@@ -398,19 +398,19 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                 out["suggestion"] = (
                     f"no operations matching {q!r} on {connector!r}; "
                     + (f"closest: {close}" if close
-                       else f"this connector has {len(all_ops)} ops total — "
+                       else f"this connector has {len(all_ops)} ops total -- "
                             f"omit `q=` to list them all (or pass a more "
                             f"general keyword).")
                 )
                 if close:
                     out["near"] = close
         # Multi-match: attach a compact param SIGNATURE per op so the agent sees
-        # each op's real param names BEFORE it picks one and calls run_op —
+        # each op's real param names BEFORE it picks one and calls run_op --
         # pre-empting the "choose an op, then guess its params" flail that wasted
         # ~8 calls in export sess-vtd15c5v (the agent guessed `ip`/`srcIP`/`host`
         # when the real param was `value (IP Address)`). One batched query,
         # top-level params only (sub-params stay in get_op_schema). Each entry is
-        # {name, required, type, label} — the `label` (the param's human title,
+        # {name, required, type, label} -- the `label` (the param's human title,
         # e.g. "IP Address") is the disambiguator that stops the model from
         # substituting its own guessed name for an unintuitive one like `value`.
         # Single-match skips this; it gets the full slim schema below.
@@ -447,7 +447,7 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
         # When the search narrows to a single op, fold the slim schema
         # into the response so the agent can skip the follow-up
         # get_op_schema round-trip (saves ~1 LLM turn + ~6KB of cache).
-        # Only triggers when there is exactly one match — multi-match
+        # Only triggers when there is exactly one match -- multi-match
         # results stay terse so the agent can still disambiguate.
         if len(rows) == 1 and rows[0].get("op_name"):
             try:
@@ -461,14 +461,14 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
 
 
 # ---------------------------------------------------------------------------
-# get_op_schema helpers — param dedup + per-select param groups
+# get_op_schema helpers -- param dedup + per-select param groups
 # ---------------------------------------------------------------------------
 
 def _dedupe_params(params: list[dict]) -> list[dict]:
     """Collapse duplicate param_name rows into one entry per name.
 
     The reference store has one row per (param_name, parent_param_name,
-    condition_value) — so a param visible under multiple conditions
+    condition_value) -- so a param visible under multiple conditions
     appears two or three times with the same name. The agent only needs
     one entry; aggregate the visibility rules into `applies_when`.
     """
@@ -483,7 +483,7 @@ def _dedupe_params(params: list[dict]) -> list[dict]:
         rule = None
         # Surface visibility predicates only when both columns exist on the
         # row (verbose path). Slim path drops parent/condition columns, so
-        # this is a no-op there — applies_when stays empty.
+        # this is a no-op there -- applies_when stays empty.
         parent = p.get("parent_param_name")
         cond = p.get("condition_value")
         if parent:
@@ -519,7 +519,7 @@ def _build_param_groups_by_select(
     are surfaced with their own option→param map so the agent can see
     the whole feasible neighborhood without iterating.
 
-    Returns {} when no top-level select gates other params — most ops.
+    Returns {} when no top-level select gates other params -- most ops.
     """
     from collections import defaultdict
     children_of: dict[tuple[str, str], list[str]] = defaultdict(list)
@@ -588,7 +588,7 @@ def _build_visibility_block(
     human-readable "<gating_param>=<option_value>" strings so the agent
     can scan once and pick the right branch.
 
-    Returns `{}` when no params have visibility rules — most ops.
+    Returns `{}` when no params have visibility rules -- most ops.
     """
     always: list[str] = []
     when: dict[str, list[str]] = {}
@@ -671,13 +671,13 @@ def _format_param_line(p: dict, indent: int = 0) -> str:
     if extras:
         head += f" [{', '.join(extras)}]"
     if desc:
-        head += f" — {desc}"
+        head += f" -- {desc}"
     return head
 
 
 def _output_field_names(op_row: dict) -> list[str]:
     """Top-level field names that live under a connector result's `.data`
-    envelope, best-effort from the catalog — so an author binds
+    envelope, best-effort from the catalog -- so an author binds
     `vars.steps.<name>.data.<field>` rather than a bare `.data`.
 
     The two catalog schemas nest DIFFERENTLY and must not be conflated:
@@ -691,9 +691,9 @@ def _output_field_names(op_row: dict) -> list[str]:
       those top-level keys as `.data.<field>` would teach a WRONG binding, so
       we only trust it when it carries an explicit nested `data` object.
 
-    Returns [] when nothing reliable is known — the caller then emits the
+    Returns [] when nothing reliable is known -- the caller then emits the
     generic envelope rule instead of a specific (possibly wrong) field list."""
-    # Static payload schema first — its keys are unambiguously `.data` fields.
+    # Static payload schema first -- its keys are unambiguously `.data` fields.
     raw = op_row.get("output_schema_json")
     if raw:
         try:
@@ -720,7 +720,7 @@ def _output_binding_hint(op_row: dict) -> str:
 
     Surfaced in `get_op_schema` because the envelope rule otherwise lives
     only in `get_step_type("connector")`, which the build sequence often
-    skips — a weak model then binds the whole envelope (`.data`, renders as
+    skips -- a weak model then binds the whole envelope (`.data`, renders as
     `Array`/`[object Object]`) instead of `.data.<field>`."""
     fields = _output_field_names(op_row)
     step_ex = "Convert_Time"
@@ -731,7 +731,7 @@ def _output_binding_hint(op_row: dict) -> str:
             f"Output fields (under the `.data` envelope): {', '.join(fields)}."
         )
         lines.append(
-            f"Reference one as `vars.steps.<step_name>.data.{first}` — NOT a "
+            f"Reference one as `vars.steps.<step_name>.data.{first}` -- NOT a "
             f"bare `vars.steps.<step_name>.data` (that is the whole object and "
             f"renders as `Array`/`[object Object]`)."
         )
@@ -743,7 +743,7 @@ def _output_binding_hint(op_row: dict) -> str:
         lines.append(
             "A connector result is an ENVELOPE: the op's output sits under "
             "`data` (siblings `status`/`message`). Reference an output field "
-            "as `vars.steps.<step_name>.data.<key>` — NOT `vars.steps."
+            "as `vars.steps.<step_name>.data.<key>` -- NOT `vars.steps."
             "<step_name>.data` (the whole object, renders as `Array`/"
             "`[object Object]`). `<step_name>` is the step's display NAME "
             "with spaces → underscores."
@@ -756,13 +756,13 @@ def _render_op_schema_md(
     params: list[dict],
     visibility: dict,
 ) -> str:
-    """Compact markdown skeleton for an op — replaces the 5KB nested-JSON
+    """Compact markdown skeleton for an op -- replaces the 5KB nested-JSON
     response with the same information in YAML-author-facing form."""
     name = op_row.get("op_name", "?")
     connector = op_row.get("connector_name", "?")
     title = op_row.get("title") or ""
     desc = op_row.get("description") or ""
-    head = f"`{name}` — {title}".rstrip(" —")
+    head = f"`{name}` -- {title}".rstrip(" --")
     by_name = {p["param_name"]: p for p in params}
 
     lines = [f"# {head}", f"connector: {connector}"]
@@ -882,9 +882,9 @@ def get_op_schema(connector: str, op: str,
     Returns the canonical `_err()` envelope (`ok:false, code, ...`) on
     miss:
     - `code: "connector_not_found"` when the connector itself is
-      unknown — call `find_connector` first.
+      unknown -- call `find_connector` first.
     - `code: "not_found"` when the connector exists but the op doesn't
-      — the response includes a `near` list of close op names.
+      -- the response includes a `near` list of close op names.
 
     `db_path` (optional): read from a specific catalog (e.g. a pyfsr warmed cache).
     """
@@ -916,7 +916,7 @@ def get_op_schema(connector: str, op: str,
                     f"reference store",
                     suggestions=[
                         "call find_connector first to confirm the name"
-                        + (f" — close matches: {near}" if near else "")
+                        + (f" -- close matches: {near}" if near else "")
                     ],
                     near=near,
                 )
@@ -981,16 +981,16 @@ def get_op_schema(connector: str, op: str,
             result = dict(op_row[0])
             # FortiSOAR's static operation output schema is an untyped scaffold
             # (every leaf is an empty string) and runs ~1000 lines for chatty
-            # connectors — pure context/export bloat with no usable type info.
+            # connectors -- pure context/export bloat with no usable type info.
             # Drop it entirely; only the run-derived `output_schema_observed`
             # carries a trustworthy shape. To learn an op's output, run it (if
             # safe) and read the observed schema. (TRIAGE_BUILD_AUDIT_PLAN E3)
             for col in ("output_schema_json", "conditional_output_schema_json"):
                 result.pop(col, None)
             # Wire-classification / UI-state columns the agent never authors
-            # against — pure noise in the verbose dump. (Phase C: the audit
+            # against -- pure noise in the verbose dump. (Phase C: the audit
             # also named operationTitle/version/agent/pickFromTenant, but this
-            # DB's `operations` row carries none of those — only `category`
+            # DB's `operations` row carries none of those -- only `category`
             # plus the visible/enabled flags exist here.)
             for col in ("category", "visible", "enabled"):
                 result.pop(col, None)
@@ -1020,26 +1020,26 @@ def get_op_schema(connector: str, op: str,
         # Only the run-derived observed schema is trustworthy for TYPES; the
         # static FortiSOAR output schema is excluded as untyped scaffolding
         # (E3). But its top-level KEYS are the real output field names, which
-        # the author needs for `.data.<key>` binding — surface those even when
+        # the author needs for `.data.<key>` binding -- surface those even when
         # the shape itself is unobserved. `output_fields` drives the binding
         # hint in the markdown skeleton above.
         out_fields = _output_field_names(op_row[0])
         if out_fields:
             out["output_fields"] = out_fields
         if op_row[0].get("output_schema_observed"):
-            out["output_schema"] = "observed — pass verbose=True for the run-derived shape"
+            out["output_schema"] = "observed -- pass verbose=True for the run-derived shape"
         elif out_fields:
             out["output_schema"] = (
-                f"field names known ({', '.join(out_fields)}); types unobserved — "
+                f"field names known ({', '.join(out_fields)}); types unobserved -- "
                 "run_op in a safe context for the run-derived shape"
             )
         elif _op_risk(op, op_row[0].get("category")) == "safe":
             out["output_schema"] = (
-                "none yet — this op is read-only; run_op to observe its real output shape"
+                "none yet -- this op is read-only; run_op to observe its real output shape"
             )
         else:
             out["output_schema"] = (
-                "none — static schema is untyped and excluded; run_op in a safe "
+                "none -- static schema is untyped and excluded; run_op in a safe "
                 "context to observe the real shape"
             )
         return out
@@ -1066,12 +1066,12 @@ _DESTRUCTIVE_CATEGORIES: frozenset[str] = frozenset(
 # with the dispatch tier gate (and with what find_enrichment_actions surfaces
 # as a tier<=2, run-it-directly action). Without this, an op whose name lacks
 # a safe prefix (e.g. `ioc_search`) but whose category is `investigation` fell
-# through to 'unknown' and was needlessly gated as requires_confirmation —
+# through to 'unknown' and was needlessly gated as requires_confirmation --
 # blocking enrichment the finder had just told the agent to run.
 _SAFE_CATEGORIES: frozenset[str] = frozenset(
     {"investigation", "query", "utilities", "enrichment", "verification"}
 )
-# Read-only name substrings (not just prefixes) — a lookup is a lookup wherever
+# Read-only name substrings (not just prefixes) -- a lookup is a lookup wherever
 # the verb sits. `ioc_search` / `domain_lookup` / `ip_reputation` are reads even
 # though the safe verb isn't the prefix. Destructive name/category checks run
 # first, so a `block_ioc` still resolves destructive.
@@ -1079,7 +1079,7 @@ _SAFE_NAME_SUBSTRINGS: tuple[str, ...] = (
     "search", "lookup", "reputation", "enrich", "_ioc", "ioc_",
     "geoip", "whois", "_context", "context_",
 )
-# Generic raw-HTTP passthrough ops — classified by their HTTP method, not name.
+# Generic raw-HTTP passthrough ops -- classified by their HTTP method, not name.
 _HTTP_PASSTHROUGH_OPS: frozenset[str] = frozenset(
     {"execute_api_request", "execute_api", "api_request", "make_rest_call",
      "generic_api_call", "invoke_api", "rest_api"}
@@ -1098,14 +1098,14 @@ def _op_risk(op_name: str, category: str | None,
     → destructive; destructive category → destructive; raw-HTTP passthrough →
     classify by HTTP method (GET/HEAD/OPTIONS safe, DELETE destructive, else
     unknown); read-only name substring → safe; safe category → safe; else
-    unknown. `unknown` is deliberate — run_op's confirm gate prompts the human
+    unknown. `unknown` is deliberate -- run_op's confirm gate prompts the human
     on it, so an op we can't prove read-only keeps a human in the loop.
 
     `params` (the resolved op inputs) is consulted only for HTTP passthrough
     ops, where the side-effect is the method, not the op name.
     """
     name_lower = op_name.lower()
-    # A `get_`/`list_`/`search_`… prefix is the strongest read signal — it wins
+    # A `get_`/`list_`/`search_`… prefix is the strongest read signal -- it wins
     # over an incidental destructive substring (e.g. `get_close_events`).
     if any(name_lower.startswith(p) for p in _SAFE_NAME_PREFIXES):
         return "safe"
@@ -1140,7 +1140,7 @@ def _op_risk(op_name: str, category: str | None,
 # ---------------------------------------------------------------------------
 # TODO: Find and wire the DELETE endpoint for dev copies so we can clean up
 # after fetching source. DELETE /api/integration/connector/development/entity/{dev_id}/
-# returns 403 with current API-key auth — needs an admin-scoped key or a
+# returns 403 with current API-key auth -- needs an admin-scoped key or a
 # different route. Until then, each connector accumulates at most one dev copy
 # (FSR returns the same dev_id on repeat calls to edit_repo_connector).
 
@@ -1149,7 +1149,7 @@ def _op_risk(op_name: str, category: str | None,
 # ---------------------------------------------------------------------------
 # In-process cache: connector name → {icon_small, icon_large, version}.
 # Backed by the SQLite `connector_icons` sidecar table for persistence
-# across process restarts. Icons are small base64 PNGs (~2–5 KB each)
+# across process restarts. Icons are small base64 PNGs (~2-5 KB each)
 # and never change for a given connector version.
 _ICON_CACHE: dict[str, dict[str, Any]] = {}
 
@@ -1197,7 +1197,7 @@ def get_connector_icon(connector: str) -> dict[str, Any]:
             }
             _ICON_CACHE[connector] = out
             return {"ok": True, "cached": "disk", **out}
-        # Not cached — need the version to address the live endpoint.
+        # Not cached -- need the version to address the live endpoint.
         ver_row = conn.execute(
             "SELECT version FROM connectors WHERE name=?", (connector,)
         ).fetchone()
@@ -1212,7 +1212,7 @@ def get_connector_icon(connector: str) -> dict[str, Any]:
     try:
         # FSR rejects GET on this endpoint ("Get method for this API
         # is forbidden, Please use POST method for same API"), so we
-        # POST with an empty body — same pattern as the rest of the
+        # POST with an empty body -- same pattern as the rest of the
         # connector-detail callers in this module.
         detail = client.post(
             f"/api/integration/connectors/{connector}/{version}/?format=json", {}
@@ -1243,7 +1243,7 @@ def get_connector_icon(connector: str) -> dict[str, Any]:
 
 
 # In-process cache for connector configurations. Configs change rarely
-# but can be added/removed by the user, so we don't persist to disk —
+# but can be added/removed by the user, so we don't persist to disk --
 # a server restart re-syncs.
 _CONFIG_CACHE: dict[str, list[dict[str, Any]]] = {}
 
@@ -1254,12 +1254,12 @@ def list_connector_configurations(connector: str,
 
     Source preference:
       1. in-process cache
-      2. local `connectors.info_json` (captured at probe time —
+      2. local `connectors.info_json` (captured at probe time --
          includes a full `configuration` array with config_id, name,
          default flag, the inline config dict, and live status)
       3. live FSR fetch via `connector_configs.list_configurations`
 
-    `refresh=True` skips (1) and (2) and forces a live re-fetch — use
+    `refresh=True` skips (1) and (2) and forces a live re-fetch -- use
     it after the user adds a configuration in another tab.
     """
     if not refresh and connector in _CONFIG_CACHE:
@@ -1267,7 +1267,7 @@ def list_connector_configurations(connector: str,
                 "configurations": _CONFIG_CACHE[connector]}
 
     if not refresh:
-        # Prefer the locally-cached info_json — instant, and we already
+        # Prefer the locally-cached info_json -- instant, and we already
         # paid the network cost during the connector probe.
         try:
             with _db() as conn:
@@ -1308,9 +1308,9 @@ def get_connector_source(connector: str, file: str = "operations.py") -> dict[st
     """Fetch the Python source code for a connector from the live FSR instance.
 
     Returns the raw content of `operations.py` (or another file in the connector
-    package — `connector.py`, `info.json`, `release_notes.md`).
+    package -- `connector.py`, `info.json`, `release_notes.md`).
 
-    **Use this sparingly** — only when the op name and parameter schema are not
+    **Use this sparingly** -- only when the op name and parameter schema are not
     sufficient to understand what the connector actually does (e.g. undocumented
     side effects, ambiguous return shape, or a newly added op with no description).
 
@@ -1450,7 +1450,7 @@ def _build_inputs_shape_text() -> str:
     kinds_str = ", ".join(kinds)
     return (
         f"list of {{name, kind, label?, tooltip?, required?, default?, "
-        f"options?}} — kind is one of: {kinds_str}. After "
+        f"options?}} -- kind is one of: {kinds_str}. After "
         "the operator submits, fields are read at "
         "`vars.steps.<step_name>.input.<name>`. `kind: select` "
         "requires `options:` (list of strings or jinja that resolves "
@@ -1463,7 +1463,7 @@ _INPUTS_SHAPE_TEXT = _build_inputs_shape_text()
 
 
 # Friendly authoring forms the compiler resolver normalizes. The AI
-# should prefer these over the wire form when both work — they're
+# should prefer these over the wire form when both work -- they're
 # shorter, more readable, and harder to malform. Keys that aren't in
 # the friendly schema are rejected by the resolver. Coverage matches
 # every short type the resolver handles in compiler.resolver.
@@ -1474,7 +1474,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "note": (
             "Manual / designer trigger. With NO `module:` it's a pure "
             "designer trigger. With a `module:` set it becomes a "
-            "record-context Execute action — `button_label:` is what the "
+            "record-context Execute action -- `button_label:` is what the "
             "user sees in the Execute menu (NOT the step name). "
             "`run_mode: per_record` (default) or `once_for_all`. Keys go "
             "at the step level (no `arguments:` wrapper)."
@@ -1494,7 +1494,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "Optional `when:` filters by post-write field state."
         ),
         "when_shape": (
-            "{logic: AND|OR, filters: [{field, op, value?}, ...]} — "
+            "{logic: AND|OR, filters: [{field, op, value?}, ...]} -- "
             "use string-typed fields or `op: changed` (changed only on "
             "start_on_update); LIKE against picklist fields will not match."
         ),
@@ -1553,7 +1553,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
                     "IRIs; friendly names are resolved at import."
                 ),
                 "type": (
-                    "optional — 'comment' (default), or a "
+                    "optional -- 'comment' (default), or a "
                     "full `/api/3/picklists/<uuid>` IRI from the "
                     "'Comment Type' picklist."
                 ),
@@ -1592,9 +1592,9 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             },
         },
         "do_not_use": [
-            "set: / values: / variables: at step level — only `vars:` is "
+            "set: / values: / variables: at step level -- only `vars:` is "
             "the recognized sugar key",
-            "putting message:{} keys under arguments: — `message:` is a "
+            "putting message:{} keys under arguments: -- `message:` is a "
             "step-level sibling of `vars:`",
         ],
     },
@@ -1605,7 +1605,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "`arguments:` (wire form). Each non-default entry has "
             "`display`, `when`, `next`. Exactly one entry must be the "
             "default (`default: true`, no `when`) and supply `next:` for "
-            "the else branch. Do NOT use a step-level `branches:` dict — "
+            "the else branch. Do NOT use a step-level `branches:` dict -- "
             "the parser hard-errors on it."
         ),
         "example": {
@@ -1619,9 +1619,9 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             ],
         },
         "do_not_use": [
-            "step-level `branches:` dict — write `next:` on each "
+            "step-level `branches:` dict -- write `next:` on each "
             "conditions[] entry instead",
-            "bare step-level `next:` — declare an explicit `default: true` "
+            "bare step-level `next:` -- declare an explicit `default: true` "
             "row in `conditions:` and put `next:` on it",
         ],
     },
@@ -1630,7 +1630,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
                           "agent", "version"],
         "note": (
             "Always look up the operation first via "
-            "find_operation/get_op_schema — `params` keys are validated "
+            "find_operation/get_op_schema -- `params` keys are validated "
             "against the operation_params catalog. `config: \"\"` "
             "selects the default connector configuration."
         ),
@@ -1638,7 +1638,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "A connector result is an ENVELOPE: the operation's output "
             "sits under `data`, with `status`/`message` as siblings. So "
             "reference an output field as "
-            "`vars.steps.<step_name>.data.<key>` — NOT "
+            "`vars.steps.<step_name>.data.<key>` -- NOT "
             "`vars.steps.<step_name>.<key>` (that reads the envelope, "
             "which has no <key> and renders empty). <key> is a field from "
             "the op's `output_schema` (get_op_schema). <step_name> is the "
@@ -1681,7 +1681,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "`partial: true` returns first page only."
         ),
         "filters_shape": (
-            "list of {field, operator, value} — operator is one of "
+            "list of {field, operator, value} -- operator is one of "
             "eq/neq/gt/gte/lt/lte/in/contains/like. `logic: AND|OR` "
             "(default AND) joins them; `limit:` caps results (default 30)."
         ),
@@ -1700,7 +1700,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "accepted_keys": ["module", "fields", "operation", "is_upsert"],
         "note": (
             "`module:` (required) is the friendly module name (alerts, "
-            "incidents, indicators, ...) — compiler converts to the IRI "
+            "incidents, indicators, ...) -- compiler converts to the IRI "
             "form. `fields:` is a flat dict of {field: value} (the friendly "
             "alias for the wire `resource:` key). Keys go at the step level "
             "(no `arguments:` wrapper)."
@@ -1719,7 +1719,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "accepted_keys": ["module", "record", "fields", "operation"],
         "note": (
             "`module:` names the module being updated. `record:` is the "
-            "RECORD IRI to update — usually "
+            "RECORD IRI to update -- usually "
             "`\"{{ vars.input.records[0]['@id'] }}\"`. `fields:` is a flat "
             "dict of {field: value} to set (the friendly alias for the wire "
             "`resource:` key). Keys go at the step level (no `arguments:` "
@@ -1756,7 +1756,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "Prompt body keys (title, description, inputs) and optional "
             "`assign_to:` / `email:` go at the STEP LEVEL (no `arguments:` "
             "wrapper). Branch buttons go under a STEP-LEVEL `options:` list. "
-            "Each option carries its own `next:` — do not use a step-level "
+            "Each option carries its own `next:` -- do not use a step-level "
             "`branches:` dict."
         ),
         "assign_to_shape": (
@@ -1770,7 +1770,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         ),
         "options_shape": (
             "list of {display, next, primary?} dicts (`option:` is accepted as "
-            "a synonym — the parser rewrites the surface key `display` to "
+            "a synonym -- the parser rewrites the surface key `display` to "
             "the wire key `option`). The first option "
             "is treated as primary unless another carries `primary: true`."
         ),
@@ -1794,12 +1794,12 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             ],
         },
         "do_not_use": [
-            "step-level `branches:` dict — put `next:` on each option",
-            "`options:` nested under `arguments:` — it must be at the "
+            "step-level `branches:` dict -- put `next:` on each option",
+            "`options:` nested under `arguments:` -- it must be at the "
             "step level (the parser hard-errors on this)",
-            "type: textarea / single-select / free-text (no such dispatch — "
+            "type: textarea / single-select / free-text (no such dispatch -- "
             "use `inputs: [{kind: textarea, ...}]` for a textarea field)",
-            "label, message (not valid keys — use title/description)",
+            "label, message (not valid keys -- use title/description)",
             "timeout (FSR ignores it)",
             "vars.steps.<id>.input.choice (does not exist; the option's "
             "`next:` is what routes the playbook)",
@@ -1824,7 +1824,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "collection) OR `workflowReference: /api/3/workflows/<uuid>` "
             "for cross-collection refs. `arguments:` keys must match the "
             "target's declared `parameters:` list. Child output is at "
-            "`vars.steps.<call_step_name>.<key>` — does NOT auto-merge "
+            "`vars.steps.<call_step_name>.<key>` -- does NOT auto-merge "
             "into parent vars."
         ),
         "example": {
@@ -1905,7 +1905,7 @@ def _render_step_type_md(short: str, ff: dict, st_row: dict) -> str:
             break
 
     # Surface single-string supplementary shapes the friendly_form
-    # carries — `inputs_shape` for manual_input documents the `kind:`
+    # carries -- `inputs_shape` for manual_input documents the `kind:`
     # enum, `when_shape` for start_on_* documents the filter object,
     # etc. Nested-dict extras (`message_block`) are too detailed for
     # slim mode and stay verbose-only.
@@ -1973,12 +1973,12 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
     (`ManualInput`, `SetVariable`, `Decision`). Friendly short names
     map to their canonical form. The response includes a
     `friendly_form` block with the YAML-author-facing schema (the
-    keys our compiler accepts) — prefer that over the wire-format
+    keys our compiler accepts) -- prefer that over the wire-format
     `args_schema_json` when authoring YAML.
 
-    By default the response is slim (~1–2 KB): the friendly_form
+    By default the response is slim (~1-2 KB): the friendly_form
     suffices for authoring and raw corpus examples are omitted. Pass
-    `verbose=True` for the full corpus dump (3 examples, no caps) —
+    `verbose=True` for the full corpus dump (3 examples, no caps) --
     only useful when debugging an unusual case the friendly_form
     doesn't cover.
     """
@@ -2026,7 +2026,7 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        # Slim path: a markdown skeleton beats nested JSON every time —
+        # Slim path: a markdown skeleton beats nested JSON every time --
         # the agent is about to author YAML and reads the rendered form
         # the same way. Verbose mode keeps the full row + corpus
         # examples for debugging unusual cases.
@@ -2065,11 +2065,11 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
                 blob = json.dumps(ex.get("snippet_json"), default=str)
                 if len(blob) > 2048:
                     ex["snippet_json"] = (
-                        f"<{len(blob)} chars truncated — call with "
+                        f"<{len(blob)} chars truncated -- call with "
                         f"verbose=True for full payload>"
                     )
         st["examples"] = examples
-        # Wire-classification noise the LLM never authors against — strip in
+        # Wire-classification noise the LLM never authors against -- strip in
         # BOTH modes (verbose keeps the wire *schemas* below, just not these).
         for k in ("uuid", "category", "occurrences"):
             st.pop(k, None)

@@ -16,7 +16,7 @@ summary: Curated multi-step composition patterns (threat-feed ingestion, data-in
 
 # FortiSOAR playbook recipes
 
-Generated from `examples/*.yaml` + `store/fsr_reference.db` by `python/store/export_recipes.py`. Recipes are *multi-step* compositions — for per-step shape see `STEP_TYPES.md`, for connector ops see `CONNECTORS.md`.
+Generated from `examples/*.yaml` + `store/fsr_reference.db` by `python/store/export_recipes.py`. Recipes are *multi-step* compositions -- for per-step shape see `STEP_TYPES.md`, for connector ops see `CONNECTORS.md`.
 
 ---
 
@@ -24,7 +24,7 @@ Generated from `examples/*.yaml` + `store/fsr_reference.db` by `python/store/exp
 
 Each pattern below is a complete, importable YAML. Compile with `fsrpb compile <file>`; push with `fsrpb push <file>`. They round-trip lossless against the live instance.
 
-### Hello world — start → set_variables → connector
+### Hello world -- start → set_variables → connector
 
 **Use when**: Smoke-testing the compiler end-to-end, or as the skeleton of a one-off automation. Three steps and you're done.
 
@@ -32,7 +32,7 @@ _File_: `examples/hello_connector.yaml`
 
 ```yaml
 collection: Compiler Demo
-description: Smallest possible end-to-end — start, set a variable, call a connector.
+description: Smallest possible end-to-end -- start, set a variable, call a connector.
 visible: true
 
 playbooks:
@@ -67,7 +67,7 @@ playbooks:
 
 ---
 
-### Decision branch — route by condition
+### Decision branch -- route by condition
 
 **Use when**: Any time the next step depends on data: severity tiers, indicator types, IOC categories, approval/deny.
 
@@ -113,7 +113,7 @@ playbooks:
               # but for the compiler we resolve it via `branches:` below.
         branches:
           high: escalate
-          low: log_low      # `low` is the implicit "else" — last branch with no condition
+          low: log_low      # `low` is the implicit "else" -- last branch with no condition
 
       - id: escalate
         type: set_variable
@@ -134,14 +134,14 @@ playbooks:
 
 ---
 
-### Find and update — the canonical mutation pattern
+### Find and update -- the canonical mutation pattern
 
 **Use when**: Look up a record by query, then mutate it. Most ingestion playbooks reduce to this. Pair with a Decision branch on the find_record result count to handle no-match.
 
 _File_: `examples/find_and_update.yaml`
 
 ```yaml
-# find_record + update_record — the canonical "look something up, mutate it"
+# find_record + update_record -- the canonical "look something up, mutate it"
 # pattern. Most ingestion playbooks look like this.
 #
 # `find_record` (handler `find_data`):
@@ -150,7 +150,7 @@ _File_: `examples/find_and_update.yaml`
 #   partial: when true, returns first page only
 #
 # `update_record` (handler `update_data`):
-#   collection: module name (yes, "collection" — the param name is misleading;
+#   collection: module name (yes, "collection" -- the param name is misleading;
 #               it's the records collection, not a workflow_collection)
 #   resource: dict of {field: new_value}; the record IRI to update is
 #             passed via the special `__bulk` mechanism FSR adds at runtime.
@@ -195,14 +195,14 @@ playbooks:
 
 ---
 
-### Manual input — pause for human approval
+### Manual input -- pause for human approval
 
 **Use when**: Approval flows. Bot proposes an action, user confirms via the FSR UI before the next step runs.
 
 _File_: `examples/manual_input_then_act.yaml`
 
 ```yaml
-# manual_input — pause execution and ask a human a question.
+# manual_input -- pause execution and ask a human a question.
 # Common in approval flows: bot proposes an action, user confirms.
 #
 # manual_input arguments:
@@ -214,7 +214,7 @@ _File_: `examples/manual_input_then_act.yaml`
 # After resume, the user's choice is in `vars.steps.<step_id>.input.<field>`.
 
 collection: Compiler Examples
-description: Approval loop — ask a human, then act based on their response.
+description: Approval loop -- ask a human, then act based on their response.
 visible: true
 
 playbooks:
@@ -269,7 +269,7 @@ playbooks:
 
 ---
 
-### Parent calls child — playbook composition
+### Parent calls child -- playbook composition
 
 **Use when**: Reusable subroutines. Anything called from more than one place should live in a child playbook + workflow_reference.
 
@@ -281,7 +281,7 @@ description: Two playbooks; the parent invokes the child with input parameters.
 
 playbooks:
   - name: Resolve Hostname
-    description: Child playbook — looks up an IP for a hostname.
+    description: Child playbook -- looks up an IP for a hostname.
     parameters:
       - hostname
       - dns_server
@@ -298,7 +298,7 @@ playbooks:
               value: "10.0.0.1  # would be {{vars.input.params.hostname}} resolved via {{vars.input.params.dns_server}}"
 
   - name: Add Host And Resolve
-    description: Parent — calls Resolve Hostname with input args.
+    description: Parent -- calls Resolve Hostname with input args.
     steps:
       - id: start
         type: start
@@ -336,7 +336,7 @@ Which trigger to pick when authoring? Frequencies below are observed across **16
 
 ## Common connector orchestrations
 
-Top connectors invoked by real playbooks on the connected instance. Use this to ground recipe choice — if a connector dominates the table, examples for it likely exist in `pb_examples/all_fsr_evoke_playbooks.json` and can be pulled with `fsrpb pull` for read-only inspection.
+Top connectors invoked by real playbooks on the connected instance. Use this to ground recipe choice -- if a connector dominates the table, examples for it likely exist in `pb_examples/all_fsr_evoke_playbooks.json` and can be pulled with `fsrpb pull` for read-only inspection.
 
 | Connector(s) used | Playbook count |
 |---|---:|

@@ -1,4 +1,4 @@
-"""Render-path analyzer — heuristic diagnostics over a step-through
+"""Render-path analyzer -- heuristic diagnostics over a step-through
 trace (RENDER_PATH_VALIDATOR_PLAN.md Phase 3).
 
 Pure data-in/data-out: takes the trace produced by
@@ -8,21 +8,21 @@ at runtime in FSR.
 
 Initial v1 ships the three highest-ROI checks:
 
-* **C1 unreachable_var_path** — `vars.steps.X.Y` where X isn't a step,
+* **C1 unreachable_var_path** -- `vars.steps.X.Y` where X isn't a step,
   or X comes after the consumer in the executed path.
-* **C2 missing_key** — path key absent from the producer's output
+* **C2 missing_key** -- path key absent from the producer's output
   shape (downgraded to warning when provenance is `default_empty` so
   we don't over-warn on never-simulated steps).
-* **C3 required_arg_empty** — rendered_args contains an empty/None
+* **C3 required_arg_empty** -- rendered_args contains an empty/None
   value at a path the schema marks required. Schema is best-effort
   per step type; missing schema means the check skips silently.
 
 Severity:
-* ``error`` — almost certainly broken at runtime (wrong step name,
+* ``error`` -- almost certainly broken at runtime (wrong step name,
   unreachable path).
-* ``warning`` — suspicious but defensible (missing key on a step
+* ``warning`` -- suspicious but defensible (missing key on a step
   whose output we couldn't fully simulate).
-* ``info`` — stylistic.
+* ``info`` -- stylistic.
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def analyze(trace: list[dict[str, Any]],
 
     ``playbook`` is the parsed YAML playbook dict (with ``steps``);
     used for ``required`` field detection on connector / record_crud
-    steps when the trace alone doesn't carry schema. Optional —
+    steps when the trace alone doesn't carry schema. Optional --
     checks that need it skip cleanly when it's missing.
     """
     diagnostics: list[Diagnostic] = []
@@ -146,7 +146,7 @@ def _c1_unreachable(trace: list[dict[str, Any]],
                     extra={"missing_step": producer},
                 ))
                 continue
-            # Producer exists but came after this consumer — runtime
+            # Producer exists but came after this consumer -- runtime
             # will see an empty value because the step hasn't run yet.
             # Look up by the producer's canonical jkey, since the
             # consumer might have written it as the step_id form.
@@ -228,7 +228,7 @@ def _c2_missing_key(trace: list[dict[str, Any]],
 def _is_subscript_segment(seg: str) -> bool:
     """True when a path segment is a numeric subscript (``"0"``) rather
     than an attribute name. The render-paths extractor encodes
-    ``vars.steps.X[0]`` as segments ``[…, "0"]`` — a bare digit string,
+    ``vars.steps.X[0]`` as segments ``[…, "0"]`` -- a bare digit string,
     not ``"[0]"``."""
     return seg.isdigit() if isinstance(seg, str) else False
 
@@ -241,9 +241,9 @@ def _check_path_against_shape(
     that's missing (valid_keys are the siblings at that level, for a
     precise diagnostic + close-key suggestion), or ``None`` if the chain
     resolves cleanly. Numeric subscript segments (``"0"``) are skipped
-    — they're indexing, not attribute access, and C6 handles
+    -- they're indexing, not attribute access, and C6 handles
     index-into-non-list. Stops walking once the shape becomes opaque
-    (no nested shape recorded for a key) — never flags deeper than the
+    (no nested shape recorded for a key) -- never flags deeper than the
     shape can see, to avoid false positives on un-simulated nesting."""
     cur = shape
     for i, seg in enumerate(segments):
@@ -261,7 +261,7 @@ def _check_path_against_shape(
         if kind == "dict":
             top_keys = cur.get("top_keys") or []
             if not top_keys:
-                return None  # empty / unknown — give it the benefit
+                return None  # empty / unknown -- give it the benefit
             if seg not in top_keys:
                 return seg, top_keys
             nested = cur.get("nested") or {}
@@ -278,7 +278,7 @@ def _check_path_against_shape(
                 cur = item_shape
                 continue
             return None
-        # scalar / null / unknown — opaque
+        # scalar / null / unknown -- opaque
         return None
     return None
 
@@ -295,7 +295,7 @@ def _suggest_close_key(needle: str, haystack: list[str]) -> str:
     near = [k for k in haystack if n in k.lower() or k.lower() in n]
     if near:
         return f"did you mean {near[0]!r}?"
-    # Edit-distance fallback — catches transpositions (summray→summary)
+    # Edit-distance fallback -- catches transpositions (summray→summary)
     # and single-char typos the substring heuristic misses.
     close = difflib.get_close_matches(n, [k.lower() for k in haystack],
                                       n=1, cutoff=0.7)
@@ -309,13 +309,13 @@ def _suggest_close_key(needle: str, haystack: list[str]) -> str:
 # C3 required_arg_empty
 # ---------------------------------------------------------------------
 
-# Per-step-type required-arg lists. Keep narrow on purpose — only
+# Per-step-type required-arg lists. Keep narrow on purpose -- only
 # fields the FSR runtime will reject if blank. Schema-driven discovery
 # (`get_op_schema`) comes in Phase 5; this is the deterministic baseline.
 # Required-field entries can be either a single key (string) or a tuple
 # of keys, where the tuple means "any of these satisfies the requirement"
 # (e.g. update_record accepts either `module:` for the bulk-update path
-# or `collection:` for the targeted-record path — see system_prompt §9).
+# or `collection:` for the targeted-record path -- see system_prompt §9).
 _REQUIRED_FIELDS: dict[str, list] = {
     "connector": ["connector", "operation"],
     "create_record": ["module"],
@@ -404,7 +404,7 @@ def _c3_required_empty(trace: list[dict[str, Any]],
                             break
                 # Also accept the bare key on the step dict for any-of
                 # alternatives (update_record's `collection:` is sometimes
-                # at the step level, sometimes nested under arguments —
+                # at the step level, sometimes nested under arguments --
                 # be liberal here).
                 if _is_empty(v) and step_node is not None:
                     av = (step_node.get("arguments") or {}).get(field_name)
@@ -415,7 +415,7 @@ def _c3_required_empty(trace: list[dict[str, Any]],
                     break
             if satisfied:
                 continue
-            # All any-of alternatives empty — emit diagnostic against
+            # All any-of alternatives empty -- emit diagnostic against
             # the first listed key for stable location.
             field_name = field_keys[0]
             v = None
@@ -468,7 +468,7 @@ def _c4_picklist_drift(trace: list[dict[str, Any]],
             result = cache[cache_key]
             if result.get("ok"):
                 continue
-            # Don't flag when the validator itself couldn't reach FSR —
+            # Don't flag when the validator itself couldn't reach FSR --
             # that's a connectivity issue, not a playbook bug.
             if result.get("code") in ("no_live_fsr", "validator_error"):
                 continue
@@ -483,7 +483,7 @@ def _c4_picklist_drift(trace: list[dict[str, Any]],
                 location=ref.get("location", ""),
                 message=(f"value {value!r} not found on picklist "
                          f"{picklist!r}"
-                         + (f" — {result.get('message')}"
+                         + (f" -- {result.get('message')}"
                             if result.get('message') else "")),
                 suggestion=sugg_text,
                 expected=suggestions,
@@ -523,7 +523,7 @@ def _resolve_shape_at(
             if attr in nested:
                 cur = nested[attr]
             elif i < len(attr_chain) - 1:
-                # Can't walk deeper — no nested shape recorded
+                # Can't walk deeper -- no nested shape recorded
                 return None
             else:
                 # Last attr; return its type and the current shape
@@ -541,7 +541,7 @@ def _resolve_shape_at(
                 return cur.get("item_type", ""), cur
         else:
             return None
-    # Followed the last attr into a nested shape — return its type
+    # Followed the last attr into a nested shape -- return its type
     if isinstance(cur, dict):
         kind = cur.get("kind", "")
         if kind == "dict":
@@ -556,7 +556,7 @@ def _resolve_shape_at(
 def _c6_index_non_list(trace: list[dict[str, Any]],
                        by_jkey: dict[str, dict[str, Any]]) -> list[Diagnostic]:
     """Flag `vars.steps.X.Y[N]` (or `[*]`) when the producer's
-    output_shape says Y is a dict or scalar — indexing it raises
+    output_shape says Y is a dict or scalar -- indexing it raises
     `'dict' object is not subscriptable` at runtime. The render path
     walker records subscripts on `segments` as the literal `"[0]"`-
     shaped strings; we read them off the consumed_paths entry.
@@ -574,7 +574,7 @@ def _c6_index_non_list(trace: list[dict[str, Any]],
             segments = ref.get("segments") or []
             if not segments:
                 continue
-            # Find a numeric subscript segment after position 0 —
+            # Find a numeric subscript segment after position 0 --
             # `X[0]` on the producer key itself is fine (means "first
             # record of the step's output list"). The render-paths
             # extractor encodes `[0]` as the bare digit string "0".
@@ -617,7 +617,7 @@ def _c6_index_non_list(trace: list[dict[str, Any]],
                 path=ref["path"],
                 location=ref.get("location", ""),
                 message=(f"indexing into {target!r} which is "
-                         f"{t!r} on {producer!r}, not a list — "
+                         f"{t!r} on {producer!r}, not a list -- "
                          "this raises at runtime"),
                 suggestion=("remove the [N] index, or fix the upstream "
                             "step to produce a list"),
@@ -637,7 +637,7 @@ _VARS_STEPS_RE = re.compile(r"\bvars\.steps\.([A-Za-z_][A-Za-z0-9_]*)")
 def _c7_decision_unset_path(playbook: dict[str, Any] | None) -> list[Diagnostic]:
     """Static-graph check: a decision branch condition references
     `vars.steps.X.…` where X is NOT on any execution path from start
-    to this decision — so X's output won't exist when the branch
+    to this decision -- so X's output won't exist when the branch
     evaluates. Complements C1 (which works on the trace's linear
     order) by catching sibling-branch references that the trace's
     chosen path might miss.
@@ -746,7 +746,7 @@ def _c7_decision_unset_path(playbook: dict[str, Any] | None) -> list[Diagnostic]
                 if not producer or producer in seen_in_expr:
                     continue
                 seen_in_expr.add(producer)
-                # Skip unknown producers — C1 already flags those when
+                # Skip unknown producers -- C1 already flags those when
                 # they appear in the trace's consumed_paths.
                 if producer not in step_index:
                     continue
@@ -761,7 +761,7 @@ def _c7_decision_unset_path(playbook: dict[str, Any] | None) -> list[Diagnostic]
                     message=(f"decision branch references step "
                              f"{producer!r}, but no path from start "
                              f"reaches this decision through "
-                             f"{producer!r} — its output won't be set"),
+                             f"{producer!r} -- its output won't be set"),
                     suggestion=("move the producer onto every path "
                                 "into this decision, or reference a "
                                 "step that always runs before it"),
@@ -780,10 +780,10 @@ def _c8_mi_mode_mismatch(trace: list[dict[str, Any]],
     """A downstream consumer reads `vars.steps.<MI>.<key>...` where
     the MI step's mode can't produce `<key>`. Concretely:
 
-    * DecisionBased MI reading `input.*` — DecisionBased has no form,
+    * DecisionBased MI reading `input.*` -- DecisionBased has no form,
       so `input` is undefined at runtime.
     * InputBased MI reading `input.<X>` where `<X>` isn't in the
-      declared `inputVariables[].name` — runtime returns undefined.
+      declared `inputVariables[].name` -- runtime returns undefined.
 
     Catalog of legal keys per mode lives in
     `compiler.mi_output_catalog`; corpus mining behind it is documented
@@ -862,7 +862,7 @@ def _c8_mi_mode_mismatch(trace: list[dict[str, Any]],
             form_key = mode_spec.get("form_key")
             allow_input_star = mode_spec.get("allow_input_star", False)
             # Special-case `input.*` reads regardless of the mode's
-            # form_key — for DecisionBased the form_key is None and we
+            # form_key -- for DecisionBased the form_key is None and we
             # still need to flag the read as an error.
             if key == "input":
                 if not allow_input_star:
@@ -874,7 +874,7 @@ def _c8_mi_mode_mismatch(trace: list[dict[str, Any]],
                         location=ref.get("location", ""),
                         message=(f"reads {form_key}.* off manual_input "
                                  f"{producer!r}, but its mode is "
-                                 f"{mode!r} — no input form to source "
+                                 f"{mode!r} -- no input form to source "
                                  "from"),
                         suggestion=("switch the manual_input to "
                                     "InputBased and declare the "
@@ -883,7 +883,7 @@ def _c8_mi_mode_mismatch(trace: list[dict[str, Any]],
                         extra={"producer_step": producer, "mode": mode},
                     ))
                     continue
-                # InputBased + form_key access — check declared list.
+                # InputBased + form_key access -- check declared list.
                 if len(segments) < 4:
                     continue
                 sub = segments[3]
@@ -900,7 +900,7 @@ def _c8_mi_mode_mismatch(trace: list[dict[str, Any]],
                         location=ref.get("location", ""),
                         message=(f"reads input.{sub} off manual_input "
                                  f"{producer!r}, but it declares no "
-                                 "inputVariables — confirm the form "
+                                 "inputVariables -- confirm the form "
                                  "actually collects this field"),
                         suggestion=("add the field to "
                                     "arguments.input.schema."
@@ -969,7 +969,7 @@ def _c9_loop_var_leak(trace: list[dict[str, Any]],
     # the loop body. Cheapest heuristic: any step whose own dict has
     # `for_each` set is itself a loop step (vars.item is valid in
     # *its* arguments); steps reachable only via the loop's `next`
-    # are downstream of the loop — vars.item is not valid there.
+    # are downstream of the loop -- vars.item is not valid there.
     loop_step_ids = {
         s.get("id") or s.get("name") for s in steps
         if isinstance(s, dict) and s.get("for_each")
@@ -989,7 +989,7 @@ def _c9_loop_var_leak(trace: list[dict[str, Any]],
                 path=ref["path"],
                 location=ref.get("location", ""),
                 message=("references `vars.item` outside a for_each "
-                         "body — undefined at runtime"),
+                         "body -- undefined at runtime"),
                 suggestion=("either move this step inside the for_each, "
                             "or refer to the for_each step's output "
                             "(`vars.steps.<loop>.<key>`) which collects "
@@ -1005,7 +1005,7 @@ def _c9_loop_var_leak(trace: list[dict[str, Any]],
 def _c10_dead_step(trace: list[dict[str, Any]],
                    by_jkey: dict[str, dict[str, Any]]) -> list[Diagnostic]:
     """A step whose output is never read by any downstream consumer.
-    Info-level only — sometimes intentional (logging, side-effect
+    Info-level only -- sometimes intentional (logging, side-effect
     record_crud writes that the next step doesn't need). Skip step
     types whose primary value is the side effect: connector_op writes
     (unsafe), record_crud writes, code_snippet (assumed intentional),
@@ -1031,7 +1031,7 @@ def _c10_dead_step(trace: list[dict[str, Any]],
         jkey = rec.get("_jkey", sid)
         if rec.get("type", "") in skip_types:
             continue
-        # Don't flag connector ops that wrote to the world — those are
+        # Don't flag connector ops that wrote to the world -- those are
         # side-effect-positive even if their output isn't consumed.
         # `simulated_from == 'mock_result'` + status "unsafe_simulated"
         # is the agent's signal that this step was a destructive write.
@@ -1040,7 +1040,7 @@ def _c10_dead_step(trace: list[dict[str, Any]],
             continue
         if jkey in referenced_producers or sid in referenced_producers:
             continue
-        # Only flag steps that *did* produce something — skipping
+        # Only flag steps that *did* produce something -- skipping
         # default-empty / errored frames keeps the noise down.
         if not rec.get("output"):
             continue
@@ -1051,7 +1051,7 @@ def _c10_dead_step(trace: list[dict[str, Any]],
             path="",
             location="",
             message=("step output is never consumed by a downstream "
-                     "step — confirm this is intentional (logging / "
+                     "step -- confirm this is intentional (logging / "
                      "side effect) or remove the step"),
             suggestion=("delete the step if you don't need its output; "
                         "or reference it from a later step's args"),

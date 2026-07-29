@@ -1,8 +1,8 @@
 # GitLab CI for FSR Playbook Studio.
 #
 # Two jobs:
-#   • unit   — fast pytest (excludes live + slow markers, matches `make tests`)
-#   • e2e    — Playwright suite under e2e/ (frontend + backend + FSR stub)
+#   • unit   -- fast pytest (excludes live + slow markers, matches `make tests`)
+#   • e2e    -- Playwright suite under e2e/ (frontend + backend + FSR stub)
 #
 # pyfsr is a sibling editable install (../pyfsr). The runner clones it
 # adjacent to this checkout so `uv pip install -e ../pyfsr` resolves.

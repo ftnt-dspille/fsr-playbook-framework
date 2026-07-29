@@ -58,7 +58,7 @@
   // editor lives inside it.
   let showArgs = $derived(node ? node.family !== 'terminal' : false);
   // Examples tab is shown for any step type that has corpus-mined
-  // skeletons available — connector_op + record_crud use the live
+  // skeletons available -- connector_op + record_crud use the live
   // operation/Jinja examples; everything else falls back to the new
   // /api/ref/step-examples/<type> clusters with deterministic English
   // summaries. The set below mirrors STEP_TYPE_TO_CORPUS in
@@ -89,7 +89,7 @@
     !!node && !NO_SAMPLE_TYPES.has(node.type) && node.family !== 'terminal'
   );
 
-  // Trigger nodes' "args" are tiny — fall back to Raw so the user
+  // Trigger nodes' "args" are tiny -- fall back to Raw so the user
   // lands on something useful. Decision / manual_input now keep
   // branches inside the Args tab, so Args is always a sensible default.
   let defaultTab = $derived<Tab>(node?.family === 'terminal' ? 'raw' : 'args');
@@ -102,7 +102,7 @@
     { key: 'raw', label: 'Raw' }
   ]);
 
-  // AI step drafter — same set the backend supports (mirrors STEP_INTROS
+  // AI step drafter -- same set the backend supports (mirrors STEP_INTROS
   // in `web/backend/step_drafter.py`). Surfaces a "✨ Describe" button
   // beside the step name when available.
   const DRAFTABLE_TYPES = new Set([
@@ -116,7 +116,7 @@
   let draftOpen = $state(false);
   let canDraft = $derived(node ? DRAFTABLE_TYPES.has(node.type) : false);
 
-  /** Pull the active module name from the node's args — only relevant
+  /** Pull the active module name from the node's args -- only relevant
    * for trigger / record_crud step types where the drafter wants the
    * field schema. Returns null otherwise. */
   function activeModule(): string | null {
@@ -152,7 +152,7 @@
     activeTab = TABS[(base + delta + len) % len].key;
   }
 
-  // ⌘[ / ⌘] cycles inspector tabs — matches Chrome/VS Code muscle
+  // ⌘[ / ⌘] cycles inspector tabs -- matches Chrome/VS Code muscle
   // memory. Only fires when a node is selected (so the inspector is
   // actually showing tabs); otherwise the browser keeps its default.
   onMount(() => {
@@ -198,7 +198,7 @@
           <button
             type="button"
             aria-label="Describe step"
-            title="Describe what you want — AI drafts the args"
+            title="Describe what you want -- AI drafts the args"
             class="rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-default)] hover:bg-[var(--bg-canvas)]"
             onclick={() => (draftOpen = true)}
           >✨ Describe</button>

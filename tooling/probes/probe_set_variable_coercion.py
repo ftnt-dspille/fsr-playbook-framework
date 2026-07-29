@@ -1,10 +1,10 @@
-"""Phase 1b probe — set_variable type-creation / auto-coercion matrix (live).
+"""Phase 1b probe -- set_variable type-creation / auto-coercion matrix (live).
 
 STATIC_TYPE_FLOW_PLAN.md Phase 1: the static var-typer must reproduce the
 engine's *actual* set_variable coercion rule, not assume it. This probe
 drives a throwaway playbook that `set_variable`s a battery of literal forms
 (quoted strings, bare YAML scalars, Jinja expressions) on the live box, then
-reads the finished run's `env` dict — which holds each var's actual
+reads the finished run's `env` dict -- which holds each var's actual
 post-coercion value. The JSON type of each env value (number / string /
 bool / array / object / null) is the evidence: it shows whether
 set_variable ran `json.loads` on the input and what survived.
@@ -84,7 +84,7 @@ def _build_yaml(coll_name: str) -> str:
     # results + env are dropped server-side). So the playbook deliberately
     # raises in a trailing code_snippet AFTER the set_variable; the failed
     # run then exposes the Set Literals step's coerced output. (Same trick
-    # the connector uses to read agent-op results — see auto-memory
+    # the connector uses to read agent-op results -- see auto-memory
     # fsr_agent_proxied_execute_async / the B3 force-fail saga.)
     lines = [
         f"collection: {coll_name}",
@@ -118,7 +118,7 @@ def _build_yaml(coll_name: str) -> str:
 
 
 # Engine-injected keys that show up in the set_variable step result
-# alongside the user vars — excluded from the matrix.
+# alongside the user vars -- excluded from the matrix.
 _ENGINE_KEYS = {"debug", "input", "request", "task_id", "result",
                 "resources", "currentUser", "auth_info", "globalMock",
                 "useMockOutput", "mockPlaybookId", "last_run_at"}

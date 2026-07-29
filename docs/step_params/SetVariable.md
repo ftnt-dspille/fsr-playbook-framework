@@ -20,7 +20,7 @@ summary: SetVariable step parameter reference.
 
 _(no resolver mapping or no allowlists declared)_
 
-> **Note:** set_variable accepts arbitrary user-chosen variable names at the arguments root (each becomes a `vars.steps.<step>.<name>` binding). Unrecognized-key detection is suppressed here — audit only the canonical fields.
+> **Note:** set_variable accepts arbitrary user-chosen variable names at the arguments root (each becomes a `vars.steps.<step>.<name>` binding). Unrecognized-key detection is suppressed here -- audit only the canonical fields.
 
 ## Corpus observations (top-level arguments keys)
 

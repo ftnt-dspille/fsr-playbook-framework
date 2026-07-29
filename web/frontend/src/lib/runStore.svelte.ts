@@ -1,5 +1,5 @@
 /**
- * Cross-tab store for the most recent run — Author tab kicks one off via
+ * Cross-tab store for the most recent run -- Author tab kicks one off via
  * Push/Run, Run tab displays the streaming logs and final env.
  */
 

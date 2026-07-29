@@ -1,5 +1,5 @@
 """
-Coverage for `_path_to_line` — the YAML error-path → line resolver.
+Coverage for `_path_to_line` -- the YAML error-path → line resolver.
 
 This pins the contract that previously regressed: errors with paths
 like `playbooks[0].steps[0].type` must surface on the actual `type:`
@@ -76,7 +76,7 @@ def test_step_dot_arguments_resolves_to_arguments_key_line():
 
 def test_key_lookup_stays_within_step_block():
     # Looking for `name:` inside step 1 must NOT walk into step 1's
-    # children or hop into step 2 — it should land on step 1's own
+    # children or hop into step 2 -- it should land on step 1's own
     # `name: second` line.
     assert _path_to_line(YAML_WITH_STEPS, "playbooks[0].steps[1].name") == 11
 
@@ -101,7 +101,7 @@ playbooks:
     conditions:
     - op: equals
 """
-    # The error targets a condition inside step 0 — still must
+    # The error targets a condition inside step 0 -- still must
     # resolve based on steps[0], not conditions[0].
     line = _path_to_line(
         yaml, "playbooks[0].steps[0].arguments.conditions[0]"
@@ -139,7 +139,7 @@ playbooks:
       - type: primitive
         field: uuid
 """
-    # steps[1] is the find_record step — its header is line 16.
+    # steps[1] is the find_record step -- its header is line 16.
     # Missing `module` falls back to the step header, not a nested
     # `- display:` or `- type: primitive` line.
     line = _path_to_line(yaml, "playbooks[0].steps[1].arguments.module")

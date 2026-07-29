@@ -45,7 +45,7 @@ class Task:
     # Investigation-mode scoring inputs. Each entry is a tool-call matcher
     # (see scoring._fact_matches). `required_facts` = pivots the agent
     # SHOULD perform (recall numerator); `forbidden_facts` = pivots it must
-    # NOT perform (e.g. external TI on an internal RFC1918 IP — any hit
+    # NOT perform (e.g. external TI on an internal RFC1918 IP -- any hit
     # hard-fails the gate).
     required_facts: list[dict[str, Any]] = field(default_factory=list)
     forbidden_facts: list[dict[str, Any]] = field(default_factory=list)

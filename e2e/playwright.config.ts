@@ -2,14 +2,14 @@ import { defineConfig } from '@playwright/test';
 
 /**
  * E2E config. Starts three processes on DEDICATED ports that don't
- * overlap with the dev environment (dev is on 4782X — e2e is on 4792X):
+ * overlap with the dev environment (dev is on 4782X -- e2e is on 4792X):
  *
- *   1. FSR stub  (port 47920) — canned FortiSOAR endpoints, see fsr_stub.py
- *   2. Backend   (port 47921) — real FastAPI app pointed at the stub
- *   3. Frontend  (port 47922) — `vite dev`, /api proxied to backend
+ *   1. FSR stub  (port 47920) -- canned FortiSOAR endpoints, see fsr_stub.py
+ *   2. Backend   (port 47921) -- real FastAPI app pointed at the stub
+ *   3. Frontend  (port 47922) -- `vite dev`, /api proxied to backend
  *
  * Reuses an existing server only if one is ALREADY on those e2e
- * ports — never collides with a running `pnpm dev` session.
+ * ports -- never collides with a running `pnpm dev` session.
  */
 const REUSE = process.env.REUSE !== '0';
 const REPO_ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');

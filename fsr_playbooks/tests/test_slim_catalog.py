@@ -1,12 +1,12 @@
 """Pins the shipped slim compile catalog (Phase 3b).
 
-The wheel ships ``fsr_playbooks/_data/fsr_reference.db`` — the stable-tables
+The wheel ships ``fsr_playbooks/_data/fsr_reference.db`` -- the stable-tables
 catalog built by ``tooling/catalog/build_compile_catalog.py``. A fresh install
 has no probed ``data/`` DB, so this packaged slim DB is what compiles run
 against. These tests assert the contract the slim DB must satisfy:
 
 * it exists and ships the stable catalog (step types populated);
-* the scrubbed **connector baseline** ships (definitions only — the public
+* the scrubbed **connector baseline** ships (definitions only -- the public
   operation/param schema the compiler validates against, so the in-repo
   example/library playbooks compile offline);
 * the instance-specific carriers are scrubbed: ``info_json``/``source_code``/
@@ -16,7 +16,7 @@ against. These tests assert the contract the slim DB must satisfy:
 * a baseline-connector playbook compiles clean against it (proves the
   shipped defs are sufficient);
 * a NON-baseline connector fails with a clear ``CompileError`` (the resolver
-  has no live fallback — see ``fsr_playbooks/_db.py``), NOT a crash.
+  has no live fallback -- see ``fsr_playbooks/_db.py``), NOT a crash.
 """
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def test_slim_db_is_present_and_shaped():
             assert source_code is None, f"{name}: source_code not scrubbed"
             assert rpm_fingerprint is None, f"{name}: rpm_fingerprint not scrubbed"
             assert source == "packaged", f"{name}: source={source!r} (expected 'packaged')"
-        # The per-instance creds table stays empty — warmed, never shipped.
+        # The per-instance creds table stays empty -- warmed, never shipped.
         assert conn.execute(
             "SELECT COUNT(*) FROM connector_configs"
         ).fetchone()[0] == 0, "connector_configs must ship empty (per-instance creds)"
@@ -86,7 +86,7 @@ def test_stable_only_playbook_compiles_against_slim_db():
 
 def test_baseline_connector_playbook_compiles_against_slim_db():
     # virustotal is in the shipped baseline, so this example must now compile
-    # offline — proving the scrubbed connector defs are sufficient.
+    # offline -- proving the scrubbed connector defs are sufficient.
     yaml_text = (_EXAMPLES / "demo_virustotal_ip.yaml").read_text()
     res = compile_yaml(yaml_text, PACKAGED_SLIM_DB)
     blocking = [e.message for e in res.errors if e.severity != "warning"]

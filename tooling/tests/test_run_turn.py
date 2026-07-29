@@ -231,7 +231,7 @@ def test_chat_py_compat_drops_first_round_text_without_pre_supplied_session():
 def test_seq_does_not_reset_between_usage_events():
     """Risk #1 from the plan. AnthropicProvider emits one UsageEvent per
     LLM round-trip inside a single user turn. The seq counter must
-    persist across them — otherwise round-2 rows collide with round-1
+    persist across them -- otherwise round-2 rows collide with round-1
     rows on (session_id, turn, seq) and INSERT OR REPLACE silently
     overwrites the earlier round. See chat.py L379-388 for the
     original incident."""
@@ -384,7 +384,7 @@ def test_error_event_in_stream_sets_error_field():
     assert result.error == "bad auth"
 
 
-# ----- 10. resume — fallback when provider has no resume ------------------
+# ----- 10. resume -- fallback when provider has no resume ------------------
 
 class _NoResumeProvider:
     name = "no-resume"
@@ -413,7 +413,7 @@ def test_resume_returns_synthetic_error_when_provider_lacks_resume():
     assert any(isinstance(e, ErrorEvent) for e in result.transcript)
 
 
-# ----- 11. resume — happy path --------------------------------------------
+# ----- 11. resume -- happy path --------------------------------------------
 
 class _ScriptedResumeProvider:
     name = "resume-script"
@@ -447,7 +447,7 @@ def test_resume_happy_path_collects_transcript():
     assert "resumed" in txt_rows[0]["content"]
 
 
-# ----- 12. §2.3 — synthetic skipped-tool events on resume -----------------
+# ----- 12. §2.3 -- synthetic skipped-tool events on resume -----------------
 
 def test_resume_emits_synthetic_events_for_skipped_tools():
     """remaining_tool_calls → synthetic ToolUseEvent + ToolResultEvent before

@@ -7,7 +7,7 @@
   <PageHeader
     eyebrow="Phase 4"
     title="Browse"
-    subtitle="Discover playbooks shipped on the connected FortiSOAR — by collection, tag, last run, or full-text search."
+    subtitle="Discover playbooks shipped on the connected FortiSOAR -- by collection, tag, last run, or full-text search."
   />
   <div class="flex-1">
     <EmptyState

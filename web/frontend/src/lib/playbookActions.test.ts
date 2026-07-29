@@ -1,6 +1,6 @@
 /**
  * Coverage for the shared validate / compile / push / push-and-run
- * pipeline. Both Design and CLI route through this module — these
+ * pipeline. Both Design and CLI route through this module -- these
  * tests pin the contract (state mutations, error handling, and the
  * collection/playbook-name extraction the run path depends on).
  */
@@ -136,7 +136,7 @@ describe('playbookActions', () => {
     const fresh = 'collection: NEW\nplaybooks:\n  - name: New\n';
     seedYaml(stale);
     visualStore.state.graph = {
-      // Minimal shape — flushVisual only reads .dirty + .graph truthiness
+      // Minimal shape -- flushVisual only reads .dirty + .graph truthiness
       // and calls renderToYaml, which we stub via fetch below.
       source: { path: null, yaml: stale },
       playbooks: []
@@ -195,7 +195,7 @@ describe('playbookActions', () => {
     seedYaml('collection: X\nplaybooks:\n  - name: P\n');
     mockFetch((url) => {
       if (url === '/api/playbook/push') return { ok: false, exit_code: 1, stdout: '', stderr: 'nope' };
-      // /api/playbook/run should NEVER be hit — push failed.
+      // /api/playbook/run should NEVER be hit -- push failed.
       if (url === '/api/playbook/run') throw new Error('run should not be invoked');
       throw new Error(`unexpected ${url}`);
     });

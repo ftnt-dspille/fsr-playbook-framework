@@ -8,7 +8,7 @@ each top-level module and subpackage by hand (force-include cannot honour
 ``exclude``, which is how ``tests/`` is kept out).
 
 Hand-maintained manifests rot: add a new module or subpackage under
-fsr_playbooks/ and forget to list it, and it silently won't ship — a broken
+fsr_playbooks/ and forget to list it, and it silently won't ship -- a broken
 release that nothing else catches. This test makes that failure loud and local:
 it asserts every importable top-level module and every non-test subdirectory is
 present in the manifest.

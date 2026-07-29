@@ -1,4 +1,4 @@
-"""OpenAI provider — streaming chat with tool use + full HITL parity.
+"""OpenAI provider -- streaming chat with tool use + full HITL parity.
 
 This is the OpenAI Chat Completions sibling of `AnthropicProvider`. It
 speaks the same `LLMProvider` protocol (TextEvent / ToolUseEvent /
@@ -23,7 +23,7 @@ block inside a user turn. The HITL semantics are identical.
 
 Works against OpenAI proper by default; `base_url` override lets it
 drive any OpenAI-compatible endpoint (vLLM, Together, Groq, …). For LM
-Studio specifically, prefer `LMStudioProvider` — it defaults to the
+Studio specifically, prefer `LMStudioProvider` -- it defaults to the
 local server and a permissive api_key. The two share no code so a change
 to one can't regress the other.
 """
@@ -92,13 +92,13 @@ DEFAULT_MODEL = (
 # connector's stop_reason contract (which the AnthropicProvider satisfies
 # natively, since Anthropic already returns "end_turn"). Without this mapping
 # the OpenAI path leaks the raw "stop"/"length" tokens, so a normal turn ends
-# on stop_reason="stop" instead of the contract's "end_turn" — silently
+# on stop_reason="stop" instead of the contract's "end_turn" -- silently
 # breaking every consumer keyed on the contract (the live chat test T3, etc.).
 # Map the OpenAI tokens onto the same vocabulary Anthropic emits.
 _FINISH_TO_CONTRACT = {
     "stop": "end_turn",
     # The OUTPUT-TOKEN CAP, and nothing else. This used to map onto
-    # "max_turns", a name that reads as the tool-loop budget — so a build turn
+    # "max_turns", a name that reads as the tool-loop budget -- so a build turn
     # truncated mid-playbook looked like the benign "ran out of steps, send
     # another message" stop instead of a half-written document. The tool-loop
     # budget has always had its OWN reason (`max_tool_turns`, emitted by the
@@ -122,7 +122,7 @@ def _contract_stop_reason(finish_reason: str | None) -> str:
     return _FINISH_TO_CONTRACT.get(finish_reason, finish_reason)
 
 
-# Mirrors AnthropicProvider._ASSESSMENT_DIRECTIVE — the P1 forced written
+# Mirrors AnthropicProvider._ASSESSMENT_DIRECTIVE -- the P1 forced written
 # assessment when a turn ran tools but closed with no narrative text.
 _ASSESSMENT_DIRECTIVE = (
     "You ran tools but did not write anything back to the analyst. Stop "
@@ -132,14 +132,14 @@ _ASSESSMENT_DIRECTIVE = (
 )
 
 # Forced enhance-delivery round. The turn verified an edit (ready_to_push) but
-# ended without calling `emit_enhancement_offer` — usually narrating the call
+# ended without calling `emit_enhancement_offer` -- usually narrating the call
 # instead of making it. We pin `tool_choice` to the offer tool so the CALL is
 # structural, and override `verified_id` afterward so a forced round can only
 # deliver the blessed bytes. Directive is belt-and-suspenders for the summary.
 _DELIVERY_DIRECTIVE = (
     "You verified an edit to the open playbook and it is ready to apply, but "
     "you have not delivered it. Call `emit_enhancement_offer` now with "
-    "verified_id {vid!r} to apply it — a written description is NOT a "
+    "verified_id {vid!r} to apply it -- a written description is NOT a "
     "substitute for the call. Write the `summary` as one or two plain-English "
     "lines describing what the edit changes."
 )
@@ -150,7 +150,7 @@ def _max_tokens_param(model: str, value: int) -> dict[str, int]:
 
     GPT-5 and later reject `max_tokens` outright ("Unsupported parameter:
     'max_tokens' is not supported with this model. Use 'max_completion_tokens'
-    instead.", HTTP 400) — so sending the old name makes every call to those
+    instead.", HTTP 400) -- so sending the old name makes every call to those
     models fail. Older models (gpt-4o, gpt-4.1*) accept `max_tokens`; some do not
     yet accept the new name, so we cannot simply always send the new one.
     """
@@ -163,7 +163,7 @@ def _is_gpt5_plus(model: str) -> bool:
 
     Deliberately prefix-based rather than an allow-list: OpenAI ships new
     point-releases and named variants continuously, and an allow-list would
-    silently fall back to the old parameter name — i.e. a 400 on every call —
+    silently fall back to the old parameter name -- i.e. a 400 on every call --
     for any id we hadn't enumerated yet. Gateways serving non-OpenAI models
     (GLM via the frank endpoint) don't match and keep the legacy name.
     """
@@ -181,14 +181,14 @@ def _cached_tokens(usage: Any) -> int:
     """Tokens served from OpenAI's prompt cache, or 0 if unreported.
 
     Chat Completions reports this at ``usage.prompt_tokens_details.cached_tokens``
-    (the Responses API uses ``input_tokens_details`` — we are on the former).
+    (the Responses API uses ``input_tokens_details`` -- we are on the former).
     Caching is automatic for prompts >=1024 tokens and needs no opt-in; cache
     reads bill at 90% off. The value is a SUBSET of ``prompt_tokens``, not an
     addition to it, so cost math must subtract before applying the discount.
 
     There is no cache-WRITE counterpart on the models we default to: writes are
     free and unreported pre-GPT-5.6. GPT-5.6+ does report ``cache_write_tokens``
-    (billed 1.25x input) — wire that up here if we ever default to one.
+    (billed 1.25x input) -- wire that up here if we ever default to one.
     """
     try:
         return getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
@@ -202,7 +202,7 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, 
     Plain-string user/assistant turns map one-to-one. Internal turns we
     append during the loop (assistant w/ tool_calls, tool result
     messages) are already OpenAI-shaped dicts carried as Message.content
-    list[dict]; they pass through verbatim — each block carries its own
+    list[dict]; they pass through verbatim -- each block carries its own
     `role`, so the Message.role on a list-content carrier is ignored."""
     out: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for m in messages:
@@ -219,7 +219,7 @@ def _normalize_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     (`{type:"function", function:{name, description, parameters}}`).
 
     The connector advertises an intent tool-slice using the Anthropic shape
-    (`{name, description, input_schema}`) regardless of the active provider —
+    (`{name, description, input_schema}`) regardless of the active provider --
     so a triage turn reaches us with Anthropic-shaped tools and OpenAI 400s
     with "Missing required parameter: 'tools[0].type'". We own our wire
     format: accept either shape and convert. Already-OpenAI tools pass
@@ -296,15 +296,15 @@ class OpenAIProvider:
 
         OpenAI form of AnthropicProvider.resume: the assistant turn (with
         its `tool_calls`) already lives in `history_snapshot`. We rebuild
-        one `{"role": "tool", …}` message per tool_use the model emitted —
+        one `{"role": "tool", …}` message per tool_use the model emitted --
         the prior results that completed before the gate, the resolved
         pending call (re-dispatched on approve / synthesized denial on
         deny), and `superseded_by_approval` placeholders for calls that
-        hadn't run yet — then re-enter `stream()`."""
-        # Phase 3.1 HMAC binding check — fail closed on tamper / lost secret.
+        hadn't run yet -- then re-enter `stream()`."""
+        # Phase 3.1 HMAC binding check -- fail closed on tamper / lost secret.
         if not _approvals.verify(suspended):
             yield ErrorEvent(
-                message="Approval binding check failed — the suspended action "
+                message="Approval binding check failed -- the suspended action "
                         "could not be verified and was not executed. Re-issue "
                         "the request."
             )
@@ -340,8 +340,8 @@ class OpenAIProvider:
             })
 
         # history_snapshot is the OpenAI history WITHOUT the system message
-        # (stream() re-prepends it). Carry the whole thing — snapshot dicts
-        # then the rebuilt tool messages — as a single list-content Message
+        # (stream() re-prepends it). Carry the whole thing -- snapshot dicts
+        # then the rebuilt tool messages -- as a single list-content Message
         # so `_to_openai_messages` lays them out in order.
         carried: list[dict[str, Any]] = list(suspended.history_snapshot) + tool_messages
         rehydrated = [Message(role="user", content=carried)]
@@ -372,7 +372,7 @@ class OpenAIProvider:
 
         Shared by the max-tool-turns wrap-up and the P1 forced-assessment
         guarantee. Appends `directive` as a user turn, runs with NO tools,
-        and streams the text. Failures are logged and swallowed — the
+        and streams the text. Failures are logged and swallowed -- the
         caller still emits a terminal DoneEvent so the turn never hangs."""
         history.append({"role": "user", "content": directive})
         try:
@@ -412,7 +412,7 @@ class OpenAIProvider:
             logging.exception("%s call failed", stop_reason_label)
             yield ErrorEvent(
                 message=(
-                    "hit max tool budget; summary failed — see "
+                    "hit max tool budget; summary failed -- see "
                     "history above"
                 ),
             )
@@ -427,7 +427,7 @@ class OpenAIProvider:
         case_state: Any = None,  # CaseState | None, kept as Any to avoid import
     ) -> AsyncIterator[Event]:
         if not self.model:
-            yield ErrorEvent(message="No OpenAI model selected — set one in Settings.")
+            yield ErrorEvent(message="No OpenAI model selected -- set one in Settings.")
             return
 
         history = _to_openai_messages(system, messages)
@@ -455,11 +455,11 @@ class OpenAIProvider:
             for t in tools
         }
 
-        # P4 — repeated-error guard. Don't re-run an identical (name, args)
+        # P4 -- repeated-error guard. Don't re-run an identical (name, args)
         # call that already failed this turn; return a guard envelope so the
         # model adapts instead of burning budget on the same 400 twice.
         failed_signatures: set[str] = set()
-        # Triage discipline (hunt floor + forbidden pivot + call-once) — see
+        # Triage discipline (hunt floor + forbidden pivot + call-once) -- see
         # _loop_helpers.TriageDiscipline. Fires only on triage tool names.
         # If case_state is provided, pass its investigation to seed counters.
         investigation_state = (
@@ -500,7 +500,7 @@ class OpenAIProvider:
                     "error": (
                         f"This exact call to `{nm}` already failed earlier this "
                         f"turn and was NOT re-run. Do not retry the identical "
-                        f"arguments — change the inputs (e.g. resolve the "
+                        f"arguments -- change the inputs (e.g. resolve the "
                         f"correct id from the record's sourcedata) or stop and "
                         f"report the blocker in your assessment."
                     ),
@@ -508,7 +508,7 @@ class OpenAIProvider:
             guard = _discipline.evaluate(nm, ar)
             if guard is not None:
                 # Terminal guards (forbidden pivot / call-once) can never
-                # succeed — register the signature so an identical re-call hits
+                # succeed -- register the signature so an identical re-call hits
                 # the firmer repeated_call_guard and the model stops retrying.
                 # The hunt-floor block is intentionally NOT terminal: that exact
                 # call should succeed once investigation has caught up.
@@ -596,7 +596,7 @@ class OpenAIProvider:
                 yield ErrorEvent(
                     message=f"The request to OpenAI timed out after "
                             f"{STREAM_TIMEOUT_SECS}s. The API may be slow or "
-                            f"unreachable — please try again."
+                            f"unreachable -- please try again."
                 )
                 return
             except Exception as e:
@@ -642,7 +642,7 @@ class OpenAIProvider:
                     tool_calls=tool_call_usage, tags=tags,
                 )
 
-            # Terminal turn (no tool calls) — self-repair, P1 assessment, done.
+            # Terminal turn (no tool calls) -- self-repair, P1 assessment, done.
             if not tool_calls_for_msg or finish_reason != "tool_calls":
                 if self_repair_turns < MAX_SELF_REPAIR_TURNS and text_buf:
                     yaml_block = _extract_yaml_block(text_buf)
@@ -661,7 +661,7 @@ class OpenAIProvider:
                             yield _emit_usage(finish_reason or "", repair_delta=1)
                             continue
 
-                # Enhance-delivery guard — a verify passed but no offer
+                # Enhance-delivery guard -- a verify passed but no offer
                 # followed. Force ONE round pinned to emit_enhancement_offer so
                 # the delivery is a real tool call, then override verified_id
                 # with the blessed handle so the forced call can only apply the
@@ -798,7 +798,7 @@ class OpenAIProvider:
                     remaining = list(tool_calls[i + 1:])
                     approval_id = result["approval_id"]
                     # history (incl. the assistant tool_calls turn) is the
-                    # snapshot, minus the leading system message — stream()
+                    # snapshot, minus the leading system message -- stream()
                     # re-prepends system on resume.
                     suspended_session = _approvals.SuspendedSession(
                         approval_id=approval_id,
@@ -853,7 +853,7 @@ class OpenAIProvider:
             any_tools_run = True
             yield _emit_usage(finish_reason or "tool_calls")
 
-        # Tool-turn budget exhausted — one no-tools wrap-up round.
+        # Tool-turn budget exhausted -- one no-tools wrap-up round.
         turn_idx += 1
         async for ev in self._wrapup_call(
             history=history,
@@ -889,7 +889,7 @@ def _stringify(result: Any) -> str:
 
 def _friendly_error(e: Exception, base_url: str) -> str:
     if isinstance(e, AuthenticationError):
-        return "OpenAI authentication failed — check the API key."
+        return "OpenAI authentication failed -- check the API key."
     if isinstance(e, PermissionDeniedError):
         return "The OpenAI API key lacks permission for this model."
     if isinstance(e, RateLimitError):
@@ -897,7 +897,7 @@ def _friendly_error(e: Exception, base_url: str) -> str:
     if isinstance(e, APITimeoutError):
         return "The request to OpenAI timed out. Try again, or shorten the prompt."
     if isinstance(e, APIConnectionError):
-        return (f"Could not reach the OpenAI endpoint at {base_url} — check "
+        return (f"Could not reach the OpenAI endpoint at {base_url} -- check "
                 f"network connectivity and the base URL.")
     if isinstance(e, BadRequestError):
         return f"OpenAI rejected the request: {getattr(e, 'message', str(e))[:200]}"

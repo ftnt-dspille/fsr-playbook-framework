@@ -26,7 +26,7 @@ export function formatFsrValue(v: unknown): string {
       const tail = (o['@id'] as string).split('/').filter(Boolean).pop();
       return tail ?? String(o['@id']);
     }
-    // Small generic object — fall through to JSON.
+    // Small generic object -- fall through to JSON.
     try { return JSON.stringify(o); } catch { return '<object>'; }
   }
   return String(v);

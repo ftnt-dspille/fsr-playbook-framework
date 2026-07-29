@@ -6,7 +6,7 @@ results, then produces a final authored+validated playbook.
 
 Unlike scripts/try_openai_stream.py (which only checks streaming), this
 drives OpenAIProvider with the ACTUAL `openai_tools()` slice and the real
-`dispatch()` registry — so a passing run means the model:
+`dispatch()` registry -- so a passing run means the model:
   1. emitted well-formed OpenAI tool_calls for REAL tool names,
   2. those names were in the advertised slice (allowed_names),
   3. dispatch returned real data (not "unknown tool" / bad-arguments),
@@ -26,7 +26,7 @@ import asyncio
 import sys
 import time
 
-import web.backend.app  # noqa: F401  — triggers _load_dotenv()
+import web.backend.app  # noqa: F401  -- triggers _load_dotenv()
 from web.backend import settings
 from fsr_playbooks.llm.openai_provider import OpenAIProvider
 from fsr_playbooks.llm.tools import openai_tools
@@ -35,7 +35,7 @@ from fsr_playbooks.llm.provider import (
     ToolResultEvent, ToolUseEvent, UsageEvent,
 )
 
-# Tier-0 authoring tools — discover → author → validate, all offline.
+# Tier-0 authoring tools -- discover → author → validate, all offline.
 OFFLINE_SLICE = {
     "find_connector", "find_operation", "get_op_schema", "get_step_type",
     "find_jinja_filter", "find_jinja_pattern", "get_filter_examples",
@@ -49,7 +49,7 @@ SYSTEM = (
     "connector with find_connector, find the operation with find_operation, "
     "inspect its schema with get_op_schema, then author the YAML and prove "
     "it with validate_yaml (and compile_yaml). Do not invent connector or "
-    "operation names — look them up. When done, output the final YAML in a "
+    "operation names -- look them up. When done, output the final YAML in a "
     "```yaml fenced block plus a one-line assessment."
 )
 
@@ -131,7 +131,7 @@ async def main() -> int:
     print(f"[{'PASS' if can_call_tools else 'FAIL'}] gb200 calls your custom tools with valid args")
     print(f"[{'PASS' if has_yaml else 'WARN'}] gb200 produced a final playbook YAML")
     if not final_text.strip():
-        print("  note: no closing text — check the transcript above")
+        print("  note: no closing text -- check the transcript above")
     else:
         print("\n--- final assistant text (tail) ---")
         print(final_text[-800:])

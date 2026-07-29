@@ -28,7 +28,7 @@ DB_PATH = _shared.DB_PATH
 # Before executing an op we confirm the connector actually has an active
 # configuration AND that its healthcheck passes. A misconfigured / disconnected
 # connector is a user-fixable problem, so we surface it as a structured error
-# the agent relays back to the user — rather than firing the op blind and
+# the agent relays back to the user -- rather than firing the op blind and
 # flailing to a different connector on the generic execution failure.
 #
 # Healthchecks hit the upstream vendor service, so we cache the result in
@@ -127,12 +127,12 @@ def _store_health(connector: str, version: str, status: Any, message: str,
 
 # Live op-definition cache. The per-connector detail POST that enumerates a
 # connector's operations + their params is heavy, and op definitions change
-# only on a connector UPGRADE — so cache the parsed ops list in sqlite (like
+# only on a connector UPGRADE -- so cache the parsed ops list in sqlite (like
 # health, this survives worker restarts and is visible across worker processes,
 # which an in-process cache would not be). Keyed by (connector, version) so an
 # upgrade naturally misses and re-fetches. Used by the un-synced grounding path
 # (`validate_op_grounded`) and pre-warmed for un-synced connectors by
-# `populate_op_definitions` — so the first grounding call in a hunt is a cache
+# `populate_op_definitions` -- so the first grounding call in a hunt is a cache
 # hit instead of a multi-second live fetch repeated every pivot.
 _OP_DEFS_TTL_S = 24 * 3600
 
@@ -198,7 +198,7 @@ def _agent_configured_rows(client) -> list[dict[str, Any]]:
 
     Agent-proxied connectors show config_count=0 in connector_details?configured=true
     and are invisible to preflight. Fix: list active agents via GET /api/3/agents,
-    then POST connector_details?agent={id}&active=true&exclude=operation per agent —
+    then POST connector_details?agent={id}&active=true&exclude=operation per agent --
     this returns real config_count. Only include rows with config_count > 0 and
     status=Completed (installed-but-unconfigured agent connectors have config_count=0)."""
     try:
@@ -239,7 +239,7 @@ def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
     """Active, configured connectors on the live instance (by name+version).
 
     Cached in-process for a short TTL: preflight calls this on every `run_op`,
-    and on a busy box the `connector_details` POST is non-trivial — re-fetching
+    and on a busy box the `connector_details` POST is non-trivial -- re-fetching
     it per op during a multi-pivot hunt is pure overhead. The set rarely
     changes within a session; a 2-minute TTL keeps it fresh enough.
 
@@ -266,7 +266,7 @@ def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
             by_name[name] = ar
             continue
         # Same connector installed BOTH locally and on an agent. Don't drop the
-        # agent row — its agent-only configs would become invisible to
+        # agent row -- its agent-only configs would become invisible to
         # _resolve_config_id, so run_op couldn't map an agent config NAME to its
         # UUID and would skip the agent force-fail wrap (returning the empty
         # in-progress stub). Merge the agent's configuration entries + agent id
@@ -314,10 +314,10 @@ def _healthcheck_via_agents(client, connector: str,
 
     Two paths:
     1. When `agent_id` is known: POST /api/integration/connectors/{name}/{version}/
-       ?agent={agent_id} — returns the connector detail with configuration[].health_status.
+       ?agent={agent_id} -- returns the connector detail with configuration[].health_status.
        When `config` is also supplied, returns that specific config's health_status;
        otherwise aggregates (any Available wins).
-    2. Fallback: POST /api/integration/connectors/agents/{name}/{version}/ — lists agent
+    2. Fallback: POST /api/integration/connectors/agents/{name}/{version}/ -- lists agent
        install rows and reads remote_status. Works when agent_id is unknown.
 
     Fails open on any error so a probe gap never silently drops a valid connector."""
@@ -377,7 +377,7 @@ def _live_healthcheck(client, connector: str, version: str,
     """One live healthcheck call.
 
     `config` is an optional config UUID. `agent_id` is the FortiSOAR Agent's
-    agentId — when provided we read the cached health from the agent-scoped
+    agentId -- when provided we read the cached health from the agent-scoped
     connector detail (the sync healthcheck endpoint dispatches an async job
     when ?agent= is supplied, not a usable synchronous result).
     """
@@ -419,7 +419,7 @@ def _live_healthcheck(client, connector: str, version: str,
             pass
         if not data:
             # The probe itself failed (timeout / network / unreachable
-            # endpoint) — we did NOT get an authoritative verdict from the
+            # endpoint) -- we did NOT get an authoritative verdict from the
             # vendor. Tag it `_probe_failed` so callers can fail open and NOT
             # cache it: persisting a probe hiccup as "error" would poison the
             # 5-min unhealthy TTL and silently drop containment/enrichment ops
@@ -438,7 +438,7 @@ def _live_healthcheck(client, connector: str, version: str,
     if _needs_agent_fallback:
         return _healthcheck_via_agents(client, connector, version)
     # Reached the endpoint but got no usable status (e.g. non-2xx with an
-    # unparseable body) — same as a probe failure: not an authoritative
+    # unparseable body) -- same as a probe failure: not an authoritative
     # unhealthy verdict, so tag it and let callers fail open rather than cache.
     if not (isinstance(data, dict) and data.get("status")):
         return {"status": "error", "_probe_failed": True,
@@ -455,7 +455,7 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
     connector.
 
     Healthchecks hit the upstream vendor service and can be slow, so the pass
-    is bounded by `time_budget_s` — once the budget is exhausted we stop and
+    is bounded by `time_budget_s` -- once the budget is exhausted we stop and
     leave the rest to be filled lazily by `run_op`'s preflight on first use
     (so warmup never blows the platform's op timeout). Connectors whose cached
     verdict is still within its TTL are SKIPPED unless `force=True`, so repeat
@@ -492,7 +492,7 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
             hc = _live_healthcheck(client, name, version, cid, agent_id=agent_id)
             status = hc.get("status")
             # A probe failure (timeout / unreachable) is not an authoritative
-            # verdict — don't cache it (would poison the unhealthy TTL and drop
+            # verdict -- don't cache it (would poison the unhealthy TTL and drop
             # ops after recovery). Still record the status locally so the
             # summary/aggregate reflects this pass.
             if not hc.get("_probe_failed"):
@@ -536,13 +536,13 @@ def populate_op_definitions(client, time_budget_s: float = 60.0,
 
     The per-connector detail POST returns each operation WITH its parameter
     list, so one fetch captures operations + operation-params together. We warm
-    **un-synced connectors first** — those absent from the bundled catalog
+    **un-synced connectors first** -- those absent from the bundled catalog
     (`store_ops_count == 0`, e.g. the sess-uq31go5p virustotal case) have no
     offline fallback, so the grounding path would otherwise do a multi-second
     live fetch on every pivot. Remaining budget then warms synced connectors
     too (the bundle can lag the live box), newest-need first.
 
-    Bounded by `time_budget_s` (background pass — never blocks warmup);
+    Bounded by `time_budget_s` (background pass -- never blocks warmup);
     connectors with a fresh cache are skipped unless `force`. Anything not
     reached is filled lazily by `validate_op_grounded` on first use.
     Best-effort: returns a summary, never raises."""
@@ -583,7 +583,7 @@ def populate_op_definitions(client, time_budget_s: float = 60.0,
                 warmed += 1
             else:
                 skipped += 1
-        except Exception:  # noqa: BLE001 — best-effort; grounding backfills
+        except Exception:  # noqa: BLE001 -- best-effort; grounding backfills
             skipped += 1
     return {"ok": True, "warmed": warmed, "empty_or_failed": skipped,
             "fresh_cached": fresh, "budget_skipped": budget_skipped,
@@ -633,7 +633,7 @@ def _resolve_config_id(rows: list[dict[str, Any]], connector: str,
 
 def _live_ops_for(client, connector: str,
                   force: bool = False) -> list[dict[str, Any]]:
-    """Live operation objects for a connector — cache-first.
+    """Live operation objects for a connector -- cache-first.
 
     Reads the sqlite op-def cache (`connector_op_defs`, keyed by version), and
     only on a miss does the heavy per-connector detail POST (then caches it).
@@ -709,7 +709,7 @@ def _validate_op_live(client, connector: str, op: str) -> dict[str, Any] | None:
     catalogued for `connector` (so `_validate_op_exists` couldn't decide).
 
     Returns an `unknown_operation` error (with near-matches) when the live
-    op list is non-empty and `op` isn't in it; None otherwise — including on
+    op list is non-empty and `op` isn't in it; None otherwise -- including on
     ANY lookup failure, so a transient hiccup never false-rejects a real op
     (the execute call still reports genuine errors).
     """
@@ -726,17 +726,17 @@ def _validate_op_params_live(op_def: dict[str, Any] | None, connector: str,
     """Validate `params` against a LIVE op definition's parameter list.
 
     The offline-store analog (`_shared._validate_op_params`) no-ops when the op
-    has no params catalogued — exactly the un-synced case that lets the agent
+    has no params catalogued -- exactly the un-synced case that lets the agent
     burn turns guessing param names live (`ip`→`ip_address`→`indicator`, the
     `invest_excessive_mail_egress` flail). This closes that gap: unknown-param
     (typo detector) + missing-required, validated against the live connector
-    definition. Deliberately loose — select-option membership and type checks
+    definition. Deliberately loose -- select-option membership and type checks
     stay on the offline path; here we only reject names that don't exist and
     required names that are absent. Returns a `bad_params` envelope or None.
 
     Fails open (None) when the live op has no parameter list (can't prove a
     name is unknown), mirroring `_op_not_in_live`'s empty-list guard. Jinja
-    template values are left alone — only top-level membership is judged."""
+    template values are left alone -- only top-level membership is judged."""
     params = params or {}
     plist = (op_def or {}).get("parameters") or []
     if not isinstance(plist, list) or not plist:
@@ -775,7 +775,7 @@ def _validate_op_params_live(op_def: dict[str, Any] | None, connector: str,
     # The live op-def is already in hand (`known`), so embed a COMPACT param
     # signature inline rather than telling the agent to spend another round-trip
     # on get_op_schema (~6KB). One line per param: name, required flag, type, and
-    # a select-option count (not the options themselves — those stay in the full
+    # a select-option count (not the options themselves -- those stay in the full
     # schema). This turns the flail loop (fail -> discover -> retry, 3 turns +
     # heavy schema) into fail-with-the-answer -> retry (2 turns, tiny payload).
     valid_params = _compact_param_sig(plist)
@@ -785,7 +785,7 @@ def _validate_op_params_live(op_def: dict[str, Any] | None, connector: str,
         f"invalid argument(s) (validated against the live connector definition)",
         suggestions=[
             "Re-issue the call with corrected args using `valid_params` below "
-            "(no need to call get_op_schema — the full param list is inline).",
+            "(no need to call get_op_schema -- the full param list is inline).",
             f"For select options / types in detail, call "
             f"get_op_schema({connector!r}, {op!r}).",
         ],
@@ -827,7 +827,7 @@ def _preflight_connector(client, connector: str,
     healthy on the live instance; None when it's good to run.
 
     Infrastructure hiccups (the preflight calls themselves failing) do NOT
-    block — we let the actual execute surface those so we never false-negative
+    block -- we let the actual execute surface those so we never false-negative
     a working connector on a transient lookup error.
     """
     try:
@@ -875,9 +875,9 @@ def _preflight_connector(client, connector: str,
     agent_id = cands[0].get("_agent_id") or ""
     config_id = _resolve_config_id(rows, connector, config_name)
 
-    # Healthcheck the connector BEFORE running an op. This is cheap — the
+    # Healthcheck the connector BEFORE running an op. This is cheap -- the
     # healthcheck endpoint returns in ~0.5s (it's the connector's *ops* that
-    # are slow when the upstream is down, not the healthcheck) — and it's the
+    # are slow when the upstream is down, not the healthcheck) -- and it's the
     # whole point of the gate: a Disconnected connector (e.g. FortiSIEM whose
     # SIEM is unreachable) is caught here in half a second instead of the agent
     # burning minutes on op timeouts. Result is cached (4h healthy / 5min
@@ -891,7 +891,7 @@ def _preflight_connector(client, connector: str,
             # The healthcheck probe itself failed (timeout / unreachable
             # endpoint), which is NOT an authoritative "connector down"
             # verdict. Don't cache it (would block ops for the 5-min unhealthy
-            # TTL even after recovery) and fail OPEN — let the op run. If the
+            # TTL even after recovery) and fail OPEN -- let the op run. If the
             # upstream really is down the op fails loudly on its own, rather
             # than a probe hiccup manufacturing a capability gap here.
             return None
@@ -928,7 +928,7 @@ def _preflight_connector(client, connector: str,
                 resume_value="recheck_connector",
                 tips=[
                     {"text": "A connector that fails its healthcheck is caught "
-                             "here in ~0.5s instead of timing out mid-op — fix "
+                             "here in ~0.5s instead of timing out mid-op -- fix "
                              "the config and I'll pick it straight back up."},
                 ],
                 alternatives=[
@@ -945,7 +945,7 @@ def _live_client_for_grounding():
 
     Isolated so a caller without a client of its own (`emit_action_card`) shares
     `run_op`'s resolution path, and so tests can stub the live half. Never
-    raises — any resolution problem yields None (fail open)."""
+    raises -- any resolution problem yields None (fail open)."""
     try:
         sys.path.insert(0, str(REPO_ROOT / "tooling"))
         from probes._env import get_client, get_config
@@ -963,19 +963,19 @@ def validate_op_grounded(connector: str, op: str,
                          params: dict[str, Any] | None = None,
                          client=None) -> dict[str, Any] | None:
     """Grounding guarantee shared by `run_op` AND `emit_action_card`: a
-    hallucinated/typo'd op — or, when `params` is supplied, a call with
-    unknown/missing-required arguments — must NEVER reach the analyst (as an
+    hallucinated/typo'd op -- or, when `params` is supplied, a call with
+    unknown/missing-required arguments -- must NEVER reach the analyst (as an
     approval card) or the live box (as an execute). Returns an
     `unknown_operation` / `bad_params` error envelope or None to proceed.
 
     Two layers, matching the contract's "offline reference store, with a live
     connector-definition fallback":
 
-    1. Offline store (`_validate_op_exists`) — decisive when the connector's
+    1. Offline store (`_validate_op_exists`) -- decisive when the connector's
        ops are catalogued. Offline PARAM validation lives in the callers'
        `_shared._validate_op_params`, which is likewise decisive when params
        are catalogued.
-    2. Live connector definition — used ONLY when the store has 0 ops for the
+    2. Live connector definition -- used ONLY when the store has 0 ops for the
        connector (un-synced reference DB). A single detail fetch grounds BOTH
        the op name and (when `params` is given) the argument names, so the
        agent stops discovering param names by trial-and-error live (the
@@ -991,7 +991,7 @@ def validate_op_grounded(connector: str, op: str,
     if off_err is not None:
         return off_err
     # Offline returned None: either the op genuinely exists, or the connector
-    # has 0 ops catalogued. Only the latter needs the live fallback — avoid a
+    # has 0 ops catalogued. Only the latter needs the live fallback -- avoid a
     # needless round-trip when the offline check was already decisive.
     try:
         with _db() as conn:
@@ -1034,7 +1034,7 @@ def validate_op_grounded(connector: str, op: str,
 
 
 # ---------------------------------------------------------------------------
-# Output summarization — keep enrichment blobs out of the LLM context
+# Output summarization -- keep enrichment blobs out of the LLM context
 # ---------------------------------------------------------------------------
 # Per-connector field whitelists. We prune to the fields that actually drive a
 # verdict (and that the widget's ioc_card reads); everything else (per-engine
@@ -1091,8 +1091,8 @@ def _prune_known_enrichment(cn: str, data: Any) -> Any | None:
 # get_events_for_incident / get_alert_event_logs, run_report, …) returns many
 # homogeneous rows, each carrying a raw log blob + dozens of parsed fields.
 # Dumping the first 5 raw rows is both lossy and bulky. For triage the agent
-# reasons over AGGREGATES — which IPs/users/hosts recur, what volume, what
-# time spread — so we collapse a long row list into a digest: count, time
+# reasons over AGGREGATES -- which IPs/users/hosts recur, what volume, what
+# time spread -- so we collapse a long row list into a digest: count, time
 # window, top-N facets with counts, and a few pruned sample rows. Shape-gated
 # (>= this many uniform dict rows) so small/structured results pass through
 # untouched. The full observed schema is still stored for authoring, and the
@@ -1100,7 +1100,7 @@ def _prune_known_enrichment(cn: str, data: Any) -> Any | None:
 _DIGEST_MIN_ROWS = 8
 _DIGEST_TOP_N = 8
 _DIGEST_SAMPLES = 3
-# Raw log / message payloads — never worth echoing into context.
+# Raw log / message payloads -- never worth echoing into context.
 _RAW_BLOB_RE = re.compile(
     r"raw|_raw|rawmsg|rawevent|eventlog|logmessage|payload|rawmessage", re.I)
 _TIME_HINT_RE = re.compile(r"time|date|timestamp|recv|epoch|seen", re.I)
@@ -1251,7 +1251,7 @@ _AGENT_CFG_CACHE: dict[str, Any] = {"ts": 0.0, "ids": None}
 def _local_config_ids(client) -> set[str]:
     """Config UUIDs runnable LOCALLY on the master node (the non-agent
     `configured=true` set). A raw /api/integration/execute/ against these
-    returns inline results, so they must NOT be treated as agent-proxied —
+    returns inline results, so they must NOT be treated as agent-proxied --
     even when the same config_id also surfaces under a remote agent (a tenant
     `connector_details?agent=…` query echoes the master's shared configs)."""
     ids: set[str] = set()
@@ -1273,7 +1273,7 @@ def _local_config_ids(client) -> set[str]:
 
 def _agent_config_ids(client) -> set[str]:
     """Cached set of config UUIDs that are ONLY reachable through a FortiSOAR
-    Agent — a raw /api/integration/execute/ against them is fire-and-forget, so
+    Agent -- a raw /api/integration/execute/ against them is fire-and-forget, so
     run_op must route them through the force-fail playbook instead.
 
     Configs that are ALSO configured locally on the master are excluded: they
@@ -1289,10 +1289,10 @@ def _agent_config_ids(client) -> set[str]:
         for row in _agent_configured_rows(client):
             for cid in _row_config_ids(row):
                 ids.add(str(cid))
-        # Drop anything also runnable locally — direct execute is correct (and
+        # Drop anything also runnable locally -- direct execute is correct (and
         # lossless) for those; the wrap is only for agent-EXCLUSIVE configs.
         ids -= _local_config_ids(client)
-    except Exception:  # noqa: BLE001 — fail open: treat as non-agent
+    except Exception:  # noqa: BLE001 -- fail open: treat as non-agent
         ids = set()
     _AGENT_CFG_CACHE["ids"] = ids
     _AGENT_CFG_CACHE["ts"] = time.time()
@@ -1319,7 +1319,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
     import yaml as _yaml
     # Relative import: works both in dev (fsr_playbooks is top-level) and on the
     # FortiSOAR box (fsr_playbooks is a sub-package of the connector). The compiler
-    # is the only dependency — `_hard_purge` is inlined below so the wrap never
+    # is the only dependency -- `_hard_purge` is inlined below so the wrap never
     # needs the repo-only `e2e` test package, which isn't vendored.
     try:
         from ..compiler import compile_yaml as _compile
@@ -1362,7 +1362,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
     wf = coll["workflows"][0]
     wf_uuid = wf["uuid"]
     # `priority` ("High") is already a live-synced picklist IRI stamped by the
-    # compiler's resolver, and `debug: true` is compiled in — both ride the POST.
+    # compiler's resolver, and `debug: true` is compiled in -- both ride the POST.
 
     try:
         # 1) UNWRAPPED push: bare collection dict via the raw session (the
@@ -1380,7 +1380,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
             client.session.put(
                 client.base_url + f"/api/3/workflows/{wf_uuid}",
                 json={"debug": True}, verify=client.verify_ssl)
-        except Exception:  # noqa: BLE001 — compiled value already carries it
+        except Exception:  # noqa: BLE001 -- compiled value already carries it
             pass
 
         # 3) Trigger (designer Run-button style).
@@ -1453,7 +1453,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
         data = step_res.get("data", step_res) if isinstance(step_res, dict) else step_res
         shape = _infer_shape(data)
         _store_observed_schema(connector, op, data)
-        # Trace recorder (§2) — full agent-routed output is the wiring source too.
+        # Trace recorder (§2) -- full agent-routed output is the wiring source too.
         try:
             from fsr_playbooks.agent.skill_trace import record_run_op as _record_skill_call
             _prefix = "data" if (isinstance(step_res, dict) and "data" in step_res) else ""
@@ -1482,13 +1482,13 @@ def _run_op_via_agent_playbook(connector: str, op: str,
         }
         if truncated:
             out["output_truncated"] = True
-            out["note"] = ("Output summarized to keep context lean — full shape "
+            out["note"] = ("Output summarized to keep context lean -- full shape "
                            "is in the reference store via get_op_schema.")
         return out
     finally:
         # Inline, ungated hard-purge of ONLY the UUIDs this wrap just created
         # (the scratch collection + its single workflow). Scope is limited to
-        # locally-minted UUIDs — no server-side discovery, no name matching —
+        # locally-minted UUIDs -- no server-side discovery, no name matching --
         # so it's safe without the FSR_ALLOW_E2E gate the e2e harness uses.
         #
         # SINGLE-ROW deletes, not the bulk `/api/3/delete/{entity}` endpoint:
@@ -1497,7 +1497,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
         # endpoint's `{"ids":[...]}` would arrive empty and delete nothing (this
         # silently leaked every scratch collection until 0.3.62). The single-row
         # CRUD endpoint needs no body. `$hardDelete=true` (WITH the `$`) skips
-        # the recycle bin — without `$` it soft-deletes and the uuid lingers;
+        # the recycle bin -- without `$` it soft-deletes and the uuid lingers;
         # `$showDeleted=true` also reaches a row already recycled by an older run.
         q = "?$hardDelete=true&$showDeleted=true"
         try:
@@ -1506,7 +1506,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
                 verify=client.verify_ssl)
             _diag["wf"] = {"status": getattr(rw, "status_code", None),
                            "body": str(getattr(rw, "_data", ""))[:200]}
-        except Exception as e:  # noqa: BLE001 — best-effort cleanup
+        except Exception as e:  # noqa: BLE001 -- best-effort cleanup
             _diag["wf"] = {"exc": repr(e)}
         try:
             rc = client.session.delete(
@@ -1514,7 +1514,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
                 verify=client.verify_ssl)
             _diag["coll"] = {"status": getattr(rc, "status_code", None),
                              "body": str(getattr(rc, "_data", ""))[:200]}
-        except Exception as e:  # noqa: BLE001 — best-effort cleanup
+        except Exception as e:  # noqa: BLE001 -- best-effort cleanup
             _diag["coll"] = {"exc": repr(e)}
 
 
@@ -1523,11 +1523,11 @@ def _classify_execute_error(connector: str, op: str,
     """Shape an `/api/integration/execute/` failure into the right error code.
 
     A status-bearing HTTP error means the request REACHED the connector and it
-    rejected the call — that is NOT a transport/connectivity failure (the
+    rejected the call -- that is NOT a transport/connectivity failure (the
     connector is up; its healthcheck passes). Mislabeling it `transport_failed`
     with "check connectivity" suggestions sent triage down a dead end on a
     perfectly healthy FortiSIEM (session yq8nhcix: the real error was "Invalid
-    Incident Id" — a wrong param, not a down connector). Classify by status and
+    Incident Id" -- a wrong param, not a down connector). Classify by status and
     surface the connector's own message so the caller can self-repair.
     """
     if isinstance(status, int) and 400 <= status < 500:
@@ -1535,10 +1535,10 @@ def _classify_execute_error(connector: str, op: str,
             "op_request_rejected",
             f"{connector}.{op} rejected the request (HTTP {status}): {msg}",
             suggestions=[
-                "Re-check `params` against `get_op_schema` — esp. that any ID "
+                "Re-check `params` against `get_op_schema` -- esp. that any ID "
                 "is the value THIS connector expects (e.g. FortiSIEM's own "
                 "incidentId, not the FortiSOAR record id).",
-                "Fix the offending param and retry — the connector is up; this "
+                "Fix the offending param and retry -- the connector is up; this "
                 "is a bad-request, not a connectivity problem.",
             ],
             status=str(status),
@@ -1548,7 +1548,7 @@ def _classify_execute_error(connector: str, op: str,
             "upstream_error",
             f"{connector}.{op} failed upstream (HTTP {status}): {msg}",
             suggestions=[
-                "The connector reached its backend but it errored — inspect the "
+                "The connector reached its backend but it errored -- inspect the "
                 "message; often a malformed param or an unsupported query.",
                 "Try a narrower/alternate op or simpler params; the connector "
                 "itself is configured + healthy.",
@@ -1587,7 +1587,7 @@ def run_op(
     This is the authoritative way to discover what a step produces when
     info.json has no output_schema or the static schema is incomplete.
 
-    **Guardrails** — operations are classified by their `category` field:
+    **Guardrails** -- operations are classified by their `category` field:
     - `query / investigation / utilities` → **safe**, runs automatically.
     - `remediation / containment / management` → **destructive**, requires
       `confirm=True`.  The tool returns `{requires_confirmation: true}` when
@@ -1607,22 +1607,22 @@ def run_op(
     - Returns `{ok: false, status: <str>, message: <str>}` with the FSR error.
     - Records `live_op_exec / tested_fail` so the store tracks the attempt.
 
-    `params` — dict of input parameter values for the operation.
-    `config` — optional connector config name (leave empty for the default config).
-    `confirm` — set True to execute operations that are not auto-safe.
-    `summarize` — when True (default), large/list outputs are field-pruned,
+    `params` -- dict of input parameter values for the operation.
+    `config` -- optional connector config name (leave empty for the default config).
+    `confirm` -- set True to execute operations that are not auto-safe.
+    `summarize` -- when True (default), large/list outputs are field-pruned,
         list-capped, and key-capped to keep agent context lean. Set False when
         the caller does its own bounded digest (e.g. the NOC FMG wrappers) and
-        must see the raw rows — the generic truncation drops dict keys past the
+        must see the raw rows -- the generic truncation drops dict keys past the
         first 40, which silently strips late-ordered fields like FMG `name`/`ip`.
-    `step_name` — optional short, descriptive Title-Case label for this step in a
+    `step_name` -- optional short, descriptive Title-Case label for this step in a
         playbook compiled from the session (e.g. "Lookup IP Geolocation"). STRONGLY
         preferred for generic passthrough ops (`execute_api_request`,
         `generic_rest_api_call`, `make_rest_call`) whose op name titleizes to a
         meaningless "Execute Api Request"; describe what the call DOES instead.
         Leave empty for ops whose name already reads well. The recorder sanitizes
         it to the step-name charset and guarantees uniqueness, so collisions are
-        de-duplicated automatically — you don't need to number them.
+        de-duplicated automatically -- you don't need to number them.
     """
     sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
@@ -1664,7 +1664,7 @@ def run_op(
     if crow is None:
         # Before declaring it nonexistent, ask the box. A connector installed
         # after the last warmup is absent from the catalog but present on the
-        # appliance, and "not found in store" then reads as "doesn't exist" —
+        # appliance, and "not found in store" then reads as "doesn't exist" --
         # sending the agent off to substitute some unrelated connector. See
         # _shared.stale_catalog_hint.
         stale = _shared.stale_catalog_hint(connector)
@@ -1686,7 +1686,7 @@ def run_op(
 
     # Reject a hallucinated/typo'd op BEFORE the risk gate, so a bad op name
     # surfaces as an actionable `unknown_operation` (with near-matches) the
-    # agent can self-correct against — rather than tripping the unknown-category
+    # agent can self-correct against -- rather than tripping the unknown-category
     # confirm prompt and then failing opaquely at execute on a phantom op.
     op_err = _shared._validate_op_exists(connector, op)
     if op_err is not None:
@@ -1700,7 +1700,7 @@ def run_op(
     param_err = _shared._validate_op_params(connector, op, params)
     if param_err is not None:
         # Auto-recover the unambiguous single semantic-alias miss (ip→value,
-        # host→hostName) instead of bouncing it back as bad_params — but only if
+        # host→hostName) instead of bouncing it back as bad_params -- but only if
         # the remapped params actually pass validation. Otherwise return the
         # (now actionable) error.
         remap = _shared._auto_remap_params(params, param_err.get("issues"))
@@ -1730,7 +1730,7 @@ def run_op(
     # phantom op / bad args when the connector's ops are catalogued. When the
     # store has NO ops for it (un-synced reference DB), validate BOTH the op
     # name and the argument names against the LIVE connector definition now
-    # that preflight has confirmed it's configured — so a hallucinated op or a
+    # that preflight has confirmed it's configured -- so a hallucinated op or a
     # guessed param name is caught up front, before the confirm prompt and the
     # execute, instead of the agent discovering the real param names by trial
     # and error live. Shared with `emit_action_card` via validate_op_grounded
@@ -1772,13 +1772,13 @@ def run_op(
 
     # Agent-proxied configs: /api/integration/execute/ is fire-and-forget and
     # returns an empty in-progress stub (the op runs, but the result is
-    # websocket-pushed, not inline). Detect PROACTIVELY — before the execute —
+    # websocket-pushed, not inline). Detect PROACTIVELY -- before the execute --
     # and route through the force-fail playbook wrap, which runs the op exactly
     # once and recovers its real output. Never execute-then-detect: the raw
     # execute would fire the action a second time.
     try:
         agent_ids = _agent_config_ids(client)
-    except Exception:  # noqa: BLE001 — fail open to the normal execute path
+    except Exception:  # noqa: BLE001 -- fail open to the normal execute path
         agent_ids = set()
     if exec_config and exec_config in agent_ids:
         agent_id = ""
@@ -1834,12 +1834,12 @@ def run_op(
     # Store the FULL observed schema (accuracy matters for authoring), then
     # return a SUMMARIZED payload to the agent. Enrichment ops (VirusTotal,
     # Shodan, AbuseIPDB, …) can return huge blobs (per-engine analysis,
-    # whois, certs) that would flood the LLM context with noise — we prune to
+    # whois, certs) that would flood the LLM context with noise -- we prune to
     # the fields that actually drive a verdict, and generically cap anything
     # still oversized. The widget's ioc_card reads this same summarized shape.
     _store_observed_schema(connector, op, data)
     # Record the typed action trace (SKILL_BASED_PLAYBOOK_PLAN §2): the FULL
-    # output `data` — not the summarized payload below — is the wiring source
+    # output `data` -- not the summarized payload below -- is the wiring source
     # for the session→YAML compile. No-op unless a session wrapper installed an
     # active trace, so studio/tests stay on raw run_op untouched.
     try:
@@ -1866,7 +1866,7 @@ def run_op(
     }
     if truncated:
         out["output_truncated"] = True
-        out["note"] = ("Output summarized to keep context lean — full shape is "
+        out["note"] = ("Output summarized to keep context lean -- full shape is "
                        "in the reference store via get_op_schema.")
     if _remap_note:
         # Tell the agent the correct name so its NEXT call uses it directly.
@@ -1945,7 +1945,7 @@ def run_playbook(playbook: str,
     """Run / execute / trigger an EXISTING deployed playbook by name, and
     (optionally) poll until terminal. THIS is the tool for any "run the
     playbook <name>", "execute the deployed playbook <name>", or "trigger the
-    existing playbook <name>" request — the platform resolves the named
+    existing playbook <name>" request -- the platform resolves the named
     playbook and launches it. Do NOT author YAML or call verify_playbook /
     validate_yaml / compile_yaml for such a request; those are for building a
     NEW playbook, not running one that already exists.
@@ -1987,7 +1987,7 @@ def run_playbook(playbook: str,
         route_uuid = _fetch_trigger_route_uuid(client, wf_uuid)
         if not route_uuid:
             return {"ok": False, "error": (
-                "no trigger.route on workflow — playbook is not a "
+                "no trigger.route on workflow -- playbook is not a "
                 "record-action style trigger; omit `record`"
             )}
         path = f"/api/triggers/1/action/{route_uuid}"
@@ -2012,7 +2012,7 @@ def run_playbook(playbook: str,
         resp = {}
     task_id = resp.get("task_id") if isinstance(resp, dict) else None
     # The record-action route (/api/triggers/1/action/...) returns the plural
-    # `task_ids` list, not `task_id` — without this a cybersponse.action run
+    # `task_ids` list, not `task_id` -- without this a cybersponse.action run
     # always reports "triggered" and never follows to terminal.
     if not task_id and isinstance(resp, dict):
         tids = resp.get("task_ids")
@@ -2089,7 +2089,7 @@ def dry_run_playbook(yaml_text: str, playbook: str,
     Args:
         yaml_text: full YAML source.
         playbook: workflow name to trigger after push (one playbook in the
-            collection — the agent picks which one).
+            collection -- the agent picks which one).
         input: trigger params (mapped to `vars.input.params.<k>`).
         timeout_s: poll timeout (default 180s).
         cleanup: hard-purge the collection after the run (default True).
@@ -2136,8 +2136,8 @@ def healthcheck_connector(name: str, version: str | None = None,
 
     Args:
         name: connector name
-        version: optional — when omitted, the first configured version is used
-        config: optional config UUID — required when the connector has more
+        version: optional -- when omitted, the first configured version is used
+        config: optional config UUID -- required when the connector has more
             than one configuration and you want a specific one
 
     Returns:
@@ -2234,7 +2234,7 @@ def _shape_run(m: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# E2: Playbook test harness — run_and_wait + execution_context in one call
+# E2: Playbook test harness -- run_and_wait + execution_context in one call
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -2273,7 +2273,7 @@ def run_playbook_test(
         ``ok`` is True only when status == "finished". On failure, ``failure``
         carries the first failing step + error. ``audit_context`` shows what
         other playbooks or manual actions changed the same record during the
-        run — key for debugging race conditions and unexpected state.
+        run -- key for debugging race conditions and unexpected state.
     """
     sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
@@ -2345,7 +2345,7 @@ def run_playbook_test(
                 "other_playbooks": ctx.other_playbooks,
                 "summary": ctx.summary(),
             }
-        except Exception:  # noqa: BLE001 — audit is enrichment
+        except Exception:  # noqa: BLE001 -- audit is enrichment
             pass
 
     return {

@@ -1,4 +1,4 @@
-"""Phase 3 (STATIC_TYPE_FLOW_PLAN) — playbook parameter declared types.
+"""Phase 3 (STATIC_TYPE_FLOW_PLAN) -- playbook parameter declared types.
 
 `parameters:` now accepts a mapping {name: type} alongside the back-compatible
 bare list. The parser populates `Playbook.parameter_types`; the walker seeds

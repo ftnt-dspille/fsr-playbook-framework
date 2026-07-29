@@ -1,6 +1,6 @@
 """Regression: run_op must accept a STRINGIFIED-JSON `params` arg.
 
-Models routinely emit `run_op(params='{"indicator":"1.2.3.4"}')` — params is
+Models routinely emit `run_op(params='{"indicator":"1.2.3.4"}')` -- params is
 shown as JSON in the tool docs. Before the fix the dispatch layer left the
 string as-is: the arg gate bounced it ("params: Input should be a valid
 dictionary") and, when it slipped through, the op ran with no params and the

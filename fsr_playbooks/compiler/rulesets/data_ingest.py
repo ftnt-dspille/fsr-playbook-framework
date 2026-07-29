@@ -52,14 +52,14 @@ def rule_picklist_mapping_for_severity_status(doc: dict) -> Iterable[Issue]:
                 yield Issue(
                     rule_id="data_ingest.severity_status_unset",
                     severity="warn",
-                    message="Create Record resource sets neither severity nor status/state — alert mapping likely incomplete",
+                    message="Create Record resource sets neither severity nor status/state -- alert mapping likely incomplete",
                     path=f"data[{ci}].workflows[{wi}].steps[{si}]({step.get('name')!r})",
                 )
             elif "resolveRange" not in blob and "/api/3/picklists/" not in blob:
                 yield Issue(
                     rule_id="data_ingest.severity_status_no_picklist_resolution",
                     severity="warn",
-                    message="severity/status/state set but no resolveRange or picklist IRI seen — vendor enum may not resolve to FSR picklist",
+                    message="severity/status/state set but no resolveRange or picklist IRI seen -- vendor enum may not resolve to FSR picklist",
                     path=f"data[{ci}].workflows[{wi}].steps[{si}]({step.get('name')!r})",
                 )
 
@@ -81,7 +81,7 @@ def rule_create_record_has_dedup(doc: dict) -> Iterable[Issue]:
                 yield Issue(
                     rule_id="data_ingest.dedup_field_required",
                     severity="warn",
-                    message="Create Record on dataingestion workflow has no sourceId/externalId — duplicates likely on re-run",
+                    message="Create Record on dataingestion workflow has no sourceId/externalId -- duplicates likely on re-run",
                     path=f"data[{ci}].workflows[{wi}].steps[{si}]({step.get('name')!r})",
                     suggestion='Set resource.sourceId to vendor native id, e.g. "{{vars.item.alertid}}"',
                 )

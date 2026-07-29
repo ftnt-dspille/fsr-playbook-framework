@@ -4,7 +4,7 @@ Pulls an existing playbook with CyopsUtilites steps from the box,
 decompiles (overlay should map CyopsUtilites -> connector), recompiles
 (should emit Connectors), and verifies the round-trip is clean.
 
-The push path is already proven — the compiler always emits Connectors
+The push path is already proven -- the compiler always emits Connectors
 for stop/end/connector steps, and fsrpb push has been used on live boxes
 many times. The question is whether PULLED CyopsUtilites steps decompile
 to the same friendly YAML as AUTHORED ones.
@@ -124,7 +124,7 @@ if not result.ok:
     if step_type_errors:
         print("\n  FAILED: step-type errors found!")
         exit(1)
-    print("  No step-type errors — overlay is clean")
+    print("  No step-type errors -- overlay is clean")
     # Still check: does the partial compile emit Connectors for the connector steps?
     if result.fsr_json:
         for s in result.fsr_json["data"][0]["workflows"][0]["steps"]:
@@ -132,7 +132,7 @@ if not result.ok:
             name = STEP_TYPES.get(st.rsplit("/", 1)[-1], st.rsplit("/", 1)[-1]) if isinstance(st, str) else "?"
             print(f"  recompiled step '{s['name']}': {name}")
     else:
-        print("  (no fsr_json produced — blocking errors prevent emission)")
+        print("  (no fsr_json produced -- blocking errors prevent emission)")
 else:
     recompiled = result.fsr_json
     for s in recompiled["data"][0]["workflows"][0]["steps"]:
@@ -177,7 +177,7 @@ if result.fsr_json:
     print(f"  Recompiled no-op step:       {recomp_done_type}")
     print(f"  Match: {fresh_done_type == recomp_done_type}")
 else:
-    print(f"  (recompile blocked by Jinja/unreachable errors — no fsr_json)")
+    print(f"  (recompile blocked by Jinja/unreachable errors -- no fsr_json)")
     print(f"  But the compiler ALWAYS emits {fresh_done_type} for connector-family steps,")
     print(f"  so the recompile would produce {fresh_done_type} for the connector steps.")
 
@@ -188,7 +188,7 @@ print(f"  Live box emits CyopsUtilites: YES")
 print(f"  Overlay maps CyopsUtilites -> connector: YES")
 print(f"  Recompile emits Connectors (same as fresh compile): {fresh_done_type == recomp_done_type}")
 print(f"  Connectors is the standard step type the compiler always emits")
-print(f"  for connector-family steps — proven by every fsrpb push.")
+print(f"  for connector-family steps -- proven by every fsrpb push.")
 print(f"\n  The overlay is LIVE-VERIFIED. The CyopsUtilites -> Connectors")
 print(f"  step-type change on pull->push is equivalent to what every")
 print(f"  freshly authored playbook already does.")

@@ -22,7 +22,7 @@
     arguments: Record<string, unknown>;
     result_preview?: string;
     /** Server-resolved tier (HITL Phase 2). Drives the audit pane row
-     *  badge — tier 3+ rows are highlighted because they went through
+     *  badge -- tier 3+ rows are highlighted because they went through
      *  an approval card. */
     tier?: number;
     ts?: number;
@@ -52,7 +52,7 @@
     /** For tier-4 step-up: the user types the rendered target back. */
     confirmedTarget?: string;
     /** Best-effort target identifier extracted from `preview.args` for
-     *  the step-up prompt — typically the IP/host/record id. */
+     *  the step-up prompt -- typically the IP/host/record id. */
     targetHint?: string;
   };
 
@@ -63,7 +63,7 @@
 
   type Turn = {
     role: 'user' | 'assistant';
-    /** Full concatenated text — kept for YAML extraction, history,
+    /** Full concatenated text -- kept for YAML extraction, history,
      *  and replays. Rendering uses `segments` instead so text blocks
      *  emitted between tool calls don't collapse into one paragraph. */
     text: string;
@@ -88,7 +88,7 @@
     initialTurns?: Turn[];
   } = $props();
 
-  // User-controlled toggle. Off by default — including the YAML is
+  // User-controlled toggle. Off by default -- including the YAML is
   // an explicit opt-in so the model doesn't get fed a buffer the user
   // didn't mean to share. The user flips it on when they actually
   // want the editor's contents as context.
@@ -98,14 +98,14 @@
   // Re-seed `turns` whenever the parent passes a fresh `initialTurns`
   // reference. Tracks identity (not contents) so live edits to a stable
   // array don't clobber the running session.
-  // Non-reactive identity tracker — same reasoning as
+  // Non-reactive identity tracker -- same reasoning as
   // yamlPrevMeaningful: read+written only inside the effect below.
   let lastSeededRef: Turn[] | null = null;
 
   // Tools whose arguments carry the assistant's latest YAML draft.
   // When any of these is invoked, the editor auto-updates from its
   // `yaml_text` (or `after_yaml` for verify_enhancement). Mirrors the
-  // tools actually registered in fsr_playbooks/llm/tools.py SAFE_TOOLS —
+  // tools actually registered in fsr_playbooks/llm/tools.py SAFE_TOOLS --
   // the prompt now points the agent at verify_playbook rather than
   // validate_yaml/compile_yaml.
   const YAML_BEARING_TOOLS = new Set([
@@ -140,7 +140,7 @@
   function autosize(el: HTMLTextAreaElement | null) {
     if (!el) return;
     el.style.height = 'auto';
-    const max = 320; // px — ~12 lines at 15px/1.5
+    const max = 320; // px -- ~12 lines at 15px/1.5
     el.style.height = Math.min(el.scrollHeight, max) + 'px';
   }
   $effect(() => {
@@ -150,7 +150,7 @@
   });
   let busy = $state(false);
   let err = $state<string | null>(null);
-  // Session id of the active chat — captured from the first `usage`
+  // Session id of the active chat -- captured from the first `usage`
   // SSE event of the first turn. Used to name the draft this chat
   // writes its agent revisions to. A reload mid-session keeps the same
   // id only if the backend sends it; otherwise we fall back to a
@@ -160,7 +160,7 @@
   // ── Loop telemetry ────────────────────────────────────────────────
   // Tracks the per-session AI authoring loop so the user can see what
   // the agent is doing in real time (validate count, tokens, elapsed).
-  // Per-turn correctness is now reported inline by verify_playbook —
+  // Per-turn correctness is now reported inline by verify_playbook --
   // its required_fixes / ready_to_push results land in the transcript,
   // so there's no separate aggregate "ladder" score.
   let validateCount = $state(0);
@@ -191,7 +191,7 @@
 
   // Sample prompts for testing the agent. Sourced from the eval-task
   // corpus (python/evals/tasks/*.json) via /api/ref/example-prompts so
-  // the picker stays in sync with the harness — adding a task file
+  // the picker stays in sync with the harness -- adding a task file
   // shows up here automatically.
   let examplePrompts = $state<ExamplePrompt[]>([]);
   let promptPickerOpen = $state(false);
@@ -246,7 +246,7 @@
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
-    // Belt-and-braces — the composer is already disabled when
+    // Belt-and-braces -- the composer is already disabled when
     // llmReady is false, but guard the function too so a bad-state
     // race or keybinding can't fire a request that's guaranteed to 401.
     if (!llmReady) {
@@ -296,7 +296,7 @@
       busy = false;
       const replyText = turns[aIdx]?.text ?? '';
       // Prefer a fenced block in the reply (explicit handoff). Fall
-      // back to the last YAML the agent validated this turn — it's
+      // back to the last YAML the agent validated this turn -- it's
       // the same content, just delivered via tool args instead of
       // duplicated into prose.
       const yaml = extractYamlBlock(replyText) ?? lastValidatedYaml;
@@ -309,7 +309,7 @@
         draftName = name;
         // Persist into the server-side drafts table so the new playbook
         // shows up in the PlaybookHeader picker and becomes the active
-        // document — Save/Push/Validate all operate on what the chat just
+        // document -- Save/Push/Validate all operate on what the chat just
         // produced instead of the previously-open draft.
         try {
           await playbookStore.createDraft(name, yaml);
@@ -326,7 +326,7 @@
         // Don't stomp a real backend error (network failure, provider
         // error, etc.) with the misleading "didn't include yaml" copy.
         // Also skip the warning if the assistant produced no text AND no
-        // tool calls — that's a different failure mode than "agent
+        // tool calls -- that's a different failure mode than "agent
         // replied but forgot the fence".
         const assistantTurn = turns[aIdx];
         const hadAnyOutput =
@@ -338,8 +338,8 @@
           const wrongFence = /```(?!ya?ml\b)[A-Za-z0-9_+-]*\s*\n[\s\S]*?(collection:|playbooks:|type:\s+set_variable)[\s\S]*?```/i
             .test(replyText);
           err = wrongFence
-            ? "The reply contained YAML-shaped content but in a non-yaml code fence — the editor wasn't updated. Ask the agent to wrap it in ```yaml … ```."
-            : "The reply didn't include a ```yaml block — the editor wasn't updated. If you wanted a playbook, ask the agent to emit the full YAML inside a ```yaml fenced block.";
+            ? "The reply contained YAML-shaped content but in a non-yaml code fence -- the editor wasn't updated. Ask the agent to wrap it in ```yaml … ```."
+            : "The reply didn't include a ```yaml block -- the editor wasn't updated. If you wanted a playbook, ask the agent to emit the full YAML inside a ```yaml fenced block.";
         }
       }
     }
@@ -382,7 +382,7 @@
         const tc = a.tools?.find((t) => t.call_id === ev.call_id);
         if (tc) tc.result_preview = ev.result_preview;
         // When the agent's validate/compile call returns clean, offer
-        // a Push button inline. The push itself is user-initiated —
+        // a Push button inline. The push itself is user-initiated --
         // the AI doesn't have access to the push tool. Latest clean
         // validate wins; we want the most recent draft, not the first.
         if (tc) {
@@ -404,7 +404,7 @@
                 };
               }
             } catch {
-              /* truncated/non-JSON preview — skip */
+              /* truncated/non-JSON preview -- skip */
             }
           }
         }
@@ -491,7 +491,7 @@
       )) {
         const ev = parseChatEvent(frame.event, frame.data);
         if (!ev) continue;
-        // Server-side step-up rejection — the suspended session is
+        // Server-side step-up rejection -- the suspended session is
         // preserved; bounce the card back to pending so the user can
         // retype the target instead of having to retry the whole turn.
         if (ev.kind === 'done' && ev.stop_reason === 'step_up_required') {
@@ -790,11 +790,11 @@
                   </div>
                 {:else if card.state === 'approved'}
                   <div class="mt-2 text-[11px] text-emerald-300">
-                    ✓ Approved — action executed
+                    ✓ Approved -- action executed
                   </div>
                 {:else if card.state === 'denied'}
                   <div class="mt-2 text-[11px] text-[var(--text-muted)]">
-                    ✕ Denied — action skipped
+                    ✕ Denied -- action skipped
                   </div>
                 {/if}
               </div>
@@ -919,7 +919,7 @@
 
       {#if turns.some((t) => (t.tools?.length ?? 0) > 0)}
         <!-- HITL Phase 2: tool-activity audit pane. Collapsed by
-             default — the conversation IS the audit trail, but this
+             default -- the conversation IS the audit trail, but this
              surfaces the chronology + tier badges without scrolling
              back through every turn. -->
         <details class="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-panel)]/40">
@@ -991,7 +991,7 @@
     {#if llmBlocked}
       <div class="mb-2 flex items-start justify-between gap-3 rounded-md border border-red-700/70 bg-red-900/30 px-3 py-2 text-xs text-red-100">
         <div>
-          <strong class="font-semibold">LLM provider unreachable</strong> — chat is disabled until this clears.<br />
+          <strong class="font-semibold">LLM provider unreachable</strong> -- chat is disabled until this clears.<br />
           {#if llmHealth?.active}<span class="text-red-200">{llmHealth.active}:</span> {/if}
           <span class="text-red-200/90">{llmHealth?.error ?? 'no active provider configured'}</span>
         </div>
@@ -1018,7 +1018,7 @@
         bind:this={textareaEl}
         class="block w-full resize-none rounded-lg bg-transparent px-3 py-2 text-[15px] text-[var(--text-default)] placeholder:text-[var(--text-faint)] focus:outline-none"
         placeholder={llmBlocked
-          ? 'LLM provider unreachable — fix credentials in Settings'
+          ? 'LLM provider unreachable -- fix credentials in Settings'
           : 'Ask the model to build or edit the YAML…'}
         rows="3"
         bind:value={input}
@@ -1029,7 +1029,7 @@
         <label
           class="flex items-center gap-1.5 text-[11px] text-[var(--text-faint)] hover:text-[var(--text-muted)] cursor-pointer"
           title="When on, the editor's current YAML is sent to the model as
-context. Turn off to author a brand-new playbook from scratch — sending
+context. Turn off to author a brand-new playbook from scratch -- sending
 a scaffold biases the model into extending it rather than starting fresh."
         >
           <input
@@ -1055,7 +1055,7 @@ a scaffold biases the model into extending it rather than starting fresh."
             class="rounded-md bg-emerald-700 px-3 py-1 text-xs font-medium text-emerald-50 transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)] disabled:text-[var(--text-faint)]"
             onclick={send}
             disabled={busy || !input.trim() || !llmReady}
-            title={llmBlocked ? 'LLM provider not reachable — fix in Settings' : ''}
+            title={llmBlocked ? 'LLM provider not reachable -- fix in Settings' : ''}
           >
             {busy ? '…' : 'Send'}
           </button>
@@ -1066,7 +1066,7 @@ a scaffold biases the model into extending it rather than starting fresh."
 </div>
 
 <style>
-  /* Scoped markdown styling — readable, compact, dark theme. */
+  /* Scoped markdown styling -- readable, compact, dark theme. */
   :global(.markdown-body p) {
     margin: 0.5rem 0;
   }

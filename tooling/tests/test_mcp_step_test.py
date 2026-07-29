@@ -1,4 +1,4 @@
-"""mcp_server.step_test — single-step variant of step_through_playbook.
+"""mcp_server.step_test -- single-step variant of step_through_playbook.
 
 Render-only path is tested offline (no live FSR). The execute path is
 verified by stubbing run_op + _record_verification so we can assert the
@@ -130,7 +130,7 @@ def test_mock_result_on_step_overlays_into_render_context(monkeypatch):
 def test_run_op_receives_inner_params_not_envelope(monkeypatch):
     """Regression: step_test must pass just the inner `params:` dict to
     run_op, not the full rendered envelope. The connector matches its
-    declared parameters at the top level — sending `{connector, operation,
+    declared parameters at the top level -- sending `{connector, operation,
     params: {...}}` makes every declared param look 'not provided'."""
     monkeypatch.setattr(mcp_server._shared, "_live_client", lambda: None)
     monkeypatch.setattr(mcp_server._shared, "_safe_op_category", lambda c, o: "investigation")
@@ -143,7 +143,7 @@ def test_run_op_receives_inner_params_not_envelope(monkeypatch):
                         lambda *a, **kw: None)
     r = mcp_server.step_test(YAML, step_id="fetch")
     assert r["ok"] is True
-    # Only the inner params land at run_op — no envelope keys leak through.
+    # Only the inner params land at run_op -- no envelope keys leak through.
     assert captured["params"] == {"issue_key": "JIR-1"}
     assert "connector" not in captured["params"]
     assert "operation" not in captured["params"]
@@ -241,7 +241,7 @@ def test_samples_sidecar_overlays_into_render_context(monkeypatch):
     class _Stub:
         def post(self, _path, data):
             tpl = data["template"]
-            # Echo back what the FSR engine would resolve — we just need
+            # Echo back what the FSR engine would resolve -- we just need
             # to prove the sample reached the rendering context.
             from jinja2 import Environment
             return {"result": Environment().from_string(tpl).render(**data["values"])}

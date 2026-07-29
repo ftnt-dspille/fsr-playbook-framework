@@ -1,4 +1,4 @@
-"""compiler.render_analyzer — diagnostics over a step-through trace.
+"""compiler.render_analyzer -- diagnostics over a step-through trace.
 
 RENDER_PATH_VALIDATOR_PLAN.md Phase 3. Tests pin C1 (unreachable),
 C2 (missing key), C3 (required arg empty), and severity downgrade
@@ -235,7 +235,7 @@ def test_c2_downgrades_when_producer_was_conditionally_skipped():
         """)
     diags = analyze(_trace(yaml))
     by = _by_kind(diags)
-    # The producer was skipped — severity should drop to warning,
+    # The producer was skipped -- severity should drop to warning,
     # not error, because the producer might not run at runtime.
     if "missing_key" in by:
         assert by["missing_key"][0].severity == "warning"
@@ -281,7 +281,7 @@ def test_c2_flags_typo_in_nested_output_key():
     assert d.severity == "error"
     assert "summray" in d.path
     # Suggestion list must be the NESTED keys (summary, status), not the
-    # top-level keys (data) — that's the whole point of recursing.
+    # top-level keys (data) -- that's the whole point of recursing.
     assert "summary" in (d.suggestion or "")
     assert "status" in (d.expected or [])
 
@@ -363,7 +363,7 @@ def test_c2_flags_typo_in_doubly_nested_output_key():
 
 
 def test_c2_does_not_flag_unsimulated_deep_nesting():
-    """Beyond the depth cap (2 levels), a typo must NOT fire — degrading
+    """Beyond the depth cap (2 levels), a typo must NOT fire -- degrading
     to opaque avoids false positives on un-simulated nesting."""
     yaml = textwrap.dedent("""\
         playbooks:
@@ -396,7 +396,7 @@ def test_c2_does_not_flag_unsimulated_deep_nesting():
                 name: Stop
         """)
     diags = analyze(_trace(yaml))
-    # depth 3 (data>owner>contact>name) — beyond the cap; no false positive.
+    # depth 3 (data>owner>contact>name) -- beyond the cap; no false positive.
     assert _by_kind(diags).get("missing_key", []) == []
 
 
@@ -768,7 +768,7 @@ def test_diagnostics_dict_is_jsonable():
 
 def test_c6_flags_index_into_dict_attr():
     """Producer's mock_result has an attr that is a dict; downstream
-    `[0]`s it — runtime would raise TypeError on subscription."""
+    `[0]`s it -- runtime would raise TypeError on subscription."""
     yaml = textwrap.dedent("""\
         playbooks:
           - name: P
@@ -798,7 +798,7 @@ def test_c6_flags_index_into_dict_attr():
     diags = analyze(_trace(yaml))
     by = _by_kind(diags)
     # Whether this fires depends on the simulator inferring `meta` as
-    # dict-shaped — guard the assertion so we don't false-fail when
+    # dict-shaped -- guard the assertion so we don't false-fail when
     # the trace doesn't expose enough shape info.
     if "index_into_non_list" in by:
         d = by["index_into_non_list"][0]
@@ -807,7 +807,7 @@ def test_c6_flags_index_into_dict_attr():
 
 
 def test_c6_flags_index_into_nested_dict_attr():
-    """Indexing a NESTED dict attr — `vars.steps.Fetch.data.owner[0]`
+    """Indexing a NESTED dict attr -- `vars.steps.Fetch.data.owner[0]`
     where `owner` is a dict inside `data`. Previously the walk stopped
     at the top-level `data` key and couldn't see `owner`'s type."""
     yaml = textwrap.dedent("""\
@@ -849,7 +849,7 @@ def test_c6_flags_index_into_nested_dict_attr():
 
 
 def test_c6_passes_when_nested_attr_is_list():
-    """Indexing a NESTED list attr — `vars.steps.Fetch.data.tags[0]`
+    """Indexing a NESTED list attr -- `vars.steps.Fetch.data.tags[0]`
     where `tags` is a list inside `data`. Must NOT fire."""
     yaml = textwrap.dedent("""\
         playbooks:
@@ -925,7 +925,7 @@ def test_c6_flags_index_into_doubly_nested_scalar():
 
 def test_c6_does_not_flag_beyond_depth_cap():
     """Beyond the shape inference depth cap (2 levels), don't false-fire
-    — the shape is opaque there."""
+    -- the shape is opaque there."""
     yaml = textwrap.dedent("""\
         playbooks:
           - name: P
@@ -1100,7 +1100,7 @@ def test_c10_silent_when_step_is_referenced():
 
 def test_c7_flags_sibling_branch_reference():
     """A decision on branch B references a step that only runs on
-    branch A — its output is never set on the path that reaches this
+    branch A -- its output is never set on the path that reaches this
     decision."""
     yaml = textwrap.dedent("""\
         playbooks:
@@ -1286,7 +1286,7 @@ def test_c8_allows_system_metadata_keys():
 
 
 def test_c8_warns_on_buttononly_inputbased_when_input_read():
-    """DecisionBased (no inputs) reading input.* — now an error, not
+    """DecisionBased (no inputs) reading input.* -- now an error, not
     a warning. The old InputBased-with-no-inputVariables scenario is
     no longer expressible: inputs: [] infers DecisionBased."""
     yaml = _mi_yaml(

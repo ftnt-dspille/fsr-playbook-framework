@@ -1,8 +1,8 @@
-"""verify_enhancement — diff-aware pre-submit gate for enhance mode.
+"""verify_enhancement -- diff-aware pre-submit gate for enhance mode.
 
 Sibling of `verify_playbook`. Same shape check (delegates to it), plus a
 structural diff against `before_yaml` to flag regressions the build-mode
-gate cannot see — dropped steps, silently-renamed steps, stripped
+gate cannot see -- dropped steps, silently-renamed steps, stripped
 annotations, behavior changes outside the user-requested edit.
 
 Why this exists: a green compile is necessary but not sufficient in
@@ -12,8 +12,8 @@ clean but is still a regression vs the prior YAML. See
 `docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md` §C3.
 
 Heuristic boundary: "the user didn't ask to touch this step" is fuzzy.
-We start strict — only literal step-name mentions in `user_message`
-mark a step as fair game — and rely on C4's enhance eval bucket to
+We start strict -- only literal step-name mentions in `user_message`
+mark a step as fair game -- and rely on C4's enhance eval bucket to
 tell us where to loosen.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _parse(yaml_text: str):
 
 
 # ---------------------------------------------------------------------------
-# IR projection — what counts as "the same step" for regression purposes.
+# IR projection -- what counts as "the same step" for regression purposes.
 # Text-diffing YAML would flag whitespace + key ordering; IR-diffing won't.
 # ---------------------------------------------------------------------------
 
@@ -74,7 +74,7 @@ def _annotation_projection(a) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# "Did the user ask to touch this step?" — strict by design.
+# "Did the user ask to touch this step?" -- strict by design.
 # ---------------------------------------------------------------------------
 
 def _user_referenced_steps(user_message: str | None,
@@ -82,7 +82,7 @@ def _user_referenced_steps(user_message: str | None,
     """Return the set of step names the user explicitly named, or None
     if `user_message` is absent (eval harness, agent calling without
     chat context). None means: skip the `behavior_changed_outside_diff`
-    flag — we only emit the hard regressions."""
+    flag -- we only emit the hard regressions."""
     if user_message is None:
         return None
     msg = user_message.lower()
@@ -196,7 +196,7 @@ def _diff_collections(before, after, user_message: str | None
                             "severity": "error",
                             "message": (f"step renamed {dn!r} → {an!r}; "
                                         "breaks external vars.steps.<slug>.* "
-                                        "consumers — confirm with the user"),
+                                        "consumers -- confirm with the user"),
                         })
                         dropped.discard(dn)
                         added.discard(an)
@@ -313,7 +313,7 @@ def verify_enhancement(
       before_yaml: the playbook YAML the user started with.
       after_yaml: the proposed edited YAML.
       user_message: the chat turn that asked for the edit. Used to mark
-        which steps were "fair game" to touch — steps changed outside
+        which steps were "fair game" to touch -- steps changed outside
         the user's named scope fire a `behavior_changed_outside_diff`
         warning. Pass None to skip that heuristic (still emits hard
         regressions: dropped steps, renamed steps, stripped annotations).
@@ -330,14 +330,14 @@ def verify_enhancement(
     Regression kinds:
       - playbook_dropped       (error)
       - step_dropped           (error)
-      - step_renamed_silently  (error) — same shape, new name; breaks
+      - step_renamed_silently  (error) -- same shape, new name; breaks
                                           external vars.steps.<slug>.* refs
       - annotation_stripped    (warning)
       - annotation_modified    (warning)
       - ui_metadata_lost       (warning)
-      - behavior_changed_outside_diff (warning) — only when user_message given
+      - behavior_changed_outside_diff (warning) -- only when user_message given
 
-    When the verdict passes, the result also carries **`verified_id`** — an
+    When the verdict passes, the result also carries **`verified_id`** -- an
     opaque handle to the exact `after_yaml` bytes that just cleared the gate.
     Pass it to `emit_enhancement_offer(verified_id=…)` to apply the edit. That
     tool takes no YAML, so the document you verified is the document that
@@ -352,7 +352,7 @@ def verify_enhancement(
     after_coll, after_errs = _parse(after_yaml)
 
     if before_coll is None:
-        # Before YAML is unparseable — we cannot diff. Surface this as
+        # Before YAML is unparseable -- we cannot diff. Surface this as
         # an evidence note, return the verify_playbook result unchanged
         # with empty diff fields. Better than refusing the call.
         out = dict(after_result)
@@ -361,7 +361,7 @@ def verify_enhancement(
                                "steps_modified": [], "unchanged": 0}
         out.setdefault("evidence", {})["before_unparseable"] = {
             "errors": before_errs,
-            "note": ("before_yaml did not parse — skipping regression diff; "
+            "note": ("before_yaml did not parse -- skipping regression diff; "
                      "treating this as a build-mode verify of after_yaml only"),
         }
         return _issue_verified_id(out, after_yaml, before_yaml)
@@ -407,7 +407,7 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
     Only a PASSING verdict gets a handle: `verified_id` is a claim that these
     exact bytes cleared the gate, so minting one for a failing verify would let
     `emit_enhancement_offer` apply a document the gate rejected. On a failure we
-    instead say — in the envelope the model actually reads — that the next move
+    instead say -- in the envelope the model actually reads -- that the next move
     is to fix and re-verify, not to paste YAML into chat. The live regression
     was a model that treated a green verify as permission to free-hand the
     document; the symmetric risk is treating a red one as advisory.
@@ -430,7 +430,7 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
     out["how_to_apply"] = (
         "Call emit_enhancement_offer(verified_id=…) to apply this edit. That "
         "is the ONLY way the edit reaches the analyst's playbook. Do not "
-        "re-type the YAML into your reply — the offer card carries the exact "
+        "re-type the YAML into your reply -- the offer card carries the exact "
         "text verified here."
     )
     return out

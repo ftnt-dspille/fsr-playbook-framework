@@ -1,10 +1,10 @@
-"""A3 guard — every *gating* key emitted by `scoring.score(...)` must resolve
+"""A3 guard -- every *gating* key emitted by `scoring.score(...)` must resolve
 to a real prompt lever (Chat Intelligence Plan, Track A3).
 
 `calibrate_investigation` and `chat_drive` annotate each failing, counted gate
 with `levers.lever_for(key)` so a red eval points at the exact prompt section to
 edit. If a new gate lands without a lever, the verdict prints
-"unmapped — inspect trace". This test drives `score()` across the modes the
+"unmapped -- inspect trace". This test drives `score()` across the modes the
 tuning loop uses, harvests every key that counts toward the pass/fail aggregate
 (not skipped, not informational), and fails loudly if any has no mapped lever.
 """

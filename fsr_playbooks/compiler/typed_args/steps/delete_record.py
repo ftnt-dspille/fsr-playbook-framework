@@ -2,7 +2,7 @@
 
 FortiSOAR has no first-class delete step type; deletion is a connector step
 hitting the internal API via ``cyops_utilities.make_cyops_request`` (method
-DELETE). `delete_record` is the friendly authoring surface for that — grounded
+DELETE). `delete_record` is the friendly authoring surface for that -- grounded
 on real corpus playbooks (4 DELETE-method cyops_utilities steps). Because it
 compiles *to* a connector step, it never appears in the decompiled wire, so the
 byte-identical contract here is the authoring path (``test_delete_record.py``),
@@ -11,18 +11,18 @@ not the corpus round-trip.
 Friendly inputs (exactly one targeting mode required)::
 
     record:              a single record IRI ('/api/3/<module>/<uuid>') or
-                         '@id' jinja — deleted directly.
+                         '@id' jinja -- deleted directly.
     module + record_id:  build '/api/3/<module>/<record_id>'.
     module + query:      bulk delete via '/api/3/delete-with-query/<module>';
                          `query` is a filter dict {logic, filters:[…]} json-
                          encoded into the body, or a raw jinja/string body.
-    show_deleted:        bool — append '?$showDeleted=true' (default true for
+    show_deleted:        bool -- append '?$showDeleted=true' (default true for
                          the query form, false for single-record).
     iri / method / body: raw escape hatches inside `params` (passed verbatim).
 
 `DeleteRecordArgs` types the scalar friendly fields so a wrong-typed value
 becomes a clean `BAD_VALUE` (e.g. ``show_deleted: "maybe"``). `record`,
-`record_id`, and `query` stay `Any` — they are IRIs / jinja / filter dicts whose
+`record_id`, and `query` stay `Any` -- they are IRIs / jinja / filter dicts whose
 shape the transform branches on directly. `expand_delete_record` owns the
 friendly→canonical transform, byte-for-byte with the imperative normalizer it
 replaces (same param key order, same connector defaults, same showDeleted rule).
@@ -49,7 +49,7 @@ class DeleteRecordArgs(StrictArgs):
     soft-delete query flag (pydantic coerces the usual ``true``/``1``/``"true"``
     forms). `record`/`record_id`/`query` stay `Any` (IRI / id / filter-dict or
     jinja). `extra="allow"` because canonical/escape-hatch keys (`params`,
-    `connector`, `operation`, …) ride through untouched — the resolver's
+    `connector`, `operation`, …) ride through untouched -- the resolver's
     `_check_unknown_keys` has already rejected anything genuinely unknown.
     """
 
@@ -73,7 +73,7 @@ def expand_delete_record(
     DELETE connector shape.
 
     Returns the canonical dict, or ``None`` to leave `step.arguments` unchanged
-    — when the input is not a dict or a hard targeting error is appended (the
+    -- when the input is not a dict or a hard targeting error is appended (the
     step is left for the author to fix; compilation fails so nothing emits).
     `resolve_module` is the resolver's ``resolve_module_name`` bound method,
     threaded in because module canonicalization needs the catalog.

@@ -1,4 +1,4 @@
-"""Phase 4b probe — connector-param ingestion coercion (live).
+"""Phase 4b probe -- connector-param ingestion coercion (live).
 
 STATIC_TYPE_FLOW_PLAN.md Open Q #2 / Phase 4b: when a value flows into a
 connector op param, what python type does the connector actually receive,
@@ -31,7 +31,7 @@ OUT_PATH = REPO_ROOT / "data" / "probe_results" / "param_ingestion_coercion.json
 WIDGETS = ["p_text", "p_textarea", "p_integer", "p_decimal",
            "p_checkbox", "p_json"]
 
-# (label, value) — the same value is sent into every widget-typed param so we
+# (label, value) -- the same value is sent into every widget-typed param so we
 # can compare what each widget receives. Mirrors the Phase 1b set_variable
 # battery so the two matrices can be compared directly.
 BATTERY: list[tuple[str, object]] = [

@@ -5,13 +5,13 @@
    * Each row binds an outgoing `branch_kind: 'branch'` edge to its
    * matching entry in the node's `arguments.conditions[]` (decision)
    * or `arguments.options[]` (manual_input). Edges and the conditions
-   * array are kept in lockstep — renaming a label, retargeting, adding
+   * array are kept in lockstep -- renaming a label, retargeting, adding
    * or deleting a branch updates both sides so the emitted YAML is
    * coherent.
    *
    * Decision rows additionally expose:
-   *  - `condition` — the Jinja predicate that gates the branch.
-   *  - `default` — the else/default flag (FSR's designer renders a
+   *  - `condition` -- the Jinja predicate that gates the branch.
+   *  - `default` -- the else/default flag (FSR's designer renders a
    *     broken else edge unless exactly one row has default: true).
    *
    * Manual_input rows expose `formType` so users can pick string /
@@ -159,7 +159,7 @@
     const checked = (e.currentTarget as HTMLInputElement).checked;
     const conds = getConditions().slice();
     if (checked) {
-      // FSR allows only one default — clear the flag on every other row
+      // FSR allows only one default -- clear the flag on every other row
       // first so the user doesn't end up with two else branches that
       // race in the designer.
       for (let i = 0; i < conds.length; i++) {
@@ -251,7 +251,7 @@
 
   // Common manual_input formTypes observed in the live FSR corpus
   // (190 ManualInput steps, 14 distinct formTypes). Free-form fallback
-  // available via the "(custom)" entry — the user can drop into Raw if
+  // available via the "(custom)" entry -- the user can drop into Raw if
   // they need something exotic.
   const FORM_TYPES = [
     '', 'string', 'text', 'number', 'integer', 'boolean', 'datetime',
@@ -299,7 +299,7 @@
                   wrap={true}
                   onInsert={(snippet) => {
                     // Append the picked path to the existing condition
-                    // text — keeps any prose/operators the user already
+                    // text -- keeps any prose/operators the user already
                     // typed. The compiler is forgiving about whitespace
                     // around `{{ }}` boundaries.
                     const cur = (cond?.condition as string | undefined) ?? '';
@@ -337,7 +337,7 @@
           <input
             type="text"
             value={(cond?.condition as string | undefined) ?? ''}
-            placeholder={cond?.default ? '(default branch — predicate ignored)' : '{{ vars.score > 50 }}' /* literal Jinja */}
+            placeholder={cond?.default ? '(default branch -- predicate ignored)' : '{{ vars.score > 50 }}' /* literal Jinja */}
             disabled={!!cond?.default}
             oninput={(e) => setCondition(br.label, e)}
             onfocus={cond?.default ? undefined : condFocus.onfocus}
@@ -355,7 +355,7 @@
             class="block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-xs"
           >
             {#each FORM_TYPES as ft}
-              <option value={ft}>{ft || '— none —'}</option>
+              <option value={ft}>{ft || '-- none --'}</option>
             {/each}
           </select>
         {/if}
@@ -383,7 +383,7 @@
     bind:value={newTarget}
     class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-xs"
   >
-    <option value="">— pick target —</option>
+    <option value="">-- pick target --</option>
     {#each allTargets as t (t.id)}
       <option value={t.id}>{t.name} ({t.id})</option>
     {/each}
@@ -429,7 +429,7 @@
       class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 text-xs"
     >
       {#each FORM_TYPES as ft}
-        <option value={ft}>{ft || '— form type (optional) —'}</option>
+        <option value={ft}>{ft || '-- form type (optional) --'}</option>
       {/each}
     </select>
   {/if}

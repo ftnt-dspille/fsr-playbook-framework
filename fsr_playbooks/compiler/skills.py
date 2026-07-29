@@ -1,9 +1,9 @@
-"""Skill descriptors — typed, tested playbook-block templates.
+"""Skill descriptors -- typed, tested playbook-block templates.
 
 A **skill** is a typed playbook-block descriptor: an `id`, the FSR step
 type it compiles to, an optional `(connector, op)` binding, an input
 schema, and a `compile()` hook that emits a canonical YAML *source-form*
-step dict (the same shape `compiler.parser` consumes — not the resolved
+step dict (the same shape `compiler.parser` consumes -- not the resolved
 FSR JSON). The session→YAML compiler records each executed action as a
 `SkillCall` and compiles the **typed trace** instead of the prose
 transcript, recovering step wiring by static value-match over captured
@@ -67,11 +67,11 @@ class Skill:
 
 
 # ---------------------------------------------------------------------------
-# compile() hooks — emit YAML source-form step dicts
+# compile() hooks -- emit YAML source-form step dicts
 # ---------------------------------------------------------------------------
 #
 # Each hook returns the *authoring* shape (what a human would write in
-# the .yaml), which `compiler.parser` already understands — NOT the
+# the .yaml), which `compiler.parser` already understands -- NOT the
 # resolved FSR JSON. This keeps skills decoupled from the resolver and
 # means every emitted step flows through the same validate path as a
 # hand-authored one.
@@ -117,7 +117,7 @@ def _compile_set_variable(
 ) -> Dict[str, Any]:
     """SetVariable. `inputs` is the name→value mapping to stage; wired
     values become jinja refs. Emits the top-level `vars:` form (no
-    `arguments:` — the parser rejects that for set_variable)."""
+    `arguments:` -- the parser rejects that for set_variable)."""
     merged = _apply_wires(inputs, wired_refs)
     return {"type": "set_variable", "name": step_name, "vars": dict(merged)}
 
@@ -166,7 +166,7 @@ def _compile_decision(
 
 
 # ---------------------------------------------------------------------------
-# Registry — the four demo-core skills (§1)
+# Registry -- the four demo-core skills (§1)
 # ---------------------------------------------------------------------------
 
 
@@ -194,7 +194,7 @@ register(Skill(
         "operation": ParamSpec(type="string", jinja_bindable=False, required=True),
     },
     description=(
-        "The real work — maps 1:1 to a run_op call's I/O. Parameterized by "
+        "The real work -- maps 1:1 to a run_op call's I/O. Parameterized by "
         "get_op_schema (input) and the observed run_op output (output), so "
         "the connector long tail is covered by one generic skill."
     ),

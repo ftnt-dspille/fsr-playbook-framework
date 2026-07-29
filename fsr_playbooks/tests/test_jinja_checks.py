@@ -1,7 +1,7 @@
 """Unit tests for the static Jinja checks (jinja_syntax_error +
 unknown_jinja_filter).
 
-Pure — `check_jinja` walks an args dict and runs jinja2's parser, which IS the
+Pure -- `check_jinja` walks an args dict and runs jinja2's parser, which IS the
 FortiSOAR runtime parser, so these findings are zero-false-positive for syntax.
 """
 from fsr_playbooks.compiler.jinja_checks import (
@@ -35,7 +35,7 @@ def test_missing_endif_is_syntax_error():
 
 
 def test_malformed_filter_in_balanced_braces_is_syntax_error():
-    # `{{ x | }}` — pipe with no filter name — parses to a TemplateSyntaxError.
+    # `{{ x | }}` -- pipe with no filter name -- parses to a TemplateSyntaxError.
     issues = check_jinja({"v": "{{ vars.a | }}"}, step_id="s", path="p")
     assert any(i["code"] == "jinja_syntax_error" for i in issues)
 
@@ -70,7 +70,7 @@ def test_unknown_filter_with_did_you_mean():
 
 
 def test_did_you_mean_fires_for_real_typo_below_strict_cutoff():
-    # Regression: `uppercasse` sits below a 0.7 cutoff but above 0.6 — it must
+    # Regression: `uppercasse` sits below a 0.7 cutoff but above 0.6 -- it must
     # still get a suggestion (this is the case that motivated lowering it).
     f = check_jinja(
         {"v": "{{ x | uppercasse }}"}, step_id="s", path="p")[0]
@@ -104,7 +104,7 @@ def test_nested_args_locations():
     assert issues[0]["location"] == "arguments.params.items[0]"
 
 
-# --- Ansible namespace (§G — false-positive fix) ---------------------------
+# --- Ansible namespace (§G -- false-positive fix) ---------------------------
 
 def test_ansible_filters_validate_clean():
     # FSR playbooks run through an Ansible-based engine: the Ansible filter

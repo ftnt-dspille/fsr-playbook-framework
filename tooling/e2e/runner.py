@@ -76,7 +76,7 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
              keep: bool = False, verbose: bool = True) -> RunResult:
     """Run a single .test.yaml. Returns a RunResult; never raises for
     expected failure modes (compile errors, push failure, run failed,
-    assertion failure) — those land in `failures` and `ok=False`."""
+    assertion failure) -- those land in `failures` and `ok=False`."""
 
     run_id = uuid.uuid4().hex[:8]
     log_dir = (log_root or _default_log_root()) / run_id
@@ -162,7 +162,7 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
 
     # 4b. Setup steps: insert tagged test records, capture for templating + cleanup.
     # For auto_trigger mode (post_create), capture the timestamp BEFORE
-    # setup runs — the setup POST itself fires the run.
+    # setup runs -- the setup POST itself fires the run.
     if trigger_auto:
         trigger_started = time.time()
     try:
@@ -198,7 +198,7 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
     #    - input:  /notrigger/<wf> for cybersponse.abstract_trigger (manual)
     rec_target = _render_templates(trigger_record, setup_ctx) if trigger_record else None
     if trigger_auto:
-        _log(f"[{run_id}] auto-trigger (post_create) — setup POST fired the run")
+        _log(f"[{run_id}] auto-trigger (post_create) -- setup POST fired the run")
         task_id = None
     elif trigger_mutate:
         cap = trigger_mutate.get("capture")
@@ -231,7 +231,7 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
             return _fail(f"mutate PUT failed: HTTP {pr.status_code}")
         _log(f"[{run_id}] mutated {module}/{rec_uuid[:8]} → "
              f"{list(mut_fields)} (post_update fire)")
-        # Skip the POST /triggers branch entirely — FSR's event subscriber
+        # Skip the POST /triggers branch entirely -- FSR's event subscriber
         # spawns the workflow run from the PUT.
         task_id = None
     elif rec_target:
@@ -245,7 +245,7 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
         # the workflow uuid; and the body's misleadingly-named `__uuid`
         # is the WORKFLOW uuid (not the record). Confirmed against the
         # FSR UI's Run-Action request 2026-05-03. The route uuid lives
-        # in arguments.route on the trigger step — fetch it.
+        # in arguments.route on the trigger step -- fetch it.
         route_uuid = _fetch_trigger_route_uuid(client, wf_uuid)
         if not route_uuid:
             _flush_cleanup(client, cleanup_records, _log, run_id)
@@ -342,7 +342,7 @@ def run_test(test_path: Path, *, log_root: Path | None = None,
         _hard_purge(client, coll_uuid, coll_entity)
         _log(f"[{run_id}] purged collection")
     else:
-        _log(f"[{run_id}] kept collection ({coll_uuid[:8]}) — pass keep=False to purge")
+        _log(f"[{run_id}] kept collection ({coll_uuid[:8]}) -- pass keep=False to purge")
 
     res.ok = not failures and status == (expects.get("status", "finished"))
     _log(f"[{run_id}] {'PASS' if res.ok else 'FAIL'} status={status} "
@@ -399,7 +399,7 @@ def _hard_purge(client, coll_uuid: str, coll_entity: dict) -> None:
     """Hard-delete the collection and its (locally-known) workflows.
 
     Scope is strictly limited to UUIDs that came from the local just-
-    compiled YAML — no server-side discovery, no name matching. Idempotent;
+    compiled YAML -- no server-side discovery, no name matching. Idempotent;
     individual failures swallowed (the followup POST will surface any
     remaining collision).
 
@@ -467,7 +467,7 @@ def _resolve_wf(client, coll_uuid: str, name: str) -> str | None:
 def _render_templates(value, ctx: dict):
     """Walk value and substitute `{{ setup.<key>.<field>… }}` against ctx.
 
-    Templates are recognized as `{{ setup.X.Y }}` strings — a strict
+    Templates are recognized as `{{ setup.X.Y }}` strings -- a strict
     subset of Jinja, just enough for fixture wiring. Any other `{{ }}`
     is left as-is (it'll be resolved by FSR's runtime). Nested
     dicts/lists walked recursively.
@@ -497,7 +497,7 @@ def _render_templates(value, ctx: dict):
 def _resolve_module_fields(client, module: str, fields: dict) -> dict:
     """Resolve friendly picklist values in a record-fields dict to IRIs.
     Delegates to `picklists.resolve_module_fields`, which auto-discovers
-    the picklist_name per (module, field) — no hardcoded map."""
+    the picklist_name per (module, field) -- no hardcoded map."""
     from picklists import resolve_module_fields as _shared
     return _shared(client, module, fields)
 
@@ -563,7 +563,7 @@ def _poll_by_template(client, wf_uuid: str, started_unix: float,
     """Poll for a workflow run matching template_iri=<wf_uuid> created
     after `started_unix`. Used for /action triggers which don't return
     a task_id. Race-window: if another run on the same playbook fires in
-    the same second, we may grab the wrong one — fine for isolated test
+    the same second, we may grab the wrong one -- fine for isolated test
     fixtures, fragile for shared playbooks."""
     import datetime
     template_iri = f"/api/3/workflows/{wf_uuid}"

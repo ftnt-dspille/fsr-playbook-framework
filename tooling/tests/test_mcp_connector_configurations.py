@@ -1,4 +1,4 @@
-"""mcp_server.list_connector_configurations — wraps connector_configs.
+"""mcp_server.list_connector_configurations -- wraps connector_configs.
 
 We stub the underlying live-fetch helper so the test stays offline.
 """
@@ -53,7 +53,7 @@ def test_refresh_bypasses_cache(stub_list, monkeypatch):
 
 def test_sqlite_source_when_info_json_has_configurations(monkeypatch):
     """info_json from probe ingest already contains the full
-    `configuration` array. Prefer that over a live round-trip — saves
+    `configuration` array. Prefer that over a live round-trip -- saves
     ~2 s per first-touch lookup."""
     import sqlite3, json
     name = "sqlite_first_test"

@@ -8,7 +8,7 @@ import { commands, isEditableTarget } from './commands.svelte';
 
 export function installKeybindings(): () => void {
   const onKey = (ev: KeyboardEvent) => {
-    // Bail on key events from inputs / textareas — let the field
+    // Bail on key events from inputs / textareas -- let the field
     // handle its own keystrokes. Each command can opt back in via
     // `match()` if it really wants to fire while typing (e.g. Cmd+S
     // to save while in Monaco).
@@ -18,7 +18,7 @@ export function installKeybindings(): () => void {
       if (editable && !cmd.runInInputs) continue;
       if (!cmd.match(ev)) continue;
       // Always swallow a matching hotkey, even when the command is
-      // disabled — otherwise the browser default takes over (Cmd+Z
+      // disabled -- otherwise the browser default takes over (Cmd+Z
       // history nav, Cmd+S "save page", etc.) and surprises the user.
       // Disabled simply means "no-op", not "let the browser have it".
       ev.preventDefault();

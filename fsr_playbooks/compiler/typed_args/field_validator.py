@@ -24,7 +24,7 @@ class FieldValueValidator:
     filters (field existence, value type/picklist membership).
 
     Operators where the ``value`` is semantically meaningless
-    (``isnull`` / ``isnotnull`` / ``changed``) skip value validation — FSR's
+    (``isnull`` / ``isnotnull`` / ``changed``) skip value validation -- FSR's
     own designer emits a placeholder (e.g. ``"true"``) there, and flagging it
     as a type mismatch is a false positive.
     """
@@ -75,7 +75,7 @@ class FieldValueValidator:
             )
             return
 
-        # Leaf filter — validate field + value
+        # Leaf filter -- validate field + value
         field = filt.get("field")
         if not isinstance(field, str) or not field:
             # Missing field already caught by structural validation
@@ -219,7 +219,7 @@ class FieldValueValidator:
             # Null/empty is always valid (operators like isnull/isnotnull require it)
             return
         if isinstance(value, str) and ("{{" in value or "{%" in value):
-            # Jinja template — defer to runtime
+            # Jinja template -- defer to runtime
             return
 
         def _is_numeric_string(s: str) -> bool:
@@ -236,7 +236,7 @@ class FieldValueValidator:
                 # List of integers (e.g., for `in` operator)
                 for i, v in enumerate(value):
                     if isinstance(v, str) and ("{{" in v or "{%" in v):
-                        # Jinja in list — pass through
+                        # Jinja in list -- pass through
                         continue
                     if not isinstance(v, int) and not (
                         isinstance(v, str) and _is_numeric_string(v)

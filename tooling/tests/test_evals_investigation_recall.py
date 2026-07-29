@@ -1,4 +1,4 @@
-"""Investigation-quality eval scoring (Phase 1.4 — Part A).
+"""Investigation-quality eval scoring (Phase 1.4 -- Part A).
 
 `mode="investigation"` grades a triage/hunt task on **pivot recall**
 (required tool-calls the agent performed / required), not YAML shape, with
@@ -143,7 +143,7 @@ def test_quality_param_flail_detected():
 
 def test_quality_param_flail_ignores_confirm_retry():
     # A retry that only adds `confirm: true` is the designed confirm-gate
-    # path, NOT a param guess — must collapse to one distinct arg-set.
+    # path, NOT a param guess -- must collapse to one distinct arg-set.
     trace = [
         _call("run_op", connector="vt", op="lookup", params={"ip": "1.2.3.4"}),
         _call("run_op", connector="vt", op="lookup", params={"ip": "1.2.3.4"},
@@ -206,7 +206,7 @@ def test_score_investigation_mode_demotes_authoring_gates():
         {"tool": "run_op", "connector": "virustotal", "args_contains": ["1.2.3.4"]},
     ]
     out = scoring.score(
-        "",  # no YAML — investigation tasks don't author
+        "",  # no YAML -- investigation tasks don't author
         trace=trace, final_text="Investigated the alert; IP is malicious.",
         mode="investigation", required_facts=required,
         # Isolate the demotion check from the deliverable gate (tested above).
@@ -228,7 +228,7 @@ def test_score_investigation_mode_demotes_authoring_gates():
 
 def test_refused_forbidden_pivot_not_counted():
     """A guard-refused external-TI-on-internal-IP attempt is the guard working,
-    not a violation — it must not trip the forbidden-pivot fail."""
+    not a violation -- it must not trip the forbidden-pivot fail."""
     forbidden = [{"tool": "run_op", "connector": "virustotal",
                   "args_contains": ["192.168.1.1"]}]
     trace = [

@@ -1,4 +1,4 @@
-"""Local Jinja analysis for validation — catches undefined bare names
+"""Local Jinja analysis for validation -- catches undefined bare names
 that static regex-based checks miss.
 
 Phase 0 of DYNAMIC_JINJA_RENDER_PLAN.md. The AST-based approach parses
@@ -6,10 +6,10 @@ each template with Jinja2 and walks the AST for ``Name`` nodes with
 ``ctx='load'`` that aren't in the known set (Jinja2 builtins + FSR
 globals + locally-defined names like loop variables). This catches
 references like ``{{ items | length }}`` where ``items`` is never
-defined — the existing ``_check_undefined_vars`` only matches
+defined -- the existing ``_check_undefined_vars`` only matches
 ``vars.<name>`` regex patterns, so bare names go unchecked.
 
-Pure offline — stdlib + jinja2 (already a dep). No rendering, no DB,
+Pure offline -- stdlib + jinja2 (already a dep). No rendering, no DB,
 no live FSR. The render-based approach (SandboxedEnvironment +
 StrictUndefined) is the next layer; this module ships the AST walk
 first because it is zero-false-positive and directly addresses the
@@ -26,10 +26,10 @@ _ENV = Environment(autoescape=False,
                     extensions=["jinja2.ext.do", "jinja2.ext.loopcontrols"])
 
 # Always-available bare names in FSR's Jinja context:
-# - ``vars`` — the root context object (always injected by FSR)
+# - ``vars`` -- the root context object (always injected by FSR)
 # - Jinja2 built-in globals
-# - ``globalVars`` — FSR context var (jinja_context_vars table)
-# - ``workflow`` — injected by FSR playbook runtime (not in
+# - ``globalVars`` -- FSR context var (jinja_context_vars table)
+# - ``workflow`` -- injected by FSR playbook runtime (not in
 #   jinja_globals table but present in system playbooks)
 _KNOWN_BARE_NAMES: frozenset[str] = frozenset({
     "vars",
@@ -46,7 +46,7 @@ def _load_globals_from_db() -> set[str]:
         with sqlite3.connect(str(PACKAGED_SLIM_DB)) as conn:
             rows = conn.execute("SELECT name FROM jinja_globals").fetchall()
         return {r[0] for r in rows if r[0]}
-    except Exception:  # noqa: BLE001 — DB is optional; fall back to hardcoded set
+    except Exception:  # noqa: BLE001 -- DB is optional; fall back to hardcoded set
         return set()
 
 
@@ -89,7 +89,7 @@ def find_undefined_bare_names(
     match ``vars.<name>`` regex patterns, so bare names go unchecked.
 
     ``extra_known`` adds step-specific names (e.g. set_variable vars
-    surfaced at the top level — though in practice FSR keeps them
+    surfaced at the top level -- though in practice FSR keeps them
     under ``vars.*``, so this is empty for now).
 
     Returns unique names (no duplicates) in first-occurrence order.

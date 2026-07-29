@@ -1,4 +1,4 @@
-"""P4 — repeated-error guard.
+"""P4 -- repeated-error guard.
 
 If a tool call with the identical (name, args) shape already failed once this
 turn, the provider must NOT re-run it; it returns a guard envelope so the model
@@ -96,7 +96,7 @@ def test_identical_failing_call_not_rerun(monkeypatch):
     provider = AnthropicProvider(model="fake", client=_FakeClient(turns))
     events = asyncio.run(_drain(provider, [Message(role="user", content="triage")]))
 
-    # dispatch ran exactly once — the second identical call was short-circuited.
+    # dispatch ran exactly once -- the second identical call was short-circuited.
     assert len(calls) == 1, f"expected 1 real dispatch, got {len(calls)}"
 
     results = [e.result for e in events if isinstance(e, ToolResultEvent)]
@@ -116,7 +116,7 @@ def test_different_args_not_guarded(monkeypatch):
 
     turns = [
         _FinalMessage([_tool_use("c1", "run_op", {"incident_id": "563"})]),
-        # Adapted: a DIFFERENT id — must actually run, not be guarded.
+        # Adapted: a DIFFERENT id -- must actually run, not be guarded.
         _FinalMessage([_tool_use("c2", "run_op", {"incident_id": "11521"})]),
         _FinalMessage([_text("done")]),
     ]

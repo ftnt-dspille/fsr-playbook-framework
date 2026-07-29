@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Render-path analyzer diagnostics list — step-id-keyed bugs that
+   * Render-path analyzer diagnostics list -- step-id-keyed bugs that
    * `analyze_playbook` surfaces (unreachable refs, missing keys,
    * required-empty fields, picklist drift). Per-row "Suggest fix"
    * button calls `suggest_fix_for_diagnostic` and surfaces the
@@ -83,7 +83,7 @@
                   <div class="mt-2 rounded border border-[var(--brand-ring)] bg-[var(--brand-soft)] px-2 py-1.5 text-[11px]">
                     <div class="mb-1 flex items-center gap-2">
                       <span class="font-semibold text-[var(--text-default)]">Proposed fix</span>
-                      <span class="rounded bg-[var(--bg-canvas)] px-1.5 py-px text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{fix.confidence ?? '—'}</span>
+                      <span class="rounded bg-[var(--bg-canvas)] px-1.5 py-px text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{fix.confidence ?? '--'}</span>
                     </div>
                     <p class="mb-1.5 text-[var(--text-default)]">{fix.explanation ?? ''}</p>
                     {#if fix.before !== undefined && fix.after !== undefined}

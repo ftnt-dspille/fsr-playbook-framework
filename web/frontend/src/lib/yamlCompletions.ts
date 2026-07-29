@@ -1,5 +1,5 @@
 /**
- * Monaco YAML completion provider — context-sensitive suggestions for
+ * Monaco YAML completion provider -- context-sensitive suggestions for
  * `type:`, `connector:`, `operation:`, plus step-type snippets that
  * scaffold the next required fields.
  */
@@ -55,14 +55,14 @@ function findConnectorAbove(model: any, lineNumber: number): string | null {
 }
 
 /**
- * Snippets keyed by short step type — inserted INSTEAD OF just the keyword
+ * Snippets keyed by short step type -- inserted INSTEAD OF just the keyword
  * when the user picks an item. `${N}` are tab-stops; ${0} is the final cursor.
  *
  * Monaco's autoIndent:'full' (default) re-indents each newline to match the
  * surrounding context, so snippets must NOT include an explicit base-indent
  * prefix.  Each continuation line carries only its *relative* child indent.
  * The `pad` parameter is accepted for API compatibility but intentionally
- * unused — Monaco provides the base indentation automatically.
+ * unused -- Monaco provides the base indentation automatically.
  */
 const STEP_SNIPPETS: Record<string, (pad: string) => string> = {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -127,7 +127,7 @@ export function registerYamlCompletions(
         return {
           suggestions: types.map((t) => {
             const hasSnippet = t.name in STEP_SNIPPETS;
-            // Pass '' — Monaco autoIndent:'full' provides the base indentation.
+            // Pass '' -- Monaco autoIndent:'full' provides the base indentation.
             const insertText = hasSnippet ? buildSnippet(t.name, '') : t.name;
             return {
               label: t.name,
@@ -164,14 +164,14 @@ export function registerYamlCompletions(
         };
       }
 
-      // typed value-path inside `{{ ... }}` — fires when the most
+      // typed value-path inside `{{ ... }}` -- fires when the most
       // recent `{{` is unclosed AND the partial expression starts
       // with `vars.steps.`. Suggestions come from the typed_walker
       // shapes published by the most recent verify run.
       const lastOpen = before.lastIndexOf('{{');
       if (lastOpen !== -1 && !before.slice(lastOpen).includes('}}')) {
         const expr = before.slice(lastOpen);
-        // Don't shadow the filter branch — once a `|` appears in the
+        // Don't shadow the filter branch -- once a `|` appears in the
         // expression, the filter completion owns the suggestion list.
         if (!/\|/.test(expr)) {
           // Module-aware input.records: when the expression targets
@@ -224,7 +224,7 @@ export function registerYamlCompletions(
         }
       }
 
-      // jinja filter — fires when the cursor is inside `{{ ... | }}`
+      // jinja filter -- fires when the cursor is inside `{{ ... | }}`
       // and the user has just typed a `|`. Match: the most recent `{{`
       // is unclosed on this line AND a `|` (with optional whitespace)
       // sits between it and the cursor.

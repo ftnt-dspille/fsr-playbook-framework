@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate `tooling/agent/static_grammar_block.md` — the cacheable
+"""Generate `tooling/agent/static_grammar_block.md` -- the cacheable
 prompt prefix containing byte-identical-across-tenants reference data.
 
 Output gets prepended to the live `system_prompt.md` so Anthropic
@@ -60,7 +60,7 @@ def _step_section() -> str:
         "These are the *only* step types the resolver accepts. Use the "
         "friendly short name on the left in YAML. Each section lists "
         "`accepted_keys`, a one-line note, and a worked example. **Reject "
-        "any other top-level shape** — there is no `script_step`, "
+        "any other top-level shape** -- there is no `script_step`, "
         "`http_call`, `webhook`, or `branch` type.\n"
     )
     out.append("| Friendly | Canonical FSR | Use when |")
@@ -75,16 +75,16 @@ def _step_section() -> str:
         "find_record": "query records from a module with a typed filter tree",
         "create_record": "create a record",
         "update_record": "update a record by IRI",
-        "manual_input": "ask the analyst — Context (Record Linked vs Independent), Behavior, InputType",
+        "manual_input": "ask the analyst -- Context (Record Linked vs Independent), Behavior, InputType",
         "approval": "approve / reject buttons routed to an analyst",
-        "code_snippet": "run inline Python (use sparingly — opaque to the typed walker)",
+        "code_snippet": "run inline Python (use sparingly -- opaque to the typed walker)",
         "delay": "pause for N seconds before next step",
         "workflow_reference": "call another playbook (sync = `apply_async: false`)",
         "stop": "terminate the playbook",
         "end": "terminal node on a linear branch",
     }
     for short in _STEP_ORDER:
-        canon = _SHORT_TO_CANONICAL.get(short, "—")
+        canon = _SHORT_TO_CANONICAL.get(short, "--")
         use = uses.get(short, "")
         out.append(f"| `{short}` | `{canon}` | {use} |")
     out.append("")
@@ -113,12 +113,12 @@ def _step_section() -> str:
 
 def _fsr_jinja_section() -> str:
     """Authoritative list of FSR-custom Jinja symbols (globals, filters,
-    tests). Ansible / stdlib symbols are excluded — the LLM knows those.
+    tests). Ansible / stdlib symbols are excluded -- the LLM knows those.
     """
     out: list[str] = ["## 2. FortiSOAR-custom Jinja\n"]
     out.append(
         "These symbols come from `sealab.jinja`, `workflow.jinja`, and "
-        "`workflow.np_filters` — they are **not** in stock Jinja2 or "
+        "`workflow.np_filters` -- they are **not** in stock Jinja2 or "
         "Ansible. Prefer them over hand-rolled date / IOC / connector-"
         "config patterns. Pipe filters with `|`, call globals/tests "
         "directly.\n"
@@ -142,10 +142,10 @@ def _fsr_jinja_section() -> str:
         out.append(f"### {header} ({len(rows)})\n")
         for r in rows:
             sig = (r["signature"] or "").strip() or r["name"]
-            out.append(f"- `{sig}` — _{r['module']}_")
+            out.append(f"- `{sig}` -- _{r['module']}_")
         out.append("")
     out.append(
-        "**Ansible filters worth remembering** (network + json + collections — "
+        "**Ansible filters worth remembering** (network + json + collections -- "
         "FSR includes them, but they're standard Ansible):\n"
     )
     out.append(
@@ -172,12 +172,12 @@ Step names use Title Case display strings (e.g. `Check Value`,
 `Greater Than 10`) and may only contain letters, digits, spaces,
 and `_`. **Forbidden**: `-`, `:`, em-dashes, parens, `?`, `/`, `#`,
 quotes. The Norway problem: never use unquoted `no`, `false`, `off`,
-`yes`, `true`, `on` as bare values — YAML coerces them to booleans.
+`yes`, `true`, `on` as bare values -- YAML coerces them to booleans.
 Quote string values that match those tokens.
 
 ### 3.2 Step references in `next:`
 
-Reference a step by writing its `name:` verbatim — same spaces, same
+Reference a step by writing its `name:` verbatim -- same spaces, same
 casing. Examples:
 
 ```yaml
@@ -197,7 +197,7 @@ casing. Examples:
 
 ### 3.3 Runtime access to step outputs
 
-`vars.steps.<name-with-spaces-replaced-by-underscores>.<key>` — same
+`vars.steps.<name-with-spaces-replaced-by-underscores>.<key>` -- same
 slug rule applies to child-playbook outputs and to references inside
 Jinja:
 
@@ -206,7 +206,7 @@ Jinja:
 - `vars.input.records[0]` is the triggering record for module-bound
   triggers (`start` with `module:`, `start_on_create`, `start_on_update`).
 
-### 3.4 Decision step — exact shape
+### 3.4 Decision step -- exact shape
 
 ```yaml
 - type: decision
@@ -225,15 +225,15 @@ Jinja:
   `display`, `default: true`, `next` and **no** `when`.
 - Decisions with zero defaults or two defaults are rejected.
 
-### 3.5 Manual input — mode-driven, not free-form
+### 3.5 Manual input -- mode-driven, not free-form
 
 Every "extra" top-level key on `manual_input` is gated by one of three
 UI-mode toggles. Wrong combinations (e.g. internal-only with external
 emails populated) are structurally rejected.
 
-- **Mode A — Context**: `Record Linked` (default) vs `Record Independent`.
-- **Mode B — Behavior**: who receives the prompt — analyst queue, specific user, etc.
-- **Mode C — InputType**: `DecisionBased` (buttons only) vs `InputBased`
+- **Mode A -- Context**: `Record Linked` (default) vs `Record Independent`.
+- **Mode B -- Behavior**: who receives the prompt -- analyst queue, specific user, etc.
+- **Mode C -- InputType**: `DecisionBased` (buttons only) vs `InputBased`
   (free-form fields) vs both.
 
 ```yaml
@@ -251,9 +251,9 @@ emails populated) are structurally rejected.
 
 The first option is primary unless another is marked. For
 `InputBased`, use `inputs:` with typed `kind:` per field (`ipv4`,
-`email`, `url`, `integer`, etc. — `text` only for free-form prose).
+`email`, `url`, `integer`, etc. -- `text` only for free-form prose).
 
-### 3.6 Set-variable — vars vs message
+### 3.6 Set-variable -- vars vs message
 
 ```yaml
 - type: set_variable
@@ -275,7 +275,7 @@ The first option is primary unless another is marked. For
 ### 3.7 Picklists
 
 Picklist values in `arguments:` are friendly strings (`"High"`), not
-IRIs — the compiler resolves them. Picklist trigger filters cannot use
+IRIs -- the compiler resolves them. Picklist trigger filters cannot use
 `like` against picklist-typed fields (`type`, `severity`, `status`);
 filter on string fields, or use `op: changed`.
 

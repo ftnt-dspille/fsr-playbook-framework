@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('runVarsStore — trace probing', () => {
+describe('runVarsStore -- trace probing', () => {
   it('prefers wf_step_logs when populated', async () => {
     (fetchRunDetail as any).mockResolvedValue({
       ok: true,
@@ -103,7 +103,7 @@ describe('runVarsStore — trace probing', () => {
   });
 });
 
-describe('runVarsStore.observedAt — path resolution', () => {
+describe('runVarsStore.observedAt -- path resolution', () => {
   beforeEach(async () => {
     (fetchRunDetail as any).mockResolvedValue({
       ok: true,

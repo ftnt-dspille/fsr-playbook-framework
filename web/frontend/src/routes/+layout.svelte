@@ -19,7 +19,7 @@
   // Settings as sub-pages; theme switcher lives there too. Health pills
   // moved to the bottom StatusBar (VS Code style) so the header stays
   // light. Order matches frequency of use.
-  // /run was retired — its log surface lives in the DiagnosticsDrawer's
+  // /run was retired -- its log surface lives in the DiagnosticsDrawer's
   // Deploy tab now (visible inline during Push & Run instead of needing
   // a tab switch). The route still resolves and redirects to /, so old
   // bookmarks survive.

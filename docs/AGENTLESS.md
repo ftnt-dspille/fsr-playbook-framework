@@ -75,7 +75,7 @@ the read commands.
 | index audit                              | `fsrpb inventory summary \| connectors \| stale`        |
 | reset demo state                         | `fsrpb demo prep` (FSR_ALLOW_E2E gated)                 |
 
-Every command exits 0 on success, non-zero on failure — easy to wire
+Every command exits 0 on success, non-zero on failure -- easy to wire
 into any shell pipeline.
 
 ## 3. Web HTTP routes
@@ -93,7 +93,7 @@ GET  /api/ref/api-examples?q=...
 GET  /api/ref/synthesize-http-step?entry_id=...
 ```
 
-Same data the LLM sees — without the LLM. The Inventory dashboard's
+Same data the LLM sees -- without the LLM. The Inventory dashboard's
 "Browse the index" panel is the most visible consumer; it powers
 zero-typing exploration of the entire reference store.
 
@@ -106,7 +106,7 @@ Monaco YAML autocomplete is wired through the same routes:
 - `operation: <Tab>`   → ops for the connector named on the line above
 - `{{ value | <Tab>`   → 170+ Jinja filters with signatures + descriptions
 
-No LLM round-trip for any of these — pure SQLite reads through the web
+No LLM round-trip for any of these -- pure SQLite reads through the web
 backend.
 
 ## 5. Pre-commit hook
@@ -124,8 +124,8 @@ silently when no live FSR is configured, so the hook works in CI too.
 
 ## 6. Other MCP clients
 
-`fsrpb mcp` starts the server over stdio. Any MCP-compatible client —
-Cursor, Continue, Zed, Claude Code, custom scripts — can register it:
+`fsrpb mcp` starts the server over stdio. Any MCP-compatible client --
+Cursor, Continue, Zed, Claude Code, custom scripts -- can register it:
 
 ```jsonc
 // .claude/settings.json (or your client's equivalent)
@@ -151,6 +151,6 @@ Two narrow surfaces:
    `validate` + `resolve` + `diagnose` + `assert` close every loop
    without an LLM in sight.
 
-Everything else — lookups, validation, live execution, diagnostics,
-recipe synthesis from `info.json`, outcome assertions — is plain
+Everything else -- lookups, validation, live execution, diagnostics,
+recipe synthesis from `info.json`, outcome assertions -- is plain
 Python you can call from any context.

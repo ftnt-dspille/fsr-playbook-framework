@@ -26,7 +26,7 @@ def test_registry_models_set_variable():
 
 def test_registry_unmodeled_type_falls_back():
     # Unmodeled step types must report no model so the resolver keeps using
-    # the imperative path — the migration's incremental contract. (After the
+    # the imperative path -- the migration's incremental contract. (After the
     # P5 batch + ingest_bulk_feed, only the one-way authoring sugars stop/end
     # remain unmodeled -- they compile down to a connector call and carry no
     # distinct envelope to type.)

@@ -8,7 +8,7 @@ authoring reference can never drift from the oracle by hand.
 `test_step_reference_in_sync.py` fails if the committed block is stale.
 Regenerate with: `python -m fsr_playbooks.tests.step_reference_gen --write`.
 
-This is a docs/test-time tool, not runtime compiler code — it lives under
+This is a docs/test-time tool, not runtime compiler code -- it lives under
 `tests/` so it never gets vendored into the connector.
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ def _clean_note(note: str) -> str:
     from a key's note so the table reads for authors, not bundle archaeologists.
     Keeps the leading meaning, drops the breadcrumbs, caps the length."""
     note = (note or "").strip()
-    # Drop trailing reverse-engineering breadcrumbs — keep the first sentence(s).
+    # Drop trailing reverse-engineering breadcrumbs -- keep the first sentence(s).
     note = re.split(r"(?:\s*Set at line|\s*Present in ~?\d|\s*System key|"
                     r"\s*Standard playbook step field|\s*Becomes step variable|"
                     r"\s*\[system key\])", note)[0]
@@ -60,7 +60,7 @@ def _clean_note(note: str) -> str:
 def _render_step(shape: StepShape, aliases: list[str]) -> list[str]:
     lines: list[str] = []
     alias_str = ", ".join(f"`{a}`" for a in aliases) if aliases else "_(no alias)_"
-    lines.append(f"#### {shape.canonical_name} — {alias_str}")
+    lines.append(f"#### {shape.canonical_name} -- {alias_str}")
     lines.append("")
     rows = []
     for key in sorted(shape.all_keys):
@@ -90,7 +90,7 @@ def render_step_reference() -> str:
     lines = [
         _BEGIN,
         "",
-        "<!-- Generated from docs/STEP_WIRE_SHAPES.json — do not edit by hand.",
+        "<!-- Generated from docs/STEP_WIRE_SHAPES.json -- do not edit by hand.",
         "     Regenerate: python -m fsr_playbooks.tests.step_reference_gen --write -->",
         "",
         "### Per-step-type argument reference",

@@ -1,5 +1,5 @@
 /**
- * Jinja hover provider — extracts the path under the cursor, resolves
+ * Jinja hover provider -- extracts the path under the cursor, resolves
  * its type via the shapes store, renders a markdown popup. Covers both
  * the path-extraction helper and the registered provider's contract.
  */
@@ -78,7 +78,7 @@ describe('extractPathAtCursor', () => {
   });
 });
 
-describe('registerJinjaHover — integration with shapes store', () => {
+describe('registerJinjaHover -- integration with shapes store', () => {
   beforeEach(() => {
     jinjaShapesStore.setShapes({ Get_Alert: SHAPE });
   });

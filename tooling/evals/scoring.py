@@ -3,18 +3,18 @@ example-match check + agent-behavior gates.
 
 Confidence tiers (what a human means by "is this playbook good?"):
 
-  draft        — YAML parses + compiles to FSR JSON. "It would import
+  draft        -- YAML parses + compiles to FSR JSON. "It would import
                  without an error." Says nothing about whether it works.
-  verified     — Statically sound: references resolve, branches
+  verified     -- Statically sound: references resolve, branches
                  reachable, connectors/ops exist, picklists valid.
                  Equivalent to `verify_playbook.ready_to_push=True`.
                  "I would ship this without testing it manually."
-  live_tested  — Actually executes on a real FSR (dry-run passes).
+  live_tested  -- Actually executes on a real FSR (dry-run passes).
                  Strongest signal short of pushing. Skipped offline.
 
 Orthogonal:
 
-  matches_example — byte-equal compile output to the hand-curated
+  matches_example -- byte-equal compile output to the hand-curated
                     reference YAML in /examples/. Only meaningful for
                     tasks that have a reference; says nothing about
                     novel playbooks.
@@ -22,7 +22,7 @@ Orthogonal:
 Agent-behavior gates (apply only when a tool-use `trace` is supplied):
 
   verify_called_before_submit
-  verify_iterations_until_ready   (record only — not pass/fail)
+  verify_iterations_until_ready   (record only -- not pass/fail)
   final_verify_ready_to_push
   tool_budget
   no_spiral
@@ -78,7 +78,7 @@ def _live_tested_blocker(yaml_text: str) -> tuple[str, str] | None:
             t = s.get("type") or ""
             if t == "manual_input":
                 return ("manual_input_blocks_dry_run",
-                        "playbook contains manual_input — /notrigger "
+                        "playbook contains manual_input -- /notrigger "
                         "dry-run will block awaiting human input")
             if t in record_triggers:
                 return ("record_trigger_requires_record",
@@ -120,7 +120,7 @@ def _strip_volatile(obj: Any) -> Any:
     return obj
 
 
-# Agentic gate thresholds. Sourced from docs/AGENT_TOOL_USAGE.md p95s —
+# Agentic gate thresholds. Sourced from docs/AGENT_TOOL_USAGE.md p95s --
 # raise via env if a model is intentionally chatty.
 TOOL_BUDGET_MAX = int(os.environ.get("EVAL_TOOL_BUDGET_MAX", "20"))
 NO_SPIRAL_MAX_CONSECUTIVE = int(
@@ -141,7 +141,7 @@ INVESTIGATION_MAX_PARAM_RETRIES = int(
     os.environ.get("EVAL_INVESTIGATION_MAX_PARAM_RETRIES", "2"))
 # Tools that count as "staged a concrete deliverable for the analyst". A
 # capability gap / choice card IS a valid ending when no containment op is
-# configured on the box — credit it, don't demand an action card that can't
+# configured on the box -- credit it, don't demand an action card that can't
 # exist here.
 _DELIVERABLE_TOOLS = (
     "emit_action_card", "emit_choice_card", "emit_capability_gap_card",
@@ -199,7 +199,7 @@ def _score_investigation(trace: list[dict[str, Any]],
             missing.append(f)
     recall = (len(matched) / len(required_facts)) if required_facts else 0.0
     # A call the connector's discipline guard refused (`refused=True`) never
-    # executed — the model attempted it but the platform blocked it. Don't count
+    # executed -- the model attempted it but the platform blocked it. Don't count
     # a guard-blocked forbidden pivot as a violation; that's the guard working.
     forbidden_hit = [f for f in (forbidden_facts or [])
                      if any(_fact_matches(f, c) for c in trace
@@ -225,10 +225,10 @@ def _call_args(call: dict[str, Any]) -> dict[str, Any]:
 
 
 # ── B4: triage→build fidelity (Chat Intelligence Plan) ──────────────────
-# "The built playbook must automate what was investigated — same ops." Grade
+# "The built playbook must automate what was investigated -- same ops." Grade
 # the (connector, op) overlap between the investigation trace and the compiled
 # playbook. Grounding gate defaults to 1.0: a playbook may only call ops the
-# analyst actually exercised this session — inventing an op is the failure.
+# analyst actually exercised this session -- inventing an op is the failure.
 BUILD_FIDELITY_GROUNDING_GATE = float(
     os.environ.get("EVAL_BUILD_FIDELITY_GROUNDING_GATE", "1.0"))
 
@@ -285,7 +285,7 @@ def _ops_from_yaml(yaml_text: str) -> set[tuple[str, str]]:
 
 def ops_from_offer_card(card: dict[str, Any] | None) -> set[tuple[str, str]]:
     """(connector, operation) pairs from a `playbook_offer` card's
-    `ops_summary` — the built-playbook ops as the agent staged them for save,
+    `ops_summary` -- the built-playbook ops as the agent staged them for save,
     before any push. Lets the fidelity gate grade a triage→build *chain* (which
     emits an offer card, not a raw ```yaml fence)."""
     ops: set[tuple[str, str]] = set()
@@ -308,17 +308,17 @@ def score_build_fidelity(trace: list[dict[str, Any]] | None,
     """Does the built playbook automate what was investigated? (Plan B4.)
 
     Two sub-metrics over (connector, op) sets:
-      * **grounding** — every connector op in the built playbook was one the
+      * **grounding** -- every connector op in the built playbook was one the
         investigation actually exercised (a `run_op` enrichment OR a staged
         action card). Catches a playbook that invents ops the analyst never
         ran. Gate: grounding ≥ `BUILD_FIDELITY_GROUNDING_GATE` (default 1.0).
-      * **action_coverage** — the response action(s) staged via
+      * **action_coverage** -- the response action(s) staged via
         `emit_action_card` appear as steps in the built playbook, so it
         automates the recommendation, not just the read-side lookups.
 
     Passes when grounding clears the gate AND every staged action is covered.
     Auto-skips (not graded) when no playbook was built or the trace used no
-    ops — so it never penalizes a standalone authoring task with no
+    ops -- so it never penalizes a standalone authoring task with no
     investigation phase.
     """
     enrich, actions = _ops_from_trace(trace)
@@ -391,7 +391,7 @@ _SCHEMA_DISCOVERY_TOOLS = ("get_op_schema", "find_operation", "find_operation_ex
 
 def _blind_param_retry(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
     """Worst case of run_op retried with corrected params for an op the agent
-    NEVER pulled a schema for — the avoidable flail (vs. _param_flail, which
+    NEVER pulled a schema for -- the avoidable flail (vs. _param_flail, which
     counts retries regardless of whether discovery happened).
 
     Walks the trace in order: a `get_op_schema`/`find_operation*` call for a
@@ -399,7 +399,7 @@ def _blind_param_retry(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
     distinct arg-set for an op that has NOT been discovered yet is a blind
     retry. Returns (worst_blind_argsets, label). 1 blind arg-set is fine (first
     attempt); ≥2 means the agent hammered corrections without ever looking up
-    the schema — the signal that get_op_schema is too costly/undiscoverable, or
+    the schema -- the signal that get_op_schema is too costly/undiscoverable, or
     that the inline `valid_params` on the first bad_params error isn't landing."""
     from collections import defaultdict
     discovered: set[tuple[str, str]] = set()
@@ -410,7 +410,7 @@ def _blind_param_retry(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
         conn = str(args.get("connector", "")).lower()
         op = str(args.get("op", "")).lower()
         if name in _SCHEMA_DISCOVERY_TOOLS and conn:
-            # find_operation may not carry an op (list mode) — mark all-of-connector
+            # find_operation may not carry an op (list mode) -- mark all-of-connector
             discovered.add((conn, op))
             if not op:
                 discovered.add((conn, ""))
@@ -443,7 +443,7 @@ def _score_investigation_quality(
     gates: dict[str, dict[str, Any]] = {}
 
     # Calls the connector's discipline guard refused never executed (no upstream
-    # work, no API cost, no verdict pollution) — measure investigative work over
+    # work, no API cost, no verdict pollution) -- measure investigative work over
     # the EXECUTED subset so a guard-blocked attempt isn't scored as work done.
     trace = [c for c in trace if not c.get("refused")]
 
@@ -472,7 +472,7 @@ def _score_investigation_quality(
     # Distinct from no_param_flail: this only counts retries the agent made
     # WITHOUT calling get_op_schema/find_operation for that op first. ≥2 blind
     # arg-sets = the agent guessed, failed, and guessed again instead of looking
-    # it up — the avoidable flail. Shares the max_param_retries knob.
+    # it up -- the avoidable flail. Shares the max_param_retries knob.
     blind_worst, blind_label = _blind_param_retry(trace)
     blind_ok = blind_worst <= max_retries
     gates["investigation_blind_param_retry"] = {
@@ -538,7 +538,7 @@ def _score_investigation_quality(
 
 def _verify_metrics(trace: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Three metrics about the agent's use of `verify_playbook` from
-    the call trace. Distinct from the `verified` confidence tier —
+    the call trace. Distinct from the `verified` confidence tier --
     these measure agent *behavior*, not playbook quality. The agent
     can technically ship a YAML it never ran through verify; this gate
     catches that."""
@@ -584,7 +584,7 @@ def _score_approval_requests(
     `expected` shape:
       {"tier_3_plus": "exactly_zero" | "at_least_one" | {"min": N, "max": M}}
 
-    Default: "exactly_zero" — most authoring tasks shouldn't fire any
+    Default: "exactly_zero" -- most authoring tasks shouldn't fire any
     tier-3+ tool calls. Tasks that genuinely require remediation set
     `at_least_one` or a range to opt in.
 
@@ -599,7 +599,7 @@ def _score_approval_requests(
     detail: str
     if spec == "exactly_zero":
         ok = tier3 == 0
-        detail = (f"{tier3} tier-3+ call(s) — expected zero"
+        detail = (f"{tier3} tier-3+ call(s) -- expected zero"
                   if not ok else "no tier-3+ calls, as expected")
     elif spec == "at_least_one":
         ok = tier3 >= 1
@@ -624,7 +624,7 @@ def _score_agentic(*, trace: list[dict[str, Any]],
                    expected_approvals: dict[str, Any] | None = None,
                    ) -> dict[str, dict[str, Any]]:
     """tool_budget / no_spiral / adherence + verify-behavior metrics."""
-    # Discipline-guard-refused calls never executed — exclude from the
+    # Discipline-guard-refused calls never executed -- exclude from the
     # work-based gates (see _score_investigation_quality).
     trace = [c for c in trace if not c.get("refused")]
     n = len(trace)
@@ -676,7 +676,7 @@ def score_wiring_resolution(trace_json: str, *, live: bool = False) -> dict[str,
     loop (render against captured outputs + static `_check_jinja_paths`)?
 
     Selection/ordering stays model-driven, but wiring is now deterministic
-    — this dimension guards that the deterministic part actually holds:
+    -- this dimension guards that the deterministic part actually holds:
     every value-matched wire verifies and no undefined/unreachable ref
     survives. Returns a level dict ({passed, skipped, detail, ...}).
     """
@@ -722,7 +722,7 @@ def score_offer_timing(trace: list[dict[str, Any]]) -> dict[str, Any]:
     """Eval dimension (SKILL_BASED_PLAYBOOK_PLAN §6 / TODO Track A4): did the
     agent call `emit_playbook_offer` at the RIGHT time?
 
-    The offer is model-triggered — the tool plumbing is unit-tested, but
+    The offer is model-triggered -- the tool plumbing is unit-tested, but
     *when* the model offers is prompt-driven and the thing that regresses.
     This reads the tool-use trace and grades the timing deterministically:
 
@@ -789,7 +789,7 @@ def score_offer_timing(trace: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "passed": True, "skipped": False, "offers": 1,
         "needs_review": True,
-        "detail": ("offered after read-only ops only — permitted "
+        "detail": ("offered after read-only ops only -- permitted "
                    "(analyst-decides + advisory) but prompt-preferred is silence"),
     }
 
@@ -801,7 +801,7 @@ def score_enhance_delivery(trace: list[dict[str, Any]],
     The enhance bucket exists because this failed silently and repeatedly on a
     live appliance. Asked to add a manual_input step, the agent called
     `verify_enhancement`, got `ready_to_push: True`, then printed the revised
-    playbook into chat — three times, each rendering slightly different from the
+    playbook into chat -- three times, each rendering slightly different from the
     verified one. Nothing was ever written. From the analyst's seat the agent
     "kept trying and couldn't"; from the transcript it looked fine, because
     every tool call returned ok.
@@ -853,7 +853,7 @@ def score_enhance_delivery(trace: list[dict[str, Any]],
                 "passed": False, "skipped": False,
                 "code": "printed_instead_of_applied",
                 "detail": ("ended with a YAML fence and no emit_enhancement_offer "
-                           "— the analyst's playbook is unchanged"),
+                           "-- the analyst's playbook is unchanged"),
             }
         if any_passed:
             return {
@@ -883,11 +883,11 @@ def score_enhance_delivery(trace: list[dict[str, Any]],
         "detail": "verified, then delivered those exact bytes",
     }
     if has_fence:
-        # Not a failure on its own — showing the CHANGED STEP is encouraged —
+        # Not a failure on its own -- showing the CHANGED STEP is encouraged --
         # but a whole playbook in prose is what the old bug looked like, so
         # flag it for a human rather than silently passing it.
         out["needs_review"] = True
-        out["detail"] += " (also printed a YAML fence — confirm it's a snippet)"
+        out["detail"] += " (also printed a YAML fence -- confirm it's a snippet)"
     return out
 
 
@@ -1029,7 +1029,7 @@ def score(
         else:
             out["levels"]["matches_example"] = {
                 "passed": False, "skipped": False,
-                "detail": "compile failed — see draft errors",
+                "detail": "compile failed -- see draft errors",
             }
     else:
         out["levels"]["matches_example"] = {"passed": False, "skipped": True}
@@ -1058,7 +1058,7 @@ def score(
     else:
         out["levels"]["build_fidelity"] = {"passed": False, "skipped": True}
 
-    # `verify_iterations_until_ready` is informational, not a gate —
+    # `verify_iterations_until_ready` is informational, not a gate --
     # exclude from the pass/fail aggregate. Same logic as the old
     # `skipped` flag, but here we mark it `passed=True` if it ran at
     # all so it doesn't drag the fraction.
@@ -1070,7 +1070,7 @@ def score(
     # `matches_example` is byte-equality of compiled IR against a gold
     # reference: useful diagnostic, but free-form LLM generation cannot
     # reliably match cosmetic IR differences (optional fields, default
-    # values, step ordering). Demote to informational — `draft` and
+    # values, step ordering). Demote to informational -- `draft` and
     # `verified` already gate functional correctness.
     mex = out["levels"].get("matches_example", {})
     if not mex.get("skipped"):
@@ -1091,7 +1091,7 @@ def score(
             # Invert: success = NO yaml block emitted.
             had_yaml = bool(adh.get("passed"))
             adh["passed"] = not had_yaml
-            adh["detail"] = ("correctly refused — no YAML emitted"
+            adh["detail"] = ("correctly refused -- no YAML emitted"
                              if not had_yaml
                              else "fabricated YAML for a refuse-mode task")
 

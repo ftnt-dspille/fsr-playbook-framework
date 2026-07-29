@@ -1,4 +1,4 @@
-"""RewriterMixin — automatic rewriting of variable references and reserved keys."""
+"""RewriterMixin -- automatic rewriting of variable references and reserved keys."""
 from __future__ import annotations
 
 import re as _re
@@ -77,7 +77,7 @@ class RewriterMixin:
             esc_j, esc_k = _re.escape(jkey), _re.escape(key)
             vs = r"\bvars(?:\.steps|\[\s*['\"]steps['\"]\s*\])"
             # Use non-capturing groups with character classes for the
-            # quote chars — avoids backref numbering issues when
+            # quote chars -- avoids backref numbering issues when
             # composing step + key fragments. Quote-mismatch (e.g.
             # `vars.steps['SV"]`) is a YAML/Jinja syntax error anyway,
             # so character-class quoting is fine.
@@ -126,7 +126,7 @@ class RewriterMixin:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
                     message=(
-                        f"`vars.steps.{jkey}.{key}` rewritten to `vars.{key}` — "
+                        f"`vars.steps.{jkey}.{key}` rewritten to `vars.{key}` -- "
                         f"set_variable outputs live at top-level vars, not "
                         f"under the step-output namespace. The other form "
                         f"silently evaluates to empty at runtime."
@@ -156,7 +156,7 @@ class RewriterMixin:
         _current_si = [-1]
 
         # vars.input.<p> | vars.input['<p>']  (dot or bracket on the param,
-        # but only `vars.input.` — bracket form on `input` is rare and
+        # but only `vars.input.` -- bracket form on `input` is rare and
         # the substitution would be ambiguous to fix; skip it).
         # Negative lookahead skips already-correct `vars.input.params.<p>`.
         def _patterns(p: str) -> list:
@@ -189,7 +189,7 @@ class RewriterMixin:
                     severity="warning",
                     message=(
                         f"`vars.input.{p}` rewritten to "
-                        f"`vars.input.params.{p}` — declared playbook "
+                        f"`vars.input.params.{p}` -- declared playbook "
                         f"parameters live under `vars.input.params.*`; the "
                         f"bare form evaluates to empty at runtime."
                     ),
@@ -216,7 +216,7 @@ class RewriterMixin:
 
         FSR only materializes `vars.input.params.<name>` for parameters
         declared on the trigger step. A reference to an undeclared name
-        silently evaluates to empty at runtime — the classic "set_variable
+        silently evaluates to empty at runtime -- the classic "set_variable
         assumed vars.input.params.X but no parameter X was defined" bug.
         Run AFTER `_auto_rewrite_input_param_refs` so bare `vars.input.X`
         forms have already been promoted to their `.params.` shape.
@@ -242,7 +242,7 @@ class RewriterMixin:
                         f"`vars.input.params.{name}` references playbook "
                         f"parameter {name!r}, which is not declared. Add "
                         f"{name!r} to the playbook's `parameters:` list so the "
-                        f"trigger materializes it as an input variable — "
+                        f"trigger materializes it as an input variable -- "
                         f"otherwise the reference evaluates to empty at runtime."
                     ),
                     path=f"playbooks[{pi}].steps[{si}].arguments",
@@ -331,7 +331,7 @@ class RewriterMixin:
                 for old in list(args.keys()):
                     if old in _RESERVED_VARS_KEYS and old != "step_variables":
                         # `message` as a dict is the record-message sugar
-                        # (not a user var) — leave it for the message
+                        # (not a user var) -- leave it for the message
                         # normalizer downstream.
                         if old == "message" and isinstance(args[old], dict):
                             continue
@@ -353,7 +353,7 @@ class RewriterMixin:
         if not renames:
             return renames
         # Walk every string in every step's args and rewrite top-level
-        # `vars.<old>` references. NOT `vars.steps.<X>.<old>` — those
+        # `vars.<old>` references. NOT `vars.steps.<X>.<old>` -- those
         # are step-output reads in a different namespace.
         for step in pb.steps:
             self._rewrite_vars_refs(step.arguments, renames, _re)
@@ -391,7 +391,7 @@ class RewriterMixin:
           - dotted:    `vars.message`
           - single:    `vars['message']`
           - double:    `vars["message"]`
-        Skips `vars.steps.<X>.<old>` — that's the step-output namespace,
+        Skips `vars.steps.<X>.<old>` -- that's the step-output namespace,
         handled by `_auto_rewrite_set_var_step_refs`.
         """
         for old, new in renames.items():
@@ -406,7 +406,7 @@ class RewriterMixin:
                 r"\bvars\[\s*(['\"])" + esc + r"\1\s*\]",
                 f"vars.{new}", text,
             )
-            # Form 3: vars.get('<old>') / vars.get("<old>")  — keep the
+            # Form 3: vars.get('<old>') / vars.get("<old>")  -- keep the
             # .get() call (soft-fail semantics the author chose), just
             # swap the key string.
             text = _re.sub(

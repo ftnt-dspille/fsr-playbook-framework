@@ -22,7 +22,7 @@ playbooks:
 
 
 def test_set_variable_kwargs_permissive(db_path):
-    # set_multiple has **kwargs — arbitrary var names are fine.
+    # set_multiple has **kwargs -- arbitrary var names are fine.
     text = """
 collection: T
 playbooks:
@@ -42,7 +42,7 @@ playbooks:
 
 
 def test_framework_params_excluded(db_path):
-    # `cond(step, conditions, ...)` — `step` is framework-injected and
+    # `cond(step, conditions, ...)` -- `step` is framework-injected and
     # should NOT be required of the user.
     text = """
 collection: T
@@ -64,7 +64,7 @@ def test_no_op_with_no_params_emits_no_warning(db_path):
     """Regression: `stop`/`end` compile to cyops_utilities.no_op which has
     zero param rows in the reference store. The validator must NOT emit
     the "params passed through unvalidated" warning when the user
-    provided no params — only when they did and we can't verify them.
+    provided no params -- only when they did and we can't verify them.
     """
     text = """
 collection: T
@@ -88,7 +88,7 @@ playbooks:
 
 def test_unknown_op_with_provided_params_still_warns(db_path):
     """Counterpart: when the user DOES supply params but we have no
-    schema for them, the warning still fires — that's its real purpose.
+    schema for them, the warning still fires -- that's its real purpose.
     Uses a deliberately unknown connector/op pair so the warning path
     can't be mistaken for a strict-validation pass.
     """
@@ -301,7 +301,7 @@ def test_decision_with_default_entry_is_clean(db_path):
 
 
 def test_decision_no_default_warns(db_path):
-    """No `default: true` entry — a false-condition run has no target."""
+    """No `default: true` entry -- a false-condition run has no target."""
     text = _decision_yaml(
         "          - {display: 'yes', when: '{{ x }}', next: a}\n",
     )
@@ -311,7 +311,7 @@ def test_decision_no_default_warns(db_path):
                for e in r.errors)
 
 
-# ---- I28 — set_variable typo trap (2026-05-06) -----------------------
+# ---- I28 -- set_variable typo trap (2026-05-06) -----------------------
 
 def test_set_variable_legacy_arguments_rejected(db_path):
     """Set-variable steps must use the top-level `vars:` mapping.
@@ -355,7 +355,7 @@ playbooks:
 
 
 def test_step_id_key_rejected(db_path):
-    """`id:` on a step is a hard parser error — only `name:` is allowed."""
+    """`id:` on a step is a hard parser error -- only `name:` is allowed."""
     text = """
 collection: T
 playbooks:
@@ -369,7 +369,7 @@ playbooks:
     assert any("step.id is not allowed" in e.message for e in r.errors)
 
 
-# ---- I31 — validate_yaml next_fix summary (2026-05-06) ---------------
+# ---- I31 -- validate_yaml next_fix summary (2026-05-06) ---------------
 
 def test_mcp_validate_yaml_returns_next_fix():
     """The agent burns context iterating against the full error list;
@@ -378,7 +378,7 @@ def test_mcp_validate_yaml_returns_next_fix():
     sys.path.insert(0, "tooling")
     from fsr_playbooks.mcp_server import validate_yaml as mcp_validate
     # A bare `collection:` with no playbooks is a missing_field on the
-    # `playbooks` path — canonical first error to test the next_fix
+    # `playbooks` path -- canonical first error to test the next_fix
     # prioritization. (Omitting the collection key entirely no longer
     # errors; it defaults to per-playbook mode with the studio target.)
     yaml = "collection: A\n"

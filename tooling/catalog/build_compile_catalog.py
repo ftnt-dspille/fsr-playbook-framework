@@ -2,22 +2,22 @@
 
 The full ``data/fsr_reference.db`` (~65 MB) mixes three kinds of data:
 
-* **Globally-stable authoring catalog** — step types, handlers, jinja, recipes,
+* **Globally-stable authoring catalog** -- step types, handlers, jinja, recipes,
   api endpoints. Identical on every appliance for a given FSR version; safe to
   ship.
-* **Per-install probed data** — connectors, operations, picklists, modules.
+* **Per-install probed data** -- connectors, operations, picklists, modules.
   Carry instance-specific UUIDs; warmed from the *target* SOAR (``warmup``),
   never shipped *verbatim* (shipping Instance A's UUIDs would mis-resolve on
   Instance B). A **scrubbed subset** of connector *definitions* is shipped
-  (see ``CONNECTOR_BASELINE``) — only the public operation/param schema the
+  (see ``CONNECTOR_BASELINE``) -- only the public operation/param schema the
   compiler validates against; the per-instance UUID/cred/host carriers
   (``info_json``, ``source_code``, ``rpm_fingerprint``, ``connector_configs``)
   are dropped or NULLed.
-* **Heavy corpus / telemetry** — playbook_steps, verifications, *_probes. Mining
+* **Heavy corpus / telemetry** -- playbook_steps, verifications, *_probes. Mining
   and audit artifacts; irrelevant at compile time.
 
 This copies the **full schema** (so every table the resolver might touch exists,
-even if empty — a missing connector then yields a clean ``CompileError`` rather
+even if empty -- a missing connector then yields a clean ``CompileError`` rather
 than "no such table") but populates ONLY the stable tables (plus the scrubbed
 ``CONNECTOR_BASELINE`` connector definitions), then VACUUMs.
 
@@ -42,7 +42,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DB = _REPO_ROOT / "data" / "fsr_reference.db"
 DST_DB = _REPO_ROOT / "fsr_playbooks" / "_data" / "fsr_reference.db"
 
-# Globally-stable tables — populated in the slim DB. Everything else (per-install
+# Globally-stable tables -- populated in the slim DB. Everything else (per-install
 # probed tables, corpus, telemetry, FTS shadow tables) ships with schema only,
 # zero rows.
 STABLE_TABLES = (
@@ -56,7 +56,7 @@ STABLE_TABLES = (
     "recipes",
     "connector_op_defs",
     # Module *type names* (alerts, incidents, indicators, …) are globally
-    # stable for an FSR version and carry no per-install UUIDs — shipping
+    # stable for an FSR version and carry no per-install UUIDs -- shipping
     # them lets the resolver validate/canonicalize module names offline
     # ('Alerts' → 'alerts', flag typos). A target's custom modules are still
     # picked up by `warmup`, which overwrites this baseline.
@@ -65,13 +65,13 @@ STABLE_TABLES = (
 
 # Deliberately EXCLUDED though globally stable: the authoring-hint corpus
 # (jinja_expressions ~7.8k, jinja_filter_usage ~1.7k) and the REST reference
-# catalog (api_endpoints* ~1.2k). The compiler reads none of them — only the
+# catalog (api_endpoints* ~1.2k). The compiler reads none of them -- only the
 # tools_jinja MCP helper does, and it degrades to "no suggestions" on the empty
 # (schema-present) tables. Keeping them out holds the slim DB near ~1 MB. To
 # ship them, move the name here and rebuild.
 
 
-# Connector *definitions* shipped as a scrubbed baseline — the public
+# Connector *definitions* shipped as a scrubbed baseline -- the public
 # operation/param schema the compiler validates connector steps against, so the
 # in-repo example/library playbooks compile offline without a live ``warmup``.
 # This is the same carve-out precedent as ``modules``: only the globally-stable,
@@ -80,14 +80,14 @@ STABLE_TABLES = (
 #
 # Which connectors: the distinct set the example + library playbooks reference
 # (pyfsr examples/playbooks/library/*). A connector not in this list still
-# needs ``warmup`` against a target SOAR — the resolver reports a clean
+# needs ``warmup`` against a target SOAR -- the resolver reports a clean
 # ``unknown_connector`` CompileError, never a crash.
 #
 # What ships per connector: the ``connectors`` row + its ``operations`` +
 # ``operation_params`` rows. The compiler reads only those three tables for
 # validation. The instance-specific / sensitive columns on ``connectors`` are
 # NULLed (see ``_scrub_connector_row``); ``connector_configs`` (per-instance
-# creds) stays empty — warmed, never shipped.
+# creds) stays empty -- warmed, never shipped.
 CONNECTOR_BASELINE: tuple[str, ...] = (
     "abuseipdb",
     "activedirectory",
@@ -106,7 +106,7 @@ CONNECTOR_BASELINE: tuple[str, ...] = (
 # Columns on ``connectors`` that carry instance-specific or sensitive data and
 # are NULLed before shipping. ``info_json`` embeds the live ``configuration``
 # array (per-instance config_id UUIDs) and sometimes a probe-time host URL
-# (e.g. an appliance IP) — the compiler never reads it (only the MCP discovery
+# (e.g. an appliance IP) -- the compiler never reads it (only the MCP discovery
 # tool does, as a fast-path cache), so NULLing is compile-safe and removes the
 # only sensitive carrier. ``source_code``/``rpm_fingerprint`` are the
 # connector's shipped code bundle + build fingerprint (large, not needed for
@@ -142,14 +142,14 @@ def _copy_connector_baseline(dst: sqlite3.Connection) -> dict[str, int]:
 
     Three tables: ``connectors`` (1 row each, sensitive cols NULLed) +
     ``operations`` + ``operation_params`` (all ops/params for the baseline
-    connectors, verbatim — they carry only public schema).
+    connectors, verbatim -- they carry only public schema).
     """
     if not CONNECTOR_BASELINE:
         return {"connectors": 0, "operations": 0, "operation_params": 0}
     placeholders = ",".join("?" * len(CONNECTOR_BASELINE))
     counts: dict[str, int] = {}
 
-    # connectors — scrub the sensitive/instance columns and re-tag the source.
+    # connectors -- scrub the sensitive/instance columns and re-tag the source.
     cols = _table_columns(dst, "connectors")
     col_list = ",".join(f'"{c}"' for c in cols)
     sel = ", ".join(
@@ -165,7 +165,7 @@ def _copy_connector_baseline(dst: sqlite3.Connection) -> dict[str, int]:
     )
     counts["connectors"] = dst.execute('SELECT COUNT(*) FROM main."connectors"').fetchone()[0]
 
-    # operations + operation_params — public schema only; copy verbatim.
+    # operations + operation_params -- public schema only; copy verbatim.
     for table, key in (("operations", "connector_name"), ("operation_params", "connector_name")):
         cols = _table_columns(dst, table)
         col_list = ",".join(f'"{c}"' for c in cols)
@@ -198,7 +198,7 @@ def build() -> int:
         copied = {}
         for t in STABLE_TABLES:
             if t not in table_names:
-                print(f"  warn: stable table {t!r} absent from source — skipped", file=sys.stderr)
+                print(f"  warn: stable table {t!r} absent from source -- skipped", file=sys.stderr)
                 continue
             dst.execute(f'INSERT INTO main."{t}" SELECT * FROM src."{t}"')
             copied[t] = dst.execute(f'SELECT COUNT(*) FROM main."{t}"').fetchone()[0]
@@ -266,7 +266,7 @@ def check() -> int:
                 problems.append(f"connector {name!r}: rpm_fingerprint not NULLed")
             if source != _CONNECTOR_SOURCE_TAG:
                 problems.append(f"connector {name!r}: source={source!r} (expected {_CONNECTOR_SOURCE_TAG!r})")
-        # The per-instance creds table stays empty — warmed, never shipped.
+        # The per-instance creds table stays empty -- warmed, never shipped.
         n = conn.execute('SELECT COUNT(*) FROM "connector_configs"').fetchone()[0]
         if n != 0:
             problems.append(f"connector_configs has {n} rows (should be empty)")

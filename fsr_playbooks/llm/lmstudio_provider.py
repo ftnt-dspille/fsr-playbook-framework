@@ -1,8 +1,8 @@
-"""LM Studio (OpenAI-compatible) provider — streaming chat with tool use.
+"""LM Studio (OpenAI-compatible) provider -- streaming chat with tool use.
 
 Same agent loop shape as AnthropicProvider, just translated to the
 OpenAI Chat Completions wire format. Works against any OpenAI-compatible
-endpoint (LM Studio, vLLM, Ollama-OpenAI, OpenAI proper) — the only
+endpoint (LM Studio, vLLM, Ollama-OpenAI, OpenAI proper) -- the only
 LM-Studio-specific bit is the default base_url and a permissive default
 api_key (LM Studio's local server ignores it).
 
@@ -12,7 +12,7 @@ fragmented JSON-string chunks. We accumulate per-index and json.loads
 once the chunk stream signals `finish_reason='tool_calls'`.
 
 Usage tokens only show up in the final empty chunk when
-`stream_options.include_usage=True`. Cache fields don't exist locally —
+`stream_options.include_usage=True`. Cache fields don't exist locally --
 emit zeros, our UsageEvent schema tolerates that.
 """
 from __future__ import annotations
@@ -99,7 +99,7 @@ class LMStudioProvider:
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key or DEFAULT_API_KEY
         self.model = model or DEFAULT_MODEL
-        # Shared ceiling — see `_loop_helpers.DEFAULT_MAX_OUTPUT_TOKENS`. A
+        # Shared ceiling -- see `_loop_helpers.DEFAULT_MAX_OUTPUT_TOKENS`. A
         # local model with a smaller context will want this lowered.
         self.max_output_tokens = max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS
         self._client = client or AsyncOpenAI(
@@ -116,7 +116,7 @@ class LMStudioProvider:
         case_state: Any = None,  # CaseState | None, kept as Any to avoid import
     ) -> AsyncIterator[Event]:
         if not self.model:
-            yield ErrorEvent(message="No LM Studio model selected — pick one in Settings.")
+            yield ErrorEvent(message="No LM Studio model selected -- pick one in Settings.")
             return
 
         history = _to_openai_messages(system, messages)
@@ -305,7 +305,7 @@ def _friendly_error(e: Exception, base_url: str) -> str:
     if isinstance(e, AuthenticationError):
         return "API key rejected by the LLM endpoint."
     if isinstance(e, APIConnectionError):
-        return (f"Could not reach the LLM at {base_url} — is LM Studio "
+        return (f"Could not reach the LLM at {base_url} -- is LM Studio "
                 f"running with the local server enabled?")
     if isinstance(e, APITimeoutError):
         return "The LLM endpoint timed out. Try again, or shorten the prompt."

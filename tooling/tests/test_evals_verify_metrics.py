@@ -46,7 +46,7 @@ def test_never_ready_fails_final_gate():
 
 
 def test_last_call_wins_even_after_a_ready_one():
-    # Agent reached ready then mutated YAML and a later verify failed —
+    # Agent reached ready then mutated YAML and a later verify failed --
     # the *last* verify determines what got shown to the user.
     m = _verify_metrics(_trace(True, False))
     assert m["final_verify_ready_to_push"]["passed"] is False

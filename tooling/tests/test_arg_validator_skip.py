@@ -5,7 +5,7 @@ that *resolve* to the connector handler (`stop`, `end`) and ignored
 other resolver-validated handlers (`update_data`, `delay`, `set_multiple`,
 …). That mis-gating produced a flood of false-positive `unknown_param`
 warnings on resolver-injected wire-format keys (`name`, `operationTitle`,
-`operation`, `collectionType`, `type`, `rule`, etc.) — which is what
+`operation`, `collectionType`, `type`, `rule`, etc.) -- which is what
 the user originally complained about in the screenshot.
 
 These tests pin the new behavior so the regression doesn't return.

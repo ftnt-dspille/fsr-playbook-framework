@@ -2,7 +2,7 @@
  * Idempotent register of the YAML / Jinja Monaco providers
  * (completion + step-args hover + jinja-path hover + jinja language).
  *
- * Called by every editor that wants the Jinja autocomplete experience —
+ * Called by every editor that wants the Jinja autocomplete experience --
  * MonacoYaml.svelte (the big editor), MonacoCode.svelte when its
  * language prop is `yaml` (inline value editors like set_variable
  * rows). Dedupes on the monaco namespace so we don't get duplicate
@@ -56,7 +56,7 @@ export function ensureYamlSupport(monaco: any): void {
   setTimeout(apply, 250);
 
   // Disable Monaco's json language worker. The worker provides
-  // validation / formatting / schema-driven IntelliSense — none of
+  // validation / formatting / schema-driven IntelliSense -- none of
   // which this app uses. The worker fails to load in our Vite dev
   // setup (`_FileAccessImpl.toUri` blows up because workers aren't
   // configured), so the only effect of leaving it on is a console

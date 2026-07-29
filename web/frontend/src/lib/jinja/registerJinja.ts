@@ -9,7 +9,7 @@
  *   - snippet completion
  *   - keyword + `vars.*` / `loop.*` variable completion
  *
- * AND (on language id "yaml") — so the same filter / snippet / keyword
+ * AND (on language id "yaml") -- so the same filter / snippet / keyword
  * completions and signature help fire inside `{{ … }}` / `{% … %}`
  * regions of YAML files. Member-access completions for typed paths
  * (`vars.steps.X.…`) are handled separately by jinjaPathCompletions.
@@ -32,7 +32,7 @@ import { registerJinjaQuickFixes } from './jinjaQuickFixes';
 const registered = new WeakSet<object>();
 const registrationsByMonaco = new WeakMap<object, Array<{ dispose: () => void }>>();
 
-/** Shared parsed-input context for `.` / `[` member completions —
+/** Shared parsed-input context for `.` / `[` member completions --
  *  ported from the widget's `currentInputContext`. The Jinja test
  *  modal's Input pane pushes its parsed JSON in here; the member
  *  provider reads it when the user types `vars.input.records[0].`. */
@@ -85,7 +85,7 @@ export function registerJinja(monaco: any): void {
   });
 
   // Editors in this app are created with `theme: 'vs-dark'` (built-in)
-  // — so define overrides for `vs-dark` and `vs` that inherit from the
+  // -- so define overrides for `vs-dark` and `vs` that inherit from the
   // built-in palette and layer the jinja token rules on top. This
   // colors `{{ … }}` content inside both the standalone jinja language
   // AND the YAML buffer (which emits the same jinja token names via
@@ -104,7 +104,7 @@ export function registerJinja(monaco: any): void {
   });
   // `defineTheme` updates the theme registry but Monaco doesn't
   // automatically re-tokenize editors that were created with that
-  // theme name — colors are baked at create time. Re-set the active
+  // theme name -- colors are baked at create time. Re-set the active
   // theme to force a redraw with the new rules. We try to keep
   // whatever theme the host is currently using; falling back to
   // 'vs-dark' covers the no-existing-editors case.
@@ -123,21 +123,21 @@ export function registerJinja(monaco: any): void {
   track(registerSignatureHelpProvider(monaco, 'jinja', filterSignatures));
 
   // yaml-embedded providers (filter completion + hover + signature help
-  // inside `{{ … }}` / `{% … %}` only — guards are inside the providers).
+  // inside `{{ … }}` / `{% … %}` only -- guards are inside the providers).
   track(registerFilterCompletionProvider(monaco, 'yaml', filterSignatures));
   track(registerFilterHoverProvider(monaco, 'yaml', filterSignatures));
   track(registerSignatureHelpProvider(monaco, 'yaml', filterSignatures));
   track(registerVariableCompletionProvider(monaco, 'yaml'));
   track(registerJinjaSnippetProviderInYaml(monaco, snippets));
 
-  // Member-access (`.` / `[`) completions backed by setInputContext —
+  // Member-access (`.` / `[`) completions backed by setInputContext --
   // walks the parsed input JSON to show available keys/indices.
   // Registered on BOTH jinja and yaml so the modal's template editor
   // (jinja) AND the main YAML editor get input-aware suggestions.
   track(registerMemberCompletionProvider(monaco, 'jinja'));
   track(registerMemberCompletionProvider(monaco, 'yaml'));
 
-  // Quick fixes (Monaco light-bulb) for our jinja markers — appends
+  // Quick fixes (Monaco light-bulb) for our jinja markers -- appends
   // closers, suggests nearest filter name, deletes orphan end tags.
   track(registerJinjaQuickFixes(monaco));
 }
@@ -342,7 +342,7 @@ function registerVariableCompletionProvider(monaco: any, languageId: string) {
         .substring(0, position.column - 1);
       const ctx = insideJinja(model, position);
       if (!ctx.tag && !ctx.expr) return { suggestions: [] };
-      // Suppress mid-filter — the filter provider owns that completion path.
+      // Suppress mid-filter -- the filter provider owns that completion path.
       if (/\|\s*[\w]*$/.test(lineUpTo)) return { suggestions: [] };
 
       const word = model.getWordUntilPosition(position);
@@ -382,7 +382,7 @@ function registerFilterHoverProvider(
       const word = model.getWordAtPosition(position);
       if (!word) return null;
       // In YAML, only show the filter hover when inside a `{{ … }}`
-      // or `{% … %}` region — otherwise a plain word like "upper"
+      // or `{% … %}` region -- otherwise a plain word like "upper"
       // appearing in description text shouldn't pop the filter card.
       if (languageId === 'yaml') {
         const ctx = insideJinja(model, position);
@@ -584,7 +584,7 @@ function buildMemberSuggestions(
             label: "'" + key + "'",
             kind: monaco.languages.CompletionItemKind.Field,
             insertText: "'" + escapeSingleQuotes(key) + "'",
-            detail: 'first-element key — ' + describeValue((target[0] as any)[key]),
+            detail: 'first-element key -- ' + describeValue((target[0] as any)[key]),
             sortText: 'zz_' + key,
             range
           });

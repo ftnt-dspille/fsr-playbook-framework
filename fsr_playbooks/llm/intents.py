@@ -2,11 +2,11 @@
 
 The agentic surface runs in one of two intents:
 
-  - ``triage``  — incident-response: investigate the record in front of the
+  - ``triage``  -- incident-response: investigate the record in front of the
     analyst, pivot across modules, enrich indicators read-only, and stage any
     mutating/containment action via ``emit_action_card`` for approval. The
     YAML-authoring + playbook-mutation tools are dropped.
-  - ``build``   — playbook authoring: the full tool registry.
+  - ``build``   -- playbook authoring: the full tool registry.
 
 Both the FortiSOAR connector (``operations.py``) and the local hunt/demo
 runner resolve their system prompt + tool list through here, so the prompt
@@ -35,15 +35,15 @@ BUILD_ONLY_TOOLS = frozenset({
     "step_through_playbook", "dry_run_playbook",
     "diagnose_yaml_against_pb_execution",
     "push_playbook", "run_playbook",
-    # Value-level fix card for the OPEN playbook — meaningless in triage (there
+    # Value-level fix card for the OPEN playbook -- meaningless in triage (there
     # is no playbook open to patch), so keep it out of the triage slice.
     "emit_patch_proposal",
-    # Enhance mode's write path — same reasoning: triage has no open playbook
+    # Enhance mode's write path -- same reasoning: triage has no open playbook
     # to update.
     "emit_enhancement_offer",
 })
 
-# Tools that only make sense when an OPEN playbook exists to edit — the enhance
+# Tools that only make sense when an OPEN playbook exists to edit -- the enhance
 # verify+write pair. A from-scratch CREATE (build intent, no playbook mounted)
 # has nothing to enhance, yet the build slice = full registry minus TRIAGE_ONLY,
 # so it still advertises these. A drifting model can then terminate a create via
@@ -51,14 +51,14 @@ BUILD_ONLY_TOOLS = frozenset({
 # a NEW playbook via emit_playbook_offer. The connector's _intent_drop_set gates
 # this set out of a no-open-playbook build; EnhanceDeliveryGuard is keyed on the
 # SAME names (asserted in a test) so the guard and the advertised slice can never
-# drift. This is a SUBSET of BUILD_ONLY_TOOLS — dropping it never touches triage.
+# drift. This is a SUBSET of BUILD_ONLY_TOOLS -- dropping it never touches triage.
 ENHANCE_ONLY_TOOLS = frozenset({
     "verify_enhancement", "emit_enhancement_offer",
 })
 
 # Triage-only tools dropped from the build slice (ROADMAP §4, three-pillar
 # plan Track C5): the live alert/incident investigation + containment-staging
-# surface. Build mode authors playbooks — it discovers ops with
+# surface. Build mode authors playbooks -- it discovers ops with
 # find_connector/find_operation/get_op_schema and offers them via
 # emit_playbook_offer; it must NOT stage live containment action-cards
 # (emit_action_card) or run connector ops directly (run_op). find_containment_actions /
@@ -68,7 +68,7 @@ ENHANCE_ONLY_TOOLS = frozenset({
 # fsr_soc_triage.registry.register_triage_tools() re-injects the alert/incident
 # hunt tools (get_record, search_module_records, siem_*, faz_*, fmg_*) into the
 # global REGISTRY at import, and extends THIS set with those same names so the
-# build slice excludes them too — mirroring how it already mutates SAFE_TOOLS /
+# build slice excludes them too -- mirroring how it already mutates SAFE_TOOLS /
 # TOOL_TIERS / REGISTRY (Option-A posture). tools_for_intent reads this global
 # at call time, so the connector's additions are visible without a code path
 # fork. Framework-standalone (no connector) keeps just the two base names.
@@ -94,7 +94,7 @@ TRIAGE_ONLY_TOOLS: set[str] = {
 # find_connector, why_did_playbook_fail, …) and end the turn WITHOUT ever
 # calling run_playbook. With run_playbook as the ONLY tool on the table, the
 # model has one way to act, and it takes it. If the name is approximate,
-# run_playbook resolves (or reports not-found) — no discovery tool needed.
+# run_playbook resolves (or reports not-found) -- no discovery tool needed.
 RUN_MODE_KEEP_TOOLS = frozenset({"run_playbook"})
 
 RUN = "run"
@@ -102,7 +102,7 @@ AUTHOR = "author"
 OTHER = "other"
 
 # Classifier system prompt. It classifies MEANING, not surface words, so it is
-# language-agnostic — no keyword/regex list to enumerate or maintain. We parse
+# language-agnostic -- no keyword/regex list to enumerate or maintain. We parse
 # only our OWN one-word control output (run|author|other), never the analyst's
 # free text, so this introduces no language lock-in.
 _RUN_AUTHOR_SYSTEM = (
@@ -126,20 +126,20 @@ def classify_run_or_author(message: Any, complete: "Callable[[str, str], str]") 
     ``complete(system, user) -> str`` is supplied by the caller (the connector
     passes its configured provider); this keeps the framework provider-agnostic
     and the function unit-testable with a fake. Fails OPEN to ``other`` (normal
-    build behavior) on any empty input or provider error — a classifier hiccup
+    build behavior) on any empty input or provider error -- a classifier hiccup
     must never block authoring or run.
     """
     if not isinstance(message, str) or not message.strip():
         return OTHER
     try:
         raw = complete(_RUN_AUTHOR_SYSTEM, message)
-    except Exception:  # noqa: BLE001 — fail open, never break the turn
+    except Exception:  # noqa: BLE001 -- fail open, never break the turn
         return OTHER
     tok = (raw or "").strip().lower()
     for w in (RUN, AUTHOR, OTHER):
         if tok.startswith(w):
             return w
-    # Model padded the answer ("intent: run") — look for the token anywhere,
+    # Model padded the answer ("intent: run") -- look for the token anywhere,
     # preferring the more specific labels over the catch-all.
     if RUN in tok:
         return RUN
@@ -162,7 +162,7 @@ _FALLBACK_BUILD_PROMPT = (
     "and refine YAML playbooks using the tools available. Be concise. Quote "
     "tool errors verbatim and explain the fix. The conversation may open with "
     "a prior triage transcript plus a directive to design a re-runnable "
-    "playbook around the operations used during triage — reproduce those "
+    "playbook around the operations used during triage -- reproduce those "
     "operations as parameterized steps."
 )
 _FALLBACK_TRIAGE_PROMPT = (
@@ -171,7 +171,7 @@ _FALLBACK_TRIAGE_PROMPT = (
     "locate capabilities. Call run_op directly only for read-only "
     "intelligence; for ANY mutating/containment action (block, isolate, "
     "quarantine, disable, add-to-group, etc.) build the call and emit it via "
-    "emit_action_card for analyst approval — never run it silently. Do not "
+    "emit_action_card for analyst approval -- never run it silently. Do not "
     "author YAML here. Be concise; quote tool errors verbatim."
 )
 
@@ -187,7 +187,7 @@ _PROMPT_CACHE: dict[str, str] = {}
 # full investigation. A real directive ("build the attack timeline") is the
 # only class that should auto-investigate.
 
-# Greetings / acks / smoke-test pings — no investigative direction.
+# Greetings / acks / smoke-test pings -- no investigative direction.
 _TRIVIAL_TOKENS = frozenset({
     "hi", "hello", "hey", "yo", "sup", "hiya", "howdy",
     "test", "testing", "ping", "pong", "ok", "okay", "k",
@@ -210,14 +210,14 @@ DIRECTIVE = "directive"
 def classify_message(text: Any) -> str:
     """Classify a user message into ``trivial`` / ``continue`` / ``directive``.
 
-    - ``trivial``   — empty, a greeting, an ack, or a smoke-test ping. The
+    - ``trivial``   -- empty, a greeting, an ack, or a smoke-test ping. The
       caller should orient on the case and offer choices, NOT auto-investigate.
-    - ``continue``  — "what's next" / "keep going". Summarize established state
+    - ``continue``  -- "what's next" / "keep going". Summarize established state
       and propose the next logical step (ties into the no-repeat fix).
-    - ``directive`` — a real investigative instruction. Auto-investigate.
+    - ``directive`` -- a real investigative instruction. Auto-investigate.
 
     Heuristic + cheap on purpose: this gates an expensive tool loop, so a false
-    ``directive`` (auto-investigate) is the safe failure — we only suppress on
+    ``directive`` (auto-investigate) is the safe failure -- we only suppress on
     high-confidence trivial/continue matches.
     """
     if not isinstance(text, str):
@@ -243,7 +243,7 @@ def classify_message(text: Any) -> str:
 def gate_directive(label: str, scenario_title: str | None = None) -> str:
     """The system-prompt addendum for a low-signal message.
 
-    Empty string for ``directive`` (no gate — let the agent investigate).
+    Empty string for ``directive`` (no gate -- let the agent investigate).
     """
     case = f" ({scenario_title})" if scenario_title else ""
     if label == TRIVIAL:
@@ -251,8 +251,8 @@ def gate_directive(label: str, scenario_title: str | None = None) -> str:
             "\n\n## Low-signal input\n"
             f"The analyst's message carries no investigative direction. Do NOT "
             f"launch an autonomous investigation or call enrichment tools. "
-            f"Briefly orient them on the case in front of you{case} — what it "
-            f"is and the few most useful next steps they could ask for — then "
+            f"Briefly orient them on the case in front of you{case} -- what it "
+            f"is and the few most useful next steps they could ask for -- then "
             f"ask which they'd like, or invite a specific question. One short "
             f"paragraph."
         )
@@ -304,9 +304,9 @@ def load_intent_prompt(intent: str) -> str:
 def tools_for_intent(intent: str) -> list[dict[str, Any]]:
     """The tool slice advertised to the model for this intent.
 
-    - ``triage`` — the full registry minus the build-only (YAML-authoring +
+    - ``triage`` -- the full registry minus the build-only (YAML-authoring +
       playbook-mutation) tools.
-    - ``build``  — the full registry minus the triage-only (containment-staging
+    - ``build``  -- the full registry minus the triage-only (containment-staging
       ``emit_action_card``, direct ``run_op``, alert/incident investigation)
       tools, so authoring mode never stages containment action-cards.
     """

@@ -1,4 +1,4 @@
-"""Phase 5 — build_playbook_from_trace entry point (PLAN §3–5)."""
+"""Phase 5 -- build_playbook_from_trace entry point (PLAN §3-5)."""
 from __future__ import annotations
 
 import yaml
@@ -59,7 +59,7 @@ def test_tool_is_build_only_not_in_triage_slice():
 def test_tool_is_registered_and_advertised_for_build():
     """The trace compiler must be in the dispatch registry, or it's never
     advertised to the model and `_guarded_dispatch` rejects it as
-    intent-disallowed even under build — the agent then silently hand-authors
+    intent-disallowed even under build -- the agent then silently hand-authors
     (losing trace grounding). Regression for the SAFE_TOOLS omission."""
     from fsr_playbooks.llm.tools import REGISTRY, anthropic_tools, dispatch
     assert "build_playbook_from_trace" in REGISTRY
@@ -90,7 +90,7 @@ def test_recorded_config_is_emitted_on_connector_step():
              if s["type"] == "connector"}
     assert steps["Block Ip New"]["config"] == "cfg-uuid-123"
     # The config-less step must not borrow the other step's id; the resolver
-    # supplies the "" default at compile (asserted via the source YAML here —
+    # supplies the "" default at compile (asserted via the source YAML here --
     # omitted means defaulted downstream).
     assert steps["Query Ip"].get("config") in (None, "")
 
@@ -99,7 +99,7 @@ def test_recorded_agent_is_emitted_on_connector_step():
     """An agent-routed op (agent-bound connector like fortigate) must surface
     its FortiSOAR Agent id as the connector step's `arguments.agent` alongside
     `arguments.config`. A playbook connector step for an agent-routed connector
-    needs the agent binding too — config alone isn't enough for the workflow
+    needs the agent binding too -- config alone isn't enough for the workflow
     engine to reach the connector. A non-agent op carries no `agent` field."""
     t = SkillTrace()
     t.record_run_op("fortigate-firewall", "get_addresses", {"name": ""},
@@ -127,7 +127,7 @@ def _conn_steps(out):
 def test_record_ioc_parameterized_to_records0_via_set_inputs():
     """A one-off IOC that matches a triaged-record field is parameterized to
     vars.input.records[0].<field> on a Set Inputs step (module-bound trigger),
-    instead of baking the literal — so the playbook re-runs per record."""
+    instead of baking the literal -- so the playbook re-runs per record."""
     t = SkillTrace(module="incidents",
                    record_fields={"sourceIp": "102.220.160.21",
                                   "name": "C2 beacon"})
@@ -153,7 +153,7 @@ def test_record_ioc_parameterized_to_records0_via_set_inputs():
 
 def test_no_module_leaves_ioc_literal_no_set_inputs():
     """Without a module the trigger is a designer-only Referenced start where
-    vars.input.records[0] does not resolve — so the IOC stays literal and no
+    vars.input.records[0] does not resolve -- so the IOC stays literal and no
     Set Inputs step is injected (records[0] would be a dangling reference)."""
     t = SkillTrace(record_fields={"sourceIp": "102.220.160.21"})  # no module
     t.record_run_op("virustotal", "query_ip", {"ip": "102.220.160.21"},

@@ -1,4 +1,4 @@
-"""probe_jinja_corpus — mine ALL Jinja usage from the live workflow corpus.
+"""probe_jinja_corpus -- mine ALL Jinja usage from the live workflow corpus.
 
 Beyond filter usages, this captures:
   - `{{ expr | filter | … }}` expression blocks
@@ -9,14 +9,14 @@ Beyond filter usages, this captures:
 
 For each block we record:
   - kind          (expr | set | for | if | elif | else | macro | …)
-  - head          (the leading expression — assignment target, loop iterable, condition)
+  - head          (the leading expression -- assignment target, loop iterable, condition)
   - filters_csv   (filter names used in any pipeline within the block)
   - vars_csv      (normalized vars.* paths referenced)
   - source        (playbook + step + step_type)
   - occurrences   (deduped by raw block)
 
-The agent uses this to learn FSR's jinja idioms — `{% set x = vars.steps.find.records[0] %}`,
-loop-with-paged-fetch, `{% if vars.input.records | length > 0 %}`, etc — instead of
+The agent uses this to learn FSR's jinja idioms -- `{% set x = vars.steps.find.records[0] %}`,
+loop-with-paged-fetch, `{% if vars.input.records | length > 0 %}`, etc -- instead of
 guessing from synthetic single-line examples. Plus rolls up to a `jinja_filter_usage`
 view for backwards compat with `get_filter_examples`.
 """
@@ -45,7 +45,7 @@ _CONTROL_KEYWORDS = {
     "import": "import", "from": "from",
 }
 
-# vars.<path> walker — captures the head of any vars.* access. Includes
+# vars.<path> walker -- captures the head of any vars.* access. Includes
 # bracket subscripts so `vars.input.records[0]['@id']` becomes
 # `vars.input.records[0]['@id']` (no normalization beyond stripping spaces).
 _VAR_RE = re.compile(
@@ -227,7 +227,7 @@ def main() -> int:
         # Repopulate the legacy filter-usage table from the new corpus, so
         # `get_filter_examples` and the MCP tool keep working.
         conn.execute("DELETE FROM jinja_filter_usage")
-        # One row per (filter_name, raw block) — every filter mentioned
+        # One row per (filter_name, raw block) -- every filter mentioned
         # in any block produces a row. Sum occurrences when collapsing.
         for v in rolled.values():
             if not v["filters_csv"]:

@@ -81,7 +81,7 @@ def _serialize(event: Event) -> dict[str, Any]:
         }
     if isinstance(event, UsageEvent):
         # Frontend can render a per-turn cost ribbon. Telemetry side
-        # effects (history.db, JSONL) happen in the consumer below —
+        # effects (history.db, JSONL) happen in the consumer below --
         # this just forwards the same shape over SSE for live display.
         return {
             "event": "usage",
@@ -152,7 +152,7 @@ def _persist_usage(ev: UsageEvent) -> None:
     log_turn(record)
     history_db.record_chat_turn(record)
     print(
-        f"[chat {ev.session_id}#{ev.turn}] tokens — "
+        f"[chat {ev.session_id}#{ev.turn}] tokens -- "
         f"input:{ev.input_tokens} output:{ev.output_tokens} "
         f"cache_read:{ev.cache_read} cache_write:{ev.cache_write} "
         f"history_chars:{ev.history_chars} "
@@ -188,7 +188,7 @@ def _current_turn(messages: list[Message]) -> int:
 
 
 _PLACEHOLDER_MARKERS = (
-    "# Welcome — try one of these to get started:",
+    "# Welcome -- try one of these to get started:",
     "# ... rest of your current workflow content ...",
 )
 
@@ -196,7 +196,7 @@ _PLACEHOLDER_MARKERS = (
 def _is_meaningful_yaml(text: str | None) -> bool:
     """Drop placeholder/empty buffers server-side. Sending the welcome
     scaffold biases the agent into extending it rather than authoring
-    fresh — surfaced as an explicit failure mode by user feedback."""
+    fresh -- surfaced as an explicit failure mode by user feedback."""
     if not text:
         return False
     for marker in _PLACEHOLDER_MARKERS:
@@ -211,7 +211,7 @@ def _is_meaningful_yaml(text: str | None) -> bool:
 
 
 # Verbs that signal a surgical change to an existing playbook. Kept
-# tight on purpose — false-positives (build flagged as enhance) waste
+# tight on purpose -- false-positives (build flagged as enhance) waste
 # a clarifying question; false-negatives (enhance flagged as build)
 # trigger silent rewrites, which is the failure mode C2 exists to
 # prevent. When in doubt with meaningful YAML present, default to
@@ -239,7 +239,7 @@ _REWRITE_VERBS = (
 
 def _detect_intent(current_yaml: str | None, last_user_msg: str) -> str:
     """Return "build" or "enhance" for the session's tags + prompt
-    selection. Heuristic, not perfect — see C2 in AGENT_LOOP_REFINEMENT_PLAN.
+    selection. Heuristic, not perfect -- see C2 in AGENT_LOOP_REFINEMENT_PLAN.
 
     Rule of thumb (plan §C1):
     - No meaningful YAML in editor → build.
@@ -291,7 +291,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
             yield {
                 "event": "error",
                 "data": json.dumps({
-                    "message": f"{chosen!r} is not fully configured — open Settings "
+                    "message": f"{chosen!r} is not fully configured -- open Settings "
                                f"and set the URL/key/model."
                 }),
             }
@@ -384,7 +384,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
 # keyed by approval_id and emits an `approval_request` SSE event. The
 # frontend renders an approval card and posts the user's decision here;
 # we re-enter the provider loop with the decision baked in. Auth is the
-# existing app session — no separate HMAC token. The approval_id itself
+# existing app session -- no separate HMAC token. The approval_id itself
 # is single-use (popped on resolution), so a replay attempt 404s.
 
 class ApprovalDecisionIn(BaseModel):
@@ -392,7 +392,7 @@ class ApprovalDecisionIn(BaseModel):
     # For tier-4 step-up: the user-typed target. Backend asserts this
     # equals the canonical target extracted from the suspended args
     # before flipping decision to approve. Frontend already enforces
-    # the same check, but the frontend is bypassable — a curl with
+    # the same check, but the frontend is bypassable -- a curl with
     # `{"decision":"approve"}` and no confirmed_target must still 400.
     confirmed_target: str | None = None
 
@@ -401,7 +401,7 @@ def _extract_target(args: dict[str, Any]) -> str | None:
     """Pull the canonical target identifier out of the suspended args.
 
     Mirrors the frontend's `targetHint` derivation so both ends agree on
-    what string the user must re-type. Order matters — first hit wins."""
+    what string the user must re-type. Order matters -- first hit wins."""
     if not isinstance(args, dict):
         return None
     params = args.get("params")
@@ -440,7 +440,7 @@ async def resolve_approval(
 
     # Tier-4 step-up: backend re-derives the canonical target from the
     # suspended args and requires confirmed_target == target. Only
-    # enforced on approve — deny is always allowed regardless of typing.
+    # enforced on approve -- deny is always allowed regardless of typing.
     if body.decision == "approve" and suspended.tier >= 4:
         target = _extract_target(suspended.args)
         if target and body.confirmed_target != target:
@@ -453,7 +453,7 @@ async def resolve_approval(
                 yield {"event": "done", "data": json.dumps({"stop_reason": "step_up_required"})}
             return EventSourceResponse(gen_stepup())
 
-    # Validated — consume the session.
+    # Validated -- consume the session.
     suspended = _approval_store.pop(approval_id)
     if suspended is None:
         # Lost the race against TTL gc between peek and pop.
@@ -499,12 +499,12 @@ async def resolve_approval(
             await producer
             # resume_agent_turn surfaces failures as ErrorEvents in the
             # transcript (already streamed via cb above) and sets
-            # result.error. The route doesn't need an extra yield —
+            # result.error. The route doesn't need an extra yield --
             # the client already saw the error event.
             if result.stop_reason == "config_error" and not any(
                 isinstance(e, ErrorEvent) for e in result.transcript
             ):
-                # Shouldn't happen — defensive.
+                # Shouldn't happen -- defensive.
                 yield {"event": "done", "data": json.dumps({"stop_reason": "config_error"})}
         except Exception as exc:  # noqa: BLE001
             yield {"event": "error",

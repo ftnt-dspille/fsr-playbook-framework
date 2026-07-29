@@ -35,7 +35,7 @@ test('compile bad YAML surfaces an error marker instead of crashing', async ({ r
   const r = await request.post('http://localhost:47821/api/yaml/compile', {
     data: { text: 'name: broken\nsteps: not-a-list\n' }
   });
-  // Even malformed input gets a 200 with markers — the editor
+  // Even malformed input gets a 200 with markers -- the editor
   // relies on this so the inspector can render quick-fixes.
   expect(r.ok()).toBe(true);
   const body = await r.json();

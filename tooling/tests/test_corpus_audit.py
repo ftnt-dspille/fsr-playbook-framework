@@ -90,7 +90,7 @@ def test_template_url_is_advisory(db_path: Path):
     conn = sqlite3.connect(str(db_path))
     report = audit.audit_input_field_kinds(conn)
     conn.close()
-    # The dominant variant — bare text with templateUrl absent —
+    # The dominant variant -- bare text with templateUrl absent --
     # is a real corpus pattern; assert it's now covered.
     text_none = [
         d for d in report["all"]

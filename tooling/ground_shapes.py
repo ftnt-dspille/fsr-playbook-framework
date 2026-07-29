@@ -3,7 +3,7 @@
 Pushes a playbook to the live FSR, triggers it, pulls the run env (per-step
 results), measures each step's output shape, and folds it into the persistent
 GroundedShapeStore. Also dumps the raw env so we can ground data-presence and
-namespace (E5/E6) facts against what the box ACTUALLY produced — not inference.
+namespace (E5/E6) facts against what the box ACTUALLY produced -- not inference.
 
 Usage (source .env.205 first):
     PYTHONPATH=tooling:fsr_playbooks python -m ground_shapes examples/demo_code_snippet.yaml \
@@ -37,7 +37,7 @@ def _fetch_env_raw(pk: str) -> dict:
     """Fetch a run's env + per-step results via the raw wf-api endpoint.
 
     Robust replacement for tools_connector_discovery.get_run_env, which calls
-    `client.playbooks.get_execution` — absent on the installed pyfsr version.
+    `client.playbooks.get_execution` -- absent on the installed pyfsr version.
     Mirrors the same shape: {status, name, vars:{...env, steps:{name_→result}}}.
     """
     from probes._env import get_client

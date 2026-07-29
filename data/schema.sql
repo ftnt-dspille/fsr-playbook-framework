@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS connectors (
     source_path       TEXT,                  -- when local: path to info.json
     info_json         TEXT,                  -- full blob, fallback / debug only (icons stripped)
     source_code       TEXT,                  -- connector.py + operations.py concatenated, populated lazily by mcp get_connector_source
-    rpm_fingerprint   TEXT                   -- "<rpm_full_name>:<size_bytes>" — set by repo_rpm tier; lets re-runs skip already-ingested connectors
+    rpm_fingerprint   TEXT                   -- "<rpm_full_name>:<size_bytes>" -- set by repo_rpm tier; lets re-runs skip already-ingested connectors
 );
 
 CREATE TABLE IF NOT EXISTS operations (
@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS step_types (
 -- live FSR appliance. Each step_type's args_schema_json.script ends in
 -- /wf/workflow/tasks/<handler_name>, e.g. Decision -> 'cond',
 -- SetVariable -> 'set_multiple', Connector -> 'connector'. This table
--- gives the canonical Python signature for each handler — the source of
+-- gives the canonical Python signature for each handler -- the source of
 -- truth for what `arguments` a step must provide.
 CREATE TABLE IF NOT EXISTS step_handlers (
     name             TEXT PRIMARY KEY,         -- FUNCTION_MAP key, e.g. 'cond'
@@ -193,7 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_step_examples_type ON step_examples(step_type_nam
 -- Full per-step corpus, ingested from FSR playbook JSON exports (SP bundles,
 -- store/incoming drops, live FSR pulls). Unlike step_examples (which is a
 -- 3-row sampling per type used for quick LLM context), this table holds
--- EVERY step from EVERY playbook we've seen — used to mine real-world
+-- EVERY step from EVERY playbook we've seen -- used to mine real-world
 -- argument shapes when tightening linting/validation.
 --
 -- step_type_name is denormalized at ingest time by joining stepType (an IRI
@@ -254,10 +254,10 @@ CREATE INDEX IF NOT EXISTS idx_picklists_list ON picklists(list_name);
 -- generator (jinja2's `groupby`, `permutations`, `combinations`) will break
 -- a downstream filter that expects a list unless wrapped in `| list`.
 -- We track three views of the type per filter:
---   input_type_hint        — what the filter is *intended* to consume
+--   input_type_hint        -- what the filter is *intended* to consume
 --                             (e.g. "string", "list", "dict", "any")
---   output_type_declared   — what the widget constants / docs claim it returns
---   output_type_observed   — what `type_debug` reports when we render it live
+--   output_type_declared   -- what the widget constants / docs claim it returns
+--   output_type_observed   -- what `type_debug` reports when we render it live
 --                             (the only one with status=tested_pass)
 -- parameters_json holds the structured parameter list from widget constants
 -- so agents can resolve arg names/types/required without re-parsing.
@@ -376,33 +376,33 @@ CREATE TABLE IF NOT EXISTS playbooks_seen (
 );
 
 -- ---------- Verification state ----------
--- Default for every entity in the store is UNTESTED — represented by the
+-- Default for every entity in the store is UNTESTED -- represented by the
 -- absence of any row here. Probes never write rows that claim verification
 -- they didn't perform. Verification is multi-method: a connector op might be
 -- "seen" via /api/3/connectors (the deployed instance has it) but only
 -- "tested_pass" once a compiled playbook actually executed it via
 -- /api/integration/. Both rows are kept.
 --
--- kind   — entity class. one of:
+-- kind   -- entity class. one of:
 --          connector, operation, operation_param, step_type, module,
 --          module_field, jinja_filter, jinja_macro, jinja_var, recipe
--- key    — canonical key for that kind, e.g.
+-- key    -- canonical key for that kind, e.g.
 --          'recorded-future-feed' (connector),
 --          'recorded-future-feed:fetch_indicators' (operation),
 --          'recorded-future-feed:fetch_indicators:api_key' (param),
 --          'upper' (jinja_filter),
 --          'threat_intel_feeds:source' (module_field).
--- method — how the verification was performed. one of:
---          live_api_get        — entity exists per a GET on a live FSR instance
---          live_api_render     — jinja template rendered successfully via API
---          live_op_exec        — connector op invoked successfully via /api/integration/
---          playbook_e2e        — used inside a playbook that ran end-to-end on live FSR
---          widget_constants    — appears in the jinja-editor widget constants file
---          schema_ts           — appears in fsr-schema.ts (step types)
---          schema_json         — appears in fortisoar/schema.json (modules)
---          rpm_info_json       — appears in a fortisoar-rpm-extracted info.json
---          manual              — human-asserted; lowest trust
--- status — tested_pass | tested_fail | seen
+-- method -- how the verification was performed. one of:
+--          live_api_get        -- entity exists per a GET on a live FSR instance
+--          live_api_render     -- jinja template rendered successfully via API
+--          live_op_exec        -- connector op invoked successfully via /api/integration/
+--          playbook_e2e        -- used inside a playbook that ran end-to-end on live FSR
+--          widget_constants    -- appears in the jinja-editor widget constants file
+--          schema_ts           -- appears in fsr-schema.ts (step types)
+--          schema_json         -- appears in fortisoar/schema.json (modules)
+--          rpm_info_json       -- appears in a fortisoar-rpm-extracted info.json
+--          manual              -- human-asserted; lowest trust
+-- status -- tested_pass | tested_fail | seen
 --          'seen' = catalogued from a source but not exercised. 'tested_pass'
 --          requires the row to have been *exercised* (rendered, executed, etc).
 CREATE TABLE IF NOT EXISTS verifications (
@@ -418,7 +418,7 @@ CREATE INDEX IF NOT EXISTS idx_verif_kind_status ON verifications(kind, status);
 
 -- Trust ladder. EVERYTHING IS UNTESTED BY DEFAULT (= no row in verifications).
 -- Local sources (rpm_info_json, schema_json, schema_ts, widget_constants) only
--- ever produce status='seen' rows — they do NOT count as trusted. To become
+-- ever produce status='seen' rows -- they do NOT count as trusted. To become
 -- trusted, an entity must be exercised on a live FSR instance via one of the
 -- live_* methods or via playbook_e2e.
 CREATE VIEW IF NOT EXISTS v_verification_state AS
@@ -454,7 +454,7 @@ GROUP BY kind;
 -- Maps a connector + friendly config name to its per-instance config UUID.
 -- These records are created out-of-band on each FSR box and are NOT portable,
 -- so they're WARMED into this table (not shipped). The compiler reads it via
--- Resolver.resolve_config_id() — no live lookup, no dev-only `tooling/` import.
+-- Resolver.resolve_config_id() -- no live lookup, no dev-only `tooling/` import.
 -- `config_name = '__default__'` holds the instance's default config for a
 -- connector. Replaces the legacy data/connector_config_map.json cache.
 CREATE TABLE IF NOT EXISTS connector_configs (

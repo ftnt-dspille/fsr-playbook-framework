@@ -6,7 +6,7 @@
  *    MonacoEnvironment.getWorker"
  *
  * …and silently degrades features (link detection, tokenization
- * helpers, etc.). We register ONLY the base editor worker —
+ * helpers, etc.). We register ONLY the base editor worker --
  * language-specific workers (json, css, html, typescript) aren't
  * needed because `disableJsonLanguageWorker` in monacoYamlSupport
  * turns off every json feature that would require them.
@@ -16,7 +16,7 @@
  */
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 
-// Idempotent — multiple imports of the module just re-assign the
+// Idempotent -- multiple imports of the module just re-assign the
 // same MonacoEnvironment object.
 (self as any).MonacoEnvironment = {
   getWorker: (_workerId: string, _label: string) => new editorWorker()

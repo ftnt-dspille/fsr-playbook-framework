@@ -1,5 +1,5 @@
 /**
- * JinjaVarPicker — the visual {x} selector that lives next to Monaco.
+ * JinjaVarPicker -- the visual {x} selector that lives next to Monaco.
  * Drives editor.executeEdits on click so insertion lands in the undo
  * stack. Covers: opens popover, lists rows from the shape store +
  * input.records defaults, filter, click → executeEdits with the right

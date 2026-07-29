@@ -1,4 +1,4 @@
-"""§2.2 — stream timeout in AnthropicProvider.
+"""§2.2 -- stream timeout in AnthropicProvider.
 
 Verifies that a hung Anthropic stream is cancelled after STREAM_TIMEOUT_SECS
 and surfaces a clean ErrorEvent instead of blocking forever.
@@ -66,7 +66,7 @@ def test_stream_timeout_yields_error_event(monkeypatch):
     [e for e in events if isinstance(e, DoneEvent)]
     assert error_events, "expected an ErrorEvent on stream timeout"
     assert "timed out" in error_events[0].message.lower()
-    # Stream exits via return after ErrorEvent — no DoneEvent, consistent with
+    # Stream exits via return after ErrorEvent -- no DoneEvent, consistent with
     # other error paths (APIConnectionError, AuthenticationError, etc.).
 
 

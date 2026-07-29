@@ -1,7 +1,7 @@
 """Typed model for the record-action trigger (`start` with a `module:`).
 
 A `start` step that names a `module:` is the manual record-action trigger
-(FSR handler ``cybersponse.action``) — the Execute-menu button on a module's
+(FSR handler ``cybersponse.action``) -- the Execute-menu button on a module's
 record listing. Its friendly inputs::
 
     button_label:     Trigger Button Label (str). Empty → FSR shows the playbook
@@ -9,19 +9,19 @@ record listing. Its friendly inputs::
     module / modules: which module(s) the button appears on.
     requires_record:  bool, default True. False = "Does not require record input
                       to run".
-    run_mode:         'per_record' (default) | 'once_for_all' — only meaningful
+    run_mode:         'per_record' (default) | 'once_for_all' -- only meaningful
                       when requires_record is True.
 
-Unlike delete_record/record_crud this has **no module→IRI transform** — the
+Unlike delete_record/record_crud this has **no module→IRI transform** -- the
 canonical shape (route uuid5, `displayConditions`, `step_variables`, the
 `noRecordExecution`/`singleRecordExecution` flag pair) is heavy and stays in the
 resolver. So this layer is *validation-only* (the `find_record` precedent):
 `RecordActionArgs` types the scalar flags so a wrong-typed value is a clean
 `BAD_VALUE` instead of silently mis-routing. The big silent-failure it catches is
-a mistyped `run_mode` — the imperative code does
+a mistyped `run_mode` -- the imperative code does
 ``singleRecordExecution = (requires_record and run_mode == "per_record")``, so
 ``run_mode: "per record"`` (a space) would quietly flip the button to
-once-for-all. `expand_record_action` never mutates `args` — it returns ``None``
+once-for-all. `expand_record_action` never mutates `args` -- it returns ``None``
 and the resolver keeps the full transform.
 
 `module`/`modules`/`resources` stay untyped (`Any`): `module:` may be a single
@@ -64,7 +64,7 @@ def expand_record_action(
     Validation-only: always returns ``None`` (the canonical transform stays in
     the resolver, so `step.arguments` is untouched). A bad flag (e.g.
     `requires_record: "yes"`, `run_mode: "per record"`) appends a `BAD_VALUE`
-    and leaves the step for the author to fix — matching the leave-unchanged
+    and leaves the step for the author to fix -- matching the leave-unchanged
     contract of the other validation-only step models (`find_record`).
     """
     if not isinstance(args, dict):

@@ -45,12 +45,12 @@ def _load_baseline(stamp: str | None) -> dict | None:
         return None
     p = RUN_DIR / f"calibrate_{stamp}.summary.json"
     if not p.exists():
-        log.warning("baseline %s not found at %s — skipping delta", stamp, p)
+        log.warning("baseline %s not found at %s -- skipping delta", stamp, p)
         return None
     try:
         return json.loads(p.read_text())
     except Exception as exc:  # noqa: BLE001
-        log.warning("baseline %s unreadable (%r) — skipping delta", stamp, exc)
+        log.warning("baseline %s unreadable (%r) -- skipping delta", stamp, exc)
         return None
 
 
@@ -93,7 +93,7 @@ log = logging.getLogger("calibrate")
 def _setup_logging(log_path: Path) -> None:
     """File + stdout logging with timestamps. Also routes the Anthropic
     SDK + httpx loggers to the file so rate-limit 429s / retry backoff
-    (the usual reason a tier-1 multi-turn run stalls) are captured —
+    (the usual reason a tier-1 multi-turn run stalls) are captured --
     'what went wrong' lands in the log instead of a buffered black box."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -107,8 +107,8 @@ def _setup_logging(log_path: Path) -> None:
     root.addHandler(fh)
     root.addHandler(sh)
     # Surface SDK retry/backoff + each HTTP request (429s included).
-    # INFO (not DEBUG) keeps the "Retrying request … in Ns" backoff lines —
-    # the usual tier-1 stall cause — without dumping the multi-KB request
+    # INFO (not DEBUG) keeps the "Retrying request … in Ns" backoff lines --
+    # the usual tier-1 stall cause -- without dumping the multi-KB request
     # body (system prompt + tool schemas) on every call.
     logging.getLogger("anthropic").setLevel(logging.INFO)
     logging.getLogger("httpx").setLevel(logging.INFO)
@@ -126,7 +126,7 @@ async def _run_one(prompt: str, model: str) -> dict:
 
     # Tier-1 org cap is 50k input tokens/min; a multi-turn investigation
     # resends growing history, so single turns can hit the per-minute
-    # ceiling. Failed retries aren't billed — crank max_retries so the
+    # ceiling. Failed retries aren't billed -- crank max_retries so the
     # SDK's backoff rides out the per-minute window instead of the turn
     # ending early (which would look like a recall miss).
     client = AsyncAnthropic(max_retries=12)
@@ -201,7 +201,7 @@ def main() -> None:
         t0 = time.monotonic()
         try:
             out = asyncio.run(_run_one(t.prompt, args.model))
-        except Exception as exc:  # noqa: BLE001 — bank the failure, keep going
+        except Exception as exc:  # noqa: BLE001 -- bank the failure, keep going
             log.exception("FIXTURE %s RAISED: %r", t.name, exc)
             results.append((t.name, {"recall": 0.0, "passed": False,
                                      "missing": ["<run raised>"], "forbidden_hit": [],
@@ -211,7 +211,7 @@ def main() -> None:
         sc = _score_investigation(out["trace"], t.required_facts, t.forbidden_facts)
         quality = _score_investigation_quality(out["trace"], t.investigation_quality)
         # A fixture clears calibration only if recall AND every non-skipped
-        # quality gate pass — recall alone greenlit 20-call flailing (the
+        # quality gate pass -- recall alone greenlit 20-call flailing (the
         # finding that motivated this strengthening).
         q_failed = [k for k, v in quality.items()
                     if not v.get("skipped") and not v.get("passed")]
@@ -235,7 +235,7 @@ def main() -> None:
 
         # Bank the golden trace the moment the fixture completes, so a
         # later stall/kill never loses an already-paid-for fixture. Only
-        # the tool-call layer (name+args+ok) is kept — not response bodies,
+        # the tool-call layer (name+args+ok) is kept -- not response bodies,
         # which go stale; the fixture pins the indicators these match on.
         if args.capture and sc["passed"]:
             gp = GOLDEN_DIR / f"{t.name}.json"
@@ -246,7 +246,7 @@ def main() -> None:
                            "ok": c.get("ok")} for c in out["trace"]],
             }, indent=2))
             log.info("  banked golden trace -> %s", gp.relative_to(REPO_ROOT))
-        # Always bank FAILURE traces (the signal for the next fix) — unlike
+        # Always bank FAILURE traces (the signal for the next fix) -- unlike
         # golden passes, these are unconditional, since a thrown-away failing
         # trace is exactly what forces an expensive re-run to diagnose. Records
         # the full arg-by-arg trace + the gates that tripped + their implicated
@@ -292,7 +292,7 @@ def main() -> None:
     n_pass = sum(1 for _, sc in results if sc["passed"])
     log.info("%s/%s fixtures clear the gate.", n_pass, len(results))
 
-    # Baseline delta — turns "3/5 PASS" into "mail_egress budget 19->11, now
+    # Baseline delta -- turns "3/5 PASS" into "mail_egress budget 19->11, now
     # clears": a verdict an agent can act on, vs. a snapshot to eyeball.
     baseline = _load_baseline(args.baseline)
     delta = _compute_delta(baseline, results) if baseline else {}

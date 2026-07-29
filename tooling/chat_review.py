@@ -1,7 +1,7 @@
-"""Chat-review heuristics — mine one session for known failure modes.
+"""Chat-review heuristics -- mine one session for known failure modes.
 
 Used by both the `fsrpb chat-review <session_id>` CLI and the
-`review_chat_session` MCP tool. Pure-python, no live FSR — operates
+`review_chat_session` MCP tool. Pure-python, no live FSR -- operates
 entirely on the rows already in `web/backend/history.db`.
 
 Each pattern is a small detector that runs against the loaded session
@@ -21,7 +21,7 @@ Pattern reference (driven by the corpus audit
   - agent emitted UUID-shaped step ids
   - agent used `set_variable: variables:` typo
   - session ended with no successful push (no YAML actually shipped)
-  - feedback rating='down' — surface the user's note prominently
+  - feedback rating='down' -- surface the user's note prominently
 """
 from __future__ import annotations
 
@@ -197,7 +197,7 @@ def _detect_feedback(s: dict) -> Iterator[Finding]:
             ),
             suggestion=(
                 "Read the user's summary above and treat it as the "
-                "primary signal — the rest of the patterns below are "
+                "primary signal -- the rest of the patterns below are "
                 "supporting evidence."
             ),
         )
@@ -250,14 +250,14 @@ def _detect_validate_spiral(s: dict) -> Iterator[Finding]:
                 detail=(
                     "validate_yaml fired 3+ times without converging "
                     "to zero errors. Each call sent ~3-4KB of error "
-                    "JSON back to the agent — this is the dominant "
+                    "JSON back to the agent -- this is the dominant "
                     "context-eating failure mode. The new "
                     "`next_fix` field on validate_yaml should help "
                     "(landed I31); also consider whether the agent "
                     "needed to `get_step_type` first."
                 ),
                 suggestion=(
-                    "If this session pre-dates I31, no action — the "
+                    "If this session pre-dates I31, no action -- the "
                     "fix is already shipped. If it's newer, the "
                     "agent ignored next_fix; tighten the system prompt."
                 ),
@@ -366,7 +366,7 @@ def _detect_set_variable_typo(s: dict) -> Iterator[Finding]:
     typo_keys = ("variables", "vars", "set", "values")
     hits: list[tuple[int, str]] = []
     for turn, yaml_text in blocks:
-        # Crude, doesn't parse YAML — just looks for `type: set_variable`
+        # Crude, doesn't parse YAML -- just looks for `type: set_variable`
         # blocks followed within a window by the typo key.
         idx = 0
         while True:
@@ -479,7 +479,7 @@ def _detect_unknown_connector(s: dict) -> Iterator[Finding]:
 
 # Lower-case substrings that strongly suggest the user asked for
 # playbook authoring/editing. Used to scope the "agent finished without
-# emitting YAML" detector — it shouldn't fire on chitchat turns.
+# emitting YAML" detector -- it shouldn't fire on chitchat turns.
 _AUTHORING_INTENT_HINTS = (
     "build a playbook", "create a playbook", "make a playbook",
     "build me a playbook", "write a playbook", "draft a playbook",
@@ -487,7 +487,7 @@ _AUTHORING_INTENT_HINTS = (
     "edit the yaml", "update the playbook", "extend the playbook",
     "let's add", "add the", "include a", "build it",
 )
-# Tokens that look very much like FSR playbook YAML — used to detect
+# Tokens that look very much like FSR playbook YAML -- used to detect
 # fenced blocks the agent emitted with the wrong language tag (or no
 # tag at all) so the frontend extractor missed them.
 _YAML_SHAPED_TOKENS = (
@@ -523,7 +523,7 @@ def _user_text_for_turn(messages: list[dict], turn: int) -> str:
 
 def _detect_no_editor_update(s: dict) -> Iterator[Finding]:
     """Agent emitted text but no ```yaml block, so the editor never
-    received a buffer replace. Frontend silently dropped the turn —
+    received a buffer replace. Frontend silently dropped the turn --
     looks like a hung agent from the user's perspective.
 
     Fires when: at least one assistant turn followed a user message
@@ -557,7 +557,7 @@ def _detect_no_editor_update(s: dict) -> Iterator[Finding]:
             code="no_editor_update",
             title=(
                 f"Agent finished {len(bad_turns)} turn(s) without "
-                f"emitting a ```yaml block — editor was never "
+                f"emitting a ```yaml block -- editor was never "
                 f"updated (turns {bad_turns})"
             ),
             detail=(
@@ -587,7 +587,7 @@ def _detect_no_editor_update(s: dict) -> Iterator[Finding]:
 def _detect_yaml_in_wrong_fence(s: dict) -> Iterator[Finding]:
     """Agent put YAML-shaped content inside a code fence with the wrong
     language tag (or no tag), so `extractYamlBlock` missed it. Different
-    failure from `no_editor_update` — here the YAML *was* produced, just
+    failure from `no_editor_update` -- here the YAML *was* produced, just
     in a fence the extractor couldn't see."""
     messages = s.get("messages") or []
     by_turn: dict[int, list[str]] = {}
@@ -616,7 +616,7 @@ def _detect_yaml_in_wrong_fence(s: dict) -> Iterator[Finding]:
             severity="warning",
             code="yaml_in_wrong_fence",
             title=(
-                f"YAML-shaped content in a non-yaml fence — extractor "
+                f"YAML-shaped content in a non-yaml fence -- extractor "
                 f"missed it (turn {first_turn}, fence tag(s): "
                 f"{', '.join(repr(t) for t in tags)})"
             ),
@@ -719,7 +719,7 @@ def render_text(report: Report) -> str:
     )
     out.append("")
     if not report.findings:
-        out.append("  (no findings — session looks clean)")
+        out.append("  (no findings -- session looks clean)")
         return "\n".join(out)
     for i, f in enumerate(report.findings, 1):
         sev_tag = {"error": "[!]", "warning": "[~]", "info": "[i]"}.get(

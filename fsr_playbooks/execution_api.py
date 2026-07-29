@@ -4,7 +4,7 @@ The carved-out triage cluster (now living in the connector, not this package)
 needs a handful of run/healthcheck/DB helpers that today are underscore-private
 internals of `mcp_server.tools_execution`, `mcp_server._shared`, `llm.tools`, and
 `agent.skill_trace`. Rather than let the connector reach into those private names
-(fragile — they can be refactored out from under it), this module is the SINGLE
+(fragile -- they can be refactored out from under it), this module is the SINGLE
 stable surface the connector may import for execution support.
 
 Contract:
@@ -12,7 +12,7 @@ Contract:
   dropping one breaks the library suite before the connector ever sees it.
 - This module only RE-EXPORTS; the underscore originals stay put and unrenamed, so
   existing in-package callers are untouched. If an internal helper's behaviour must
-  change, change it at the source — the facade name and signature are the contract.
+  change, change it at the source -- the facade name and signature are the contract.
 
 See RECONCILIATION_PLAN.md §Phase 1 for the rename map and rationale.
 """

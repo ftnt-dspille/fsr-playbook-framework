@@ -4,7 +4,7 @@ import FilterTreeEditor from './FilterTreeEditor.svelte';
 
 afterEach(cleanup);
 
-/** Field catalog for the `alerts` module — minimal but representative.
+/** Field catalog for the `alerts` module -- minimal but representative.
  * `assets` and `assignedTo` mimic the trained store's shape where the
  * relation's "type" column literally holds the target module's name. */
 const ALERTS_FIELDS = [
@@ -14,7 +14,7 @@ const ALERTS_FIELDS = [
   { name: 'assignedTo', title: 'Assigned To', type: 'people', operators: ['eq', 'neq', 'in', 'nin', 'isnull'] }
 ];
 
-/** Field catalog for `assets` — used when the user drills into the
+/** Field catalog for `assets` -- used when the user drills into the
  * relation. `hostname` is a primitive; `ip` too. The numeric `port`
  * exists so we can assert the operator catalog narrows on drill-in. */
 const ASSETS_FIELDS = [
@@ -23,7 +23,7 @@ const ASSETS_FIELDS = [
   { name: 'port', title: 'Port', type: 'integer', operators: ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'isnull'] }
 ];
 
-describe('FilterTreeEditor — related-module drill-in', () => {
+describe('FilterTreeEditor -- related-module drill-in', () => {
   it('hides the sub-field picker until the user picks a relation field', () => {
     const onChange = vi.fn();
     render(FilterTreeEditor, {
@@ -37,11 +37,11 @@ describe('FilterTreeEditor — related-module drill-in', () => {
         getRelatedFields: () => []
       }
     });
-    // Primary picker exists — accessible name reflects the current
+    // Primary picker exists -- accessible name reflects the current
     // field (`name`) when one is selected.
     expect(screen.getByRole('button', { name: /^name/i }))
       .toBeTruthy();
-    // No sub-field button yet — the leaf is on a primitive `name` field.
+    // No sub-field button yet -- the leaf is on a primitive `name` field.
     expect(screen.queryByRole('button', { name: /assets field/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /people field/i })).toBeNull();
   });
@@ -137,7 +137,7 @@ describe('FilterTreeEditor — related-module drill-in', () => {
 
     const last = onChange.mock.calls.at(-1)![0];
     expect(last.filters[0].field).toBe('assets.port');
-    // `port`'s operator catalog doesn't contain `like` — should snap
+    // `port`'s operator catalog doesn't contain `like` -- should snap
     // to the first valid operator (eq).
     expect(last.filters[0].operator).toBe('eq');
   });
@@ -181,9 +181,9 @@ describe('FilterTreeEditor — related-module drill-in', () => {
     // The relation chip surfaces in the group header.
     expect(screen.getByText('assets', { selector: 'code' })).toBeTruthy();
     // Primary picker is suppressed for both rows since they're
-    // implicitly scoped — only the sub-field picker remains.
+    // implicitly scoped -- only the sub-field picker remains.
     expect(screen.queryAllByRole('button', { name: /^assets$/ })).toHaveLength(0);
-    // Sub-field pickers ARE present for each leaf — labels show the
+    // Sub-field pickers ARE present for each leaf -- labels show the
     // already-picked sub-fields.
     expect(screen.getByRole('button', { name: /hostname/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^ip/i })).toBeTruthy();
@@ -202,7 +202,7 @@ describe('FilterTreeEditor — related-module drill-in', () => {
         getRelatedFields: () => []
       }
     });
-    // No relation chip — heterogeneous prefixes.
+    // No relation chip -- heterogeneous prefixes.
     const groupHeaders = screen.queryAllByText('assets', { selector: 'code' });
     expect(groupHeaders).toHaveLength(0);
   });
@@ -278,7 +278,7 @@ describe('FilterTreeEditor — related-module drill-in', () => {
     await fireEvent.click(screen.getByRole('button', { name: /pick field/i }));
     const dialog = screen.getByRole('dialog', { name: /^field picker$/i });
     expect(within(dialog).queryByText(/related modules/i)).toBeNull();
-    // Plain `name` is still shown — the picker isn't empty.
+    // Plain `name` is still shown -- the picker isn't empty.
     expect(within(dialog).getByText('name')).toBeTruthy();
   });
 });

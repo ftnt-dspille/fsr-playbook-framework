@@ -1,5 +1,5 @@
 """Gate models in llm/tool_models.py must mirror the REAL registered tool
-signatures — a stale model silently rejects legitimate calls at dispatch.
+signatures -- a stale model silently rejects legitimate calls at dispatch.
 
 Regression source: a live matrix run where get_record's model required
 module+record_id(str) while the registered tool accepts iri / module+uuid /
@@ -50,7 +50,7 @@ def test_module_alone_rejected():
 
 def test_real_signature_kwargs_all_accepted():
     # Full real signature: get_record(iri, module, uuid, relationships,
-    # full, record_id) — the model must not reject any real param.
+    # full, record_id) -- the model must not reject any real param.
     GetRecordArgs(iri="/api/3/alerts/x", module="alerts", uuid="x",
                   relationships=False, full=True, record_id="1")
 
@@ -58,7 +58,7 @@ def test_real_signature_kwargs_all_accepted():
 # --- emit_action_card ------------------------------------------------------
 # The live agent staged a containment card with the REAL tool's args
 # (id, connector, operation, summary, args) and the old gate bounced it with
-# "title: Field required" — title is not a param the tool accepts. The gate
+# "title: Field required" -- title is not a param the tool accepts. The gate
 # must accept exactly the registered signature.
 
 
@@ -166,7 +166,7 @@ def test_emit_patch_proposal_dispatches_and_halts_via_registry():
 # The guard that was MISSING when GetRecordArgs, then the emit_* card models,
 # drifted from their registered signatures. Introspects each registered tool
 # the gate covers (that lives in tools_emit) and asserts the gate declares
-# every real required param — so a stale gate can't silently bounce a
+# every real required param -- so a stale gate can't silently bounce a
 # legitimate call again. Extend REAL_FNS as more gated tools are pinned down.
 
 

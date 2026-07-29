@@ -24,7 +24,7 @@ from .validator import validate
 
 # Step fields the compiler/parser/emitter rely on. If the loaded `ir.Step`
 # is missing any of these, an install is half-overwritten (a stale wheel
-# shadowing the editable repo — pilot E10) and compiles will crash with an
+# shadowing the editable repo -- pilot E10) and compiles will crash with an
 # opaque `TypeError: Step.__init__() got an unexpected keyword argument …`
 # mid-run. We assert it loudly at the entrypoint instead.
 _EXPECTED_STEP_FIELDS = frozenset({
@@ -68,7 +68,7 @@ def _self_check() -> Optional[str]:
                 "fsr_playbooks install looks split: ir.py loaded from "
                 f"{ir_dir} but parser.py from {parser_dir}. A stale "
                 "fsr_playbooks (e.g. an old wheel in site-packages) is "
-                "shadowing the editable repo — `pip uninstall fsr_playbooks` "
+                "shadowing the editable repo -- `pip uninstall fsr_playbooks` "
                 "the stale copy or reinstall `-e .`."
             )
         else:
@@ -78,7 +78,7 @@ def _self_check() -> Optional[str]:
                 problem = (
                     f"loaded ir.Step is missing fields {sorted(missing)} that "
                     f"the compiler depends on (loaded from {ir_dir}). This is a "
-                    "half-overwritten install — reinstall fsr_playbooks "
+                    "half-overwritten install -- reinstall fsr_playbooks "
                     "(`pip install -e .`) and remove any stale copy."
                 )
     except Exception as e:  # pragma: no cover - defensive
@@ -207,7 +207,7 @@ def compile_yaml(
         return _blocked(errs)
 
     # Reference lint (warning-only): catch a bad `vars.steps.X.foo` offline.
-    # Runs last, on a fully-resolved IR, and never blocks — see reference_lint.
+    # Runs last, on a fully-resolved IR, and never blocks -- see reference_lint.
     if reference_lint_enabled:
         all_warnings.extend(reference_lint(coll, existing=all_warnings,
                                            db_path=str(db_path)))

@@ -1,9 +1,9 @@
-"""P4 — the tool-output envelope contract.
+"""P4 -- the tool-output envelope contract.
 
 Pins the contract from `llm.tool_result`:
   - a valid tool output is a dict OR a list whose members are all dicts;
   - a bare/untyped return (scalar, None, list-of-non-dict) is a violation;
-  - `dispatch` routes tool-fn results through it — fail-open by default
+  - `dispatch` routes tool-fn results through it -- fail-open by default
     (violation logged, result passed through), strict under
     ``FSRPB_STRICT_TOOL_OUTPUT`` (violation replaced with an error envelope);
   - every registered tool declares a return type that satisfies the contract
@@ -53,7 +53,7 @@ def test_failopen_passes_result_through(monkeypatch, caplog):
     monkeypatch.delenv("FSRPB_STRICT_TOOL_OUTPUT", raising=False)
     with caplog.at_level("WARNING"):
         out = validate_tool_output("some_tool", "bare string")
-    assert out == "bare string"  # unchanged — fail-open
+    assert out == "bare string"  # unchanged -- fail-open
     assert any("contract" in r.message for r in caplog.records)
 
 
@@ -94,7 +94,7 @@ def _return_satisfies_contract(ann: object) -> bool:
 
 
 def test_every_registered_tool_declares_conforming_return():
-    """A tool added with a bare/untyped return type (e.g. `-> str`) fails here —
+    """A tool added with a bare/untyped return type (e.g. `-> str`) fails here --
     the static guard behind the envelope contract."""
     offenders = []
     for name, spec in T.REGISTRY.items():

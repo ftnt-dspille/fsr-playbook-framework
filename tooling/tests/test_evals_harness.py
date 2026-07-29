@@ -1,12 +1,12 @@
 """LLM-evaluation harness smoke tests.
 
 Uses the deterministic `gold` and `echo` providers so the suite is
-hermetic — no external LLM calls. Exercises:
+hermetic -- no external LLM calls. Exercises:
   - YAML extraction from fenced/raw responses
   - Compiles / gold scoring gates
   - End-to-end matrix shape + per-model totals
 
-Live gates (Runs, Works) are not asserted here — they require an FSR.
+Live gates (Runs, Works) are not asserted here -- they require an FSR.
 """
 from __future__ import annotations
 

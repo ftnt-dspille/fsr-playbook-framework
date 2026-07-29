@@ -1,9 +1,9 @@
-"""probe_playbook_steps — index every step from every FSR playbook JSON
+"""probe_playbook_steps -- index every step from every FSR playbook JSON
 export we can find on disk, plus (optionally) the live FSR appliance.
 
 Why: `step_examples` only carries 3 sampled snippets per step type. When
 we tighten linting/validation around manual_input, decision, and other
-branch-fan-out steps, we need to *mine* real-world argument shapes —
+branch-fan-out steps, we need to *mine* real-world argument shapes --
 which means querying every step that's ever been exported. That's what
 this probe builds.
 
@@ -11,7 +11,7 @@ Sources walked:
   - Miscellaneous/fortisoar/SPs/playbooks/**/*.json   (SP bundles)
   - fsr-playbook-framework/store/incoming/*.json             (manual drops)
 
-Live FSR ingestion is left as a follow-up — see TODO I12. The schema
+Live FSR ingestion is left as a follow-up -- see TODO I12. The schema
 already accommodates it via `source='live_fsr'`.
 """
 from __future__ import annotations
@@ -91,7 +91,7 @@ def _iter_steps_in_doc(doc: object) -> Iterator[dict]:
 
 
 def _iter_playbooks_in_doc(doc: object) -> Iterator[dict]:
-    """Yield every playbook (Workflow) dict — needed to attach
+    """Yield every playbook (Workflow) dict -- needed to attach
     playbook_name/uuid/collection to each step rather than just the file."""
     if isinstance(doc, list):
         for item in doc:
@@ -122,7 +122,7 @@ def _ingest_file(
     seen_pbs = list(_iter_playbooks_in_doc(doc))
     if not seen_pbs:
         # Some files have steps directly under the root without the Workflow
-        # wrapper — treat the whole doc as one synthetic playbook.
+        # wrapper -- treat the whole doc as one synthetic playbook.
         seen_pbs = [doc] if isinstance(doc, dict) and "steps" in doc else []
     for pb in seen_pbs:
         pb_name = pb.get("name")

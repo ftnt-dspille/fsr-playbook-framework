@@ -63,7 +63,7 @@ describe('RunButton menu positioning', () => {
   });
 
   it('clamps the left coord so the menu does not run off the LEFT edge', async () => {
-    // Caret near the left edge of a narrow pane — `caret.right - width`
+    // Caret near the left edge of a narrow pane -- `caret.right - width`
     // would be negative without the floor.
     stubCaretRect({ right: 120, bottom: 40 });
     render(RunButton, { props: {} });
@@ -72,7 +72,7 @@ describe('RunButton menu positioning', () => {
   });
 
   it('clamps the left coord so the menu does not run off the RIGHT edge', async () => {
-    // Caret flush against the viewport right — clamp to keep a 4px gutter.
+    // Caret flush against the viewport right -- clamp to keep a 4px gutter.
     stubCaretRect({ right: VIEWPORT_W + 50, bottom: 40 });
     render(RunButton, { props: {} });
     const menu = await openMenu();

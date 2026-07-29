@@ -1,16 +1,16 @@
-"""Catalog-backed MCP tools — read-only over `catalog.sqlite` (attached
+"""Catalog-backed MCP tools -- read-only over `catalog.sqlite` (attached
 as `catalog`).
 
 Three lookups + one composer:
-  find_api_product   — fuzzy vendor-name search across 6,927 products
-  find_api_example   — FTS over 207k API entries
-  find_api_fixture   — exact-shape HTTP fixture with schemas
-  propose_http_fallback — deterministic decision tree
+  find_api_product   -- fuzzy vendor-name search across 6,927 products
+  find_api_example   -- FTS over 207k API entries
+  find_api_fixture   -- exact-shape HTTP fixture with schemas
+  propose_http_fallback -- deterministic decision tree
                           (native op > api_call > http fixture)
 
 The catalog is attached in `_shared._db()` when `CATALOG_DB_PATH`
 exists. If it isn't, these tools return a structured
-`catalog_unavailable` envelope rather than throwing — the rest of
+`catalog_unavailable` envelope rather than throwing -- the rest of
 fsrpb keeps working.
 
 Implements Phase 0 + 0.5 of `docs/plans/CONNECTOR_INTEGRATION_PLAN.md`.
@@ -60,7 +60,7 @@ _INTENT_STOPWORDS = frozenset({
 def _intent_tokens(intent: str) -> list[str]:
     """Stem-ish tokens from a free-form intent string for url-template
     matching. Singular/plural collapse, stopwords filtered. Bag-of-words
-    overlap is good enough — the catalog isn't deep enough for
+    overlap is good enough -- the catalog isn't deep enough for
     semantic embeddings to pay off."""
     raw = re.findall(r"[A-Za-z][A-Za-z0-9_]+", (intent or "").lower())
     tokens: list[str] = []
@@ -89,7 +89,7 @@ def _intent_overlap_score(url_template: str, tokens: list[str]) -> int:
 
 # Map intent verbs to expected HTTP methods. Used as a soft tie-breaker
 # when the catalog has multiple fixtures whose paths overlap the
-# intent equally — a "create" intent that comes back as GET is almost
+# intent equally -- a "create" intent that comes back as GET is almost
 # always the wrong fixture (the GET being a setup/list call from the
 # test).
 _VERB_METHOD: dict[str, str] = {
@@ -117,7 +117,7 @@ def _expected_method_for_intent(tokens: list[str]) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Catalog availability — single source of truth
+# Catalog availability -- single source of truth
 # ---------------------------------------------------------------------------
 
 
@@ -218,7 +218,7 @@ def find_api_example(product: str, q: str = "", limit: int = 5,
     code_snippet`.
 
     Use when the user wants to do an action against a vendor and you
-    need to ground the call in a real example — e.g. "splunk run
+    need to ground the call in a real example -- e.g. "splunk run
     search", "servicenow create incident". For an exact request/
     response pair with schemas, use `find_api_fixture` instead.
     """
@@ -365,7 +365,7 @@ def find_api_fixture(product: str, method: str | None = None,
 
 
 # ---------------------------------------------------------------------------
-# Phase 0.5 — propose_http_fallback
+# Phase 0.5 -- propose_http_fallback
 # ---------------------------------------------------------------------------
 
 
@@ -424,7 +424,7 @@ def _render_fallback_step(fixture: dict[str, Any], *,
         url_expr = f"{_BASE_URL_HINT.replace('<vendor>', 'vendor')}{path}"
         warnings.append(
             f"fixture's base URL is {base!r}; the step uses "
-            "`{{ vars.input.params.vendor_base_url }}` placeholder — wire the "
+            "`{{ vars.input.params.vendor_base_url }}` placeholder -- wire the "
             "real base via connector config or workflow input."
         )
     else:
@@ -435,28 +435,28 @@ def _render_fallback_step(fixture: dict[str, Any], *,
     if auth_method in {"bearer", "oauth2", "token", "jwt"}:
         headers["Authorization"] = f"Bearer {_TOKEN_HINT.replace('<vendor>', 'vendor')}"
         warnings.append(
-            "auth=bearer — fill `vars.input.params.vendor_token` from "
+            "auth=bearer -- fill `vars.input.params.vendor_token` from "
             "connector config or vault before running."
         )
     elif auth_method in {"basic", "basic_auth"}:
         headers["Authorization"] = "Basic {{ vars.input.params.vendor_basic_auth }}"
         warnings.append(
-            "auth=basic — base64-encode user:password into "
+            "auth=basic -- base64-encode user:password into "
             "`vars.input.params.vendor_basic_auth`."
         )
     elif auth_method in {"apikey", "api_key", "x-api-key"}:
         headers["X-Api-Key"] = "{{ vars.input.params.vendor_api_key }}"
         warnings.append(
-            "auth=api_key — set `vars.input.params.vendor_api_key`."
+            "auth=api_key -- set `vars.input.params.vendor_api_key`."
         )
     elif auth_method:
         warnings.append(
             f"auth_method={auth_method!r} is not standard bearer/basic/"
-            "apikey — adjust headers manually."
+            "apikey -- adjust headers manually."
         )
     else:
         warnings.append(
-            "fixture has no auth_method hint — confirm the API's auth "
+            "fixture has no auth_method hint -- confirm the API's auth "
             "requirement and add headers accordingly."
         )
 
@@ -486,7 +486,7 @@ def _render_fallback_step(fixture: dict[str, Any], *,
     }
     if fixture.get("confidence") not in (None, "high"):
         warnings.append(
-            f"fixture confidence={fixture['confidence']!r} — verify the "
+            f"fixture confidence={fixture['confidence']!r} -- verify the "
             "request shape against your tenant's API version before "
             "shipping to prod."
         )
@@ -570,7 +570,7 @@ def propose_http_fallback(vendor: str, intent: str, *,
             break
     if api_call_op:
         warnings.append(
-            "Using the connector's generic API-call op — auth + base URL "
+            "Using the connector's generic API-call op -- auth + base URL "
             "are handled by the connector's config. Fill request `method`, "
             "`endpoint`, and `payload` from the catalog fixture you "
             "consulted (call find_api_fixture)."
@@ -620,7 +620,7 @@ def propose_http_fallback(vendor: str, intent: str, *,
         # 2. higher intent-token overlap = better (negate so smaller wins).
         # This DOMINATES the method tie-break: an agent can flip GET→POST
         # by hand, but cannot guess the correct path. Pinning the path
-        # is the high-value signal — the catalog often has the path
+        # is the high-value signal -- the catalog often has the path
         # for one method but not the other.
         overlap = -_intent_overlap_score(url, intent_tokens)
         # 3. method matches the intent verb (create→POST etc.)

@@ -50,7 +50,7 @@ def test_dispatch_approved_sentinel_bypasses_gate():
     # Unknown connector/op = tier 3 by default. Without _approved it
     # returns pending_approval. With _approved=True it falls through to
     # the underlying function (which itself errors because the op is
-    # bogus — but importantly NOT with pending_approval).
+    # bogus -- but importantly NOT with pending_approval).
     out = dispatch(
         "run_op",
         {"connector": "__nope__", "op": "__nope__", "_approved": True},
@@ -102,7 +102,7 @@ def test_stash_pop_single_use():
     _approvals.stash(s)
     got = _approvals.pop(s.approval_id)
     assert got is not None and got.approval_id == s.approval_id
-    # Second pop returns None — single-use.
+    # Second pop returns None -- single-use.
     assert _approvals.pop(s.approval_id) is None
 
 
@@ -171,7 +171,7 @@ def test_resolve_approval_bad_decision(client):
     r = client.post(f"/api/approvals/{s.approval_id}", json={"decision": "maybe"})
     assert r.status_code == 200
     assert "approve or deny" in r.text
-    # Session NOT consumed on bad input — user can retry with a valid
+    # Session NOT consumed on bad input -- user can retry with a valid
     # decision.
     assert _approvals.peek(s.approval_id) is not None
 
@@ -252,7 +252,7 @@ def test_step_up_correct_target_allows_approve(client):
 
 
 def test_step_up_not_required_on_deny(client):
-    # Deny should not require confirmed_target even at tier 4 — the
+    # Deny should not require confirmed_target even at tier 4 -- the
     # user is opting out, not committing to anything.
     s = _mk_tier4_session("su4")
     _approvals.stash(s)

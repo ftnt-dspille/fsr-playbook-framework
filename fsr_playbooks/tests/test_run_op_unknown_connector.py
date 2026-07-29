@@ -1,5 +1,5 @@
 """`run_op` against a connector that exists nowhere must bounce a clean
-`unknown_connector` error BEFORE the tier gate — not escalate an uncatalogued
+`unknown_connector` error BEFORE the tier gate -- not escalate an uncatalogued
 connector to a tier-3 approval card the model can't act on.
 
 Regression for the live 8.0 case: an alert hunt with no SIEM configured

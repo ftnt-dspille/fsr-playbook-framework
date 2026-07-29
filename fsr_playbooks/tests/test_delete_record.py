@@ -1,8 +1,8 @@
-"""Phase 2 coverage — `delete_record` short type.
+"""Phase 2 coverage -- `delete_record` short type.
 
 FortiSOAR has no dedicated delete step type (the editor palette is
 Create/Update/Find only). Record deletion is performed by a connector step
-calling `cyops_utilities.make_cyops_request` with HTTP `method: DELETE` —
+calling `cyops_utilities.make_cyops_request` with HTTP `method: DELETE` --
 verified against 4 real corpus playbooks (single-record IRI and
 `delete-with-query` bulk forms). `delete_record` is a friendly short type that
 compiles to exactly that call.

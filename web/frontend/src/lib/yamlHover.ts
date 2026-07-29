@@ -1,5 +1,5 @@
 /**
- * Monaco hover provider — when the cursor is on `arguments:` (or any
+ * Monaco hover provider -- when the cursor is on `arguments:` (or any
  * key directly under it), look up the enclosing step's `type:` and
  * surface the curated step-args help as a markdown popup.
  *
@@ -75,7 +75,7 @@ function findEnclosingType(
       return m[1];
     }
     // Hard stop when we reach a previous step opener at or below
-    // argsIndent — we've left this step's body.
+    // argsIndent -- we've left this step's body.
     if (n !== startLine && stripped.startsWith('- ') && ind < argsIndent) {
       return null;
     }
@@ -109,7 +109,7 @@ export function registerYamlHover(monaco: any): { dispose: () => void } {
           }
           // Crossed out of this step's body.
           if (s.startsWith('- ') && i < ind) return null;
-          // Hit a sibling top-level key at the args indent — not under args.
+          // Hit a sibling top-level key at the args indent -- not under args.
           if (i < ind && !/^arguments\s*:/.test(s)) return null;
         }
       }

@@ -1,4 +1,4 @@
-"""Generate `store/CONNECTORS.md` — agent cheatsheet for every connector,
+"""Generate `store/CONNECTORS.md` -- agent cheatsheet for every connector,
 operation, and parameter known to the live FSR instance.
 
 Output shape is optimized for grep + LLM context: one heading per connector
@@ -87,7 +87,7 @@ def build_connectors_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> P
         "Format per operation: `op_name(req: type, [opt: type])`. Square "
         "brackets denote optional parameters. Conditional / nested params "
         "(rendered when a parent value is set) are omitted from the inline "
-        "signature — use `fsrpb explain connector <name>` to see them."
+        "signature -- use `fsrpb explain connector <name>` to see them."
     )
     parts.append("")
     parts.append("---")
@@ -97,7 +97,7 @@ def build_connectors_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> P
     parts.append("")
     for cat in sorted(by_category):
         slug = cat.lower().replace(" ", "-").replace("/", "-")
-        parts.append(f"- [{cat}](#{slug}) — {len(by_category[cat])}")
+        parts.append(f"- [{cat}](#{slug}) -- {len(by_category[cat])}")
     parts.append("")
     parts.append("---")
     parts.append("")
@@ -140,17 +140,17 @@ def build_connectors_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> P
 
             ops_by_op_cat: dict[str, list[sqlite3.Row]] = defaultdict(list)
             for o in visible_ops or ops:
-                ops_by_op_cat[o["category"] or "—"].append(o)
+                ops_by_op_cat[o["category"] or "--"].append(o)
 
             for op_cat in sorted(ops_by_op_cat):
-                if op_cat != "—":
+                if op_cat != "--":
                     parts.append(f"_{op_cat}_")
                 for o in ops_by_op_cat[op_cat]:
                     sig = _params_summary(params_by_op.get((name, o["op_name"]), []))
                     title = o["title"] or o["op_name"]
                     line = f"- `{o['op_name']}{sig}`"
                     if title != o["op_name"]:
-                        line += f" — {title}"
+                        line += f" -- {title}"
                     parts.append(line)
                 parts.append("")
             parts.append("")

@@ -4,8 +4,8 @@
    *
    * Unlike VarPathPicker (which is step-scoped and walks a Visual
    * playbook's ancestor edges), this picker is purely data-driven: it
-   * lists everything reachable from `jinjaShapesStore` — all known
-   * `vars.steps.<key>` shapes with their typed fields — plus the
+   * lists everything reachable from `jinjaShapesStore` -- all known
+   * `vars.steps.<key>` shapes with their typed fields -- plus the
    * always-available `vars.input.records[0].*` fields (module-aware
    * when the YAML carries a recognizable trigger).
    *
@@ -37,7 +37,7 @@
 
   // When the picker opens, sniff the current YAML for a trigger module
   // and upgrade record-field suggestions to module-aware ones. We don't
-  // do this on every keystroke — the picker open is a deliberate user
+  // do this on every keystroke -- the picker open is a deliberate user
   // action, perfect moment to spend a fetch.
   $effect(() => {
     if (!open || !editor) return;
@@ -82,7 +82,7 @@
 
   let rows = $derived.by(() => {
     const out: Row[] = [];
-    // 1. Trigger-record fields — always available.
+    // 1. Trigger-record fields -- always available.
     for (const f of recordFields) {
       const safe = /^[A-Za-z_][\w]*$/.test(f);
       const seg = safe ? `.${f}` : `['${f}']`;
@@ -97,7 +97,7 @@
       group: 'input',
       hint: 'playbook parameter'
     });
-    // Buffer-derived globalVars names — show actual names the user
+    // Buffer-derived globalVars names -- show actual names the user
     // already referenced; fall back to the placeholder when none.
     if (globalNames.length) {
       for (const n of globalNames) {
@@ -125,7 +125,7 @@
     //    top-level vars above; emitting both would mislead authors).
     for (const [k, shape] of Object.entries(jinjaShapesStore.shapes)) {
       // Detect set_variable shapes: object whose keys are exactly the
-      // top-level var names — those are surfaced above already.
+      // top-level var names -- those are surfaced above already.
       const isSetVar = shape.kind === 'object' &&
         Object.keys(shape.keys ?? {}).every((kk) => kk in jinjaShapesStore.topLevelVars);
       if (isSetVar && Object.keys(shape.keys ?? {}).length > 0) continue;
@@ -206,7 +206,7 @@
               >
                 <div class="font-mono text-[11px] text-[var(--text-default)]">{r.path}</div>
                 <div class="text-[10px] text-[var(--text-faint)]">
-                  {r.group} — {r.hint}
+                  {r.group} -- {r.hint}
                 </div>
               </button>
             </li>

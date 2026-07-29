@@ -7,15 +7,15 @@
  * jinjaPathCompletions.resolveJinjaPathType, and shows the type as a
  * markdown popup.
  *
- * Only handles `vars.steps.*` for now — `vars.input.records[0].*`
+ * Only handles `vars.steps.*` for now -- `vars.input.records[0].*`
  * could be added once a module-aware field type catalog is wired in.
  */
 import { resolveJinjaPathType, shapeLabel } from './jinjaPathCompletions';
 import { extractTriggerModule } from './triggerModuleFields.svelte';
 import type { Shape } from './shapeStubs';
 
-/** Render the body of the hover popup: the type label, plus — when
- *  the shape is an object — a fenced list of the keys at this level
+/** Render the body of the hover popup: the type label, plus -- when
+ *  the shape is an object -- a fenced list of the keys at this level
  *  (with their types). Lists show the element type; scalars/none/
  *  unknown render only the type label. */
 function renderBody(shape: Shape): string {
@@ -23,7 +23,7 @@ function renderBody(shape: Shape): string {
   if (shape.kind === 'object') {
     const rows = Object.entries(shape.keys ?? {})
       .slice(0, 24) // cap to keep the popup scannable on wide shapes
-      .map(([k, v]) => `- \`${k}\` — _${shapeLabel(v)}_`)
+      .map(([k, v]) => `- \`${k}\` -- _${shapeLabel(v)}_`)
       .join('\n');
     return rows
       ? `_type:_ \`${label}\`\n\n**keys:**\n${rows}`
@@ -32,7 +32,7 @@ function renderBody(shape: Shape): string {
   if (shape.kind === 'list' && shape.item.kind === 'object') {
     const rows = Object.entries(shape.item.keys ?? {})
       .slice(0, 24)
-      .map(([k, v]) => `- \`${k}\` — _${shapeLabel(v)}_`)
+      .map(([k, v]) => `- \`${k}\` -- _${shapeLabel(v)}_`)
       .join('\n');
     return rows
       ? `_type:_ \`${label}\`\n\n**item keys:**\n${rows}`
@@ -94,7 +94,7 @@ export function registerJinjaHover(monaco: any): { dispose: () => void } {
       const line: string = model.getLineContent(position.lineNumber);
       const path = extractPathAtCursor(line, position.column);
       if (!path) return null;
-      // vars.input.records — handled separately (no Shape in the store).
+      // vars.input.records -- handled separately (no Shape in the store).
       if (path.startsWith('vars.input.records')) {
         const yamlText = model.getValue?.() ?? '';
         const body = renderInputRecordHover(path, yamlText);

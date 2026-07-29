@@ -1,4 +1,4 @@
-"""Secrets backend — keyring on macOS/Windows/Linux-with-DBus, with a
+"""Secrets backend -- keyring on macOS/Windows/Linux-with-DBus, with a
 graceful fallback for headless boxes.
 
 Single abstraction (`SecretsBackend`) so the rest of the app calls
@@ -9,7 +9,7 @@ to Vault / AWS-Secrets-Manager later without rewiring callers.
 
 Headless Linux: if no D-Bus session is running, `keyring` raises
 NoKeyringError. We catch that and surface `available()=False` instead of
-crashing — the settings UI shows a banner telling the user to install
+crashing -- the settings UI shows a banner telling the user to install
 gnome-keyring or set FSR_STUDIO_SECRETS_FALLBACK=encrypted_file.
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ class SecretsBackend(Protocol):
 
 
 class KeyringBackend:
-    """Default — uses whatever the OS provides via the `keyring` library."""
+    """Default -- uses whatever the OS provides via the `keyring` library."""
 
     def get(self, name: str) -> str | None:
         try:
@@ -57,7 +57,7 @@ class KeyringBackend:
             keyring.get_password(SERVICE, "__probe__")
             backend = kr.__class__.__name__
             # `fail.Keyring` is what `keyring` returns when no real
-            # backend is available — treat as unavailable even though
+            # backend is available -- treat as unavailable even though
             # the call didn't raise.
             if backend == "Keyring" and "fail" in kr.__class__.__module__.lower():
                 return False, "no usable keyring backend on this host"
@@ -83,7 +83,7 @@ def get_secrets() -> SecretsBackend:
 
 
 def reset_for_tests(backend: SecretsBackend | None = None) -> None:
-    """Test helper — swap in a fake or clear so the next get_secrets()
+    """Test helper -- swap in a fake or clear so the next get_secrets()
     re-instantiates."""
     global _singleton
     _singleton = backend

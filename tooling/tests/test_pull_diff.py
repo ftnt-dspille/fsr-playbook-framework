@@ -12,7 +12,7 @@ from fsr_playbooks.compiler.decompiler import decompile
 from fsr_playbooks.compiler.emitter import emit
 from fsr_playbooks.compiler.roundtrip import diff, normalize_collection
 
-# Real step-type UUIDs from the live appliance — keep these stable so the
+# Real step-type UUIDs from the live appliance -- keep these stable so the
 # fixture matches what `?$relationships=true` would return.
 TRIGGER_UUID = "b348f017-9a94-471f-87f8-ce88b6a7ad62"   # cybersponse.abstract_trigger
 SET_VAR_UUID = "04d0cf46-b6a8-42c4-8683-60a7eaa69e8f"   # SetVariable
@@ -111,7 +111,7 @@ def test_diff_detects_drift(db_path):
     fixture = _live_shape_fixture()
     ir = decompile(fixture, db_path)
     # Replace the arguments dict (rather than mutating in place) so we don't
-    # also mutate the fixture — decompile shares the dict reference.
+    # also mutate the fixture -- decompile shares the dict reference.
     ir.playbooks[0].steps[1].arguments = {"arg_list": [{"name": "x", "value": "999"}]}
     regen = emit(ir)
     a = normalize_collection(fixture)

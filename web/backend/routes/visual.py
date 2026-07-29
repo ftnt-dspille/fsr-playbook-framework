@@ -165,7 +165,7 @@ def write_file(payload: FileWriteIn) -> dict[str, Any]:
         "ok": False,
         "code": "examples_readonly",
         "message": (
-            "examples/ are read-only — clone to a draft before saving. "
+            "examples/ are read-only -- clone to a draft before saving. "
             "Use POST /api/playbooks/draft/from-example."
         ),
     }
@@ -174,7 +174,7 @@ def write_file(payload: FileWriteIn) -> dict[str, Any]:
 class SamplesIn(BaseModel):
     """Replace the entire `# fsrpb:samples` sidecar block.
 
-    Whole-map writes are fine here — the block is tiny, the diff cost
+    Whole-map writes are fine here -- the block is tiny, the diff cost
     is dominated by network not bytes, and per-step PATCH would invite
     last-writer-wins races with no real upside.
     """

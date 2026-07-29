@@ -25,7 +25,7 @@ def _sev(findings, sev):
 
 
 # --------------------------------------------------------------------------- #
-# B1 — syntax (E2)
+# B1 -- syntax (E2)
 # --------------------------------------------------------------------------- #
 
 def test_b1_top_level_return_is_error():
@@ -46,7 +46,7 @@ def test_b1_empty_snippet_is_clean():
 
 
 # --------------------------------------------------------------------------- #
-# B2 — sandbox bans (E3), config-aware imports
+# B2 -- sandbox bans (E3), config-aware imports
 # --------------------------------------------------------------------------- #
 
 def test_b2_open_is_always_error():
@@ -104,12 +104,12 @@ def test_linter_respects_inline_allow_imports():
 
 
 # NOTE: the E (notrigger vars.inputs namespace) check was REMOVED after a live
-# run contradicted its premise — see grounded_shapes / the plan doc gap E. Its
+# run contradicted its premise -- see grounded_shapes / the plan doc gap E. Its
 # tests were removed with it.
 
 
 # --------------------------------------------------------------------------- #
-# I — packaging self-check (E10)
+# I -- packaging self-check (E10)
 # --------------------------------------------------------------------------- #
 
 def test_i_self_check_passes_on_healthy_install():

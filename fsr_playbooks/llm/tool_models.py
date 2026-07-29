@@ -15,7 +15,7 @@ class GetRecordArgs(BaseModel):
 
     Mirrors the REAL registered signature: get_record(iri="", module="",
     uuid="", relationships=True, full=False, record_id=""). The old model
-    here required module+record_id(str) — a stale gate that rejected every
+    here required module+record_id(str) -- a stale gate that rejected every
     legitimate form the agent tried on a live matrix run (iri-only,
     module+uuid, integer record_id), 3 tool errors in one turn.
     `coerce_numbers_to_str` accepts an integer id instead of bouncing it.
@@ -28,7 +28,7 @@ class GetRecordArgs(BaseModel):
     record_id: Optional[str] = None
     # Accept a bool OR a list of relationship names. The registered tool takes a
     # bool ("hydrate related records inline"), but the agent naturally reaches
-    # for `relationships=["ztpfArtifacts"]` to expand a *named* relationship —
+    # for `relationships=["ztpfArtifacts"]` to expand a *named* relationship --
     # which used to bounce at this gate with "Input should be a valid boolean",
     # dead-ending the very "summarize the related steps" turn ztpf devices need.
     # A name-list is coerced to True (hydrate all) in the tool; a bad value can
@@ -42,10 +42,10 @@ class GetRecordArgs(BaseModel):
         if not (self.iri or (self.module and (self.uuid or self.record_id))):
             raise ValueError(
                 "identify the record via `iri` alone, or `module` plus "
-                "`uuid`/`record_id` — e.g. "
+                "`uuid`/`record_id` -- e.g. "
                 'get_record(iri="/api/3/alerts/<uuid>") or '
                 'get_record(module="alerts", uuid="<uuid>"). '
-                "get_record fetches ONE record — to find records by a field or "
+                "get_record fetches ONE record -- to find records by a field or "
                 "relationship (e.g. every step on a device), use "
                 "search_module_records(module=..., filters={...})."
             )
@@ -59,7 +59,7 @@ class SearchModuleRecordsArgs(BaseModel):
     the tool documents, AND the list-of-conditions form
     ``[{"field": ..., "op": ..., "value": ...}]`` (or ``{"key":..,"value":..}``)
     it instinctively reaches for. The list form used to bounce here with
-    "filters: Input should be a valid dictionary" — the single most frequent
+    "filters: Input should be a valid dictionary" -- the single most frequent
     tool error in live ztpf sessions (the agent retried it 4+ times per session,
     never finding records that plainly existed). The tool normalizes whichever
     shape arrives; this gate must not reject either.
@@ -86,7 +86,7 @@ class EmitActionCardArgs(BaseModel):
 
     Mirrors the REAL registered signature: emit_action_card(id, connector,
     operation, summary, args, editable_fields). The old model here required
-    `title` — a field the registered tool does not accept — while omitting
+    `title` -- a field the registered tool does not accept -- while omitting
     id/connector/args/editable_fields entirely. So every live containment card
     the agent staged (correctly passing summary/operation/args) bounced with
     "title: Field required" and the turn ended with no action card (matrix

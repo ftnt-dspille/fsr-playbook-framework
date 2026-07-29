@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Phase 2.2 — Examples view.
+   * Phase 2.2 -- Examples view.
    *
    * Two stacked sections:
    * - Operation examples from `find_operation_example` (real
@@ -10,7 +10,7 @@
    *   vars.steps.<predecessor>.*) plus a generic "for this step
    *   type" pull when no var anchor is available.
    *
-   * Each example has a "Copy" button (Phase 2.3 — write-path
+   * Each example has a "Copy" button (Phase 2.3 -- write-path
    * proof). Insert-into-args uses the same plumbing once Phase 3
    * lands the structural-edit endpoint.
    */
@@ -88,7 +88,7 @@
         return { var_path: `vars.steps.${key}` };
       }
     }
-    // No predecessor — narrow by step type. ManualInput / Decision /
+    // No predecessor -- narrow by step type. ManualInput / Decision /
     // SetVariable / etc. all have idiomatic patterns.
     const stepType =
       n.type === 'set_variable' ? 'SetVariable' :
@@ -153,7 +153,7 @@
   });
 
   /** Minimal JSON syntax highlighter: tokenises keys, strings, numbers,
-   * booleans, and null. Returns HTML with span class names — Tailwind
+   * booleans, and null. Returns HTML with span class names -- Tailwind
    * styles them via the `.fsrpb-json-*` rules at the bottom of the
    * file. Escapes `<` so injection isn't possible. */
   function highlightJson(raw: string): string {

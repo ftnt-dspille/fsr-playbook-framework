@@ -1,14 +1,14 @@
-"""Phase 1a probe — variable scoping / lifetime (live).
+"""Phase 1a probe -- variable scoping / lifetime (live).
 
 STATIC_TYPE_FLOW_PLAN.md Phase 1a: the branch-local var-typer (Phase 2)
 needs the engine's real scoping rules, not assumptions. This drives small
-playbooks on the live box and reads back (via the force-fail channel — see
+playbooks on the live box and reads back (via the force-fail channel -- see
 probe_set_variable_coercion) what a downstream step actually sees:
 
-  A. predecessor visibility + sibling-arm isolation — a var set BEFORE a
+  A. predecessor visibility + sibling-arm isolation -- a var set BEFORE a
      decision is visible on the taken arm; a var set ONLY on the sibling
      (untaken) arm is NOT.
-  B. for_each `vars.item` lifetime — is the loop binding still readable in a
+  B. for_each `vars.item` lifetime -- is the loop binding still readable in a
      step AFTER the for_each step, or only inside it?
 
 Each probe ends in a code_snippet that raises, so FSR persists the prior

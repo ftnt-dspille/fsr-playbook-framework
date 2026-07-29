@@ -1,4 +1,4 @@
-"""Typed-args model for `delay` steps — registry contract, expand parity,
+"""Typed-args model for `delay` steps -- registry contract, expand parity,
 and the new clean-error behaviour (a non-numeric duration is a BAD_VALUE
 diagnostic, not an uncaught int() crash)."""
 from __future__ import annotations

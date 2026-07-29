@@ -1,4 +1,4 @@
-"""Resolver — looks up references against the SQLite reference store.
+"""Resolver -- looks up references against the SQLite reference store.
 
 The resolver is the only compiler component that touches the DB. It
 turns short YAML names into FSR-canonical identifiers (step type UUIDs,
@@ -62,17 +62,17 @@ class Resolver(
         ).fetchall()]
         if not candidates:
             # The WorkflowPriority picklist was never synced into this
-            # reference DB (zero rows) — we have nothing to validate against.
+            # reference DB (zero rows) -- we have nothing to validate against.
             # An unsynced reference table is a setup gap, not an authoring
             # bug: leave priority unset SILENTLY rather than emit a spurious
             # bad_value warning the author can't act on.
             pb.priority = None
             return
         sug = difflib.get_close_matches(pb.priority, candidates, n=1, cutoff=0.5)
-        valid = ", ".join(sorted(candidates)) or "(none synced — run the modules probe)"
+        valid = ", ".join(sorted(candidates)) or "(none synced -- run the modules probe)"
         errors.append(CompileError(
             code=ErrorCode.BAD_VALUE,
-            message=(f"unknown priority {pb.priority!r}; valid: {valid} — "
+            message=(f"unknown priority {pb.priority!r}; valid: {valid} -- "
                      "leaving priority unset"),
             path=f"{path}.priority",
             near=sug[0] if sug else None,
@@ -88,7 +88,7 @@ class Resolver(
         Authors write friendly team names (``owners: ["TeamA"]``); the compiler
         converts them to the IRI wire shape via the warmed ``teams`` table
         (populated by the modules probe from ``GET /api/3/teams``). Values that
-        are already IRIs pass through unchanged. No live lookup — a missing or
+        are already IRIs pass through unchanged. No live lookup -- a missing or
         unsynced ``teams`` table surfaces as a clear ``CompileError`` (the
         author must warmup, or use the team IRI directly).
         """
@@ -102,14 +102,14 @@ class Resolver(
             n = 0
         resolved: list[str] = []
         for owner in pb.owners:
-            # IRI passthrough — no resolution needed (works offline).
+            # IRI passthrough -- no resolution needed (works offline).
             if owner.startswith("/api/"):
                 resolved.append(owner)
                 continue
             if n == 0:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message=(f"owner team {owner!r} can't be resolved — the "
+                    message=(f"owner team {owner!r} can't be resolved -- the "
                              f"`teams` reference table is unsynced. Run warmup "
                              f"against the target SOAR, or use the team IRI "
                              f"(`/api/3/teams/<uuid>`) directly."),

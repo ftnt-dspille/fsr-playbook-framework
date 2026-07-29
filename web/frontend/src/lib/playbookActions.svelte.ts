@@ -2,7 +2,7 @@
  * Shared validate / compile / push / push-and-run pipeline.
  *
  * Both Design (visual canvas) and CLI (Monaco + chat) used to drive
- * these themselves — Design's "Live play" was a stub `alert()`, CLI
+ * these themselves -- Design's "Live play" was a stub `alert()`, CLI
  * had a fully wired Push & Run. Consolidated here so the unified
  * BuildBar can call into one code path and both modes get parity.
  *
@@ -13,7 +13,7 @@
  * surface) bind to this store.
  *
  * Source-of-truth YAML comes from `playbookStore.currentYaml`; callers
- * never pass YAML in — that avoids stale-buffer bugs where Design
+ * never pass YAML in -- that avoids stale-buffer bugs where Design
  * had unsaved canvas edits but CLI ran against the on-disk text.
  */
 import {
@@ -124,7 +124,7 @@ export const playbookActions = {
     }
   },
 
-  /** Render-path validator — simulates the playbook offline and
+  /** Render-path validator -- simulates the playbook offline and
    * surfaces data-access bugs (`vars.steps.X.Y` typos, missing keys,
    * required-empty fields) that `validate_yaml` can't see. Pass
    * `executeSafeOps: true` to also run C4 picklist drift against
@@ -177,7 +177,7 @@ export const playbookActions = {
   get verifyFixCount() { return state.verify?.required_fixes.length ?? 0; },
   /** Worst severity per step jkey from the latest verify run.
    * Returns 'error' | 'warning' | null per step name (with spaces→underscores
-   * because that's how the typed walker emits step ids — matches the
+   * because that's how the typed walker emits step ids -- matches the
    * canvas's jkey scheme). */
   get verifyByStep(): Map<string, 'error' | 'warning'> {
     const m = new Map<string, 'error' | 'warning'>();
@@ -209,7 +209,7 @@ export const playbookActions = {
     state.verifyBusy = true;
     state.status = { kind: 'busy', msg: 'verifying…' };
     try {
-      // verbose:true so evidence.per_step_jinja_shapes comes back —
+      // verbose:true so evidence.per_step_jinja_shapes comes back --
       // VarPathPicker + future Monaco completions consume this for
       // type-aware var-path suggestions. The marginal cost over a
       // non-verbose verify is negligible (just extra payload bytes).

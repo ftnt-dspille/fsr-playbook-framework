@@ -1,4 +1,4 @@
-"""Pytest config — make the FastAPI app importable from any cwd, and
+"""Pytest config -- make the FastAPI app importable from any cwd, and
 swap in an in-memory secrets backend + temporary settings.json so tests
 never touch the real OS keychain or the developer's saved settings."""
 from __future__ import annotations

@@ -10,7 +10,7 @@ Scope is intentionally narrow:
 - Only step types where args are uniform across samples (allowlist).
 - Skips Connectors / WorkflowReference / SetVariable (validated elsewhere
   or free-form by design).
-- Only checks literal values — Jinja expressions (`{{ ... }}`) are skipped.
+- Only checks literal values -- Jinja expressions (`{{ ... }}`) are skipped.
 - Emits warnings, never errors. Heuristic, not authoritative.
 
 The classic catch this enables: `operation: append` (lowercase) when the
@@ -117,7 +117,7 @@ class CorpusValidator:
                 # Drop singletons unless every other value is also strong;
                 # require the top values to cover the key's appearances.
                 enums[k] = {val for val, _c in vc.items()}
-            # Always register the step type even when no enum keys —
+            # Always register the step type even when no enum keys --
             # the likely-required-key check still fires off `_always_keys`.
             index[stype] = enums
         return index
@@ -158,7 +158,7 @@ class CorpusValidator:
                 errors.append(CompileError(
                     code=ErrorCode.MISSING_FIELD,
                     message=(
-                        f"{stype}.arguments.{k} is missing — every corpus "
+                        f"{stype}.arguments.{k} is missing -- every corpus "
                         f"sample for this step type sets this key"
                     ),
                     path=f"{path}.arguments.{k}",

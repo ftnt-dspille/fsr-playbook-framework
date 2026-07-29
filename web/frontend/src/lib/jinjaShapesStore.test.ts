@@ -1,5 +1,5 @@
 /**
- * jinjaShapesStore — small reactive container for per-step Jinja
+ * jinjaShapesStore -- small reactive container for per-step Jinja
  * output Shapes. Verify the public API: shapes/setShapes/shapesFor +
  * the null-fallback when a step hasn't been verified yet.
  */

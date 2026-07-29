@@ -14,7 +14,7 @@ and expands to FSR's canonical InputBased shape (`input.schema` +
 Unlike decision/record_crud, this layer is **validation-only**: the
 friendly→canonical transform (branch-label promotion, mode-aware co-presence
 checks, the InputBased default, the empty-description fallback) is large,
-battle-tested, and was the F3 bug site — it stays in the imperative normalizer
+battle-tested, and was the F3 bug site -- it stays in the imperative normalizer
 (`resolver/normalizers.py::_normalize_manual_input_args`). `ManualInputArgs`
 exists for two jobs the imperative path doesn't do:
 
@@ -27,7 +27,7 @@ exists for two jobs the imperative path doesn't do:
 
 `extra="allow"` because the canonical sibling keys (`input`, `record`,
 `owner_detail`, `response_mapping`, the email-template keys, …) ride through
-untouched — the imperative normalizer's whitelist already owns unknown-key
+untouched -- the imperative normalizer's whitelist already owns unknown-key
 rejection, so this model must not re-reject them. Structural/ambiguous fields
 (`input`, `record`, `options`, `inputs`, `type`) are left untyped (`Any`):
 their shape rules and the `type` dispatch-value check are owned by the

@@ -1,4 +1,4 @@
-"""Render-path extractor — find every ``vars.…`` reference inside a
+"""Render-path extractor -- find every ``vars.…`` reference inside a
 step's arguments.
 
 Used by the render-path validator (RENDER_PATH_VALIDATOR_PLAN.md
@@ -7,7 +7,7 @@ Phase 2) to know what each step *consumes*. Pairing producers
 the analyzer flag unreachable refs, missing-key access, type mismatch,
 and dead steps.
 
-Pure offline — no live FSR, no jinja rendering, just AST walk.
+Pure offline -- no live FSR, no jinja rendering, just AST walk.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class ConsumedPath:
     ``path`` is dotted (``vars.steps.fetch.data.id``); ``segments`` is
     the same path split for analyzer convenience. ``source_step_id``
     is the producer step name normalized to its FSR Jinja key (spaces
-    → underscores) — empty string for ``vars.input.*`` and other
+    → underscores) -- empty string for ``vars.input.*`` and other
     non-step refs. ``location`` is a dotted path into the step's
     ``arguments`` showing where the reference appeared, useful for
     UI deep-linking.
@@ -46,7 +46,7 @@ def _node_to_path(node: nodes.Node) -> tuple[str, ...] | None:
 
     Handles ``vars.steps.X.Y``, ``vars.input.Z``, ``vars.steps[X].Y``
     (subscript form), and ``vars.item``. Anything that isn't a pure
-    chain of Name + Getattr + constant Getitem yields ``None`` —
+    chain of Name + Getattr + constant Getitem yields ``None`` --
     those references involve runtime values we can't statically
     resolve, and the analyzer should skip them.
     """
@@ -88,7 +88,7 @@ def _walk_ast(root: nodes.Node) -> Iterator[tuple[str, ...]]:
         if path in seen_chains:
             continue
         # Only emit if this is the *outermost* such reference for
-        # this chain — i.e. the parent isn't another Getattr/Getitem
+        # this chain -- i.e. the parent isn't another Getattr/Getitem
         # extending it. Easiest: track all emitted prefixes and skip
         # any path that's a prefix of one we'll see later. Two-pass.
         seen_chains.add(path)
@@ -164,7 +164,7 @@ def extract_picklist_refs(value: Any,
     """Find every ``{{ 'PicklistName' | picklist('value') }}`` filter
     invocation in a step's arguments tree.
 
-    Static — pure regex over template strings. Returns one dict per
+    Static -- pure regex over template strings. Returns one dict per
     call: ``{picklist, value, location}``. The analyzer's C4 check
     uses these to validate values against the live FSR's picklists
     via ``precheck_picklist_value``.

@@ -20,7 +20,7 @@
   type Props = {
     /** Target module for the live search (e.g. ``people``, ``alerts``). */
     module: string;
-    /** Current IRI / Jinja expression — passes through unchanged on
+    /** Current IRI / Jinja expression -- passes through unchanged on
      * each keystroke; commits to onChange on blur or pick. */
     value: string;
     /** Fires with the new value (IRI from the picker, or whatever the

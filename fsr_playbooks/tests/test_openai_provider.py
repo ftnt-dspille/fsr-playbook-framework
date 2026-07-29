@@ -1,4 +1,4 @@
-"""OpenAIProvider — wire-format translation + HITL approval parity.
+"""OpenAIProvider -- wire-format translation + HITL approval parity.
 
 The OpenAI client is mocked so tests need no live endpoint. These cover
 the bits that differ from / extend the LM Studio loop: tool-call delta
@@ -246,7 +246,7 @@ def test_contract_stop_reason_normalizes_openai_finish_reasons():
     assert _contract_stop_reason(None) == "end_turn"
     assert _contract_stop_reason("") == "end_turn"
     # Token-limit truncation gets its OWN reason. It used to map onto
-    # "max_turns", which reads as the tool-loop budget — so a build turn cut off
+    # "max_turns", which reads as the tool-loop budget -- so a build turn cut off
     # mid-playbook was indistinguishable from the benign "out of tool turns,
     # send another message" stop. The tool loop emits `max_tool_turns`, so the
     # two must never share a token again.
@@ -263,7 +263,7 @@ def test_output_cap_is_configurable_and_no_longer_4096():
     """A whole playbook plus its prose does not fit in 4096 output tokens.
 
     The cap was hardcoded in all three provider loops, so a build turn could
-    not physically return its document intact — it came back truncated with the
+    not physically return its document intact -- it came back truncated with the
     token-cap stop reason. Pin the raised default and the per-instance override
     so the limit can never silently drift back to a value a playbook outgrows.
     """
@@ -272,7 +272,7 @@ def test_output_cap_is_configurable_and_no_longer_4096():
     from fsr_playbooks.llm.openai_provider import OpenAIProvider
 
     assert DEFAULT_MAX_OUTPUT_TOKENS > 4096
-    # gpt-4o's own output ceiling is exactly 16384 — going above it would 400.
+    # gpt-4o's own output ceiling is exactly 16384 -- going above it would 400.
     assert DEFAULT_MAX_OUTPUT_TOKENS <= 16384
 
     assert OpenAIProvider(api_key="x").max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS

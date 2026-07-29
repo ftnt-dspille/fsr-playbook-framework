@@ -1,12 +1,12 @@
 """Typed model for the ``send_email`` step (FSR handler ``SendMail``).
 
-Friendly SMTP email step — a `SendMail` connector-family alias. The normalizer
+Friendly SMTP email step -- a `SendMail` connector-family alias. The normalizer
 (``_normalize_send_email_args`` + the caller's connector-family defaulting
 block) defaults `connector: smtp` + `operation: send_email`; `_resolve_connector_args`
 auto-lifts the flat email fields into `params:` + stamps `version`/`operationTitle`
 from the catalog. The smtp connector's `send_email` op takes `body`/`from` natively
 (verified live on 8.0), so there is NO `body`->`content` / `from`->`from_str`
-rename — the friendly author surface IS the canonical email field shape.
+rename -- the friendly author surface IS the canonical email field shape.
 
 This layer is *validation-only* (the ``connector`` / ``api_endpoint`` precedent):
 ``SendEmailArgs`` types the envelope scalars so an agent can introspect "what

@@ -30,7 +30,7 @@ def test_system_prompt_loads_from_md():
 
 def test_web_backend_system_prompt_uses_loader():
     # Importing through the web backend path should yield the SAME text
-    # as loading directly — single source of truth.
+    # as loading directly -- single source of truth.
     from backend.system_prompt import SYSTEM_PROMPT
     assert SYSTEM_PROMPT == load_system_prompt()
 

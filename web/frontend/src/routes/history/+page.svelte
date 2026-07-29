@@ -197,7 +197,7 @@
   }
 
   function fmtCost(c: number | null | undefined): string {
-    if (c == null) return '—';
+    if (c == null) return '--';
     if (c < 0.01) return `$${c.toFixed(4)}`;
     return `$${c.toFixed(3)}`;
   }
@@ -441,7 +441,7 @@
             <textarea
               id="fb-summary"
               bind:value={pendingSummary}
-              placeholder="What worked, what broke, what should a future session investigate? (e.g. 'Picked DecisionBased for a form prompt — should have been InputBased. Validator caught it but agent looped 3 times trying to fix.')"
+              placeholder="What worked, what broke, what should a future session investigate? (e.g. 'Picked DecisionBased for a form prompt -- should have been InputBased. Validator caught it but agent looped 3 times trying to fix.')"
               class="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg-panel)] p-2 text-sm text-[var(--text-default)] placeholder:text-[var(--text-faint)] focus:border-[var(--brand)] focus:outline-none"
               rows="3"
             ></textarea>

@@ -31,7 +31,7 @@ DENY = [
     re.compile(r"\b10\.99\.\d{1,3}\.\d{1,3}\b"),
     re.compile(r"\b[a-z0-9][a-z0-9.-]*\.fortinet\.(?:com|net)\b", re.IGNORECASE),
     re.compile(r"\b[a-z0-9][a-z0-9.-]*\.forticloud\.com\b", re.IGNORECASE),
-    # Internal lab admin account — never ship as an example credential.
+    # Internal lab admin account -- never ship as an example credential.
     re.compile(r"\bcsadmin\b", re.IGNORECASE),
 ]
 # Known-public strings that match a DENY pattern but are intentionally shipped.

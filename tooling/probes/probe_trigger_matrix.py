@@ -1,11 +1,11 @@
-"""probe_trigger_matrix — battle-test FSR field-based-trigger operators.
+"""probe_trigger_matrix -- battle-test FSR field-based-trigger operators.
 
 The question this answers: for each trigger operator (and nested AND/OR
 groups), does *creating a record that matches the condition actually fire
 the playbook*, and does *a non-matching record correctly NOT fire it*?
 And does the `/api/query/<module>` selection engine agree with the trigger
-evaluator? (They are known to differ — `in_all`/`changed` 500 on /query
-but work in triggers — so disagreement is itself a recorded finding.)
+evaluator? (They are known to differ -- `in_all`/`changed` 500 on /query
+but work in triggers -- so disagreement is itself a recorded finding.)
 
 For each case we:
   1. compile a one-step `start_on_create` playbook, then OVERWRITE the
@@ -66,7 +66,7 @@ def _leaf(field, operator, value, _operator=None, type_="primitive"):
 
 def _compile_when_group(logic: str, filters: list[dict]) -> dict:
     """Compile a friendly `when:` through the real compiler and return the
-    emitted `fieldbasedtrigger` group — so a probe case exercises exactly
+    emitted `fieldbasedtrigger` group -- so a probe case exercises exactly
     what authors get from the `when:` authoring path (incl. auto-correct)."""
     import yaml as _yaml
     when = {"logic": logic, "filters": filters}
@@ -111,12 +111,12 @@ def build_cases(tok: str) -> list[dict]:
          g("AND", _leaf("name", "neq", exact, "neq")), other, exact)
 
     # ---- pattern (the core finding) ----
-    # like WITH wildcards — should substring-match.
-    case("like_wild", "like %needle% (wildcarded — expected to work)",
+    # like WITH wildcards -- should substring-match.
+    case("like_wild", "like %needle% (wildcarded -- expected to work)",
          g("AND", _leaf("name", "like", f"%{needle}%", "like")), mid, other)
-    # like WITHOUT wildcards — suspected to behave as exact, so the
+    # like WITHOUT wildcards -- suspected to behave as exact, so the
     # substring record should NOT fire (demonstrates the bug).
-    case("like_nowild", "like needle (no % — suspected exact-only)",
+    case("like_nowild", "like needle (no % -- suspected exact-only)",
          g("AND", _leaf("name", "like", needle, "like")), mid, other,
          note="if match does NOT fire, confirms like needs % wildcards")
     # our emitter's actual output: _operator=like_pattern (unattested).
@@ -178,7 +178,7 @@ def build_cases(tok: str) -> list[dict]:
 def _baseline_yaml(coll_name: str) -> str:
     return f"""
 collection: "{coll_name}"
-description: "fsrpb trigger-matrix probe — safe to delete"
+description: "fsrpb trigger-matrix probe -- safe to delete"
 playbooks:
   - name: probe
     is_active: true
@@ -279,7 +279,7 @@ def _fired_set(client, wf_uuid: str, targets: set[str]) -> set[str]:
 def _await_fence(client, fence_wf: str, targets: set[str], cap: int,
                  poll: float = 2.0) -> set[str]:
     """Event-driven barrier: poll until the catch-all FENCE playbook has
-    fired for every record in `targets` — proof the engine has dispatched
+    fired for every record in `targets` -- proof the engine has dispatched
     each create event to all field-based triggers. Adaptive (returns the
     instant the fence is satisfied); `cap` is only a hang backstop, not a
     per-record wait. Returns the fence-fired subset."""
@@ -335,7 +335,7 @@ def run_case(client, case: dict, tok: str, log_dir: Path, fence_wf: str,
 
         # Create BOTH records. The catch-all FENCE playbook fires for every
         # create; once it has fired for both records, the engine has provably
-        # dispatched both create events to all field-based triggers — so the
+        # dispatched both create events to all field-based triggers -- so the
         # test playbook's verdict is final and we read it with no static wait.
         match_id = _create_alert(client, {**case["match"]})
         nomatch_id = _create_alert(client, {**case["nomatch"]})
@@ -370,7 +370,7 @@ def run_case(client, case: dict, tok: str, log_dir: Path, fence_wf: str,
         if coll and not keep:
             try:
                 _hard_purge(client, coll["uuid"], coll)
-            except Exception as e:  # noqa: BLE001 — cleanup must never lose results
+            except Exception as e:  # noqa: BLE001 -- cleanup must never lose results
                 out.setdefault("error", None)
                 print(f"      ! purge failed (collection {coll_name} left): {e}")
     return out
@@ -380,7 +380,7 @@ def _fmt(v):
     return {True: "yes", False: "NO", None: "?"}.get(v, str(v))
 
 
-# An empty filter group fires on *every* create — the event-watermark fence.
+# An empty filter group fires on *every* create -- the event-watermark fence.
 _FENCE_GROUP = {"sort": [], "limit": 30, "logic": "AND", "filters": []}
 
 
@@ -421,7 +421,7 @@ def main() -> int:
     if not fence_wf:
         print("ERROR: could not push/resolve fence playbook")
         return 1
-    print(f"fence playbook up (wf {fence_wf[:8]}) — event watermark\n")
+    print(f"fence playbook up (wf {fence_wf[:8]}) -- event watermark\n")
 
     results = []
     try:
@@ -459,7 +459,7 @@ def main() -> int:
     print("TRIGGER≠QUERY divergence:", ", ".join(diverge) or "(none)")
     unreliable = [r["id"] for r in results if r["fence_ok"] is False]
     if unreliable:
-        print("UNRELIABLE (fence hit cap — verdict suspect):",
+        print("UNRELIABLE (fence hit cap -- verdict suspect):",
               ", ".join(unreliable))
 
     if args.out:

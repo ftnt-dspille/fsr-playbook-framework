@@ -2,7 +2,7 @@
   /**
    * Read-only @xyflow/svelte canvas for a single playbook.
    *
-   * Phase 1.1–1.4: renders nodes for the seven step-type families,
+   * Phase 1.1-1.4: renders nodes for the seven step-type families,
    * shows verification status badges (1.3), and emits a `select`
    * event so the host page can render the right-hand inspector
    * panel (1.4). Editing comes in Phase 3.
@@ -33,7 +33,7 @@
     /** Authoritative selection (driven by EditWorkspace's
      *  `selectedNodeId`). When set, the matching SvelteFlow node gets
      *  `selected: true` so the blue outline tracks programmatic
-     *  selection changes — needed for keyboard nav (↑/↓/←/→), which
+     *  selection changes -- needed for keyboard nav (↑/↓/←/→), which
      *  shifts `selectedNodeId` without going through `onnodeclick`. */
     selectedNodeId?: string | null;
   };
@@ -109,7 +109,7 @@
         node: n,
         verification: verifs[n.id] ?? null,
         // Per-step verify_playbook status. Map keys are jinja-keys
-        // (step name with spaces→underscores) — match against either
+        // (step name with spaces→underscores) -- match against either
         // the node id or jkey since the typed walker uses step ids
         // and the validator uses jkeys.
         verifyStatus:
@@ -124,7 +124,7 @@
           (visualStore.state.graph?.samples ?? {})[playbook.name]?.[n.id]
           || (n.arguments as Record<string, unknown> | undefined)?.mock_result !== undefined
         ),
-        // Debug runner breakpoint (VISUAL_EDITOR_PLAN 5.4 tail) — shared
+        // Debug runner breakpoint (VISUAL_EDITOR_PLAN 5.4 tail) -- shared
         // with DebugPanel via `debugStore` so the canvas + trace tape
         // stay in lockstep without prop-drilling.
         isBreakpoint: debugStore.breakpoints.has(n.id),
@@ -154,11 +154,11 @@
       type: 'default',
       data: { label: e.label, branch_kind: e.branch_kind, direction, playbookIdx },
       animated: false,
-      // Explicit hex (not CSS var) — SVG markers don't inherit
+      // Explicit hex (not CSS var) -- SVG markers don't inherit
       // `currentColor` and a missing color renders the arrowhead
       // invisible. Match the stroke palette in FlowEdge so the
       // arrow blends cleanly into the line.
-      // No explicit width/height — xyflow's defaults position the
+      // No explicit width/height -- xyflow's defaults position the
       // arrow tip flush with the target handle. Setting custom sizes
       // pushes the line endpoint inward and creates a visible gap
       // between the line and the node border.
@@ -246,7 +246,7 @@
       };
     }
     if (p.kind === 'recipe') {
-      // Recipes drop as a placeholder for now — Phase 3.2 inserts a
+      // Recipes drop as a placeholder for now -- Phase 3.2 inserts a
       // single annotated node and leaves expansion to a follow-up
       // (full subgraph expansion is tracked under Phase 3.3 follow-ups).
       return {

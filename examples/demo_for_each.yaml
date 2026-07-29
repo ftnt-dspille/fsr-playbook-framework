@@ -4,7 +4,7 @@
 # as `{{ vars.item }}` (object fields under `vars.item.<field>`).
 #
 # Note: this uses non-bulk Create Record so on-create alert playbook
-# triggers fire normally — the ingestion-recipe pattern. Threat-feed
+# triggers fire normally -- the ingestion-recipe pattern. Threat-feed
 # recipes use IngestBulkFeed with for_each.__bulk=true instead.
 
 collection: FSRPB Demo For Each

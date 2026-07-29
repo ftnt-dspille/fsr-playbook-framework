@@ -3,7 +3,7 @@
  * compiles the draft and (for "Push & Run") pushes + triggers a live
  * execution. Pushing to the stub from the CLI subprocess would require
  * stubbing the full FSR workflow_collections + run-trigger API surface
- * — too heavy. Instead we intercept the /api/playbook/push and
+ * -- too heavy. Instead we intercept the /api/playbook/push and
  * /api/playbook/run requests at the network layer with page.route()
  * so we can:
  *   • assert the frontend POSTs the *current* buffer (not stale yaml)
@@ -61,7 +61,7 @@ test('Push & Run sends current YAML, streams logs, status reflects success', asy
   // the dot.
   await expect(page.getByText('starting run')).toBeVisible({ timeout: 10_000 });
 
-  // The frontend POSTed the *current* YAML — not the placeholder.
+  // The frontend POSTed the *current* YAML -- not the placeholder.
   expect(pushedYaml).toBeTruthy();
   expect(pushedYaml!).toContain('Read Sev');
 });
@@ -93,7 +93,7 @@ test('Push failure surfaces in the status pill and deploy panel', async ({ page 
 
   await page.getByRole('button', { name: 'Push & Run' }).click();
 
-  // Status dot/text reflects the failure — the err pill in the action
+  // Status dot/text reflects the failure -- the err pill in the action
   // bar shows the push error message.
   await expect(page.getByText(/push failed/i)).toBeVisible({ timeout: 10_000 });
 

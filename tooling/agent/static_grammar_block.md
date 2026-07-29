@@ -24,7 +24,7 @@ runs).
 
 ## 1. Canonical step types (14)
 
-These are the *only* step types the resolver accepts. Use the friendly short name on the left in YAML. Each section lists `accepted_keys`, a one-line note, and a worked example. **Reject any other top-level shape** — there is no `script_step`, `http_call`, `webhook`, or `branch` type.
+These are the *only* step types the resolver accepts. Use the friendly short name on the left in YAML. Each section lists `accepted_keys`, a one-line note, and a worked example. **Reject any other top-level shape** -- there is no `script_step`, `http_call`, `webhook`, or `branch` type.
 
 | Friendly | Canonical FSR | Use when |
 |---|---|---|
@@ -37,9 +37,9 @@ These are the *only* step types the resolver accepts. Use the friendly short nam
 | `find_record` | `FindRecords` | query records from a module with a typed filter tree |
 | `create_record` | `InsertData` | create a record |
 | `update_record` | `UpdateRecord` | update a record by IRI |
-| `manual_input` | `ManualInput` | ask the analyst — Context (Record Linked vs Independent), Behavior, InputType |
+| `manual_input` | `ManualInput` | ask the analyst -- Context (Record Linked vs Independent), Behavior, InputType |
 | `approval` | `Approval` | approve / reject buttons routed to an analyst |
-| `code_snippet` | `CodeSnippet` | run inline Python (use sparingly — opaque to the typed walker) |
+| `code_snippet` | `CodeSnippet` | run inline Python (use sparingly -- opaque to the typed walker) |
 | `delay` | `Delay` | pause for N seconds before next step |
 | `workflow_reference` | `WorkflowReference` | call another playbook (sync = `apply_async: false`) |
 | `stop` | `Connectors` | terminate the playbook |
@@ -49,7 +49,7 @@ These are the *only* step types the resolver accepts. Use the friendly short nam
 
 **Accepted keys**: `module, modules, button_label, requires_record, run_mode`
 
-Manual / designer trigger. With NO `module:` it's a pure designer trigger (cybersponse.abstract_trigger). With a `module:` set it becomes a record-context Execute action (cybersponse.action) — `button_label:` is what the user sees in the Execute menu (NOT the step name). `run_mode: per_record` (default) or `once_for_all`.
+Manual / designer trigger. With NO `module:` it's a pure designer trigger (cybersponse.abstract_trigger). With a `module:` set it becomes a record-context Execute action (cybersponse.action) -- `button_label:` is what the user sees in the Execute menu (NOT the step name). `run_mode: per_record` (default) or `once_for_all`.
 
 Example:
 ```yaml
@@ -65,7 +65,7 @@ type: start
 
 **Accepted keys**: `module, modules, when`
 
-**`when:` filter shape**: {logic: AND|OR, filters: [{field, op, value?}, ...]} — use string-typed fields or `op: changed` (changed only on start_on_update); LIKE against picklist fields will not match.
+**`when:` filter shape**: {logic: AND|OR, filters: [{field, op, value?}, ...]} -- use string-typed fields or `op: changed` (changed only on start_on_update); LIKE against picklist fields will not match.
 
 Auto-fires whenever a record is created in `module`. Optional `when:` filters by post-write field state.
 
@@ -136,7 +136,7 @@ type: decision
 
 **Accepted keys**: `connector, operation, config, params, agent, version, pickFromTenant`
 
-Always look up the operation first via find_operation/get_op_schema — `params` keys are validated against the operation_params catalog. `config: ""` selects the default connector configuration.
+Always look up the operation first via find_operation/get_op_schema -- `params` keys are validated against the operation_params catalog. `config: ""` selects the default connector configuration.
 
 Output is an ENVELOPE: the op's result sits under `data`, with `status`/`message` as siblings. Reference an output field as `vars.steps.<name>.data.<key>` (NOT `vars.steps.<name>.<key>`, which reads the envelope and renders empty). E.g. a step `Convert Time` whose op returns `{minutes: 180}` → `{{ vars.steps.Convert_Time.data.minutes }}`.
 
@@ -178,7 +178,7 @@ type: find_record
 
 **Accepted keys**: `module, resource`
 
-`module:` is the friendly module name (alerts, incidents, indicators, ...) — compiler converts to the IRI form. `resource:` is a flat dict of {field: value}.
+`module:` is the friendly module name (alerts, incidents, indicators, ...) -- compiler converts to the IRI form. `resource:` is a flat dict of {field: value}.
 
 Example:
 ```yaml
@@ -195,7 +195,7 @@ type: create_record
 
 **Accepted keys**: `module, collection, resource`
 
-`module:` (or `collectionType:`) names the module being updated. `collection:` is the RECORD IRI to update — usually `"{{ vars.input.records[0]['@id'] }}"`. Don't confuse the two.
+`module:` (or `collectionType:`) names the module being updated. `collection:` is the RECORD IRI to update -- usually `"{{ vars.input.records[0]['@id'] }}"`. Don't confuse the two.
 
 Example:
 ```yaml
@@ -274,7 +274,7 @@ type: delay
 
 **Accepted keys**: `target, workflowReference, arguments`
 
-Either `target: <playbook_name>` (resolved within the same collection) OR `workflowReference: /api/3/workflows/<uuid>` for cross-collection refs. `arguments:` keys must match the target's declared `parameters:` list. Child output is at `vars.steps.<call_step_name>.<key>` — does NOT auto-merge into parent vars.
+Either `target: <playbook_name>` (resolved within the same collection) OR `workflowReference: /api/3/workflows/<uuid>` for cross-collection refs. `arguments:` keys must match the target's declared `parameters:` list. Child output is at `vars.steps.<call_step_name>.<key>` -- does NOT auto-merge into parent vars.
 
 Example:
 ```yaml
@@ -308,47 +308,47 @@ type: end
 
 ## 2. FortiSOAR-custom Jinja
 
-These symbols come from `sealab.jinja`, `workflow.jinja`, and `workflow.np_filters` — they are **not** in stock Jinja2 or Ansible. Prefer them over hand-rolled date / IOC / connector-config patterns. Pipe filters with `|`, call globals/tests directly.
+These symbols come from `sealab.jinja`, `workflow.jinja`, and `workflow.np_filters` -- they are **not** in stock Jinja2 or Ansible. Prefer them over hand-rolled date / IOC / connector-config patterns. Pipe filters with `|`, call globals/tests directly.
 
 ### Globals (call directly, no pipe) (5)
 
-- `(days)` — _sealab.jinja_
-- `(years=0, months=0, days=0, hours=0, minutes=0, seconds=0)` — _workflow.jinja_
-- `()` — _sealab.jinja_
-- `()` — _sealab.jinja_
-- `()` — _sealab.jinja_
+- `(days)` -- _sealab.jinja_
+- `(years=0, months=0, days=0, hours=0, minutes=0, seconds=0)` -- _workflow.jinja_
+- `()` -- _sealab.jinja_
+- `()` -- _sealab.jinja_
+- `()` -- _sealab.jinja_
 
 ### Filters (use with pipe `|`) (27)
 
-- `(data)` — _workflow.jinja_
-- `(data)` — _workflow.jinja_
-- `(data)` — _workflow.jinja_
-- `(cef_input)` — _workflow.jinja_
-- `(context, iri, indicator_types=None, indicator_reputations=None, indicator_values=None, include_related_records=False)` — _workflow.jinja_
-- `(context, iri)` — _workflow.jinja_
-- `(years=0, months=0, days=0, hours=0, minutes=0, seconds=0)` — _workflow.jinja_
-- `(string)` — _workflow.jinja_
-- `(string)` — _workflow.jinja_
-- `(ip_address, cidr)` — _workflow.jinja_
-- `(record_iri, base_uri='')` — _workflow.jinja_
-- `(data, row_fields=None, template='Stylized with row selection', display='Horizontal', styling=False, table_style=None)` — _workflow.jinja_
-- `(record_iri, module, selected_fields=[])` — _workflow.jinja_
-- `(data: 'str', log_type: 'str')` — _workflow.jinja_
-- `(markdown_string)` — _workflow.jinja_
-- `(data, batch_size)` — _workflow.np_filters_
-- `(list1, list2)` — _workflow.np_filters_
-- `(data, batch_size)` — _workflow.np_filters_
-- `(data)` — _workflow.np_filters_
-- `(context, name, value=None, key=None)` — _workflow.jinja_
-- `(value, rangeDict)` — _sealab.jinja_
-- `(string)` — _sealab.jinja_
-- `(data)` — _workflow.jinja_
-- `(url)` — _workflow.jinja_
-- `(url)` — _workflow.jinja_
-- `(xml)` — _workflow.jinja_
-- `(context, data, yaqlExpression)` — _workflow.jinja_
+- `(data)` -- _workflow.jinja_
+- `(data)` -- _workflow.jinja_
+- `(data)` -- _workflow.jinja_
+- `(cef_input)` -- _workflow.jinja_
+- `(context, iri, indicator_types=None, indicator_reputations=None, indicator_values=None, include_related_records=False)` -- _workflow.jinja_
+- `(context, iri)` -- _workflow.jinja_
+- `(years=0, months=0, days=0, hours=0, minutes=0, seconds=0)` -- _workflow.jinja_
+- `(string)` -- _workflow.jinja_
+- `(string)` -- _workflow.jinja_
+- `(ip_address, cidr)` -- _workflow.jinja_
+- `(record_iri, base_uri='')` -- _workflow.jinja_
+- `(data, row_fields=None, template='Stylized with row selection', display='Horizontal', styling=False, table_style=None)` -- _workflow.jinja_
+- `(record_iri, module, selected_fields=[])` -- _workflow.jinja_
+- `(data: 'str', log_type: 'str')` -- _workflow.jinja_
+- `(markdown_string)` -- _workflow.jinja_
+- `(data, batch_size)` -- _workflow.np_filters_
+- `(list1, list2)` -- _workflow.np_filters_
+- `(data, batch_size)` -- _workflow.np_filters_
+- `(data)` -- _workflow.np_filters_
+- `(context, name, value=None, key=None)` -- _workflow.jinja_
+- `(value, rangeDict)` -- _sealab.jinja_
+- `(string)` -- _sealab.jinja_
+- `(data)` -- _workflow.jinja_
+- `(url)` -- _workflow.jinja_
+- `(url)` -- _workflow.jinja_
+- `(xml)` -- _workflow.jinja_
+- `(context, data, yaqlExpression)` -- _workflow.jinja_
 
-**Ansible filters worth remembering** (network + json + collections — FSR includes them, but they're standard Ansible):
+**Ansible filters worth remembering** (network + json + collections -- FSR includes them, but they're standard Ansible):
 
 - IP / network: `ipaddr`, `ipv4`, `ipv6`, `ipwrap`, `ipmath`, `ipsubnet`, `cidr_merge`, `network_in_network`, `nthhost`
 - Hashing: `hash`, `to_uuid`, `password_hash`
@@ -363,12 +363,12 @@ Step names use Title Case display strings (e.g. `Check Value`,
 `Greater Than 10`) and may only contain letters, digits, spaces,
 and `_`. **Forbidden**: `-`, `:`, em-dashes, parens, `?`, `/`, `#`,
 quotes. The Norway problem: never use unquoted `no`, `false`, `off`,
-`yes`, `true`, `on` as bare values — YAML coerces them to booleans.
+`yes`, `true`, `on` as bare values -- YAML coerces them to booleans.
 Quote string values that match those tokens.
 
 ### 3.2 Step references in `next:`
 
-Reference a step by writing its `name:` verbatim — same spaces, same
+Reference a step by writing its `name:` verbatim -- same spaces, same
 casing. Examples:
 
 ```yaml
@@ -388,7 +388,7 @@ casing. Examples:
 
 ### 3.3 Runtime access to step outputs
 
-`vars.steps.<name-with-spaces-replaced-by-underscores>.<key>` — same
+`vars.steps.<name-with-spaces-replaced-by-underscores>.<key>` -- same
 slug rule applies to child-playbook outputs and to references inside
 Jinja:
 
@@ -397,7 +397,7 @@ Jinja:
 - `vars.input.records[0]` is the triggering record for module-bound
   triggers (`start` with `module:`, `start_on_create`, `start_on_update`).
 
-### 3.4 Decision step — exact shape
+### 3.4 Decision step -- exact shape
 
 ```yaml
 - type: decision
@@ -416,15 +416,15 @@ Jinja:
   `display`, `default: true`, `next` and **no** `when`.
 - Decisions with zero defaults or two defaults are rejected.
 
-### 3.5 Manual input — mode-driven, not free-form
+### 3.5 Manual input -- mode-driven, not free-form
 
 Every "extra" top-level key on `manual_input` is gated by one of three
 UI-mode toggles. Wrong combinations (e.g. internal-only with external
 emails populated) are structurally rejected.
 
-- **Mode A — Context**: `Record Linked` (default) vs `Record Independent`.
-- **Mode B — Behavior**: who receives the prompt — analyst queue, specific user, etc.
-- **Mode C — InputType**: `DecisionBased` (buttons only) vs `InputBased`
+- **Mode A -- Context**: `Record Linked` (default) vs `Record Independent`.
+- **Mode B -- Behavior**: who receives the prompt -- analyst queue, specific user, etc.
+- **Mode C -- InputType**: `DecisionBased` (buttons only) vs `InputBased`
   (free-form fields) vs both.
 
 ```yaml
@@ -443,9 +443,9 @@ emails populated) are structurally rejected.
 
 The first option is primary unless another is marked. For
 `InputBased`, use `inputs:` with typed `kind:` per field (`ipv4`,
-`email`, `url`, `integer`, etc. — `text` only for free-form prose).
+`email`, `url`, `integer`, etc. -- `text` only for free-form prose).
 
-### 3.6 Set-variable — vars vs message
+### 3.6 Set-variable -- vars vs message
 
 ```yaml
 - type: set_variable
@@ -467,7 +467,7 @@ The first option is primary unless another is marked. For
 ### 3.7 Picklists
 
 Picklist values in `arguments:` are friendly strings (`"High"`), not
-IRIs — the compiler resolves them. Picklist trigger filters cannot use
+IRIs -- the compiler resolves them. Picklist trigger filters cannot use
 `like` against picklist-typed fields (`type`, `severity`, `status`);
 filter on string fields, or use `op: changed`.
 

@@ -25,5 +25,5 @@ _(no resolver mapping or no allowlists declared)_
 
 | key | count | % of rows | accepted? |
 |---|---:|---:|---|
-| `private_key` | 2 | 100.0% | — |
-| `public_key` | 2 | 100.0% | — |
+| `private_key` | 2 | 100.0% | -- |
+| `public_key` | 2 | 100.0% | -- |

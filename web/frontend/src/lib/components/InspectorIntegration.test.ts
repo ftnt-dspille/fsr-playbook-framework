@@ -86,7 +86,7 @@ describe('Inspector integration with derived node', () => {
     await waitFor(() => screen.getByText('Variables'));
 
     // Type the new variable name + click Add. This mimics a real user
-    // pressing keys then clicking — fireEvent.input drives the
+    // pressing keys then clicking -- fireEvent.input drives the
     // bind:value, click fires the addVar handler.
     const nameInput = screen.getByPlaceholderText('new variable name') as HTMLInputElement;
     await fireEvent.input(nameInput, { target: { value: 'y' } });
@@ -191,7 +191,7 @@ describe('Inspector integration with derived node', () => {
     // The $effect that calls get_op_schema fires after mount.
     await waitFor(() => expect(capturedBody).not.toBeNull());
     expect(capturedBody).toMatchObject({ connector: 'jira', op: 'get_ticket_details' });
-    // Crucially, NO `op_name` key — the backend rejects that.
+    // Crucially, NO `op_name` key -- the backend rejects that.
     expect(Object.keys(capturedBody)).not.toContain('op_name');
   });
 
@@ -200,7 +200,7 @@ describe('Inspector integration with derived node', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
     const ta = screen.getByLabelText('Step comment') as HTMLTextAreaElement;
     await fireEvent.input(ta, { target: { value: 'hello' } });
-    // Read the store directly — JSDOM's controlled-textarea reflection
+    // Read the store directly -- JSDOM's controlled-textarea reflection
     // can lag the user's input, but the store is authoritative.
     const live = visualStore.state.graph!.playbooks[0].nodes.find((n) => n.id === 'fetch')!;
     expect(live.comment).toBe('hello');

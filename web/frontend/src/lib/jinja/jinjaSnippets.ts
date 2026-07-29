@@ -19,8 +19,8 @@ export const snippets: JinjaSnippet[] = [
   { label: 'raw', detail: 'Literal text, ignore Jinja syntax inside', insertText: '{% raw %}\n\t$0\n{% endraw %}', asSnippet: true },
   { label: 'include', detail: 'Include another template', insertText: '{% include "${1:template}" %}$0', asSnippet: true },
   { label: 'extends', detail: 'Extend a parent template', insertText: '{% extends "${1:base.html}" %}$0', asSnippet: true },
-  { label: 'expression', detail: 'Print an expression — {{ … }}', insertText: '{{ $0 }}', asSnippet: true },
-  { label: 'comment', detail: 'Jinja comment — {# … #}', insertText: '{# $0 #}', asSnippet: true },
+  { label: 'expression', detail: 'Print an expression -- {{ … }}', insertText: '{{ $0 }}', asSnippet: true },
+  { label: 'comment', detail: 'Jinja comment -- {# … #}', insertText: '{# $0 #}', asSnippet: true },
   { label: 'ternary', detail: 'Inline conditional expression', insertText: '{{ ${1:value_if_true} if ${2:condition} else ${3:value_if_false} }}$0', asSnippet: true },
   { label: 'default', detail: 'Value or fallback via default filter', insertText: "{{ ${1:value} | default(${2:'-'}) }}$0", asSnippet: true },
   { label: 'records-loop', detail: 'Loop over vars.input.records', insertText: '{% for record in vars.input.records %}\n\t{{ record.${1:name} }}$0\n{% endfor %}', asSnippet: true }

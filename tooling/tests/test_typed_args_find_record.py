@@ -1,4 +1,4 @@
-"""Typed-args model for `find_record` steps — registry contract and the new
+"""Typed-args model for `find_record` steps -- registry contract and the new
 validation behaviour: a wrong-typed scalar field (`partial`, `module`,
 `checkboxFields`) is a clean BAD_VALUE instead of silently riding through to
 the `find_data` handler, which drops garbage kwargs without complaint.
@@ -36,7 +36,7 @@ def test_valid_args_no_errors_and_unchanged():
 
 
 def test_string_bool_coerced_no_error():
-    # pydantic's lax bool accepts the usual true/false spellings — no false
+    # pydantic's lax bool accepts the usual true/false spellings -- no false
     # positive on the common `partial: "true"` authoring form.
     errs: list[CompileError] = []
     expand_find_record({"partial": "true"}, "p.steps[0]", errs)

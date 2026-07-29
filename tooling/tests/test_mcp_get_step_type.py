@@ -1,10 +1,10 @@
-"""mcp_server.get_step_type — short-name mapping, friendly_form
+"""mcp_server.get_step_type -- short-name mapping, friendly_form
 coverage, and slim-vs-verbose payload caps.
 
 Token cost was the driver: a single naïve `get_step_type('manual_input')`
 used to return ~5 KB and `code_snippet` returned 18 KB (one corpus
 example contained a giant inline Python blob). Slim mode drops both
-to ~1–2 KB by omitting raw corpus examples in favor of the curated
+to ~1-2 KB by omitting raw corpus examples in favor of the curated
 `friendly_form` block.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import pytest
 
 # `mcp_server` imports `mcp.server.fastmcp.FastMCP` at module load.
 # Skip this whole file gracefully on environments without the mcp
-# package installed — the get_step_type behavior it tests is exercised
+# package installed -- the get_step_type behavior it tests is exercised
 # indirectly by the chat / resolver tests.
 pytest.importorskip(
     "mcp.server.fastmcp",
@@ -25,7 +25,7 @@ pytest.importorskip(
 import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 
 
-# Every short type listed in resolver.SHORT_TYPE_TO_FSR — this is the
+# Every short type listed in resolver.SHORT_TYPE_TO_FSR -- this is the
 # contract the `friendly_form` coverage promises.
 SHORT_TYPES = [
     "start", "start_on_create", "start_on_update",
@@ -55,7 +55,7 @@ def test_canonical_name_still_resolves():
 
 def test_all_short_types_resolve():
     """Every short type the resolver knows about should resolve via
-    get_step_type — otherwise the AI's tool call dead-ends."""
+    get_step_type -- otherwise the AI's tool call dead-ends."""
     for n in SHORT_TYPES:
         r = mcp_server.get_step_type(n)
         assert "error" not in r, f"{n} → {r.get('error')}"
@@ -71,7 +71,7 @@ def test_every_short_type_carries_markdown_or_examples():
     for n in SHORT_TYPES:
         r = mcp_server.get_step_type(n)
         assert "markdown" in r or "examples" in r, (
-            f"{n}: no markdown and no examples — nothing to author against"
+            f"{n}: no markdown and no examples -- nothing to author against"
         )
 
 
@@ -107,14 +107,14 @@ def test_default_response_is_slim():
 def test_code_snippet_default_avoids_18k_blob():
     r = mcp_server.get_step_type("code_snippet")
     assert _size(r) < 1500, (
-        f"code_snippet slim is {_size(r)} chars — corpus blob leaking "
+        f"code_snippet slim is {_size(r)} chars -- corpus blob leaking "
         f"through?"
     )
 
 
 def test_default_omits_raw_corpus_examples_when_friendly_form_present():
     r = mcp_server.get_step_type("manual_input")
-    # Slim path drops the corpus examples entirely — the markdown
+    # Slim path drops the corpus examples entirely -- the markdown
     # skeleton has the only example the LLM needs.
     assert "examples" not in r
     assert "markdown" in r
@@ -186,13 +186,13 @@ def test_manual_input_option_key_taught_is_the_authoring_key():
     `parser.py` rewrites `display` → `option` on the way in (same rewrite it
     does for decision `display`/`when`), so BOTH spellings route correctly and
     emit byte-identical FSR JSON. This test exists because that equivalence is
-    invisible from the resolver — `normalizers.py` reads only `o.get("option")`,
+    invisible from the resolver -- `normalizers.py` reads only `o.get("option")`,
     which reads like `display` is unsupported and invites someone to "fix" the
     docs by teaching the wire key.
 
     Teaching `option:` here would be a real regression: `decision` steps teach
     `display:`, so the two branch-bearing step types would disagree on the name
-    of the same concept — exactly the parallel-list drift this suite guards.
+    of the same concept -- exactly the parallel-list drift this suite guards.
     Assert the taught key, and prove the synonym is genuinely accepted rather
     than trusting either doc string.
     """
@@ -252,7 +252,7 @@ playbooks:
         "display/option are documented as synonyms but route differently:\n"
         f"  display: {by_display}\n  option:  {by_option}"
     )
-    # Both buttons must actually reach their targets — a dropped `next:` would
+    # Both buttons must actually reach their targets -- a dropped `next:` would
     # leave a prompt whose buttons go nowhere, which still compiles clean.
     assert ("Approve", "Ask", "Done") in by_display
     assert ("Reject", "Ask", "Other") in by_display

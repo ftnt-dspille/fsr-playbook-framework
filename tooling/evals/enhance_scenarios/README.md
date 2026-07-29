@@ -1,6 +1,6 @@
 # Enhance-mode scenarios
 
-Edits to a playbook the analyst already has OPEN — the request type that
+Edits to a playbook the analyst already has OPEN -- the request type that
 generated the most live failures and had, until recently, no test coverage at
 all (`grep -r enhance` matched no test file).
 

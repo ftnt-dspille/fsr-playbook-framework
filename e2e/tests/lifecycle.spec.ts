@@ -28,11 +28,11 @@ test('Edit set_variable name → autosave → reload → change persists', async
   await nameInput.fill('Read Severity');
   await nameInput.blur();
 
-  // Autosave is debounced 1s — poll the backend until the new name lands
+  // Autosave is debounced 1s -- poll the backend until the new name lands
   // (or the helper times out at 8s with a useful "last yaml" dump).
   await waitForDraftYaml(DRAFT, (yaml) => yaml.includes('Read Severity'));
 
-  // Reload — the renamed step should still be there.
+  // Reload -- the renamed step should still be there.
   await page.reload();
   await expect(page.getByText('Read Severity', { exact: true })).toBeVisible({ timeout: 15_000 });
 });

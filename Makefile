@@ -1,11 +1,11 @@
-# FSR Playbook Studio — dev runner
+# FSR Playbook Studio -- dev runner
 #
 # Common targets:
-#   make backend     — start FastAPI on :47821 with autoreload
-#   make frontend    — start Vite (Svelte) on :47822
-#   make dev         — both, in parallel; Ctrl-C kills the group
-#   make e2e         — run every examples/*.test.yaml against the live FSR
-#   make tests       — fast pytest (excludes live + slow)
+#   make backend     -- start FastAPI on :47821 with autoreload
+#   make frontend    -- start Vite (Svelte) on :47822
+#   make dev         -- both, in parallel; Ctrl-C kills the group
+#   make e2e         -- run every examples/*.test.yaml against the live FSR
+#   make tests       -- fast pytest (excludes live + slow)
 #
 # Notes:
 #   - Backend reads .env at the repo root (FSR_BASE_URL, ANTHROPIC_API_KEY, …).
@@ -85,7 +85,7 @@ release: ## cut a PyPI release: make release VERSION=0.4.23 [NOTES="..."] (see R
 SCENARIO ?=
 MSG ?=
 
-# The structure/contract suite — deterministic order (no:randomly) so a prompt
+# The structure/contract suite -- deterministic order (no:randomly) so a prompt
 # edit that breaks assembly/routing reddens here in ~2s before any live spend.
 CHAT_FAST_TESTS := \
 	fsr_playbooks/tests/test_triage_prompt.py \
@@ -122,14 +122,14 @@ chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
 chat-calibrate: ## live: capability gate over every investigation fixture (costs credits)
 	$(PY) tooling/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),)
 
-enhance-live: ## live: enhance-DELIVERY gate — drive every enhance_scenario, grade emit_enhancement_offer vs prose (SCENARIO=<name> RUNS=n CONFIG=name). Needs .env + deployed connector.
+enhance-live: ## live: enhance-DELIVERY gate -- drive every enhance_scenario, grade emit_enhancement_offer vs prose (SCENARIO=<name> RUNS=n CONFIG=name). Needs .env + deployed connector.
 	$(PY) tooling/evals/enhance_live.py $(if $(SCENARIO),--only $(SCENARIO),) $(if $(RUNS),--runs $(RUNS),) $(if $(CONFIG),--config $(CONFIG),)
 
 lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
 	uv run ruff check fsr_playbooks/ tooling/
 
 # The connector + Angular widget both consume fsr_playbooks, so the green-check that
-# matters is fsr_playbooks + the connector's offline suite — both run on THIS repo's
+# matters is fsr_playbooks + the connector's offline suite -- both run on THIS repo's
 # .venv, which carries the editable fsr_playbooks install and its deps (yaml, anthropic).
 # (Do NOT use `uv run --extra test` in the connector: it builds an isolated env
 #  without fsr_playbooks, so its whole suite errors on ModuleNotFound.)
@@ -155,7 +155,7 @@ verify: ## green-check for the fsr_playbooks + connector axis (offline)
 	@echo "→ [3/3] connector suite (offline; live tests self-skip)"
 	cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q
 	@echo "✓ verify passed"
-	@echo "  (Angular widget has its own toolchain in WebStorm — not verifiable here.)"
+	@echo "  (Angular widget has its own toolchain in WebStorm -- not verifiable here.)"
 
 clean: ## remove pycache + node_modules build leftovers (NOT node_modules itself)
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

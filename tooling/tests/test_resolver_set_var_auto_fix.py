@@ -65,7 +65,7 @@ playbooks:
 
 def test_reserved_key_message_renamed_in_set_variable_args(db_path):
     """`vars: {message: hi}` must compile and emit `message_var` on the
-    wire — `message` itself crashes the FSR runtime."""
+    wire -- `message` itself crashes the FSR runtime."""
     r = compile_yaml(_playbook("            x: 1"), db_path)
     assert r.ok, [e.message for e in r.errors]
     args = _set_var_args(r.fsr_json)
@@ -81,7 +81,7 @@ def test_reserved_key_emits_warning_with_rename_path(db_path):
 
 
 # ---------------------------------------------------------------------
-# 2. Top-level vars.<reserved> rewrite — three access forms
+# 2. Top-level vars.<reserved> rewrite -- three access forms
 # ---------------------------------------------------------------------
 
 def test_top_level_dotted_access_rewritten(db_path):
@@ -108,12 +108,12 @@ def test_top_level_get_call_access_rewritten(db_path):
         r = compile_yaml(_playbook(body), db_path)
         assert r.ok
         desc = _show_popup_description(r.fsr_json)
-        # Must keep `.get(...)` form — only the key string changes.
+        # Must keep `.get(...)` form -- only the key string changes.
         assert "vars.get(" in desc and "message_var" in desc, desc
 
 
 # ---------------------------------------------------------------------
-# 3. vars.steps.<set_var>.<key> namespace rewrite — six access forms
+# 3. vars.steps.<set_var>.<key> namespace rewrite -- six access forms
 # ---------------------------------------------------------------------
 
 def test_step_ref_dotted_dotted(db_path):
@@ -160,7 +160,7 @@ def test_step_ref_get_form(db_path):
 
 
 # ---------------------------------------------------------------------
-# 4. Cross-cutting — both rewrites happen in the same playbook
+# 4. Cross-cutting -- both rewrites happen in the same playbook
 # ---------------------------------------------------------------------
 
 def test_combined_reserved_rename_and_step_ref_rewrite(db_path):
@@ -175,14 +175,14 @@ def test_combined_reserved_rename_and_step_ref_rewrite(db_path):
 
 
 # ---------------------------------------------------------------------
-# 5. Negative — vars.steps.<X>.<reserved> on a NON-set_variable step
+# 5. Negative -- vars.steps.<X>.<reserved> on a NON-set_variable step
 #    must NOT be rewritten (that's a legitimate connector/find_record
 #    output namespace).
 # ---------------------------------------------------------------------
 
 def test_step_ref_on_non_set_variable_step_left_alone(db_path):
     """`vars.steps.<X>.message` on a NON-set_variable step must not be
-    rewritten — connector / find_record outputs legitimately live in
+    rewritten -- connector / find_record outputs legitimately live in
     that namespace. The rewriter only fires for keys actually written
     by a SetVariable step in the same playbook."""
     text = """\

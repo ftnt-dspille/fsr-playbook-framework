@@ -10,7 +10,7 @@ topics:
 summary: >
   Task-oriented Jinja pattern catalog for FortiSOAR playbook authoring. Maps
   common tasks to working patterns with gotchas and real examples. Not a
-  filter list — a "how do I..." cheat sheet. Cross-references the fsr_reference.db
+  filter list -- a "how do I..." cheat sheet. Cross-references the fsr_reference.db
   and JINJA_IDIOMS.md for deeper detail.
 ---
 
@@ -35,7 +35,7 @@ pyfsr jinja idioms               # common composition patterns
 ## 1. Resolve a picklist IRI (the #1 portability bug)
 
 **Task:** Set a picklist field on a record, or build a query filter on a
-picklist field — needs the IRI, not the label string.
+picklist field -- needs the IRI, not the label string.
 
 **Pattern:**
 ```jinja
@@ -47,7 +47,7 @@ picklist field — needs the IRI, not the label string.
   it, the filter returns a full dict object, which produces invalid JSON
   when dropped into a template string.
 - **Wrap in JSON quotes** when embedding in a query body string:
-  `"value": "{{ ... | picklist(..., \"@id\") }}"` — unquoted, the IRI
+  `"value": "{{ ... | picklist(..., \"@id\") }}"` -- unquoted, the IRI
   renders as a bare token (`/api/3/...`), making the JSON invalid.
 - The picklist NAME goes in the pipeline input (left of `|`); the option
   label is the first argument.
@@ -58,7 +58,7 @@ picklist field — needs the IRI, not the label string.
 {{ 'Severity' | picklist('High', '@id') }}       → "/api/3/picklists/<uuid>" (explicit)
 {{ 'Severity' | picklist('High', 'uuid') }}      → "<uuid>" (just the UUID)
 {{ 'Severity' | picklist('High', 'itemValue') }}  → "High" (the display name)
-{{ 'Severity' | picklist('High') }}              → {...} (full dict, omit key — rare)
+{{ 'Severity' | picklist('High') }}              → {...} (full dict, omit key -- rare)
 ```
 
 **Real examples (from 226 picklist usages in the corpus):**
@@ -112,9 +112,9 @@ pass it to a `Query Record` step.
 ```
 
 **Gotchas:**
-- Picklist IRIs inside JSON **must be quoted** — see pattern #1.
+- Picklist IRIs inside JSON **must be quoted** -- see pattern #1.
 - Use `vars.match_results.uuid` (or whatever your previous step named the
-  record) for the UUID filter — not `vars.input.records[0].uuid` (that's
+  record) for the UUID filter -- not `vars.input.records[0].uuid` (that's
   the trigger record, not the queried record).
 - `"type": "object"` for picklist fields; `"type": "primitive"` for
   scalar fields like `uuid`.
@@ -132,7 +132,7 @@ pass it to a `Query Record` step.
 
 ## 3. Convert datetime string to epoch integer
 
-**Task:** An alert's `eventTime` field is `type=integer, formType=datetime` —
+**Task:** An alert's `eventTime` field is `type=integer, formType=datetime` --
 the API expects an epoch integer, but source data often comes as a datetime
 string. Convert it.
 
@@ -142,9 +142,9 @@ string. Convert it.
 ```
 
 **Gotchas:**
-- `arrow` is a Jinja **global** (not a filter) — call it directly, no pipe.
+- `arrow` is a Jinja **global** (not a filter) -- call it directly, no pipe.
 - `.int_timestamp` gives epoch **seconds** (integer). The API may want
-  **milliseconds** in some contexts — check the field schema.
+  **milliseconds** in some contexts -- check the field schema.
 - For "now": `{{ arrow.utcnow().int_timestamp }}`
 - For computing elapsed time:
   ```jinja
@@ -172,7 +172,7 @@ string. Convert it.
 ```
 
 **Gotchas:**
-- `vars.input.records` is a **list** — use `[0]` for the single-record case.
+- `vars.input.records` is a **list** -- use `[0]` for the single-record case.
   For record-action triggers, it always has one element.
 - `@id` needs bracket notation (`['@id']`) because `.` syntax doesn't work
   with keys starting with `@`.
@@ -180,7 +180,7 @@ string. Convert it.
   `vars.<name>`.
 
 **Corpus stats:** `vars.input.records[0]` appears 435 times; `vars.input.records`
-appears 532 times — the most common variable access in the entire corpus.
+appears 532 times -- the most common variable access in the entire corpus.
 
 ---
 
@@ -197,7 +197,7 @@ appears 532 times — the most common variable access in the entire corpus.
 **Gotchas:**
 - The step name has **spaces replaced by underscores**: a step named
   `"Query Record State"` is accessed as `vars.steps.Query_Record_State`.
-- The shape depends on the step type — `data` for query results
+- The shape depends on the step type -- `data` for query results
   (with `hydra:member`), direct fields for SetVariable steps.
 - With debug logging off (the default), `set_variable` / jinja values may
   not be captured in the run record. Assert on `status` (which always
@@ -210,13 +210,13 @@ appears 532 times — the most common variable access in the entire corpus.
 **Task:** Get all `@id` values from a list of records (e.g., to pass to a
 bulk operation or build a comma-separated list).
 
-**Pattern A — json_query filter:**
+**Pattern A -- json_query filter:**
 ```jinja
 {{ vars.input.records | json_query('[].["@id"]') }}
 {{ vars.result | json_query('[]."@id"') }}
 ```
 
-**Pattern B — loop accumulator:**
+**Pattern B -- loop accumulator:**
 ```jinja
 {% set iri_list = [] %}
 {% for r in vars.input.records %}
@@ -225,7 +225,7 @@ bulk operation or build a comma-separated list).
 {{ iri_list | join(',') }}
 ```
 
-**Real examples (json_query — 289 usages, top 3 filter):**
+**Real examples (json_query -- 289 usages, top 3 filter):**
 ```jinja
 {%- for d in vars.input.records | json_query('[].["@id"]') -%}
 {{ vars.result | json_query('[]."@id"') }}
@@ -246,7 +246,7 @@ details).
 ```
 
 **Gotchas:**
-- `fromIRI` makes a live API call — it's not free. Don't use it in a loop
+- `fromIRI` makes a live API call -- it's not free. Don't use it in a loop
   without batching.
 - Chain with `json_query` to extract a nested field:
   ```jinja
@@ -259,7 +259,7 @@ details).
 
 **Task:** Collect values across a loop into a list.
 
-**Pattern A — assignment-as-side-effect (most common):**
+**Pattern A -- assignment-as-side-effect (most common):**
 ```jinja
 {% set iri_list = [] %}
 {% for r in vars.input.records %}
@@ -267,7 +267,7 @@ details).
 {% endfor %}
 ```
 
-**Pattern B — `do` extension (more explicit):**
+**Pattern B -- `do` extension (more explicit):**
 ```jinja
 {%- set addresses = [] -%}
 {%- for a in vars.input.params.address_list -%}
@@ -276,7 +276,7 @@ details).
 ```
 
 **Gotchas:**
-- Jinja has **no block scoping** — a `{% set %}` inside a loop leaks to
+- Jinja has **no block scoping** -- a `{% set %}` inside a loop leaks to
   the surrounding scope. The accumulator pattern works because of this.
 - Use `{%- ... -%}` (whitespace control) when building JSON to avoid
   spurious newlines in the output.
@@ -340,8 +340,8 @@ details).
 
 ## See also
 
-- `pyfsr jinja find <name>` — full signature + curated doc for any filter
-- `pyfsr jinja examples <name>` — real usage from the 1,669-playbook corpus
-- `pyfsr jinja idioms` — composition patterns (set/for/if in production)
-- `FSR_CUSTOM_JINJA.md` — the canonical 170-filter cheatsheet
-- `JINJA_IDIOMS.md` — patterns from 1,669 playbooks
+- `pyfsr jinja find <name>` -- full signature + curated doc for any filter
+- `pyfsr jinja examples <name>` -- real usage from the 1,669-playbook corpus
+- `pyfsr jinja idioms` -- composition patterns (set/for/if in production)
+- `FSR_CUSTOM_JINJA.md` -- the canonical 170-filter cheatsheet
+- `JINJA_IDIOMS.md` -- patterns from 1,669 playbooks

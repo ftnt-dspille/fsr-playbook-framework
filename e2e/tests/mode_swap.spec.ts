@@ -5,7 +5,7 @@
  *   • Design canvas edit → CLI shows the same content in Monaco.
  *   • CLI Monaco edit → Design canvas reflects (visualStore parses
  *     the new YAML).
- *   • A parse-broken CLI buffer must NOT crash Design — the swap
+ *   • A parse-broken CLI buffer must NOT crash Design -- the swap
  *     should surface the error instead.
  */
 import { test, expect } from '@playwright/test';

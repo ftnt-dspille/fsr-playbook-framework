@@ -1,4 +1,4 @@
-"""mcp_server.suggest_fix_for_diagnostic — translates a render-path
+"""mcp_server.suggest_fix_for_diagnostic -- translates a render-path
 diagnostic into a structured patch proposal."""
 from __future__ import annotations
 

@@ -2,7 +2,7 @@
 VirusTotal op that doesn't exist' bug).
 
 A hallucinated/typo'd (connector, op) must surface as an actionable
-`unknown_operation` error BEFORE the user is asked to approve it — never
+`unknown_operation` error BEFORE the user is asked to approve it -- never
 an opaque post-approval execution failure. Covered at three layers: the
 offline store validator, `emit_action_card`, and the live-FSR fallback
 (`_validate_op_live`).
@@ -149,7 +149,7 @@ def test_validate_op_live_skips_when_live_list_empty(monkeypatch):
     assert te._validate_op_live(_FakeClient([]), "virustotal", "anything") is None
 
 
-# --- live param grounding (Phase 1.4 — param-level live grounding) ----------
+# --- live param grounding (Phase 1.4 -- param-level live grounding) ----------
 # The offline param check no-ops on an un-synced connector, so the agent used
 # to discover real param names by trial-and-error live (the mail_egress flail).
 # These cover validating arg names against the LIVE connector definition.
@@ -322,7 +322,7 @@ def test_populate_op_definitions_warms_all_configured(tmp_path, monkeypatch):
     db = tmp_path / "s.db"
     con = sqlite3.connect(db)
     con.execute("CREATE TABLE operations (connector_name TEXT, op_name TEXT)")
-    # 'virustotal' IS synced (has ops); 'shodan' is not — both get warmed.
+    # 'virustotal' IS synced (has ops); 'shodan' is not -- both get warmed.
     con.execute("INSERT INTO operations VALUES ('virustotal','get_ip_reputation')")
     con.commit()
     con.close()

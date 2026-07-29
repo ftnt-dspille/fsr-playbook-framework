@@ -26,7 +26,7 @@ class ProviderPatch(BaseModel):
 
 class ProbeIn(BaseModel):
     """Inputs to the test/models endpoints. The form values, NOT the
-    saved values — this lets the user probe before clobbering config."""
+    saved values -- this lets the user probe before clobbering config."""
     base_url: str | None = None
     api_key: str | None = None
 
@@ -73,7 +73,7 @@ async def test_provider(name: str, body: ProbeIn) -> dict[str, Any]:
     """Probe connectivity using the form values (or saved values if
     body fields are blank). Returns {ok, error?, latency_ms}.
 
-    For OpenAI-compatible endpoints (lmstudio): hit /v1/models — 200 means
+    For OpenAI-compatible endpoints (lmstudio): hit /v1/models -- 200 means
     reachable + auth ok in one round-trip. For Anthropic: call
     messages.count_tokens, which authenticates the key but is free
     (no token billing)."""
@@ -114,7 +114,7 @@ async def test_provider(name: str, body: ProbeIn) -> dict[str, Any]:
             model = saved.model or "claude-haiku-4-5-20251001"
             client = AsyncAnthropic(api_key=api_key, timeout=8.0)
             # count_tokens authenticates the key against the live API but
-            # is not billed for token usage — the right read-only probe.
+            # is not billed for token usage -- the right read-only probe.
             await client.messages.count_tokens(
                 model=model,
                 messages=[{"role": "user", "content": "ping"}],
@@ -204,9 +204,9 @@ def _friendly(e: Exception) -> str:
     msg = str(e)
     # Trim the noisier OpenAI tracebacks for UI display.
     if "Connection error" in msg or "ConnectError" in name or "ConnectionRefused" in msg:
-        return "Connection refused — is the LLM server running and reachable at that URL?"
+        return "Connection refused -- is the LLM server running and reachable at that URL?"
     if "401" in msg or "AuthenticationError" in name:
-        return "401 — API key rejected."
+        return "401 -- API key rejected."
     if "Timeout" in name:
         return "Timed out reaching the endpoint."
     return f"{name}: {msg[:240]}"

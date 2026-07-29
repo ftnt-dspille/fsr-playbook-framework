@@ -1,7 +1,7 @@
 fixture: examples/demo_virustotal_ip.yaml
 playbook: VT IP Reputation
 
-# 8.8.8.8 (Google DNS) is a stable known-clean IP — VT's
+# 8.8.8.8 (Google DNS) is a stable known-clean IP -- VT's
 # last_analysis_stats.malicious has been 0 every time we've checked.
 # Asserts the clean branch fires. Swap to a known-malicious IP to
 # verify the malicious branch (no fixture change needed).

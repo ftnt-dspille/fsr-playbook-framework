@@ -1,7 +1,7 @@
 """Build-persona verify defaults the safe live-probe ON (S3 lever B2).
 
 `verify_playbook` grounds a connector op's real output envelope by executing
-the step — but only for op_safety=='safe' steps (walker gate) and only for
+the step -- but only for op_safety=='safe' steps (walker gate) and only for
 safe categories (run_op refuses others without confirm=True). Since it's a
 build-only tool, dispatch() defaults `live_probe=True` so the model needn't
 know the flag; an explicit value still wins. Presence of `evidence.live_probes`

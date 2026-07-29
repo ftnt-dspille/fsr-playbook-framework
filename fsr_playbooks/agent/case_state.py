@@ -1,4 +1,4 @@
-"""Case-state spine — persisted per-session state for grounding, investigation, and capabilities.
+"""Case-state spine -- persisted per-session state for grounding, investigation, and capabilities.
 
 Owned by the framework (dataclass + serialization + mutation helpers); persisted by the connector.
 Schema version=1; loader migrates or discards on mismatch (fail-open).
@@ -54,7 +54,7 @@ class Investigation:
     """Investigation progress (guards read/write; session-scoped)."""
 
     invest_attempts: int = 0
-    """Lifetime count — TriageDiscipline hunt-floor reads THIS."""
+    """Lifetime count -- TriageDiscipline hunt-floor reads THIS."""
 
     hunt_floor_met: bool = False
     """Sticky once true; a later turn never resets it."""
@@ -75,7 +75,7 @@ class Investigation:
     """Cap on called_once_sigs, searched, enriched to prevent unbounded growth."""
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict. Applies the FIFO cap first — serialization is
+        """Serialize to dict. Applies the FIFO cap first -- serialization is
         the persistence chokepoint, so the stored blob can never grow
         unbounded even if no caller invoked ``cap_lists()`` explicitly."""
         self.cap_lists()

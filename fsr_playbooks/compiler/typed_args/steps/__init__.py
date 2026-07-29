@@ -5,7 +5,7 @@ with a model routes its arguments through the typed layer; everything else
 keeps using the imperative normalizer in `resolver/normalizers.py`. This keeps
 every intermediate commit shippable (zero corpus-emit diff at each step).
 
-`STEP_ARG_MODELS` maps an FSR-friendly step type to its pydantic model — the
+`STEP_ARG_MODELS` maps an FSR-friendly step type to its pydantic model -- the
 introspection surface Phase 4 will emit JSON Schema from. Types whose wire
 output is not a fixed-field record (e.g. set_variable, whose flat output keys
 are the author's variable names) also expose an `expand_*` walk that owns the
@@ -49,7 +49,7 @@ from .ingest_bulk_feed import IngestBulkFeedArgs, expand_ingest_bulk_feed
 # Step type → typed argument model. Grows incrementally through Phase 2.
 #
 # Keys are FSR-friendly step types. `record_action` is the one entry that is not
-# a distinct *authoring* type — it is authored as `type: start` with a `module:`
+# a distinct *authoring* type -- it is authored as `type: start` with a `module:`
 # (the manual record-action trigger; see `validator.py` TRIGGER_TYPES and the
 # `cybersponse.action` mapping). It is keyed here so its schema is discoverable
 # via `get_step_arg_schema("record_action")`; the resolver wires its validation
@@ -84,7 +84,7 @@ STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     # the resolver's catalog checks (op/param/enum/visibility/required) own
     # the richer runtime messages.
     "connector": ConnectorArgs,
-    # `utilities` — the editor's "Utilities" palette entry (CyopsUtilices). A
+    # `utilities` -- the editor's "Utilities" palette entry (CyopsUtilices). A
     # connector-family alias: it routes through ConnectorStepCtrl + connector.html,
     # so its wire shape IS the connector envelope; the normalizer defaults
     # `connector: cyops_utilities` (one of 55 utility ops) and falls through to
@@ -96,7 +96,7 @@ STEP_ARG_MODELS: dict[str, type[StrictArgs]] = {
     # imperative normalizer; see manual_input.py). Registered for the JSON-schema
     # introspection surface + typed scalar validation.
     "manual_input": ManualInputArgs,
-    # Trigger Tenant Playbook (RemotePlaybookReference) — cross-tenant call to
+    # Trigger Tenant Playbook (RemotePlaybookReference) -- cross-tenant call to
     # a playbook in another FortiSOAR tenant. Owns a distinct script handler
     # (`/wf/workflow/tasks/remote_workflow_reference`), so a real step type
     # (not a connector alias). Validation-only envelope; the resolver owns the

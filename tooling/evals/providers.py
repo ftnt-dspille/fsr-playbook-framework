@@ -32,7 +32,7 @@ def extract_yaml(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def gold_provider(gold_lookup: Callable[[str], str | None]) -> ProviderFn:
-    """Returns the task's gold YAML verbatim — a control row showing
+    """Returns the task's gold YAML verbatim -- a control row showing
     "the harness would score 4/4 if a model produced perfect output."
 
     `gold_lookup(prompt)` should return the gold YAML for the matching
@@ -45,13 +45,13 @@ def gold_provider(gold_lookup: Callable[[str], str | None]) -> ProviderFn:
 
 
 def echo_provider(system: str, prompt: str) -> str:  # noqa: ARG001
-    """Always returns an empty playbook — proves the harness scores
+    """Always returns an empty playbook -- proves the harness scores
     failures cleanly. Useful as a smoke test in CI."""
     return "collection: Echo\nplaybooks: []\n"
 
 
 # ---------------------------------------------------------------------------
-# Real provider stubs — wired only when the corresponding env / SDK is
+# Real provider stubs -- wired only when the corresponding env / SDK is
 # available. The harness never imports these eagerly so a missing key
 # doesn't break offline runs.
 # ---------------------------------------------------------------------------
@@ -121,14 +121,14 @@ def _lmstudio_provider() -> ProviderFn:
 
 
 # ---------------------------------------------------------------------------
-# Agentic providers — full tool-use loop with the same MCP tool registry the
+# Agentic providers -- full tool-use loop with the same MCP tool registry the
 # Studio chat uses. Output is a dict {text, trace, turns} so the harness can
 # score tool-budget / no-spiral / adherence empirically. The harness detects
 # the dict return and routes it through the agentic gates.
 # ---------------------------------------------------------------------------
 
 # Cap on tool-use turns per agentic eval task. Mirrors MAX_TOOL_TURNS in
-# web/backend/llm/_loop_helpers.py — the eval provider should hit the same
+# web/backend/llm/_loop_helpers.py -- the eval provider should hit the same
 # wall the chat path hits, so a runaway scoring config matches production.
 _AGENTIC_MAX_TURNS = 12
 
@@ -161,7 +161,7 @@ def _agentic_anthropic_provider() -> Callable:
     model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
     anthropic_tools, _, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
     raw_tools = anthropic_tools()
-    # Cache the (static) tool list — mark the last entry so the cache
+    # Cache the (static) tool list -- mark the last entry so the cache
     # breakpoint includes every preceding tool def.
     tools = [dict(t) for t in raw_tools]
     if tools:

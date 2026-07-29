@@ -88,7 +88,7 @@ def test_friendly_form_default_continue_when_no_options(db_path):
 
 def test_canonical_form_passes_through(db_path):
     """An author who hand-writes the full FSR shape should not get
-    rejected — every key is on the canonical whitelist. `type` is
+    rejected -- every key is on the canonical whitelist. `type` is
     inferred (InputBased) from the presence of `input:`."""
     text = _wrap(
         "          input:\n"
@@ -112,7 +112,7 @@ def test_canonical_form_passes_through(db_path):
 
 def test_label_message_timeout_now_accepted(db_path):
     """`label`, `message`, and `timeout` were originally rejected as
-    unknown — but the live FSR corpus shows real ManualInputs use all
+    unknown -- but the live FSR corpus shows real ManualInputs use all
     three (label 1×, message 4×, timeout 20× across 168 live MIs). After
     audit §0 the resolver accepts them. Junk keys still get caught
     (test_unknown_key_truly_unknown_rejected below).
@@ -169,7 +169,7 @@ def test_input_string_rejected_with_pointer(db_path):
 
 def test_type_decision_based_accepted(db_path):
     """DecisionBased (button-only) is inferred when there are no
-    `inputs:` — just `options:`."""
+    `inputs:` -- just `options:`."""
     text = _wrap(
         "          title: Pick\n",
         options_block=(
@@ -185,7 +185,7 @@ def test_type_decision_based_accepted(db_path):
 
 
 def test_description_defaults_to_title_when_omitted(db_path):
-    """AGENT_DX_PLAN D1 — a manual_input with no `description:` used to emit an
+    """AGENT_DX_PLAN D1 -- a manual_input with no `description:` used to emit an
     empty description body, which validates offline but FSR's runtime rejects.
     The description now falls back to the title so the prompt still runs."""
     text = _wrap("          title: Approve the heist?\n")
@@ -211,7 +211,7 @@ def test_explicit_description_is_preserved(db_path):
 
 
 def test_kind_ipv4_compiles(db_path):
-    """I17 — formType=ipv4 was never in our whitelist, but live FSR
+    """I17 -- formType=ipv4 was never in our whitelist, but live FSR
     uses it (audit §4). Should now compile and emit the webAddress
     template."""
     text = _wrap(
@@ -229,7 +229,7 @@ def test_kind_ipv4_compiles(db_path):
 
 
 def test_kind_lookup_requires_module(db_path):
-    """I23 — `kind: lookup` without a `module:` key has no target;
+    """I23 -- `kind: lookup` without a `module:` key has no target;
     FSR's typeahead won't render."""
     text = _wrap(
         "          inputs:\n"
@@ -269,7 +269,7 @@ def test_kind_picklist_requires_picklist_name(db_path):
 
 
 def test_per_option_next_promoted_to_branches(db_path):
-    """I22 — friendly `next:` per option used to be silently dropped."""
+    """I22 -- friendly `next:` per option used to be silently dropped."""
     text = """
 collection: T
 visible: true
@@ -359,7 +359,7 @@ def test_step_level_inputs_match_live_playbook_wire_shape(db_path):
     `step:00c8a0b4-6633-4bd6-89d5-bf0abb6230d5`): an InputBased manual_input
     declaring one "Dynamic List" field. Authoring it in the documented
     step-level friendly form (`kind: select`) must reproduce the captured wire
-    tuple — formType/dataType `dynamicList`, type `array` — proving the hoist
+    tuple -- formType/dataType `dynamicList`, type `array` -- proving the hoist
     fix yields the real platform shape, not an empty form."""
     text = _step_level_inputs_pb(
         "        title: test\n"
@@ -417,7 +417,7 @@ playbooks:
 
 
 def test_mode_record_linked_requires_record(db_path):
-    """I20 — Context mode coherence: isRecordLinked=true ⟹ record set."""
+    """I20 -- Context mode coherence: isRecordLinked=true ⟹ record set."""
     text = _wrap(
         "          isRecordLinked: true\n",
         options_block=(
@@ -432,7 +432,7 @@ def test_mode_record_linked_requires_record(db_path):
 
 
 def test_mode_external_keys_in_internal_prompt_rejected(db_path):
-    """I20 — Audience mode coherence: external email-distribution keys
+    """I20 -- Audience mode coherence: external email-distribution keys
     require unauthenticated_input or inputExternalUser to be true."""
     text = _wrap(
         "          customEmailExternal: 'subj'\n",
@@ -465,7 +465,7 @@ def test_mode_external_with_unauthenticated_ok(db_path):
 
 
 def test_mode_assignment_requires_exactly_one_target(db_path):
-    """I20 — Assignment mode coherence: isAssigned=true ⟹ exactly one
+    """I20 -- Assignment mode coherence: isAssigned=true ⟹ exactly one
     of assignedToPerson/Team/Record/Field set."""
     text = _wrap(
         "          owner_detail:\n"

@@ -1,6 +1,6 @@
 /**
  * Canvas-mutation E2E. The visual canvas is the primary authoring
- * surface — most of the bugs in this app live in the edges between
+ * surface -- most of the bugs in this app live in the edges between
  * "click a thing on the canvas" and "the YAML serializer emits the
  * right shape". Today only `lifecycle.spec` exercises a single-field
  * rename. This spec adds:
@@ -42,7 +42,7 @@ test('add a decision step via the canvas, rename, persists to YAML', async ({ pa
   await expect(page.getByText('Extract', { exact: true })).toBeVisible({ timeout: 15_000 });
   await page.getByText('Extract', { exact: true }).first().click();
 
-  // The "+" affordance is only opaque on the selected node — scope to
+  // The "+" affordance is only opaque on the selected node -- scope to
   // the xyflow wrapper marked data-selected="true".
   await page.locator('[data-selected="true"]')
     .getByRole('button', { name: 'Add next step' })
@@ -78,7 +78,7 @@ test('delete a step via the inspector removes it from the YAML', async ({ page }
 
     const inspector = page.getByRole('dialog', { name: /step inspector/i });
 
-    // Native window.confirm() guards the delete — register the
+    // Native window.confirm() guards the delete -- register the
     // dialog handler BEFORE clicking so it fires for the prompt.
     page.once('dialog', (d) => d.accept());
     await inspector.getByRole('button', { name: 'Delete step' }).click();

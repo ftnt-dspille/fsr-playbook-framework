@@ -68,7 +68,7 @@ def _find_fetch_op(info: dict) -> tuple[str, dict]:
     for cand in ("fetch_indicators", "get_indicators", "list_indicators"):
         if cand in by_name:
             return cand, by_name[cand]
-    # 3. title match — TAXII2's op is named get_objects_by_collection_id
+    # 3. title match -- TAXII2's op is named get_objects_by_collection_id
     #    but its title is literally "Fetch Indicators"
     for o in ops:
         if (o.get("title") or "").strip().lower() in ("fetch indicators", "get indicators", "list indicators"):
@@ -499,7 +499,7 @@ def generate_data_ingest_recipe(
             "@type": "WorkflowCollection",
             "name": f"Sample - {label} Data Ingestion - {version}",
             "description": (
-                f"Sample data ingestion playbooks for {label}. Clone before customizing — "
+                f"Sample data ingestion playbooks for {label}. Clone before customizing -- "
                 f"the sample collection is replaced on connector upgrade."
             ),
             "visible": True,
@@ -926,7 +926,7 @@ def generate_threat_feed_recipe(
             "name": f"Sample - {label} - {version}",
             "description": (
                 f"Sample playbooks for {label}. Clone these into a separate "
-                f"collection before customizing — the sample collection is "
+                f"collection before customizing -- the sample collection is "
                 f"replaced on connector upgrade."
             ),
             "visible": True,

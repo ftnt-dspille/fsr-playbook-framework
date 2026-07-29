@@ -1,4 +1,4 @@
-"""Push / env route tests — subprocess is mocked.
+"""Push / env route tests -- subprocess is mocked.
 
 The run-playbook SSE path is not unit-tested here; it requires async
 subprocess streaming which adds complexity disproportionate to what the

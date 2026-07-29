@@ -1,4 +1,4 @@
-"""Step-type coverage matrix — the north-star instrument for the agentic
+"""Step-type coverage matrix -- the north-star instrument for the agentic
 playbook assistant.
 
 The fsr_playbooks project exists to make FortiSOAR playbooks simple for
@@ -7,16 +7,16 @@ feedback that tells the agent what to correct. For an agent to create / read
 / modify / troubleshoot a playbook of a given step type, three loops must be
 closed for that type:
 
-  * **author**   — friendly YAML -> canonical wire. Is there a typed arg
+  * **author**   -- friendly YAML -> canonical wire. Is there a typed arg
                    model (`STEP_ARG_MODELS`) behind the imperative normalizer,
                    so the shape is introspectable + scalar-validated?
-  * **discover** — can an agent ask "what can this step take?" and get an
+  * **discover** -- can an agent ask "what can this step take?" and get an
                    answer? `emit_step_arg_schema` returns a non-None JSON
                    Schema for modeled types, None for the rest.
-  * **read**     — does the decompiler recover a friendly shape from an
+  * **read**     -- does the decompiler recover a friendly shape from an
                    existing playbook (`minimified`), pass canonical args
                    through unchanged (`pass-through`), or is the friendly
-                   sugar one-way — compiled down to a shared canonical with
+                   sugar one-way -- compiled down to a shared canonical with
                    no distinct type to recover (`sugar-not-recovered`)?
 
 `COVERAGE` is the single source of truth for "which of the 24 friendly step
@@ -26,9 +26,9 @@ as much as the dashboard: `priority` flags the next work.
 Two invariants are *enforced* by `tooling/tests/test_step_type_coverage.py`:
 
   1. Every friendly step type (`SHORT_TYPE_TO_FSR`) has an explicit COVERAGE
-     entry — adding a step type without a coverage decision fails the gate.
+     entry -- adding a step type without a coverage decision fails the gate.
      No accidental gaps.
-  2. The derived facts (`typed`, `schema`, `read`) match the live code — a
+  2. The derived facts (`typed`, `schema`, `read`) match the live code -- a
      claim the registries don't back up fails the gate. No false claims.
 
 The `example` axis (worked examples in the pyfsr foundational library) is
@@ -385,7 +385,7 @@ def _build_canonical_to_friendly() -> None:
 def friendly_for_editor(label: str) -> str | None:
     """The friendly short type covering an editor palette entry, or None.
 
-    None means: this editor step type has NO friendly YAML surface — an agent
+    None means: this editor step type has NO friendly YAML surface -- an agent
     cannot create it through the YAML language at all. That is a palette gap.
     """
     if not _CANONICAL_TO_FRIENDLY:
@@ -400,7 +400,7 @@ def palette_gaps() -> list[tuple[str, str]]:
     """Editor palette entries with no friendly YAML surface, sorted.
 
     Each tuple is (editor_label, canonical). These are step types an agent can
-    create in the UI but cannot author in YAML — the highest-leverage north-star
+    create in the UI but cannot author in YAML -- the highest-leverage north-star
     gaps, because they mean a whole class of playbook is unreachable from the
     friendly surface and must be hand-edited as raw canonical JSON.
     """
@@ -456,7 +456,7 @@ def prioritized(priority: str) -> list[str]:
 
 
 def render_matrix() -> str:
-    """A fixed-width table of the matrix — the north-star dashboard."""
+    """A fixed-width table of the matrix -- the north-star dashboard."""
     rows = [("step_type", "typed", "schema", "read", "pri", "note")]
     for t in sorted(COVERAGE):
         c = COVERAGE[t]

@@ -1,4 +1,4 @@
-"""EnhanceDeliveryGuard — the structural counterpart to `score_enhance_delivery`.
+"""EnhanceDeliveryGuard -- the structural counterpart to `score_enhance_delivery`.
 
 The scorer catches "verified but never delivered" offline, after the turn. This
 guard catches it IN the loop so the provider can force the delivery. These tests
@@ -44,7 +44,7 @@ def test_delivered_is_not_outstanding():
 
 
 def test_failed_offer_still_outstanding():
-    # A rejected handle (unknown_verified_id) is NOT a delivery — the guard must
+    # A rejected handle (unknown_verified_id) is NOT a delivery -- the guard must
     # still force a re-delivery with the correct id.
     g = EnhanceDeliveryGuard()
     g.note_result("verify_enhancement", {}, _passing_verify())
@@ -97,5 +97,5 @@ def test_fires_at_most_once():
     g.note_result("verify_enhancement", {}, _passing_verify())
     assert g.outstanding(ENHANCE_SLICE) == "v1"
     g.mark_forced()
-    # After one forced round the guard is spent — it must not loop.
+    # After one forced round the guard is spent -- it must not loop.
     assert g.outstanding(ENHANCE_SLICE) is None

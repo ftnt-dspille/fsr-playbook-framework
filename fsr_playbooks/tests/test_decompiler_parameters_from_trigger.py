@@ -2,7 +2,7 @@
 
 A playbook's input form is built from the TRIGGER step's
 `arguments.inputVariables[]`. The decompiler used to read declarations only
-from the workflow's top-level `parameters` field — but on real appliance
+from the workflow's top-level `parameters` field -- but on real appliance
 content the two sources disagree:
 
   * most stock playbooks have `parameters: []` and declare everything on the
@@ -16,7 +16,7 @@ output. Found by pulling 400 stock playbooks from a live appliance: this one
 bug accounted for 42 of the 122 hard compile failures, and fixing it moved the
 corpus from 142/400 to 178/400 compiling clean.
 
-Why it is worse than a normal fidelity gap — same reason as the dropped
+Why it is worse than a normal fidelity gap -- same reason as the dropped
 `for_each`: the widget saves the agent's LAST ```yaml fence back OVER the open
 record. So pull a playbook -> ask for any one-field edit -> save silently
 stripped its entire manual-trigger input form, with no error and no diff the
@@ -79,7 +79,7 @@ def test_trigger_input_variables_are_recovered_when_top_level_is_empty():
     """The common stock shape: `parameters: []`, everything on the trigger."""
     params = _parameters_of(_wf([], ["actionReason", "inputIndicatorValue"]))
     assert "actionReason" in params, (
-        "trigger-declared parameter was dropped — the playbook's input form "
+        "trigger-declared parameter was dropped -- the playbook's input form "
         "does not survive a pull")
     assert "inputIndicatorValue" in params
 
@@ -89,14 +89,14 @@ def test_trigger_declarations_are_UNIONED_with_a_nonempty_top_level_list():
 
     This playbook declares three parameters at the top level AND a fourth on
     the trigger only. An `if not params:` fallback never fires here, so the
-    fourth stayed lost — which is exactly what the live corpus showed.
+    fourth stayed lost -- which is exactly what the live corpus showed.
     """
     wf = _wf(["inputIndicatorRecordIRI", "inputIndicatorValue",
               "inputActionReasons"], ["actionReason"])
     params = _parameters_of(wf)
     assert "actionReason" in params, (
         "a trigger-only declaration was lost because the top-level list was "
-        "non-empty — the two sources must be unioned, not preferred")
+        "non-empty -- the two sources must be unioned, not preferred")
     # …without losing the ones that were already there.
     for p in ("inputIndicatorRecordIRI", "inputIndicatorValue",
               "inputActionReasons"):

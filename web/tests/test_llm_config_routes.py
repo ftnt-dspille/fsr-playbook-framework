@@ -1,4 +1,4 @@
-"""HTTP-level tests for /api/llm/* — the configuration surface the
+"""HTTP-level tests for /api/llm/* -- the configuration surface the
 Settings page drives. We mock the OpenAI client so connectivity tests
 don't need an LM Studio instance running.
 """
@@ -110,7 +110,7 @@ def test_lmstudio_test_reports_connection_refused(client):
 
 
 def test_anthropic_test_is_shape_only(client):
-    """Don't burn billable tokens on the Test button — just check shape."""
+    """Don't burn billable tokens on the Test button -- just check shape."""
     r = client.post("/api/llm/providers/anthropic/test",
                     json={"api_key": "sk-ant-1234567890abcdef1234567890"})
     assert r.json()["ok"] is True

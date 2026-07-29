@@ -4,25 +4,25 @@ Grounded in live FSR wire shapes pulled from box 198.51.100.205
 (`tooling/probes/fixtures/live_trigger_filter_shapes.json`). The designer
 stores five filter shapes inside `arguments.fieldbasedtrigger.filters`:
 
-  * primitive — scalar `eq`/`neq`/`like`/…:
+  * primitive -- scalar `eq`/`neq`/`like`/…:
       {type, field, value, operator, _operator}
-  * object    — picklist / IRI-backed field:
+  * object    -- picklist / IRI-backed field:
       {type, field, value:<iri>, _value:{@id, display, itemValue}, operator}
-  * array     — tags / multi-value (`in`/`in_all`):
+  * array     -- tags / multi-value (`in`/`in_all`):
       {type, field, value:[iri…], module, operator, template,
        OPERATOR_KEY, previousOperator, previousTemplate}
-  * datetime  — date field (`isnull`/…):
+  * datetime  -- date field (`isnull`/…):
       {type, field, value, operator}
-  * changed   — update-only "field changed" sentinel (object-typed)
+  * changed   -- update-only "field changed" sentinel (object-typed)
 
-and a filter entry can itself be a nested `{logic, filters:[…]}` group —
+and a filter entry can itself be a nested `{logic, filters:[…]}` group --
 the AND/OR nesting the old flat `_expand_when` could not author (25 such
 groups live in the corpus).
 
 `WhenGroup`/`WhenLeaf` enforce the *structure* (known keys via
-`extra="forbid"`, value types, recursive nesting). The operator semantics —
+`extra="forbid"`, value types, recursive nesting). The operator semantics --
 alias rewriting, the `contains → like %…%` rewrite, the bare-`like` wildcard
-wrap, the `changed`-only-on-update rule — live in `expand_when`, which walks
+wrap, the `changed`-only-on-update rule -- live in `expand_when`, which walks
 the validated tree with precise `filters[i].op` paths so warning/error
 messages stay byte-identical to the imperative normalizer they replace.
 """
@@ -39,7 +39,7 @@ from ._bridge import validate_args
 
 # ── operator vocabulary (single source of truth; normalizers re-imports) ──
 # Valid operators FSR's field-based-trigger evaluator honors. A wrong operator
-# does not error at deploy — the trigger silently never matches — so unknowns
+# does not error at deploy -- the trigger silently never matches -- so unknowns
 # are rejected at compile time. `changed` is update-only (enforced below).
 _TRIGGER_OPS: frozenset[str] = frozenset({
     "eq", "neq", "gt", "gte", "lt", "lte",
@@ -47,7 +47,7 @@ _TRIGGER_OPS: frozenset[str] = frozenset({
     "in", "nin", "in_all",
     # `like`/`notlike` = case-insensitive SQL-LIKE on a scalar. `contains`/
     # `notcontains` are accepted authoring sugar but rewrite to `like`/`notlike`
-    # with a `%…%`-wrapped value (a raw scalar `contains` never fires — the
+    # with a `%…%`-wrapped value (a raw scalar `contains` never fires -- the
     # query layer 400s it). Live-verified via probe_trigger_matrix.
     "like", "notlike",
     "contains", "notcontains",
@@ -74,7 +74,7 @@ _TRIGGER_OP_ALIASES: dict[str, str] = {
     "is_changed": "changed", "has_changed": "changed",
 }
 # Pattern-producing rewrites: op → (canonical operator, wildcard wrap mode).
-# FSR has no scalar startswith/endswith/contains operator — they are all `like`
+# FSR has no scalar startswith/endswith/contains operator -- they are all `like`
 # (or `notlike`) with the value wrapped. Live-verified. Auto-applied + warned.
 _TRIGGER_OP_REWRITE: dict[str, tuple[str, str]] = {
     "contains": ("like", "both"), "icontains": ("like", "both"),
@@ -113,7 +113,7 @@ class WhenLeaf(StrictArgs):
     decompiled `fieldbasedtrigger` round-trips through the same model.
 
     `extra="forbid"` catches authoring typos (`feild:`, `opp:`) structurally.
-    `type` is the wire filter type hint — None/primitive emit the scalar shape;
+    `type` is the wire filter type hint -- None/primitive emit the scalar shape;
     object/array/datetime emit the IRI-backed shapes (live-grounded).
     """
 
@@ -153,7 +153,7 @@ FilterItem = Annotated[
 class WhenGroup(StrictArgs):
     """A logic group: `{logic: AND|OR, filters: [leaf | group, …]}`.
 
-    `filters` is a recursive union — a nested group is itself a `WhenGroup`,
+    `filters` is a recursive union -- a nested group is itself a `WhenGroup`,
     which is the AND/OR nesting the flat expander could not author. `sort`/
     `limit` only appear on the top-level group in the wire output.
     """
@@ -187,7 +187,7 @@ def _normalize_op(
         errors.append(CompileError(
             code=ErrorCode.BAD_VALUE, severity="warning",
             message=(f"operator {orig_op!r} has no scalar FSR equivalent "
-                     f"— compiling to {op!r} with a {wrap}-wrapped "
+                     f"-- compiling to {op!r} with a {wrap}-wrapped "
                      f"`%` pattern (SQL LIKE)"),
             path=opath,
         ))
@@ -206,7 +206,7 @@ def _normalize_op(
         errors.append(CompileError(
             code=ErrorCode.BAD_VALUE,
             message=(
-                f"invalid trigger operator {orig_op!r} — not a valid "
+                f"invalid trigger operator {orig_op!r} -- not a valid "
                 f"field-based-trigger operator (valid: "
                 f"{', '.join(sorted(_TRIGGER_OPS))})"
             ),
@@ -243,13 +243,13 @@ def _leaf_to_filter(
             ))
             return None
         # Neutral default for the FRIENDLY hand-authored `op: changed` path only.
-        # The decompile→emit path never reaches here — it passes `_value` through
+        # The decompile→emit path never reaches here -- it passes `_value` through
         # verbatim (traced 2026-07-25: a corpus `changed` filter round-trips
         # byte-identical, `@id` and all), so the corpus is unaffected by this
         # constant.
         #
         # Evidence (64 real `changed` filters in the live-captured corpus): the
-        # designer's shape is FIELD-TYPE dependent and internally inconsistent —
+        # designer's shape is FIELD-TYPE dependent and internally inconsistent --
         # picklist-backed fields get `type: object` with `_value.@id` set to
         # either "" or null; non-picklist fields get `type: primitive` with
         # `_value: null`. There is therefore NO single correct constant to emit
@@ -299,7 +299,7 @@ def _leaf_to_filter(
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE, severity="warning",
                 message=(f"`{op}` value {leaf.value!r} has no `%`/`_` "
-                         f"wildcard — auto-wrapped to {emit_val!r} so "
+                         f"wildcard -- auto-wrapped to {emit_val!r} so "
                          f"it substring-matches instead of matching "
                          f"exactly (which silently never fires)"),
                 path=opath,
@@ -342,7 +342,7 @@ def expand_when(
 
     Drop-in replacement for the imperative `_expand_when`: same friendly
     top-level messages, same per-leaf op warnings/errors, byte-identical
-    output for the flat primitive/`changed` authoring path — plus typed
+    output for the flat primitive/`changed` authoring path -- plus typed
     structural validation (`extra="forbid"` catches key typos) and nested
     AND/OR group authoring the flat expander could not produce.
     """

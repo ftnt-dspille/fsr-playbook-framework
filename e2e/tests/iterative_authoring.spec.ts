@@ -1,12 +1,12 @@
 /**
- * Iterative-authoring E2E — the "add a step, wire its inputs, add
+ * Iterative-authoring E2E -- the "add a step, wire its inputs, add
  * another step that consumes the previous one's output" journey a
  * real user walks when building a playbook from scratch.
  *
  * Exercises:
  *   • VarPathPicker (the `{x}` helper) on a fresh field
  *   • "+ Add next step" canvas affordance to grow the playbook in-flow
- *   • Cross-step refs via top-level `{{ vars.<name> }}` — the canonical
+ *   • Cross-step refs via top-level `{{ vars.<name> }}` -- the canonical
  *     set_variable surface (corpus-verified, NOT vars.steps.X.Y)
  *   • Auto-verify driving jinjaShapesStore so downstream steps see
  *     upstream set_variable outputs in their var pane.
@@ -66,7 +66,7 @@ test('add step → wire input → add downstream step → chain through vars', a
   const pane = page.getByRole('dialog', { name: /variable tree pane/i });
   await expect(pane).toBeVisible();
 
-  // records[0] auto-expands once the alerts sample loads — click the
+  // records[0] auto-expands once the alerts sample loads -- click the
   // severity leaf directly.
   await expect(pane.getByRole('button', { name: 'records[0]' })).toBeVisible();
   await pane.locator('button[title="Insert {{ vars.input.records[0].severity }}"]').click();
@@ -77,7 +77,7 @@ test('add step → wire input → add downstream step → chain through vars', a
 
   // -------- Stage 2: add a downstream step via the canvas "+ Add next" UX
 
-  // Close the var pane — its dialog overlays the canvas and would
+  // Close the var pane -- its dialog overlays the canvas and would
   // intercept clicks on the per-step "+" button.
   await pane.getByRole('button', { name: /close variable pane/i }).click();
   await expect(pane).toBeHidden();
@@ -91,7 +91,7 @@ test('add step → wire input → add downstream step → chain through vars', a
     .click();
   await page.getByRole('menuitem', { name: 'Set Variable' }).click();
 
-  // New step lands with the QUICK_TYPE label "Set Variable" — rename
+  // New step lands with the QUICK_TYPE label "Set Variable" -- rename
   // to "Tag" so the assertions can target it by name.
   const newNode = page.getByText('Set Variable', { exact: true }).first();
   await expect(newNode).toBeVisible({ timeout: 10_000 });
@@ -106,14 +106,14 @@ test('add step → wire input → add downstream step → chain through vars', a
 
   // Add var "out" that uses the previous step's `country` output.
   // FSR runtime exposes set_variable outputs at the TOP LEVEL as
-  // `{{ vars.<name> }}` — NOT `vars.steps.Extract.country`.
+  // `{{ vars.<name> }}` -- NOT `vars.steps.Extract.country`.
   await inspector.getByPlaceholder('new variable name').fill('out');
   await inspector.getByRole('button', { name: /^\+\s*add variable$/i }).click();
   await inspector.getByRole('button', { name: /^insert variable$/i }).first().click();
 
   // The vars (set_variable) group renders once auto-verify hydrates
   // jinjaShapesStore.topLevelVars. The newly-added `country` should
-  // appear there. Click it via its insert-template title — Playwright
+  // appear there. Click it via its insert-template title -- Playwright
   // auto-scrolls + auto-waits for the locator to exist.
   await expect(pane.locator('button[title="Insert {{ vars.country }}"]'))
     .toBeVisible({ timeout: 15_000 });

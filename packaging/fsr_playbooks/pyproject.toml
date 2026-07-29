@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fsr_playbooks"
-# Version is derived from the git tag (hatch-vcs) — the single source of truth.
+# Version is derived from the git tag (hatch-vcs) -- the single source of truth.
 # No hardcoded version lives in the tree; tag `vX.Y.Z` and the build stamps it.
 dynamic = ["version"]
 description = "FortiSOAR playbook authoring/compiler framework: YAML->FSR-JSON compiler, LLM co-authoring, and MCP server tools."
 readme = "README.md"
 # The compiler/CLI runs off-box (CI, pyfsr's [playbooks] extra, dev laptops),
-# so the floor tracks the lowest still-supported Python (3.10; 3.9 is EOL) — not
+# so the floor tracks the lowest still-supported Python (3.10; 3.9 is EOL) -- not
 # the SOAR runtime. No 3.12-only syntax is used; deps all support 3.10.
 requires-python = ">=3.10"
 license = "MIT"
@@ -32,17 +32,17 @@ dependencies = [
     "jinja2>=3.1",
     # The typed_args compile layer (compiler/typed_args/*) hard-imports pydantic
     # v2 (Discriminator/Tag/AliasChoices), reached unconditionally via the
-    # compiler resolver — so it's a base runtime dep, not an extra.
+    # compiler resolver -- so it's a base runtime dep, not an extra.
     "pydantic>=2",
 ]
 
 [project.optional-dependencies]
-# LLM providers — real imports only in fsr_playbooks/llm/*_provider.py.
+# LLM providers -- real imports only in fsr_playbooks/llm/*_provider.py.
 llm = [
     "openai>=1.0",
     "anthropic>=0.40",
 ]
-# MCP server — mcp_server hard-imports fsr_playbooks.llm, so [mcp] implies [llm].
+# MCP server -- mcp_server hard-imports fsr_playbooks.llm, so [mcp] implies [llm].
 mcp = [
     "fsr_playbooks[llm]",
     "mcp>=1.0",
@@ -59,7 +59,7 @@ Issues = "https://github.com/ftnt-dspille/fsr-playbook-framework/issues"
 # this dist's pyproject sits two levels down at packaging/fsr_playbooks/.
 # `no-guess-dev` matches the pyfsr sibling so dev builds read identically.
 # The version is baked into the wheel metadata at build time; the package
-# reads it back via importlib.metadata (see fsr_playbooks/__init__.py) — no
+# reads it back via importlib.metadata (see fsr_playbooks/__init__.py) -- no
 # generated _version.py is written into the external source tree.
 # ---------------------------------------------------------------------------
 [tool.hatch.version]
@@ -75,7 +75,7 @@ version_scheme = "no-guess-dev"
 # taken by the `fsrpb` dist. `packages` maps the external dir into the wheel as
 # top-level `fsr_playbooks/`; hatchling ships all non-.py runtime assets under
 # it (the _data/*.db slim catalog, _data/*.json shape oracle, agent/*.md
-# prompts, mcp_server/*.json) automatically — no package-data stanza needed.
+# prompts, mcp_server/*.json) automatically -- no package-data stanza needed.
 # Tests are not part of the shipped surface. We ship wheels only; the `..`
 # source layout cannot produce a correct sdist.
 # ---------------------------------------------------------------------------

@@ -4,16 +4,16 @@
 `scripts/corpus_gate.py` runs it over a committed corpus and emits a pass-rate.
 This test does two things:
 
-  1. GREEN — the committed synthesized corpus round-trips 100% clean, so
+  1. GREEN -- the committed synthesized corpus round-trips 100% clean, so
      `make corpus-gate` is a real, passing floor.
-  2. RED-PROOF — for each field-class we have watched get silently deleted
+  2. RED-PROOF -- for each field-class we have watched get silently deleted
      (`for_each`, declared `parameters`), reintroduce the loss on the emit side
      and assert the gate goes RED *and names the lost field*. Per
      [[tests_inherit_the_fixs_blind_spots]]: a gate that never goes red on the
      bug it exists to catch is not a gate.
 
 The RED-proof patches the emitter the gate calls, rather than a hand-diff of two
-dicts, so it exercises the real `roundtrip()` code path — the same function the
+dicts, so it exercises the real `roundtrip()` code path -- the same function the
 corpus runner calls.
 """
 from __future__ import annotations
@@ -39,13 +39,13 @@ def _load(name: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# 1. GREEN — the committed corpus is a passing floor.
+# 1. GREEN -- the committed corpus is a passing floor.
 # --------------------------------------------------------------------------- #
 
 def test_corpus_dir_is_populated():
     files = list(CORPUS_DIR.glob("*.json"))
     assert files, (
-        "no committed round-trip corpus — run scripts/gen_roundtrip_corpus.py")
+        "no committed round-trip corpus -- run scripts/gen_roundtrip_corpus.py")
     # The two historically-lost classes must both be represented, or the gate
     # is green for the wrong reason.
     names = {f.stem for f in files}
@@ -66,11 +66,11 @@ def test_gate_main_exits_zero_on_clean_corpus():
 
 
 # --------------------------------------------------------------------------- #
-# 2. RED-PROOF — reintroduce each loss on the emit side; the gate must catch it.
+# 2. RED-PROOF -- reintroduce each loss on the emit side; the gate must catch it.
 # --------------------------------------------------------------------------- #
 
 def _emit_dropping(field_mutator):
-    """Wrap the real emitter so its output has a field stripped — i.e. simulate
+    """Wrap the real emitter so its output has a field stripped -- i.e. simulate
     a decompiler/emitter that fails to write that field back. Returns a
     drop-in for `roundtrip.emit`."""
     real_emit = rt.emit
@@ -93,7 +93,7 @@ def test_gate_goes_red_when_for_each_is_dropped(monkeypatch):
     monkeypatch.setattr(rt, "emit", _emit_dropping(drop_for_each))
 
     ok, diffs = roundtrip(_load("for_each_loop"), PACKAGED_SLIM_DB)
-    assert not ok, "gate stayed GREEN with for_each dropped — it is blind to it"
+    assert not ok, "gate stayed GREEN with for_each dropped -- it is blind to it"
     assert any("for_each" in d for d in diffs), (
         f"gate went red but did not name for_each: {diffs}")
 
@@ -115,7 +115,7 @@ def test_gate_goes_red_when_top_level_parameters_are_dropped(monkeypatch):
 def test_gate_goes_red_when_trigger_input_variables_are_dropped(monkeypatch):
     """The real F4 shape: parameters declared on the trigger's `inputVariables`
     with an empty top-level list. This is the shape whose loss (42 of 122 hard
-    failures) motivated the union in the decompiler — drop the input vars and
+    failures) motivated the union in the decompiler -- drop the input vars and
     the projection must see fewer declared parameters and go red.
     """
     def drop_input_vars(_wf, step):

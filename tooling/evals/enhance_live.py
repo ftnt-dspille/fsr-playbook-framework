@@ -1,4 +1,4 @@
-"""Live enhance-DELIVERY gate — the box-touching sibling of the offline
+"""Live enhance-DELIVERY gate -- the box-touching sibling of the offline
 `tooling/tests/test_evals_enhance_delivery.py`.
 
 Drives every `enhance_scenarios/*.json` through the deployed connector's real
@@ -7,7 +7,7 @@ shipped widget does, and grades with `score_enhance_delivery`: did the edit
 reach the open playbook via `emit_enhancement_offer`, or did the agent print
 YAML at the analyst? This is the behaviour that failed live (the model narrating
 "call emit_enhancement_offer …" instead of calling it) and that the
-EnhanceDeliveryGuard now forces structurally — so this runner is the regression
+EnhanceDeliveryGuard now forces structurally -- so this runner is the regression
 gate that keeps it forced.
 
 Needs `.env` FSR creds + a reachable, deployed connector (costs credits).
@@ -15,7 +15,7 @@ Needs `.env` FSR creds + a reachable, deployed connector (costs credits).
     python tooling/evals/enhance_live.py [--only e3] [--runs 5]
                                          [--config NAME] [--version X.Y.Z]
 
-`--config ""` (default) lets the connector pick its default config — the
+`--config ""` (default) lets the connector pick its default config -- the
 analyst's real surface. Exit 0 iff every GRADED (non-skipped) run delivered.
 """
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _rich_trace(transcript: list) -> list[dict]:
     """[{name, args, result, ok}] with tool RESULTS threaded onto their calls.
 
     `transcript_to_trace` (chat_drive) keeps only ok/refused, dropping the
-    payload — but `score_enhance_delivery` reads `verify_enhancement`'s
+    payload -- but `score_enhance_delivery` reads `verify_enhancement`'s
     `ready_to_push`/`verified_id` from the result to tell a stalled delivery
     (FAIL) from a correctly-declined one (PASS). Without the payload it degrades
     to a false PASS on exactly the regression this gate exists to catch, so pair
@@ -74,7 +74,7 @@ def _rich_trace(transcript: list) -> list[dict]:
 def _entity(before_yaml: str) -> dict:
     """The widget-shaped open-playbook context: module `workflows` + the YAML
     seeded into the connector's OPEN PLAYBOOK block via `entity.playbook_yaml`.
-    No real record is needed — verify/offer operate on the YAML text, and the
+    No real record is needed -- verify/offer operate on the YAML text, and the
     offer `id` is a card id, not a lookup."""
     pb_name = "the open playbook"
     for line in before_yaml.splitlines():
@@ -140,7 +140,7 @@ def main(argv=None) -> int:
             ok = v.get("passed")
             passed += 1 if ok else 0
             print(f"  {'PASS' if ok else 'FAIL'} {tag}  tools={out['tools']} "
-                  f"fence={out['has_fence']} {v.get('code') or ''} — {v.get('detail')}")
+                  f"fence={out['has_fence']} {v.get('code') or ''} -- {v.get('detail')}")
 
     print(f"\n=== enhance-live: {passed}/{graded} graded run(s) delivered "
           f"({len(scens)} scenario(s) × {args.runs}) ===")

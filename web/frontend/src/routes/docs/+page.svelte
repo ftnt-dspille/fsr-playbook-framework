@@ -41,7 +41,7 @@
 
   <article class="min-h-0 overflow-auto px-10 py-8">
     <div class="mx-auto max-w-3xl">
-      <h1 class="text-3xl font-semibold text-[var(--text-default)]">FSR Playbook Studio — Docs</h1>
+      <h1 class="text-3xl font-semibold text-[var(--text-default)]">FSR Playbook Studio -- Docs</h1>
       <p class="mt-3 text-base text-[var(--text-muted)]">
         Browser app for authoring, validating, debugging, pushing, and triaging FortiSOAR
         playbooks. A Monaco YAML editor sits next to an LLM chat that drives the same
@@ -59,7 +59,7 @@
             <li>A run viewer that streams the CLI's output, rebuilds the runtime <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">vars</code> tree, and indexes failures for triage.</li>
           </ol>
           <p class="mt-3 text-[var(--text-muted)]">
-            Everything sits on top of the existing <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">fsrpb</code> CLI and the <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">store/</code> reference DBs — the same code path agents use over stdio MCP.
+            Everything sits on top of the existing <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">fsrpb</code> CLI and the <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">store/</code> reference DBs -- the same code path agents use over stdio MCP.
           </p>
         </section>
 
@@ -95,11 +95,11 @@
         <section id="tabs">
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">The 5 tabs</h2>
           <ul class="list-disc space-y-2 pl-6 text-[var(--text-muted)]">
-            <li><span class="font-semibold">Studio</span> — Monaco YAML editor + chat + the Diagnostics / Debug / Deploy drawer.</li>
-            <li><span class="font-semibold">Browse</span> — playbook corpus discovery (collections, tags, FTS). Phase 4 — see roadmap.</li>
-            <li><span class="font-semibold">Inventory</span> — live audit of everything the assistant knows: 714 connectors, 6,773 operations, 172 Jinja filters, picklists, 1,664 mined playbooks, 207,419 API examples.</li>
-            <li><span class="font-semibold">History</span> — recent runs (live + archived), filterable by tag / user / time, with one-click <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">get_run_env</code> + render-Jinja triage.</li>
-            <li><span class="font-semibold">Settings</span> — LLM provider config (Anthropic / OpenAI / LM Studio), theme, links to Capabilities + Docs.</li>
+            <li><span class="font-semibold">Studio</span> -- Monaco YAML editor + chat + the Diagnostics / Debug / Deploy drawer.</li>
+            <li><span class="font-semibold">Browse</span> -- playbook corpus discovery (collections, tags, FTS). Phase 4 -- see roadmap.</li>
+            <li><span class="font-semibold">Inventory</span> -- live audit of everything the assistant knows: 714 connectors, 6,773 operations, 172 Jinja filters, picklists, 1,664 mined playbooks, 207,419 API examples.</li>
+            <li><span class="font-semibold">History</span> -- recent runs (live + archived), filterable by tag / user / time, with one-click <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">get_run_env</code> + render-Jinja triage.</li>
+            <li><span class="font-semibold">Settings</span> -- LLM provider config (Anthropic / OpenAI / LM Studio), theme, links to Capabilities + Docs.</li>
           </ul>
         </section>
 
@@ -107,13 +107,13 @@
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Studio tab</h2>
           <p class="mb-3">Monaco editor on the left, chat on the right, bottom drawer with three sub-tabs.</p>
           <ul class="list-disc space-y-2 pl-6 text-[var(--text-muted)]">
-            <li><span class="font-semibold">Editor</span> — every keystroke triggers a 400ms-debounced <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">POST /api/yaml/validate</code>. Errors and warnings render as Monaco squigglies and in the Diagnostics tab. A visual node-tree designer with two-way YAML sync lives alongside the text view.</li>
-            <li><span class="font-semibold">Chat</span> — streams via SSE. If the assistant's reply ends with a fenced <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">```yaml</code> block, the editor buffer is replaced.</li>
-            <li><span class="font-semibold">Drawer</span> — three sub-tabs:
+            <li><span class="font-semibold">Editor</span> -- every keystroke triggers a 400ms-debounced <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">POST /api/yaml/validate</code>. Errors and warnings render as Monaco squigglies and in the Diagnostics tab. A visual node-tree designer with two-way YAML sync lives alongside the text view.</li>
+            <li><span class="font-semibold">Chat</span> -- streams via SSE. If the assistant's reply ends with a fenced <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">```yaml</code> block, the editor buffer is replaced.</li>
+            <li><span class="font-semibold">Drawer</span> -- three sub-tabs:
               <ul class="mt-1.5 list-[circle] space-y-1 pl-6">
-                <li><span class="font-semibold">Issues</span> — diagnostics from the compiler + render-path analyzer.</li>
-                <li><span class="font-semibold">Debug</span> — Restart / Step / Stop the stateful debug runner.</li>
-                <li><span class="font-semibold">Deploy</span> — Push log + Run log (no separate /run tab anymore).</li>
+                <li><span class="font-semibold">Issues</span> -- diagnostics from the compiler + render-path analyzer.</li>
+                <li><span class="font-semibold">Debug</span> -- Restart / Step / Stop the stateful debug runner.</li>
+                <li><span class="font-semibold">Deploy</span> -- Push log + Run log (no separate /run tab anymore).</li>
               </ul>
             </li>
           </ul>
@@ -122,11 +122,11 @@
         <section id="autocomplete">
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Autocomplete &amp; samples</h2>
           <ul class="list-disc space-y-2 pl-6 text-[var(--text-muted)]">
-            <li><code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">type:</code> — all 15 short step types. Picking one inserts a snippet scaffold.</li>
-            <li><code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">connector:</code> — fuzzy-searches the 714 connectors from the reference DB.</li>
-            <li><code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">operation:</code> — reads the <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">connector:</code> line above and offers only its ops.</li>
-            <li><span class="font-semibold">Sample answers</span> — for <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">manual_input</code> steps, the Inspector's <em>Samples</em> tab lets you record what a user would enter at runtime. Values land in a <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm"># fsrpb:samples</code> comment block in the YAML and feed downstream Jinja in both the static analyzer and the debug runner — never reach the FSR push payload.</li>
-            <li><span class="font-semibold">Mock results</span> — connector steps can carry a <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">mock_result:</code> sidecar that the analyzer + debug runner treat as the step's output without a live call.</li>
+            <li><code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">type:</code> -- all 15 short step types. Picking one inserts a snippet scaffold.</li>
+            <li><code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">connector:</code> -- fuzzy-searches the 714 connectors from the reference DB.</li>
+            <li><code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">operation:</code> -- reads the <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">connector:</code> line above and offers only its ops.</li>
+            <li><span class="font-semibold">Sample answers</span> -- for <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">manual_input</code> steps, the Inspector's <em>Samples</em> tab lets you record what a user would enter at runtime. Values land in a <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm"># fsrpb:samples</code> comment block in the YAML and feed downstream Jinja in both the static analyzer and the debug runner -- never reach the FSR push payload.</li>
+            <li><span class="font-semibold">Mock results</span> -- connector steps can carry a <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">mock_result:</code> sidecar that the analyzer + debug runner treat as the step's output without a live call.</li>
           </ul>
         </section>
 
@@ -134,21 +134,21 @@
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Validate / Resolve / Compile</h2>
           <p class="mb-3">All three run locally; none talk to FortiSOAR directly (resolve checks the local picklist mirror).</p>
           <ul class="list-disc space-y-2 pl-6 text-[var(--text-muted)]">
-            <li><span class="font-semibold">Validate</span> (auto, 400ms after each keystroke): parser → resolver → arg validator → graph validator → render-path analyzer (C1–C10). Returns markers with line numbers, error codes, and "did you mean" suggestions.</li>
+            <li><span class="font-semibold">Validate</span> (auto, 400ms after each keystroke): parser → resolver → arg validator → graph validator → render-path analyzer (C1-C10). Returns markers with line numbers, error codes, and "did you mean" suggestions.</li>
             <li><span class="font-semibold">Resolve</span>: deeper static check for unresolved picklists, missing connector installs, dangling <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">vars.steps.X.Y</code> Jinja paths, and friendly→IRI resolution.</li>
-            <li><span class="font-semibold">Compile</span>: same pipeline, but on success also emits the FortiSOAR <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">WorkflowCollection</code> JSON — what would get POSTed to the appliance.</li>
+            <li><span class="font-semibold">Compile</span>: same pipeline, but on success also emits the FortiSOAR <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">WorkflowCollection</code> JSON -- what would get POSTed to the appliance.</li>
           </ul>
         </section>
 
         <section id="push-run">
-          <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Push &amp; Run — talking to FortiSOAR</h2>
+          <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Push &amp; Run -- talking to FortiSOAR</h2>
           <p class="mb-3">Both buttons subprocess the existing <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">fsrpb</code> CLI; logs stream into the Deploy drawer.</p>
           <h3 class="mb-2 mt-4 font-semibold text-[var(--text-default)]">Push</h3>
           <ol class="list-decimal space-y-1 pl-6 text-[var(--text-muted)]">
             <li>Backend writes the editor YAML to a tmp file.</li>
             <li>Runs <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">python -m cli push &lt;tmp&gt; --mode replace</code>.</li>
             <li>The CLI tries <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">PUT /api/3/workflow_collections/&lt;uuid&gt;</code> first; on 404 it falls back to POST; on 409 it hard-purges and re-POSTs (including child workflows).</li>
-            <li>Soft-deleted rows still reserve the unique name — the CLI auto-renames stale collisions with a <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">__recycled_&lt;epoch&gt;</code> suffix.</li>
+            <li>Soft-deleted rows still reserve the unique name -- the CLI auto-renames stale collisions with a <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">__recycled_&lt;epoch&gt;</code> suffix.</li>
           </ol>
           <h3 class="mb-2 mt-4 font-semibold text-[var(--text-default)]">Run</h3>
           <ol class="list-decimal space-y-1 pl-6 text-[var(--text-muted)]">
@@ -173,7 +173,7 @@
         <section id="history-triage">
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">History &amp; triage</h2>
           <ul class="list-disc space-y-2 pl-6 text-[var(--text-muted)]">
-            <li>Lists recent workflow runs (default: failures only) across the live AND archived run tables — FSR purges every 30–60 min, so the archive is often the only place a failure still exists.</li>
+            <li>Lists recent workflow runs (default: failures only) across the live AND archived run tables -- FSR purges every 30-60 min, so the archive is often the only place a failure still exists.</li>
             <li>Filter by tag, user, or time window.</li>
             <li>Click a run → backend subprocesses <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">python -m cli env &lt;pk&gt;</code> which calls <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">GET /api/wf/api/workflows/&lt;pk&gt;/?step_detail=true</code> and rebuilds the Jinja context. The <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">Step_Name</code> form is the canonical Jinja key.</li>
             <li>Authorization header is masked and step results are pre-sanitized server-side before they hit the UI.</li>
@@ -191,9 +191,9 @@
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">How the chat knows FSR</h2>
           <p class="mb-3">No FortiSOAR knowledge lives in the model. Every turn assembles:</p>
           <ol class="list-decimal space-y-1 pl-6 text-[var(--text-muted)]">
-            <li><span class="font-semibold">System prompt</span> — role, hard rules, tool-use playbook. Cached.</li>
-            <li><span class="font-semibold">Tools schema</span> — auto-generated JSON Schema for the {TOOL_TOTAL} MCP tools. Cached.</li>
-            <li><span class="font-semibold">Editor primer</span> — current YAML wrapped in a fenced block.</li>
+            <li><span class="font-semibold">System prompt</span> -- role, hard rules, tool-use playbook. Cached.</li>
+            <li><span class="font-semibold">Tools schema</span> -- auto-generated JSON Schema for the {TOOL_TOTAL} MCP tools. Cached.</li>
+            <li><span class="font-semibold">Editor primer</span> -- current YAML wrapped in a fenced block.</li>
             <li><span class="font-semibold">Conversation history</span>.</li>
             <li><span class="font-semibold">Your latest message</span>.</li>
           </ol>
@@ -266,16 +266,16 @@
               <tr><td class="py-1.5 pr-4">Heavy (8 calls, big YAML)</td><td class="py-1.5 pr-4">~15k</td><td class="py-1.5 pr-4">~2k</td><td class="py-1.5">~$0.075</td></tr>
             </tbody>
           </table>
-          <p class="mt-3">15–25 turn authoring run: <span class="font-semibold">$0.50–$0.90</span>. 10-turn live demo: <span class="font-semibold">~$0.30</span>.</p>
+          <p class="mt-3">15-25 turn authoring run: <span class="font-semibold">$0.50-$0.90</span>. 10-turn live demo: <span class="font-semibold">~$0.30</span>.</p>
         </section>
 
         <section id="health">
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Status bar</h2>
           <p class="mb-3">Health pills live in the bottom StatusBar (VS Code style), refreshed every 8 seconds:</p>
           <ul class="list-disc space-y-2 pl-6 text-[var(--text-muted)]">
-            <li><span class="font-semibold">backend</span> — green if FastAPI is up. Click to force-refresh.</li>
-            <li><span class="font-semibold">FSR</span> — green if a live <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">GET /api/3/picklists/?$limit=1</code> returns 200.</li>
-            <li><span class="font-semibold">LLM</span> — green if the active provider (Anthropic / OpenAI / LM Studio) responds to a ping.</li>
+            <li><span class="font-semibold">backend</span> -- green if FastAPI is up. Click to force-refresh.</li>
+            <li><span class="font-semibold">FSR</span> -- green if a live <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">GET /api/3/picklists/?$limit=1</code> returns 200.</li>
+            <li><span class="font-semibold">LLM</span> -- green if the active provider (Anthropic / OpenAI / LM Studio) responds to a ping.</li>
           </ul>
         </section>
 
@@ -288,7 +288,7 @@ FSR_USERNAME=<your-username>
 FSR_PASSWORD=<your-password>
 FSR_ALLOW_E2E=true
 
-# Optional — provider keys are also configurable from the Settings tab
+# Optional -- provider keys are also configurable from the Settings tab
 ANTHROPIC_API_KEY=...
 OPENAI_API_KEY=...`}</pre>
         </section>

@@ -7,11 +7,11 @@ what its tools told it:
   * FortiAnalyzer was installed at 09:18; the last warmup ran at 07:08. The
     catalog is a snapshot with an emptiness-only staleness check, so for the
     rest of the day every ``faz_*`` call got "connector
-    'fortinet-fortianalyzer' not found in store" — indistinguishable from
+    'fortinet-fortianalyzer' not found in store" -- indistinguishable from
     "that connector doesn't exist".
   * ``find_connector`` then compounded it: difflib at cutoff 0.45 with no
     token evidence answered "siem" with ['smtp', 'imap'], "crowdstrike" with
-    ['cyops_utilities'] and "fortianalyzer" with ['fortinet-fortiedr'] — all
+    ['cyops_utilities'] and "fortianalyzer" with ['fortinet-fortiedr'] -- all
     phrased as "did you mean…?", which the model relayed as a real finding.
 
 A wrong suggestion is worse than none: it redirects the whole turn.
@@ -43,7 +43,7 @@ def test_absent_products_get_no_suggestion(q):
     """
     assert _plausible_name_matches(q, NAMES) == [], (
         f"{q!r} produced a spelling suggestion for a product that is simply "
-        f"not installed — this is the failure mode that sent the model to the "
+        f"not installed -- this is the failure mode that sent the model to the "
         f"wrong vendor"
     )
 
@@ -99,7 +99,7 @@ def test_hint_fires_when_the_box_has_it_but_the_catalog_does_not():
     hint = _shared.stale_catalog_hint("fortinet-fortianalyzer")
     assert hint is not None
     assert hint["code"] == "stale_catalog"
-    # The message must say the connector EXISTS — that is the whole point.
+    # The message must say the connector EXISTS -- that is the whole point.
     assert "IS installed" in hint["message"]
     assert any("warm" in s.lower() for s in hint["suggestions"])
 
@@ -114,7 +114,7 @@ def test_probe_failure_is_unknown_never_absent():
     """A failing/None probe must not be read as 'the box has nothing'.
 
     Treating "couldn't ask" as "isn't there" would flip every lookup into a
-    false stale-catalog claim — a new confident falsehood replacing the old.
+    false stale-catalog claim -- a new confident falsehood replacing the old.
     """
     def _boom():
         raise RuntimeError("loopback down")

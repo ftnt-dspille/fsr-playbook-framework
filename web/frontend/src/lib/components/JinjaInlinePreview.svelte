@@ -14,7 +14,7 @@
   let timer: any = null;
 
   // Don't fire the render call while the user is actively typing or
-  // navigating Monaco's autocomplete — the preview popping in
+  // navigating Monaco's autocomplete -- the preview popping in
   // mid-keystroke is distracting and burns API requests on partial
   // expressions like `{{ vars.in` that always error.
   const DEBOUNCE_MS = 700;

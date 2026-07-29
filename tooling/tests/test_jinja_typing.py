@@ -19,7 +19,7 @@ from fsr_playbooks.compiler.resolver.connector_args import (
 
 def _macros_conn() -> sqlite3.Connection:
     """Tiny in-memory jinja_macros fixture matching the live store's
-    column shape — only the columns the inferrer reads."""
+    column shape -- only the columns the inferrer reads."""
     conn = sqlite3.connect(":memory:")
     conn.execute("""
         CREATE TABLE jinja_macros (
@@ -101,14 +101,14 @@ def test_infer_none_for_unknown_filter():
 
 
 def test_infer_none_for_any_typed_filter():
-    # `| default` is declared as `any` — we deliberately don't claim a
+    # `| default` is declared as `any` -- we deliberately don't claim a
     # type so the resolver doesn't false-positive on common patterns.
     assert infer_terminal_observed_type(
         "{{ x | default(0) }}", _macros_conn()) is None
 
 
 def test_infer_none_for_no_filters():
-    # A bare `{{ vars.x }}` is the walker's job — not this module's.
+    # A bare `{{ vars.x }}` is the walker's job -- not this module's.
     assert infer_terminal_observed_type(
         "{{ vars.x }}", _macros_conn()) is None
 
@@ -126,7 +126,7 @@ def test_infer_none_for_non_strings():
 
 
 def test_infer_survives_missing_macros_table():
-    """A DB without `jinja_macros` should yield None, not raise — for
+    """A DB without `jinja_macros` should yield None, not raise -- for
     filters that aren't in the hand-curated map. Curated filters
     short-circuit before the DB is consulted, which is intentional."""
     empty = sqlite3.connect(":memory:")

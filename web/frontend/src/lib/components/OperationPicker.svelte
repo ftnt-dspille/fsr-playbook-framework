@@ -66,7 +66,7 @@
       const matches = r.result?.matches ?? [];
       // Re-rank by local user-pref score. Stable sort preserves the
       // server's own order (verification status, then alpha) inside a
-      // score tier — the server has signal we lack (e.g. tested_fail
+      // score tier -- the server has signal we lack (e.g. tested_fail
       // demotion), and we only want to *boost* familiar ops.
       const score = scoreFor(connector);
       suggestions = matches

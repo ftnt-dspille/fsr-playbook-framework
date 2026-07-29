@@ -1,6 +1,6 @@
 """The build system prompt's canonical skeleton must match what validate_yaml
-accepts. It previously instructed `id:` on every step — which is a hard
-validation error — and omitted `next:` wiring, forcing two wasted validate
+accepts. It previously instructed `id:` on every step -- which is a hard
+validation error -- and omitted `next:` wiring, forcing two wasted validate
 round-trips on every build (see session yq8nhcix). Pin the corrected shape.
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ _QUICK_ACTION_MODES = [
 # --- Native steps vs connector ops (D2 ③) ------------------------------
 # A real build ("create a playbook to block an ip and create an alert")
 # derailed because the model searched connectors for a `create_alert`
-# operation (there is none — creating a record is a native `create_record`
+# operation (there is none -- creating a record is a native `create_record`
 # step) and hallucinated. The prompt must disambiguate native steps from
 # connector ops.
 
@@ -78,7 +78,7 @@ def test_every_quick_action_mode_documented():
 #
 # S6 (apply the fix so a failed playbook runs) found the build persona, on a
 # free-text "the last run failed, fix it" turn, skipping `why_did_playbook_fail`
-# and guessing a cosmetic edit — because the only instruction to diagnose a
+# and guessing a cosmetic edit -- because the only instruction to diagnose a
 # runtime failure lived inside `# Quick-action modes`, which the prompt tells the
 # model to IGNORE when no `# Active quick-action` marker is present. The fix moved
 # the rule into `# The open playbook` (always in effect while a playbook is open).
@@ -103,15 +103,15 @@ def test_runtime_failure_triggers_why_did_playbook_fail_outside_quick_actions():
 
 # --- P4: the prompt may only promise tools the build persona actually has -----
 #
-# The failure this pins is not hypothetical and not a typo — it is a whole class,
+# The failure this pins is not hypothetical and not a typo -- it is a whole class,
 # and it cost this plan a live eval to find. S2 ran the designer persona against
 # a real box: 0/4 runs, every one dead-ending in `analyze_playbook` with nothing
-# to pass it. The cause was one sentence in this prompt —
+# to pass it. The cause was one sentence in this prompt --
 #
 #     "the open playbook's IRI is in the entity block, so call `analyze_playbook`
 #      on it rather than asking the analyst to paste YAML"
 #
-# — instructing an action the tool cannot perform: `analyze_playbook` requires
+# -- instructing an action the tool cannot perform: `analyze_playbook` requires
 # `yaml_text` and has no IRI parameter, and NOTHING in the build slice reads a
 # live playbook. The assistant was not wrong; it was obeying a prompt that
 # promised a capability that did not exist. Auditing the prompt against the real
@@ -132,14 +132,14 @@ import pytest
 # never against the raw text.
 _FLAT = re.sub(r"\s+", " ", _PROMPT).lower()
 
-# Backticked identifiers that are deliberately NOT tools. Each needs a reason —
+# Backticked identifiers that are deliberately NOT tools. Each needs a reason --
 # if you add one, say why, because the default answer is "then don't name it".
 _NOT_TOOLS = {
     # Quick-action chip keys (`# Active quick-action` markers), not callables.
     "explain", "add_step", "find_issues", "add_error_handling", "optimize",
     "quick_action",
     # The prompt's own example of a GUESSED op that does not exist. Naming it is
-    # the point — it teaches the model not to invent it.
+    # the point -- it teaches the model not to invent it.
     "get_api_response",
     # Native step types, resolved via get_step_type. Not tools. (`find_record`
     # has a tool-shaped `find_` prefix but is a step type, not the MCP tool.)
@@ -148,7 +148,7 @@ _NOT_TOOLS = {
     # YAML keys / fields the prompt teaches.
     "playbooks", "templates", "type", "stepType", "next", "name", "id",
     "parameters", "module", "yaml_text", "before_yaml", "after_yaml",
-    # Widget/connector ops the analyst's buttons call — deliberately NOT in the
+    # Widget/connector ops the analyst's buttons call -- deliberately NOT in the
     # agent's slice (the Save button calls update_playbook; the agent must not).
     "update_playbook",
 }
@@ -188,7 +188,7 @@ def test_prompt_only_names_tools_the_build_persona_actually_has():
 
 def test_the_mentions_check_actually_sees_the_prompts_tools():
     # Guard the guard: if the regex or the allowlist ever swallowed everything,
-    # the test above would pass vacuously — an oracle that only ever passes is
+    # the test above would pass vacuously -- an oracle that only ever passes is
     # the bug this plan exists to catch, one level up.
     mentions = _prompt_tool_mentions()
     assert len(mentions) >= 10, f"suspiciously few tool mentions parsed: {mentions}"
@@ -220,7 +220,7 @@ def test_the_analysis_tools_really_do_require_yaml_text(tool):
     spec = by_name[tool]
     schema = spec["input_schema"] if isinstance(spec, dict) else spec.input_schema
     assert "yaml_text" in (schema.get("required") or []), (
-        f"{tool} no longer requires yaml_text — the prompt's 'pass the OPEN "
+        f"{tool} no longer requires yaml_text -- the prompt's 'pass the OPEN "
         f"PLAYBOOK YAML as yaml_text' instruction needs revisiting")
 
 
@@ -235,8 +235,8 @@ def test_prompt_grounds_the_designer_in_the_open_playbook_block():
 def test_prompt_delivers_an_edit_through_the_offer_card_not_a_fence():
     """An edit to the OPEN playbook is delivered by `emit_enhancement_offer`.
 
-    This test used to assert the OPPOSITE — that the prompt tells the model to
-    end with "the complete revised playbook as the last ```yaml fence" —
+    This test used to assert the OPPOSITE -- that the prompt tells the model to
+    end with "the complete revised playbook as the last ```yaml fence" --
     because a prose fence scraped by the widget was the only write path
     enhance mode had. Live, that path lost the edit: the model verified one
     document, then re-typed three different ones into chat, and the widget
@@ -273,4 +273,4 @@ def test_prompt_forbids_a_yaml_fence_on_a_read_only_turn():
 
 def test_terminal_action_rule_is_scoped_to_change_requests():
     """The fence-required rule must not read as unconditional."""
-    assert "Terminal action — hard rule for a CHANGE request" in _PROMPT
+    assert "Terminal action -- hard rule for a CHANGE request" in _PROMPT

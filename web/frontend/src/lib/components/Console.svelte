@@ -39,7 +39,7 @@
   //
   // Strict invariant: every span / anchor we emit is built directly
   // from a chunk of the raw input, escaped at emission time. We never
-  // run a regex over already-rendered HTML — earlier versions did, and
+  // run a regex over already-rendered HTML -- earlier versions did, and
   // a `\d+` highlighter merrily matched `300` inside class names like
   // `text-emerald-300`, which corrupted the whole frame.
   //

@@ -42,7 +42,7 @@ jobs:
           uv pip install pyyaml "ruamel.yaml" jinja2 openai anthropic "mcp>=1.0" \
                          pytest requests-mock anyio
       - name: Run tests
-        # Call the venv interpreter directly — deterministic, avoids uv trying
+        # Call the venv interpreter directly -- deterministic, avoids uv trying
         # to sync the root project (which expects a sibling pyfsr checkout).
         run: .venv/bin/python -m pytest fsr_playbooks/tests -q -m "not live and not slow"
 

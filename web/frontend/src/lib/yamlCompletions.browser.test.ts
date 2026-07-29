@@ -3,7 +3,7 @@
  *
  * Runs in Vitest browser mode (Chromium via Playwright) so we get a
  * full DOM, layout boxes, ResizeObserver, and Monaco's real model /
- * provider machinery — none of which jsdom supplies. Asserts:
+ * provider machinery -- none of which jsdom supplies. Asserts:
  *
  *   - Snippet insertion through Monaco's CompletionItemInsertTextRule
  *     actually expands the template into the model text.
@@ -60,7 +60,7 @@ beforeEach(() => {
   editor = monaco.editor.create(host, { value: '', language: 'yaml', tabSize: 2 });
 });
 
-describe('real Monaco — snippet expansion', () => {
+describe('real Monaco -- snippet expansion', () => {
   it('connector snippet expands into structured arguments block', async () => {
     // Insert the connector snippet via Monaco's snippet controller so
     // we exercise CompletionItemInsertTextRule.InsertAsSnippet for real.

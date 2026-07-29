@@ -3,7 +3,7 @@
 The S3 build-persona eval's one remaining failure: the model called
 `list_configured_connectors`, didn't see cyops_utilities (a config-LESS utility,
 config_count=0), concluded "connector not available", and bailed to a skeleton
-with an undefined input. cyops_utilities needs no config — its ops run with
+with an undefined input. cyops_utilities needs no config -- its ops run with
 `config: ''`. `find_connector` now returns a `config_required` bool per match and
 a note that absence from the configured list is not unavailability.
 """

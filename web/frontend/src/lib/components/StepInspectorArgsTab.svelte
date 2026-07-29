@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Phase 2.1 — schema-driven Args view.
+   * Phase 2.1 -- schema-driven Args view.
    *
    * For connector_op nodes we fetch `get_op_schema` and lay each
    * declared param next to its current value. Conditional params
@@ -65,7 +65,7 @@
       const r = await fetch('/api/ref/modules');
       if (r.ok) allModules = await r.json();
       modulesLoaded = true;
-    } catch { /* trained store missing — leave list empty */ }
+    } catch { /* trained store missing -- leave list empty */ }
     finally { modulesLoading = false; }
   }
 
@@ -90,7 +90,7 @@
     }
   }
 
-  // Lazy-load on mount when the node is a trigger / record_crud — the
+  // Lazy-load on mount when the node is a trigger / record_crud -- the
   // dropdown wants the list ready before the user clicks.
   $effect(() => {
     if (node.family === 'trigger' || node.family === 'record_crud') {
@@ -108,7 +108,7 @@
     return (q < 0 ? s : s.slice(0, q)).trim();
   }
 
-  /** Pull the active module name from the node's arguments — different
+  /** Pull the active module name from the node's arguments -- different
    * step families stash it in different keys. Centralised so the
    * field-loader effect below reacts to the same source the editor
    * blocks read. */
@@ -127,7 +127,7 @@
   }
 
   // React to the module changing (either user picks a new one or a
-  // freshly-mounted node already has one set) — load its field
+  // freshly-mounted node already has one set) -- load its field
   // catalog so the FilterTreeEditor's picker has data when the user
   // clicks. Using $effect (not `{@const}` for side-effects) so the
   // reactive graph actually fires the fetch.
@@ -172,7 +172,7 @@
 
   // Connector + Operation autocomplete are owned by their respective
   // pickers (ConnectorPicker / OperationPicker). They commit on
-  // selection/Enter/blur — never on partial keystrokes — so the
+  // selection/Enter/blur -- never on partial keystrokes -- so the
   // schema $effect below doesn't see "operation 'b'" mid-type.
   let connector = $derived(node.arguments?.connector as string | undefined);
   let opName = $derived(
@@ -181,7 +181,7 @@
   );
   let configName = $derived((node.arguments?.config as string | undefined) ?? '');
 
-  /** Configurations for the selected connector — populated on demand
+  /** Configurations for the selected connector -- populated on demand
    * from the live FSR (`list_connector_configurations` MCP). Empty list
    * when the env isn't configured or the connector has none yet. */
   type ConfigEntry = { config_id: string; name: string; default: boolean };
@@ -205,7 +205,7 @@
         configsLoadedFor = c;
       })
       .catch(() => {
-        // Tolerate transport / 404 / FSR-down errors silently — the
+        // Tolerate transport / 404 / FSR-down errors silently -- the
         // form falls back to the "no configurations" hint.
         if (connector === c) {
           configurations = [];
@@ -225,7 +225,7 @@
   // Track the previous schema's title/op_name so the auto-name logic
   // below can decide "did the user customise the name, or is it just
   // the previous operation's auto-derived label?" The set of strings
-  // we treat as "system-set defaults" — overwrite on op change.
+  // we treat as "system-set defaults" -- overwrite on op change.
   let lastSchemaTitle: string | null = $state(null);
   let lastSchemaOpName: string | null = $state(null);
 
@@ -371,7 +371,7 @@
     if (!trimmed || trimmed === oldName) return;
     const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
     const params = ((args.params as Record<string, unknown>) ?? {});
-    if (trimmed in params) return;  // collision — silent no-op
+    if (trimmed in params) return;  // collision -- silent no-op
     params[trimmed] = params[oldName];
     delete params[oldName];
     args.params = params;
@@ -427,7 +427,7 @@
       rules.push({ parent: p.parent_param_name, value: p.condition_value });
     }
     if (rules.length === 0) return true;
-    if (stack.has(p.param_name)) return true; // cycle — assume visible
+    if (stack.has(p.param_name)) return true; // cycle -- assume visible
     const next = new Set(stack); next.add(p.param_name);
     return rules.some((r) => String(effectiveValue(r.parent, next) ?? '') === String(r.value));
   }
@@ -492,14 +492,14 @@
   }
 </script>
 
-<!-- Shared module datalist — referenced by every Resource/Module input
+<!-- Shared module datalist -- referenced by every Resource/Module input
      in the trigger + record_crud editors below. Rendered once so we
      don't repeat it inside the {#each} branches. -->
 {#if allModules.length > 0}
   <datalist id="fsrpb-modules-list">
     {#each allModules as m (m.name)}
       <!-- modules.label often holds the FSR Jinja template for the
-           record's display name (e.g. `{{ name }}`) — not useful as a
+           record's display name (e.g. `{{ name }}`) -- not useful as a
            UI label. Show the plural noun when distinct from the
            machine name; that's what the analyst recognizes. -->
       <option value={m.name}>{m.plural && m.plural !== m.name ? m.plural : ''}</option>
@@ -527,7 +527,7 @@
     const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
     args.inputs = next;
     // Drop the canonical block when present so we have one source of
-    // truth — the resolver re-expands `inputs:` into `input.schema.*`
+    // truth -- the resolver re-expands `inputs:` into `input.schema.*`
     // at compile time.
     delete args.input;
     visualStore.setArgs(playbookIdx, node.id, args);
@@ -561,7 +561,7 @@
     <textarea
       rows="3"
       value={description}
-      placeholder="Context the analyst reads before answering — supports markdown / inline HTML."
+      placeholder="Context the analyst reads before answering -- supports markdown / inline HTML."
       oninput={(e) => {
         const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
         const v = (e.currentTarget as HTMLTextAreaElement).value;
@@ -584,7 +584,7 @@
           visualStore.setArgs(playbookIdx, node.id, args);
         }}
       />
-      <span title="Marks the prompt as an Approval — surfaces in the analyst's queue with approval-specific UX.">approval</span>
+      <span title="Marks the prompt as an Approval -- surfaces in the analyst's queue with approval-specific UX.">approval</span>
     </label>
     <label class="flex items-center gap-1">
       <input
@@ -615,7 +615,7 @@
   <div class="mt-4">
     <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Fields ({fields.length})</div>
     {#if fields.length === 0}
-      <p class="text-[11px] italic text-[var(--text-faint)]">No fields. Add one below — the form will render with just the buttons.</p>
+      <p class="text-[11px] italic text-[var(--text-faint)]">No fields. Add one below -- the form will render with just the buttons.</p>
     {:else}
       <ul class="space-y-2">
         {#each fields as f, idx (f.name ?? `__${idx}`)}
@@ -815,7 +815,7 @@
           visualStore.setArgs(playbookIdx, node.id, args);
         }}
       />
-      <span title="Fire-and-forget — caller does not wait for the nested playbook to finish.">apply_async</span>
+      <span title="Fire-and-forget -- caller does not wait for the nested playbook to finish.">apply_async</span>
     </label>
     <label class="flex items-center gap-1">
       <input
@@ -926,7 +926,7 @@
 
   <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Trigger</div>
   <p class="mt-1 text-[11px] text-[var(--text-faint)]">
-    {#if node.type === 'start_on_create'}Fires when a record is created in the chosen module.{:else if node.type === 'start_on_update'}Fires when a record is updated in the chosen module.{:else if node.type === 'manual_action'}Fires when an analyst clicks an action button on a record.{:else if node.type === 'api_call'}Fires when an external system POSTs to this playbook's endpoint.{:else}Manual trigger — runs on demand.{/if}
+    {#if node.type === 'start_on_create'}Fires when a record is created in the chosen module.{:else if node.type === 'start_on_update'}Fires when a record is updated in the chosen module.{:else if node.type === 'manual_action'}Fires when an analyst clicks an action button on a record.{:else if node.type === 'api_call'}Fires when an external system POSTs to this playbook's endpoint.{:else}Manual trigger -- runs on demand.{/if}
   </p>
 
   <label class="mt-2 block">
@@ -954,7 +954,7 @@
       <p class="mt-0.5 text-[10px] italic text-[var(--text-faint)]">loading modules…</p>
     {:else if modulesLoaded && allModules.length === 0}
       <p class="mt-0.5 text-[10px] italic text-[var(--text-faint)]">
-        Module catalog empty — run <code>fsrpb train</code> against the live FSR to populate.
+        Module catalog empty -- run <code>fsrpb train</code> against the live FSR to populate.
       </p>
     {/if}
   </label>
@@ -974,7 +974,7 @@
       <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
         Filter conditions
       </div>
-      <!-- Live English summary of the trigger — refreshes as the user
+      <!-- Live English summary of the trigger -- refreshes as the user
            edits filters so they can sanity-check intent without
            parsing the AND/OR tree visually. -->
       <p class="mb-2 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[11px] italic text-[var(--text-default)]">
@@ -1052,7 +1052,7 @@
               visualStore.setArgs(playbookIdx, node.id, args);
             }}
           />
-          <span title="Caps how many times this trigger can refire on the same record per minute.">Throttle (<code>__triggerLimit</code>) — rate-limit re-fires on the same record.</span>
+          <span title="Caps how many times this trigger can refire on the same record per minute.">Throttle (<code>__triggerLimit</code>) -- rate-limit re-fires on the same record.</span>
         </label>
       </div>
     </details>
@@ -1105,7 +1105,7 @@
       <p class="mt-0.5 text-[10px] italic text-[var(--text-faint)]">loading modules…</p>
     {:else if modulesLoaded && allModules.length === 0}
       <p class="mt-0.5 text-[10px] italic text-[var(--text-faint)]">
-        Module catalog empty — run <code>fsrpb train</code> to populate.
+        Module catalog empty -- run <code>fsrpb train</code> to populate.
       </p>
     {/if}
   </label>
@@ -1261,7 +1261,7 @@
       >
         <option value="">+ add field…</option>
         {#each fieldList.filter((f) => !selectFields.includes(f.name)) as f (f.name)}
-          <option value={f.name}>{f.name}{f.title ? ` — ${f.title}` : ''}</option>
+          <option value={f.name}>{f.name}{f.title ? ` -- ${f.title}` : ''}</option>
         {/each}
       </select>
     </details>
@@ -1295,7 +1295,7 @@
               }}
               class="flex-1 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1 py-0.5 font-mono text-[11px]"
             >
-              <option value="">— pick field —</option>
+              <option value="">-- pick field --</option>
               {#each fieldList as f (f.name)}
                 <option value={f.name}>{f.name}</option>
               {/each}
@@ -1418,7 +1418,7 @@
         Feed source
       </div>
       <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
-        Iterate over a list expression — each element becomes
+        Iterate over a list expression -- each element becomes
         <code class="font-mono">vars.item</code>. The bulk-feed step
         bypasses on-create triggers (intentional: ingestion is
         firehose-rate, triggers fire post-hoc on enrichment).
@@ -1468,7 +1468,7 @@
             checked={feParallel}
             onchange={(e) => updateForEach({ parallel: (e.currentTarget as HTMLInputElement).checked })}
           />
-          <span title="Run batches concurrently — speeds up wide ingest at the cost of ordering guarantees.">parallel</span>
+          <span title="Run batches concurrently -- speeds up wide ingest at the cost of ordering guarantees.">parallel</span>
         </label>
       </div>
 
@@ -1540,7 +1540,7 @@
               visualStore.setArgs(playbookIdx, node.id, args);
             }}
           />
-          <span title="Batches the create — does NOT skip on-create triggers; use Ingest Bulk Feed for that.">__bulk</span>
+          <span title="Batches the create -- does NOT skip on-create triggers; use Ingest Bulk Feed for that.">__bulk</span>
         </label>
       {/if}
     </div>
@@ -1631,7 +1631,7 @@
                   onchange={(e) => writeField(k, (e.currentTarget as HTMLSelectElement).value)}
                   class="mt-1 block w-full rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-[11px]"
                 >
-                  <option value="">— pick value —</option>
+                  <option value="">-- pick value --</option>
                   {#each picklistVals as pv}
                     <option value={pv}>{pv}</option>
                   {/each}
@@ -1690,7 +1690,7 @@
                   {/if}
                 </div>
                 <p class="mt-0.5 text-[10px] text-[var(--text-faint)]">
-                  Relation to <code>{fieldMeta?.type}</code> — pick a record or paste an IRI / Jinja expression.
+                  Relation to <code>{fieldMeta?.type}</code> -- pick a record or paste an IRI / Jinja expression.
                 </p>
               {:else}
                 <textarea
@@ -1728,7 +1728,7 @@
           <option value="">+ Add field…</option>
           {#each unsetFields as f (f.name)}
             <option value={f.name}>
-              {f.name}{f.title ? ` — ${f.title}` : ''} ({f.type}){f.required ? ' · required' : ''}
+              {f.name}{f.title ? ` -- ${f.title}` : ''} ({f.type}){f.required ? ' · required' : ''}
             </option>
           {/each}
         </select>
@@ -1755,7 +1755,7 @@
 
   {#if isDelete}
     <p class="mt-3 text-[11px] text-[var(--text-faint)]">
-      Delete steps use the upstream record reference — usually
+      Delete steps use the upstream record reference -- usually
       <code class="font-mono">{`{{ vars.input.records[0]['@id'] }}`}</code>
       or a Find step's result. Author the IRI via the Raw tab; no
       additional config is needed here.
@@ -1805,7 +1805,7 @@
   {@const a = (node.arguments ?? {}) as Record<string, unknown>}
   {@const labels: Record<string, string> = {
     raise_exception: 'Raise an exception with a descriptive message. Halts the playbook and surfaces in the run log.',
-    terminate: 'Terminate the current playbook run. Use sparingly — most flows should end on a normal terminal step.',
+    terminate: 'Terminate the current playbook run. Use sparingly -- most flows should end on a normal terminal step.',
     assert: 'Fail the run when the predicate evaluates falsy. Useful for guarding preconditions.'
   }}
   <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
@@ -1834,7 +1834,7 @@
     <textarea
       rows="2"
       value={(a.message as string) ?? (a.reason as string) ?? ''}
-      placeholder="Describe why the run is failing — surfaces in logs."
+      placeholder="Describe why the run is failing -- surfaces in logs."
       oninput={(e) => {
         const args = deepClone(node.arguments ?? {}) as Record<string, unknown>;
         args.message = (e.currentTarget as HTMLTextAreaElement).value;
@@ -1904,7 +1904,7 @@
           </div>
           <!-- Live render: see what `{{ … }}` becomes against the current
                context (pinned sample, upstream set_variable outputs, etc.)
-               while you type — no need to switch to the Verify tab. -->
+               while you type -- no need to switch to the Verify tab. -->
           <JinjaInlinePreview value={typeof v.value === 'string' ? v.value : ''} />
         </li>
       {/each}
@@ -1927,7 +1927,7 @@
   </div>
 {:else if node.family !== 'connector_op'}
   {#if node.type === 'decision' || node.type === 'manual_input'}
-    <!-- Decision / manual_input args ARE the branches — and the
+    <!-- Decision / manual_input args ARE the branches -- and the
          Branches editor is folded in beneath this slot by
          StepInspector. Skip the raw JSON dump so the user sees the
          actual editor, not the raw blob it produces. -->
@@ -2174,7 +2174,7 @@
   {#if hiddenParams.length}
     <details class="mb-3 rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] p-2">
       <summary class="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-        Hidden ({hiddenParams.length}) — gated by other field values
+        Hidden ({hiddenParams.length}) -- gated by other field values
       </summary>
       <ul class="mt-2 space-y-2">
         {#each hiddenParams as p (p.param_name)}

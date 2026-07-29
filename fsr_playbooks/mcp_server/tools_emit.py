@@ -1,7 +1,7 @@
 """Constrained-generation emitters for hot step shapes.
 
 These tools take strict structured input (enforced by Anthropic's
-`input_schema` on the wire — the model cannot send a malformed call)
+`input_schema` on the wire -- the model cannot send a malformed call)
 and return the canonical YAML fragment for that step. The agent splices
 the returned YAML into its draft instead of hand-writing the shape.
 
@@ -13,7 +13,7 @@ branches) that constrained generation makes literally impossible. See
 Schema overrides for these tools live in
 `web/backend/llm/tools.py::TOOL_SCHEMA_OVERRIDES`; the auto-from-signature
 builder is too weak for nested-object validation. Keep the override and
-the runtime check in this module in sync — the override is the wire
+the runtime check in this module in sync -- the override is the wire
 contract, the runtime check is the belt-and-suspenders for callers
 (eval harness, tests) that bypass the LLM.
 """
@@ -45,7 +45,7 @@ def emit_decision_step(
     default_branch: dict[str, Any],
 ) -> dict[str, Any]:
     """Emit a canonical `decision` step. Prefer this over hand-writing
-    decision YAML — the schema is enforced, so malformed shapes
+    decision YAML -- the schema is enforced, so malformed shapes
     (missing `default: true`, branches without `when`, etc.) cannot be
     produced.
 
@@ -55,7 +55,7 @@ def emit_decision_step(
         {display: str, when: str (Jinja expression), next: str (target step name)}.
         Must have at least one entry.
       default_branch: the else branch. Shape: {display: str, next: str}.
-        `default: true` is added by this tool — do NOT pass it.
+        `default: true` is added by this tool -- do NOT pass it.
 
     Returns: {ok: True, yaml: "<fenced YAML fragment>"} on success.
     On a runtime-check failure: {ok: False, code, message, suggestions}.
@@ -81,7 +81,7 @@ def emit_decision_step(
                         suggestions=["every condition needs display, when, next"])
         if "default" in c:
             return _err("default_in_condition",
-                        (f"conditions[{i}] sets default — only the "
+                        (f"conditions[{i}] sets default -- only the "
                          "default_branch carries `default: true`"))
         ne = _bad_name(c["next"])
         if ne:
@@ -100,7 +100,7 @@ def emit_decision_step(
         return _err("invalid_branch_target", f"default_branch.next: {ne}")
 
     # Render. YAML emit is hand-rolled (not yaml.dump) so the output
-    # exactly matches the canonical shape in system_prompt.md §3 —
+    # exactly matches the canonical shape in system_prompt.md §3 --
     # key ordering, double-quoted `when:`, no flow style.
     lines: list[str] = []
     lines.append("- type: decision")
@@ -150,7 +150,7 @@ def emit_choice_card(
     connector?", etc.) instead of asking in prose.
 
     `options` is a list of `{label, value, hint?}`. `value` is what the
-    widget echoes back on resume — pick stable, machine-readable values."""
+    widget echoes back on resume -- pick stable, machine-readable values."""
     if not isinstance(id, str) or not id.strip():
         return _err("missing_id", "id must be a non-empty string")
     if not isinstance(prompt, str) or not prompt.strip():
@@ -220,32 +220,32 @@ def emit_action_card(
     if bad:
         return _err("editable_fields_not_in_args",
                     f"editable_fields not present in args: {bad}")
-    # Don't render an approval card for a connector/op that doesn't exist —
+    # Don't render an approval card for a connector/op that doesn't exist --
     # the analyst would approve a phantom action that then fails at execute.
     # Use the SHARED grounding guarantee (offline store + live-definition
-    # fallback when the store is un-synced), the same check run_op runs — so a
+    # fallback when the store is un-synced), the same check run_op runs -- so a
     # phantom op can't slip through here just because the connector's ops aren't
     # catalogued yet (the sess-uq31go5p live-triage failure). Fails open on any
     # live-lookup hiccup, so a transient network problem never blocks a real op.
     # Pass `args` so the SHARED grounding guarantee validates the argument
-    # names too — against the live connector definition when the store is
-    # un-synced — so a card with guessed/typo'd params can't reach the analyst
+    # names too -- against the live connector definition when the store is
+    # un-synced -- so a card with guessed/typo'd params can't reach the analyst
     # for a connector whose params aren't catalogued yet (the live half of the
     # sess-uq31go5p / mail_egress param-flail gap).
     from .tools_execution import validate_op_grounded
     op_err = validate_op_grounded(connector, operation, params=args)
     if op_err is not None:
         return op_err
-    # Offline param validation (decisive when params ARE catalogued — select
+    # Offline param validation (decisive when params ARE catalogued -- select
     # options, types, required). The live fallback above covers the un-synced
     # case; this covers the synced one. Don't render a card whose args are
-    # incomplete/invalid — the analyst would approve it only for it to fail
+    # incomplete/invalid -- the analyst would approve it only for it to fail
     # post-approval at execute.
     param_err = _validate_op_params(connector, operation, args)
     if param_err is not None:
         return param_err
     # Record the staged action into the session trace so a later trace-built
-    # playbook AUTOMATES it — the analyst was offered this containment but it
+    # playbook AUTOMATES it -- the analyst was offered this containment but it
     # was never executed, so `run_op` never recorded it and the trace compiler
     # had nothing to replay (the `action_coverage` gap). No-op when no trace is
     # active (studio/tests) or the same op is already on the trace. The compiler
@@ -278,7 +278,7 @@ def emit_capability_gap_card(
     docs_url: str | None = None,
 ) -> dict[str, Any]:
     """Emit a `capability_gap` card when the instance CAN'T do what the
-    investigation needs (e.g. no IP-containment connector is configured) —
+    investigation needs (e.g. no IP-containment connector is configured) --
     so the analyst is never left at a dead end. The card states what's
     missing, why, the concrete steps to enable it, optional automation
     tips, and a RESUME button that re-runs the blocked step after the
@@ -294,15 +294,15 @@ def emit_capability_gap_card(
       fix_steps: ordered, concrete steps the analyst can take to enable it
         (e.g. ["Configure the fortigate-firewall connector under Settings →
         Connectors", "Grant it firewall-policy write access"]). At least one.
-      resume: the re-check button — {label, value}. On click the widget
+      resume: the re-check button -- {label, value}. On click the widget
         resumes the turn echoing `value`; the agent re-runs the blocked
         discovery (e.g. find_containment_actions) and continues. `value`
         must be machine-readable and distinct from any alternative value.
-      tips: optional automation/UX recommendations — list of {text, hint?}.
+      tips: optional automation/UX recommendations -- list of {text, hint?}.
         Use for "how to make this work better next time" guidance (e.g.
         keeping a response connector configured, granting probe access).
       alternatives: optional manual fallbacks the analyst can pick instead
-        of fixing the gap now — list of {label, value, hint?} (e.g.
+        of fixing the gap now -- list of {label, value, hint?} (e.g.
         "Escalate to T2", "Document & close"). Same resume semantics as a
         choice_card option. Values must be unique across resume+alternatives.
       docs_url: optional link to setup/configuration docs.
@@ -389,15 +389,15 @@ def emit_playbook_offer(
       offer after every single action.
     - **Direct build (`yaml=<final YAML>`).** A hand-authored build turn has
       no trace; once `verify_playbook` passes, calling this with the final
-      validated YAML is the MANDATORY terminal action — the card carries the
+      validated YAML is the MANDATORY terminal action -- the card carries the
       YAML and accept compiles + pushes it deterministically. Never end a
       successful build turn by telling the user to call `push_playbook`
       themselves.
 
     You supply only the conversational framing (`summary`, optional
-    `title_suggestion`). The card's reviewable-draft body — the per-step
+    `title_suggestion`). The card's reviewable-draft body -- the per-step
     `ops_summary` with plain-English wiring labels, verify badges, and the
-    `draft_steps` tree — is built HERE from the recorded session trace via
+    `draft_steps` tree -- is built HERE from the recorded session trace via
     the deterministic skill compiler. You do NOT hand-write step wiring;
     that is exactly the guess-the-jinja failure mode this flow removes.
 
@@ -411,10 +411,10 @@ def emit_playbook_offer(
         (default True).
 
     Returns {ok: True, card:{type:"playbook_offer", ...}} on success, or
-    {ok: False, code, message} — notably `empty_trace` when no action was
+    {ok: False, code, message} -- notably `empty_trace` when no action was
     recorded (there is nothing to offer; do not call it then). The card always
     carries `has_mutating_action` (bool); when the trace is purely read-only it
-    also carries an `advisory` note so the analyst can decide — the offer is
+    also carries an `advisory` note so the analyst can decide -- the offer is
     never refused for lacking a containment step."""
     for label, val in (("id", id), ("summary", summary)):
         if not isinstance(val, str) or not val.strip():
@@ -443,12 +443,12 @@ def emit_playbook_offer(
     if not draft["ops_summary"]:
         return _err(
             "empty_trace",
-            "the recorded actions did not map to any known skill — nothing to "
+            "the recorded actions did not map to any known skill -- nothing to "
             "offer",
         )
 
     # A2 advisory (NOT a gate): the offer is never refused for a read-only
-    # trace. We classify each recorded op (method-aware — a GET
+    # trace. We classify each recorded op (method-aware -- a GET
     # `execute_api_request` is read-only, a POST is not) and add an advisory
     # that keeps a human in the loop:
     #   • all ops provably safe → "only read-only lookups" note.
@@ -482,7 +482,7 @@ def emit_playbook_offer(
     }
     if all_read_only:
         card["advisory"] = (
-            "This triage recorded only read-only lookups — saving it produces "
+            "This triage recorded only read-only lookups -- saving it produces "
             "an enrichment playbook with no containment step. Save it if that "
             "is what you want."
         )
@@ -491,7 +491,7 @@ def emit_playbook_offer(
         card["advisory"] = (
             "Before saving, confirm these step(s) are safe to re-run "
             f"automatically: {names}. They aren't recognized as read-only "
-            "lookups, so they may change state — review them in the draft below."
+            "lookups, so they may change state -- review them in the draft below."
         )
         card["needs_review_ops"] = unknown_ops
     if title_suggestion and title_suggestion.strip():
@@ -515,8 +515,8 @@ def emit_patch_proposal(
 ) -> dict[str, Any]:
     """Emit a `patch_proposal` card: a value-level fix the agent proposes for
     ONE step/field of the open playbook, shown in chat as a before→after diff
-    the analyst accepts or rejects inline. Use this — not a prose "you could
-    change X to Y" — whenever you want to offer a concrete, one-click edit to
+    the analyst accepts or rejects inline. Use this -- not a prose "you could
+    change X to Y" -- whenever you want to offer a concrete, one-click edit to
     the playbook the user has open (e.g. correct a jinja expression, fix a
     wrong arg value, tighten a condition). The turn HALTS on the card; on accept
     the widget resumes and the connector applies the fix via `reply_tool`.
@@ -530,8 +530,8 @@ def emit_patch_proposal(
       title: one-line plain-English summary of the fix (e.g. "Fix the IP jinja
         in step 'Block source'").
       before_yaml: the current snippet being replaced (the step/field as it is
-        now). Shown as the "before" side of the diff. Keep it minimal — just the
-        lines that change — so the diff is readable.
+        now). Shown as the "before" side of the diff. Keep it minimal -- just the
+        lines that change -- so the diff is readable.
       after_yaml: the proposed replacement snippet. Shown as "after".
       rationale: optional one line on WHY (e.g. "records[0] is empty on a
         record-action trigger; use vars.input.records[0]").
@@ -552,7 +552,7 @@ def emit_patch_proposal(
             return _err("missing_field", f"{label} must be a non-empty string")
     if before_yaml.strip() == after_yaml.strip():
         return _err("noop_patch",
-                    "before_yaml and after_yaml are identical — there is "
+                    "before_yaml and after_yaml are identical -- there is "
                     "nothing to change. Only propose a patch that alters the "
                     "playbook.")
     if tier is not None and (not isinstance(tier, int) or tier < 0):
@@ -584,7 +584,7 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
     """Direct-build mode of `emit_playbook_offer` (§A): the card carries the
     final validated YAML; accept compiles + pushes THAT text deterministically
     (no trace involved). The steps list is a display summary parsed from the
-    YAML — best-effort, never a gate (the YAML already passed validate/verify
+    YAML -- best-effort, never a gate (the YAML already passed validate/verify
     before the model offers it)."""
     if not isinstance(yaml_text, str) or not yaml_text.strip():
         return _err("missing_field", "yaml must be a non-empty string")
@@ -599,7 +599,7 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
             if isinstance(s, dict) and s.get("name"):
                 ops_summary.append({"label": str(s["name"]),
                                     "step_type": str(s.get("type") or "")})
-    except Exception:  # noqa: BLE001 — display summary only, never block
+    except Exception:  # noqa: BLE001 -- display summary only, never block
         ops_summary = []
 
     card: dict[str, Any] = {
@@ -612,7 +612,7 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
         # review rather than asserting safety either way.
         "has_mutating_action": False,
         "advisory": ("Built from the YAML above (not a recorded triage trace) "
-                     "— review the steps before saving."),
+                     "-- review the steps before saving."),
         "final_yaml": yaml_text,
     }
     if title_suggestion and title_suggestion.strip():
@@ -627,7 +627,7 @@ def emit_enhancement_offer(
     verified_id: str,
 ) -> dict[str, Any]:
     """Apply a verified edit to the playbook the analyst has OPEN. This is the
-    MANDATORY terminal action of an enhance turn — the only thing that makes an
+    MANDATORY terminal action of an enhance turn -- the only thing that makes an
     edit real.
 
     Enhance mode's counterpart to `emit_playbook_offer`. That one CREATES a new
@@ -641,7 +641,7 @@ def emit_enhancement_offer(
     whole point of the tool: a live session verified one document and then
     re-typed a subtly different one into chat three times, the widget scraped
     the last prose fence, and the analyst's playbook got YAML no gate had ever
-    seen — while the transcript showed a green verify. Removing the parameter
+    seen -- while the transcript showed a green verify. Removing the parameter
     removes the failure mode.
 
     So the enhance turn is exactly:
@@ -649,21 +649,21 @@ def emit_enhancement_offer(
         emit_enhancement_offer(id, summary, verified_id) ->  card, turn halts
 
     Never end an enhance turn by printing the revised playbook and hoping the
-    analyst pastes or saves it. If the verify did not pass, do not call this —
+    analyst pastes or saves it. If the verify did not pass, do not call this --
     fix the findings and re-verify.
 
     Args:
       id: stable card id; echoed back on accept/decline.
-      summary: what the analyst reads — one or two plain-English lines on what
+      summary: what the analyst reads -- one or two plain-English lines on what
         this edit changes and why (e.g. "Adds a manual-input approval gate
         before the block, wired Confirm -> Block IP and Cancel -> Manual
         Review."). Describe the change, not the YAML.
       verified_id: the handle from the passing `verify_enhancement` call.
 
-    Returns {ok: True, card:{type:"enhancement_offer", ...}} — the card carries
+    Returns {ok: True, card:{type:"enhancement_offer", ...}} -- the card carries
     `final_yaml` (the verified bytes), `diff_summary`, and any non-blocking
     `warnings` so the analyst reviews them before applying. On a bad handle
-    returns {ok: False, code: "unknown_verified_id"} — re-run
+    returns {ok: False, code: "unknown_verified_id"} -- re-run
     verify_enhancement and use the fresh id; do NOT work around it by
     presenting YAML in chat."""
     for label, val in (("id", id), ("summary", summary),
@@ -681,7 +681,7 @@ def emit_enhancement_offer(
             suggestions=[
                 "call verify_enhancement(before_yaml, after_yaml, user_message) "
                 "again and pass the verified_id it returns",
-                "do NOT fall back to pasting the YAML into your reply — the "
+                "do NOT fall back to pasting the YAML into your reply -- the "
                 "analyst's playbook is only updated through this card",
             ],
         )
@@ -697,7 +697,7 @@ def emit_enhancement_offer(
             if isinstance(s, dict) and s.get("name"):
                 ops_summary.append({"label": str(s["name"]),
                                     "step_type": str(s.get("type") or "")})
-    except Exception:  # noqa: BLE001 — display summary only, never block
+    except Exception:  # noqa: BLE001 -- display summary only, never block
         ops_summary = []
 
     diff = entry.get("diff_summary") or {}

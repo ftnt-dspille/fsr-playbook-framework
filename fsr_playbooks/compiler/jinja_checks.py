@@ -1,10 +1,10 @@
-"""Static Jinja checks — syntax validity + unknown-filter detection.
+"""Static Jinja checks -- syntax validity + unknown-filter detection.
 
 Two deterministic, high-payoff gaps the pilot's render-path extractor left open
 (PILOT_STATIC_ANALYSIS_GAP_PLAN.md "ACTIVE NEXT"):
 
 - **Syntax (jinja_syntax_error).** ``render_paths._extract_from_string`` *swallows*
-  ``TemplateSyntaxError`` (``except …: return []``) — a template that won't parse
+  ``TemplateSyntaxError`` (``except …: return []``) -- a template that won't parse
   produces no consumed paths and otherwise sails through. So a missing ``{% endif %}``
   or a malformed filter inside balanced braces passes ``ready_to_push`` and only
   blows up at runtime. jinja2 *is* the FortiSOAR runtime parser, so surfacing the
@@ -15,7 +15,7 @@ Two deterministic, high-payoff gaps the pilot's render-path extractor left open
   ``| filter`` and ``is test`` name against the known set (jinja2 built-ins ∪ the
   FortiSOAR custom catalog shipped in ``_data/jinja_filters.json``, generated from
   the Jinja-editor widget by ``tooling/extract_jinja_filters.js``) and emit a
-  ``difflib`` did-you-mean. Warning severity — the catalog is a curated subset, so a
+  ``difflib`` did-you-mean. Warning severity -- the catalog is a curated subset, so a
   truly-custom-but-real filter shouldn't hard-block.
 
 Pure offline: stdlib + jinja2 (already a compiler dep). No DB, no live FSR.
@@ -35,7 +35,7 @@ from jinja2.exceptions import TemplateSyntaxError
 from fsr_playbooks.compiler.errors import CompileError, ErrorCode
 
 # FortiSOAR's runtime Jinja engine enables the `do` extension
-# ({% do x.append(y) %} — expression statements for mutating variables
+# ({% do x.append(y) %} -- expression statements for mutating variables
 # inside loops, heavily used by system playbooks) and `loopcontrols`
 # ({% break %} / {% continue %} inside {% for %}). Without these
 # extensions the parser raises false-positive syntax errors on valid
@@ -56,13 +56,13 @@ def _load_known() -> tuple[frozenset[str], frozenset[str]]:
     ``select``…). The FSR custom catalog adds the ``fortisoar*`` filters the
     runtime registers that jinja2 doesn't know about. The ``ansible_filters``/
     ``ansible_tests`` keys carry the Ansible plugin namespace (ansible.builtin
-    + community.general, from ``tooling/extract_ansible_filters.py``) — FSR
+    + community.general, from ``tooling/extract_ansible_filters.py``) -- FSR
     playbooks execute through an Ansible-based engine, so ``json_query``,
     ``ternary``, ``combine``… are valid even though the widget palette omits
     them (AGENT_HARDENING_PLAN §G false-positive fix).
 
     The ``jinja_macros`` table (curated, in the packaged DB) carries filter
-    names mined from the live corpus + Ansible + FSR runtime — 43 filters the
+    names mined from the live corpus + Ansible + FSR runtime -- 43 filters the
     JSON catalog doesn't list (``picklist``, ``ipaddr``, ``resolveRange``…).
     Loading from it catches the FSR-custom filters the widget palette omits
     without needing a JSON catalog rebuild for every new filter discovered.
@@ -85,7 +85,7 @@ def _load_known() -> tuple[frozenset[str], frozenset[str]]:
         with sqlite3.connect(str(PACKAGED_SLIM_DB)) as conn:
             rows = conn.execute("SELECT name FROM jinja_macros").fetchall()
         filters.update(r[0] for r in rows if r[0])
-    except Exception:  # noqa: BLE001 — DB is optional; fall back to JSON
+    except Exception:  # noqa: BLE001 -- DB is optional; fall back to JSON
         pass
     return frozenset(filters), frozenset(tests)
 
@@ -137,7 +137,7 @@ def check_jinja(value: Any, *, step_id: str, path: str,
                             f"{exc.message}"),
                 "step": step_id, "path": path,
                 "location": loc,
-                "suggestion": ("fix the template — this is the exact error "
+                "suggestion": ("fix the template -- this is the exact error "
                                "FortiSOAR's Jinja engine raises at runtime"),
                 "severity": "error",
             })
@@ -163,14 +163,14 @@ def _check_filter_names(ast: nodes.Node, step_id: str, path: str,
         out.append({
             "code": "unknown_jinja_filter",
             "message": (f"Jinja {kind} {name!r} at {loc} is not in the local "
-                        f"catalog (jinja2 built-ins + FSR + Ansible) — it may "
+                        f"catalog (jinja2 built-ins + FSR + Ansible) -- it may "
                         f"still be valid on the target system.{did}"),
             "step": step_id, "path": path,
             "location": loc,
             "suggestion": (f"if {name!r} was a typo, replace with {sug!r}; "
-                           f"if it is a real {kind}, keep it — this is advisory"
+                           f"if it is a real {kind}, keep it -- this is advisory"
                            if sug else
-                           f"advisory only — verify the {kind} name; do not "
+                           f"advisory only -- verify the {kind} name; do not "
                            f"rewrite a working template to silence this"),
             "severity": "warning",
         })
@@ -191,8 +191,8 @@ def to_compile_errors(findings: list[dict[str, Any]]) -> list[CompileError]:
     ``check_jinja`` returns the per-step-schema finding shape (plain dicts);
     the compile path works in ``CompileError`` objects. This bridges the two,
     mapping each code string to its ``ErrorCode`` member and reconstructing the
-    precise dotted ``path`` — ``<step_path>.<location>`` (e.g.
-    ``playbooks[0].steps[3].arguments.params.code``) — so the diagnostic points
+    precise dotted ``path`` -- ``<step_path>.<location>`` (e.g.
+    ``playbooks[0].steps[3].arguments.params.code``) -- so the diagnostic points
     at the exact argument, matching the location precision the old brace-count
     check emitted.
     """

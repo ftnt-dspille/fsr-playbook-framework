@@ -3,7 +3,7 @@
  * via setLanguageConfiguration:
  *
  *   - Auto-close the multi-character Jinja delimiters `{{ }}`, `{% %}`,
- *     `{# #}` — the auto-closer inserts two padding spaces and parks
+ *     `{# #}` -- the auto-closer inserts two padding spaces and parks
  *     the cursor between them.
  *   - After typing an opening block tag like `{% if x %}`, offer the
  *     matching `{% endif %}` on the next line as a snippet (Tab
@@ -13,7 +13,7 @@
  *
  * Idempotent per editor (guard flag) and self-cleaning on dispose.
  *
- * Works inside both `jinja` and `yaml` models — gates by the model's
+ * Works inside both `jinja` and `yaml` models -- gates by the model's
  * language id so a non-jinja-aware buffer (python, json) isn't touched.
  */
 import { blockTagPairs } from './jinjaLanguage';

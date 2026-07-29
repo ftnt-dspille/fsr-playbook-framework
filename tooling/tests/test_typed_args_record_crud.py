@@ -1,11 +1,11 @@
-"""Typed-args model for record-write steps (`create_record` / `update_record`) — registry contract, the friendly module->IRI transform (the
+"""Typed-args model for record-write steps (`create_record` / `update_record`) -- registry contract, the friendly module->IRI transform (the
 collection-vs-collectionType split + already-set-wins + /api/ passthrough), and
 the new scalar validation (`module`/`is_upsert` wrong-typed -> clean BAD_VALUE).
 
 These steps emit to fixed-field connector wire, so the byte-identical contract is
 pinned by the corpus round-trip + wire-shape suites; here we pin the typed layer
 directly. `expand_record_crud` takes the resolver's `resolve_module_name` as a
-callback — here a passthrough identity (no catalog)."""
+callback -- here a passthrough identity (no catalog)."""
 from __future__ import annotations
 
 from fsr_playbooks.compiler import compile_yaml
@@ -44,7 +44,7 @@ def test_create_record_module_to_collection():
 def test_update_record_module_to_collection_type():
     out = _expand({"module": "alerts"}, "update_record")
     assert out["collectionType"] == "/api/3/alerts"
-    # update never touches `collection` — that's the record IRI.
+    # update never touches `collection` -- that's the record IRI.
     assert "collection" not in out
 
 
@@ -119,7 +119,7 @@ def test_non_bool_is_upsert_is_clean_bad_value():
 
 
 def test_is_upsert_truthy_coerces():
-    # pydantic coerces the usual true/1/"true" forms — no BAD_VALUE.
+    # pydantic coerces the usual true/1/"true" forms -- no BAD_VALUE.
     errs: list[CompileError] = []
     _expand({"module": "alerts", "is_upsert": "true"}, "create_record", errs)
     assert not [e for e in errs if e.code is ErrorCode.BAD_VALUE]

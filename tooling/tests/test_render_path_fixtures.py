@@ -4,12 +4,12 @@ These run our offline simulator (`step_through_playbook`) against
 each YAML scenario captured by ``probes.probe_render_path`` and assert
 the simulator's output_shape lines up with what FSR actually produced
 at runtime. Tests skip cleanly when fixtures haven't been recorded
-yet — re-run the probe to populate them:
+yet -- re-run the probe to populate them:
 
     python -m probes.probe_render_path
 
 Each fixture is a JSON dump of `{yaml, env, steps[]}` from a real
-FSR workflow run. The tests don't dictate what the truth IS — they
+FSR workflow run. The tests don't dictate what the truth IS -- they
 just pin "the simulator's prediction matches whatever the probe last
 captured." That way drift on either side surfaces immediately.
 """
@@ -39,7 +39,7 @@ def _load_fixtures() -> list[Path]:
 FIXTURES = _load_fixtures()
 if not FIXTURES:
     pytest.skip(
-        f"no render-path probe fixtures in {FIXTURE_DIR.relative_to(REPO)} — "
+        f"no render-path probe fixtures in {FIXTURE_DIR.relative_to(REPO)} -- "
         "run `python -m probes.probe_render_path` against your FSR to "
         "populate them",
         allow_module_level=True,
@@ -67,11 +67,11 @@ def test_simulator_runs_scenario_to_completion(fixture_path):
     sim_step_names = [r.get("name") for r in sim["trace"]]
 
     # Every step FSR executed should also appear in our simulator
-    # trace (allowing extras — e.g. terminals we synthesize). A real
+    # trace (allowing extras -- e.g. terminals we synthesize). A real
     # divergence here means the simulator's navigation is wrong.
     for name in fsr_step_names:
         assert name in sim_step_names, (
-            f"{fixture_path.name}: FSR ran {name!r} but simulator did not — "
+            f"{fixture_path.name}: FSR ran {name!r} but simulator did not -- "
             f"sim trace: {sim_step_names}")
 
 
@@ -111,7 +111,7 @@ def test_simulator_decisions_match_fsr_runtime_shape(fixture_path):
         real_keys = set(real.keys())
         # The simulator may legitimately know FEWER keys than reality
         # (e.g. for_each iteration accumulators). Flag only when the
-        # simulator predicts a key FSR didn't produce — that's a bug.
+        # simulator predicts a key FSR didn't produce -- that's a bug.
         spurious = sim_keys - real_keys
         assert not spurious, (
             f"{fixture_path.name} step {name!r}: simulator predicted "

@@ -1,4 +1,4 @@
-"""CatalogLookupMixin — database query methods for step types, connectors, operations."""
+"""CatalogLookupMixin -- database query methods for step types, connectors, operations."""
 from __future__ import annotations
 
 import difflib
@@ -39,7 +39,7 @@ class CatalogLookupMixin:
 
         Returns True when an unknown key was found (caller bails out so we
         don't run the normalizer on a malformed dict). Without this guard
-        unknown keys are silently dropped — a recurring class of bug where
+        unknown keys are silently dropped -- a recurring class of bug where
         a misspelled friendly key (e.g. `mins:` instead of `minutes:`)
         compiles green but produces the wrong wire shape.
         """
@@ -95,7 +95,7 @@ class CatalogLookupMixin:
         ``modules`` catalog. Returns the canonical lowercase type name.
 
         FSR module *type* names are lowercase plural tokens ('alerts',
-        'incidents', 'indicators') — the same token that goes into a
+        'incidents', 'indicators') -- the same token that goes into a
         ``/api/3/<module>`` IRI and a trigger's ``resource``. Authors
         routinely write the UI label instead ('Alerts'); the trigger /
         record-CRUD normalizers used to copy that through verbatim, so a
@@ -113,13 +113,13 @@ class CatalogLookupMixin:
         if not isinstance(raw, str) or not raw.strip():
             return raw
         name = raw.strip()
-        # Already an IRI — caller handles the /api/3/ form; don't touch.
+        # Already an IRI -- caller handles the /api/3/ form; don't touch.
         if name.startswith("/api/"):
             return name
         known = [r[0] for r in self.conn.execute(
             "SELECT name FROM modules").fetchall()]
         if not known:
-            # Unwarmed catalog (no module names shipped/synced) — silent.
+            # Unwarmed catalog (no module names shipped/synced) -- silent.
             return name
         if name in known:
             return name
@@ -130,7 +130,7 @@ class CatalogLookupMixin:
                 code=ErrorCode.BAD_VALUE,
                 message=(
                     f"module {name!r} is not the canonical FSR type name "
-                    f"(module names are lowercase) — rewrote to {canon!r}"
+                    f"(module names are lowercase) -- rewrote to {canon!r}"
                 ),
                 path=path,
                 near=canon,
@@ -142,7 +142,7 @@ class CatalogLookupMixin:
         errors.append(CompileError(
             code=ErrorCode.BAD_VALUE,
             message=(
-                f"unknown module {name!r} — not in the reference catalog "
+                f"unknown module {name!r} -- not in the reference catalog "
                 f"(ignore if it's a custom module on the target install)"
             ),
             path=path,
@@ -184,7 +184,7 @@ class CatalogLookupMixin:
             ).fetchone()
             return (row[0] or None) if row else None
         except sqlite3.OperationalError:
-            # Table absent on an old/slim DB — unwarmed, nothing to resolve.
+            # Table absent on an old/slim DB -- unwarmed, nothing to resolve.
             return None
 
     def connector(self, name: str) -> Optional[sqlite3.Row]:
@@ -318,7 +318,7 @@ class CatalogLookupMixin:
         ).fetchall()
         # Some ingestion paths store a top-level (always-visible) param with an
         # empty-string parent/condition instead of NULL. Coerce '' → None so the
-        # visibility checker treats them as unconditional — otherwise a plain
+        # visibility checker treats them as unconditional -- otherwise a plain
         # required param like virustotal.query_ip(ip) is mis-flagged as "only
         # valid when =''" and a spurious param-set conflict is raised.
         return [(r["param_name"],

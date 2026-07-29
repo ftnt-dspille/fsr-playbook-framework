@@ -1,9 +1,9 @@
 /**
- * extractTriggerModule — YAML scan that finds the first trigger step's
+ * extractTriggerModule -- YAML scan that finds the first trigger step's
  * `arguments.module` value. Used by the Monaco provider + JinjaVarPicker
  * to upgrade `vars.input.records[0].*` suggestions to module-aware fields.
  *
- * triggerModuleFieldsStore — async, deduped, cached fetch from
+ * triggerModuleFieldsStore -- async, deduped, cached fetch from
  * /api/ref/modules/<m>/fields.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';

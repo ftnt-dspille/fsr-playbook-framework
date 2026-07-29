@@ -3,11 +3,11 @@
 The wf-engine keeps its own copy of every playbook (workflow_workflow,
 workflow_step, workflow_step_next_steps, workflow_wfmetadata, …) in a
 Postgres DB called `sealab`. This is the table set that actually drives
-playbook EXECUTION — distinct from the API-platform's
+playbook EXECUTION -- distinct from the API-platform's
 workflow_collections/workflows/workflow_steps/workflow_routes which the
 designer canvas reads from.
 
-Why a probe: spinning up `manage.py shell` over SSH is 10–15s per call
+Why a probe: spinning up `manage.py shell` over SSH is 10-15s per call
 because Django imports yaql/ansible/pkg_resources cold. `psql` from the
 same host is sub-second. This probe SSHes once, runs psql, returns.
 
@@ -57,7 +57,7 @@ def _ssh_cmd(cfg: _env.Config, remote: str) -> list[str]:
     """Build an ssh argv that runs `remote` on the FSR box.
 
     Uses key auth when `FSR_SSH_KEY_PATH` is set; otherwise relies on
-    `sshpass`-style password injection. We don't shell out to expect —
+    `sshpass`-style password injection. We don't shell out to expect --
     callers should set up key auth via probes._env (one-time `ssh-copy-id`)
     so this stays fast.
     """
@@ -114,7 +114,7 @@ def _run_ssh(cfg: _env.Config, remote: str, *, stdin: str | None = None) -> str:
 
     Uses key auth when available; otherwise drives ssh through `expect`
     to handle the password prompt. Stdin (if provided) is base64-encoded
-    and decoded on the remote — that's the only quoting-safe way to ferry
+    and decoded on the remote -- that's the only quoting-safe way to ferry
     arbitrary SQL across ssh + bash without escaping land mines.
     """
     import base64
@@ -177,7 +177,7 @@ def _bootstrap_creds(cfg: _env.Config) -> tuple[str, str]:
     pw = _run_ssh(cfg, "cat ~/device_uuid").strip()
     if not pw:
         raise RuntimeError(
-            "could not read ~/device_uuid from FSR — file empty "
+            "could not read ~/device_uuid from FSR -- file empty "
             "or unreadable as the SSH user"
         )
     user = "cyberpgsql"

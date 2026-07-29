@@ -4,7 +4,7 @@ Regression: `ioc_search` (category 'investigation') resolved to 'unknown' and
 was needlessly gated as requires_confirmation during a live triage run, even
 though find_enrichment_actions had surfaced it as a tier<=2 read-only action.
 A safe category must resolve to 'safe' so the gate agrees with the dispatch
-tier model — while destructive name/category signals still win.
+tier model -- while destructive name/category signals still win.
 """
 from fsr_playbooks.mcp_server.tools_discovery import _op_risk
 
@@ -101,7 +101,7 @@ def test_edr_collector_inventory_is_host_enrichment():
     assert _is_enrichment_op("get_collector_list", "get collector list", "host")
     assert _is_enrichment_op("get_collector_list", "get collector list", "endpoint")
     assert _is_enrichment_op("get_agent_group", "get agent groups", "host")
-    # A collector op is NOT an IP enrichment — it names a different indicator.
+    # A collector op is NOT an IP enrichment -- it names a different indicator.
     assert not _is_enrichment_op("get_collector_list", "get collector list", "ip")
     # ...but widening the host family must not drag in mutations or self-plumbing.
     assert not _is_enrichment_op("move_collectors", "move collectors", "host")

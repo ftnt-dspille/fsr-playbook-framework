@@ -1,4 +1,4 @@
-"""Every YAML in examples/ must compile clean — they're documentation
+"""Every YAML in examples/ must compile clean -- they're documentation
 fixtures and the easiest way to catch a compiler regression that breaks
 real-looking authoring."""
 from __future__ import annotations
@@ -33,4 +33,4 @@ def test_example_compiles(repo_root, db_path, name):
 
 
 def test_examples_dir_not_empty(repo_root):
-    assert _examples(repo_root), "examples/ went empty — that's a regression"
+    assert _examples(repo_root), "examples/ went empty -- that's a regression"

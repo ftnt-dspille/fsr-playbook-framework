@@ -3,8 +3,8 @@
 `expand_decision` replaces the imperative branch-promotion in
 `NormalizerMixin._normalize_decision_args`. These tests pin parity (next→
 branches promotion, next stripped, original key order, non-dict pass-through,
-the leave-unchanged early-returns) plus the new additive win — a mistyped
-condition key is caught structurally instead of silently dropping the branch —
+the leave-unchanged early-returns) plus the new additive win -- a mistyped
+condition key is caught structurally instead of silently dropping the branch --
 and assert end-to-end `compile_yaml` output is unchanged.
 """
 from __future__ import annotations
@@ -49,7 +49,7 @@ def test_existing_branch_not_overwritten():
     expand_decision(
         {"conditions": [{"option": "hot", "next": "Escalate"}]},
         branches, "p", errs)
-    # setdefault semantics — pre-existing branch wins
+    # setdefault semantics -- pre-existing branch wins
     assert branches == {"hot": "AlreadyWired"}
 
 

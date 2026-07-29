@@ -33,7 +33,7 @@ export async function deleteDraft(name: string): Promise<void> {
 
 /** Poll GET /api/playbooks/draft/{name} until `predicate(yaml)` returns
  *  true, or the timeout elapses. Replaces blind `waitForTimeout(1500)`
- *  autosave waits — the test passes the moment the server has the
+ *  autosave waits -- the test passes the moment the server has the
  *  expected content, and surfaces a useful failure when it doesn't. */
 export async function waitForDraftYaml(
   name: string,
@@ -79,7 +79,7 @@ export async function openDraft(page: Page, name: string): Promise<void> {
 
 /** Sample YAML used across multiple specs. Collection-wrapper shape
  *  (what the backend parser consumes); start-on-create alerts trigger →
- *  set_variable. Picked so the variable pane has a non-trivial scope —
+ *  set_variable. Picked so the variable pane has a non-trivial scope --
  *  the stub FSR's /api/3/alerts returns records whose `severity`
  *  picklist gets unwrapped by formatFsrValue. */
 export const SAMPLE_YAML = `\

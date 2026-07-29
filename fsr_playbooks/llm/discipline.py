@@ -1,25 +1,25 @@
-"""Post-turn discipline check — detect skipped authoring tools.
+"""Post-turn discipline check -- detect skipped authoring tools.
 
 Phase 7.3 of RENDER_PATH_VALIDATOR_PLAN.md. The system prompt tells the
 agent to call ``get_step_type`` before drafting non-trivial step types,
 and ``find_connector`` / ``find_operation`` before drafting connector
-steps. But nothing enforces that — the agent can guess at args and emit
+steps. But nothing enforces that -- the agent can guess at args and emit
 YAML without ever looking up the schema.
 
 This module analyzes a completed turn's transcript (the list of
 ``Event`` objects from ``run_agent_turn``) and flags two patterns:
 
-1. **Skipped step-type lookup** — the agent emitted a YAML block
+1. **Skipped step-type lookup** -- the agent emitted a YAML block
    containing a step type that requires a schema lookup
    (``manual_input``, ``find_record``, ``update_record``, ``decision``,
    ``workflow_reference``) but never called ``get_step_type`` for that
    type during the turn.
 
-2. **Skipped connector lookup** — the agent emitted a YAML block
+2. **Skipped connector lookup** -- the agent emitted a YAML block
    containing a ``connector`` step but never called ``find_connector``
    or ``find_operation`` during the turn.
 
-3. **Guessing language** — the agent's text contains hedging phrases
+3. **Guessing language** -- the agent's text contains hedging phrases
    like "I think the args are", "probably", "I assume", suggesting it
    is inventing parameter shapes rather than having looked them up.
 
@@ -93,7 +93,7 @@ def detect_skipped_authoring_tools(
 
     Args:
       transcript: the ``TurnResult.transcript`` list from
-        ``run_agent_turn`` — a sequence of ``Event`` objects.
+        ``run_agent_turn`` -- a sequence of ``Event`` objects.
 
     Returns:
       A list of ``DisciplineWarning`` objects, possibly empty. The
@@ -194,7 +194,7 @@ def detect_skipped_authoring_tools(
                 message=(
                     "assistant text contains hedging language "
                     "(\"I think\", \"probably\", \"I assume\") "
-                    "alongside a YAML block — the agent may be "
+                    "alongside a YAML block -- the agent may be "
                     "guessing at parameter shapes instead of looking "
                     "them up"),
                 suggestion=(

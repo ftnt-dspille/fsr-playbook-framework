@@ -128,13 +128,13 @@
   }
 
   // Surface whether the step already has a saved mock so the button
-  // says "Update saved mock" instead of "Save as mock" — small, but
+  // says "Update saved mock" instead of "Save as mock" -- small, but
   // helps the user know they're not double-saving the same thing.
   let hasMock = $derived(
     (node.arguments as Record<string, unknown> | undefined)?.mock_result !== undefined
   );
 
-  // Mirrors `_SAFE_NAME_PREFIXES` in python/mcp_server.py — kept local so
+  // Mirrors `_SAFE_NAME_PREFIXES` in python/mcp_server.py -- kept local so
   // we can pre-grey the Run button without a round-trip. The server still
   // gates destructive ops via `requires_confirmation`, so this is just UX.
   const SAFE_PREFIXES = [
@@ -192,7 +192,7 @@
     findBusy = true;
     findResult = null;
     try {
-      // Pass the query body as-is — `test_find_record` validates and
+      // Pass the query body as-is -- `test_find_record` validates and
       // strips the module name's query-string suffix on the backend.
       const query = (node.arguments?.query as Record<string, unknown> | undefined) ?? {
         logic: 'AND', filters: []
@@ -271,7 +271,7 @@
     | { kind: 'error'; message: string }
     | { kind: 'pending' };
 
-  // Path-keyed map of resolution outcomes — paths look like "to" or
+  // Path-keyed map of resolution outcomes -- paths look like "to" or
   // "headers.Authorization" or "arg_list[2].value".
   let results: Record<string, Resolved> = $state({});
   let busy = $state(false);
@@ -367,7 +367,7 @@
   // buildContext overlaid sample data onto. Used to classify each
   // rendered value's provenance after a runRender.
   let sampleKeys = $state<Set<string>>(new Set());
-  // Step keys that had a `mock_result:` overlaid from the YAML — same
+  // Step keys that had a `mock_result:` overlaid from the YAML -- same
   // role as sampleKeys but distinct because the source of truth and the
   // chip color differ (mocks live on the step itself, samples in the
   // sidecar).
@@ -388,7 +388,7 @@
       // Overlay sidecar samples on top of the stubs so manual_input
       // answers (and any future sample types) win over the placeholder
       // values. We overlay under BOTH `step.id` and the
-      // `name.replace(" ", "_")` form — FSR keys vars.steps by the
+      // `name.replace(" ", "_")` form -- FSR keys vars.steps by the
       // name-underscored form (typed_walker._jinja_key), and authors
       // write their templates that way, but ids are how samples are
       // stored on disk.
@@ -417,7 +417,7 @@
           }
         }
         // Pass 2: per-step `mock_result` on connector / record_crud /
-        // utility steps. Mock wins over sample on the same step — it's
+        // utility steps. Mock wins over sample on the same step -- it's
         // the freshest synthetic value (saved straight from a Test
         // step run).
         for (const n of pb.nodes) {
@@ -452,7 +452,7 @@
   }
 
   /** Extract every `vars.steps.<key>` reference from a Jinja template
-   * string. Pure regex — we only need the head of the lookup chain to
+   * string. Pure regex -- we only need the head of the lookup chain to
    * classify provenance, not parse the whole Jinja AST. */
   function extractStepRefs(tpl: string): string[] {
     const out = new Set<string>();
@@ -533,7 +533,7 @@
   let entries = $derived(Object.entries(results));
 
   // Auto-run on tab open + whenever the focused node changes. We
-  // no longer auto-render args — step_test (Run this step) returns
+  // no longer auto-render args -- step_test (Run this step) returns
   // the rendered_args alongside execution status, so the standalone
   // render call is now dead surface. Keep the function around in
   // case a future "preview" view wants it.
@@ -627,7 +627,7 @@
             <span class="text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-400">{stepTestResult.category}</span>
           </div>
           <p class="mt-1 text-xs text-[var(--text-default)]">
-            This op is classified <strong>{stepTestResult.risk}</strong> — running it
+            This op is classified <strong>{stepTestResult.risk}</strong> -- running it
             will hit the live FSR instance and could mutate or block real
             resources. {stepTestResult.note}
           </p>
@@ -644,7 +644,7 @@
           <span class="rounded bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">{okResult.status}</span>
           <span class="text-[10px] text-[var(--text-faint)]">
             {#if okResult.status === 'rendered'}
-              args resolved cleanly — no live call was made
+              args resolved cleanly -- no live call was made
             {:else if okResult.status === 'executed'}
               connector op ran successfully against the live FSR
             {/if}
@@ -694,7 +694,7 @@
           <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Test query</div>
           <p class="mt-0.5 text-[11px] text-[var(--text-faint)]">
             {#if !findModule}
-              Pick a module first — the test posts the current filter
+              Pick a module first -- the test posts the current filter
               body to <code class="font-mono">/api/query/&lt;module&gt;</code>.
             {:else}
               Posts to <code class="font-mono">/api/query/{findModule}</code> with the current filter and returns the first 5 matches.

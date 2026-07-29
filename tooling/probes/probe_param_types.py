@@ -1,4 +1,4 @@
-"""probe_param_types — populate operation_params.observed_type / coerces_from.
+"""probe_param_types -- populate operation_params.observed_type / coerces_from.
 
 For the live-probe pass, evidence lands in `param_type_probes` first;
 the promote() step reads ≥3 corroborating rows per param before
@@ -13,7 +13,7 @@ Two passes:
 
   * **widget-only** (Phase 2.0, default): derive `observed_type` from
     `operation_params.type` (the form widget) + `options_json`.
-    Pure-static — no FSR calls. Idempotent rewrite of every row.
+    Pure-static -- no FSR calls. Idempotent rewrite of every row.
 
   * **live-probe** (Phase 2.2, not enabled here): mutate one param at
     a time with type-mismatched values against `safe`-classified ops,
@@ -23,7 +23,7 @@ Two passes:
     plan doc does not exist on this schema; pilot subset is the
     `safe`-only slice).
 
-Phase 2.1 deliverable is `classify_error()` — a pure regex-driven
+Phase 2.1 deliverable is `classify_error()` -- a pure regex-driven
 classifier callable without any DB. The probe wires it up but does
 not invoke it from the widget-only pass.
 """
@@ -51,7 +51,7 @@ CLASSIFIER_VERSION = 1
 # operation_params` on the live store. The picklist branch is keyed on
 # `options_json IS NOT NULL` because some `text` widgets carry options
 # (free-text-with-suggestions) and we want to treat those as picklists
-# too. `text` falls through to NULL — that is what Tier 2 live-probing
+# too. `text` falls through to NULL -- that is what Tier 2 live-probing
 # is meant to lift.
 _WIDGET_MAP: dict[str, str] = {
     "integer": "int",
@@ -87,15 +87,15 @@ def widget_to_observed_type(
 
 
 # ---------------------------------------------------------------------------
-# Param-name → observed_type (Phase 2.0+ — name-pattern pass)
+# Param-name → observed_type (Phase 2.0+ -- name-pattern pass)
 # ---------------------------------------------------------------------------
 # The widget pass classifies ~45% of operation_params. The residue is
 # almost entirely `type='text'` (14k+ rows), and 54% of *those* carry
-# names that are strong evidence by themselves — `url`, `ip`,
+# names that are strong evidence by themselves -- `url`, `ip`,
 # `ip_address`, `domain`, `endpoint`, `epoch_*`. This pass lifts those
 # names into typed rows without spending a single FSR call.
 #
-# Rules: regex on lowercased param_name. Order matters — more specific
+# Rules: regex on lowercased param_name. Order matters -- more specific
 # patterns first (e.g. `ip_address` before `address`). Each rule emits
 # an observed_type that the resolver already has a validator for
 # (see `connector_args.py::_OBSERVED_VALIDATORS`). Conservative:
@@ -103,7 +103,7 @@ def widget_to_observed_type(
 # the row is still eligible for Tier 2.2 live probing.
 
 _NAME_RULES: list[tuple[re.Pattern[str], str]] = [
-    # IPv4 / IPv6 — match `ip`, `ip_address`, `src_ip`, `dst_ipv4`, etc.
+    # IPv4 / IPv6 -- match `ip`, `ip_address`, `src_ip`, `dst_ipv4`, etc.
     # Anchored on word-boundary at the right to avoid `ip` matching
     # words like `script`, `recipient`, `clip`.
     (re.compile(r"(^|_)ipv6(_|$)"),                    "ipv6"),
@@ -111,23 +111,23 @@ _NAME_RULES: list[tuple[re.Pattern[str], str]] = [
                 r"src_ip|dst_ip|source_ip|dest_ip|"
                 r"client_ip|server_ip|host_ip|peer_ip|"
                 r"remote_ip|local_ip|public_ip|private_ip)(_|$)"), "ipv4"),
-    # URLs / endpoints — require the name to *end* in url/uri/endpoint
+    # URLs / endpoints -- require the name to *end* in url/uri/endpoint
     # or contain `_url`/`_uri` so we don't pick up tokens that happen
     # to share substrings.
     (re.compile(r"(^|_)(url|uri|endpoint|webhook|callback_url|"
                 r"redirect_url|api_url|api_endpoint|base_url|"
                 r"base_uri|server_url)(_|$)"),         "url"),
-    # Email — `email`, `recipient_email`, `from_email`, etc.
+    # Email -- `email`, `recipient_email`, `from_email`, etc.
     (re.compile(r"(^|_)(email|email_address|from_email|"
                 r"to_email|recipient_email|sender_email|"
                 r"cc_email|bcc_email|user_email)(_|$)"), "email"),
-    # ISO timestamps — date / datetime / *_at / *_time, but NOT
+    # ISO timestamps -- date / datetime / *_at / *_time, but NOT
     # `timeout` / `time_limit` (those are durations).
     (re.compile(r"(^|_)(timestamp|created_at|updated_at|"
                 r"modified_at|deleted_at|start_time|end_time|"
                 r"start_date|end_date|from_date|to_date|"
                 r"date_from|date_to|iso_date|datetime)(_|$)"), "iso8601"),
-    # JSON payload — `payload`, `body`, `json_body`, `request_body`.
+    # JSON payload -- `payload`, `body`, `json_body`, `request_body`.
     # Skip when the widget already classified to json_object via the
     # widget map; this is for text-widget rows that *carry* a JSON blob.
     (re.compile(r"(^|_)(json_body|request_body|response_body|"
@@ -138,7 +138,7 @@ _NAME_RULES: list[tuple[re.Pattern[str], str]] = [
 def name_to_observed_type(param_name: str | None) -> str | None:
     """Match param_name against the name-rule table.
 
-    Returns None when no rule fires — keeps the row eligible for
+    Returns None when no rule fires -- keeps the row eligible for
     Phase 2.2 live probing. Pure; no DB access; safe to call from the
     resolver as a fallback if a row was somehow probed before this
     pass ran.
@@ -162,7 +162,7 @@ def name_to_observed_type(param_name: str | None) -> str | None:
 # corpus uses (validators, ipaddress, email_validator, dateutil).
 #
 # Adding rules: keep them anchored on stable error text. Prefer
-# something the runtime *quotes literally* — connector authors rarely
+# something the runtime *quotes literally* -- connector authors rarely
 # rewrite error messages from stdlib helpers, so `invalid literal for
 # int()` is far more stable than a connector's wrapping prose.
 
@@ -247,7 +247,7 @@ _RULES: list[ClassifierRule] = [
         r"parameter must be a bool(ean)?\.?",
         re.IGNORECASE,
     ), "bool", "bool,str"),
-    # "Invalid <paramName> parameter." — used when an enum-typed param
+    # "Invalid <paramName> parameter." -- used when an enum-typed param
     # is given an unknown value. Distinct from the int/float/bool
     # phrasing above (which is shape-only).
     (re.compile(
@@ -272,7 +272,7 @@ def classify_error(message: str) -> tuple[str | None, str | None]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2.0 — widget-only pass
+# Phase 2.0 -- widget-only pass
 # ---------------------------------------------------------------------------
 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
@@ -281,7 +281,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     Newly-created stores get the columns from schema.sql's CREATE TABLE;
     older stores need ALTER. We don't run the full schema.sql here
     because operation_params has FK constraints and recreating it would
-    cascade — ALTER is cheap and safe.
+    cascade -- ALTER is cheap and safe.
     """
     cols = {r[1] for r in conn.execute(
         "PRAGMA table_info(operation_params)").fetchall()}
@@ -296,7 +296,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
 def run_widget_only(conn: sqlite3.Connection) -> dict[str, int]:
     """Phase 2.0 pass: populate observed_type from widget type alone.
 
-    Touches every row in operation_params. Idempotent — re-running
+    Touches every row in operation_params. Idempotent -- re-running
     overwrites prior widget-only values; live-probe results (Phase
     2.2, future) would be merged from a separate ledger so they
     survive this pass.
@@ -315,7 +315,7 @@ def run_widget_only(conn: sqlite3.Connection) -> dict[str, int]:
         if obs is not None:
             counts["typed_by_widget"] += 1
         else:
-            # Name-pattern fallback — covers text-widget rows where the
+            # Name-pattern fallback -- covers text-widget rows where the
             # param_name carries the type signal (url / ip / domain / ...).
             obs = name_to_observed_type(r["param_name"])
             if obs is not None:
@@ -324,7 +324,7 @@ def run_widget_only(conn: sqlite3.Connection) -> dict[str, int]:
             counts["untyped"] += 1
         else:
             counts["typed"] += 1
-        # parent_param_name / condition_value are NULL-able PK columns —
+        # parent_param_name / condition_value are NULL-able PK columns --
         # IS NULL comparison required, '= NULL' silently matches nothing.
         conn.execute(
             "UPDATE operation_params "
@@ -343,12 +343,12 @@ def run_widget_only(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2.2 — live-probe pass
+# Phase 2.2 -- live-probe pass
 # ---------------------------------------------------------------------------
 #
 # A `RunOpFn` is the only thing this pass needs from the outside world.
 # Production wires it to `mcp_server.tools_execution.run_op`. Tests pass
-# a fake that returns canned errors — that's where the synthetic
+# a fake that returns canned errors -- that's where the synthetic
 # regression for the mutation-loop comes from.
 #
 # Contract (mirrors run_op's actual response shape):
@@ -363,7 +363,7 @@ RunOpFn = Callable[[str, str, dict[str, Any]], dict[str, Any]]
 # Per the plan: each observed_type maps to ~3 mutation values that
 # should trigger the corresponding stdlib coercion error if the
 # connector relies on stdlib int/float/bool/etc. The point is to
-# cross-confirm — three mutations agreeing on one inferred type beats
+# cross-confirm -- three mutations agreeing on one inferred type beats
 # one rich error.
 _MUTATIONS_BY_TYPE: dict[str, list[tuple[str, Any]]] = {
     "int": [
@@ -384,7 +384,7 @@ _MUTATIONS_BY_TYPE: dict[str, list[tuple[str, Any]]] = {
     "picklist": [
         ("enum_invalid", "__no_such_value_zzzz__"),
     ],
-    # Phase 2.0+ name-pattern types — mutations chosen to elicit the
+    # Phase 2.0+ name-pattern types -- mutations chosen to elicit the
     # validator error specific to each. The classifier sees the
     # connector's reaction and confirms the inferred type.
     "ipv4": [
@@ -469,7 +469,7 @@ def _safe_op_universe(
 ) -> list[sqlite3.Row]:
     """Return ops that are (a) classified safe and (b) have a baseline
     example in operation_examples. Plan calls for hard-gating on the
-    safety classifier — no exceptions, even for ops the user thinks
+    safety classifier -- no exceptions, even for ops the user thinks
     are safe but classifier marked unknown."""
     q = (
         "SELECT DISTINCT s.connector_name, s.op_name "
@@ -596,7 +596,7 @@ def run_live_probe(
         if not base_ok:
             counts["ops_baseline_fail"] += 1
             # Per plan: don't treat mutation errors as evidence when the
-            # baseline didn't succeed — could just be a broken op.
+            # baseline didn't succeed -- could just be a broken op.
             continue
         counts["ops_baseline_ok"] += 1
 
@@ -623,7 +623,7 @@ def run_live_probe(
                     payload[p_name] = value
                     resp = run_op_fn(connector, op, payload)
                     if resp.get("ok"):
-                        # Connector accepted the mutated value — that's
+                        # Connector accepted the mutated value -- that's
                         # evidence the param is permissive, but we can't
                         # derive a type from it. Record as no-error.
                         status = "mutation_ok"
@@ -660,7 +660,7 @@ def promote(
     """Walk param_type_probes, count classifier votes per param, and
     write the majority observed_type back to operation_params *only
     when it differs from the widget-derived value*. Widget-derived
-    types are kept as the floor — live probing refines, doesn't
+    types are kept as the floor -- live probing refines, doesn't
     contradict, unless it has the votes.
     """
     _ensure_columns(conn)
@@ -702,7 +702,7 @@ def promote(
             continue
         if cur["observed_type"] == top_type:
             counts["unchanged"] += 1
-            # Still backfill coerces_from if absent — cheap.
+            # Still backfill coerces_from if absent -- cheap.
             conn.execute(
                 "UPDATE operation_params SET coerces_from = "
                 "  COALESCE(coerces_from, ?) "
@@ -793,11 +793,11 @@ def main(argv: list[str] | None = None) -> int:
         # that wrapper opens its own write connection to record per-op
         # verifications and deadlocks against the probe_session's
         # outer write transaction. For type probing we only need the
-        # raw response — verification ledger pollution is unwanted.
+        # raw response -- verification ledger pollution is unwanted.
         from probes._env import get_config, get_client
         cfg = get_config()
         if not cfg.is_live():
-            print("FSR_BASE_URL / FSR_API_KEY not set — refusing live probe.")
+            print("FSR_BASE_URL / FSR_API_KEY not set -- refusing live probe.")
             return 2
         client = get_client()
         # Cache connector version lookups so we don't requery per call.
@@ -823,7 +823,7 @@ def main(argv: list[str] | None = None) -> int:
                 # FSR maps connector validation failures to HTTP 4xx
                 # with a JSON body like
                 # {"message":"... parameter must be an integer."}.
-                # That's classifier-grade evidence — not a transport
+                # That's classifier-grade evidence -- not a transport
                 # failure. Only fall through to transport_err for
                 # network/5xx/HTML responses.
                 r = getattr(exc, "response", None)

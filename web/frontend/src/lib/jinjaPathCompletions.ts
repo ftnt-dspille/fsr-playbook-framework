@@ -51,7 +51,7 @@ function walkShape(root: Shape, path: Array<string | number>): Shape | null {
   return cur;
 }
 
-/** Default field names common to FSR records — used when no
+/** Default field names common to FSR records -- used when no
  *  module-aware catalog is supplied for `vars.input.records[0]`.
  *  These are the keys present on (almost) every entity in the
  *  reference store, plus the universal envelope key `@id`. */
@@ -95,7 +95,7 @@ export function resolveJinjaPathType(
   const [, stepKey, tail] = m;
   const root = shapes[stepKey];
   if (!root) return null;
-  // Treat the entire tail as committed segments — no partial.
+  // Treat the entire tail as committed segments -- no partial.
   const { segments, partial } = parsePathTail(tail + '.'); // trailing dot commits
   void partial;
   return walkShape(root, segments);
@@ -122,7 +122,7 @@ export type SuggestOptions = {
    *  aware fields by fetching /api/ref/modules/<m>/fields; we fall
    *  back to DEFAULT_RECORD_FIELDS when omitted. */
   inputRecordFields?: string[];
-  /** Known globalVars names — typically derived from a YAML buffer
+  /** Known globalVars names -- typically derived from a YAML buffer
    *  scan (extractGlobalVarNames). Empty/undefined → no globalVars
    *  suggestions (since we have no static catalog). */
   globalVarNames?: string[];
@@ -136,7 +136,7 @@ export function suggestForJinjaPath(
   optsOrShapes: SuggestOptions | Record<string, Shape> = {}
 ): PathSuggestion[] | null {
   // Back-compat: callers used to pass a plain `shapes` map as the 2nd arg.
-  // An empty object is treated as "no opts" so the store fallback fires —
+  // An empty object is treated as "no opts" so the store fallback fires --
   // otherwise the default param value would shadow store-driven calls.
   const isOptions =
     optsOrShapes &&
@@ -179,7 +179,7 @@ export function suggestForJinjaPath(
       });
   }
 
-  // `vars.<setvarname>` — top-level vars from set_variable steps.
+  // `vars.<setvarname>` -- top-level vars from set_variable steps.
   // Match BEFORE the vars.steps check so we don't shadow.
   const topMatch = after.match(/^vars\.([A-Za-z_][\w]*)?$/);
   if (topMatch && !/^vars\.(input|steps)$/.test(after)) {

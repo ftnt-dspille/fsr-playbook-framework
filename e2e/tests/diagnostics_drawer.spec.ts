@@ -4,7 +4,7 @@
  *   1. Typing bad YAML in CLI mode must mark playbookStore dirty AND
  *      trigger validate so the err/warn chip + drawer show the error.
  *   2. The squiggle / row lines up with the actual offending key line
- *      (the `_path_to_line` fix — backend-side, but assertable through
+ *      (the `_path_to_line` fix -- backend-side, but assertable through
  *      the marker's `line` field surfaced in the row text).
  *   3. An auto-fixable warning surfaces an inline "Apply" button that
  *      patches the YAML through Monaco's executeEdits (round-trips
@@ -16,7 +16,7 @@ import { seedDraft, deleteDraft, openDraft, waitForDraftYaml } from './helpers';
 const DRAFT = `__e2e_diag_${Date.now()}`;
 
 // Auto-fix-friendly seed. The decision step uses bare yes/no branches
-// — which the validator flags as `W::W_BARE_YES_NO` (or similar) with
+// -- which the validator flags as `W::W_BARE_YES_NO` (or similar) with
 // an auto-fix that wraps them in quotes. We trigger this by routing
 // the test through CLI mode and asserting against the marker rows.
 const SEED_YAML = `\
@@ -68,7 +68,7 @@ playbooks:
     await openDraft(page, BROKEN_DRAFT);
     await page.goto('/?mode=cli');
 
-    // Wait for the action bar's err chip — it only renders when
+    // Wait for the action bar's err chip -- it only renders when
     // validate finds errors. Title is "Open issues drawer".
     const errChip = page.getByTitle('Open issues drawer');
     await expect(errChip).toBeVisible({ timeout: 15_000 });
@@ -89,7 +89,7 @@ playbooks:
 test('valid YAML shows the clean "No issues" empty state', async ({ page }) => {
   await openDraft(page, DRAFT);
 
-  // Open the drawer via the Issues tab — it's collapsed by default.
+  // Open the drawer via the Issues tab -- it's collapsed by default.
   // The drawer header has a chevron "Expand" toggle on the right.
   await page.getByRole('button', { name: 'Expand' }).first().click();
 

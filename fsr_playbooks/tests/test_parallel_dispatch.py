@@ -1,4 +1,4 @@
-"""§2.8 — parallel read-only tool dispatch in AnthropicProvider.
+"""§2.8 -- parallel read-only tool dispatch in AnthropicProvider.
 
 Drives the provider's tool loop with a mocked Anthropic client (a scripted
 sequence of `messages.stream` round-trips) and a patched `dispatch` that

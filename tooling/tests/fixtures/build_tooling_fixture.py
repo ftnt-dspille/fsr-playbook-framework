@@ -3,7 +3,7 @@
 
 The tooling gate (``pytest -m "not slow and not live"``) resolves connectors
 against a reference DB. Historically that was the mutable dev cache
-``data/fsr_reference.db`` — gitignored, and clobbered whenever a local
+``data/fsr_reference.db`` -- gitignored, and clobbered whenever a local
 connector-op probe fires warmup (it re-syncs the box catalog over the dev
 corpus). A clobbered dev DB reds ~24 tests, blocking commits for a reason
 unrelated to the change under test.
@@ -13,10 +13,10 @@ connectors the ``db_path`` tests reference, at full param fidelity, plus the
 infra tables the compiler needs (step_types, jinja, modules, op_safety,
 picklists). Sources:
 
-  * dev cache  — full infra + op_safety, and a handful of connectors
-  * slim catalog (``fsr_playbooks/_data/fsr_reference.db``, committed) — the
+  * dev cache  -- full infra + op_safety, and a handful of connectors
+  * slim catalog (``fsr_playbooks/_data/fsr_reference.db``, committed) -- the
     connectors the clobbered dev cache is missing
-  * public Fortinet RPM repo — connectors present in neither local DB
+  * public Fortinet RPM repo -- connectors present in neither local DB
     (apivoid, aws-access-analyzer, recorded-future, http), fetched at full
     fidelity via the probe's RPM path (no live box required)
 
@@ -63,13 +63,13 @@ CONN = [
 ]
 # Connectors the clobbered dev cache lacks but the committed slim catalog has.
 FROM_SLIM = ["abuseipdb", "activedirectory", "fortinet-fortisiem", "ssh"]
-# Connectors present in neither local DB — fetched from the public RPM repo.
+# Connectors present in neither local DB -- fetched from the public RPM repo.
 FROM_REPO = ["apivoid", "aws-access-analyzer", "recorded-future", "http",
              "claroty-xdome"]
 
-# Big analytics tables the compiler never reads — dropped to keep the fixture
+# Big analytics tables the compiler never reads -- dropped to keep the fixture
 # committable (the dev cache is ~66 MB, almost all of it these tables).
-# NOTE: playbook_steps / playbooks_seen are KEPT — the corpus validator/audit
+# NOTE: playbook_steps / playbooks_seen are KEPT -- the corpus validator/audit
 # tests learn canonical operations and likely-required keys from them.
 STRIP = [
     "verifications", "jinja_expressions", "jinja_filter_usage",

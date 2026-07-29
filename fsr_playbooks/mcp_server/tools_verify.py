@@ -1,4 +1,4 @@
-"""verify_playbook — the forcing-function MCP tool.
+"""verify_playbook -- the forcing-function MCP tool.
 
 Single gate the agent calls before showing YAML to the user. Plan:
 VERIFY_PLAYBOOK_PLAN.md §"The `verify_playbook` MCP tool".
@@ -35,11 +35,11 @@ from fsr_playbooks.compiler.record_op_checks import (
 
 
 # ---------------------------------------------------------------------------
-# Check toggles — let a caller (e.g. pyfsr) skip groups of compiler checks.
+# Check toggles -- let a caller (e.g. pyfsr) skip groups of compiler checks.
 # `verify_playbook(disable_checks=[...])` accepts either a GROUP name from this
 # map or an individual diagnostic `code`. Disabled diagnostics are removed from
 # `required_fixes`/`warnings` (so they no longer block `ready_to_push`) and
-# echoed under `evidence.suppressed` for transparency — skipping is never
+# echoed under `evidence.suppressed` for transparency -- skipping is never
 # silent. Codes that several checks share (notably `bad_value`) can only be
 # toggled as a coarse group; distinct codes toggle precisely.
 # ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ CHECK_GROUPS: dict[str, frozenset[str]] = {
     # turns off all of them. The three fine groups below match on the
     # `check` sub-tag instead, so a caller can silence just picklist drift
     # (unavoidable when the catalog lags the box), just literal param-type
-    # nags, or just snippet-sandbox bans — without disabling the rest of
+    # nags, or just snippet-sandbox bans -- without disabling the rest of
     # `bad_value`. Sub-tag toggles are additive with `value`, never override it.
     "value": frozenset({"bad_value"}),
     "picklist": frozenset({"picklist_drift"}),
@@ -111,7 +111,7 @@ def _resolve_disabled_codes(
     disable_checks: list[str] | None,
 ) -> tuple[frozenset[str], list[str]]:
     """Expand a `disable_checks` list (group names and/or codes) into the set
-    of diagnostic codes to suppress. Returns (codes, unknown_tokens) — unknown
+    of diagnostic codes to suppress. Returns (codes, unknown_tokens) -- unknown
     tokens are surfaced to the caller, never fatal."""
     if not disable_checks:
         return frozenset(), []
@@ -197,7 +197,7 @@ def _module_fields_fn():
 
 def _op_safety_fn():
     conn = _db()
-    # Cached at call time — fine, table is tiny.
+    # Cached at call time -- fine, table is tiny.
     try:
         rows = conn.execute(
             "SELECT connector_name, op_name, safety FROM op_safety"
@@ -325,7 +325,7 @@ def _module_field_names(module: str) -> list[str]:
 
 def _op_declared_params(connector: str, op: str) -> list[str]:
     """All declared param names for a connector op (G unknown-name check),
-    across any nesting/condition — conservative, to avoid flagging a valid
+    across any nesting/condition -- conservative, to avoid flagging a valid
     nested/conditional param used at the top level."""
     conn = _db()
     try:
@@ -342,7 +342,7 @@ def _op_declared_params(connector: str, op: str) -> list[str]:
 def _op_required_params(connector: str, op: str) -> list[str]:
     """Top-level *unconditional* required params with no default (G missing-
     check). Excludes nested (parent_param_name) and conditional
-    (condition_value) params — required only when a sibling is set — and params
+    (condition_value) params -- required only when a sibling is set -- and params
     carrying a `default_value` (FSR supplies the default, so omitting them is
     not a failure). Flagging any of those would false-fire on valid playbooks."""
     conn = _db()
@@ -363,7 +363,7 @@ def _connector_config_status(connector: str) -> tuple[bool, list[str], bool]:
     """(configs_known, config_names, has_default) for a connector.
 
     `configs_known` is False when the whole connector_configs table is empty
-    (warm never ran) — the config check skips entirely in that case, so an
+    (warm never ran) -- the config check skips entirely in that case, so an
     un-warmed slim DB never false-flags a connector as un-configured."""
     conn = _db()
     try:
@@ -468,7 +468,7 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
                     else:
                         msg = (f"operation {op!r} not found on connector "
                                f"{connector!r}, and no close matches "
-                               f"exist — connector may be installed but "
+                               f"exist -- connector may be installed but "
                                f"not yet probed, or the op name is wrong")
                         sug = ("call `find_operation` against this "
                                "connector to list real op names")
@@ -481,7 +481,7 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
                         "severity": "error",
                     })
                 elif connector and op:
-                    # Op exists — validate its params (G) and config bind.
+                    # Op exists -- validate its params (G) and config bind.
                     fixes.extend(check_op_params(
                         connector=connector, operation=op,
                         params=a.get("params"),
@@ -491,7 +491,7 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
                     ))
                 # Connector-config existence is *instance-specific* (which
                 # configs exist on THIS target), so it's a live-target preflight
-                # — pyfsr D3's domain — not an offline-static fact. Running it
+                # -- pyfsr D3's domain -- not an offline-static fact. Running it
                 # offline false-flags any playbook authored for a different box
                 # (a connector not configured on the warm target). Gate on
                 # live_probe so the default offline path never blocks on it.
@@ -511,7 +511,7 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
                     step_id=s.id, path=spath,
                 ))
                 # Required-field completeness is creation-only (update is a
-                # partial patch — an absent required field is legal).
+                # partial patch -- an absent required field is legal).
                 if isinstance(module, str) and module:
                     # Unknown-field check applies to create + update (a bogus
                     # key is wrong either way); warning severity.
@@ -557,8 +557,8 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
                 target = a.get("playbook") or a.get("playbook_name")
                 if target:
                     if not any(p.name == target for p in coll.playbooks):
-                        # not a hard error — target may live in another
-                        # collection on the FSR — warning only.
+                        # not a hard error -- target may live in another
+                        # collection on the FSR -- warning only.
                         fixes.append({
                             "code": "workflow_reference_unresolvable",
                             "message": (f"workflow_reference target {target!r} "
@@ -595,7 +595,7 @@ def verify_playbook(
     `evidence.suppressed` (never silent) and stop blocking `ready_to_push`;
     `suppressed_count` reports how many. Groups:
       jinja | shape | type | record | op | connector | graph | vars |
-      value (coarse: all `bad_value` — picklist/literal-type/snippet-ban) |
+      value (coarse: all `bad_value` -- picklist/literal-type/snippet-ban) |
       structure (parse/missing-field/unknown-step-type/…)
     Example: `disable_checks=["jinja", "type_mismatch"]`.
 
@@ -614,8 +614,8 @@ def verify_playbook(
       - op_param_unknown
       - required_record_field_missing   (create_record missing a required field)
       - unknown_module                  (record write into a non-existent module)
-      - connector_config_missing        (live_probe only — no config on target)
-      - unknown_connector_config        (live_probe only — config: name unknown)
+      - connector_config_missing        (live_probe only -- no config on target)
+      - unknown_connector_config        (live_probe only -- config: name unknown)
       - branch_target_missing
       - workflow_reference_unresolvable (error severity only)
       - jinja_syntax_error              (un-parseable Jinja template; emitted
@@ -664,7 +664,7 @@ def verify_playbook(
              "check": e.check}
             for e in cres.errors
         ]
-        # Promote compile errors directly into required_fixes — caller
+        # Promote compile errors directly into required_fixes -- caller
         # gets one shape regardless of which gate failed.
         for ce in compile_errors:
             if ce["severity"] == "error":
@@ -673,7 +673,7 @@ def verify_playbook(
                 warnings.append(ce)
         checks_run.append({"name": "compile", "ok": False,
                            "summary": f"{len(compile_errors)} compiler issues"})
-        # §B: the full error list already lives in required_fixes/warnings —
+        # §B: the full error list already lives in required_fixes/warnings --
         # repeating it under evidence doubled the model-facing payload.
         evidence["compile"] = {"error_count": len(compile_errors)}
         result = _finalize(checks_run, required_fixes, warnings, evidence,
@@ -700,12 +700,12 @@ def verify_playbook(
     #  - `coll` = a fresh parse (authoring shape): the per-step schema checks
     #    and Jinja-shape evidence are written against the friendly shape the
     #    author wrote. The resolver rewrites some steps in ways those checks
-    #    don't expect — e.g. an `options:`-based manual_input becomes
+    #    don't expect -- e.g. an `options:`-based manual_input becomes
     #    `type: InputBased` with `response_mapping` and no `inputVariables`,
     #    which would false-trigger the "InputBased needs inputs[]" check.
     coll, parse_errs = parse_yaml(yaml_text)
     if coll is None:
-        # Should not happen — compile_yaml above succeeded.
+        # Should not happen -- compile_yaml above succeeded.
         return _err("parse_inconsistency",
                     "compile succeeded but parse_yaml returned no IR")
     walk_coll = cres.ir if cres.ir is not None else coll
@@ -756,7 +756,7 @@ def verify_playbook(
     # individual references actually resolve through unknown shapes they
     # surface as `unknown_shape_downstream_reference` (specific, useful).
 
-    # Phase 5 — persist the type trace (best-effort) and surface its path.
+    # Phase 5 -- persist the type trace (best-effort) and surface its path.
     trace_path = _write_type_trace(yaml_text, playbook, walk)
     if trace_path:
         evidence["type_trace_path"] = trace_path
@@ -784,7 +784,7 @@ def verify_playbook(
                     jinja_shapes[jkey] = walk.per_step_shapes[s.id]
         evidence["per_step_jinja_shapes"] = jinja_shapes
     else:
-        # §B: lean mode carries counts, not the per-branch step-id lists —
+        # §B: lean mode carries counts, not the per-branch step-id lists --
         # on a large playbook those lists were pure token burn (the live
         # session's verify result was 47KB for 4 warnings). The full
         # trace is on disk at `type_trace_path`; `verbose=True` inlines it.
@@ -803,7 +803,7 @@ def verify_playbook(
 
 
 def _write_type_trace(yaml_text: str, playbook: str | None, walk) -> str | None:
-    """Phase 5 — persist a per-branch, per-step type trace to
+    """Phase 5 -- persist a per-branch, per-step type trace to
     store/verify_traces/<yaml_sha>.json for troubleshooting. Best-effort;
     never raises. Returns the path written (str) or None."""
     try:
@@ -880,13 +880,13 @@ def _finalize(checks_run, required_fixes, warnings, evidence,
               disabled_codes: frozenset[str] = frozenset(),
               unknown_tokens: list[str] | None = None) -> dict[str, Any]:
     # Apply check toggles: pull any disabled-code diagnostics out of the
-    # blocking/​warning lists into `suppressed` so they never block — but stay
+    # blocking/​warning lists into `suppressed` so they never block -- but stay
     # visible. `ready_to_push` is computed on what remains.
     suppressed: list[dict[str, Any]] = []
     if disabled_codes:
         kept_fixes, kept_warnings = [], []
         # A diagnostic is suppressed if EITHER its coarse `code` or its
-        # fine-grained `check` sub-tag is in the disabled set — so `value`
+        # fine-grained `check` sub-tag is in the disabled set -- so `value`
         # (code) and `picklist`/`param_type`/`snippet` (check) both work.
         def _suppressed(d: dict[str, Any]) -> bool:
             return (d.get("code") in disabled_codes

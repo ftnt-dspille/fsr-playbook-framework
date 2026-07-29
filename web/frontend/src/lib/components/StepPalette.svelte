@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Left rail palette — Steps / Connectors / Recipes.
+   * Left rail palette -- Steps / Connectors / Recipes.
    * Drag rows onto the canvas, or click to stage via Save flow.
    */
   import { onMount } from 'svelte';
@@ -395,7 +395,7 @@
   .row:hover .row-stripe,
   .row.open .row-stripe { opacity: 1; }
 
-  /* Family palette — colors mirror StepNode.svelte's FAMILY_STYLE so
+  /* Family palette -- colors mirror StepNode.svelte's FAMILY_STYLE so
      a row in the palette matches the node it spawns on the canvas. */
   .fam-trigger      { --hue: #d97706; --hue-soft: rgba(217,119,6,0.12);   --hue-ring: rgba(217,119,6,0.45); }
   .fam-connector_op { --hue: #2563eb; --hue-soft: rgba(37,99,235,0.13);   --hue-ring: rgba(37,99,235,0.45); }

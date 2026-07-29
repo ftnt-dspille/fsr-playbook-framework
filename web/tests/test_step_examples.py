@@ -143,11 +143,11 @@ def test_summarise_set_variable_handles_both_shapes():
     assert summarise_set_variable({"arg_list": [
         {"name": "a", "value": 1}, {"name": "b", "value": 2},
     ]}) == "Sets a, b."
-    # Canonical FSR form — every top-level non-system key is a var.
+    # Canonical FSR form -- every top-level non-system key is a var.
     assert summarise_set_variable({
         "base_branch": "{{ vars.x }}",
         "repo_name": "{{ vars.y }}",
-        "step_variables": [],  # system key — excluded
+        "step_variables": [],  # system key -- excluded
     }) == "Sets base_branch, repo_name."
 
 
@@ -172,7 +172,7 @@ def fake_corpus(tmp_path):
     """)
     rows = [
         # Three near-identical Decision steps that vary only in the
-        # condition expression — should cluster together because the
+        # condition expression -- should cluster together because the
         # canonicaliser strips Jinja templates.
         ("Decision", "pb-A", json.dumps({"conditions": [
             {"option": "Yes", "condition": "{{ vars.x > 5 }}"},
@@ -186,7 +186,7 @@ def fake_corpus(tmp_path):
             {"option": "Yes", "condition": "{{ vars.z != null }}"},
             {"option": "No", "default": True},
         ]})),
-        # Distinct shape — three branches instead of two.
+        # Distinct shape -- three branches instead of two.
         ("Decision", "pb-C", json.dumps({"conditions": [
             {"option": "Hi", "condition": "x"},
             {"option": "Med", "condition": "y"},

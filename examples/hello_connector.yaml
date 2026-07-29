@@ -1,5 +1,5 @@
 collection: Compiler Demo
-description: Smallest possible end-to-end — start, set a variable, call a connector.
+description: Smallest possible end-to-end -- start, set a variable, call a connector.
 visible: true
 
 playbooks:

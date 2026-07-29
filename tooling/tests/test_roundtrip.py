@@ -1,4 +1,4 @@
-"""Corpus-wide round-trip — the headline regression test.
+"""Corpus-wide round-trip -- the headline regression test.
 
 Iterates every workflow in the bundled FSR export, decompiles to IR,
 re-emits, and asserts semantic equivalence. Slow-ish (~10s) but the

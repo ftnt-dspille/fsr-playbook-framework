@@ -1,4 +1,4 @@
-"""compiler.render_paths — vars.X extractor for the render-path
+"""compiler.render_paths -- vars.X extractor for the render-path
 validator (RENDER_PATH_VALIDATOR_PLAN.md Phase 2).
 
 Tests pin the deepest-chain pruning, location reporting, container
@@ -40,7 +40,7 @@ def test_item_ref_inside_for_each_body():
 
 
 def test_deepest_chain_only():
-    """Walking the AST hits Getattr at every depth — we want only the
+    """Walking the AST hits Getattr at every depth -- we want only the
     deepest reference per template."""
     out = _paths("{{ vars.steps.a.b.c }}")
     assert len(out) == 1
@@ -63,7 +63,7 @@ def test_subscript_string_index():
 
 
 def test_subscript_runtime_index_is_skipped():
-    """`vars.steps[some_var]` is unresolvable statically — extractor
+    """`vars.steps[some_var]` is unresolvable statically -- extractor
     drops the chain rather than emit a partial path."""
     out = _paths("{{ vars.steps[vars.input.k].id }}")
     # The outer chain can't resolve, but the inner vars.input.k can.
@@ -115,7 +115,7 @@ def test_no_template_returns_empty():
 
 
 def test_malformed_template_does_not_raise():
-    # Unclosed `{{` — extractor must swallow and return [].
+    # Unclosed `{{` -- extractor must swallow and return [].
     assert _paths("{{ vars.steps.x.y") == []
 
 

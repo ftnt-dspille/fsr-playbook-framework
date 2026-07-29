@@ -76,7 +76,7 @@ def _load_all(db_path: str | os.PathLike | None = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------------
-# Phase 1A — tool-call census
+# Phase 1A -- tool-call census
 # ---------------------------------------------------------------------
 
 _ERROR_HINTS = ("\"ok\": false", "\"ok\":false", "\"error\"", "error:",
@@ -193,7 +193,7 @@ def tool_census(sessions: list[dict]) -> dict[str, ToolStat]:
 
 
 # ---------------------------------------------------------------------
-# Phase 1B — data-gap signals
+# Phase 1B -- data-gap signals
 # ---------------------------------------------------------------------
 
 @dataclass
@@ -263,7 +263,7 @@ def _needle(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------
-# Phase 1C — prompt adherence (structural detectors)
+# Phase 1C -- prompt adherence (structural detectors)
 # ---------------------------------------------------------------------
 
 @dataclass
@@ -454,7 +454,7 @@ def render_data_gaps(gaps: list[GapSignal]) -> str:
             f"{len(g.sessions)} | {g.reason} |"
         )
     if not gaps:
-        lines.append("| — | (no gap signals detected) | 0 | 0 | — |")
+        lines.append("| -- | (no gap signals detected) | 0 | 0 | -- |")
     lines.append("")
     return "\n".join(lines)
 
@@ -468,7 +468,7 @@ def render_adherence(checks: list[AdherenceCheck]) -> str:
              "| Rule | Sessions | Pass | Violated | Pass rate | Sample violators |",
              "|---|---:|---:|---:|---:|---|"]
     for c in checks:
-        samples = ", ".join(f"`{s}`" for s in c.sample_sessions) or "—"
+        samples = ", ".join(f"`{s}`" for s in c.sample_sessions) or "--"
         rate = f"{c.pass_rate * 100:.0f}%" if c.total else "n/a"
         lines.append(
             f"| {c.rule} | {c.total} | {c.passed} | {c.violated} | {rate} | {samples} |"

@@ -295,7 +295,7 @@ describe('playbookStore', () => {
 });
 
 
-describe('playbookStore — save mutation state machine', () => {
+describe('playbookStore -- save mutation state machine', () => {
   /** Spin up a draft + drive its YAML buffer; returns the put-call
    *  counter so retry tests can assert the number of PUT attempts. */
   async function openAndDirty(handler: (url: string, init?: RequestInit) => any) {
@@ -353,7 +353,7 @@ describe('playbookStore — save mutation state machine', () => {
       const r = await pending;
       // save() returns from the FIRST runSave invocation; in this
       // model that's the transient-fail return. The state machine
-      // continued retrying afterwards and ultimately succeeded —
+      // continued retrying afterwards and ultimately succeeded --
       // assertable via saveState.
       void r;
       expect(playbookStore.state.saveState).toBe('saved-just-now');

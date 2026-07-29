@@ -34,7 +34,7 @@ from ._shared import (
 def rule_threatintel_tag_in_sibling_info_json(doc: dict, info_json_path: "str | None" = None) -> Iterable[Issue]:
     """Per the official guide TIM section, the canonical place for the
     `ThreatIntel` tag is the connector's `info.json`, NOT playbook recordTags.
-    TAXII2 and AWS Feed prove this — neither tags any playbook, both work.
+    TAXII2 and AWS Feed prove this -- neither tags any playbook, both work.
 
     If validate-ingestion is given an --info-json path (or one is found
     next to the playbooks file), check it. Otherwise this rule is a no-op
@@ -96,7 +96,7 @@ def rule_ibf_resource_required_fields(doc: dict) -> Iterable[Issue]:
 
 
 def rule_create_step_guards_empty_data(doc: dict) -> Iterable[Issue]:
-    """Fetch+Create workflow should not call Ingest Bulk Feed unconditionally —
+    """Fetch+Create workflow should not call Ingest Bulk Feed unconditionally --
     either the IBF step itself has a `when` clause, or an upstream Decision
     branches on data presence. Otherwise empty fetches silently no-op (or worse,
     error out on for_each over None).
@@ -222,7 +222,7 @@ def rule_macro_plumbing_present(doc: dict) -> Iterable[Issue]:
                 severity="fail",
                 message=(
                     f"Ingest workflow missing macro plumbing "
-                    f"(get={gets}, update={updates}) — incremental fetch will not persist"
+                    f"(get={gets}, update={updates}) -- incremental fetch will not persist"
                 ),
                 path=f"data[{ci}].workflows[{wi}]({wf.get('name')!r})",
                 suggestion="Add a make_cyops_request GET on /api/wf/api/dynamic-variable + a cyops_utilities.updatemacro after the fetch",

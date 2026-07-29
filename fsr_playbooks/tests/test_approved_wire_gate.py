@@ -1,4 +1,4 @@
-"""S1 — the `_approved` tier-gate bypass flag must never be honored from
+"""S1 -- the `_approved` tier-gate bypass flag must never be honored from
 untrusted tool arguments.
 
 A compromised widget / MITM / prompt-injected LLM could try to smuggle

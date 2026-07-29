@@ -38,7 +38,7 @@ class CodeSnippetArgs(StrictArgs):
     non-string as a clean BAD_VALUE). `config` is optional and passed through
     untouched (name or UUID). `extra="allow"` because canonical/sibling keys
     (connector, operation, operationTitle, version, params, step_variables,
-    pickFromTenant, mock_result, condition) ride through untouched — the
+    pickFromTenant, mock_result, condition) ride through untouched -- the
     resolver's `_check_unknown_keys` has already rejected anything genuinely
     unknown.
     """
@@ -56,7 +56,7 @@ def expand_code_snippet(
     """Expand friendly code args into the canonical CodeSnippet shape.
 
     Returns the canonical dict, or ``None`` to leave `step.arguments` unchanged
-    — when the input is not a dict, is already canonical (connector+operation+params
+    -- when the input is not a dict, is already canonical (connector+operation+params
     present), or a friendly field fails validation (a `BAD_VALUE` is appended
     and the step is left for the author to fix).
 
@@ -65,7 +65,7 @@ def expand_code_snippet(
     `resolve_config_id`. This separation keeps the typed layer
     catalog-independent and byte-identical with the imperative path.
 
-    The `config` field is NOT consumed here — it's left in the returned dict
+    The `config` field is NOT consumed here -- it's left in the returned dict
     for the resolver to handle (detect if name vs UUID, pop it, resolve UUID).
     """
     if not isinstance(args, dict):

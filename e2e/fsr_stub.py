@@ -1,6 +1,6 @@
 """
 Tiny FastAPI app that mimics the FortiSOAR endpoints the FSRPB backend
-hits. Used by the E2E Playwright suite — points the real backend at
+hits. Used by the E2E Playwright suite -- points the real backend at
 this stub via FSR_BASE_URL so we exercise the full request path without
 a live appliance.
 
@@ -100,7 +100,7 @@ _RUN_DETAILS: dict[int, dict[str, Any]] = {
         "playbookName": "Demo Playbook",
         "records": ["/api/3/alerts/aaaa-1111"],
         # First of the three candidate field names runVarsStore probes
-        # — confirms the trace-source ordering on a real fetch.
+        # -- confirms the trace-source ordering on a real fetch.
         "wf_step_logs": [
             {
                 "name": "Find Issue",
@@ -165,7 +165,7 @@ def get_workflow(run_id: int, format: str | None = None) -> dict[str, Any]:
 @app.get("/api/wf/api/dynamic-variable/")
 def global_vars() -> dict[str, Any]:
     """FSR exposes globalVars under this internal name (the user
-    discovered this — not in the public API guide). Backend's
+    discovered this -- not in the public API guide). Backend's
     /api/ref/global-vars wraps it."""
     return {"hydra:member": _GLOBAL_VARS}
 
@@ -194,7 +194,7 @@ def get_record(module: str, record_id: str) -> dict[str, Any]:
 # Templates the step debugger / tools_analysis.py hits to render Jinja
 # args (`/api/wf/api/jinja-editor/`) and execute connector ops live
 # (`/api/integration/execute/`). Stubbed so e2e specs that drive the
-# Step Debugger don't need a real FSR — Jinja resolves real values
+# Step Debugger don't need a real FSR -- Jinja resolves real values
 # from the supplied `vars`, and a small registry of canned connector
 # ops returns plausible enrichment payloads.
 
@@ -228,7 +228,7 @@ async def jinja_render(request: Request) -> dict[str, Any]:
 # /api/integration/execute/. Add entries here when a new e2e spec
 # needs to "test" a connector action.
 _CONNECTOR_OPS: dict[tuple[str, str], dict[str, Any]] = {
-    # virustotal/query_ip — `query_` prefix routes to risk=safe per
+    # virustotal/query_ip -- `query_` prefix routes to risk=safe per
     # tools_discovery._op_risk so step_through (execute_safe_ops=True)
     # actually hits this stub. Keys picked so connector_op.spec.ts can
     # assert output_top_keys + verify the rendered IP arrived in the
@@ -248,7 +248,7 @@ async def integration_execute(request: Request) -> dict[str, Any]:
     """Run a connector operation. The Step Debugger ('Run with safe
     ops on') sends `{connector, operation, version, config, params}`
     and expects `{status: 'Success', data: ...}` back. Unknown ops
-    return a 200 with an empty payload so step-through doesn't crash —
+    return a 200 with an empty payload so step-through doesn't crash --
     the trace will show `output_top_keys: []` which is what the real
     FSR would emit for a configless connector."""
     body = await request.json()

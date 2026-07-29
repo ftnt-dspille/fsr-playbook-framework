@@ -4,7 +4,7 @@ Bridges YAML <-> the flowchart-canvas graph used by the visual editor.
 The YAML pipeline (parser → resolver → emitter) stays the source of
 truth; this module is a thin view over it that adds two things:
 
-1.  **Graph projection** — `to_visual(yaml_text)` walks the parsed IR
+1.  **Graph projection** -- `to_visual(yaml_text)` walks the parsed IR
     and returns `{playbooks: [{name, nodes, edges}], collection,
     layout_present, errors}`. Each node carries id, type family,
     display name, raw step args, and an `(x, y)` position when one is
@@ -12,12 +12,12 @@ truth; this module is a thin view over it that adds two things:
     and unlabeled fanout, matching the IR shape exactly so no info is
     lost on the way out.
 
-2.  **Identity / structural-preserving write** — `from_visual(graph,
+2.  **Identity / structural-preserving write** -- `from_visual(graph,
     original_yaml)` uses `ruamel.yaml` round-trip mode to mutate the
     original document in place: positions are persisted to a
     `# fsrpb:layout` block at the bottom of the file, and step-level
     edits write back through the same key paths the parser reads. When
-    nothing changed, the output is byte-identical to the input — that
+    nothing changed, the output is byte-identical to the input -- that
     invariant is what the VISUAL_EDITOR_PLAN Phase 0.3 CI test pins.
 
 Edits beyond positions (add / remove / rewire steps, change args)
@@ -41,7 +41,7 @@ from .samples import (
 
 
 # ---------------------------------------------------------------------------
-# Node type families — collapses the 43 step types into ~7 visual templates
+# Node type families -- collapses the 43 step types into ~7 visual templates
 # the canvas renders. Source of truth for icon + color in the frontend.
 # ---------------------------------------------------------------------------
 
@@ -157,7 +157,7 @@ def _extract_layout_block(text: str) -> tuple[dict[str, dict[str, list[int]]], s
     The block opens with `# fsrpb:layout` and closes with
     `# fsrpb:layout-end`. Lines between are `# <json>` comments holding
     the serialized layout map (playbook name → step id → [x, y]). The
-    block may live at the top or bottom of the file — we search for the
+    block may live at the top or bottom of the file -- we search for the
     first occurrence. Missing/malformed → empty map + original text.
     """
     head = _LAYOUT_HEAD_RE.search(text)
@@ -219,7 +219,7 @@ def to_visual(yaml_text: str) -> dict[str, Any]:
         }
     """
     # Both sidecar blocks live at the YAML footer. We strip them only to
-    # recover the map — parser tolerates them (they're comments), but
+    # recover the map -- parser tolerates them (they're comments), but
     # callers also want the structured form.
     layout_map, _body = _extract_layout_block(yaml_text)
     samples_map, _body2 = extract_samples_block(yaml_text)
@@ -260,7 +260,7 @@ def to_visual(yaml_text: str) -> dict[str, Any]:
             # Surfaced for the frontend's "inactive playbook" guard.
             # Default in the IR is False; trigger playbooks need this
             # set to True (or a post-push PUT-activate) to actually
-            # fire — confirmed by the round-trip live-fire probe.
+            # fire -- confirmed by the round-trip live-fire probe.
             "is_active": bool(getattr(pb, "is_active", False)),
             # Verbose runtime tracing. New visual-editor drafts ship
             # with this set so authors see step-by-step output the
@@ -305,8 +305,8 @@ def from_visual(graph: dict[str, Any], original_yaml: str) -> str:
     Position-only updates re-emit the `# fsrpb:layout` footer block
     and leave the body intact (pure-stdlib path).
 
-    Structural edits — `arguments`, `name`, `comment`, `for_each`,
-    and step add/remove — are routed through `ruamel.yaml` round-trip
+    Structural edits -- `arguments`, `name`, `comment`, `for_each`,
+    and step add/remove -- are routed through `ruamel.yaml` round-trip
     mode so the rest of the document keeps its comments, key order,
     and quoting style. Edge rewiring is currently rejected so the
     user has one place to look (Phase 3.5/3.6 will lift this).
@@ -335,7 +335,7 @@ def from_visual(graph: dict[str, Any], original_yaml: str) -> str:
 def _append_sidecars(body: str,
                       layout: dict[str, dict[str, list[int]]],
                       samples: dict[str, dict[str, Any]]) -> str:
-    """Layout first, then samples — fixed order so round-trips are
+    """Layout first, then samples -- fixed order so round-trips are
     byte-stable. Each is a no-op on its empty map."""
     out = _append_layout(body, layout)
     out = append_samples(out, samples)
@@ -542,7 +542,7 @@ def _apply_structural_edits(body: str, diff: _GraphDiff, graph: dict[str, Any]) 
             if tgt_id in new_node_by_id:
                 tgt_name = new_node_by_id[tgt_id].get("name") or tgt_id
             else:
-                # Existing target — look up its display name
+                # Existing target -- look up its display name
                 tgt_doc = next((s for s in steps if _step_id(s) == tgt_id), None)
                 tgt_name = str(tgt_doc.get("name")) if tgt_doc else tgt_id
             # Find source step doc
@@ -594,7 +594,7 @@ def _splice_arguments(s_doc: Any, new_args: dict) -> None:
 
     set_variable's `arg_list:` shape (post-parser normalization) is
     converted back to the friendlier top-level `vars:` mapping when
-    that's the form the original used — otherwise downstream re-parses
+    that's the form the original used -- otherwise downstream re-parses
     would error with "set_variable: write a top-level `vars:` mapping".
     """
     new_args = dict(new_args or {})
@@ -623,7 +623,7 @@ def _splice_arguments(s_doc: Any, new_args: dict) -> None:
         if hoisted in s_doc and hoisted in new_args:
             s_doc[hoisted] = new_args.pop(hoisted)
         elif hoisted in s_doc and hoisted not in new_args:
-            # The graph dropped this key — remove it from the doc too.
+            # The graph dropped this key -- remove it from the doc too.
             del s_doc[hoisted]
         elif hoisted in nested_keys:
             # Was nested under `arguments:` originally; leave the
@@ -655,7 +655,7 @@ def _apply_edge_rewiring(steps: list, graph_pb: dict, pd: _PlaybookDiff,
     name_for_id = {sid: (n.get("name") or sid) for sid, n in nodes_by_id.items()}
 
     # Bucket the new edges by source step id, skipping edges that
-    # touch newly-added nodes — those are already wired by step 4.
+    # touch newly-added nodes -- those are already wired by step 4.
     by_source: dict[str, list[dict]] = {}
     for e in graph_pb.get("edges", []):
         if e["source"] in added_ids or e["target"] in added_ids:

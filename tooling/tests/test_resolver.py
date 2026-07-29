@@ -142,7 +142,7 @@ def test_picklist_enum_case_mismatch_emits_case_hint(db_path):
 
 
 def test_picklist_jinja_value_skipped(db_path):
-    """Jinja-templated values are deferred to runtime — no static
+    """Jinja-templated values are deferred to runtime -- no static
     enum complaint, since we can't resolve the expression."""
     text = _yaml(
         "        type: connector\n"
@@ -259,7 +259,7 @@ def test_typed_param_skips_jinja(db_path):
 
 def test_tier23_ipv4_validator_unit():
     """Pure-function tests for the new observed_type validators. These
-    don't need the DB — they catch validator regressions cheaply."""
+    don't need the DB -- they catch validator regressions cheaply."""
     from fsr_playbooks.compiler.resolver.connector_args import (
         _is_ipv4, _is_url, _is_email, _is_iso8601,
         _is_json_object, _is_json_array,
@@ -268,7 +268,7 @@ def test_tier23_ipv4_validator_unit():
     assert _is_ipv4("0.0.0.0")
     assert not _is_ipv4("999.0.0.1")
     assert not _is_ipv4("hostname.example.com")
-    assert not _is_ipv4("::1")          # ipv6 — distinct observed_type
+    assert not _is_ipv4("::1")          # ipv6 -- distinct observed_type
     assert not _is_ipv4(12345)
 
     assert _is_url("https://example.com/path?x=1")
@@ -284,7 +284,7 @@ def test_tier23_ipv4_validator_unit():
     assert _is_iso8601("2026-05-20T12:00:00")
     assert _is_iso8601("2026-05-20")
     assert not _is_iso8601("yesterday")
-    assert not _is_iso8601(1717200000)   # epoch — not iso
+    assert not _is_iso8601(1717200000)   # epoch -- not iso
 
     assert _is_json_object({"a": 1})
     assert _is_json_object('{"a":1}')
@@ -300,12 +300,12 @@ def test_tier23_ipv4_observed_type_fires(db_path):
     """Integration: when observed_type='ipv4' is set on a text-widget
     param, a non-IPv4 literal triggers the new diagnostic.
 
-    We mutate the DB in-process so the test is self-contained — the
+    We mutate the DB in-process so the test is self-contained -- the
     Tier 2.2 live probe is what populates observed_type in production.
     """
     import sqlite3 as _sqlite3
     conn = _sqlite3.connect(db_path)
-    # Snapshot the previous value so we can restore — db_path is shared
+    # Snapshot the previous value so we can restore -- db_path is shared
     # across tests via the session fixture.
     cur = conn.execute(
         "SELECT observed_type FROM operation_params "

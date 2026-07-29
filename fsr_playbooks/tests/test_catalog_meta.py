@@ -28,7 +28,7 @@ def conn():
 
 
 def test_get_on_absent_table_is_unstamped(conn):
-    # No ensure_table() yet — reads must not blow up.
+    # No ensure_table() yet -- reads must not blow up.
     assert cm.get(conn, "base_url_hash") is None
     assert cm.get_all(conn) == {}
     status, label, h = cm.check_instance(conn, "https://10.0.0.1")

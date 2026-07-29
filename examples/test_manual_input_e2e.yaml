@@ -1,6 +1,6 @@
 collection: FSRPB Manual-Input Test
 description: |
-  Stage 4 — adds a manual_input pause between two set_variable steps.
+  Stage 4 -- adds a manual_input pause between two set_variable steps.
   The integration test fires this playbook, finds the pending input via
   `fsrpb inputs list`, responds with the primary option via `fsrpb
   inputs respond`, and asserts the run finishes.

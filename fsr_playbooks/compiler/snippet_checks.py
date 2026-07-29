@@ -2,22 +2,22 @@
 
 FortiSOAR's code-snippet connector runs the authored Python inside a
 restricted sandbox (the ``python_inline_code_editor`` operation). Two whole
-classes of failure are deterministic and catchable *before* a live run — they
+classes of failure are deterministic and catchable *before* a live run -- they
 bit the 2026-06-25 archetype pilot as errors E2 and E3:
 
-- **B1 — syntax (E2).** A top-level ``return`` (or any other ``SyntaxError``)
+- **B1 -- syntax (E2).** A top-level ``return`` (or any other ``SyntaxError``)
   fails the snippet the instant the sandbox compiles it. ``compile(src,
   "<snippet>", "exec")`` reproduces the exact error in microseconds with zero
   dependencies, so we never need a heavyweight Pyodide/sandbox exec to find it.
 
-- **B2 — sandbox bans (E3).** The sandbox bans a *specific* set of names and
+- **B2 -- sandbox bans (E3).** The sandbox bans a *specific* set of names and
   modules (``open``, ``os``, ``sys``, ``subprocess``, ``importlib``, ``imp``)
-  and — unless the connector config enables it — bans ``import`` outright. A
+  and -- unless the connector config enables it -- bans ``import`` outright. A
   snippet that ``open()``\\s a file or imports ``os`` passes a vanilla Python
   ``compile()`` (and even Pyodide, which *has* ``open``) yet fails FortiSOAR at
   runtime with ``Uses of ['open'] is restricted``. We model the ban with a
-  small **per-version manifest** (``SANDBOX_CONSTRAINTS``) — the natural sibling
-  of ``STEP_WIRE_SHAPES.json``'s per-step shapes — and an ``ast.walk``.
+  small **per-version manifest** (``SANDBOX_CONSTRAINTS``) -- the natural sibling
+  of ``STEP_WIRE_SHAPES.json``'s per-step shapes -- and an ``ast.walk``.
 
 The import ban is **config-aware**: the sandbox's *default* config disallows
 imports, but a config with ``allow_imports`` enabled relaxes it. The always-banned
@@ -55,10 +55,10 @@ class SnippetFinding(NamedTuple):
 # entry covers every version we haven't pinned explicitly.
 #
 # - ``banned_names``: identifiers/modules the sandbox restricts *regardless* of
-#   ``allow_imports`` — used both as bare names (``open(...)``) and as import
+#   ``allow_imports`` -- used both as bare names (``open(...)``) and as import
 #   targets (``import os``). FortiSOAR raises ``Uses of [...] is restricted``.
 # - ``imports_allowed_by_default``: whether ``import`` works without a config
-#   that enables it. The sandbox default is False — imports are off unless the
+#   that enables it. The sandbox default is False -- imports are off unless the
 #   connector config turns them on.
 #
 # This mirrors the FortiSOAR code-snippet sandbox (v2.1.4) observed in the pilot.
@@ -104,7 +104,7 @@ def check_snippet(
 
     # --- B1: syntax. ---
     # `compile(..., "exec")` runs the symbol-table pass too, so it catches
-    # `'return' outside function` (E2) — `ast.parse` alone does not, since that
+    # `'return' outside function` (E2) -- `ast.parse` alone does not, since that
     # error is raised during compilation, not parsing. We compile() to vet, then
     # ast.parse() the same source for the B2 walk.
     try:
@@ -117,7 +117,7 @@ def check_snippet(
             message=(f"code-snippet body is not valid Python: {e.msg} "
                      f"(line {e.lineno})"),
             suggestion=(
-                "fix the syntax; a top-level `return` is the usual culprit — "
+                "fix the syntax; a top-level `return` is the usual culprit -- "
                 "the sandbox runs the body at module scope, so use a bare "
                 "expression/assignment or wrap it in a function you then call"
                 if e.msg and "return" in e.msg.lower()
@@ -147,7 +147,7 @@ def check_snippet(
                 severity="error",
                 name=node.id,
                 message=(f"code-snippet uses {node.id!r}, which the FortiSOAR "
-                         f"sandbox restricts — runtime fails with "
+                         f"sandbox restricts -- runtime fails with "
                          f"\"Uses of ['{node.id}'] is restricted\""),
                 suggestion=(f"remove the use of {node.id!r}; the sandbox has no "
                             "filesystem/process access"),

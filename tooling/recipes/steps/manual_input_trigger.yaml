@@ -1,7 +1,7 @@
 name: manual_input_trigger
 description: |
   First-step pattern for user-initiated playbooks: the trigger IS a
-  manual_input. Do NOT prepend a `start` step — FSR designer renders
+  manual_input. Do NOT prepend a `start` step -- FSR designer renders
   this as a manual trigger that prompts the user before running.
 intent_keywords:
   - manual trigger

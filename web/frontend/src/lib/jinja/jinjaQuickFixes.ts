@@ -8,11 +8,11 @@
  *   - "Unclosed expression …"           → append ` }}` to the line
  *   - "{% X %} on line N was never …"   → append `{% endX %}` after the
  *                                         template
- *   - "Unexpected {% endX %} — no …"    → delete the orphan tag
+ *   - "Unexpected {% endX %} -- no …"    → delete the orphan tag
  *   - "Unknown filter \"X\" …"          → replace with closest known
  *                                         filter name (Levenshtein)
  *
- * "X was not found in the test input" warnings have no quick fix —
+ * "X was not found in the test input" warnings have no quick fix --
  * the fix lives in the input JSON, not the template.
  */
 import { filterSignatures } from './jinjaFilters';
@@ -27,20 +27,20 @@ export function registerJinjaQuickFixes(monaco: any): { dispose: () => void } {
       for (const m of context.markers as any[]) {
         const text: string = m.message || '';
 
-        // Unclosed `{%` — append ` %}` (or `%}` if line already ends
+        // Unclosed `{%` -- append ` %}` (or `%}` if line already ends
         // in whitespace) at end of the marked line.
         if (text.startsWith('Unclosed block tag')) {
           actions.push(closerAction(monaco, model, m, '%}', "Close with ' %}'"));
           continue;
         }
 
-        // Unclosed `{{` — append ` }}` (same trailing-space rule).
+        // Unclosed `{{` -- append ` }}` (same trailing-space rule).
         if (text.startsWith('Unclosed expression')) {
           actions.push(closerAction(monaco, model, m, '}}', "Close with ' }}'"));
           continue;
         }
 
-        // Unclosed block opener — append `{% endX %}` after end of file.
+        // Unclosed block opener -- append `{% endX %}` after end of file.
         const noClose = text.match(/^\{% (\w+) %\} on line \d+ was never closed with \{% (end\w+) %\}/);
         if (noClose) {
           const closer = noClose[2];
@@ -48,14 +48,14 @@ export function registerJinjaQuickFixes(monaco: any): { dispose: () => void } {
           continue;
         }
 
-        // Orphan `{% endX %}` — delete it.
+        // Orphan `{% endX %}` -- delete it.
         const orphan = text.match(/^Unexpected \{% (end\w+) %\}/);
         if (orphan) {
           actions.push(deleteOrphanAction(monaco, model, m));
           continue;
         }
 
-        // Unknown filter — suggest the nearest known name.
+        // Unknown filter -- suggest the nearest known name.
         const filt = text.match(/^Unknown filter "(\w+)"/);
         if (filt) {
           const wrong = filt[1];
@@ -142,7 +142,7 @@ function appendEndTagAction(monaco: any, model: any, marker: any, closer: string
 }
 
 function deleteOrphanAction(monaco: any, model: any, marker: any) {
-  // Delete the whole offending line — the orphan `{% endX %}` likely
+  // Delete the whole offending line -- the orphan `{% endX %}` likely
   // sits on its own line; if it doesn't, this is still the simplest
   // reasonable fix and lands in the undo stack.
   const ln = marker.startLineNumber;
@@ -222,7 +222,7 @@ function closestName(input: string, candidates: string[]): string | null {
       best = c;
     }
   }
-  // Only suggest when "close enough" — protects against random guesses.
+  // Only suggest when "close enough" -- protects against random guesses.
   return best && bestD <= Math.max(2, Math.floor(input.length / 3)) ? best : null;
 }
 

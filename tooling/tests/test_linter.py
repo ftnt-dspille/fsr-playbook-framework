@@ -1,4 +1,4 @@
-"""Linter v1 — Norway problem, step-name charset, mock_result on Fetch.
+"""Linter v1 -- Norway problem, step-name charset, mock_result on Fetch.
 
 Each rule has a positive (catches the foot-gun) and a negative (clean
 input passes) case so future refactors can't silently weaken the linter.
@@ -68,14 +68,14 @@ playbooks:
     steps:
       - name: trigger
         type: start
-        next: "Hello — World? (yes)"
-      - name: "Hello — World? (yes)"
+        next: "Hello -- World? (yes)"
+      - name: "Hello -- World? (yes)"
         type: set_variable
         vars: { x: 1 }
 """
 
 NAME_OK = NAME_BAD.replace(
-    'Hello — World? (yes)',
+    'Hello -- World? (yes)',
     'Hello World yes',
 )
 
@@ -90,7 +90,7 @@ def test_step_name_with_dash_paren_em_dash_auto_rewritten(db_path):
     # The compiled JSON has the cleaned name (no em-dash / paren / ?).
     steps = r.fsr_json["data"][0]["workflows"][0]["steps"]
     assert any(_BAD_CHAR not in s["name"]
-               for s in steps for _BAD_CHAR in "—()?")
+               for s in steps for _BAD_CHAR in "--()?")
 
 
 def test_step_name_clean_passes(db_path):
@@ -123,7 +123,7 @@ FETCH_WITH_MOCK = FETCH_NO_MOCK.replace(
 
 def test_fetch_step_without_mock_emits_warning(db_path):
     r = compile_yaml(FETCH_NO_MOCK, db_path)
-    # Warning, not error — compile still succeeds.
+    # Warning, not error -- compile still succeeds.
     assert r.ok, [e.to_dict() for e in r.errors]
     warns = [e for e in r.errors if e.severity == "warning"]
     assert any("mock_result" in w.message for w in warns)
@@ -140,7 +140,7 @@ def test_fetch_step_with_mock_clean(db_path):
 # ---- Sanity: linter ignores yes-shaped keys outside `branches:` ---------
 
 def test_linter_does_not_misfire_on_unrelated_yes_key(db_path):
-    """A `yes:` key inside `vars:` is fine — the Norway rule only
+    """A `yes:` key inside `vars:` is fine -- the Norway rule only
     fires for `display:` values on decision/manual_input branches."""
     text = """
 collection: T

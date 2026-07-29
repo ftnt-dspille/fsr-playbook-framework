@@ -46,7 +46,7 @@ def test_no_status_is_genuine_transport_failure():
 # (GA-demo repro: find_containment_actions returned count:0 on a healthy box).
 
 def _fake_client_raising(exc: Exception):
-    """Minimal client whose healthcheck GET raises — simulates a timeout."""
+    """Minimal client whose healthcheck GET raises -- simulates a timeout."""
     def _get(*_a, **_k):
         raise exc
     session = types.SimpleNamespace(get=_get)
@@ -63,7 +63,7 @@ def test_healthcheck_timeout_is_tagged_probe_failed():
 
 
 def test_probe_failure_is_not_cached(monkeypatch):
-    """A `_probe_failed` verdict must never reach the health cache — otherwise
+    """A `_probe_failed` verdict must never reach the health cache -- otherwise
     the unhealthy TTL keeps dropping the connector's ops after it recovers."""
     stored: list = []
     monkeypatch.setattr(te, "_store_health",
@@ -84,7 +84,7 @@ def test_probe_failure_is_not_cached(monkeypatch):
 
 def test_genuine_unhealthy_status_is_still_cached(monkeypatch):
     """A real vendor 'Disconnected' verdict (no _probe_failed) must still be
-    cached — we only stop persisting probe *failures*, not real bad news."""
+    cached -- we only stop persisting probe *failures*, not real bad news."""
     stored: list = []
     monkeypatch.setattr(te, "_store_health",
                         lambda *a, **k: stored.append(a))

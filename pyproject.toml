@@ -17,7 +17,7 @@ dependencies = [
 
 [project.scripts]
 # `fsrpb_main` (repo-root shim) bootstraps tooling/ onto sys.path, then calls
-# cli.main — cli.py is NOT an installed package so it can't be the entry directly.
+# cli.main -- cli.py is NOT an installed package so it can't be the entry directly.
 fsrpb = "fsrpb_main:main"
 
 [dependency-groups]
@@ -55,7 +55,7 @@ select = ["F"]
 # "unused import" is the intended public surface / registration side effect.
 "**/__init__.py" = ["F401"]
 
-# Typing audit (TYPING_GAP_IDENTIFICATION_PLAN). REPORT-ONLY for now — run
+# Typing audit (TYPING_GAP_IDENTIFICATION_PLAN). REPORT-ONLY for now -- run
 # `mypy fsr_playbooks/compiler/` to regenerate docs/typing/mypy_baseline.md.
 # Not a CI gate (decision recorded in the plan): the enforced gate is the
 # shape-contract ratchet; mypy graduates to fail-on-new once NormalizerMixin
@@ -64,6 +64,6 @@ select = ["F"]
 python_version = "3.10"
 ignore_missing_imports = true
 follow_imports = "silent"
-# Deliberately NOT strict yet — default checks surface the high-signal
+# Deliberately NOT strict yet -- default checks surface the high-signal
 # union-attr / index / arg-type bugs without drowning in `Any` noise.
 files = ["fsr_playbooks/compiler"]

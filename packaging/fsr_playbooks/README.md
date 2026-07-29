@@ -2,11 +2,11 @@
 
 A FortiSOAR **playbook authoring & compiler framework**:
 
-- **Compiler** — turn readable YAML into FortiSOAR playbook JSON (parser →
+- **Compiler** -- turn readable YAML into FortiSOAR playbook JSON (parser →
   resolver → validator → emitter), round-trip lossless with structured
   diagnostics.
-- **Agent** — LLM co-authoring helpers for building and triaging playbooks.
-- **MCP server** — tools that expose the compiler, connector/Jinja reference,
+- **Agent** -- LLM co-authoring helpers for building and triaging playbooks.
+- **MCP server** -- tools that expose the compiler, connector/Jinja reference,
   and playbook authoring to MCP-compatible clients.
 
 ## Install
@@ -29,7 +29,7 @@ The compiler input is a readable collection of playbooks. A minimal one
 ```yaml
 # hello_connector.yaml
 collection: Compiler Demo
-description: Smallest possible end-to-end — start, set a variable, call a connector.
+description: Smallest possible end-to-end -- start, set a variable, call a connector.
 visible: true
 
 playbooks:
@@ -64,7 +64,7 @@ from fsr_playbooks import compile_yaml
 
 # The reference DB resolves connectors, operations, params, step types, and
 # Jinja. It ships with the full framework repo (store/fsr_reference.db), NOT
-# the PyPI wheel — point this at your copy.
+# the PyPI wheel -- point this at your copy.
 REFERENCE_DB = Path("store/fsr_reference.db")
 
 text = Path("hello_connector.yaml").read_text()
@@ -80,13 +80,13 @@ collection = result.fsr_json["data"][0]             # the FortiSOAR collection e
 
 `compile_yaml(text, db_path, lax_codes=None) -> CompileResult` returns a result
 object with `.ok`, `.fsr_json` (`{"data": [collection]}`), `.errors`,
-`.warnings`, and `.ir` (the parsed tree) — it reports problems as structured
+`.warnings`, and `.ir` (the parsed tree) -- it reports problems as structured
 `CompileError`s rather than raising.
 
 ### 3. Deploy the collection to a FortiSOAR instance
 
 Pushing and triggering talk to a live FortiSOAR REST API, so they use the
-[`pyfsr`](https://pypi.org/project/pyfsr/) client (`pip install pyfsr`) — this
+[`pyfsr`](https://pypi.org/project/pyfsr/) client (`pip install pyfsr`) -- this
 package does the compiling, `pyfsr` does the transport.
 
 ```python
@@ -137,7 +137,7 @@ while True:
 ```
 
 > **What needs what:** step 2 (compile) is pure `fsr_playbooks` + the reference
-> DB. Steps 3–4 (deploy/run) additionally need `pyfsr` and a reachable
+> DB. Steps 3-4 (deploy/run) additionally need `pyfsr` and a reachable
 > FortiSOAR instance. The `fsr_playbooks` package never imports `pyfsr` itself.
 
 ## Extras
@@ -150,7 +150,7 @@ while True:
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT -- see [LICENSE](LICENSE).
 
 ## Links
 

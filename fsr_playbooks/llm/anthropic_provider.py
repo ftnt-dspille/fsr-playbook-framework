@@ -1,4 +1,4 @@
-"""Anthropic provider — streaming with tool use.
+"""Anthropic provider -- streaming with tool use.
 
 We do the agentic loop here so the route handler stays a dumb pipe:
 - send messages + tools
@@ -20,8 +20,8 @@ try:
 except ImportError:
     # The SDK isn't installed in every environment (e.g. the test/dev box
     # that only exercises the pure helpers, or the FSR connector runtime).
-    # Defer the hard failure to AnthropicProvider.__init__ so the module —
-    # and its module-level helpers — import cleanly without it.
+    # Defer the hard failure to AnthropicProvider.__init__ so the module --
+    # and its module-level helpers -- import cleanly without it.
     AsyncAnthropic = None  # type: ignore[assignment,misc]
 
 from .provider import (
@@ -57,7 +57,7 @@ from .tools import anthropic_tools, dispatch, _resolve_tier as _tier_for
 DEFAULT_MODEL = os.environ.get("STUDIO_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
 
 
-# P1 — forced written assessment. When a turn runs tools but the final
+# P1 -- forced written assessment. When a turn runs tools but the final
 # assistant block carries no text (only tool_use / emitted cards), the chat
 # looks like it "didn't answer." We append this directive and do ONE more
 # no-tools round so the analyst always gets a narrative close.
@@ -69,13 +69,13 @@ _ASSESSMENT_DIRECTIVE = (
 )
 
 # Forced enhance-delivery round (mirrors OpenAIProvider._DELIVERY_DIRECTIVE).
-# A verify passed but no emit_enhancement_offer followed — force the call via
+# A verify passed but no emit_enhancement_offer followed -- force the call via
 # tool_choice and override verified_id afterward so the forced round can only
 # apply the blessed bytes.
 _DELIVERY_DIRECTIVE = (
     "You verified an edit to the open playbook and it is ready to apply, but "
     "you have not delivered it. Call `emit_enhancement_offer` now with "
-    "verified_id {vid!r} to apply it — a written description is NOT a "
+    "verified_id {vid!r} to apply it -- a written description is NOT a "
     "substitute for the call. Write the `summary` as one or two plain-English "
     "lines describing what the edit changes."
 )
@@ -94,8 +94,8 @@ def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
 def _with_history_breakpoint(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Add a rolling cache breakpoint on the last block of the last message.
 
-    Without this we cache only the (tools + system) prefix — 2 of the 4
-    breakpoints Anthropic allows — and re-send the whole conversation uncached
+    Without this we cache only the (tools + system) prefix -- 2 of the 4
+    breakpoints Anthropic allows -- and re-send the whole conversation uncached
     on every iteration. That is the expensive half of an agentic turn: `history`
     grows by an assistant block plus a tool_result block per tool call, so a
     10-tool turn pays full input price on a transcript that is mostly identical
@@ -104,11 +104,11 @@ def _with_history_breakpoint(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]
     Anthropic's cache is prefix-based, so a breakpoint at the END of history
     makes each request read everything up to the previous request's breakpoint
     and write only the new increment. Reads bill at 0.1x input; writes at 1.25x
-    for the default 5-minute TTL, which refreshes free on every hit — so a write
+    for the default 5-minute TTL, which refreshes free on every hit -- so a write
     repays itself after roughly three reads.
 
     Placement follows the documented rule: mark the last block that is identical
-    across requests. The final block of the current history is exactly that — on
+    across requests. The final block of the current history is exactly that -- on
     the next request it is unchanged and everything after it is new.
     """
     if not msgs:
@@ -153,7 +153,7 @@ class AnthropicProvider:
         max_output_tokens: int | None = None,
     ):
         self.model = model or DEFAULT_MODEL
-        # Shared ceiling — see `openai_provider.DEFAULT_MAX_OUTPUT_TOKENS` for
+        # Shared ceiling -- see `openai_provider.DEFAULT_MAX_OUTPUT_TOKENS` for
         # why it is uniform rather than per-intent (a cap is a ceiling, not a
         # spend: you are billed on tokens emitted, not on the limit).
         self.max_output_tokens = max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS
@@ -164,8 +164,8 @@ class AnthropicProvider:
         _client_kwargs: dict[str, Any] = {"max_retries": 5}
         if base_url:
             _client_kwargs["base_url"] = base_url
-        # max_retries=5 (SDK default is 2). Failed retries cost nothing —
-        # Anthropic only bills successful generations — so a higher
+        # max_retries=5 (SDK default is 2). Failed retries cost nothing --
+        # Anthropic only bills successful generations -- so a higher
         # ceiling makes us robust to transient 529 overloads at zero
         # cost. The SDK already exponentially backs off between retries.
         if client is not None:
@@ -181,7 +181,7 @@ class AnthropicProvider:
             self._client = AsyncAnthropic(**_client_kwargs)
         # ApprovalGateway impl (fsr_playbooks.protocols.ApprovalGateway). When
         # None, falls back to the module-level singleton in
-        # `fsr_playbooks.llm.approvals` — that's what the web backend uses.
+        # `fsr_playbooks.llm.approvals` -- that's what the web backend uses.
         # The FortiSOAR connector passes a PersistedApprovalGateway so
         # paused HITL turns survive worker restarts.
         self._approval_gateway = approval_gateway
@@ -209,11 +209,11 @@ class AnthropicProvider:
         """
         # Phase 3.1: verify the HMAC binding before trusting the stored args.
         # A mismatch means the session was tampered with (or minted before a
-        # secret rotation / restart without a stable FSR_APPROVAL_HMAC_KEY) —
+        # secret rotation / restart without a stable FSR_APPROVAL_HMAC_KEY) --
         # fail closed rather than re-dispatch a possibly-substituted call.
         if not _approvals.verify(suspended):
             yield ErrorEvent(
-                message="Approval binding check failed — the suspended action "
+                message="Approval binding check failed -- the suspended action "
                         "could not be verified and was not executed. Re-issue "
                         "the request."
             )
@@ -221,7 +221,7 @@ class AnthropicProvider:
             return
 
         if decision == "approve":
-            # Bypass the gate this one time — see tools.dispatch.
+            # Bypass the gate this one time -- see tools.dispatch.
             resolved = dispatch(
                 suspended.tool,
                 {**suspended.args, "_approved": True},
@@ -293,7 +293,7 @@ class AnthropicProvider:
         Shared by the max-tool-turns wrap-up and the P1 forced-assessment
         guarantee. Appends ``directive`` as a user turn, runs the model with
         NO tools (so it can't keep investigating), and streams the resulting
-        text. Failures are logged and swallowed — the caller still emits a
+        text. Failures are logged and swallowed -- the caller still emits a
         terminal DoneEvent so the turn never hangs.
         """
         history.append(Message(role="user", content=directive))
@@ -333,7 +333,7 @@ class AnthropicProvider:
             logging.exception("%s call failed", stop_reason_label)
             yield ErrorEvent(
                 message=(
-                    "hit max tool budget; summary failed — see "
+                    "hit max tool budget; summary failed -- see "
                     "history above"
                 ),
             )
@@ -351,7 +351,7 @@ class AnthropicProvider:
 
         history = list(messages)
         self_repair_turns = 0
-        # P1 — forced-assessment guarantee. `any_tools_run` flips once any
+        # P1 -- forced-assessment guarantee. `any_tools_run` flips once any
         # tool result has been folded into history; `assessment_forced`
         # caps the guarantee at one extra round so it can't loop.
         any_tools_run = False
@@ -373,20 +373,20 @@ class AnthropicProvider:
         # The caller advertises an intent-filtered tool list (triage drops
         # the build-only authoring/mutation surface), but `dispatch` will
         # happily execute ANY tool name. If a build-only tool name reaches
-        # us in a triage session — model confusion, a stale widget, a
-        # replayed transcript — refuse to run it instead of silently
+        # us in a triage session -- model confusion, a stale widget, a
+        # replayed transcript -- refuse to run it instead of silently
         # authoring/mutating. The model only ever sees `allowed_names`, so
         # in the normal path this never triggers; it's a backstop.
         allowed_names = {t["name"] for t in tools}
 
-        # P4 — repeated-error guard. If a tool call with the identical
+        # P4 -- repeated-error guard. If a tool call with the identical
         # (name, args) shape already failed once this turn, don't re-run it:
         # return a guard envelope telling the model to stop retrying that exact
         # shape and adapt (e.g. re-resolve a SIEM incidentId from sourcedata)
         # or surface the blocker. Stops the "same 400 twice, no adaptation"
         # budget burn seen in live triage.
         failed_signatures: set[str] = set()
-        # Triage discipline (hunt floor + forbidden pivot + call-once) — see
+        # Triage discipline (hunt floor + forbidden pivot + call-once) -- see
         # _loop_helpers.TriageDiscipline. Fires only on triage tool names.
         # If case_state is provided, pass its investigation to seed counters.
         investigation_state = (
@@ -394,7 +394,7 @@ class AnthropicProvider:
             if case_state is not None else None
         )
         # Authoring/build turns are detected by the absence of the triage-only
-        # staging tool `emit_action_card` from the advertised slice — build never
+        # staging tool `emit_action_card` from the advertised slice -- build never
         # stages containment, so the hunt-floor gate must not block
         # find_containment_actions DISCOVERY there (it stays fully in force for
         # triage, whose slice includes emit_action_card).
@@ -429,7 +429,7 @@ class AnthropicProvider:
                     "error": (
                         f"This exact call to `{nm}` already failed earlier this "
                         f"turn and was NOT re-run. Do not retry the identical "
-                        f"arguments — change the inputs (e.g. resolve the "
+                        f"arguments -- change the inputs (e.g. resolve the "
                         f"correct id from the record's sourcedata) or stop and "
                         f"report the blocker in your assessment."
                     ),
@@ -437,7 +437,7 @@ class AnthropicProvider:
             guard = _discipline.evaluate(nm, ar)
             if guard is not None:
                 # Terminal guards (forbidden pivot / call-once) can never
-                # succeed — register the signature so an identical re-call hits
+                # succeed -- register the signature so an identical re-call hits
                 # the firmer repeated_call_guard and the model stops retrying.
                 # The hunt-floor block is intentionally NOT terminal: that exact
                 # call should succeed once investigation has caught up.
@@ -468,7 +468,7 @@ class AnthropicProvider:
             turn_idx += 1
             # Compact older turns: dedupe idempotent-tool results and
             # cap older validate_yaml/compile_yaml bodies. Only mutates
-            # historical blocks — the most recent assistant + tool_result
+            # historical blocks -- the most recent assistant + tool_result
             # stay byte-identical so prompt cache is preserved.
             try:
                 _shrink_history(history)
@@ -478,20 +478,20 @@ class AnthropicProvider:
                 logging.exception("shrink_history failed")
             # Snapshot history size BEFORE the LLM round-trip so we can
             # see what we paid to send. Cached system+tools aren't in
-            # this number — Anthropic's `cache_read_input_tokens` is.
+            # this number -- Anthropic's `cache_read_input_tokens` is.
             try:
                 history_chars = len(json.dumps(
                     _to_anthropic_messages(history), default=str
                 ))
             except Exception:
                 history_chars = 0
-            # §2.2 — stream the round-trip live: text deltas reach the caller
+            # §2.2 -- stream the round-trip live: text deltas reach the caller
             # (and the connector's chat_poll feed) AS THEY ARRIVE, so the widget
             # shows a live token stream instead of the whole answer landing at
             # once on turn completion. `_pump` keeps `get_final_message()` inside
             # the SDK's streaming context; `drain_with_idle_timeout` supplies the
             # per-delta inactivity timeout + cancellation (shared across
-            # providers — see _loop_helpers).
+            # providers -- see _loop_helpers).
             async def _pump():
                 async with self._client.messages.stream(
                     model=self.model,
@@ -524,13 +524,13 @@ class AnthropicProvider:
                 yield ErrorEvent(
                     message=f"The request to Anthropic timed out after "
                             f"{STREAM_TIMEOUT_SECS}s. The API may be slow "
-                            f"or unreachable — please try again."
+                            f"or unreachable -- please try again."
                 )
                 return
             except Exception as e:
                 # Surface a clean, user-readable message; log the raw
                 # detail server-side. The SDK already auto-retried up to
-                # max_retries on 429/5xx/529 — if we reach this except
+                # max_retries on 429/5xx/529 -- if we reach this except
                 # block, retries were exhausted (or it's a non-retryable
                 # error like Auth/BadRequest).
                 import logging
@@ -541,7 +541,7 @@ class AnthropicProvider:
                 )
                 logging.exception("anthropic stream failed")
                 if isinstance(e, AuthenticationError):
-                    msg = "Anthropic authentication failed — check ANTHROPIC_API_KEY in the backend env."
+                    msg = "Anthropic authentication failed -- check ANTHROPIC_API_KEY in the backend env."
                 elif isinstance(e, PermissionDeniedError):
                     msg = "Anthropic API key lacks permission for this model."
                 elif isinstance(e, RateLimitError):
@@ -549,7 +549,7 @@ class AnthropicProvider:
                 elif isinstance(e, APITimeoutError):
                     msg = "The request to Anthropic timed out. Try again, or shorten the prompt if it's very long."
                 elif isinstance(e, APIConnectionError):
-                    msg = "Could not reach Anthropic — check your network connection and try again."
+                    msg = "Could not reach Anthropic -- check your network connection and try again."
                 elif isinstance(e, BadRequestError):
                     msg = f"Anthropic rejected the request: {getattr(e, 'message', str(e))[:200]}"
                 elif isinstance(e, APIStatusError):
@@ -564,7 +564,7 @@ class AnthropicProvider:
                         pass
                     if err_type == "overloaded_error":
                         msg = ("Anthropic is overloaded right now. We retried a few times "
-                               "and still couldn't get through — please try again in a moment.")
+                               "and still couldn't get through -- please try again in a moment.")
                     else:
                         status = getattr(e, "status_code", "?")
                         msg = f"Anthropic returned an error (HTTP {status}). Please try again."
@@ -632,7 +632,7 @@ class AnthropicProvider:
                                 tool_calls=tool_call_usage, tags=tags,
                             )
                             continue
-                # Enhance-delivery guard — a verify passed but no offer
+                # Enhance-delivery guard -- a verify passed but no offer
                 # followed. Force ONE round pinned to emit_enhancement_offer so
                 # the delivery is a real tool call, then override verified_id
                 # with the blessed handle so the forced call can only apply the
@@ -686,7 +686,7 @@ class AnthropicProvider:
                             logging.exception("forced enhance delivery failed")
                     yield DoneEvent(stop_reason="end_turn")
                     return
-                # P1 — forced-assessment guarantee. The turn ran tools but
+                # P1 -- forced-assessment guarantee. The turn ran tools but
                 # the final assistant block has no text (only tool_use /
                 # emitted cards). Emit the usage for the round we paid for,
                 # then force ONE no-tools round so the analyst gets a written
@@ -761,7 +761,7 @@ class AnthropicProvider:
                 ))
                 return block
 
-            # §2.8 — Parallel read-only dispatch. The first tier-3+ call (if
+            # §2.8 -- Parallel read-only dispatch. The first tier-3+ call (if
             # any) is the approval boundary; by construction every call before
             # it is read-only (tier ≤ 2), so those are safe to fan out
             # concurrently. The approval call itself + everything after it
@@ -892,7 +892,7 @@ class AnthropicProvider:
             )
 
         # Tool-turn budget exhausted. Without a final assistant message
-        # the chat just goes silent — the user can't tell whether the
+        # the chat just goes silent -- the user can't tell whether the
         # agent finished or got cut off. Force one more no-tools round
         # so the model can summarize where it landed and what's left.
         turn_idx += 1

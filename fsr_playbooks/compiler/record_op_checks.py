@@ -7,7 +7,7 @@ lookups from the warmed reference DB.
 
 Each function returns a list of issue dicts in the `_per_step_schema_checks`
 shape: ``{code, message, step, path, suggestion, severity, near?}``. An empty
-list means "nothing to flag" — including the deliberate "no catalog data, so
+list means "nothing to flag" -- including the deliberate "no catalog data, so
 don't guess" case (callers pass empty facts when the warm hasn't run).
 
 Grounding (2026-06-26 pilot, .205 warm):
@@ -21,7 +21,7 @@ from __future__ import annotations
 import difflib
 from typing import Any, Iterable, Optional
 
-# F applies to record *creation* only. `update_record` is a partial patch —
+# F applies to record *creation* only. `update_record` is a partial patch --
 # an absent required field is legal there (you're updating a subset), so
 # requiring completeness on update would false-positive.
 RECORD_CREATE_TYPES = frozenset({"create_record"})
@@ -32,10 +32,10 @@ RECORD_CREATE_TYPES = frozenset({"create_record"})
 # every such step (the connector has zero rows in `connector_configs`, which the
 # check otherwise reads as "unconfigured → empty config can't bind"). That is a
 # false positive that costs an authoring model several wasted turns fighting the
-# gate — observed live: a build turn burned ~6 tool calls (retrying verify,
+# gate -- observed live: a build turn burned ~6 tool calls (retrying verify,
 # mis-formatting `disable_checks`, tripping the repeated-call guard) before
 # abandoning verify for `dry_run`. `cyops_utilities` is the FortiSOAR built-in
-# Utilities connector — the same one that backs `no_op`/`stop`/`end` steps — and
+# Utilities connector -- the same one that backs `no_op`/`stop`/`end` steps -- and
 # is universally present and config-less. (The catalog's `config_schema_json` is
 # empty across the board even in warmed DBs, so it cannot distinguish config-less
 # from config-required; this authoritative set is the reliable signal. Broaden it
@@ -44,7 +44,7 @@ CONFIG_LESS_CONNECTORS = frozenset({"cyops_utilities"})
 
 
 def _is_dynamic(value: Any) -> bool:
-    """A Jinja-templated value — we can't statically know what it renders to."""
+    """A Jinja-templated value -- we can't statically know what it renders to."""
     return isinstance(value, str) and ("{{" in value or "{%" in value)
 
 
@@ -86,7 +86,7 @@ def check_record_module(
     msg = f"module {name!r} does not exist on the target"
     sug = None
     if near:
-        msg += f" — did you mean {', '.join(repr(n) for n in near)}?"
+        msg += f" -- did you mean {', '.join(repr(n) for n in near)}?"
         sug = f"use module {near[0]!r}"
     return [{
         "code": "unknown_module",
@@ -107,12 +107,12 @@ def check_required_record_fields(
     step_id: str = "",
     path: str = "",
 ) -> list[dict[str, Any]]:
-    """F — a `create_record` whose `resource` omits a required module field.
+    """F -- a `create_record` whose `resource` omits a required module field.
 
     Complements the render-path `required-arg-empty` check (which catches a
     *present* key that renders to ""/null): this catches a key that is
     *structurally absent*. Only fires when the module's required-field set is
-    known (non-empty) — an unknown/un-warmed module yields no facts, no flags.
+    known (non-empty) -- an unknown/un-warmed module yields no facts, no flags.
     """
     req = sorted({f for f in (required_fields or []) if f})
     if not module or not req or not isinstance(resource, dict):
@@ -124,7 +124,7 @@ def check_required_record_fields(
             issues.append({
                 "code": "required_record_field_missing",
                 "message": (f"create_record into {module!r} is missing required "
-                            f"field {field!r} — the record API rejects this with "
+                            f"field {field!r} -- the record API rejects this with "
                             f"'This value should not be blank'"),
                 "step": step_id,
                 "path": f"{path}.arguments.resource" if path else "",
@@ -159,7 +159,7 @@ def check_unknown_record_fields(
         msg = f"module {module!r} has no field {key!r}"
         sug = None
         if near:
-            msg += f" — did you mean {near[0]!r}?"
+            msg += f" -- did you mean {near[0]!r}?"
             sug = f"rename field {key!r} → {near[0]!r}"
         issues.append({
             "code": "unknown_record_field",
@@ -183,19 +183,19 @@ def check_op_params(
     step_id: str = "",
     path: str = "",
 ) -> list[dict[str, Any]]:
-    """G — connector-op param completeness + name validity.
+    """G -- connector-op param completeness + name validity.
 
     Two checks, both gated on the op actually being in the catalog
     (``declared_params`` non-empty):
 
       - **unknown param name** (warning): a key in `params` that is not a
-        declared param of this op — the "I typed `body_type` instead of
+        declared param of this op -- the "I typed `body_type` instead of
         `content_type`" class. Warning, not error: FSR tolerates some extras,
         and an over-eager error would block valid playbooks.
       - **required param missing** (error): a declared *unconditional* required
         param with no key present. (Conditionally-required params are excluded
-        upstream — only top-level always-required names belong in
-        ``required_params`` — so this never false-fires on a param that's only
+        upstream -- only top-level always-required names belong in
+        ``required_params`` -- so this never false-fires on a param that's only
         required when a sibling is set.)
     """
     declared = {p for p in (declared_params or []) if p}
@@ -210,7 +210,7 @@ def check_op_params(
                f"{name!r}")
         sug = None
         if near:
-            msg += f" — did you mean {near[0]!r}?"
+            msg += f" -- did you mean {near[0]!r}?"
             sug = f"rename param {name!r} → {near[0]!r}"
         issues.append({
             "code": "op_param_unknown_name",
@@ -256,7 +256,7 @@ def check_connector_config(
         fall back to and may bind to an arbitrary/none config.
 
     Skipped entirely when the catalog has no config data warmed
-    (``configs_known=False``) — absence of data is not absence of a config.
+    (``configs_known=False``) -- absence of data is not absence of a config.
 
     A non-empty `config:` *name* is validated against the connector's known
     config names (`unknown_connector_config` if absent). An IRI or a Jinja
@@ -265,7 +265,7 @@ def check_connector_config(
     if not connector or not configs_known:
         return []
     # A config-less built-in (e.g. cyops_utilities) binds fine with an empty
-    # `config:` and never carries a saved config — never flag it as missing one.
+    # `config:` and never carries a saved config -- never flag it as missing one.
     # A non-empty config *name* still falls through to name validation below.
     if connector in CONFIG_LESS_CONNECTORS and not (
             isinstance(config_value, str) and config_value.strip()):
@@ -282,7 +282,7 @@ def check_connector_config(
                    f"{val!r}")
             sug = None
             if near:
-                msg += f" — did you mean {', '.join(repr(n) for n in near)}?"
+                msg += f" -- did you mean {', '.join(repr(n) for n in near)}?"
                 sug = f"use config {near[0]!r}"
             return [{
                 "code": "unknown_connector_config",
@@ -301,7 +301,7 @@ def check_connector_config(
         return [{
             "code": "connector_config_missing",
             "message": (f"connector {connector!r} has no configuration on the "
-                        f"target — a step with an empty config cannot bind"),
+                        f"target -- a step with an empty config cannot bind"),
             "step": step_id,
             "path": f"{path}.arguments.config" if path else "",
             "suggestion": (f"configure {connector!r} on the target, or pin an "

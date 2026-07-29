@@ -53,7 +53,7 @@
       code: 'AGT',
       title: 'Let an agent build it from a one-line ask',
       blurb:
-        'Describe what you want; the LLM uses 20+ MCP tools to look up connectors, write YAML, validate, and run it — no CLI hand-off.',
+        'Describe what you want; the LLM uses 20+ MCP tools to look up connectors, write YAML, validate, and run it -- no CLI hand-off.',
       accent: 'violet',
       bullets: [
         'Demo prompt: "Build me a playbook that looks up an IP on VirusTotal and tells me if it is malicious."',
@@ -77,7 +77,7 @@
       bullets: [
         'Search the catalog by product or operation',
         'Synthesize an http_request step with method, path, auth, and params pre-filled',
-        'Deterministic translation — the LLM picks the entry; code emits the YAML'
+        'Deterministic translation -- the LLM picks the entry; code emits the YAML'
       ],
       primary: { label: 'Open Inventory', href: '/inventory' },
       tools: [{ name: 'search_api_examples' }, { name: 'synthesize_http_step' }]
@@ -89,7 +89,7 @@
         'List recent failures (live and historical), inspect the real run env, fix the shape mismatch, push, re-run.',
       accent: 'rose',
       bullets: [
-        'Sees runs across the live AND historical tables (FSR purges every 30–60 min)',
+        'Sees runs across the live AND historical tables (FSR purges every 30-60 min)',
         'Filter by tag, user, or time window',
         'render_jinja against a real past run before committing the fix'
       ],
@@ -134,12 +134,12 @@
       code: 'CHK',
       title: 'Verify before you push',
       blurb:
-        'Compiler with structured "did you mean" suggestions for every typo class — connector, op, param, step-id, Jinja path, picklist value.',
+        'Compiler with structured "did you mean" suggestions for every typo class -- connector, op, param, step-id, Jinja path, picklist value.',
       accent: 'lime',
       bullets: [
         'Validate runs every keystroke (400ms debounce) on the Design tab',
         'Title-aware op suggestions: "get_ip_reputation" → "query_ip"',
-        'Errors are structured data, not prose — every diagnostic has a code, line/col, and fix hint'
+        'Errors are structured data, not prose -- every diagnostic has a code, line/col, and fix hint'
       ],
       primary: { label: 'Open editor', href: '/' },
       tools: [{ name: 'validate_yaml' }, { name: 'compile_yaml' }]
@@ -160,13 +160,13 @@
     }
   ];
 
-  // Roadmap cards — what's planned, with honest status. No emojis.
+  // Roadmap cards -- what's planned, with honest status. No emojis.
   const upcoming: Upcoming[] = [
     {
       code: 'Compiles+',
       title: 'Static-resolve gate',
       body:
-        'Catch unresolved picklists, missing connector installs, and dangling Jinja variable paths before push — not at runtime.',
+        'Catch unresolved picklists, missing connector installs, and dangling Jinja variable paths before push -- not at runtime.',
       notes: [
         'resolve_yaml MCP tool wraps the checks',
         'Variable-reachability ruleset cross-checks {{ vars.steps.X.Y }} against observed step output shapes',
@@ -190,7 +190,7 @@
       code: 'Works',
       title: 'Outcome assertions',
       body:
-        'Declarative success checks — record exists, field equals, count greater than N — so a playbook is "done" only when it produced the asked-for outcome.',
+        'Declarative success checks -- record exists, field equals, count greater than N -- so a playbook is "done" only when it produced the asked-for outcome.',
       notes: [
         'assert_playbook_outcome MCP tool',
         'Closes the loop: the agent knows when to stop iterating',
@@ -277,7 +277,7 @@
       </p>
       <h1 class="text-4xl font-semibold leading-tight text-[var(--text-default)]">
         Author, run, and triage FortiSOAR playbooks
-        <span class="text-[var(--text-muted)]">— without the Designer.</span>
+        <span class="text-[var(--text-muted)]">-- without the Designer.</span>
       </h1>
       <p class="mt-4 max-w-3xl text-lg text-[var(--text-muted)]">
         Pick the entry point that matches what you are trying to do. Each card lands you on a working tool, sample, or chat prompt.
@@ -365,7 +365,7 @@
     <section class="mt-16" id="mcp-tools">
       <div class="mb-5 flex items-baseline justify-between">
         <h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--text-faint)]">
-          MCP tools ({TOOL_TOTAL}) — by category
+          MCP tools ({TOOL_TOTAL}) -- by category
         </h2>
         <a href="/docs#tools" class="text-xs text-[var(--text-faint)] hover:text-[var(--text-muted)]">Full reference in Docs →</a>
       </div>
@@ -462,7 +462,7 @@
     <section class="mt-16">
       <div class="mb-5 flex items-baseline justify-between">
         <h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--text-faint)]">Demo storyboards</h2>
-        <span class="text-xs text-[var(--text-faint)]">~3–5 min each</span>
+        <span class="text-xs text-[var(--text-faint)]">~3-5 min each</span>
       </div>
       <div class="grid gap-3 md:grid-cols-2">
         {#each [

@@ -1,7 +1,7 @@
-"""Dynamic tool-surface materializer — turns FortiSOAR 8.0 native-MCP-gateway
+"""Dynamic tool-surface materializer -- turns FortiSOAR 8.0 native-MCP-gateway
 tools (``client.mcp.list_tools``) into first-class ``ToolSpec``\\ s in the LLM
 REGISTRY. Regression for the design: an unconfigured connector's tool is NOT
-registered (structural-impossibility — the ``unknown_connector`` thrash the
+registered (structural-impossibility -- the ``unknown_connector`` thrash the
 prompt rules policed can't happen), tier is wired into ``TOOL_TIERS`` (which
 ``_resolve_tier`` reads, not ``spec.tier``), and every failure path leaves
 REGISTRY unchanged.
@@ -43,7 +43,7 @@ def _clean():
 
 
 def test_empty_allowlist_is_noop():
-    """Default (nothing configured) → REGISTRY unchanged — safe upgrade."""
+    """Default (nothing configured) → REGISTRY unchanged -- safe upgrade."""
     before = set(T.REGISTRY)
     M.ensure_initialized()
     assert set(T.REGISTRY) == before
@@ -62,7 +62,7 @@ def test_materializes_tools_and_schemas_passthrough():
 
 
 def test_tier_wired_into_tool_tiers_not_just_spec():
-    """dispatch() uses _resolve_tier which reads TOOL_TIERS, not spec.tier —
+    """dispatch() uses _resolve_tier which reads TOOL_TIERS, not spec.tier --
     so the materializer MUST register the name in TOOL_TIERS for gating."""
     M.configure(mcp_allowlist={"soc": {"tools": "*", "tier": "read_only"}},
                 client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
@@ -180,11 +180,11 @@ def test_rematerialize_is_idempotent_no_duplicates():
 
 def test_env_var_allowlist_fallback(monkeypatch):
     """FSRPB_MCP_ALLOWLIST (JSON) activates the materializer without a code-level
-    configure() call — the operator sets it in the worker env."""
+    configure() call -- the operator sets it in the worker env."""
     import json
     monkeypatch.setenv("FSRPB_MCP_ALLOWLIST",
                        json.dumps({"soc": {"tools": "*", "tier": "read_only"}}))
-    M.ensure_initialized()  # no configure() call — env var drives it
+    M.ensure_initialized()  # no configure() call -- env var drives it
     # client_factory unset → _build_client() returns None (no EnvConfig) → dormant
     assert "mcp_soc__get_alert" not in T.REGISTRY
     # but the allowlist WAS loaded (proved by configuring a factory + re-running)
@@ -206,7 +206,7 @@ def test_two_phase_configure_preserves_client_factory():
     """The connector wires in two phases: ``register_mcp_materializer()``
     sets ``client_factory`` at import time, then ``_apply_mcp_allowlist(config)``
     sets ``mcp_allowlist`` per turn. The second ``configure()`` call MUST NOT
-    clobber the factory set by the first — otherwise ensure_initialized builds
+    clobber the factory set by the first -- otherwise ensure_initialized builds
     the client from env (None on-box) and the materializer stays dormant even
     with the allowlist set. Regression for the config-field path going live."""
     M.configure(client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
@@ -223,7 +223,7 @@ class _MCPToolModel:
     ``.get``/``in``/``[]`` (via ``_Lenient``), and ``input_schema`` exposed as a
     read-only property derived from the wire's ``inputSchema``. The materializer
     used to gate on ``isinstance(tool, dict)`` and silently skip every one of
-    these — so the live gateway materialized zero tools."""
+    these -- so the live gateway materialized zero tools."""
     def __init__(self, name, description=None, input_schema=None):
         self.name = name
         self.description = description
@@ -241,7 +241,7 @@ class _MCPToolModel:
 
 
 def test_materializes_pydantic_model_tools():
-    """pyfsr's native client returns MCPTool models, not dicts — the materializer
+    """pyfsr's native client returns MCPTool models, not dicts -- the materializer
     must read name/description/input_schema off the model. Regression: the live
     bridge registered 0 tools until this was fixed."""
     models = [
@@ -269,7 +269,7 @@ def test_materializes_pydantic_model_tools():
     ("", False),             # empty
 ])
 def test_shorthand_allowlist_rules(rule, should_register):
-    """Admins write the allowlist by hand — a bare ``true``/``"*"`` used to raise
+    """Admins write the allowlist by hand -- a bare ``true``/``"*"`` used to raise
     ``'bool' object has no attribute 'get'`` and silently disable ALL
     materialization. Each shorthand now normalizes; falsey values skip the server."""
     M.configure(mcp_allowlist={"soc": rule},

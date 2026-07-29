@@ -2,14 +2,14 @@
 
 Two halves of the evidence:
 
-  DETERMINISTIC (this script) — does the trace compiler produce playbooks that
+  DETERMINISTIC (this script) -- does the trace compiler produce playbooks that
   clear the SAME `verified` bar (`verify_playbook.ready_to_push`) a human-authored
   gold does, with no dangling references? For every trace fixture: build the
   playbook from the recorded trace, verify it, and report the trust signals
   (wires verified, gaps, repairs, static errors). For every hand-authored gold
   example: verify it. A table contrasts the two.
 
-  LIVE (separate, not run here) — at what rate does the MODEL hand-authoring the
+  LIVE (separate, not run here) -- at what rate does the MODEL hand-authoring the
   SAME scenarios fail the `verified` bar? That is the failure the fallback exists
   to catch; measuring it needs the live agent loop (`harness.run(live=True)` over
   the authoring tasks). This script prints the command to gather it.
@@ -69,7 +69,7 @@ def trace_rows() -> list[dict[str, Any]]:
 
 
 def gold_rows() -> list[dict[str, Any]]:
-    """Verify every hand-authored connector example — the human baseline that
+    """Verify every hand-authored connector example -- the human baseline that
     the trace path must match (not regress)."""
     rows: list[dict[str, Any]] = []
     for f in sorted(glob.glob(str(_EXAMPLES_DIR / "*.yaml"))):
@@ -88,7 +88,7 @@ def _live_section(live_path: str | None) -> list[str]:
     """Render the hand-author baseline from a persisted live-sample artifact
     (store/eval_runs/live_handauthor_*.json), if one is supplied. The headline
     finding: the model reaches the same `verified` bar, but only via a multi-turn
-    verify-repair loop — the cost the trace compiler eliminates."""
+    verify-repair loop -- the cost the trace compiler eliminates."""
     if not live_path:
         return [
             "## Hand-author baseline (live, not gathered in this run)",
@@ -108,7 +108,7 @@ def _live_section(live_path: str | None) -> list[str]:
     tools = sum(r.get("tool_calls") or 0 for r in rows)
     out_tok = sum(r.get("output_tokens") or 0 for r in rows)
     lines = [
-        f"## Hand-author baseline (live — {meta.get('model')}, {meta.get('provider')})",
+        f"## Hand-author baseline (live -- {meta.get('model')}, {meta.get('provider')})",
         "",
         "| task | verified | turns | tool calls | output tok |",
         "|---|---|---|---|---|",
@@ -118,7 +118,7 @@ def _live_section(live_path: str | None) -> list[str]:
                      f"{r.get('turns')} | {r.get('tool_calls')} | {r.get('output_tokens')} |")
     lines += [
         "",
-        f"**{v}/{len(rows)} reach `verified` (ready_to_push) — but via {tools} tool "
+        f"**{v}/{len(rows)} reach `verified` (ready_to_push) -- but via {tools} tool "
         f"calls and ~{out_tok:,} output tokens of an agentic verify→repair loop** "
         "(author → `verify_playbook` → fix dangling refs → re-verify). The fallback's "
         "safety net is exactly this loop catching the model's wiring guesses.",
@@ -126,7 +126,7 @@ def _live_section(live_path: str | None) -> list[str]:
         "## Verdict",
         "",
         "Both paths reach the same `ready_to_push` bar, so the default-flip case is "
-        "**not** 'hand-author produces broken playbooks' — it's cost + determinism:",
+        "**not** 'hand-author produces broken playbooks' -- it's cost + determinism:",
         "",
         "- **Trace path:** ready_to_push in **0 LLM turns, 0 tool calls, 0 verify-repair "
         "iterations**, deterministic (value-match recovers every wire; unwirable values "
@@ -135,7 +135,7 @@ def _live_section(live_path: str | None) -> list[str]:
         "loop across the sample, with model-run variance.",
         "",
         "When a usable session trace exists, the trace compiler dominates on cost, latency, "
-        "and determinism at equal correctness — supporting trace-first with the hand-author "
+        "and determinism at equal correctness -- supporting trace-first with the hand-author "
         "loop retained as the fallback for sessions with no usable trace (empty/novel).",
     ]
     return lines
@@ -148,9 +148,9 @@ def render(trace: list[dict[str, Any]], gold: list[dict[str, Any]],
                   if r.get("ready_to_push") and not r.get("static_errors"))
     g_pass = sum(1 for r in gold if r.get("ready_to_push"))
     lines = [
-        f"# Trace-compiler parity report — {stamp}",
+        f"# Trace-compiler parity report -- {stamp}",
         "",
-        "**Question (default-flip):** can the hand-author fallback be removed — "
+        "**Question (default-flip):** can the hand-author fallback be removed -- "
         "i.e. does the trace compiler produce playbooks that clear the same "
         "`verify_playbook.ready_to_push` bar a human does, with no dangling refs?",
         "",
@@ -161,7 +161,7 @@ def render(trace: list[dict[str, Any]], gold: list[dict[str, Any]],
     ]
     for r in trace:
         if not r.get("build_ok"):
-            lines.append(f"| {r['name']} | BUILD FAILED ({r.get('error')}) | – | – | – | – |")
+            lines.append(f"| {r['name']} | BUILD FAILED ({r.get('error')}) | - | - | - | - |")
             continue
         lines.append(
             f"| {r['name']} | {'✅' if r['ready_to_push'] else '❌'} | "
@@ -172,7 +172,7 @@ def render(trace: list[dict[str, Any]], gold: list[dict[str, Any]],
         f"**{t_pass}/{len(trace)} trace-built playbooks are `ready_to_push` "
         f"with no static errors ({t_clean}/{len(trace)}).** Every value-matched "
         "wire verified; `repaired=0` means no wire had to be downgraded to a "
-        "literal. `gaps` are the honest trust signal — a value with no prior "
+        "literal. `gaps` are the honest trust signal -- a value with no prior "
         "producer to wire from (e.g. the IOC at its first use) is surfaced as a "
         "gap, never emitted as a dangling reference.",
         "",
@@ -187,7 +187,7 @@ def render(trace: list[dict[str, Any]], gold: list[dict[str, Any]],
         "",
         f"**{g_pass}/{len(gold)} hand-authored connector examples are "
         "`ready_to_push`** (correct by construction). The trace path reaches the "
-        "same bar deterministically — parity, no regression.",
+        "same bar deterministically -- parity, no regression.",
         "",
     ]
     lines += _live_section(live_path)

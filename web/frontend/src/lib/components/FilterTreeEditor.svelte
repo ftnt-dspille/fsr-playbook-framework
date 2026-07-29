@@ -2,14 +2,14 @@
   /**
    * Recursive AND/OR filter-tree editor for triggers + FindRecords.
    *
-   * Wire shape (mirrors FortiSOAR's Query API — see store/QUERY_API.md
+   * Wire shape (mirrors FortiSOAR's Query API -- see store/QUERY_API.md
    * §2.2 "Logic groups"):
    *
    *   { logic: "AND" | "OR",
    *     filters: [
    *       // leaf
    *       { field, operator, value, type, _operator?, _value? },
-   *       // group — recurse
+   *       // group -- recurse
    *       { logic: "AND" | "OR", filters: [...] }
    *     ],
    *     limit?: 30,
@@ -49,7 +49,7 @@
 
   type Props = {
     /** Root group. Pass `{logic:'AND', filters:[]}` if the underlying
-     * argument is missing — the parent owns initialization. */
+     * argument is missing -- the parent owns initialization. */
     group: Group;
     /** Replace the whole subtree. Caller is responsible for writing
      * back into the node arguments and dispatching to the visual store. */
@@ -58,7 +58,7 @@
      * `operators` (when present) scopes the operator picker to ops
      * that make sense for that field's type. Empty array = free text. */
     fields?: (string | FieldMeta)[];
-    /** Recursion depth — internal. Caps the visual nesting to keep the
+    /** Recursion depth -- internal. Caps the visual nesting to keep the
      * inspector readable when authors paste 6-deep monstrosities from
      * the live designer. */
     depth?: number;
@@ -68,13 +68,13 @@
      * separate sub-tree the FSR designer only exposes when prior state
      * exists (On Update / Find Record). Defaults true. */
     allowRelatedModules?: boolean;
-    /** Extra operators to merge into every field's catalog — used by
+    /** Extra operators to merge into every field's catalog -- used by
      * On Update triggers to surface `is_changed` on every field. */
     extraOperators?: string[];
     /** Names of every known FSR module. A field whose `type` matches
      * one of these is a relation to that module (the trained store
      * encodes relations by storing the target module's name as the
-     * field type — e.g. `assignedTo: people`, `alerts: alerts`).
+     * field type -- e.g. `assignedTo: people`, `alerts: alerts`).
      * Without this set we can't distinguish relations from primitive
      * types like `string` or `picklists`. */
     moduleNames?: string[];
@@ -88,7 +88,7 @@
     /** When provided, leaf value inputs sprout a `{x}` button that
      * opens a Jinja var-path picker. Requires both the active node
      * and its playbook so the picker can walk inbound edges to
-     * suggest predecessor outputs. Optional — leaves stay plain text
+     * suggest predecessor outputs. Optional -- leaves stay plain text
      * when omitted. */
     node?: VisualNode | null;
     playbook?: VisualPlaybook | null;
@@ -163,7 +163,7 @@
 
   /** Field types that point at another module, not a literal value.
    * Picking one of these in the FSR designer pivots the query into a
-   * sub-tree on the related module's fields — flagged with a header
+   * sub-tree on the related module's fields -- flagged with a header
    * in the picker and hidden entirely on On-Create triggers (the
    * designer doesn't allow them there since the record has no prior
    * state to query against). */
@@ -210,7 +210,7 @@
   }
 
   // Two buckets so the related-module fields sort to the bottom of the
-  // picker under their own header — matches the FSR designer's UX.
+  // picker under their own header -- matches the FSR designer's UX.
   let plainFields = $derived(
     fieldList.filter((f) => !isRelated(f)).sort((a, b) => a.name.localeCompare(b.name))
   );
@@ -220,9 +220,9 @@
       : []
   );
 
-  // Per QUERY_API.md §2.1 — full operator catalog. `notlike` and
+  // Per QUERY_API.md §2.1 -- full operator catalog. `notlike` and
   // `search` are excluded (search is internal-only; notlike is
-  // de-listed but technically works — surface only on demand).
+  // de-listed but technically works -- surface only on demand).
   const OPERATORS = [
     'eq', 'neq',
     'lt', 'lte', 'gt', 'gte',
@@ -256,7 +256,7 @@
   /** Map an FSR field type to the wire-level value `type` the query API
    * expects. Picklist / lookup / relation fields ship with `type:object`
    * (the value is an IRI); date-likes use `type:datetime`; everything
-   * else is `type:primitive`. The user never sees this selector — it's
+   * else is `type:primitive`. The user never sees this selector -- it's
    * derived from the field they pick. */
   function valueTypeFor(fieldType: string | undefined): 'primitive' | 'object' | 'datetime' {
     switch (fieldType) {
@@ -336,7 +336,7 @@
     const copy = group.filters.slice();
     const cur = copy[i] as Leaf;
     copy[i] = { ...cur, ...patch };
-    // Keep `_operator` shadow in sync with `operator` — the FSR designer
+    // Keep `_operator` shadow in sync with `operator` -- the FSR designer
     // reads it back when rebuilding the predicate UI; drift produces an
     // empty operator dropdown on round-trip.
     if (patch.operator !== undefined) (copy[i] as Leaf)._operator = patch.operator;
@@ -488,7 +488,7 @@
                             {#if visibleRelated.length > 0}
                               <li class="sticky border-t border-[var(--border-soft)] bg-[var(--bg-elev)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                                 Related modules
-                                <span class="ml-1 font-normal normal-case text-[var(--text-faint)]">— sub-query against the related record</span>
+                                <span class="ml-1 font-normal normal-case text-[var(--text-faint)]">-- sub-query against the related record</span>
                               </li>
                               {#each visibleRelated as fld (fld.name)}
                                 <li>
@@ -524,7 +524,7 @@
                 {/if}
                 <!-- Sub-field picker for relation drills. Appears only
                      when the user selected a field whose type is
-                     another module — at which point they can either
+                     another module -- at which point they can either
                      compare the relation directly (`assets eq <iri>`)
                      or drill in to a sub-field (`assets.hostname`). -->
                 {#if relation}
@@ -539,7 +539,7 @@
                       type="button"
                       onclick={() => toggleSubPicker(i)}
                       title={split.sub
-                        ? `${relation}.${split.sub}${subMeta?.title ? ' — ' + subMeta.title : ''}`
+                        ? `${relation}.${split.sub}${subMeta?.title ? ' -- ' + subMeta.title : ''}`
                         : `pick a field on ${relation}`}
                       class="flex w-40 items-center justify-between rounded border border-[var(--border-soft)] bg-[var(--bg-elev)] px-1.5 py-0.5 text-left font-mono text-[11px] hover:bg-[var(--bg-canvas)]"
                     >
@@ -617,7 +617,7 @@
                     <option value="false">is not empty</option>
                   </select>
                 {:else if f.operator === 'changed'}
-                  <!-- `changed` has no value side — the trigger fires
+                  <!-- `changed` has no value side -- the trigger fires
                        whenever the field's value differs from before.
                        Confirmed against the live-FSR corpus (300+
                        post_update steps use this exact operator). -->

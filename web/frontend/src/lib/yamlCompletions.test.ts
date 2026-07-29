@@ -3,7 +3,7 @@
  *
  * Monaco's autoIndent:'full' (the default) re-indents each newline to match
  * the surrounding context, so snippets must NOT include an explicit base-pad
- * prefix — they should only carry relative child indentation.
+ * prefix -- they should only carry relative child indentation.
  *
  * Key invariant: buildSnippet(name, pad) must return the same string for any
  * value of `pad`, because Monaco provides the base indentation automatically.
@@ -17,7 +17,7 @@ function stripTabStops(text: string): string {
   return text.replace(/\$\{?\d+(?::([^}]*))?\}?/g, '$1').replace(/\$\{?\d+\}?/g, '');
 }
 
-describe('buildSnippet — pad-independent output (no double-indentation)', () => {
+describe('buildSnippet -- pad-independent output (no double-indentation)', () => {
   const PADS = ['', '  ', '    ', '      ', '        ', '\t', '\t\t'];
 
   for (const name of SNIPPET_NAMES) {
@@ -26,7 +26,7 @@ describe('buildSnippet — pad-independent output (no double-indentation)', () =
       for (const pad of PADS) {
         expect(
           buildSnippet(name, pad),
-          `snippet "${name}" differs when pad="${pad}" — it embeds the pad (double-indent bug)`
+          `snippet "${name}" differs when pad="${pad}" -- it embeds the pad (double-indent bug)`
         ).toBe(baseline);
       }
     });

@@ -1,4 +1,4 @@
-"""probe_filter_usage — mine real-world Jinja filter usage from live workflows.
+"""probe_filter_usage -- mine real-world Jinja filter usage from live workflows.
 
 Walks every workflow on the instance, extracts every `{{ … }}` and `{% … %}`
 expression from each step's `arguments` blob, parses the filter chain, and
@@ -21,11 +21,11 @@ from .common import probe_session
 
 PROBE_NAME = "probe_filter_usage"
 
-# Match any Jinja expression block — both `{{ … }}` and `{% … %}`.
+# Match any Jinja expression block -- both `{{ … }}` and `{% … %}`.
 # Non-greedy on the body so adjacent blocks don't merge.
 _BLOCK_RE = re.compile(r"\{\{(.+?)\}\}|\{%(.+?)%\}", re.DOTALL)
 
-# Within a Jinja expression, split on top-level pipes only — pipes inside
+# Within a Jinja expression, split on top-level pipes only -- pipes inside
 # strings/parens/brackets shouldn't split the chain.  Build the segments by
 # scanning char-by-char (cheaper + more reliable than a regex for this).
 def _split_pipeline(expr: str) -> list[str]:
@@ -72,10 +72,10 @@ def _extract_filters(blob: str) -> list[tuple[str, str]]:
             continue
         full = m.group(0)
         # Skip control-flow keywords ({% if %}, {% for %}, {% set %}, …)
-        # — the filter chain we care about lives in the rhs of those.
+        # -- the filter chain we care about lives in the rhs of those.
         # Pipeline split still works correctly across them.
         segments = _split_pipeline(body)
-        # First segment is the input expression, not a filter — skip it.
+        # First segment is the input expression, not a filter -- skip it.
         for seg in segments[1:]:
             head = _FILTER_HEAD_RE.match(seg)
             if not head:
@@ -84,7 +84,7 @@ def _extract_filters(blob: str) -> list[tuple[str, str]]:
             # Filter out obvious false positives: jinja keywords, Python
             # kwargs that happen to look like ids (rare since we already
             # split on top-level pipes), and the test-suffixes
-            # (`is defined`, `is none`, etc — those use `is`, not `|`).
+            # (`is defined`, `is none`, etc -- those use `is`, not `|`).
             if fname in {"and", "or", "not", "in", "is", "if", "else", "elif",
                           "endif", "endfor", "for", "set", "endset",
                           "endmacro", "macro", "true", "false", "none", "with",
@@ -143,7 +143,7 @@ def main() -> int:
 
     with probe_session(PROBE_NAME, sources) as conn:
         # Page through every workflow with $relationships=true so steps
-        # inline. Cap at 5000 — well above today's ~1664 corpus.
+        # inline. Cap at 5000 -- well above today's ~1664 corpus.
         page = 1
         seen = 0
         while page <= 50:

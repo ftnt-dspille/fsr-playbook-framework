@@ -1,4 +1,4 @@
-"""PicklistMixin — resolving and rewriting picklist friendly token references."""
+"""PicklistMixin -- resolving and rewriting picklist friendly token references."""
 from __future__ import annotations
 
 import difflib
@@ -37,8 +37,8 @@ class PicklistMixin:
             return
 
         # Module IRI source per step type. `collection` on create/insert is
-        # the module IRI; on update it's the record IRI — use collectionType
-        # there. Bail if we can't pin down the module — without it we can't
+        # the module IRI; on update it's the record IRI -- use collectionType
+        # there. Bail if we can't pin down the module -- without it we can't
         # look up which fields are picklist-backed.
         if step.type == "create_record":
             mod_iri = a.get("collection")
@@ -110,7 +110,7 @@ class PicklistMixin:
             (list_name,),
         ).fetchall()]
         sug = difflib.get_close_matches(value, candidates, n=1, cutoff=0.6)
-        # Recipe-template placeholders are intentional — flag as a
+        # Recipe-template placeholders are intentional -- flag as a
         # warning so the template compiles cleanly until the author
         # fills it in.
         is_placeholder = value.startswith("TODO") or value.startswith("<TODO")
@@ -131,7 +131,7 @@ class PicklistMixin:
     # Friendly `kind:` → canonical (formType, dataType, type, templateUrl)
     # for the inputVariables section of a manual_input step. Each row was
     # picked by querying live FSR (`probe playbook-steps --live`) for the
-    # dominant (formType, dataType, type, templateUrl) tuple — see the
+    # dominant (formType, dataType, type, templateUrl) tuple -- see the
     # SQL in MI_DECISION_VALIDATION_AUDIT.md §4.
     _WEBADDR = "app/components/form/fields/webAddress.html"
     _INPUT_HTML = "app/components/form/fields/input.html"
@@ -142,7 +142,7 @@ class PicklistMixin:
         "richtext": {"formType": "richtext", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/markdownEditor.html"},
         "html":     {"formType": "html",     "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/htmlEditor.html"},
         "password": {"formType": "password", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/password.html"},
-        # webAddress.html family — text dataType but typed sub-formats. Confirmed
+        # webAddress.html family -- text dataType but typed sub-formats. Confirmed
         # against live FSR (ipv4/ipv6/domain present in store/fsr_reference.db).
         "ipv4":     {"formType": "ipv4",     "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
         "ipv6":     {"formType": "ipv6",     "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
@@ -168,7 +168,7 @@ class PicklistMixin:
         "multiselect":        {"formType": "multiselect",         "dataType": "dynamicList", "type": "array",     "templateUrl": "app/components/form/fields/dynamicList.html"},
         "picklist":           {"formType": "picklist",            "dataType": "picklist",    "type": "picklists", "templateUrl": "app/components/form/fields/typeahead.html"},
         "multiselectpicklist":{"formType": "multiselectpicklist", "dataType": "picklist",    "type": "picklists", "templateUrl": "app/components/form/fields/typeahead.html"},
-        # lookup — `type` is overridden per-field with the target module name
+        # lookup -- `type` is overridden per-field with the target module name
         # (people / indicators / alerts / etc.); see _expand_input_variables.
         "lookup":   {"formType": "lookup", "dataType": "lookup", "type": "lookup", "templateUrl": "app/components/form/fields/typeahead.html"},
         # files / structured
@@ -195,7 +195,7 @@ class PicklistMixin:
         "json": "JSON", "object": "JSON",
     }
 
-    # Name/label substring → more specific input `kind:`. Order matters —
+    # Name/label substring → more specific input `kind:`. Order matters --
     # ipv4 must beat the bare "ip" rule for ip_address-style fields.
     _KIND_HINTS = (
         ("ipv6", "ipv6"),

@@ -1,4 +1,4 @@
-"""Tool registry — wraps existing mcp_server.py functions.
+"""Tool registry -- wraps existing mcp_server.py functions.
 
 Phase 2 v1: read-only authoring tools only. No `run_op`, no `push`, no
 destructive actions. Live FSR calls (render_jinja, get_run_env,
@@ -45,46 +45,46 @@ SAFE_TOOLS: list[str] = [
     "list_picklists",
     "picklist_for_field",
     "resolve_picklist_value",
-    # Phase 0 — authoring loop tools the system prompt mandates.
+    # Phase 0 -- authoring loop tools the system prompt mandates.
     "validate_yaml",
     "compile_yaml",
     "analyze_playbook",
-    # Trace compiler (SKILL_BASED_PLAYBOOK §3–5) — build a grounded playbook
+    # Trace compiler (SKILL_BASED_PLAYBOOK §3-5) -- build a grounded playbook
     # from the session's recorded action trace instead of hand-authoring. The
     # build prompt mandates calling this FIRST; without it in the registry the
     # tool is never advertised/dispatchable and the agent silently falls back
     # to hand-authoring (losing trace grounding + staged-action coverage).
     "build_playbook_from_trace",
-    # "find_step_recipe",  # hidden — recipes corpus not populated yet; revisit later
-    # Widget card emitters — drive the chat UI's awaiting_* halts.
+    # "find_step_recipe",  # hidden -- recipes corpus not populated yet; revisit later
+    # Widget card emitters -- drive the chat UI's awaiting_* halts.
     "emit_choice_card",
     "emit_action_card",
     "emit_manual_input",
     "emit_capability_gap_card",
     "emit_playbook_offer",
-    # Enhance mode's terminal action — applies a verified edit to the OPEN
+    # Enhance mode's terminal action -- applies a verified edit to the OPEN
     # playbook. Its sibling emit_playbook_offer CREATES; this one UPDATES.
     # Without it in the registry the enhance path has no write channel at all,
-    # and the model falls back to printing YAML at the analyst — which is how
+    # and the model falls back to printing YAML at the analyst -- which is how
     # edits silently failed to land in live sessions.
     "emit_enhancement_offer",
     # Value-level fix card: a before→after patch to one step/field of the OPEN
     # playbook, accepted/rejected inline. Build-only (the widget renders it via
     # its patch_proposal card; the connector applies it on accept via reply_tool).
     "emit_patch_proposal",
-    # Phase 1.1 — HTTP fallback authoring helper.
+    # Phase 1.1 -- HTTP fallback authoring helper.
     "propose_http_fallback",
-    # Phase 1.2 — live triage (read-only FSR).
+    # Phase 1.2 -- live triage (read-only FSR).
     # NOC / FortiManager + FortiAnalyzer device diagnostics (read-only).
-    # Tier 1+ — gated by the dispatch wrapper below. See `TOOL_TIERS`.
+    # Tier 1+ -- gated by the dispatch wrapper below. See `TOOL_TIERS`.
     "run_op",
     "step_through_playbook",
     "dry_run_playbook",
     "diagnose_yaml_against_pb_execution",
-    # Phase 1.3 — side-effecting execution (tier-dynamic).
+    # Phase 1.3 -- side-effecting execution (tier-dynamic).
     "push_playbook",
     "run_playbook",
-    # Connector & playbook-run discovery — shared with the SOC triage path.
+    # Connector & playbook-run discovery -- shared with the SOC triage path.
     # RECONCILIATION_PLAN: connector-awareness is authoring (knowing what
     # connectors are installed/configured/running + what actions a step can
     # call), NOT alert investigation, so it lives in the library. Tier 1.
@@ -96,7 +96,7 @@ SAFE_TOOLS: list[str] = [
     # Troubleshooting orchestrator (S5). Given a playbook name/uuid it already
     # holds (the designer entity block carries the open playbook's identity),
     # this chains list_recent_failed_runs → get_run_env →
-    # diagnose_yaml_against_pb_execution in one call — the build slice already
+    # diagnose_yaml_against_pb_execution in one call -- the build slice already
     # has the last link but NO way to discover which run failed, so without
     # this a "why did my run fail?" turn dead-ends the same way S2 did with no
     # read channel. Read-only (renders jinja against a past run's vars); tier 1.
@@ -111,7 +111,7 @@ SAFE_TOOLS: list[str] = [
 # called.
 
 TOOL_TIERS: dict[str, int] = {
-    # Tier 0 — pure local compute.
+    # Tier 0 -- pure local compute.
     "find_connector": 0,
     "find_operation": 0,
     "get_op_schema": 0,
@@ -123,21 +123,21 @@ TOOL_TIERS: dict[str, int] = {
     "list_picklists": 0,
     "picklist_for_field": 0,
     "resolve_picklist_value": 0,
-    # Tier 1 — read-only FSR API.
+    # Tier 1 -- read-only FSR API.
     "verify_playbook": 1,
     "verify_enhancement": 1,
-    # Tier 0 — pure local YAML render from a structured payload.
+    # Tier 0 -- pure local YAML render from a structured payload.
     "emit_decision_step": 0,
     "healthcheck_connector": 1,
     "diagnose_yaml_against_pb_execution": 1,
-    # Phase 0 — pure local compute (no FSR I/O).
+    # Phase 0 -- pure local compute (no FSR I/O).
     "validate_yaml": 0,
     "compile_yaml": 0,
     "analyze_playbook": 0,
     # Local compile from the recorded trace (offline by default; the push is a
     # separate, tier-gated tool). Pure authoring → tier 0.
     "build_playbook_from_trace": 0,
-    # "find_step_recipe": 0,  # hidden — see SAFE_TOOLS
+    # "find_step_recipe": 0,  # hidden -- see SAFE_TOOLS
     "emit_choice_card": 0,
     "emit_action_card": 0,
     "emit_manual_input": 0,
@@ -145,20 +145,20 @@ TOOL_TIERS: dict[str, int] = {
     "emit_playbook_offer": 0,
     # Tier 0: emitting the card only shapes local text. The WRITE happens on
     # the analyst's accept, in the connector, through update_playbook's
-    # snapshot-then-PUT — a human gate, not an agent one.
+    # snapshot-then-PUT -- a human gate, not an agent one.
     "emit_enhancement_offer": 0,
     # Emitting the card is tier 0 (pure local shaping); the card's own `tier`
     # field is what gates the Apply button client-side, mirroring action_card.
     "emit_patch_proposal": 0,
     "propose_http_fallback": 0,
-    # Phase 1.2 — read-only FSR API.
+    # Phase 1.2 -- read-only FSR API.
     # Tier-dynamic. Resolved per call.
     "run_op": -1,
     "step_through_playbook": -1,
     "dry_run_playbook": -1,
     "push_playbook": -1,
     "run_playbook": -1,
-    # Connector & playbook-run discovery — read-only, auto-confirm.
+    # Connector & playbook-run discovery -- read-only, auto-confirm.
     "get_run_env": 1,
     "list_configured_connectors": 1,
     "list_playbook_runs": 1,
@@ -234,8 +234,8 @@ def _lookup_op_metadata(connector: str, op: str) -> tuple[str | None, str | None
 def _op_presence(connector: str, op: str) -> tuple[bool, bool]:
     """Return (op_exists, connector_known) from the reference catalog.
 
-    op_exists       — there is an `operations` row for (connector, op).
-    connector_known — the catalog has at least one op for `connector`.
+    op_exists       -- there is an `operations` row for (connector, op).
+    connector_known -- the catalog has at least one op for `connector`.
 
     A guessed / mistyped op on a connector we *do* have a catalog for is
     ``(False, True)``: it cannot execute (it doesn't exist), so the tier gate
@@ -266,7 +266,7 @@ def _op_presence(connector: str, op: str) -> tuple[bool, bool]:
 
 # ── Pre-card validators ──────────────────────────────────────────────────────
 # A tier-3+ call is normally suspended into an approval card WITHOUT the tool
-# body ever running — so an argument that cannot possibly work (a connector that
+# body ever running -- so an argument that cannot possibly work (a connector that
 # exists nowhere, a playbook name the model invented) reaches the analyst as a
 # card that *looks* legitimate and can only fail after approval. A pre-card
 # validator gets the args just before the envelope is built and may return an
@@ -274,7 +274,7 @@ def _op_presence(connector: str, op: str) -> tuple[bool, bool]:
 # result instead, and no human is asked to approve a no-op.
 #
 # Contract: ``fn(args: dict) -> dict | None``. Return ``None`` to fall through to
-# normal carding. MUST be fail-open — any uncertainty (transport blip, missing
+# normal carding. MUST be fail-open -- any uncertainty (transport blip, missing
 # catalog) returns ``None``, because refusing a legitimate action is worse than
 # carding a doomed one. Registered out-of-tree by the connector, which owns the
 # live clients these checks need (see `fsr_soc_triage.registry`).
@@ -287,7 +287,7 @@ def set_precard_validator(tool_name: str, fn: Any) -> None:
 
 
 def _precard_error(name: str, args: dict[str, Any]) -> dict[str, Any] | None:
-    """Run ``name``'s pre-card validator, if any. Never raises — a validator
+    """Run ``name``'s pre-card validator, if any. Never raises -- a validator
     that blows up must not take the dispatch down with it (it would turn a
     runnable action into a hard error), so it degrades to normal carding."""
     fn = _PRECARD_VALIDATORS.get(name)
@@ -295,7 +295,7 @@ def _precard_error(name: str, args: dict[str, Any]) -> dict[str, Any] | None:
         return None
     try:
         out = fn(dict(args or {}))
-    except Exception:  # noqa: BLE001 — fail-open: fall through to the card.
+    except Exception:  # noqa: BLE001 -- fail-open: fall through to the card.
         logging.getLogger(__name__).debug(
             "pre-card validator for '%s' raised; falling through to card", name,
             exc_info=True)
@@ -313,7 +313,7 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
     """Clean `unknown_connector` bounce for a `run_op` whose connector isn't real.
 
     The chat `dispatch`, for an uncatalogued connector, would escalate to a
-    tier-3 **approval card** the model can't act on — so the store-presence
+    tier-3 **approval card** the model can't act on -- so the store-presence
     check inside ``mcp_server.tools_execution.run_op`` (which returns the
     actionable ``unknown_connector`` error the dedicated ``siem_*/faz_*``
     wrappers already surface) never runs. Live on 8.0: an alert hunt with no
@@ -323,9 +323,9 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
     Mirror ``tools_execution.run_op``'s resolution: look the connector up in the
     store ``connectors`` table; if absent, confirm it truly doesn't exist (a
     connector installed after the last warmup is absent from the catalog but
-    present on the box — ``stale_catalog_hint`` returns a re-warmup hint, and we
+    present on the box -- ``stale_catalog_hint`` returns a re-warmup hint, and we
     keep the conservative path there). Only a connector that exists NOWHERE
-    yields the bounce — and one that can't be reached can't execute anything, so
+    yields the bounce -- and one that can't be reached can't execute anything, so
     an error is strictly safer than a card. Returns the error dict to
     short-circuit, or ``None`` to fall through to normal tiering.
     """
@@ -347,7 +347,7 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
     try:
         from ..mcp_server import _shared
         stale = _shared.stale_catalog_hint(connector)
-    except Exception:  # noqa: BLE001 — never harden a tier lookup into a crash
+    except Exception:  # noqa: BLE001 -- never harden a tier lookup into a crash
         stale = None
     if stale is not None:
         return None  # installed-after-warmup; keep the conservative path
@@ -358,7 +358,7 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
         "message": f"connector '{connector}' not found in store",
         "suggestions": [
             "Run `find_connector` to search the catalog for the right name.",
-            "Only connectors from `list_configured_connectors` can run — pivot "
+            "Only connectors from `list_configured_connectors` can run -- pivot "
             "to a configured one, or consolidate what you already have.",
         ],
     }
@@ -383,7 +383,7 @@ def _op_name_is_destructive(op: str) -> bool:
     try:
         from ..mcp_server.tools_connector_discovery import (
             _CONTAINMENT_VERBS, _NON_ACTION_PREFIXES)
-    except Exception:  # noqa: BLE001 — never harden a tier lookup into a crash
+    except Exception:  # noqa: BLE001 -- never harden a tier lookup into a crash
         return False
     if nm.startswith(_NON_ACTION_PREFIXES):
         return False
@@ -393,10 +393,10 @@ def _op_name_is_destructive(op: str) -> bool:
 def _tier_for_run_op(args: dict[str, Any]) -> int:
     """Resolve effective tier for a `run_op` call from op_safety + category.
 
-    Tier 4 — third-party side effect (remediation / containment).
-    Tier 3 — FSR data mutation (management).
-    Tier 2 — read-only external (third-party query: safe + non-FSR connector).
-    Tier 1 — read-only FSR or safely-classified op.
+    Tier 4 -- third-party side effect (remediation / containment).
+    Tier 3 -- FSR data mutation (management).
+    Tier 2 -- read-only external (third-party query: safe + non-FSR connector).
+    Tier 1 -- read-only FSR or safely-classified op.
     Unknowns escalate: default to tier 3 (always prompt).
     """
     connector = (args or {}).get("connector") or ""
@@ -412,12 +412,12 @@ def _tier_for_run_op(args: dict[str, Any]) -> int:
         # `set_collector_state` are categorized `investigation` in the catalog
         # but are real host-containment actions (op_safety='unsafe'). Without
         # this ordering they auto-allow at tier 2 (no approval card) AND get
-        # dropped from find_containment_actions' tier>=3 guard — so "isolate
+        # dropped from find_containment_actions' tier>=3 guard -- so "isolate
         # this host" would execute ungated and the proper op wouldn't surface.
         return 4
     if _op_name_is_destructive(op):
         # The op_safety probe is the PRIMARY signal above, but it is not always
-        # populated — on a live 8.0 box only 391 of 466 catalogued ops carried a
+        # populated -- on a live 8.0 box only 391 of 466 catalogued ops carried a
         # safety verdict, and FortiEDR's `isolate_collector` was among the gaps.
         # Category `investigation` then won and the op resolved to tier 2:
         # `run_op` would have ISOLATED A HOST with no approval card, and
@@ -433,12 +433,12 @@ def _tier_for_run_op(args: dict[str, Any]) -> int:
         return 2
     # Unknown / unclassified. Before escalating to approval, separate a
     # guessed/mistyped op from a real-but-unclassified one. If the connector's
-    # catalog is known to us but this op isn't in it, the op cannot run — it
+    # catalog is known to us but this op isn't in it, the op cannot run -- it
     # doesn't exist. Gating a non-existent op for human approval just halts the
     # hunt and hides the `unknown_operation` error (with the real op names) that
     # lets the agent self-correct. Let it dispatch (tier 1) so run_op bounces
     # back the correction. A connector we have NO catalog for stays conservative
-    # (tier 3) — it could carry a real mutating op we simply haven't probed.
+    # (tier 3) -- it could carry a real mutating op we simply haven't probed.
     op_exists, connector_known = _op_presence(connector, op)
     if connector_known and not op_exists:
         return 1
@@ -457,7 +457,7 @@ def _tier_for_simulator(args: dict[str, Any]) -> int:
 
 # A host (the connector) can lower `run_playbook` from the default tier-3
 # approval card to tier-2 auto-run for playbooks it has explicitly designated
-# safe — e.g. a persona whose `run_playbook.auto` allowlist names a read-only
+# safe -- e.g. a persona whose `run_playbook.auto` allowlist names a read-only
 # validation playbook. The framework can't see connector-owned persona state, so
 # it consults this optional resolver: `fn(args) -> bool`, True ⇒ auto-run (tier
 # 2). Absent/raises/False ⇒ the safe default (tier 3, carded). Registered via
@@ -480,7 +480,7 @@ def _resolve_tier(name: str, args: dict[str, Any]) -> int:
     if name in ("step_through_playbook", "dry_run_playbook"):
         return _tier_for_simulator(args or {})
     if name == "push_playbook":
-        return 3  # writes to FSR — always require approval
+        return 3  # writes to FSR -- always require approval
     if name == "run_playbook":
         # Default: triggers live execution → tier 3 (approval card). A host may
         # designate specific playbooks auto-runnable (persona `run_playbook.auto`)
@@ -488,7 +488,7 @@ def _resolve_tier(name: str, args: dict[str, Any]) -> int:
         try:
             if _RUN_PLAYBOOK_AUTO_RESOLVER and _RUN_PLAYBOOK_AUTO_RESOLVER(args or {}):
                 return 2
-        except Exception:  # noqa: BLE001 — resolver must never harden into a crash.
+        except Exception:  # noqa: BLE001 -- resolver must never harden into a crash.
             pass
         return 3
     return 0
@@ -568,14 +568,14 @@ def snapshot_audit_log() -> list[dict[str, Any]]:
 # --- Eval-mode approval policy (Phase 3) ----------------------------------
 #
 # Under the chat / agent loop the gate suspends and waits for a human.
-# Under the eval harness there's no human in the loop — the policy
+# Under the eval harness there's no human in the loop -- the policy
 # decides for us. Set via env (`EVAL_APPROVAL_POLICY`) or the per-task
 # `approval_policy` field, which the harness sets per task before
 # calling dispatch. Recognized values:
-#   "suspend"          — production behavior (default). Return pending_approval.
-#   "approve-all"      — auto-approve every gated call.
-#   "deny-tier-3+"     — synthesize `{ok:false, code:user_denied, ...}`.
-#   "auto-approve-tier:N" — approve iff tier ≤ N, else deny.
+#   "suspend"          -- production behavior (default). Return pending_approval.
+#   "approve-all"      -- auto-approve every gated call.
+#   "deny-tier-3+"     -- synthesize `{ok:false, code:user_denied, ...}`.
+#   "auto-approve-tier:N" -- approve iff tier ≤ N, else deny.
 # Anything unrecognized falls back to "suspend".
 
 _EVAL_POLICY_OVERRIDE: str | None = None  # set by the harness per task
@@ -594,18 +594,18 @@ def _active_eval_policy() -> str | None:
 
 # --- Read-only auto-approve policy ----------------------------------------
 #
-# Read-only actions (tier 1–2: FSR/third-party queries) auto-run without an
-# approval card. This is the intended default — a SOC analyst shouldn't have to
+# Read-only actions (tier 1-2: FSR/third-party queries) auto-run without an
+# approval card. This is the intended default -- a SOC analyst shouldn't have to
 # click "approve" to let the agent *look* at a record. The behavior used to be
 # implicit in the `tier >= 3` gate; this flag makes it an explicit, documented,
 # operator-toggleable policy.
 #
-#   FSR_AUTO_APPROVE_READONLY=1  (default) — tier 1–2 auto-run, tier 3+ gated.
-#   FSR_AUTO_APPROVE_READONLY=0            — paranoid mode: tier 1+ all gated;
+#   FSR_AUTO_APPROVE_READONLY=1  (default) -- tier 1-2 auto-run, tier 3+ gated.
+#   FSR_AUTO_APPROVE_READONLY=0            -- paranoid mode: tier 1+ all gated;
 #                                            only tier-0 local tools auto-run.
 #
 # Deferred (not built here): "allow-once / always-allow this specific tool"
-# — a per-(tool[,connector,op]) grant that survives one approval. This flag is
+# -- a per-(tool[,connector,op]) grant that survives one approval. This flag is
 # the coarse read-only switch, not that per-tool machinery.
 _READONLY_AUTO_APPROVE_OVERRIDE: bool | None = None  # test/host override
 
@@ -628,7 +628,7 @@ def _readonly_auto_approve() -> bool:
 
 def _approval_floor() -> int:
     """Minimum tier that requires human approval. Default 3 (read-only
-    tier 1–2 auto-runs). With read-only auto-approve disabled, everything
+    tier 1-2 auto-runs). With read-only auto-approve disabled, everything
     above tier 0 (local, side-effect-free tools) is gated."""
     return 3 if _readonly_auto_approve() else 1
 
@@ -757,7 +757,7 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
 # for the auto-from-signature builder. Anthropic enforces these on the
 # wire, so e.g. emit_decision_step physically cannot receive a condition
 # missing `when:` or a default_branch without `next:`. Keep these in
-# sync with the runtime checks inside the tool itself — the override is
+# sync with the runtime checks inside the tool itself -- the override is
 # the wire contract; the runtime check covers non-LLM callers.
 TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
     "emit_choice_card": {
@@ -882,7 +882,7 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                       "description": "One-line summary of the fix."},
             "before_yaml": {"type": "string", "minLength": 1,
                             "description": "Current snippet being replaced "
-                                           "(minimal — just the changing lines)."},
+                                           "(minimal -- just the changing lines)."},
             "after_yaml": {"type": "string", "minLength": 1,
                            "description": "Proposed replacement snippet."},
             "rationale": {"type": "string",
@@ -950,7 +950,7 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                             "type": "string",
                             "description": ("Jinja expression returning "
                                             "truthy/falsy. Do not wrap "
-                                            "in {{ }} — the tool does that."),
+                                            "in {{ }} -- the tool does that."),
                         },
                         "next": {
                             "type": "string",
@@ -1067,7 +1067,7 @@ def openai_tools() -> list[dict[str, Any]]:
 def _finalize_tool_output(name: str, result: Any) -> Any:
     """Route a tool fn's return through the P4 envelope contract (fail-open by
     default; strict under ``FSRPB_STRICT_TOOL_OUTPUT``). Dispatch-created
-    envelopes (error dicts, pending_approval) don't pass through here — the
+    envelopes (error dicts, pending_approval) don't pass through here -- the
     contract governs *tool* outputs, and those are already well-formed dicts."""
     from .tool_result import validate_tool_output
     return validate_tool_output(name, result)
@@ -1087,7 +1087,7 @@ def dispatch(
 ) -> Any:
     """Tier-aware dispatch (HITL_GUARDRAILS_PLAN Phase 0).
 
-    Tier 0–2: execute immediately, append an audit row.
+    Tier 0-2: execute immediately, append an audit row.
     Tier 3+:  if `arguments` lacks a valid `_approval_token`, return a
               `{pending_approval: true, …}` envelope without calling the
               underlying tool. The chat-app loop (Phase 1) suspends on
@@ -1107,8 +1107,8 @@ def dispatch(
     # `_approved` is an internal-only sentinel: it bypasses the HITL tier
     # gate and may ONLY be set by the resume path (post human-approval),
     # which calls dispatch with `_internal=True`. Any `_approved` arriving
-    # on a normal dispatch originates from untrusted input — the LLM's
-    # tool-use args or a compromised/MITM'd wire frame — and is a gate-
+    # on a normal dispatch originates from untrusted input -- the LLM's
+    # tool-use args or a compromised/MITM'd wire frame -- and is a gate-
     # bypass injection attempt (S1). Reject it loudly rather than honor it.
     if "_approved" in raw_args and not _internal:
         logging.getLogger(__name__).error(
@@ -1127,14 +1127,14 @@ def dispatch(
     approved = bool(raw_args.pop("_approved", False)) if _internal else False
     summary = raw_args.pop("_summary", None)
 
-    # Models frequently STRINGIFY object-valued args — `params` is shown as JSON
+    # Models frequently STRINGIFY object-valued args -- `params` is shown as JSON
     # in the tool docs, so they send run_op(params='{"indicator":"1.2.3.4"}')
     # instead of a dict. Neither the arg gate (Optional[dict]) nor the tool fn
     # accepts a string: the gate bounced it ("params: Input should be a valid
     # dictionary") and, when it slipped past, the op ran with NO params and the
     # connector rejected it ("IOC/ID Value not Provided"). A live enrich-then-
     # block turn burned ~10 calls on this and never enriched. Parse a JSON-string
-    # object back to a dict HERE — before validation and tier-resolution, both of
+    # object back to a dict HERE -- before validation and tier-resolution, both of
     # which read `params`. Same "accept the shape the model emits" class as the
     # GetRecordArgs / SearchModuleRecordsArgs gates.
     if name == "run_op":
@@ -1154,12 +1154,12 @@ def dispatch(
     # Run-vs-author redirect (language-agnostic, keyed on the CALL SHAPE, not
     # the analyst's words). When the analyst asks to *run* an already-deployed
     # playbook by name, models (esp. gpt-4.1-mini) reliably mis-route to an
-    # authoring tool — they call verify_playbook/validate_yaml/compile_yaml with
+    # authoring tool -- they call verify_playbook/validate_yaml/compile_yaml with
     # a `playbook` NAME but no YAML to work on, because those tools also take a
     # `playbook` arg. There is nothing to author (yaml_text is blank), so this
     # shape is nonsensical for authoring and unambiguous for "run it". Short-
     # circuit with a tool_result that names the right tool, so the model self-
-    # corrects to run_playbook in the next step. No natural-language parsing —
+    # corrects to run_playbook in the next step. No natural-language parsing --
     # works regardless of the language the request was phrased in.
     if name in _AUTHORING_YAML_TOOLS:
         _pb = raw_args.get("playbook")
@@ -1168,7 +1168,7 @@ def dispatch(
                 and not (isinstance(_yaml, str) and _yaml.strip())):
             _pbname = _pb.strip()
             # FORCING redirect (Lever 1). A passive tool_result telling the model
-            # to "call run_playbook instead" is unreliable — gpt-4.1-mini gets the
+            # to "call run_playbook instead" is unreliable -- gpt-4.1-mini gets the
             # message and wanders into authoring/investigation anyway. So we don't
             # ask: re-dispatch run_playbook ourselves, through the SAME tier gate
             # (tier-3 still yields the approval envelope, so nothing runs
@@ -1197,7 +1197,7 @@ def dispatch(
             }
 
     # Validate tool arguments using pydantic models if available.
-    # Validation errors don't fail the dispatch — they're surfaced as
+    # Validation errors don't fail the dispatch -- they're surfaced as
     # tool results so the model can see and potentially fix bad args.
     try:
         from .tool_models import TOOL_MODELS
@@ -1221,7 +1221,7 @@ def dispatch(
     # MEASURED envelope (static output_schema is often incomplete). Safe by
     # construction: the walker probes ONLY op_safety=='safe' steps, and run_op
     # independently refuses non-safe categories unless confirm=True (the probe
-    # never sets it) — so no mutating op can execute. verify_playbook is a
+    # never sets it) -- so no mutating op can execute. verify_playbook is a
     # build-only tool; default the flag on so the model needn't know it. An
     # explicit live_probe in the LLM's args still wins.
     if name == "verify_playbook" and "live_probe" not in raw_args:
@@ -1272,7 +1272,7 @@ def dispatch(
 
         # About to card this call. An argument that cannot possibly work must
         # bounce a clean, self-correctable error instead of a misleading approval
-        # card — a `run_op` on a connector that exists nowhere, a `run_playbook`
+        # card -- a `run_op` on a connector that exists nowhere, a `run_playbook`
         # on a name the model invented. Only HERE, after grants/policy: a granted
         # or eval-approved call still executes and surfaces its own store error.
         precard = _precard_error(name, raw_args)

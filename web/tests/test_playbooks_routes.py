@@ -48,7 +48,7 @@ def test_list_combines_examples_and_drafts(client):
 
 
 def test_put_draft_creates_then_updates_with_revision_history(client):
-    # Initial save — manual.
+    # Initial save -- manual.
     r1 = client.put(
         "/api/playbooks/draft/incident_v1",
         json={"yaml": "step: 1\n", "reason": "initial draft", "auto": False},
@@ -58,7 +58,7 @@ def test_put_draft_creates_then_updates_with_revision_history(client):
     assert body1["ok"] is True
     rev1 = body1["revision_id"]
 
-    # Auto-snapshot — different reason, is_auto flagged.
+    # Auto-snapshot -- different reason, is_auto flagged.
     r2 = client.put(
         "/api/playbooks/draft/incident_v1",
         json={"yaml": "step: 2\n", "reason": "mode-switch", "auto": True},
@@ -119,7 +119,7 @@ def test_delete_draft_cascades_revisions(client):
 
 
 def test_invalid_draft_names_rejected(client):
-    # Length limit — names over 200 chars are user error, reject early.
+    # Length limit -- names over 200 chars are user error, reject early.
     long_name = "x" * 201
     bad = client.put(
         f"/api/playbooks/draft/{long_name}",
@@ -205,7 +205,7 @@ def _count_auto_revisions(db_path, draft_name: str) -> int:
 
 
 def test_pruning_keeps_manual_saves_forever(client):
-    """Manual saves are the user's explicit checkpoints — they survive
+    """Manual saves are the user's explicit checkpoints -- they survive
     every tier of the auto-pruner even when older than a month."""
     name = "manual_survives"
     # One manual save, then backdate it to 60 days ago.
@@ -248,7 +248,7 @@ def test_pruning_collapses_old_auto_revisions_into_buckets(client):
     # the day-tier (so they're old enough to be bucketed at 10min
     # granularity, young enough not to hit the 1-week tier).
     import sqlite3
-    base_offset = 6 * 60 * 60  # 6 hours ago — squarely in the day tier
+    base_offset = 6 * 60 * 60  # 6 hours ago -- squarely in the day tier
     conn = sqlite3.connect(pb_routes.DRAFTS_DB)
     inserted_ids = []
     for i in range(12):
@@ -365,7 +365,7 @@ def test_put_with_stale_if_match_returns_409_and_server_state(client):
     )
     rev1 = r1.json()["revision_id"]
 
-    # Peer tab saves first (no If-Match — simulates an existing client
+    # Peer tab saves first (no If-Match -- simulates an existing client
     # that hasn't been upgraded yet, or an explicit Overwrite).
     r2 = client.put(
         "/api/playbooks/draft/conflict",

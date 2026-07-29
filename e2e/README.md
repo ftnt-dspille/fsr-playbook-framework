@@ -31,7 +31,7 @@ pnpm install-browsers   # downloads Chromium
 ```
 
 The backend + frontend startup commands assume the repo's normal
-Python + pnpm environments are set up — see the repo README.
+Python + pnpm environments are set up -- see the repo README.
 
 ## Run
 
@@ -42,7 +42,7 @@ pnpm test:debug      # Playwright inspector
 ```
 
 Set `REUSE=0` to force a fresh boot of all three services (default
-reuses anything already on the right port — handy when you have
+reuses anything already on the right port -- handy when you have
 `pnpm dev` already running).
 
 ## What's covered
@@ -67,5 +67,5 @@ reuses anything already on the right port — handy when you have
 The FSR stub returns canned alerts + 2 workflow runs (see top of
 `fsr_stub.py`). To exercise a new backend → FSR call path, extend the
 stub there, then write the spec against the new shape. Keep the stub
-shape aligned with what the real appliance returns — see
+shape aligned with what the real appliance returns -- see
 `web/backend/routes/ref.py` for the request shapes the backend issues.

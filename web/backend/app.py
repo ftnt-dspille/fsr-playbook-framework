@@ -1,4 +1,4 @@
-"""FSR Playbook Studio — FastAPI entrypoint.
+"""FSR Playbook Studio -- FastAPI entrypoint.
 
 Phase 0: skeleton with /api/health. Imports the existing compiler package
 to verify the in-process integration works before we add real routes.
@@ -23,7 +23,7 @@ def _load_dotenv() -> None:
 
     `settings._DEFAULTS` resolves OPENAI_ENDPOINT/OPENAI_MODEL (and other
     providers read keys) at import time, and `make backend` runs bare
-    uvicorn with no env sourcing — so without this the .env is invisible to
+    uvicorn with no env sourcing -- so without this the .env is invisible to
     the backend. setdefault: never clobber a real shell-exported value."""
     env_path = REPO_ROOT / ".env"
     if not env_path.exists():
@@ -92,7 +92,7 @@ _llm_factory.set_config_provider(_BackendConfigProvider())
 
 
 def _install_approval_persistence() -> None:
-    """Phase 3.2 — back the HITL approval gateway with sqlite so suspended
+    """Phase 3.2 -- back the HITL approval gateway with sqlite so suspended
     tier-3+ sessions survive a backend restart. Installs as the process-wide
     default so both the provider (stash side) and the chat route (resolve
     side) share one persisted store. Also pins a stable HMAC key (3.1) in the
@@ -123,7 +123,7 @@ def _install_approval_persistence() -> None:
             _approvals.SqliteApprovalGateway(str(db_path))
         )
     except Exception:
-        # Never block startup on persistence — fall back to the in-memory
+        # Never block startup on persistence -- fall back to the in-memory
         # default gateway already installed at import.
         pass
 
@@ -161,7 +161,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _on_startup() -> None:
-    # Defer to startup (not import) so we don't touch keyring at import time —
+    # Defer to startup (not import) so we don't touch keyring at import time --
     # mirrors the keyring-deferral the /api/health handler relies on.
     _install_approval_persistence()
 

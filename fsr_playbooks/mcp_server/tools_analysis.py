@@ -40,7 +40,7 @@ def step_through_playbook(yaml_text: str,
       1. Render its arguments against the accumulated `vars.steps.*` +
          `vars.input.*` context using the live FSR's Jinja engine.
       2. If the step is a query-class connector op AND `execute_safe_ops`
-         is True, execute it live via `run_op` (read-only — same risk
+         is True, execute it live via `run_op` (read-only -- same risk
          gate as `run_op` itself; destructive ops are skipped with a
          simulated placeholder).
       3. Otherwise simulate: record the rendered args and an empty
@@ -56,7 +56,7 @@ def step_through_playbook(yaml_text: str,
       branch_choices: {step_id: branch_label} pinning decision-step paths.
       execute_safe_ops: if False, every step is simulated (purely offline).
       execute_unsafe_ops: opt-in flag (HITL Phase 5). Default False keeps
-        the simulator strictly read-only — unsafe steps return
+        the simulator strictly read-only -- unsafe steps return
         `{output: {_simulated: True, would_have_run: {connector, op,
         params}}}` so downstream Jinja keeps resolving. When True, the
         dispatch wrapper escalates the *call* to tier-3 (one approval
@@ -127,7 +127,7 @@ def step_through_playbook(yaml_text: str,
             "status": "skipped",
             "note": "",
         }
-        # Static extractor — runs against raw (pre-render) args so we
+        # Static extractor -- runs against raw (pre-render) args so we
         # see what the *author wrote*, not what jinja resolved to.
         # The analyzer (Phase 3) cross-references these against the
         # producer's output_shape.
@@ -185,7 +185,7 @@ def step_through_playbook(yaml_text: str,
         # output is a list of per-iteration dicts. We re-render the
         # step body once per item with `vars.item` bound, evaluate
         # the per-iteration `condition` (skip-iter when falsy) and
-        # `break_loop` (exit AFTER the breaking iteration runs —
+        # `break_loop` (exit AFTER the breaking iteration runs --
         # do-while semantics), then emit the collected list.
         fe = (cur.get("for_each")
               if isinstance(cur.get("for_each"), dict) else None)
@@ -377,7 +377,7 @@ def step_through_playbook(yaml_text: str,
                     sim_output = {k: v for k, v in rendered.items()
                                   if k != "step_variables"}
             # FSR runtime contract: set_variable also surfaces vars at
-            # the TOP LEVEL — `{{ vars.<name> }}` — so downstream Jinja
+            # the TOP LEVEL -- `{{ vars.<name> }}` -- so downstream Jinja
             # rendering resolves chained refs without going through
             # `vars.steps.<step>.<name>`. Mirror that here.
             for k, v in sim_output.items():
@@ -385,7 +385,7 @@ def step_through_playbook(yaml_text: str,
             step_record["status"] = "simulated"
             step_record["simulated_from"] = "computed"
         elif stype == "decision":
-            # Decision is a gateway — its "output" is just the chosen
+            # Decision is a gateway -- its "output" is just the chosen
             # branch label. Real navigation happens in step (3) below
             # via _decision_pick_branch; we evaluate it here too so the
             # trace shows the resolved label, not just `{}`.
@@ -403,7 +403,7 @@ def step_through_playbook(yaml_text: str,
             # vars.steps.<ref> = the child's full env dict.
             target = rendered.get("target")
             if not target:
-                # Cross-collection IRI ref — can't resolve offline.
+                # Cross-collection IRI ref -- can't resolve offline.
                 # Output an empty dict with weak provenance so the
                 # analyzer downgrades downstream missing_key warnings.
                 sim_output = {}
@@ -450,7 +450,7 @@ def step_through_playbook(yaml_text: str,
         elif stype == "manual_input":
             # FSR pauses for the user; we resolve from manual_choices,
             # else first option as a deterministic default. Friendly
-            # YAML keeps `options:` at the step level — _normalize_
+            # YAML keeps `options:` at the step level -- _normalize_
             # friendly_steps mirrors them under arguments but we also
             # fall back to the step dict directly for safety.
             options = rendered.get("options") or cur.get("options") or []
@@ -542,7 +542,7 @@ def step_through_playbook(yaml_text: str,
         trace.append(step_record)
 
         # 3) Advance. For Decision steps, use the auto-evaluated branch
-        # when the caller didn't pin one — otherwise the stepper would
+        # when the caller didn't pin one -- otherwise the stepper would
         # always take the first branch and miss the heuristic-chosen
         # path the analyzer needs to trace.
         nav_branch = (branch_choices.get(sid) or chosen_branch)
@@ -578,7 +578,7 @@ def analyze_playbook(yaml_text: str,
 
     `execute_safe_ops` defaults to False here (vs. True on
     step_through_playbook) because the analyzer is meant to run
-    purely offline — users explicitly opt in to live ops.
+    purely offline -- users explicitly opt in to live ops.
 
     See RENDER_PATH_VALIDATOR_PLAN.md for the catalog of checks.
     """
@@ -610,7 +610,7 @@ def analyze_playbook(yaml_text: str,
         pb_node = None
 
     # C4 picklist drift only fires when the caller opts in to live
-    # ops (`execute_safe_ops=True`) — picklist validation needs the
+    # ops (`execute_safe_ops=True`) -- picklist validation needs the
     # live FSR. Otherwise the analyzer skips it silently.
     pv = (precheck_picklist_value if execute_safe_ops
           else None)
@@ -648,7 +648,7 @@ def suggest_fix_for_diagnostic(diagnostic: dict[str, Any]
         "kind":        echoes the diagnostic kind for routing,
       }
 
-    Heuristic-only — the agent is responsible for verifying the
+    Heuristic-only -- the agent is responsible for verifying the
     patch with `analyze_playbook` after applying it. Returns
     `{ok: false, reason}` when the diagnostic doesn't match a known
     auto-fix recipe.
@@ -663,7 +663,7 @@ def suggest_fix_for_diagnostic(diagnostic: dict[str, Any]
 
     if kind == "unreachable_var_path":
         # Suggestion text from C1 doesn't carry the close-match
-        # explicitly — the diagnostic just says "rename or remove".
+        # explicitly -- the diagnostic just says "rename or remove".
         # We can't rename without knowing valid step names; surface
         # a low-confidence proposal and let the agent call
         # find_close_step_name (or scan the trace) for the target.
@@ -673,7 +673,7 @@ def suggest_fix_for_diagnostic(diagnostic: dict[str, Any]
             "kind": kind,
             "reason": (
                 f"reference to {missing!r} can't be auto-fixed without "
-                "knowing the intended target — agent should pick the "
+                "knowing the intended target -- agent should pick the "
                 "closest existing step name from the trace and rename "
                 f"{missing!r} → <chosen_name> at {loc}"),
         }
@@ -701,7 +701,7 @@ def suggest_fix_for_diagnostic(diagnostic: dict[str, Any]
             "confidence": "high",
             "explanation": (
                 f"replace key {actual!r} with {m.group(1)!r} in the "
-                f"template at {loc} — close-match against the producer's "
+                f"template at {loc} -- close-match against the producer's "
                 f"known output keys"),
         }
 
@@ -709,7 +709,7 @@ def suggest_fix_for_diagnostic(diagnostic: dict[str, Any]
         if not expected:
             return {"ok": False, "kind": kind,
                     "reason": "no close matches from the picklist "
-                              "validator — user must pick a valid value"}
+                              "validator -- user must pick a valid value"}
         return {
             "ok": True,
             "kind": kind,
@@ -736,7 +736,7 @@ def suggest_fix_for_diagnostic(diagnostic: dict[str, Any]
             "after": f"TODO_set_{field}",
             "confidence": "low",
             "explanation": (
-                f"required arg {field!r} rendered empty — set it to a "
+                f"required arg {field!r} rendered empty -- set it to a "
                 "literal or fix the upstream Jinja expression. "
                 "The TODO placeholder will trip a CI check until set."),
         }
@@ -756,7 +756,7 @@ def step_test(yaml_text: str,
               confirm: bool = False) -> dict[str, Any]:
     """Single-step probe: render one step's args + (if safe) execute it.
 
-    Targeted variant of `step_through_playbook` — pinpoints a single step
+    Targeted variant of `step_through_playbook` -- pinpoints a single step
     by `id` (or by name with spaces→underscores). Useful for the visual
     editor's per-node Verify tab where the agent / user wants to confirm
     one step compiles and executes cleanly without walking the full
@@ -765,10 +765,10 @@ def step_test(yaml_text: str,
     Args:
       yaml_text: simplified-IR YAML.
       step_id: target step's `id:` field, or its `name:` (spaces collapse
-        to underscores) — whichever matches first.
+        to underscores) -- whichever matches first.
       playbook: which playbook to look in (defaults to the first).
       input: vars.input.params.* for jinja rendering.
-      execute_safe_ops: if False, render only — never live-execute.
+      execute_safe_ops: if False, render only -- never live-execute.
       confirm: if True, execute non-safe ops too (user has acknowledged
         the risk via the Verify-tab confirm dialog). Without this, a
         non-safe op short-circuits with `status="needs_confirm"` and a
@@ -777,7 +777,7 @@ def step_test(yaml_text: str,
 
     Returns:
       `{ok, step_id, type, rendered_args, output, output_top_keys,
-        status, note}` — same per-step record shape `step_through_playbook`
+        status, note}` -- same per-step record shape `step_through_playbook`
       emits, plus a `verification_recorded` flag when run_op fired.
     """
     try:
@@ -833,13 +833,13 @@ def step_test(yaml_text: str,
         if not isinstance(s, dict):
             continue
         nm = s.get("name")
-        # Distinct local name — outer `sid` (the target's id) must
+        # Distinct local name -- outer `sid` (the target's id) must
         # survive this loop intact for the result record.
         sid_iter = s.get("id") or (_slugify(nm) if isinstance(nm, str) and nm else None)
         if not sid_iter:
             continue
         # Step-level mock_result wins over the sidecar sample for the
-        # same step — authors typically save a mock right after a real
+        # same step -- authors typically save a mock right after a real
         # Test step run, so it's the freshest synthetic value we have.
         # Surfaced under the step output shape FSR exposes
         # (vars.steps.<key> directly = the connector's response body).
@@ -908,7 +908,7 @@ def step_test(yaml_text: str,
     opn = (rendered.get("operation") if isinstance(rendered, dict) else None) \
         or target.get("operation")
     if not (cn and opn):
-        record["note"] = "connector/operation missing — render-only"
+        record["note"] = "connector/operation missing -- render-only"
         return record
 
     cat = _shared._safe_op_category(cn, opn)
@@ -927,7 +927,7 @@ def step_test(yaml_text: str,
         return record
 
     # The rendered args envelope is `{connector, operation, config,
-    # params: {...}}` — we have to pass just the inner connector params
+    # params: {...}}` -- we have to pass just the inner connector params
     # to run_op. Sending the envelope as-is means the connector can't
     # find any of its declared params (it sees keys like `connector` /
     # `operation` / `params` at the top level instead).
@@ -1057,7 +1057,7 @@ def synthesize_http_step(entry_id: int,
 
 
 # ---------------------------------------------------------------------------
-# step_through_playbook — pre-push stepper (in-editor, no FSR writes)
+# step_through_playbook -- pre-push stepper (in-editor, no FSR writes)
 # ---------------------------------------------------------------------------
 
 # `dry_run_playbook` (compile + push + run + cleanup) is the full E2E loop
@@ -1072,7 +1072,7 @@ def _next_step(step: dict, taken_branch: str | None,
     """Pick the next step id for the stepper.
 
     Linear: follow `next`. Decision: follow `branches[taken_branch]` if
-    provided, else the first branch (deterministic default — agent can
+    provided, else the first branch (deterministic default -- agent can
     pin a path with branch_choices).
     """
     nxt = step.get("next")
@@ -1096,7 +1096,7 @@ def _infer_output_shape(value: Any, _depth: int = 0) -> dict[str, Any]:
     Used by render-path analyzer (RENDER_PATH_VALIDATOR_PLAN.md C2/C5/C6).
 
     Recurses up to two levels into nested dicts (and list-of-dict heads) so
-    that a typo in a *nested* key — ``vars.steps.Fetch.data.summray`` — is
+    that a typo in a *nested* key -- ``vars.steps.Fetch.data.summray`` -- is
     catchable instead of silently passing once the top-level ``data`` key
     matches. Deeper nesting degrades to opaque (no false positives).
     """
@@ -1145,7 +1145,7 @@ def _infer_output_shape(value: Any, _depth: int = 0) -> dict[str, Any]:
 
 
 def _truthy(v: Any) -> bool:
-    """Loose truthiness matching FSR's runtime behavior — strings like
+    """Loose truthiness matching FSR's runtime behavior -- strings like
     'false' / '0' / 'no' / '' / 'null' all count as falsy because Jinja
     rendering reduces booleans to strings before the engine sees them."""
     if v is None: return False
@@ -1159,7 +1159,7 @@ def _truthy(v: Any) -> bool:
 
 
 def _coerce_literal_list(value: Any) -> list[Any]:
-    """Best-effort offline fallback for ``for_each.item`` — when the
+    """Best-effort offline fallback for ``for_each.item`` -- when the
     live Jinja engine is absent the renderer returns the template
     string verbatim. We parse trivial inline literals like
     ``"{{ [1, 2, 3] }}"`` via ``ast.literal_eval`` so the simulator
@@ -1442,7 +1442,7 @@ def step_debug_session(
 
     `branch_choice_override` lets the caller pin a decision branch
     just for the upcoming step (merged into the session's persistent
-    `branch_choices`). Returns `{ok, status}` — when `done=True` no
+    `branch_choices`). Returns `{ok, status}` -- when `done=True` no
     further `advance` calls will produce records.
     """
     from .debug_session import get_store  # noqa: PLC0415
@@ -1479,7 +1479,7 @@ def continue_debug_session(
     advanced = 0
     stop_reason = "done"
     for _ in range(max_advance):
-        # Check breakpoint / until before advancing — if we're paused
+        # Check breakpoint / until before advancing -- if we're paused
         # AT this step, the caller wants control before it runs.
         peek = sess.peek_next_id()
         if peek is None:

@@ -85,7 +85,7 @@ def _compute_layout(steps: list, start_id: str | None) -> dict[str, tuple[int, i
 
     ROW (top) = longest-path distance from Start. Using the *longest* path (not
     BFS-shortest) means a node that merges two branches sits BELOW every one of
-    its predecessors, so all edges flow downward — no branch has to loop back
+    its predecessors, so all edges flow downward -- no branch has to loop back
     up into a shared join (e.g. two reject paths converging on one gate).
 
     COLUMN (left) = a BFS hint (linear `next:` keeps the parent column; each
@@ -205,7 +205,7 @@ def emit(collection: Collection) -> dict[str, Any]:
         # auto-generated note per step that carries a comment. Auto-notes
         # are tagged so the decompiler can fold them back into step.comment.
         annotations: list[Annotation] = list(pb.annotations)
-        # Recognized prefixes — first word of the comment body categorizes
+        # Recognized prefixes -- first word of the comment body categorizes
         # the note. Lets authors flag actionable items vs. background
         # explanation in the canvas without a separate field.
         _PREFIXES = ("TODO", "FIX", "NOTE", "WARN", "HACK", "XXX")
@@ -324,7 +324,7 @@ def emit(collection: Collection) -> dict[str, Any]:
                     seen_options.add(label)
                 # `next:` fall-through: FSR's Decision designer requires an
                 # explicit `default: true` row in conditions for the else
-                # branch — an unlabeled route from a Decision step renders
+                # branch -- an unlabeled route from a Decision step renders
                 # as a broken edge with no else label. If the author wrote
                 # `next: <id>` on a Decision and didn't already supply a
                 # default condition row, synthesize one labeled "Else" and
@@ -404,8 +404,8 @@ def emit(collection: Collection) -> dict[str, Any]:
         # Route `name` follows FSR's UI convention "<src display> -> <tgt display>"
         # (spaces around the arrow, display names not snake_case ids). The JS
         # canvas seems to derive lookup ids from this string and silently
-        # fails — `addRoute` throws and the whole jsPlumb batch aborts so no
-        # edges render — when it deviates (e.g. "src->tgt" or "src:label->tgt").
+        # fails -- `addRoute` throws and the whole jsPlumb batch aborts so no
+        # edges render -- when it deviates (e.g. "src->tgt" or "src:label->tgt").
         # Verified empirically: every playbook we'd pushed with the old
         # `f"{s.id}->{tgt_id}"` format failed to render; FSR-UI-built
         # playbooks with the spaced display-name format work.
@@ -456,14 +456,14 @@ def emit(collection: Collection) -> dict[str, Any]:
             # wf-engine reads this when materializing workflow_wfmetadata.wf_modified;
             # leaving it null makes it stamp the 1990-01-19 sentinel which makes
             # "is this row stale?" diagnostics impossible.
-            # Format: integer Unix epoch seconds (NOT ISO-8601 — Doctrine rejects
+            # Format: integer Unix epoch seconds (NOT ISO-8601 -- Doctrine rejects
             # string formats with NotNormalizableValueException, verified live
             # 2026-05-06 against /api/3/workflow_collections).
             "lastModifyDate": int(datetime.now(timezone.utc).timestamp()),
             # Stamp the parent-collection IRI explicitly. Fresh POST to
             # `/api/3/workflow_collections` populates this from the parent
             # row, but bulkupsert on a row whose `deletedAt` we just
-            # cleared via the recycle-bin restore does NOT — the workflow
+            # cleared via the recycle-bin restore does NOT -- the workflow
             # comes back with `collection: null`, which makes the FSR UI's
             # breadcrumb resolver (and `?collection=<uuid>` filters) treat
             # the playbook as orphaned. Stamping it here keeps the parent
@@ -481,7 +481,7 @@ def emit(collection: Collection) -> dict[str, Any]:
             "playbookOrigin": None,
             "isEditable": True,
             "uuid": wf_uuid,
-            # Owner teams — IRI strings (`/api/3/teams/<uuid>`). The resolver
+            # Owner teams -- IRI strings (`/api/3/teams/<uuid>`). The resolver
             # converts authored team names to IRIs (owners_iris); IRIs authored
             # directly pass through. Private playbooks require owners (enforced
             # in the parser); a public playbook emits owners: [].
@@ -522,7 +522,7 @@ def _clean_step_arguments(args: dict[str, Any]) -> None:
        (empty condition), `message` (empty content), `for_each` (empty item).
     2. for_each `break_loop` is incompatible with async/agent execution and is
        dropped. NOTE: loop-mode *defaulting* (bulk `batch_size`, `parallel`/
-       `batch_size` pruning) is NOT done here — it lives in the authoring parser
+       `batch_size` pruning) is NOT done here -- it lives in the authoring parser
        so the emitter stays a faithful serializer and decompiled for_each shapes
        round-trip byte-for-byte (the corpus carries inconsistent bulk shapes).
 
@@ -550,7 +550,7 @@ def _clean_step_arguments(args: dict[str, Any]) -> None:
 
     # 2. for_each: only the cross-argument compatibility guard lives here.
     # Loop-mode defaulting (bulk batch_size, parallel/batch_size pruning) is
-    # applied in the authoring parser, NOT here — the emitter stays a faithful
+    # applied in the authoring parser, NOT here -- the emitter stays a faithful
     # serializer so a decompiled for_each round-trips byte-for-byte. The corpus
     # carries inconsistent bulk shapes that no emit-time normalization could
     # reproduce (some bulk loops omit batch_size, some keep parallel).
@@ -617,7 +617,7 @@ def _emit_group(ann: Annotation, step_layout: dict[str, tuple[int, int]]) -> dic
                     # Snap to the next GRID column past the rightmost step in
                     # the band. Steps sit at _STEP_LEFT + col*_STEP_HSTRIDE, so
                     # +_STEP_HSTRIDE lands the note on an empty column in these
-                    # rows — no overlap regardless of the real rendered box
+                    # rows -- no overlap regardless of the real rendered box
                     # width (which is wider than _STEP_WIDTH), while staying as
                     # close to the step as one column allows.
                     left = anchor + _STEP_HSTRIDE

@@ -130,7 +130,7 @@ class _ConfiguredClient:
 
 def test_configured_rows_merges_agent_config_for_dual_install(monkeypatch):
     """A connector installed BOTH locally and on an agent must keep its
-    agent-only config resolvable — regression for code-snippet, whose agent
+    agent-only config resolvable -- regression for code-snippet, whose agent
     config `test` was dropped by the name-dedup so run_op never wrapped it
     (returned the empty in-progress stub instead). See
     fsr_agent_proxied_execute_async.md."""

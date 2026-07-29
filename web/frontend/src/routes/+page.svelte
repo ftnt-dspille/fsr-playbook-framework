@@ -24,7 +24,7 @@
     getLatestYaml: getActiveYaml,
     onActiveLoaded: (yaml) => {
       // Push freshly-loaded drafts into visualStore so flipping to
-      // Design shows the right canvas. Fire-and-forget — parse errors
+      // Design shows the right canvas. Fire-and-forget -- parse errors
       // are surfaced by the canvas itself.
       void visualStore.loadFromYaml(yaml).catch(() => {});
     }
@@ -46,7 +46,7 @@
   // Replay mode: when the URL carries `?session=<id>`, hydrate the
   // editor + chat with the saved transcript so the user can see how
   // the original conversation played out. Replay is read-only on the
-  // chat side — sending a new message starts a fresh session.
+  // chat side -- sending a new message starts a fresh session.
   let replayTurns = $state<ReplayTurn[]>([]);
   let replayBanner = $state<string | null>(null);
 
@@ -59,7 +59,7 @@
     {
       role: 'assistant',
       text:
-        "Hi — I'm here to help you author FortiSOAR playbooks.\n\n" +
+        "Hi -- I'm here to help you author FortiSOAR playbooks.\n\n" +
         "I've loaded a sample playbook on the canvas to get you started. " +
         "You can:\n" +
         "  • describe what you want and I'll write/edit YAML for you,\n" +
@@ -93,7 +93,7 @@
     switching = true;
     try {
       if (target === 'cli') {
-        // Design → CLI: render any unsaved canvas edits — renderToYaml
+        // Design → CLI: render any unsaved canvas edits -- renderToYaml
         // writes straight into the canonical buffer.
         if (visualStore.state.graph && visualStore.state.dirty) {
           await visualStore.renderToYaml();
@@ -160,7 +160,7 @@
         }
       }
 
-      // No (valid) pointer — open the most recently modified draft so a
+      // No (valid) pointer -- open the most recently modified draft so a
       // dev-db restart or a fresh browser still lands the user on real
       // work instead of the welcome example.
       if (playbookStore.state.drafts.length > 0) {

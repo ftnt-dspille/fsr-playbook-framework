@@ -1,9 +1,9 @@
-"""Anthropic parity for the enhance-delivery guard — the same e3 failure driven
+"""Anthropic parity for the enhance-delivery guard -- the same e3 failure driven
 through the real AnthropicProvider.stream() with a faked streaming client.
 
 Mirrors test_openai_enhance_delivery_forced.py. GA's default is OpenAI, but the
 ship installs an `fsrpb-anthropic` (claude-haiku) fallback config, so the
-Anthropic branch of the guard must be proven too — especially its distinct
+Anthropic branch of the guard must be proven too -- especially its distinct
 forced round (`messages.create` + `tool_choice={"type":"tool",...}`, parsing
 `resp.content` for the tool_use block).
 """
@@ -35,7 +35,7 @@ def _tool_use_block(id, name, input):
 
 
 class _FakeStream:
-    """Stands in for `self._client.messages.stream(...)` — an async CM that is
+    """Stands in for `self._client.messages.stream(...)` -- an async CM that is
     itself async-iterable (text deltas) and exposes get_final_message()."""
     def __init__(self, text_deltas, final_msg):
         self._deltas = text_deltas
@@ -103,7 +103,7 @@ def _forced_resp(verified_id="STALE-WRONG"):
 
 def test_narrated_delivery_is_forced_into_a_real_offer_call():
     # Turn 1: verify_enhancement (passes). Turn 2: prose narration, end_turn, no
-    # tool call — the e3 shape. Then the guard's forced tool_choice round.
+    # tool call -- the e3 shape. Then the guard's forced tool_choice round.
     turn1 = _FakeStream([], MagicMock(
         content=[_tool_use_block("c1", "verify_enhancement", {})],
         stop_reason="tool_use", usage=_usage()))
@@ -139,14 +139,14 @@ def test_narrated_delivery_is_forced_into_a_real_offer_call():
 
 def test_no_force_when_offer_already_made():
     # Turn 1 verifies AND offers in the same turn (the healthy path). The guard
-    # must stay inert — no forced round, create() never called.
+    # must stay inert -- no forced round, create() never called.
     turn1 = _FakeStream([], MagicMock(
         content=[_tool_use_block("c1", "verify_enhancement", {}),
                  _tool_use_block("c2", "emit_enhancement_offer",
                                  {"id": "x", "summary": "s", "verified_id": "v1"})],
         stop_reason="tool_use", usage=_usage()))
-    turn2 = _FakeStream(["Done — applied."],
-                        MagicMock(content=[_text_block("Done — applied.")],
+    turn2 = _FakeStream(["Done -- applied."],
+                        MagicMock(content=[_text_block("Done -- applied.")],
                                   stop_reason="end_turn", usage=_usage()))
     forced = _forced_resp()
     p = _provider([turn1, turn2], forced)

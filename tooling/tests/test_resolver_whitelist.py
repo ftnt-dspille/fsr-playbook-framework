@@ -1,6 +1,6 @@
 """Strict-whitelist enforcement on resolver normalizers.
 
-Same trap that bit manual_input historically — unknown keys silently
+Same trap that bit manual_input historically -- unknown keys silently
 dropped at compile time, surface as missing wire shape at FSR runtime.
 Each normalizer now hard-errors on keys outside its friendly + canonical
 sets.

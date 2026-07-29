@@ -2,7 +2,7 @@
 
 The compiler emits deterministic uuid5 IDs for every entity table the push
 will touch (collection / workflow / step / route). FSR keeps soft-deleted
-rows reserved at the DB level — a plain GET 404s but a POST/PUT to the
+rows reserved at the DB level -- a plain GET 404s but a POST/PUT to the
 same uuid hits a UniqueConstraintViolation. Without preflight we never
 know we're about to step on something until FSR rejects the push.
 
@@ -12,9 +12,9 @@ This module's job, given a compiled collection dict, is:
   2. Query each entity table once (POST /api/query/<entity>?$showDeleted=true)
      filtered by `uuid in [...]` to classify every uuid as one of:
 
-       - "fresh"    — not present server-side
-       - "live"     — exists, deletedAt is null
-       - "recycled" — exists in the recycle bin (deletedAt is a timestamp)
+       - "fresh"    -- not present server-side
+       - "live"     -- exists, deletedAt is null
+       - "recycled" -- exists in the recycle bin (deletedAt is a timestamp)
 
   3. Restore recycled rows by re-PUTting them with `deletedAt: null`.
      (Empirically confirmed against the dev FSR 7.6.x build: a single PUT
@@ -197,7 +197,7 @@ def find_foreign_workflows(
 
     These are usually playbooks a user added via the FSR web UI after our
     original push. A naive cascade-delete on the collection would wipe
-    them — surfacing them in preflight lets the caller refuse to proceed
+    them -- surfacing them in preflight lets the caller refuse to proceed
     until the user moves them elsewhere (or explicitly opts into loss).
 
     Returns ``[{"uuid": …, "name": …, "deletedAt": …}, …]``. Empty list
@@ -231,7 +231,7 @@ def find_foreign_workflows(
         u = w.get("uuid")
         if not u or u in known:
             continue
-        # Verify the parent FK actually matches before flagging — belt
+        # Verify the parent FK actually matches before flagging -- belt
         # and suspenders in case the server filter ever misbehaves.
         parent = w.get("collection") or w.get("workflowCollection") or ""
         if isinstance(parent, dict):
@@ -254,7 +254,7 @@ def find_children_of_workflows(
 
     Used by the purge path to clean up orphan child rows that don't
     appear in the new YAML (e.g. when the playbook's step structure
-    changed between pushes). FK-bound discovery — we only follow uuids
+    changed between pushes). FK-bound discovery -- we only follow uuids
     that belong to workflows we already own, so the scope cannot leak
     across collections.
     """
@@ -307,7 +307,7 @@ def recycled_uuids(cls: dict[str, dict[str, _Row]]) -> dict[str, list[str]]:
 
 # Entities with a global unique-name constraint. Empirically: pushing a
 # collection or workflow whose name matches a recycle-bin row (different
-# uuid) hits HTTP 500 UniqueConstraintViolationException on `name` —
+# uuid) hits HTTP 500 UniqueConstraintViolationException on `name` --
 # the soft-deleted row still reserves the slot. Steps/routes are
 # name-unique only inside their parent and rarely collide cross-push.
 NAME_UNIQUE_ENTITIES = ("workflow_collections", "workflows")
@@ -317,7 +317,7 @@ def find_name_collisions(
     client, inv: Inventory,
 ) -> dict[str, list[dict]]:
     """Find recycle-bin rows whose name matches one of ours but whose
-    uuid does NOT — these block create-by-name even though our uuid
+    uuid does NOT -- these block create-by-name even though our uuid
     preflight says fresh.
 
     Returns ``{entity: [{"uuid", "name", "deletedAt"}, …]}``. Empty
@@ -354,7 +354,7 @@ def find_name_collisions(
             if not u or u in our_uuids:
                 continue
             # Only recycle-bin collisions are ours to rename. A LIVE row
-            # owned by someone else is intentionally NOT touched —
+            # owned by someone else is intentionally NOT touched --
             # surface it to the caller as a hard conflict instead.
             if not m.get("deletedAt"):
                 continue
@@ -373,7 +373,7 @@ def rename_name_collisions(
 ) -> tuple[int, list[str]]:
     """Free unique-name slots held by recycle-bin rows by PUTting them
     with name suffixed ``__recycled_<epoch>``. The row stays in the
-    recycle bin — only the name moves out of the way so the new push
+    recycle bin -- only the name moves out of the way so the new push
     can create-by-name.
 
     Returns (renamed_count, errors).
@@ -439,7 +439,7 @@ def restore_recycled(
 
     Restore order is parent-first (collection → workflow → step → route)
     so FK validation succeeds at each step. Each row is fetched fresh
-    via ``GET …?$showDeleted=true`` so we PUT a complete body — partial
+    via ``GET …?$showDeleted=true`` so we PUT a complete body -- partial
     bodies risk wiping unmodelled fields.
     """
     restored = 0

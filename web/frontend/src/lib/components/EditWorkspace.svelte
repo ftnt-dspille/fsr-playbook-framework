@@ -53,7 +53,7 @@
     try { localStorage.setItem('fsrpb.palette.open', paletteOpen ? '1' : '0'); } catch {}
   });
 
-  // Inspector starts closed on every page load — it only pops open when
+  // Inspector starts closed on every page load -- it only pops open when
   // the user actually selects a node (effect below). No localStorage
   // persistence: a fresh canvas should never come up with an empty
   // inspector hogging the right edge.
@@ -84,14 +84,14 @@
   // Keep the var pane's scope in sync with the selected node so
   // ancestor step shapes reflect what's actually in scope when the
   // user opens the pane from a field. Also auto-close the pane when
-  // the user navigates to a different step — the previous target's
+  // the user navigates to a different step -- the previous target's
   // insert closure is no longer relevant.
   $effect(() => {
     varPaneStore.node = selectedNode;
     if (!selectedNode) varPaneStore.close();
   });
 
-  // Drain cross-component focus signals — e.g. the diagnostics drawer
+  // Drain cross-component focus signals -- e.g. the diagnostics drawer
   // calling `visualStore.selectStepByName(step_id)` when the user
   // clicks a render-path diagnostic row. We mirror the pending tuple
   // into our local selection state, which auto-opens the inspector
@@ -106,7 +106,7 @@
 
   // Node-scope shortcuts. Registered here (not in +page.svelte) because
   // they need live access to the selection. The command registry handles
-  // the cross-component sharing — the palette + keybindings see these
+  // the cross-component sharing -- the palette + keybindings see these
   // alongside the page-level commands.
   onMount(() => {
     return commands.registerMany([
@@ -180,7 +180,7 @@
         if (!pb || pb.nodes.length === 0) return;
         // Cold start: seed selection with the trigger step (or the
         // first node) so ↓ / → land somewhere sensible from a blank
-        // canvas. ↑ / ← from cold start pick the last node — natural
+        // canvas. ↑ / ← from cold start pick the last node -- natural
         // for "I want to look at the end of the playbook" too.
         if (!selectedNodeId) {
           const first =
@@ -282,7 +282,7 @@
       {/if}
       <!-- Inspector edge-tab: only surfaces when there is something
            selected to inspect AND the panel was manually dismissed.
-           A no-selection tab is just chrome — the auto-open effect
+           A no-selection tab is just chrome -- the auto-open effect
            pops the inspector when the user clicks a node, so the tab
            exists purely to re-open after an explicit close. -->
       {#if !inspectorOpen && selectedNode}
@@ -299,7 +299,7 @@
       {/if}
 
       {#if inspectorOpen && varPaneStore.open && selectedNode}
-        <!-- Variable tree pane — flies in to the immediate left of
+        <!-- Variable tree pane -- flies in to the immediate left of
              the inspector when a Jinja-accepting field is focused or
              its {x} button is clicked. Width matches the inspector
              so the two panes feel like a single inspector cluster. -->

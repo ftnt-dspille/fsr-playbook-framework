@@ -4,7 +4,7 @@ The recipe generators (`generate_threat_feed_recipe`,
 `generate_data_ingest_recipe`) emit FSR JSON whose UUIDs are derived
 deterministically from the connector slug. That means we can lock the
 *entire* generator output into a fixture and assert byte-for-byte
-equality on every run — any silent change to step ordering, arg
+equality on every run -- any silent change to step ordering, arg
 shapes, or picklist macros breaks the test loudly instead of leaking
 into a real recipe months later.
 
@@ -28,7 +28,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "recipes"
 
 
 def _normalize(blob) -> str:
-    """Sort-keyed pretty JSON — same shape the gold was written with,
+    """Sort-keyed pretty JSON -- same shape the gold was written with,
     so dict-key reordering by the generator can't false-positive."""
     return json.dumps(blob, indent=2, sort_keys=True)
 
@@ -43,7 +43,7 @@ def test_threat_feed_recipe_byte_equal_to_gold():
     )
     assert _normalize(out) == gold, (
         "threat-feed generator output drifted from "
-        "synthetic_threat_feed.gold.json — re-bake the fixture only if "
+        "synthetic_threat_feed.gold.json -- re-bake the fixture only if "
         "the change is intentional"
     )
 
@@ -62,14 +62,14 @@ def test_data_ingest_recipe_byte_equal_to_gold():
     )
     assert _normalize(out) == gold, (
         "data-ingest generator output drifted from "
-        "synthetic_data_ingest.gold.json — re-bake the fixture only if "
+        "synthetic_data_ingest.gold.json -- re-bake the fixture only if "
         "the change is intentional"
     )
 
 
 def test_recipe_uuids_are_deterministic():
     """Two back-to-back invocations on the same input must produce
-    identical UUIDs — that's the whole point of deriving them via
+    identical UUIDs -- that's the whole point of deriving them via
     `_uuid_from(seed)` rather than uuid4(). If this regresses, every
     upstream test that relies on stable IRIs will start flapping."""
     info = json.loads(

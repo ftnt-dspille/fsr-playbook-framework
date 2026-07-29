@@ -21,14 +21,14 @@ type State = {
   undoStack: VisualGraph[];
   /** Snapshots restored to `graph` by undo, available for redo. */
   redoStack: VisualGraph[];
-  /** Cross-component "focus this node" signal — set by, e.g., the
+  /** Cross-component "focus this node" signal -- set by, e.g., the
    * diagnostics drawer when the user clicks a step_id and read by
    * the canvas-owning component (EditWorkspace) which reflects it
    * into its own selection state. Cleared after consumption. */
   pendingSelection: { playbookIdx: number; nodeId: string } | null;
   /** Serialized snapshot of `graph` at the moment of the most recent
    *  save. Used by undo/redo to decide whether the restored graph is
-   *  the same as the persisted state — without this, walking back to
+   *  the same as the persisted state -- without this, walking back to
    *  the saved point still flags as dirty. JSON-stringified up front so
    *  comparisons are cheap (no per-call serialize). */
   savedGraphJson: string | null;
@@ -110,7 +110,7 @@ export const visualStore = {
   get canUndo() { return state.undoStack.length > 0; },
   get canRedo() { return state.redoStack.length > 0; },
 
-  /** Mutate a single node's args — most common edit shape. */
+  /** Mutate a single node's args -- most common edit shape. */
   patchNode(playbookIdx: number, nodeId: string, patch: Partial<VisualNode>) {
     if (!state.graph) return;
     const pb = state.graph.playbooks[playbookIdx];
@@ -233,7 +233,7 @@ export const visualStore = {
     state.dirty = true;
   },
 
-  /** Phase 3.5 — retarget an existing edge to a new target node. */
+  /** Phase 3.5 -- retarget an existing edge to a new target node. */
   retargetEdge(playbookIdx: number, edgeKey: { source: string; target: string; label: string | null }, newTarget: string) {
     if (!state.graph) return;
     const pb = state.graph.playbooks[playbookIdx];
@@ -247,7 +247,7 @@ export const visualStore = {
     state.dirty = true;
   },
 
-  /** Phase 3.5 — delete an edge (right-click flow). */
+  /** Phase 3.5 -- delete an edge (right-click flow). */
   removeEdge(playbookIdx: number, edgeKey: { source: string; target: string; label: string | null }) {
     if (!state.graph) return;
     const pb = state.graph.playbooks[playbookIdx];
@@ -262,7 +262,7 @@ export const visualStore = {
     state.dirty = true;
   },
 
-  /** Phase 3.6 — rename a decision/manual_input branch label. */
+  /** Phase 3.6 -- rename a decision/manual_input branch label. */
   renameBranchLabel(playbookIdx: number, source: string, oldLabel: string | null, newLabel: string) {
     if (!state.graph) return;
     const pb = state.graph.playbooks[playbookIdx];
@@ -394,7 +394,7 @@ export const visualStore = {
     state.pendingSelection = { playbookIdx: hit.playbookIdx, nodeId: hit.node.id };
   },
 
-  /** Drain the pending selection signal — owners of the canvas
+  /** Drain the pending selection signal -- owners of the canvas
    * call this from a $effect, mirror the values into their own
    * selection state, then clear here. */
   consumePendingSelection(): { playbookIdx: number; nodeId: string } | null {
@@ -403,12 +403,12 @@ export const visualStore = {
     return v;
   },
 
-  /** Apply a text-swap fix — locate the offending value at the dotted
+  /** Apply a text-swap fix -- locate the offending value at the dotted
    * `location` path inside the named step's arguments, replace
    * `before` with `after`, push to undo stack. Returns true on hit.
    *
    * The diagnostic's `location` looks like
-   * `arguments.arg_list[0].value` or `arguments.params.url` —
+   * `arguments.arg_list[0].value` or `arguments.params.url` --
    * standard JS dot/bracket notation. We walk to the leaf, then
    * substring-replace within the leaf string (so a Jinja segment
    * inside a longer template gets swapped without rewriting the
@@ -416,7 +416,7 @@ export const visualStore = {
   applyTextSwap(args: { stepId: string; location: string; before: string; after: string }): boolean {
     const hit = this.findNodeByStepId(args.stepId);
     if (!hit) return false;
-    // Strip the leading `arguments.` if present — we operate on the
+    // Strip the leading `arguments.` if present -- we operate on the
     // node.arguments tree directly.
     const path = args.location.replace(/^arguments\.?/, '');
     const segments = path.match(/[^.[\]]+/g) ?? [];
@@ -429,7 +429,7 @@ export const visualStore = {
       const seg = segments[i];
       const idx = /^\d+$/.test(seg) ? parseInt(seg, 10) : seg;
       if (cursor[idx] === undefined) {
-        // Path doesn't resolve — bail without a partial swap.
+        // Path doesn't resolve -- bail without a partial swap.
         return false;
       }
       cursor = cursor[idx];

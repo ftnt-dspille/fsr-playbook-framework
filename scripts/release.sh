@@ -4,7 +4,7 @@
 #   scripts/release.sh 0.4.23 ["release notes text"]
 #
 # The published version is derived ENTIRELY from the git tag (hatch-vcs). This
-# script tags `vX.Y.Z`, pushes it, and cuts a GitHub Release — the
+# script tags `vX.Y.Z`, pushes it, and cuts a GitHub Release -- the
 # `Publish to PyPI` workflow fires on the release and uploads the wheel via
 # Trusted Publishing (OIDC). No version literal is bumped anywhere.
 #
@@ -36,7 +36,7 @@ REMOTE="${REMOTE:-origin}"
 
 # --- tag must be new -------------------------------------------------------
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    echo "release: tag $TAG already exists locally — pick the next version" >&2; exit 1
+    echo "release: tag $TAG already exists locally -- pick the next version" >&2; exit 1
 fi
 if git ls-remote --tags "$REMOTE" "$TAG" | grep -q "$TAG"; then
     echo "release: tag $TAG already on $REMOTE" >&2; exit 1
@@ -49,11 +49,11 @@ if [[ -n "$LATEST" ]]; then
     HIGHER="$(printf '%s\n%s\n' "$LATEST" "$VERSION" | sort -V | tail -1)"
     if [[ "$VERSION" == "$LATEST" || "$HIGHER" != "$VERSION" ]]; then
         echo "release: VERSION $VERSION is not greater than PyPI latest $LATEST" >&2
-        echo "         (PyPI rejects re-uploads — pick a higher version)" >&2; exit 1
+        echo "         (PyPI rejects re-uploads -- pick a higher version)" >&2; exit 1
     fi
     echo ">> PyPI latest is $LATEST; releasing $VERSION"
 else
-    echo ">> WARN: could not read PyPI latest (offline?) — skipping the floor check" >&2
+    echo ">> WARN: could not read PyPI latest (offline?) -- skipping the floor check" >&2
 fi
 
 # --- tests before tagging --------------------------------------------------

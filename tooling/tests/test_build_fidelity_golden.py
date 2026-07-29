@@ -1,8 +1,8 @@
-"""B4 — frozen golden pin for the live-proven triage→build chain.
+"""B4 -- frozen golden pin for the live-proven triage→build chain.
 
 `python/tests/fixtures/build_goldens/b4_triage_build.json` is a FROZEN capture of
 a real, known-good live run (connector 0.3.126, session `loop-f279bdb5`,
-2026-06-07) — the run that proved `grounding 1.0` after muting the
+2026-06-07) -- the run that proved `grounding 1.0` after muting the
 `siem_events_for_incident` / `_siem_pubv2_query` internal `execute_api_request`
 fan-out (commit `f7d0845`).
 
@@ -13,7 +13,7 @@ automates exactly the investigated ops + the staged action, with ZERO raw
 
 SCOPE (per Chat Intelligence Plan A4/A6 fast-vs-live split): this is the
 FAST/STRUCTURE guard. It pins the *scoring contract* against a real transcript
-— it reddens if an edit to `score_build_fidelity`, `transcript_to_trace`, or
+-- it reddens if an edit to `score_build_fidelity`, `transcript_to_trace`, or
 `_ops_from_yaml` breaks the verdict that was true live. It does NOT re-drive the
 agent, so a *recorder/compiler* regression that reintroduces the fan-out is
 caught by the `test_mute_recording_*` unit tests + a live re-drive, not here.
@@ -66,7 +66,7 @@ def test_b4_golden_built_playbook_has_no_raw_execute_api_request():
 
 def test_b4_golden_built_ops_are_the_investigated_named_ops():
     """The built playbook automates the named investigation ops + the staged
-    containment — a concrete pin on WHAT it built, not just the score."""
+    containment -- a concrete pin on WHAT it built, not just the score."""
     _, built, _ = _load()
     assert built == {
         ("virustotal", "query_ip"),

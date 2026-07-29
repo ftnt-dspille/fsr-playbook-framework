@@ -12,25 +12,25 @@ export function translateJinjaError(msg: string): string {
       /list\s+(?:index\s+)?(?:out of range|object\s+)?has\s+no\s+attribute|'list'\s+object\s+has\s+no\s+attribute|list index out of range/
     )
   ) {
-    return `vars.input.records may be empty or doesn't have enough items — wrap with {% if vars.input.records %} to guard (original: ${msg})`;
+    return `vars.input.records may be empty or doesn't have enough items -- wrap with {% if vars.input.records %} to guard (original: ${msg})`;
   }
   if (lower.match(/has\s+no\s+attribute/) && !lower.match(/list/)) {
-    return `A field was not found — check the variable name and make sure it exists in the input (original: ${msg})`;
+    return `A field was not found -- check the variable name and make sure it exists in the input (original: ${msg})`;
   }
   if (lower.match(/no\s+filter\s+named|unknown\s+filter/)) {
-    return `Unknown filter name — check spelling or browse the filter library (original: ${msg})`;
+    return `Unknown filter name -- check spelling or browse the filter library (original: ${msg})`;
   }
   if (lower.match(/expected token|unexpected|end of statement block|end of template/)) {
-    return `Syntax error in template — check for unclosed {{ }}, {% %}, or mismatched tags (original: ${msg})`;
+    return `Syntax error in template -- check for unclosed {{ }}, {% %}, or mismatched tags (original: ${msg})`;
   }
   if (lower.match(/division by zero/)) {
-    return `Division by zero — the divisor evaluated to 0 (original: ${msg})`;
+    return `Division by zero -- the divisor evaluated to 0 (original: ${msg})`;
   }
   if (lower.match(/filter.*requires|takes.*argument|takes no arguments/)) {
-    return `A filter was called with the wrong number of arguments — check the filter library for the correct signature (original: ${msg})`;
+    return `A filter was called with the wrong number of arguments -- check the filter library for the correct signature (original: ${msg})`;
   }
   if (lower.match(/cannot convert|int\(\)|float\(\)/)) {
-    return `Type error — a filter or expression received the wrong data type (original: ${msg})`;
+    return `Type error -- a filter or expression received the wrong data type (original: ${msg})`;
   }
   return msg;
 }
@@ -44,7 +44,7 @@ export function parseErrorLineNumber(msg: string): number | null {
 }
 
 /** Scan the template for the last line with an unclosed `{{` or `{%`
- *  — used when the engine error has no explicit line number. */
+ *  -- used when the engine error has no explicit line number. */
 export function findUnclosedTagLine(templateText: string): number | null {
   if (!templateText) return null;
   const lines = templateText.split('\n');
@@ -71,7 +71,7 @@ export interface JinjaFinding {
  *  every keystroke so the user sees red squiggles for unclosed `{{`,
  *  `{%`, mismatched `{% end* %}`, and unknown filters without having
  *  to hit Render. `knownFilters` is the set of filter names from the
- *  filter library — pass empty / null to skip filter-name checks. */
+ *  filter library -- pass empty / null to skip filter-name checks. */
 export function scanTemplate(
   templateText: string,
   knownFilters: Set<string> | null = null
@@ -79,8 +79,8 @@ export function scanTemplate(
   const findings: JinjaFinding[] = [];
   if (!templateText) return findings;
   const lines = templateText.split('\n');
-  // FSR's Jinja only uses inline `{% set name = value %}` — no
-  // `{% set %}…{% endset %}` capture form — so `set` is NOT tracked
+  // FSR's Jinja only uses inline `{% set name = value %}` -- no
+  // `{% set %}…{% endset %}` capture form -- so `set` is NOT tracked
   // as a block opener and `endset` is NOT a valid closer.
   const openingTags = new Set([
     'if', 'for', 'block', 'macro', 'call', 'filter', 'with'
@@ -111,7 +111,7 @@ export function scanTemplate(
       if (open === -1) break;
       const close = line.indexOf('%}', open + 2);
       if (close === -1) {
-        findings.push({ line: lineNum, message: 'Unclosed block tag — did you mean {% … %}?' });
+        findings.push({ line: lineNum, message: 'Unclosed block tag -- did you mean {% … %}?' });
         break;
       }
       const content = line
@@ -128,14 +128,14 @@ export function scanTemplate(
         if (blockStack.length === 0 || blockStack[blockStack.length - 1].tag !== expected) {
           findings.push({
             line: lineNum,
-            message: `Unexpected {% ${tagName} %} — no matching {% ${expected} %} found`
+            message: `Unexpected {% ${tagName} %} -- no matching {% ${expected} %} found`
           });
         } else {
           blockStack.pop();
         }
       }
       // Anything else (`else`, `elif`, `set`, `include`, …) is a
-      // continuation or leaf — no stack change.
+      // continuation or leaf -- no stack change.
       cursor = close + 2;
     }
 
@@ -146,7 +146,7 @@ export function scanTemplate(
       if (open === -1) break;
       const close = line.indexOf('}}', open + 2);
       if (close === -1) {
-        findings.push({ line: lineNum, message: 'Unclosed expression — did you mean {{ … }}?' });
+        findings.push({ line: lineNum, message: 'Unclosed expression -- did you mean {{ … }}?' });
         break;
       }
       if (knownFilters && knownFilters.size > 0) {
@@ -158,7 +158,7 @@ export function scanTemplate(
             if (!knownFilters.has(fname)) {
               findings.push({
                 line: lineNum,
-                message: `Unknown filter "${fname}" — check spelling or see the filter library`
+                message: `Unknown filter "${fname}" -- check spelling or see the filter library`
               });
               break;
             }
@@ -281,7 +281,7 @@ export function checkInputPaths(
       if (!res.found) {
         findings.push({
           line: i + 1,
-          message: `"${expr}" was not found in the test input — check the field name`,
+          message: `"${expr}" was not found in the test input -- check the field name`,
           severity: 'warning'
         });
       }

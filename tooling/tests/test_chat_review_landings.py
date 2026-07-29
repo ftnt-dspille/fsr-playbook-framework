@@ -181,7 +181,7 @@ def test_visibility_warns_on_inactive_branch_param(db_path):
     Reported as an ERROR rather than a warning: FSR hides the field at
     runtime and the operation rejects the call, so letting it through as a
     warning made `verify_playbook` answer ready_to_push=True for a step that
-    cannot execute. A live session shipped exactly that — a green verdict on
+    cannot execute. A live session shipped exactly that -- a green verdict on
     a containment step the firewall would refuse.
     """
     text = """
@@ -301,7 +301,7 @@ playbooks:
 
 
 def test_message_sugar_does_not_collide_with_reserved_var_rewriter(db_path):
-    """`message` is in _RESERVED_VARS_KEYS — when it's a dict (the
+    """`message` is in _RESERVED_VARS_KEYS -- when it's a dict (the
     record-message sugar) the auto-rewriter must leave it alone."""
     text = """
 collection: T

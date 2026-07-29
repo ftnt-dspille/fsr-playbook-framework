@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Samples tab — unified "what would this step return at runtime?"
+   * Samples tab -- unified "what would this step return at runtime?"
    * editor. Two persistence shapes, depending on step type:
    *
    *  manual_input → `# fsrpb:samples` sidecar comment in the YAML.
@@ -15,7 +15,7 @@
    *
    * Step types that compute their output deterministically
    * (set_variable, decision, start/stop/end) don't expose either
-   * shape — for those, this tab shows a short note instead of a form.
+   * shape -- for those, this tab shows a short note instead of a form.
    */
   import type { VisualNode, VisualPlaybook } from '../api';
   import { writeSamples, getVisualFromBuffer } from '../api';
@@ -39,7 +39,7 @@
   // ─── manual_input prompt wireframe ───────────────────────────────────
   // Mocks up what an FSR user will see when this step fires. Title +
   // description + inputs as labeled placeholders + option buttons.
-  // Pure presentation — no Jinja round-trip, no interactive form.
+  // Pure presentation -- no Jinja round-trip, no interactive form.
 
   type Option = { display: string; primary?: boolean };
 
@@ -61,7 +61,7 @@
 
   let promptOptions = $derived.by<Option[]>(() => {
     if (!isManualInput) return [];
-    // Source 1 (most common): node.arguments.options — the visual store
+    // Source 1 (most common): node.arguments.options -- the visual store
     //   normalises both friendly `options:` and wire
     //   `arguments.response_mapping.options` onto this single key (see
     //   StepInspectorBranchesTab.svelte).
@@ -69,7 +69,7 @@
     //   for nodes loaded directly from raw wire shape without
     //   normalisation.
     // Source 3 (last resort): outgoing edges with branch_kind:'branch'
-    //   — guarantees the preview matches the canvas even when the
+    //   -- guarantees the preview matches the canvas even when the
     //   options array is somehow missing.
     const a = (node.arguments ?? {}) as Record<string, unknown>;
     const direct = a.options;
@@ -290,7 +290,7 @@
     mockSaveStatus = '';
   }
 
-  // Skeleton placeholder for empty mocks — gives the user a starting
+  // Skeleton placeholder for empty mocks -- gives the user a starting
   // point that matches FSR's connector-op output envelope.
   let mockPlaceholder = $derived(
     node.family === 'connector_op'
@@ -305,12 +305,12 @@
   {#if !isManualInput && !isMockable}
     <p class="text-[11px] italic text-[var(--text-faint)]">
       <code class="font-mono">{node.type}</code> steps compute their output
-      deterministically from their args — no sample data needed.
+      deterministically from their args -- no sample data needed.
     </p>
   {/if}
 
   {#if isManualInput}
-    <!-- Prompt wireframe — what a user sees in the FSR UI when this
+    <!-- Prompt wireframe -- what a user sees in the FSR UI when this
          step pauses execution. Pure visual mockup; templated strings
          stay as {{ … }} so the author can spot their own placeholders. -->
     <section class="rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] p-3">
@@ -335,7 +335,7 @@
 
         {#if promptDescription}
           <!-- FSR allows HTML in description. We render as plain text
-               here (no innerHTML — avoids XSS from author markup) but
+               here (no innerHTML -- avoids XSS from author markup) but
                preserve line breaks so multi-line descriptions read right. -->
           <p class="mt-1 whitespace-pre-wrap text-xs text-[var(--text-muted)]">{promptDescription}</p>
         {/if}
@@ -368,13 +368,13 @@
             {/each}
           </div>
         {:else}
-          <p class="mt-3 text-[10px] italic text-[var(--text-faint)]">(no buttons configured — add an option to <code class="font-mono">arguments.response_mapping.options</code>)</p>
+          <p class="mt-3 text-[10px] italic text-[var(--text-faint)]">(no buttons configured -- add an option to <code class="font-mono">arguments.response_mapping.options</code>)</p>
         {/if}
       </div>
 
       <p class="mt-2 text-[10px] text-[var(--text-faint)]">
         Templated <code class="font-mono">{`{{ … }}`}</code> in title/description resolves against runtime
-        data — preview shows the author's raw text.
+        data -- preview shows the author's raw text.
       </p>
     </section>
 
@@ -457,7 +457,7 @@
           {/if}
         </h3>
         <p class="mt-1 text-[11px] text-[var(--text-faint)]">
-          Pretend this step returned the JSON below — instead of running it live.
+          Pretend this step returned the JSON below -- instead of running it live.
           Saved to <code class="font-mono">arguments.mock_result</code>; honored by
           the debug runner and by FSR in mock mode. Downstream
           <code class="font-mono">vars.steps.{node.id}.&lt;key&gt;</code> resolves

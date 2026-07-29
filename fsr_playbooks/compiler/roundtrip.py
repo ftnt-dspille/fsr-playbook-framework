@@ -1,6 +1,6 @@
 """Semantic round-trip diff: FSR JSON -> IR -> FSR JSON.
 
-A perfect byte-equivalent round trip is impossible — FSR carries
+A perfect byte-equivalent round trip is impossible -- FSR carries
 metadata (timestamps, ownership, layout) that the IR doesn't model.
 Instead we check **semantic equivalence**: same steps, same arguments,
 same routing graph. That is the property the compiler must preserve.
@@ -43,7 +43,7 @@ def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
     for s in wf.get("steps", []):
         args = dict(s.get("arguments") or {})
         # for_each is a wire-level args key but conceptually a separate
-        # construct — lift it out so it's compared as its own thing and
+        # construct -- lift it out so it's compared as its own thing and
         # arguments-diffs aren't drowned by for_each contents.
         fe = args.pop("for_each", None)
         if isinstance(fe, dict) and not fe:
@@ -80,7 +80,7 @@ def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
     else:
         params = []
 
-    # Union in the trigger step's inputVariables — the decompiler does the
+    # Union in the trigger step's inputVariables -- the decompiler does the
     # same (decompiler.py:1174-1182). FSR is inconsistent: some playbooks
     # have an empty top-level `parameters` but declare inputs on the trigger
     # step. Without this union the normalizer sees fewer params than the

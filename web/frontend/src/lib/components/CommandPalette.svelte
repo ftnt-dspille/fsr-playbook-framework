@@ -4,7 +4,7 @@
    * (bound to the Cmd+K hotkey in +page.svelte). Filters the global
    * command registry by typed query; Enter runs the highlighted one.
    *
-   * Keep the markup minimal — this is a quick-access surface, not a
+   * Keep the markup minimal -- this is a quick-access surface, not a
    * settings panel. No icons, no fancy grouping; commands self-tag
    * via the `group` field for a single right-aligned label.
    */

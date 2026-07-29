@@ -1,6 +1,6 @@
 /**
  * Coverage for the debug runner UI. Pins:
- *  - ▶ Run is the single primary action — creates a session AND
+ *  - ▶ Run is the single primary action -- creates a session AND
  *    continues to done/breakpoint. No separate Start click.
  *  - ⏭ Step also creates a session on first click and advances one
  *    tile (auto-skipping the trigger entry).
@@ -103,7 +103,7 @@ describe('DebugPanel', () => {
     })));
     render(DebugPanel);
     await fireEvent.click(screen.getByRole('button', { name: /Step/ }));
-    // Session created AND stepped — one round trip each.
+    // Session created AND stepped -- one round trip each.
     expect(startDebugSession).toHaveBeenCalledOnce();
     expect(stepDebugSession).toHaveBeenCalledWith('sess-abc', undefined);
   });

@@ -27,7 +27,7 @@ const realCreate = monaco.editor.create;
   return inst;
 };
 
-describe('MonacoYaml — prop wiring & internalUpdate guard', () => {
+describe('MonacoYaml -- prop wiring & internalUpdate guard', () => {
   beforeEach(() => {
     createSpy.mockClear();
     setValueSpy.mockClear();

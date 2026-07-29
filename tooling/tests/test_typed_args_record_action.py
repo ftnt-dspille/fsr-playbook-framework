@@ -3,7 +3,7 @@
 Validation-only (the `find_record` precedent): the heavy canonical transform
 (route uuid5, displayConditions, the noRecordExecution/singleRecordExecution flag
 pair) stays in the resolver, so `expand_record_action` never mutates and always
-returns ``None``. These tests pin the scalar-flag validation — the headline win
+returns ``None``. These tests pin the scalar-flag validation -- the headline win
 is catching a mistyped `run_mode`/`requires_record` that would otherwise silently
 mis-route the Execute button.
 
@@ -79,7 +79,7 @@ def test_non_string_button_label_is_clean_bad_value():
 
 
 def test_module_list_rides_through_untouched():
-    # `module` may be a single name OR a list — left untyped, no false positive.
+    # `module` may be a single name OR a list -- left untyped, no false positive.
     errs: list[CompileError] = []
     _expand({"module": ["alerts", "incidents"]}, errs)
     assert not [e for e in errs if e.code is ErrorCode.BAD_VALUE]

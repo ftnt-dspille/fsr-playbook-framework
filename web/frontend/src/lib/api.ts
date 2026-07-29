@@ -116,7 +116,7 @@ export type Marker = {
 };
 
 /** One render-path analyzer diagnostic. Step-id-based (not line-based
- * like Marker) — these come from `analyze_playbook` and are surfaced
+ * like Marker) -- these come from `analyze_playbook` and are surfaced
  * in the canvas + diagnostics drawer with per-node badges. */
 export type Diagnostic = {
   kind: string;
@@ -164,7 +164,7 @@ export async function analyzePlaybook(
   if (!r.ok || !r.result) {
     return { ok: false, diagnostics: [], error_count: 0, warning_count: 0 };
   }
-  // Some MCP responses omit fields when empty — normalize.
+  // Some MCP responses omit fields when empty -- normalize.
   return {
     ok: r.result.ok ?? false,
     trace: r.result.trace,
@@ -235,7 +235,7 @@ export async function verifyPlaybook(
   };
 }
 
-// Debug runner — drives `step_through_playbook` for the Debug drawer.
+// Debug runner -- drives `step_through_playbook` for the Debug drawer.
 // One call returns the full trace; the UI scrubs through it rather
 // than maintaining a separate server-side session, which keeps the
 // MVP simple (no breakpoints / pause yet).
@@ -434,7 +434,7 @@ export type ChatEvent =
       name: string;
       arguments: Record<string, unknown>;
       call_id: string;
-      /** HITL Phase 2: server-resolved tier (0–4). 0/1/2 auto-allow;
+      /** HITL Phase 2: server-resolved tier (0-4). 0/1/2 auto-allow;
        *  3+ went through an approval card. Used by the audit pane to
        *  flag tier-3+ rows. Default 0 when older backends don't send it. */
       tier?: number;
@@ -553,7 +553,7 @@ export type ShapesResponse = {
   needs_verify?: Array<{ step: string; step_id: string; reason: string }>;
 };
 
-/** Fast typed-walker pass — returns per-step Jinja shapes WITHOUT
+/** Fast typed-walker pass -- returns per-step Jinja shapes WITHOUT
  *  running the full verify_playbook gate. Used by the variable picker
  *  + Monaco completions so the user sees real step output shapes on
  *  every YAML edit, not just after clicking Verify. */
@@ -584,7 +584,7 @@ export type SampleRecordResponse = {
   error?: string;
 };
 
-/** Pull live sample records from FSR for `<module>` — used by the
+/** Pull live sample records from FSR for `<module>` -- used by the
  *  start-step UI / variable picker so the user can SEE what
  *  `vars.input.records[0]` will actually look like at runtime. */
 export async function fetchSampleRecords(module: string, limit = 5): Promise<SampleRecordResponse> {
@@ -607,7 +607,7 @@ export type RecentRun = {
 };
 
 /** Recent FSR playbook executions. Returns each run with its
- *  record-IRI list — the trigger sample picker uses one of those
+ *  record-IRI list -- the trigger sample picker uses one of those
  *  IRIs to fetch the actual record that was running. */
 export async function fetchRecentRuns(
   playbookIri?: string, limit = 5
@@ -754,7 +754,7 @@ export type VisualPlaybook = {
   trigger: string;
   trigger_step_id: string | null;
   /** Whether the playbook is enabled. Trigger playbooks with
-   * `is_active: false` ship to FSR but never fire — the inspector
+   * `is_active: false` ship to FSR but never fire -- the inspector
    * surfaces a guard banner so the user catches the silent dead-end
    * before testing. Defaults to false (matches the IR default). */
   is_active?: boolean;
@@ -804,7 +804,7 @@ export async function getVisualFromBuffer(text: string): Promise<VisualGraph> {
 /**
  * Rewrite the `# fsrpb:samples` sidecar block on a YAML buffer.
  *
- * Whole-map writes (not per-step PATCH) — see the backend route for
+ * Whole-map writes (not per-step PATCH) -- see the backend route for
  * the rationale. Caller is expected to splice the returned `yaml`
  * back into the playbook store.
  */

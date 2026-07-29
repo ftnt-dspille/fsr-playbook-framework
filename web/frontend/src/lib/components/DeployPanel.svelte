@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Combined Push + Run output. One tab instead of two — the user
+   * Combined Push + Run output. One tab instead of two -- the user
    * almost always wants to see both side-by-side ("did the push land,
    * and what did the run say?"). Top half shows push stdout/stderr;
    * bottom half shows the streaming run logs. Both expose status
@@ -60,13 +60,13 @@
   const runLineCount = $derived(runStore.logs.length);
 </script>
 
-<!-- Push usually emits 1–4 lines; Run streams indefinitely. A 50/50
+<!-- Push usually emits 1-4 lines; Run streams indefinitely. A 50/50
      split wasted half the panel on push and starved run. Push takes a
      fixed minimum (so it always renders), capped at 35% so a noisy push
-     can't crowd out run. We can't use `auto` here — Console's body uses
+     can't crowd out run. We can't use `auto` here -- Console's body uses
      h-full, which collapses to 0 inside an auto-sized grid row. -->
 <div class="grid h-full min-h-0 grid-rows-[minmax(110px,35%)_minmax(0,1fr)] divide-y divide-[var(--border-soft)]">
-  <!-- Push section. Sized by the parent grid row (110px–35%); flex-col
+  <!-- Push section. Sized by the parent grid row (110px-35%); flex-col
        inside so the body fills below the header. -->
   <section class="flex min-h-0 flex-col">
     <header class="flex items-center gap-2 border-b border-[var(--border-soft)] bg-[var(--bg-panel)]/60 px-3 py-1 text-[11px] uppercase tracking-wider text-[var(--text-faint)]">

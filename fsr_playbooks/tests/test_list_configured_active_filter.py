@@ -1,5 +1,5 @@
 """Regression: list_configured_connectors must not advertise a connector whose
-config is INACTIVE as "Available" — run_op's preflight would reject it as
+config is INACTIVE as "Available" -- run_op's preflight would reject it as
 `connector_not_configured`, so the agent calls a connector that can't run and
 wastes a turn (matrix run 9 P1: whois-rdap listed Available, then run_op
 rejected it). The listing now filters through the same active-config source
@@ -73,7 +73,7 @@ def test_inactive_config_connector_is_filtered_out(monkeypatch):
 
 
 def test_fail_open_when_active_source_unresolved(monkeypatch):
-    """If the active-config source can't be resolved (returns nothing — the
+    """If the active-config source can't be resolved (returns nothing -- the
     preflight itself fails open on the same lookup), DON'T blank the listing:
     keep the unfiltered pyfsr set so a transient lookup error can't hide every
     configured connector from the agent."""

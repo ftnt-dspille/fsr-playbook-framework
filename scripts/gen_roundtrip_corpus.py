@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Generate the committed round-trip fidelity corpus (box-free).
 
-Why this exists — the honest version: the F4 pull's clean playbooks were never
+Why this exists -- the honest version: the F4 pull's clean playbooks were never
 written out (only the 1,389 FAILING ones survived, in a gitignored scratch dir),
 so a fidelity gate that needs playbooks which *compile* had nothing to diff. See
 `docs/plans/playbook-compiler-fidelity-and-agent-surface.md` §3.1a. Rather than
 block on a fresh box pull (gated by the R1 licensing review), this synthesizes a
 small, committed corpus that exercises the two field-classes we have *already
-watched get silently deleted* — `steps[].for_each` and declared playbook
-`parameters` — plus clean baselines and the envelope-sugar hoist.
+watched get silently deleted* -- `steps[].for_each` and declared playbook
+`parameters` -- plus clean baselines and the envelope-sugar hoist.
 
 Each fixture is a real FSR *wire* collection envelope: curated YAML is compiled
 through the real pipeline (so the step-type UUIDs and argument shapes are the
@@ -16,7 +16,7 @@ genuine ones), then ENRICHED with the server metadata a `?$relationships=true`
 pull carries (`@id`, `uuid`, `createDate`, `owners`, `recordTags`, and an
 expanded `stepType` dict on the trigger). That noise is the point: the gate's
 normalizer must project past it, so the corpus has to contain it. The committed
-artifact is the static JSON — this generator is kept only to extend/refresh it.
+artifact is the static JSON -- this generator is kept only to extend/refresh it.
 
     FSRPB_DEV=1 .venv/bin/python scripts/gen_roundtrip_corpus.py
 """
@@ -42,7 +42,7 @@ _EXPANDED_STEPTYPE = "ea155646-3821-4542-9702-b246da430a8d"
 CORPUS: list[tuple[str, str, str]] = [
     (
         "for_each_loop",
-        "LOSSY CLASS #1 — a looping step; for_each must survive the round-trip",
+        "LOSSY CLASS #1 -- a looping step; for_each must survive the round-trip",
         """
 collection: Corpus
 playbooks:
@@ -69,7 +69,7 @@ playbooks:
     ),
     (
         "declared_parameters",
-        "LOSSY CLASS #2 — top-level declared parameters (the manual-trigger form)",
+        "LOSSY CLASS #2 -- top-level declared parameters (the manual-trigger form)",
         """
 collection: Corpus
 playbooks:
@@ -109,7 +109,7 @@ playbooks:
     ),
     (
         "linear_baseline",
-        "Clean baseline — a plain linear playbook with no lossy structures",
+        "Clean baseline -- a plain linear playbook with no lossy structures",
         """
 collection: Corpus
 playbooks:
@@ -134,7 +134,7 @@ playbooks:
 # The real F4 shape: `parameters: []` at the top level, everything declared on
 # the TRIGGER step's `inputVariables`. The YAML dialect materializes params to
 # the top-level list, so this shape can only be built as hand-authored wire
-# JSON — which is also how test_decompiler_parameters_from_trigger.py builds it.
+# JSON -- which is also how test_decompiler_parameters_from_trigger.py builds it.
 _TRIGGER_UUID = "e77eec41-6212-468a-9128-63a2cead869c"
 _TRIGGER_STEPTYPE = "f4ca4d1c-8b1c-4a2a-9b53-9d0a2a5a1a11"
 
@@ -142,7 +142,7 @@ _TRIGGER_STEPTYPE = "f4ca4d1c-8b1c-4a2a-9b53-9d0a2a5a1a11"
 def _trigger_declared_params_fixture() -> dict:
     wf = {
         "name": "Action - Domain - Unblock", "description": "", "isActive": True,
-        "parameters": [],  # empty top-level — the whole point of this shape
+        "parameters": [],  # empty top-level -- the whole point of this shape
         "triggerStep": f"/api/3/workflow_steps/{_TRIGGER_UUID}",
         "steps": [
             {
@@ -174,7 +174,7 @@ def _trigger_declared_params_fixture() -> dict:
 def _enrich(env: dict) -> dict:
     """Add the server-side metadata a live `?$relationships=true` pull carries.
 
-    The gate must ignore every key added here — that is exactly what makes the
+    The gate must ignore every key added here -- that is exactly what makes the
     corpus a real test of the projection rather than of the compiler's own
     output shape.
     """
@@ -227,10 +227,10 @@ def main() -> int:
         (OUT_DIR / f"{name}.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n")
         written += 1
-        print(f"  wrote {name}.json  — {intent}")
+        print(f"  wrote {name}.json  -- {intent}")
 
     # Hand-authored appliance shape (params on the trigger, empty top-level).
-    intent = ("LOSSY CLASS #2 (real F4 shape) — parameters declared on the "
+    intent = ("LOSSY CLASS #2 (real F4 shape) -- parameters declared on the "
               "trigger's inputVariables with an empty top-level list")
     env = _enrich(_trigger_declared_params_fixture())
     ok, diffs = roundtrip(env, PACKAGED_SLIM_DB)
@@ -239,7 +239,7 @@ def main() -> int:
         json.dumps({"_intent": intent, "envelope": env},
                    indent=2, sort_keys=True) + "\n")
     written += 1
-    print(f"  wrote trigger_parameters.json  — {intent}")
+    print(f"  wrote trigger_parameters.json  -- {intent}")
 
     print(f"corpus: {written} fixtures -> {OUT_DIR}")
     return 0

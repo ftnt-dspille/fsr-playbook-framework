@@ -9,7 +9,7 @@
   "data": [
     {
       "@type": "WorkflowCollection",
-      "description": "Sample playbooks for Synthetic Threat Feed. Clone these into a separate collection before customizing \u2014 the sample collection is replaced on connector upgrade.",
+      "description": "Sample playbooks for Synthetic Threat Feed. Clone these into a separate collection before customizing -- the sample collection is replaced on connector upgrade.",
       "name": "Sample - Synthetic Threat Feed - 1.0.0",
       "recordTags": [
         "synthetic_threat_feed"

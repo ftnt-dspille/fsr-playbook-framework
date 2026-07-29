@@ -12,7 +12,7 @@ signatures to enforce two rules:
      (FSR's runtime allows arbitrary extras for these handlers).
 
 `Connector` validation is handled in detail by the resolver against the
-operation_params table — this validator only handles the residual case
+operation_params table -- this validator only handles the residual case
 of confirming `arguments.connector` and `arguments.operation` exist
 (already enforced upstream) and skips deeper inspection.
 
@@ -40,7 +40,7 @@ _FRAMEWORK_PARAMS = frozenset({
     "for_each", "cyops_playbook_iri", "cyops_playbook_name",
     "collaborationNote", "inputVariables", "displayConditions",
     "__bulk", "_showJson", "fieldOperation",
-    # Auto-injected by the resolver for manual_input — never user-supplied
+    # Auto-injected by the resolver for manual_input -- never user-supplied
     # in the friendly YAML, but live on the step by the time arg_validator
     # runs. Listing them here keeps the unknown-arg warning quiet for them.
     "is_approval", "isRecordLinked", "owner_detail", "email_notification",
@@ -83,7 +83,7 @@ class ArgValidator:
         # `name`, `operationTitle`, `operation`, `collectionType`, `type`,
         # `rule`). For those handlers, a generic signature pass produces
         # false positives on the injected keys. Skip them.
-        # set_variable's arguments is a flat {var_name: value} payload —
+        # set_variable's arguments is a flat {var_name: value} payload --
         # the keys ARE the variables to set, not handler kwargs.
         _RESOLVER_VALIDATES = frozenset({
             "connector",       # connector / stop / end (no_op)
@@ -111,7 +111,7 @@ class ArgValidator:
             and p["name"] not in _FRAMEWORK_PARAMS
         ]
         # Actually `default is None` here means inspect.signature() reported
-        # no default — Parameter.empty serialized as None in the dump. Verify:
+        # no default -- Parameter.empty serialized as None in the dump. Verify:
         # required == params with default field literally None in JSON.
         # (Parameters that default to the python value None render as 'None'
         # string in the dump, not null.)
@@ -130,13 +130,13 @@ class ArgValidator:
                 continue
             if accepts_kwargs:
                 # Handler accepts **kwargs so technically the arg is legal
-                # syntactically — but in practice FSR's runtime often errors
+                # syntactically -- but in practice FSR's runtime often errors
                 # on unrecognised top-level keys (manual_input is a notorious
                 # offender). Warn so the author can see it before runtime.
                 errors.append(CompileError(
                     code=ErrorCode.UNKNOWN_PARAM,
                     message=(
-                        f"unknown argument {k!r} for handler {step.handler!r} — "
+                        f"unknown argument {k!r} for handler {step.handler!r} -- "
                         f"FSR may ignore or error at runtime"
                     ),
                     path=f"{path}.arguments.{k}",
@@ -152,7 +152,7 @@ class ArgValidator:
                     path=f"{path}.arguments.{k}",
                 ))
 
-        # manual_input: `input` MUST be a dict at runtime — FSR calls .get()
+        # manual_input: `input` MUST be a dict at runtime -- FSR calls .get()
         # on it. We've seen the LLM produce `input: "some string"` which
         # passes generic shape checks but crashes the workflow.
         if step.handler == "manual_input":

@@ -31,7 +31,7 @@ def test_subtag_groups_registered():
     assert CHECK_GROUPS["picklist"] == frozenset({"picklist_drift"})
     assert CHECK_GROUPS["param_type"] == frozenset({"param_type"})
     assert CHECK_GROUPS["snippet"] == frozenset({"snippet_sandbox"})
-    # The coarse catch-all is untouched — nothing downstream breaks.
+    # The coarse catch-all is untouched -- nothing downstream breaks.
     assert CHECK_GROUPS["value"] == frozenset({"bad_value"})
 
 
@@ -67,7 +67,7 @@ def test_finalize_subtag_does_not_suppress_other_subtag():
 
 def test_finalize_coarse_value_still_suppresses_tagged_bad_value():
     # The coarse `value` group (matches on `code`) keeps working even for a
-    # diagnostic that also carries a `check` sub-tag — backward-compatible.
+    # diagnostic that also carries a `check` sub-tag -- backward-compatible.
     r = _finalize([], [_fix(check="param_type")], [], {},
                   disabled_codes=CHECK_GROUPS["value"])
     assert r["ready_to_push"] is True

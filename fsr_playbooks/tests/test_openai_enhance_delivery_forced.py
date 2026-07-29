@@ -1,9 +1,9 @@
 """End-to-end: the enhance-delivery guard forces a real offer through the ACTUAL
-OpenAIProvider loop — the exact e3 failure, reproduced against a fake client.
+OpenAIProvider loop -- the exact e3 failure, reproduced against a fake client.
 
 e3 on GA (gpt-4.1-mini): the model runs `verify_enhancement` (passes, gets a
 `verified_id`), then on the next round writes "Call emit_enhancement_offer with
-verified_id … to apply this" as PROSE and stops — narrating the terminal action
+verified_id … to apply this" as PROSE and stops -- narrating the terminal action
 instead of taking it. `score_enhance_delivery` graded that `verified_not_applied`
 1-in-4 runs. This test drives that transcript through the real loop and asserts
 the guard converts it to a deterministic tool call.
@@ -77,7 +77,7 @@ def _fake_dispatch(name, args):
 
 def _forced_response():
     """The non-streaming, tool_choice-pinned round the guard triggers. The model
-    supplies a WRONG verified_id on purpose — the guard must override it."""
+    supplies a WRONG verified_id on purpose -- the guard must override it."""
     tc = MagicMock(id="c_forced")
     tc.function = MagicMock(arguments=json.dumps(
         {"id": "card1", "summary": "adds a gate", "verified_id": "STALE-WRONG"}))
@@ -87,7 +87,7 @@ def _forced_response():
 
 def test_narrated_delivery_is_forced_into_a_real_offer_call():
     # Turn 1: verify_enhancement (passes). Turn 2: prose narration, no tool call
-    # (finish="stop") — verbatim e3. Then the guard's forced offer round.
+    # (finish="stop") -- verbatim e3. Then the guard's forced offer round.
     turn1 = [
         _delta_chunk(tool_calls=[_tool_call_delta(
             index=0, id="c1", name="verify_enhancement", args="{}")]),
@@ -133,7 +133,7 @@ def test_narrated_delivery_is_forced_into_a_real_offer_call():
 
 def test_forced_delivery_fires_at_most_once():
     # If the FORCED round itself somehow still didn't deliver, the guard must not
-    # loop — outstanding() returns None after mark_forced(). Here the forced round
+    # loop -- outstanding() returns None after mark_forced(). Here the forced round
     # returns no tool_calls; the turn must still terminate.
     turn1 = [
         _delta_chunk(tool_calls=[_tool_call_delta(

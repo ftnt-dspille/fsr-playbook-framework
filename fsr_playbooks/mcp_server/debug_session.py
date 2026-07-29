@@ -6,7 +6,7 @@ frontend can drive ⏭ / ⏯ / ⏹ controls, set breakpoints, and override
 branch choices mid-run.
 
 The one-shot `step_through_playbook` tool is intentionally left
-untouched (parallel implementation) — it would otherwise have to
+untouched (parallel implementation) -- it would otherwise have to
 ship as part of this refactor and risk regressing the analyzer /
 verify_playbook / agent-loop callers that depend on its exact
 behavior today. The duplication is acknowledged tech debt; track
@@ -100,7 +100,7 @@ class DebugSession:
 
 
 # =====================================================================
-# Per-step execution — extracted from tools_analysis.step_through_playbook
+# Per-step execution -- extracted from tools_analysis.step_through_playbook
 # loop body. Mutates session.vars_ctx / session.cur / session.done /
 # session.first_error.
 # =====================================================================
@@ -398,7 +398,7 @@ def _execute_one_step(s: DebugSession) -> dict[str, Any] | None:
         sim_output = {"option": picked} if picked else {}
         # Carry sample answers (overlaid in build_session) into the step
         # output so the debug pane shows `input.<field>` alongside `option`
-        # — that's the shape FSR exposes at runtime for manual_input.
+        # -- that's the shape FSR exposes at runtime for manual_input.
         jkey_mi = (cur.get("name") or sid).replace(" ", "_")
         existing_sample = (s.vars_ctx.get("steps", {}).get(jkey_mi)
                            or s.vars_ctx.get("steps", {}).get(sid) or {})
@@ -466,7 +466,7 @@ def _execute_one_step(s: DebugSession) -> dict[str, Any] | None:
 
 class SessionStore:
     """In-memory session store with TTL eviction. Process-local; not
-    safe for multi-worker deployments — debug runner is a developer
+    safe for multi-worker deployments -- debug runner is a developer
     tool in a single-process MCP server."""
 
     def __init__(self, ttl_seconds: float = _SESSION_TTL_SECONDS) -> None:
@@ -515,7 +515,7 @@ def get_store() -> SessionStore:
 
 
 # =====================================================================
-# Session bootstrap — parses YAML, picks the playbook, finds the start
+# Session bootstrap -- parses YAML, picks the playbook, finds the start
 # step. Mirrors the prelude of step_through_playbook.
 # =====================================================================
 
@@ -550,7 +550,7 @@ def build_session(
     for s in steps:
         if isinstance(s, dict) and "id" not in s and s.get("name"):
             s["id"] = s["name"]
-    # Same friendly-YAML bridge step_through_playbook applies — share
+    # Same friendly-YAML bridge step_through_playbook applies -- share
     # the helper so both paths walk decisions / manual_input the same.
     from .tools_analysis import _normalize_friendly_steps  # noqa: PLC0415
     _normalize_friendly_steps(steps)
@@ -566,7 +566,7 @@ def build_session(
     # into downstream Jinja from step 1, same as step_through_playbook.
     #
     # Samples are saved keyed by the slugified step name (e.g.
-    # `get_ip_address` for "Get IP Address") — same convention
+    # `get_ip_address` for "Get IP Address") -- same convention
     # `tools_analysis.step_test` uses. We try both forms here so authors
     # who hand-key the block by raw name still hit, and we mirror the
     # payload under every alias (raw id, slug, jkey) so downstream

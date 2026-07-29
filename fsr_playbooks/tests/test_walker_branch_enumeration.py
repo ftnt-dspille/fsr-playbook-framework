@@ -1,10 +1,10 @@
-"""Phase 0 (STATIC_TYPE_FLOW_PLAN) — branch enumeration on the resolved IR.
+"""Phase 0 (STATIC_TYPE_FLOW_PLAN) -- branch enumeration on the resolved IR.
 
 The typed walker is branch-aware (each trigger→leaf path gets its own
 `typed_env`; a `vars.steps.X` ref resolves only against producers on its
 branch), but it only forks at `decision`/`manual_input` steps whose
 `branches` dict is populated. `branches` is filled by the *resolver*, not
-the parser — so walking a fresh `parse_yaml` IR (branches={}) stops at the
+the parser -- so walking a fresh `parse_yaml` IR (branches={}) stops at the
 first decision. `verify_playbook` must walk `cres.ir` (the resolved IR)
 instead. These tests pin that.
 """
@@ -48,7 +48,7 @@ def test_resolved_ir_enumerates_both_arms():
 
 def test_branch_typed_envs_differ():
     # typed_env is keyed by jinja-key (display name, spaces→underscores,
-    # case preserved) — not the lowercased step id.
+    # case preserved) -- not the lowercased step id.
     w = _walk_resolved(_DECISION)
     env_keysets = [frozenset(b.typed_env.keys()) for b in w.branches]
     assert env_keysets[0] != env_keysets[1]
@@ -64,7 +64,7 @@ def test_branch_typed_envs_differ():
 
 # set_variable outputs are rewritten by the resolver to `vars.<name>`
 # (not `vars.steps.<step>`), so a cross-branch *step-output* reference must
-# use a step type whose output survives as `vars.steps.<step>` — e.g.
+# use a step type whose output survives as `vars.steps.<step>` -- e.g.
 # find_record. The Log-low arm references Find_Alerts, which only runs on
 # the high arm.
 _CROSS_BRANCH = """
@@ -107,7 +107,7 @@ def test_cross_branch_reference_flagged():
                for b in w.branches)
 
 
-# Find Alerts runs above Announce on the SAME branch — the ref is clean.
+# Find Alerts runs above Announce on the SAME branch -- the ref is clean.
 _SAME_BRANCH = """
 collection: t
 playbooks:

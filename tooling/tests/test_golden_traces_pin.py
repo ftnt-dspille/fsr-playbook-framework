@@ -8,23 +8,23 @@ investigation of fixture X looked like".
 This test replays each FROZEN golden trace through the same scoring gates the
 live calibration applies (`scoring._score_investigation` +
 `_score_investigation_quality`) and asserts it still clears its fixture's
-contract — recall ≥ gate, no forbidden pivot, every non-skipped quality gate
+contract -- recall ≥ gate, no forbidden pivot, every non-skipped quality gate
 green.
 
 SCOPE (deliberate, per Chat Intelligence Plan A4/A6 fast-vs-live split): this is
 the FAST/STRUCTURE guard. It reddens when an edit to a fixture's
 `required_facts`/`forbidden_facts`, or to the recall/forbidden scoring, breaks a
-case that used to pass — i.e. it pins the *durable investigation contract*. It
+case that used to pass -- i.e. it pins the *durable investigation contract*. It
 does NOT re-drive the agent, so a *prompt* regression is caught by the live
 `calibrate_investigation.py --baseline` capability gate, not here. Green here
 means "the contract is intact", not "the prompts are fine".
 
 What it hard-pins vs. warns on:
-  * HARD FAIL — recall ≥ gate and zero forbidden pivots. These are invariants of
+  * HARD FAIL -- recall ≥ gate and zero forbidden pivots. These are invariants of
     a *good* investigation: the required pivots stay reachable, the off-limits
     ones stay off-limits. A fixture/scoring edit that breaks either is a real
     regression.
-  * WARN ONLY — the quality gates (tool budget, param-flail, deliverable). On a
+  * WARN ONLY -- the quality gates (tool budget, param-flail, deliverable). On a
     FROZEN trace these are constants (the call count never changes), so pinning a
     historical capture to a later-tightened budget would redden CI for reasons
     unrelated to the trace. A drift here means the golden is STALE relative to
@@ -77,7 +77,7 @@ def test_golden_trace_still_clears_its_fixture(golden_path: Path):
     task = _tasks_by_name().get(fixture_name)
     assert task is not None, (
         f"golden {golden_path.name} references unknown fixture {fixture_name!r} "
-        "— add the fixture under python/evals/tasks/ or remove the golden"
+        "-- add the fixture under python/evals/tasks/ or remove the golden"
     )
     assert task.mode == "investigation", (
         f"{fixture_name}: golden pin only applies to investigation fixtures"
@@ -88,14 +88,14 @@ def test_golden_trace_still_clears_its_fixture(golden_path: Path):
         trace, task.required_facts, task.forbidden_facts)
     assert not rec["forbidden_hit"], (
         f"{fixture_name}: frozen golden now trips forbidden pivot(s) "
-        f"{rec['forbidden_hit']} — fixture/scoring edit broke a known-good case"
+        f"{rec['forbidden_hit']} -- fixture/scoring edit broke a known-good case"
     )
     assert rec["passed"], (
         f"{fixture_name}: frozen golden no longer clears recall "
         f"({rec['detail']}; missing={rec['missing']})"
     )
 
-    # 3) Quality gates (budget / flail / deliverable) — WARN, don't fail. On a
+    # 3) Quality gates (budget / flail / deliverable) -- WARN, don't fail. On a
     #    frozen trace these are constants; a miss means the golden is stale vs.
     #    today's quality bar and wants a live re-capture, not a red offline CI.
     quality = scoring._score_investigation_quality(
@@ -105,7 +105,7 @@ def test_golden_trace_still_clears_its_fixture(golden_path: Path):
     if drift:
         warnings.warn(
             f"STALE GOLDEN {fixture_name}: recall intact but quality drift "
-            f"{drift} — re-capture live (calibrate --capture / "
+            f"{drift} -- re-capture live (calibrate --capture / "
             f"chat-drive --capture-fixture) to refresh the bar",
             stacklevel=2,
         )

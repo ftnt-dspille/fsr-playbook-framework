@@ -44,7 +44,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     intro:
       'The compiler the editor calls on every keystroke. Parser → resolver → arg validator → graph validator → (optional) emit. All three are pure-local; nothing reaches FSR.',
     tools: [
-      { name: 'validate_yaml', blurb: 'Compiler dry-run — structured diagnostics with line/col + fix hints.', flags: ['safe', 'local'] },
+      { name: 'validate_yaml', blurb: 'Compiler dry-run -- structured diagnostics with line/col + fix hints.', flags: ['safe', 'local'] },
       { name: 'resolve_yaml', blurb: 'Whole-YAML resolvability check (picklists, install status, Jinja paths).', flags: ['safe', 'local'] },
       { name: 'compile_yaml', blurb: 'Compile YAML to FortiSOAR WorkflowCollection JSON.', flags: ['safe', 'local'] }
     ]
@@ -54,12 +54,12 @@ export const TOOL_GROUPS: ToolGroup[] = [
     title: 'Execution (live FSR)',
     accent: 'rose',
     intro:
-      'The only tools that mutate state. Used by the Studio’s Push / Push & Run buttons and — selectively — by the chat when it asks to probe a real op. Always gated.',
+      'The only tools that mutate state. Used by the Studio’s Push / Push & Run buttons and -- selectively -- by the chat when it asks to probe a real op. Always gated.',
     tools: [
       { name: 'run_op', blurb: 'Execute one connector op live and return its real output.', flags: ['mutating', 'live-fsr'] },
       { name: 'push_playbook', blurb: 'Compile a YAML playbook and push it to the live FSR.', flags: ['mutating', 'live-fsr'] },
       { name: 'run_playbook', blurb: 'Trigger a deployed playbook and (optionally) poll until terminal.', flags: ['mutating', 'live-fsr'] },
-      { name: 'dry_run_playbook', blurb: 'Compile + push + run + auto-cleanup — the agent’s full E2E loop in one call.', flags: ['mutating', 'live-fsr'] },
+      { name: 'dry_run_playbook', blurb: 'Compile + push + run + auto-cleanup -- the agent’s full E2E loop in one call.', flags: ['mutating', 'live-fsr'] },
       { name: 'healthcheck_connector', blurb: 'Live-check whether a single connector configuration is reachable.', flags: ['live-fsr'] }
     ]
   },
@@ -97,7 +97,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     title: 'Triage & run history',
     accent: 'teal',
     intro:
-      'Pull the live state of past runs and the appliance. Powers the History tab and the chat’s “why did this break” loop — spans live and archived run tables (FSR purges every 30–60 min).',
+      'Pull the live state of past runs and the appliance. Powers the History tab and the chat’s “why did this break” loop -- spans live and archived run tables (FSR purges every 30-60 min).',
     tools: [
       { name: 'get_run_env', blurb: 'Fetch the live Jinja context (vars + per-step results) of a past execution.', flags: ['live-fsr'] },
       { name: 'list_recent_failed_runs', blurb: 'List recent workflow runs (default: failures only) for triage.', flags: ['live-fsr'] },
@@ -114,7 +114,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     title: 'Picklists',
     accent: 'violet',
     intro:
-      'Discover and resolve picklists — friendly values to IRIs and back. Wired into Studio’s field-aware autocomplete and the resolver gate.',
+      'Discover and resolve picklists -- friendly values to IRIs and back. Wired into Studio’s field-aware autocomplete and the resolver gate.',
     tools: [
       { name: 'list_picklists', blurb: 'List every picklist listName.name known to the FSR instance.', flags: ['live-fsr'] },
       { name: 'get_picklist', blurb: 'List items of a single picklist as [{itemValue, uuid, iri, ordinal}].', flags: ['live-fsr'] },
@@ -130,7 +130,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     intro:
       'Stateful debug-runner that powers Studio’s Debug drawer (Restart / Step / Stop) plus the static render-path analyzer. Lets the agent walk a playbook step-by-step without ever pushing to FSR.',
     tools: [
-      { name: 'analyze_playbook', blurb: 'Render-path validator: simulate the playbook + run heuristic checks (C1–C10).', flags: ['safe', 'local'] },
+      { name: 'analyze_playbook', blurb: 'Render-path validator: simulate the playbook + run heuristic checks (C1-C10).', flags: ['safe', 'local'] },
       { name: 'step_through_playbook', blurb: 'Pre-push stepper: walk a playbook step-by-step without pushing.', flags: ['safe', 'local'] },
       { name: 'step_test', blurb: 'Single-step probe: render one step’s args + (if safe) execute it.', flags: ['safe', 'local'] },
       { name: 'start_debug_session', blurb: 'Create a fresh stateful debug session at the playbook’s start step.', flags: ['safe', 'local'] },
@@ -148,7 +148,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     title: 'Recipes & failure diagnosis',
     accent: 'emerald',
     intro:
-      'Higher-order tools that combine the primitives — generate a working ingestion playbook from a connector’s info.json, or one-shot triage why a past run failed.',
+      'Higher-order tools that combine the primitives -- generate a working ingestion playbook from a connector’s info.json, or one-shot triage why a past run failed.',
     tools: [
       { name: 'generate_recipe', blurb: 'Synthesize an ingestion playbook from a connector’s info.json.', flags: ['local'] },
       { name: 'find_recipe', blurb: 'Look up persisted recipes by name / connector / kind.', flags: ['local'] },
@@ -166,7 +166,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     tools: [
       { name: 'verify_playbook', blurb: 'Single forcing-function pre-submit gate.', flags: ['safe', 'local'] },
       { name: 'verify_enhancement', blurb: 'Diff-aware pre-submit gate for enhance mode.', flags: ['safe', 'local'] },
-      { name: 'emit_decision_step', blurb: 'Emit a canonical decision step — schema enforced so malformed shapes can’t be produced.', flags: ['local'] }
+      { name: 'emit_decision_step', blurb: 'Emit a canonical decision step -- schema enforced so malformed shapes can’t be produced.', flags: ['local'] }
     ]
   },
   {
@@ -186,7 +186,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
 
 export const TOOL_TOTAL = TOOL_GROUPS.reduce((n, g) => n + g.tools.length, 0);
 
-// Tailwind needs literal class names — JIT scans source.
+// Tailwind needs literal class names -- JIT scans source.
 export const accentClasses: Record<
   string,
   { ring: string; text: string; bg: string; border: string; dot: string }

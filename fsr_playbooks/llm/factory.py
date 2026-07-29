@@ -22,7 +22,7 @@ _CONFIG_PROVIDER: Optional[ConfigProvider] = None
 
 
 def set_config_provider(provider: ConfigProvider) -> None:
-    """Consumer hook — call once at startup with the implementation that
+    """Consumer hook -- call once at startup with the implementation that
     knows how to resolve provider configs in this environment."""
     global _CONFIG_PROVIDER
     _CONFIG_PROVIDER = provider
@@ -93,7 +93,7 @@ def registered_names() -> list[str]:
 
 
 def reset_registry() -> None:
-    """Test helper — wipes the registry. Production code should never
+    """Test helper -- wipes the registry. Production code should never
     call this."""
     _REGISTRY.clear()
 

@@ -1,11 +1,11 @@
-"""Simulated FSR client — offline / demo data source.
+"""Simulated FSR client -- offline / demo data source.
 
 When the connector's ``simulation_mode`` config is enabled, the
 ``probes._env`` bridge binds :func:`get_client` here instead of the live
 crudhub client (:mod:`fsr_playbooks.mcp_server._live_crudhub`). The agent loop,
 the reference DB, and every *pure-local* tool (compile / validate / resolve /
 render / find_connector / find_operation / get_op_schema …) run completely
-unchanged — only the three *live-touching* FortiSOAR integration endpoints
+unchanged -- only the three *live-touching* FortiSOAR integration endpoints
 are served from canned fixtures instead of hitting the platform:
 
     POST /api/integration/connector_details/        -> a roster of healthy,
@@ -24,8 +24,8 @@ gate and starves a hunt/timeline/blast-radius demo of data. Simulation mode
 gives the real agent rich, deterministic data to reason over without any
 live dependency, and doubles as the substrate for the offline test harness.
 
-The surface mirrors the slice of ``pyfsr.FortiSOAR`` the tools touch — the
-same contract :class:`_live_crudhub.CrudhubLiveClient` implements — so the
+The surface mirrors the slice of ``pyfsr.FortiSOAR`` the tools touch -- the
+same contract :class:`_live_crudhub.CrudhubLiveClient` implements -- so the
 swap is invisible to the ~50 tool call-sites.
 """
 from __future__ import annotations

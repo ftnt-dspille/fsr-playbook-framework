@@ -1,4 +1,4 @@
-"""§2.3 output budgeting — oversized tool_result bodies are capped by
+"""§2.3 output budgeting -- oversized tool_result bodies are capped by
 ``shrink_history`` while the freshest result stays full.
 
 Covers the gap the idempotent-dedup and yaml-arg passes miss: a single large

@@ -1,4 +1,4 @@
-"""CLI smoke tests — invoke each subcommand as a subprocess.
+"""CLI smoke tests -- invoke each subcommand as a subprocess.
 
 We use subprocess (not import) because that's how users actually run
 fsrpb. Catches PYTHONPATH / module-resolution regressions the unit
@@ -13,7 +13,7 @@ import sys
 import pytest
 
 # Use the SAME interpreter running the tests (the project .venv), not a bare
-# "python3" — under pre-commit's minimal PATH that resolves to the system python
+# "python3" -- under pre-commit's minimal PATH that resolves to the system python
 # which lacks the project deps (jinja2/mcp), so the CLI subprocess ImportError'd
 # even though the test process itself had them. sys.executable is venv-correct
 # everywhere (make tests, pre-commit, CI).
@@ -94,7 +94,7 @@ def test_roundtrip_subcommand(repo_root, db_path, corpus_path, tmp_path):
 
 
 def test_push_subcommand_registered(repo_root):
-    """We don't hit the live FSR in tests — just confirm the subcommand
+    """We don't hit the live FSR in tests -- just confirm the subcommand
     is wired and shows up in --help."""
     r = _run(repo_root, "--help")
     assert r.returncode == 0

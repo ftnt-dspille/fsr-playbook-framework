@@ -1,5 +1,5 @@
 /**
- * Coverage for the consolidated Design-mode toolbar — companion to
+ * Coverage for the consolidated Design-mode toolbar -- companion to
  * EditorToolbar.test.ts (which pins undo/redo + layout + Jinja).
  * Here we pin the chrome trim: no Validate / Compile / Analyze / Verify
  * buttons, no separate verify pill, single combined err/warn chip,

@@ -1,6 +1,6 @@
 """`is_upsert` on create_record routes the step at the upsert endpoint.
 
-FortiSOAR exposes record upsert as a *separate collection* —
+FortiSOAR exposes record upsert as a *separate collection* --
 ``/api/3/upsert/<module>``, not a flag on InsertData. So ``is_upsert`` is a
 friendly YAML lever that ``expand_record_crud`` compiles away: it rewrites the
 collection, defaults ``operation: Overwrite`` (the idempotent write op), and is
@@ -35,7 +35,7 @@ def test_is_upsert_rewrites_collection_and_sets_overwrite():
     assert not errs, errs
     assert args["collection"] == "/api/3/upsert/alerts"
     assert args["operation"] == "Overwrite"
-    # The friendly lever is compiled away — it is not a real InsertData wire arg.
+    # The friendly lever is compiled away -- it is not a real InsertData wire arg.
     assert "is_upsert" not in args
 
 

@@ -96,7 +96,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 # Tiered retention for AUTO revisions. Manual saves (is_auto=0) are
-# never pruned — those are checkpoints the user explicitly committed
+# never pruned -- those are checkpoints the user explicitly committed
 # to. Same shape Google Docs uses ("aggregate older changes").
 #
 # Each tier covers an age range and keeps the newest auto-revision per
@@ -106,10 +106,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 # encoded as `bucket_seconds = None`.
 _PRUNE_TIERS: tuple[tuple[int, int, int | None], ...] = (
     # (age_low_seconds, age_high_seconds, bucket_seconds)
-    (60,           60 * 60,             60),          # 1min–1hr: 1min buckets
-    (60 * 60,      24 * 60 * 60,        10 * 60),     # 1hr–1d:  10min buckets
-    (24 * 60 * 60, 7 * 24 * 60 * 60,    60 * 60),     # 1d–1w:   1hr buckets
-    (7 * 24 * 60 * 60,  30 * 24 * 60 * 60, 24 * 60 * 60),  # 1w–1mo: 1day buckets
+    (60,           60 * 60,             60),          # 1min-1hr: 1min buckets
+    (60 * 60,      24 * 60 * 60,        10 * 60),     # 1hr-1d:  10min buckets
+    (24 * 60 * 60, 7 * 24 * 60 * 60,    60 * 60),     # 1d-1w:   1hr buckets
+    (7 * 24 * 60 * 60,  30 * 24 * 60 * 60, 24 * 60 * 60),  # 1w-1mo: 1day buckets
     (30 * 24 * 60 * 60, 10 ** 12,       None),        # older: drop
 )
 
@@ -117,7 +117,7 @@ _PRUNE_TIERS: tuple[tuple[int, int, int | None], ...] = (
 def _prune_auto_revisions(conn: sqlite3.Connection, draft_name: str) -> int:
     """Apply tiered retention to this draft's auto-revisions. Called
     inside the same transaction as the INSERT so prune+insert are
-    atomic — a crash between them can't leave the table mid-pruned.
+    atomic -- a crash between them can't leave the table mid-pruned.
 
     Returns the number of rows deleted (useful for tests + telemetry).
 
@@ -170,7 +170,7 @@ def _now() -> str:
 def _validate_name(name: str) -> str:
     """Accept user-supplied draft names but reject anything that could
     travel back as a path segment misinterpretation. Drafts are keyed in
-    SQLite, not the filesystem — but the name shows up in URLs so keep
+    SQLite, not the filesystem -- but the name shows up in URLs so keep
     it ASCII-printable, no slashes, modest length."""
     name = (name or "").strip()
     if not name:
@@ -334,7 +334,7 @@ def put_draft(
     surface a recoverable conflict UI instead of silently overwriting
     a peer tab's edit.
 
-    Saves without `If-Match` skip the check — useful for first-time
+    Saves without `If-Match` skip the check -- useful for first-time
     creates and explicit "Overwrite" resolutions from the conflict UI.
 
     `auto=true` flags the revision as a system snapshot.
@@ -410,7 +410,7 @@ def put_draft(
         )
         rev_id = cursor.lastrowid
         conn.execute("UPDATE drafts SET head_revision_id=? WHERE name=?", (rev_id, name))
-        # Prune older auto-revisions in the same txn — keeps the table
+        # Prune older auto-revisions in the same txn -- keeps the table
         # bounded without a background job, and a crash mid-save can't
         # leave it half-pruned. Manual saves are never touched.
         _prune_auto_revisions(conn, name)

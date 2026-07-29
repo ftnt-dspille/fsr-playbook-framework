@@ -39,7 +39,7 @@ def test_layout_block_persists_and_is_stable() -> None:
     g["playbooks"][0]["nodes"][0]["position"] = {"x": 12, "y": 34}
     out = from_visual(g, text)
     # Layout block now lives at the bottom of the file so the YAML body
-    # opens with the playbook itself — readable diffs, no header noise.
+    # opens with the playbook itself -- readable diffs, no header noise.
     assert "# fsrpb:layout\n" in out, "layout marker missing"
     assert out.rstrip().endswith("# fsrpb:layout-end"), "layout block should be at footer"
 
@@ -63,7 +63,7 @@ def test_decision_branches_become_edges() -> None:
 
 
 def test_arg_edit_round_trips() -> None:
-    """Phase 3 — argument-level edits write back through ruamel."""
+    """Phase 3 -- argument-level edits write back through ruamel."""
     text = (EXAMPLES / "decision_branch.yaml").read_text()
     g = to_visual(text)
     # Find the set_variable that defines `severity` and rename the var.
@@ -74,7 +74,7 @@ def test_arg_edit_round_trips() -> None:
     }
     out = from_visual(g, text)
     assert "| upper" in out, "edit didn't reach the YAML body"
-    # Re-parse the edited YAML — should still be valid + reflect the change.
+    # Re-parse the edited YAML -- should still be valid + reflect the change.
     g2 = to_visual(out)
     assert g2["errors"] == []
     sv2 = next(n for n in g2["playbooks"][0]["nodes"] if n["id"] == "read_severity")
@@ -82,7 +82,7 @@ def test_arg_edit_round_trips() -> None:
 
 
 def test_decision_branch_retarget_round_trips() -> None:
-    """Phase 3.5/3.6 — flip a decision's branch targets; YAML reflects it."""
+    """Phase 3.5/3.6 -- flip a decision's branch targets; YAML reflects it."""
     text = (EXAMPLES / "decision_branch.yaml").read_text()
     g = to_visual(text)
     edges = g["playbooks"][0]["edges"]

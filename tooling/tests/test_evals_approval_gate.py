@@ -70,7 +70,7 @@ def _reset_state():
 
 
 def test_suspend_is_default(monkeypatch):
-    # This exercises the suspend→card gate, not connector existence — neutralize
+    # This exercises the suspend→card gate, not connector existence -- neutralize
     # the (real) unknown-connector bounce so the placeholder connector still cards.
     monkeypatch.setattr(_tools, "_run_op_absent_connector_error", lambda c, o: None)
     out = _tools.dispatch("run_op", {"connector": "__x__", "op": "__y__"})
@@ -80,7 +80,7 @@ def test_suspend_is_default(monkeypatch):
 def test_approve_all_bypasses_gate():
     _tools.set_eval_policy("approve-all")
     out = _tools.dispatch("run_op", {"connector": "__x__", "op": "__y__"})
-    # Underlying call ran (and errored on bogus op) — but NOT pending_approval.
+    # Underlying call ran (and errored on bogus op) -- but NOT pending_approval.
     assert "pending_approval" not in out
     audit = _tools.snapshot_audit_log()
     assert audit[-1]["decision"] == "approved"

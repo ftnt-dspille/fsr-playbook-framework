@@ -1,6 +1,6 @@
 """Guards the trace-compiler side of the default-flip parity evidence: every
 sim-replayed trace fixture must build into a playbook that clears the SAME
-`verify_playbook.ready_to_push` bar a hand-authored gold does — with no static
+`verify_playbook.ready_to_push` bar a hand-authored gold does -- with no static
 errors and no wire downgraded to a literal (repaired=0). Deterministic; the live
 model-authoring rate is gathered separately (see parity_report's docstring).
 """

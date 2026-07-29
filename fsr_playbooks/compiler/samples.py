@@ -1,8 +1,8 @@
 """Sample-data sidecar for `manual_input` steps (and future use).
 
 Authors test downstream Jinja against synthetic answers without running
-the playbook. The data lives in a YAML comment block — same pattern as
-`# fsrpb:layout` — so it never reaches FSR on push but survives parse →
+the playbook. The data lives in a YAML comment block -- same pattern as
+`# fsrpb:layout` -- so it never reaches FSR on push but survives parse →
 round-trip writes.
 
 Shape:
@@ -16,8 +16,8 @@ Shape:
     # fsrpb:samples-end
 
 Per-step values are merged into `vars.steps.<step_id>` before rendering.
-For `manual_input` the convention is `{input: {<name>: <value>}}` —
-matching the runtime shape FSR exposes — but the merge is generic so
+For `manual_input` the convention is `{input: {<name>: <value>}}` --
+matching the runtime shape FSR exposes -- but the merge is generic so
 later step types (e.g. fake connector outputs) can drop into the same
 block without code changes.
 """
@@ -119,7 +119,7 @@ def _deep_fill(dst: dict[str, Any], src: dict[str, Any]) -> None:
 
 
 def _deep_copy(v: Any) -> Any:
-    """Cheap structural copy for the sample payload — keeps the source
+    """Cheap structural copy for the sample payload -- keeps the source
     map immutable when callers later mutate the vars context."""
     if isinstance(v, dict):
         return {k: _deep_copy(x) for k, x in v.items()}

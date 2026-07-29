@@ -1,4 +1,4 @@
-"""FortiAI Proxy provider — on-appliance LLM adapter.
+"""FortiAI Proxy provider -- on-appliance LLM adapter.
 
 Drives the agent loop through the on-appliance `fortinet-fortiai-proxy`
 connector (`agent_chat_completions` operation). Non-streaming, one HTTP
@@ -46,7 +46,7 @@ def _normalize_tools_fortiai(tools: list[dict[str, Any]]) -> list[dict[str, Any]
     The connector advertises an intent tool-slice using the Anthropic shape
     (``{name, description, input_schema}``) regardless of the active provider.
     The proxy rejects both OpenAI's ``{type: function, function: {parameters}}``
-    and Anthropic's ``{name, description, input_schema}`` — it requires the
+    and Anthropic's ``{name, description, input_schema}`` -- it requires the
     plain ``schema`` key.  Already-correct shapes pass through untouched.
     """
     out: list[dict[str, Any]] = []
@@ -131,7 +131,7 @@ class FortiAIProxyProvider:
         flattened-text tool result messages, and re-enters stream()."""
         if not _approvals.verify(suspended):
             yield ErrorEvent(
-                message="Approval binding check failed — the suspended action "
+                message="Approval binding check failed -- the suspended action "
                         "could not be verified and was not executed. Re-issue "
                         "the request."
             )
@@ -168,7 +168,7 @@ class FortiAIProxyProvider:
         for skipped in suspended.remaining_tool_calls:
             carried.append({
                 "role": "assistant",
-                "content": f"[called {skipped.name} — superseded by approval]",
+                "content": f"[called {skipped.name} -- superseded by approval]",
             })
             carried.append({
                 "role": "user",
@@ -243,7 +243,7 @@ class FortiAIProxyProvider:
                         # Non-dict block (str, etc.) → wrap as user message
                         history.append({"role": "user", "content": str(block)})
 
-        # P4 — repeated-error guard
+        # P4 -- repeated-error guard
         failed_signatures: set[str] = set()
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:
@@ -269,7 +269,7 @@ class FortiAIProxyProvider:
                     "error": (
                         f"This exact call to `{nm}` already failed earlier this "
                         f"turn and was NOT re-run. Do not retry the identical "
-                        f"arguments — change the inputs or stop and report the "
+                        f"arguments -- change the inputs or stop and report the "
                         f"blocker in your assessment."
                     ),
                 }

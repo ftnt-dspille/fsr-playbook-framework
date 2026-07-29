@@ -9,8 +9,8 @@ import { sampleRecordsStore, triggerModuleFieldsStore, globalVarsStore } from '.
 
 // Mock runVarsStore so we can dictate observedAt's return values
 // without driving the (already tested) fetch flow. Reactivity still
-// works — $state inside the stub re-renders the pane on change.
-// Plain (non-reactive) mock — sufficient because all tests seed
+// works -- $state inside the stub re-renders the pane on change.
+// Plain (non-reactive) mock -- sufficient because all tests seed
 // observed values BEFORE render. If we ever need post-render updates,
 // move the factory into a `.svelte.ts` helper so $state can be used.
 vi.mock('../runVarsStore.svelte', () => {
@@ -105,7 +105,7 @@ describe('VarTreePane', () => {
     expect(screen.getByRole('button', { name: /step outputs/i })).toBeTruthy();
   });
 
-  /** records[0] is collapsed by default — open it so the field rows
+  /** records[0] is collapsed by default -- open it so the field rows
    *  are visible. Wait for the trigger-module fields to hydrate first
    *  (otherwise we'd expand into the 3-entry default placeholder set
    *  and miss the catalog-driven `severity` row). */
@@ -113,7 +113,7 @@ describe('VarTreePane', () => {
     await waitFor(() => expect(screen.getByText(/alerts record/i)).toBeTruthy());
     // The label button calls `pick(n)` (insert). The expand caret next
     // to it is a separate button with aria-label "Expand"/"Collapse".
-    // We need the records[0] row's caret specifically — find the
+    // We need the records[0] row's caret specifically -- find the
     // <div> that contains the records[0] label, then its Expand button.
     const recordsLabel = screen.getByText(/^records\[0\]$/);
     const row = recordsLabel.closest('div');

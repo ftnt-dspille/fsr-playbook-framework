@@ -9,14 +9,14 @@ export interface JinjaTemplateExample {
 export const templateExamples: JinjaTemplateExample[] = [
   {
     id: 'greeting',
-    label: 'Greeting — simple variable',
+    label: 'Greeting -- simple variable',
     description: 'Interpolate a single field with a fallback.',
     template: "Hello, {{ vars.input.records[0].name | default('stranger') }}!",
     input: { vars: { input: { records: [{ name: 'Ada' }] } } }
   },
   {
     id: 'record-summary',
-    label: 'Record summary — multi-line',
+    label: 'Record summary -- multi-line',
     description: 'Print several fields from the current record.',
     template:
       'Name:    {{ vars.input.records[0].name }}\n' +
@@ -32,7 +32,7 @@ export const templateExamples: JinjaTemplateExample[] = [
   },
   {
     id: 'loop-table',
-    label: 'Loop — render a table of alerts',
+    label: 'Loop -- render a table of alerts',
     description: 'Iterate over records with loop.index and conditional rows.',
     template:
       '{% for alert in vars.input.records %}\n' +
@@ -54,22 +54,22 @@ export const templateExamples: JinjaTemplateExample[] = [
   },
   {
     id: 'conditional',
-    label: 'Conditional — if / elif / else',
+    label: 'Conditional -- if / elif / else',
     description: 'Branch on a numeric score.',
     template:
       '{% set score = vars.input.records[0].risk_score %}\n' +
       '{% if score >= 80 %}\n' +
-      'CRITICAL — immediate response required ({{ score }}).\n' +
+      'CRITICAL -- immediate response required ({{ score }}).\n' +
       '{% elif score >= 50 %}\n' +
-      'Elevated — review within the hour ({{ score }}).\n' +
+      'Elevated -- review within the hour ({{ score }}).\n' +
       '{% else %}\n' +
-      'Low — routine handling ({{ score }}).\n' +
+      'Low -- routine handling ({{ score }}).\n' +
       '{% endif %}',
     input: { vars: { input: { records: [{ risk_score: 72 }] } } }
   },
   {
     id: 'macro',
-    label: 'Macro — reusable row renderer',
+    label: 'Macro -- reusable row renderer',
     description: 'Define a macro and call it inside a loop.',
     template:
       '{% macro row(item) %}' +
@@ -92,7 +92,7 @@ export const templateExamples: JinjaTemplateExample[] = [
   },
   {
     id: 'filter-chain',
-    label: 'Filter chain — normalize strings',
+    label: 'Filter chain -- normalize strings',
     description: 'Demonstrates trim, lower, replace, title filters.',
     template:
       '{{ vars.input.records[0].title ' +
@@ -105,7 +105,7 @@ export const templateExamples: JinjaTemplateExample[] = [
   },
   {
     id: 'json-extract',
-    label: 'Extract — unique list join',
+    label: 'Extract -- unique list join',
     description: 'Collect one field across records and join the unique values.',
     template:
       'Affected hosts: ' +
@@ -125,7 +125,7 @@ export const templateExamples: JinjaTemplateExample[] = [
   },
   {
     id: 'api-response',
-    label: 'API response — summarize a result block',
+    label: 'API response -- summarize a result block',
     description: 'Typical vars.steps.<step>.data shape from FortiSOAR.',
     template:
       'Fetched {{ vars.steps.getUsers.data.hydra_totalItems }} user(s):\n' +

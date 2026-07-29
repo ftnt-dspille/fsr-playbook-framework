@@ -1,4 +1,4 @@
-"""Staged-action coverage — an `emit_action_card` containment the analyst was
+"""Staged-action coverage -- an `emit_action_card` containment the analyst was
 offered but never executed must still be replayed into a trace-built playbook
 (the `action_coverage` gap, CHAT_INTELLIGENCE §B4)."""
 from __future__ import annotations
@@ -36,7 +36,7 @@ def test_executed_op_wins_over_staged_duplicate():
     t = SkillTrace()
     t.record_run_op("fortigate-firewall", "block_ip_new", {"ip": "1.2.3.4"},
                     {"status": "blocked"})
-    # The action later staged again must NOT add a second step — the executed
+    # The action later staged again must NOT add a second step -- the executed
     # one (with its real output) wins.
     assert t.record_staged_action("fortigate-firewall", "block_ip_new",
                                   {"ip": "1.2.3.4"}) is None

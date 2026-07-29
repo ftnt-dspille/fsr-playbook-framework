@@ -1,19 +1,19 @@
 /**
  * Browser-mode setup. Real Chromium has all the DOM APIs Monaco needs
  * (ResizeObserver, matchMedia, layout boxes, requestAnimationFrame),
- * so the only thing to wire here is Monaco's worker shim — using
+ * so the only thing to wire here is Monaco's worker shim -- using
  * editor-only languages without workers keeps the bundle slim and
  * avoids vite worker-resolution gymnastics in the test runner.
  *
  * @ts-expect-error Monaco's worker contract is loose; this stub is
- * intentionally minimal — Monaco falls back to inline tokenization
+ * intentionally minimal -- Monaco falls back to inline tokenization
  * when getWorker returns no usable Worker.
  */
 import '@testing-library/jest-dom/vitest';
 
 // Monaco looks at self.MonacoEnvironment for worker URLs. With no
 // configured worker URL it logs a one-time warning but continues to
-// function for the editor.api surface — which is what our tests use.
+// function for the editor.api surface -- which is what our tests use.
 // Monaco's editor.dispose() cancels in-flight language-service promises
 // with a sentinel rejection (`Canceled`) that Vitest otherwise surfaces
 // as an unhandled error. Swallow only that exact kind.

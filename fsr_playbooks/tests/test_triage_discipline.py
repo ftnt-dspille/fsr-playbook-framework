@@ -59,7 +59,7 @@ def test_containment_allowed_after_floor():
 
 def test_authoring_exempts_containment_discovery_from_floor():
     """In build/authoring the hunt-floor gate must NOT block
-    find_containment_actions / find_enrichment_actions DISCOVERY — there is no
+    find_containment_actions / find_enrichment_actions DISCOVERY -- there is no
     live alert to investigate, and the build agent legitimately uses them to
     learn which ops exist (e.g. which connector op blocks an IP)."""
     d = TriageDiscipline(authoring=True)
@@ -72,14 +72,14 @@ def test_authoring_exempts_containment_discovery_from_floor():
 def test_authoring_still_gates_emit_action_card():
     """Belt-and-suspenders: even in authoring the actual STAGING tool stays
     floor-gated. It should never be in a build slice, but if it leaks in, the
-    exemption is discovery-only — staging is still blocked."""
+    exemption is discovery-only -- staging is still blocked."""
     d = TriageDiscipline(authoring=True)
     g = _drive(d, "emit_action_card", {})
     assert g is not None and g["hunt_floor_guard"] is True
 
 
 def test_triage_default_still_gates_containment_discovery():
-    """Regression: authoring defaults False, so triage is byte-unchanged —
+    """Regression: authoring defaults False, so triage is byte-unchanged --
     find_containment_actions is still floor-gated before investigation."""
     d = TriageDiscipline()  # authoring defaults False
     g = _drive(d, "find_containment_actions", {})
@@ -87,7 +87,7 @@ def test_triage_default_still_gates_containment_discovery():
 
 
 def test_failed_investigation_attempts_still_count():
-    """Attempts, not successes — a config gap can't deadlock the floor."""
+    """Attempts, not successes -- a config gap can't deadlock the floor."""
     d = TriageDiscipline()
     for _ in range(MIN_INVESTIGATION_BEFORE_CONTAINMENT):
         _drive(d, "siem_search_ip", {"ip": "1.2.3.4"})
@@ -145,7 +145,7 @@ def test_find_enrichment_actions_call_once():
 def test_call_once_is_per_target_type():
     """Regression: the call-once guard is scoped by target_type. These tools
     filter their result set by indicator type, so a call for `domain` and a
-    call for `ip` are DISTINCT and both legitimate — only a repeat of the SAME
+    call for `ip` are DISTINCT and both legitimate -- only a repeat of the SAME
     target_type is a wasteful duplicate. (Live-observed: a triage that scoped
     find_containment_actions to `ip` then `endpoint` was wrongly blocked.)"""
     d = TriageDiscipline()
@@ -312,7 +312,7 @@ def test_no_state_behavior_unchanged():
 def test_is_error_result_guards_not_errors():
     """Provider does NOT flag guard_redirect results as is_error (design item 6).
 
-    Guard redirects are steering, not errors — they should be rendered
+    Guard redirects are steering, not errors -- they should be rendered
     as info-tone steering, not red errors.
     """
     # Regular errors are marked is_error
@@ -356,7 +356,7 @@ def _caps():
 
 def test_capability_guard_short_circuits_known_unavailable():
     """A run_op against a connector already recorded unavailable is blocked
-    with a guard_redirect — no live re-probe (design item 4)."""
+    with a guard_redirect -- no live re-probe (design item 4)."""
     caps = _caps()
     caps.unavailable["whois-rdap"] = "connector_not_configured"
     d = TriageDiscipline(capabilities=caps)
@@ -410,7 +410,7 @@ def test_note_result_success_confirms_and_clears():
 
 
 def test_recheck_clears_unavailable():
-    """list_configured_connectors success clears ALL unavailable entries —
+    """list_configured_connectors success clears ALL unavailable entries --
     the capability-gap 'Re-check & continue' gesture (design item 4)."""
     caps = _caps()
     caps.unavailable.update({
@@ -474,7 +474,7 @@ def test_credit_as_investigation_registers_extra_names():
 def test_containment_verb_in_op_name_escalates_tier():
     """Regression (GA beat-5): FortiEDR's `isolate_collector` is categorized
     `investigation` in the catalog and had NO op_safety verdict on the live box,
-    so it resolved to tier 2 — `run_op` would have isolated a host with no
+    so it resolved to tier 2 -- `run_op` would have isolated a host with no
     approval card, and find_containment_actions dropped it from the tier>=3
     slice. The op name is the fail-safe signal."""
     from fsr_playbooks.llm.tools import _op_name_is_destructive, _tier_for_run_op

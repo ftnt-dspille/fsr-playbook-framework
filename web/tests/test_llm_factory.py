@@ -135,7 +135,7 @@ def test_provider_name_attribute_present():
 
 
 def test_satisfies_runtime_protocol_check():
-    """`LLMProvider` is a structural Protocol — a duck check confirms
+    """`LLMProvider` is a structural Protocol -- a duck check confirms
     we haven't drifted from it."""
     fake = FakeProvider([])
     # Protocol can be used as a structural type guard via hasattr

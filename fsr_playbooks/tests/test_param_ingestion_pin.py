@@ -1,10 +1,10 @@
-"""Phase 4b (STATIC_TYPE_FLOW) — pin the live connector-param ingestion matrix.
+"""Phase 4b (STATIC_TYPE_FLOW) -- pin the live connector-param ingestion matrix.
 
 The live probe (`python/probes/probe_param_ingestion.py`) proved two things on
 FortiCloud SOAR (build 7.6.5), captured in
 `store/probe_results/param_ingestion_coercion.json`:
 
-  1. **Widget type is irrelevant** — a value sent into a text param and into an
+  1. **Widget type is irrelevant** -- a value sent into a text param and into an
      integer param arrives as the SAME python type. The widget type does NOT
      drive runtime coercion (it is a UI hint only).
   2. **Ingestion applies the identical smart-cast as set_variable** (the Phase
@@ -13,7 +13,7 @@ FortiCloud SOAR (build 7.6.5), captured in
 
 This test pins both against the committed artifact so an FSR upgrade that
 changes the behavior fails here (re-run the probe, update the matrix). It is
-offline — it reads the committed JSON, no live calls. Skips if the artifact is
+offline -- it reads the committed JSON, no live calls. Skips if the artifact is
 absent (e.g. a checkout that never ran the probe).
 
 Consequence for the analyzer (why Phase 4 ships NO extra scalar→scalar rule):

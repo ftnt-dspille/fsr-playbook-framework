@@ -1,4 +1,4 @@
-"""FakeProvider — scripted event stream for tests.
+"""FakeProvider -- scripted event stream for tests.
 
 Construct with a list-of-list-of-events; each inner list is one LLM
 round-trip's worth of events. The provider emits each in order. Useful

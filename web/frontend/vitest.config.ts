@@ -1,9 +1,9 @@
 /**
  * Two-project Vitest setup:
  *
- *   1. jsdom  — fast unit tests, monaco-editor aliased to a tiny mock
+ *   1. jsdom  -- fast unit tests, monaco-editor aliased to a tiny mock
  *               in src/lib/__mocks__/. Used by *.test.ts.
- *   2. browser — real Chromium via Playwright. No alias, so monaco-editor
+ *   2. browser -- real Chromium via Playwright. No alias, so monaco-editor
  *                resolves to the real npm package. Used by *.browser.test.ts
  *                for integration assertions (completion popup opens,
  *                snippet expansion lands in the model, hover bubble

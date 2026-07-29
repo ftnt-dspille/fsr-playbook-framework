@@ -96,7 +96,7 @@ playbooks:
 
 
 def test_jinja_value_skipped(db_path):
-    # Jinja values resolve at runtime — never warn on them.
+    # Jinja values resolve at runtime -- never warn on them.
     # `op` is defined by a SetVariable so this isolates the corpus-literal
     # check (which must SKIP a Jinja `operation` value) from the orthogonal
     # undefined-vars warning (_check_undefined_vars), which legitimately fires

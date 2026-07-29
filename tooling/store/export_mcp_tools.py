@@ -19,7 +19,7 @@ OUT = REPO_ROOT / "store" / "MCP_TOOLS.md"
 
 def _is_mcp_tool(decorators: list[ast.expr]) -> bool:
     for d in decorators:
-        # @mcp.tool() — Call(Attribute(Name('mcp'), 'tool'))
+        # @mcp.tool() -- Call(Attribute(Name('mcp'), 'tool'))
         if (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
                 and isinstance(d.func.value, ast.Name)
                 and d.func.value.id == "mcp" and d.func.attr == "tool"):
@@ -92,7 +92,7 @@ def _extract_banners(source: str) -> list[tuple[int, str]]:
 # Hand-curated mapping of tool name → category. Keeps the doc structured
 # without depending on file ordering or comment-banner heuristics.
 CATEGORIES: dict[str, str] = {
-    # Reference store — read-only lookups
+    # Reference store -- read-only lookups
     "find_connector": "Reference / lookup",
     "find_operation": "Reference / lookup",
     "get_op_schema": "Reference / lookup",
@@ -119,7 +119,7 @@ CATEGORIES: dict[str, str] = {
     "get_run_env": "Authoring loop",
     "list_recent_failed_runs": "Authoring loop",
     "list_playbook_runs": "Authoring loop",
-    # Live FSR — connector execution + health
+    # Live FSR -- connector execution + health
     "run_op": "Live FSR",
     "list_configured_connectors": "Live FSR",
     "healthcheck_connector": "Live FSR",
@@ -146,7 +146,7 @@ def main() -> None:
         items.sort(key=lambda t: t[0])
 
     lines: list[str] = []
-    lines.append("# MCP Tools — fsrpb agent surface\n")
+    lines.append("# MCP Tools -- fsrpb agent surface\n")
     lines.append("Auto-generated from `python/mcp_server.py` by "
                  "`python/store/export_mcp_tools.py`. **Do not hand-edit.**\n")
     n_groups = sum(1 for s in SECTION_ORDER if grouped.get(s))
@@ -158,7 +158,7 @@ def main() -> None:
         if not items:
             continue
         names = ", ".join(f"[`{n}`](#{n.replace('_','-')})" for n, _, _ in items)
-        lines.append(f"- **{section}** — {names}")
+        lines.append(f"- **{section}** -- {names}")
     lines.append("\n---\n")
 
     for section in SECTION_ORDER:

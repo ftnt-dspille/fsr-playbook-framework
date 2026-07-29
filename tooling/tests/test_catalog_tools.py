@@ -2,7 +2,7 @@
 
 These tests run against the live attached catalog when present. If
 the catalog is missing they assert the graceful-degrade envelope
-instead — the tools must NEVER throw.
+instead -- the tools must NEVER throw.
 """
 from __future__ import annotations
 
@@ -166,7 +166,7 @@ def test_propose_http_fallback_missing_args():
 @catalog_required
 def test_propose_http_fallback_picks_native_when_available():
     # virustotal has a get_ip_reputation op (or similar) in the FSR
-    # reference store — the native branch should win.
+    # reference store -- the native branch should win.
     out = propose_http_fallback("virustotal", "ip reputation")
     if out.get("ok") is True and out["decision"] == "native_op":
         assert out["step"]["connector"] == "virustotal"
@@ -179,7 +179,7 @@ def test_propose_http_fallback_picks_native_when_available():
 
 @catalog_required
 def test_propose_http_fallback_returns_http_step_when_no_native():
-    # Made-up intent for a real catalog vendor — should land on
+    # Made-up intent for a real catalog vendor -- should land on
     # http_fixture or no_grounded_shape, not throw.
     out = propose_http_fallback("akamai", "block url")
     assert out.get("ok") is True or out.get("code") == "no_grounded_shape"

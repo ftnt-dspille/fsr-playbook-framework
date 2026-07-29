@@ -3,7 +3,7 @@
 The classifier is language-agnostic (it judges MEANING via an injected LLM and
 we parse only our own one-word control output). The run-mode slice removes the
 authoring surface so a classified "run" turn has run_playbook as its only
-terminal action — closing the gap Lever 1 (dispatch forcing-redirect) can't:
+terminal action -- closing the gap Lever 1 (dispatch forcing-redirect) can't:
 the model fabricating full YAML with no playbook-name arg to key on.
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ def test_provider_error_fails_open_to_other():
 
 
 def test_language_agnostic_by_construction():
-    """No keyword list is consulted — a non-English 'run' request classifies as
+    """No keyword list is consulted -- a non-English 'run' request classifies as
     run purely from the (fake) model's judgment, proving no regex lock-in."""
     # Spanish: "ejecuta el playbook 'Extract Indicators'"
     assert classify_run_or_author("ejecuta el playbook 'Extract Indicators'", _fake("run")) == RUN
@@ -62,7 +62,7 @@ def test_run_mode_slice_is_only_the_allowlist():
     names = {t["name"] for t in tools_for_run_mode("build")}
     # run_playbook survives (it is in the base build slice)
     assert "run_playbook" in names
-    # nothing outside the allowlist is advertised — no authoring, no discovery
+    # nothing outside the allowlist is advertised -- no authoring, no discovery
     assert names <= RUN_MODE_KEEP_TOOLS
     # the tools the model kept mis-using / wandering into are all gone
     for gone in ("verify_playbook", "search_playbooks", "find_connector",

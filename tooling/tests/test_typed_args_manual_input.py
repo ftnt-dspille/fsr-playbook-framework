@@ -1,11 +1,11 @@
-"""Typed-args model for `manual_input` steps — registry contract + the new
+"""Typed-args model for `manual_input` steps -- registry contract + the new
 scalar validation. The friendly→canonical transform (the F3 bug site) stays in
 the imperative normalizer; `ManualInputArgs` is validation-only:
 `expand_manual_input` always returns None and never mutates the args.
 
 The model also backs `emit_step_arg_schema("manual_input")` (the introspection
 surface). Structural fields (`input`, `type`, `options`, `inputs`, `record`)
-are intentionally left untyped — their shape rules stay in the imperative path,
+are intentionally left untyped -- their shape rules stay in the imperative path,
 so this layer must not duplicate or false-positive on them."""
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def test_valid_friendly_args_no_errors_and_unchanged():
 
 
 def test_string_bool_coerced_no_error():
-    # pydantic's lax bool accepts the usual spellings — no false positive on a
+    # pydantic's lax bool accepts the usual spellings -- no false positive on a
     # common `is_approval: "true"` form.
     errs: list[CompileError] = []
     expand_manual_input({"is_approval": "true"}, "p.steps[0]", errs)
@@ -190,7 +190,7 @@ playbooks:
 def test_step_level_is_approval_hoists_and_repoints_step_type(db_path):
     # `is_approval` written next to the step (like `title`/`inputs`/`options`),
     # with NO `arguments:` block, must hoist into arguments and re-point the
-    # step type — otherwise it warns as an unknown step-level key and is dropped.
+    # step type -- otherwise it warns as an unknown step-level key and is dropped.
     text = """
 collection: T
 playbooks:

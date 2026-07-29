@@ -3,7 +3,7 @@
  * "Real run" mode.
  *
  * FSR's workflow-execution detail includes step traces, but the field
- * name + shape vary by version — we probe `wf_step_logs`, `step_logs`,
+ * name + shape vary by version -- we probe `wf_step_logs`, `step_logs`,
  * and `stepInstances` in that order and pull whichever has data. Each
  * trace entry is normalized into `{ stepKey: observedOutput }` so the
  * pane can look up a Jinja path like `vars.steps.Find_Issue.data[0].id`

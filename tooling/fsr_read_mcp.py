@@ -4,7 +4,7 @@
 The common live + reference-store **read** operations for backend / connector
 testing AND widget (frontend) work, exposed as a small, safe MCP surface. It
 re-registers a curated read subset of the battle-tested `fsr_playbooks.mcp_server`
-tools onto a dedicated FastMCP instance — no duplicated live-path logic, and
+tools onto a dedicated FastMCP instance -- no duplicated live-path logic, and
 none of the mutating/authoring tools (push_playbook, run_playbook, emit_*, the
 agent loop).
 
@@ -13,13 +13,13 @@ Widget-side tools (read-only, .env-cred client):
     resolve_picklist_value / precheck_picklist_value (csField dropdowns,
     cs-conditional, c3charts groupby .itemValue, install-time FK guards)
   - get_connector_icon (action-renderer / widget rendering)
-  - get_module_metadata / list_modules (field/attribute schema — the #1 widget
+  - get_module_metadata / list_modules (field/attribute schema -- the #1 widget
     lookup; defined here, not in the agent brain, since the agent doesn't need
     them but widget templates constantly do)
   - list_widgets / get_widget (what's installed + current uuid/version)
 Endpoint gotchas baked in: `staging_model_metadatas` needs `$relationships=true`
 to inline `attributes`; `/api/3/widgets` 500s on `$orderby=name` (sort client-
-side). WRITES (widget install, record create/delete) are deliberately excluded —
+side). WRITES (widget install, record create/delete) are deliberately excluded --
 keep this server read-only; put mutations in a separate gated server.
 
 Why a separate server: `fsr_playbooks.mcp_server` is the connector's full agent
@@ -93,7 +93,7 @@ for _fn in _READ_TOOLS:
 
 # ───────────────────── widget-side live reads (Tier 2/3) ─────────────────
 # These are test-surface tools (module/field metadata + widget lifecycle),
-# defined here rather than in the connector's agent brain — the agent doesn't
+# defined here rather than in the connector's agent brain -- the agent doesn't
 # need them, but widget work constantly does. Read-only; .env-cred client.
 
 def _live_get(path: str) -> Any:
@@ -130,7 +130,7 @@ _META_BASE = "/api/3/staging_model_metadatas?$limit=2147483647&$orderby=type"
 
 
 def get_module_metadata(module: str) -> dict:
-    """Field/attribute schema for one module — the #1 widget lookup.
+    """Field/attribute schema for one module -- the #1 widget lookup.
 
     Returns each field's `name`, `title`, `type` (the attr type IS the related
     module type for relationship fields), `required`, and `picklist_name` when
@@ -191,9 +191,9 @@ def list_modules() -> dict:
 
 
 def list_widgets() -> dict:
-    """Installed widgets with `name`, `uuid`, `category`, `version` — confirm
+    """Installed widgets with `name`, `uuid`, `category`, `version` -- confirm
     what's on the box and the current uuid/version (a push mints a new uuid)."""
-    # NB: /api/3/widgets 500s on `$orderby=name` — sort in python instead.
+    # NB: /api/3/widgets 500s on `$orderby=name` -- sort in python instead.
     data = _live_get("/api/3/widgets?$limit=2147483647")
     if isinstance(data, dict) and data.get("error"):
         return data
@@ -210,7 +210,7 @@ def list_widgets() -> dict:
 
 
 def get_widget(uuid_or_name: str) -> dict:
-    """One widget's full record by uuid (or exact name) — template/options/
+    """One widget's full record by uuid (or exact name) -- template/options/
     metadata for inspecting an installed widget."""
     key = uuid_or_name.strip()
     if key and "-" in key and " " not in key:  # looks like a uuid

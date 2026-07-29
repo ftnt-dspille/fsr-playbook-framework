@@ -1,4 +1,4 @@
-"""Tier 3 first slice — terminal-type inference for Jinja filter chains.
+"""Tier 3 first slice -- terminal-type inference for Jinja filter chains.
 
 Tier 1 / 2 validate connector param values *only* when the value is a
 static literal. The moment the YAML carries `{{ … }}`, both tiers bail
@@ -55,18 +55,18 @@ _FSR_TO_OBSERVED: dict[str, str] = {
 }
 
 
-# Hand-curated filter signatures — covers the long tail of macros whose
+# Hand-curated filter signatures -- covers the long tail of macros whose
 # `jinja_macros.output_type_declared` is NULL on the live store but
 # whose behaviour is obvious from the upstream definition. Each entry
 # is (input_type, output_type) in the FSR vocab; either side may be
 # None to mean "any" / "unknown / don't claim".
 #
 # Adding entries: when in doubt, prefer None on whichever side is
-# polymorphic (e.g. `default`, `mandatory` — pass-through filters).
+# polymorphic (e.g. `default`, `mandatory` -- pass-through filters).
 # False positives waste agent loop budget; false negatives just fall
 # through to the existing widget/observed_type check.
 _HAND_CURATED: dict[str, tuple[str | None, str | None]] = {
-    # ── Standard Jinja string filters — input is `string`, output too.
+    # ── Standard Jinja string filters -- input is `string`, output too.
     # The live DB has these with output_type_declared='string' but no
     # input_type_hint; we add the input so chain validation can flag
     # `| int | upper` and friends as the type error they really are.
@@ -145,7 +145,7 @@ _HAND_CURATED: dict[str, tuple[str | None, str | None]] = {
     "urlencode":      (None, "string"),
     "urlsplit":       ("string", "object"),
 
-    # ── Network / IP filters (Ansible netcommon — return strings or
+    # ── Network / IP filters (Ansible netcommon -- return strings or
     # lists of strings depending on call shape; we claim string for
     # the scalar form since that's the common usage in connector args)
     "ipaddr":         (None, "string"),
@@ -190,7 +190,7 @@ _HAND_CURATED: dict[str, tuple[str | None, str | None]] = {
     "human_readable": ("number", "string"),
     "human_to_bytes": ("string", "integer"),
 
-    # ── Pass-through / polymorphic — keep both None ────────────────────
+    # ── Pass-through / polymorphic -- keep both None ────────────────────
     "d":              (None, None),
     "default":        (None, None),
     "mandatory":      (None, None),

@@ -14,7 +14,7 @@ from .jinja_checks import check_jinja, to_compile_errors
 
 # Find every Jinja expression. Non-greedy; tolerates whitespace.
 _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
-# vars.steps.<key>.<path...> — capture the step jinja-key + the trailing
+# vars.steps.<key>.<path...> -- capture the step jinja-key + the trailing
 # attribute chain. Stops at any non-attribute character (operators,
 # whitespace, brackets, pipes).
 _VARS_STEPS_RE = re.compile(
@@ -66,7 +66,7 @@ _RESERVED_VARS_KEYS = {
 }
 
 # Jinja/Python tokens that would break `vars.steps.<name>` attribute access
-# or get parsed as keywords. Short list — only the ones that actually break.
+# or get parsed as keywords. Short list -- only the ones that actually break.
 _INVALID_JINJA_KEY_TOKENS = {
     "true", "false", "none", "null",
     "and", "or", "not", "is", "in", "if", "else", "for",
@@ -112,14 +112,14 @@ def _step_output_top_keys(s: Step) -> set[str] | None:
 
     if s.type == "connector" and isinstance(s.arguments, dict):
         # A connector result is an ENVELOPE. The op's `output_schema` describes
-        # what sits UNDER `data` — it is NOT the top-level shape. At runtime
+        # what sits UNDER `data` -- it is NOT the top-level shape. At runtime
         # `vars.steps.<name>` is `{data: <op output>, status, message,
         # operation}` (live-verified: convert_periodic_time_to_minutes ->
         # `{"data": {"minutes": 180}, "status": "Success", ...}`). So the
         # top-level keys are the envelope keys, and an op field like `minutes`
         # is reached as `vars.steps.<name>.data.minutes`. Returning the
         # output_schema keys here was the bug that flagged the *correct*
-        # `.data.<field>` path and blessed the broken `.<field>` one — the
+        # `.data.<field>` path and blessed the broken `.<field>` one -- the
         # exact miss S3 caught on the box (build model authored
         # `vars.steps.Convert.minutes` -> empty record field). Mirrors the
         # `.data` envelope the grounded typed_walker already models for
@@ -129,7 +129,7 @@ def _step_output_top_keys(s: Step) -> set[str] | None:
     if s.type == "find_record":
         # FindRecords returns a hydra:Collection-shaped envelope. Top-level
         # keys are the canonical hydra ones. Skip strict validation for
-        # this — most authors index `[0]` directly.
+        # this -- most authors index `[0]` directly.
         return {"@context", "@id", "@type", "hydra:member",
                 "hydra:totalItems", "hydra:itemsPerPage"}
 
@@ -137,7 +137,7 @@ def _step_output_top_keys(s: Step) -> set[str] | None:
         # Output is the resumed input + chosen option.
         return {"input", "option", "user", "username", "datetime"}
 
-    # Unknown — code_snippet, workflow_reference, decision, delay,
+    # Unknown -- code_snippet, workflow_reference, decision, delay,
     # create_record, update_record, start*, etc.
     return None
 
@@ -206,7 +206,7 @@ def _compute_predecessors(pb: Playbook) -> dict[str, set[str]]:
                     preds[nxt] |= inherited
                     changed = True
                 seen_path.add(edge)
-    # Steps unreachable from a start get an empty predecessor set —
+    # Steps unreachable from a start get an empty predecessor set --
     # references *into* them would fail; references *from* them won't
     # be checked because those steps are dead code (a separate lint).
     return preds
@@ -217,16 +217,16 @@ def _check_jinja_paths(pb: Playbook, pi: int,
     """Catch `{{ vars.steps.<name>... }}` references that don't resolve.
 
     Three failure modes:
-      1. The named step doesn't exist (typo) — error.
+      1. The named step doesn't exist (typo) -- error.
       2. The named step exists but cannot run *before* the referencing
-         step in the DAG — error (the reference would be undefined at
+         step in the DAG -- error (the reference would be undefined at
          runtime).
       3. The first attribute after the step name isn't in the step's
-         declared/observed output schema — warning (we may have the
+         declared/observed output schema -- warning (we may have the
          wrong shape; observed schemas are more authoritative).
     """
     path = f"playbooks[{pi}]"
-    # Skip Jinja path analysis on cyclic graphs — predecessor sets are
+    # Skip Jinja path analysis on cyclic graphs -- predecessor sets are
     # unreliable for cycles and produce spurious reachability errors.
     # _check_graph (always called before this) reports the cycle itself.
     if _has_cycle(pb):
@@ -253,7 +253,7 @@ def _check_jinja_paths(pb: Playbook, pi: int,
                     target = by_jinja_key.get(key)
                     if target is None:
                         # Don't flag references to steps that exist with the
-                        # same name but different casing/spaces — emitter
+                        # same name but different casing/spaces -- emitter
                         # already collisions-checks. Just unknown ones.
                         suggestion = _closest_step(key, by_jinja_key.keys())
                         errors.append(CompileError(
@@ -305,7 +305,7 @@ def _check_jinja_paths(pb: Playbook, pi: int,
                     if keys is None or first_attr in keys:
                         continue
                     # FSR exposes `status`/`result` on every step in addition
-                    # to the handler's payload — never flag those.
+                    # to the handler's payload -- never flag those.
                     if first_attr in {"status", "result", "id", "name",
                                       "uuid", "@id", "@type", "step_id"}:
                         continue
@@ -324,7 +324,7 @@ def _check_jinja_paths(pb: Playbook, pi: int,
 def _check_jinja_templates(pb: Playbook, pi: int,
                            errors: list[CompileError]) -> None:
     """Parse every Jinja template in each step's arguments with the real
-    jinja2 engine — the same parser FortiSOAR renders through at runtime —
+    jinja2 engine -- the same parser FortiSOAR renders through at runtime --
     and surface ``jinja_syntax_error`` (blocks) when a template won't parse,
     plus an ``unknown_jinja_filter`` warning when a filter/test name isn't in
     the known (built-in union FortiSOAR custom) catalog.
@@ -332,9 +332,9 @@ def _check_jinja_templates(pb: Playbook, pi: int,
     This replaces a naive ``{{``/``}}`` substring-balance scan, which
     false-positived on code steps: a Python nested-dict close
     (``{"text": "x"}}``) produces an adjacent ``}}`` the count mistook for a
-    Jinja delimiter. The parse has zero false positives — jinja2 only treats
+    Jinja delimiter. The parse has zero false positives -- jinja2 only treats
     ``{{``/``{%``/``{#`` as block opens, so a standalone stray ``}}`` is plain
-    literal text — and is a strict superset of the balance scan (an unclosed
+    literal text -- and is a strict superset of the balance scan (an unclosed
     ``{{`` or ``{%``/``%}`` mismatch both fail to parse). See
     ``jinja_checks.check_jinja`` / ``to_compile_errors``.
     """
@@ -351,7 +351,7 @@ _VARS_TOPLEVEL_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_]*)")
 
 def _check_undefined_vars(pb: Playbook, pi: int,
                           errors: list[CompileError]) -> None:
-    """Flag `{{ vars.<name> }}` references whose `<name>` is never defined —
+    """Flag `{{ vars.<name> }}` references whose `<name>` is never defined --
     not an FSR runtime key, not the loop binding, and not produced by any
     SetVariable in the playbook. A typo'd local var silently evaluates empty
     at runtime, so this is the only signal the author gets.
@@ -368,8 +368,8 @@ def _check_undefined_vars(pb: Playbook, pi: int,
     # Every var name defined in the playbook, gathered across the whole
     # playbook (vars are global; definition can lexically follow the read).
     # Two definition mechanisms:
-    #   1. set_variable steps — output keys are the var names themselves.
-    #   2. step_variables on ANY step — a {var_name: jinja} dict that maps
+    #   1. set_variable steps -- output keys are the var names themselves.
+    #   2. step_variables on ANY step -- a {var_name: jinja} dict that maps
     #      the step's post-execution result into named vars. Connector steps
     #      use this to expose computed values (e.g. ttl_config, module_exists)
     #      that downstream steps read as vars.<name>.
@@ -447,7 +447,7 @@ def _check_reserved_names(pb: Playbook, pi: int,
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(f"step name {sname!r} normalises to Jinja key "
-                         f"{jinja_key!r}, which is a reserved keyword — "
+                         f"{jinja_key!r}, which is a reserved keyword -- "
                          f"`vars.steps.{jinja_key}` won't parse"),
                 path=f"{spath}.name",
                 severity="error",
@@ -478,7 +478,7 @@ def _check_reserved_names(pb: Playbook, pi: int,
                     names.append((var_name, var_name))
             # Reserved-name collisions are auto-renamed in resolver
             # (_auto_rename_reserved_set_var_keys) which emits a warning.
-            # No re-check here — the auto-renamer guarantees they're gone.
+            # No re-check here -- the auto-renamer guarantees they're gone.
 
 
 def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
@@ -518,7 +518,7 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(f"step {s.id!r} ({s.name or s.type}) is unreachable "
-                         f"from the trigger — no step's next/branches "
+                         f"from the trigger -- no step's next/branches "
                          f"point to it"),
                 path=f"{path}.steps[{si}]",
                 severity="warning",
@@ -539,7 +539,7 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
             if nxt not in by_id:
                 continue
             if color.get(nxt) == GREY:
-                # Back-edge — found a cycle. Report once per (src, dst) pair.
+                # Back-edge -- found a cycle. Report once per (src, dst) pair.
                 key = (sid, nxt)
                 if key in cycle_reported:
                     continue
@@ -666,7 +666,7 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
                     severity="warning",
                 ))
 
-    # 4. ManualInput branch coverage — same idea as decision: every
+    # 4. ManualInput branch coverage -- same idea as decision: every
     # response_mapping option needs a branch target. Live data shows
     # ~4% of options are intentionally terminal (button ends the run);
     # warn-only for those if the prompt has multiple options.
@@ -704,7 +704,7 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
                     message=(f"manual_input {s.id!r}: option {opt_label!r} "
-                             f"has no target — multi-button prompts where "
+                             f"has no target -- multi-button prompts where "
                              f"≥2 options end the run usually indicate "
                              f"forgotten wiring"),
                     path=f"{opath}.step_iri",
@@ -738,7 +738,7 @@ def validate(collection: Collection) -> list[CompileError]:
     errors: list[CompileError] = []
 
     # Workflow names must be unique within a collection (FSR Doctrine
-    # constraint: UniqueConstraint on (name, collection) — see
+    # constraint: UniqueConstraint on (name, collection) -- see
     # Entity/Workflow/Workflow.php). Catch this at compile time rather
     # than letting FSR's import_jobs return an opaque error.
     seen_names: dict[str, int] = {}
@@ -775,7 +775,7 @@ def validate(collection: Collection) -> list[CompileError]:
                     message=(f"duplicate step name {sname!r} in playbook "
                              f"{pb.name!r} (already used by step #"
                              f"{step_seen_names[sname]}); names must be "
-                             f"unique — vars.steps.<name> would collide "
+                             f"unique -- vars.steps.<name> would collide "
                              f"silently at runtime"),
                     path=sp,
                 ))

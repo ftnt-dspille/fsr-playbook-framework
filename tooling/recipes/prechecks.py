@@ -4,12 +4,12 @@ A recipe that compiles is not a recipe that runs. Each function below
 catches one silent-failure surface that today only surfaces at runtime
 on the FSR appliance:
 
-- `check_connector_installed`  — recipe targets a connector that isn't
+- `check_connector_installed`  -- recipe targets a connector that isn't
   installed on this FSR. Today: recipe ships, first connector step
   fails with "configuration not found". Now: fail at generation time
   with a "solution pack X needed" message.
 
-- `check_picklist_value`       — `{{ 'PL' | picklist('value') }}` won't
+- `check_picklist_value`       -- `{{ 'PL' | picklist('value') }}` won't
   resolve on this FSR (picklist missing or value not in the picklist).
   Today: recipe emits the unresolved IRI as a `{{…}}` placeholder.
   Now: surface the failure plus close-match suggestions.
@@ -17,7 +17,7 @@ on the FSR appliance:
 Each function returns a `PrecheckResult` with a uniform shape so the CLI
 and the MCP tool render the same way.
 
-Designed to be optional — recipes can still be generated `--skip-prechecks`
+Designed to be optional -- recipes can still be generated `--skip-prechecks`
 when the user is offline or hitting a different appliance.
 """
 from __future__ import annotations
@@ -61,7 +61,7 @@ def check_connector_installed(
     try:
         resp = client.get(
             "/api/integration/connectors/",
-            # NB: the integration API is Django-REST — it paginates on
+            # NB: the integration API is Django-REST -- it paginates on
             # `page_size`/`page` (default 30) and returns rows under `data`,
             # NOT the crudhub's `$limit`/`hydra:member`. Passing `$limit` here
             # silently caps results at 30.

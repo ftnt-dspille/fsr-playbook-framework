@@ -1,4 +1,4 @@
-"""Phase 2 — SkillCall trace recorder (SKILL_BASED_PLAYBOOK_PLAN §2)."""
+"""Phase 2 -- SkillCall trace recorder (SKILL_BASED_PLAYBOOK_PLAN §2)."""
 from __future__ import annotations
 
 import pytest
@@ -51,7 +51,7 @@ def test_ai_supplied_step_name_is_sanitized_and_deduped():
 
 def test_mute_recording_suppresses_module_level_record():
     """A wrapper's internal `execute_api_request` fan-out (submit/poll/fetch)
-    must not pollute the trace as raw-HTTP playbook steps — the grounding gap.
+    must not pollute the trace as raw-HTTP playbook steps -- the grounding gap.
     `mute_recording()` no-ops the module-level recorder while active, then
     restores it; nests safely and unwinds on exception."""
     t = SkillTrace()
@@ -70,7 +70,7 @@ def test_mute_recording_suppresses_module_level_record():
                                  {"endpoint": "/results"}, {}) is None
     assert len(t) == 1  # nothing recorded while muted
 
-    # Depth fully unwound — recording resumes.
+    # Depth fully unwound -- recording resumes.
     assert record_run_op("fortinet-fortiguard-ioc", "ioc_search", {}, {}) is not None
     assert len(t) == 2
 
@@ -81,7 +81,7 @@ def test_mute_recording_unwinds_on_exception():
     with pytest.raises(ValueError):
         with skill_trace.mute_recording():
             raise ValueError("boom")
-    # Depth restored despite the exception — recording works again.
+    # Depth restored despite the exception -- recording works again.
     assert record_run_op("virustotal", "query_ip", {}, {}) is not None
     assert len(t) == 1
 

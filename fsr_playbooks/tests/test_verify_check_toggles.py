@@ -1,4 +1,4 @@
-"""verify_playbook `disable_checks` — let a caller (pyfsr) skip groups or
+"""verify_playbook `disable_checks` -- let a caller (pyfsr) skip groups or
 individual checks. Disabled diagnostics move to evidence.suppressed (never
 silent) and stop blocking ready_to_push.
 """

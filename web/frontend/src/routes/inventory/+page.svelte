@@ -1,7 +1,7 @@
 <script lang="ts">
-  // Inventory dashboard — "what does the assistant know?"
+  // Inventory dashboard -- "what does the assistant know?"
   // Powered by GET /api/ref/inventory + /api/ref/inventory/search.
-  // Demonstrates the assistant is grounded in a real, queryable index —
+  // Demonstrates the assistant is grounded in a real, queryable index --
   // not just an LLM guessing.
   import { onMount } from 'svelte';
 
@@ -60,7 +60,7 @@
 
   // Curated, click-to-search browse chips. Each group targets a slice
   // of the index so a user can explore "what's in here?" without ever
-  // typing — the most common request when demoing the dashboard.
+  // typing -- the most common request when demoing the dashboard.
   type BrowseGroup = {
     label: string;
     blurb: string;
@@ -183,7 +183,7 @@
     searching = true;
     searchDebounce = setTimeout(async () => {
       try {
-        // We need entry_id on api_examples for the insert button — fetch
+        // We need entry_id on api_examples for the insert button -- fetch
         // a richer search via the api-examples-aware endpoint when needed.
         const r = await fetch(
           `/api/ref/inventory/search?q=${encodeURIComponent(needle)}&limit=15`
@@ -209,7 +209,7 @@
 
   async function insertHttpStep(entry: ApiExampleHit) {
     if (entry.entry_id == null) {
-      showToast('No entry_id — cannot synthesize');
+      showToast('No entry_id -- cannot synthesize');
       return;
     }
     try {
@@ -220,7 +220,7 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       await navigator.clipboard.writeText(j.yaml);
-      showToast('Copied YAML step to clipboard — paste into Design view');
+      showToast('Copied YAML step to clipboard -- paste into Design view');
     } catch (e: any) {
       showToast(`Failed: ${e?.message ?? e}`);
     }
@@ -240,7 +240,7 @@
   <PageHeader
     eyebrow="Reference store"
     title="What the assistant knows"
-    subtitle="Every number here is a real row in a queryable index — not a guess. The agent does SQL lookups before it touches an LLM."
+    subtitle="Every number here is a real row in a queryable index -- not a guess. The agent does SQL lookups before it touches an LLM."
   />
   <div class="flex-1 overflow-y-auto fade-in">
     <div class="mx-auto max-w-6xl space-y-8 p-6 pb-16">
@@ -510,7 +510,7 @@
             </div>
           {/if}
 
-          <!-- API examples — actionable -->
+          <!-- API examples -- actionable -->
           <div class="rounded border border-[var(--border-soft)] bg-[var(--bg-panel)]/40 p-3">
             <div class="mb-2 text-xs font-semibold uppercase text-[var(--text-muted)]">
               API examples · {hits.api_examples.length}

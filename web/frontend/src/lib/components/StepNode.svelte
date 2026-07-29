@@ -24,7 +24,7 @@
   // downstream Verify/Render path.
   let hasSample = $derived(!!props.data.hasSample);
   // Red dot in the upper-left when the user has flagged this node as
-  // a debug-runner breakpoint (DebugPanel ↔ debugStore — keeps the
+  // a debug-runner breakpoint (DebugPanel ↔ debugStore -- keeps the
   // canvas + trace tape in sync without prop-drilling a callback).
   let isBreakpoint = $derived(!!props.data.isBreakpoint);
   let direction = $derived((props.data.direction as 'TB' | 'LR' | undefined) ?? 'TB');
@@ -156,11 +156,11 @@
   {#if isBreakpoint}
     <!-- Debug-runner breakpoint dot. Mirrors the rose outline used on
          the DebugPanel trace tape so the same step reads as "armed" in
-         both surfaces. Pure presentational — toggling still happens
+         both surfaces. Pure presentational -- toggling still happens
          from the trace tape (shift-click / dbl-click). -->
     <span
       class="absolute -left-1.5 -top-1.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-rose-500 ring-2 ring-white dark:ring-zinc-900"
-      title="debug breakpoint — runner will pause BEFORE this step"
+      title="debug breakpoint -- runner will pause BEFORE this step"
       aria-label="breakpoint set"
     ></span>
   {/if}
@@ -184,7 +184,7 @@
         <span
           class="inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] font-bold text-white"
           style="background: {DIAG_COLOR[diagnosticBadge.severity]}"
-          title={`${diagnosticBadge.count} ${diagnosticBadge.kind.replace(/_/g, ' ')} — ${diagnosticBadge.sample}`}
+          title={`${diagnosticBadge.count} ${diagnosticBadge.kind.replace(/_/g, ' ')} -- ${diagnosticBadge.sample}`}
           aria-label={`${diagnosticBadge.count} render-path ${diagnosticBadge.severity}`}
         >
           {diagnosticBadge.severity === 'error' ? '✗' : diagnosticBadge.severity === 'warning' ? '!' : '·'}
@@ -202,14 +202,14 @@
       {#if hasSample}
         <span
           class="inline-flex items-center rounded-full bg-emerald-500/20 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-emerald-700"
-          title="sample answers saved — downstream Verify renders against these"
+          title="sample answers saved -- downstream Verify renders against these"
           aria-label="sample saved"
         >sample</span>
       {/if}
       {#if verifyStatus}
         <!-- verify_playbook per-step status. Distinct from the
              store-verification dot above (which tracks whether the
-             connector/op has ever been used) — this one reflects the
+             connector/op has ever been used) -- this one reflects the
              latest pre-submit verify run. -->
         <span
           class="inline-flex items-center rounded-full px-1.5 py-px text-[9px] font-bold text-white"
@@ -275,14 +275,14 @@
 
   /* xyflow's Handle circles are the "drag-an-edge-end-here" dots. The
      user only wants them visible while they're engaging with a LINE
-     (hovering or selected) — not whenever a node is touched. So we
+     (hovering or selected) -- not whenever a node is touched. So we
      hide them at rest and show them globally whenever any edge in the
      flow is hovered or selected. The handle's hit area is invisible
      but still receives drops for the in-progress reconnect drag. */
   :global(.svelte-flow__handle) {
     opacity: 0;
     transition: opacity 120ms ease, transform 120ms ease;
-    /* Bigger hit area for drag-out — small dots are awkward targets. */
+    /* Bigger hit area for drag-out -- small dots are awkward targets. */
     width: 12px !important;
     height: 12px !important;
     background: var(--brand, #6366f1) !important;
@@ -290,7 +290,7 @@
   }
   /* G52: surface handles whenever the user hovers ANY node so starting
      a new edge is discoverable. Previously handles were hidden until
-     an existing edge was hovered/selected — that worked for reconnect
+     an existing edge was hovered/selected -- that worked for reconnect
      but not for first-time edge creation. */
   :global(.svelte-flow__node:hover .svelte-flow__handle),
   :global(.svelte-flow:has(.svelte-flow__edge:hover) .svelte-flow__handle),
@@ -301,7 +301,7 @@
     opacity: 1;
   }
   /* Center handles ON the node border so edge endpoints connect
-     flush to the node — pushing them fully outside (translate 100%)
+     flush to the node -- pushing them fully outside (translate 100%)
      creates a visible gap because xyflow draws the edge line to the
      handle center. Half-in / half-out is xyflow's default and is the
      only configuration that doesn't leave a stranded line endpoint. */

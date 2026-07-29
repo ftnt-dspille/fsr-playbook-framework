@@ -4,14 +4,14 @@ tool calls returned ok.
 The gap this closes, from a live appliance: asked "how does a manual input step
 work, can you add one", the agent called `verify_enhancement`, got
 `ready_to_push: True`, and then printed the revised playbook into chat three
-times — each rendering subtly different from the verified one. Nothing was
+times -- each rendering subtly different from the verified one. Nothing was
 written. Every tool call in that transcript returned ok, so nothing that graded
 tool errors could see the failure; the analyst asked twice more and got two more
 walls of YAML.
 
 `score_enhance_delivery` grades the delivery, so the defect has a failing test
-before it has a live repro. These scenarios are deterministic — synthetic
-traces, no LLM, no box — so they run in CI. Whether the MODEL reaches for the
+before it has a live repro. These scenarios are deterministic -- synthetic
+traces, no LLM, no box -- so they run in CI. Whether the MODEL reaches for the
 tool is a separate, live-graded question; this pins that the harness can TELL.
 """
 from __future__ import annotations
@@ -50,7 +50,7 @@ def test_the_live_defect_fails():
 
 
 def test_verified_but_silent_fails():
-    """No fence, no offer — the edit still never happened."""
+    """No fence, no offer -- the edit still never happened."""
     r = score_enhance_delivery([_verify()], "I've added the step.")
     assert r["passed"] is False
     assert r["code"] == "verified_not_applied"
@@ -60,7 +60,7 @@ def test_declining_to_deliver_a_broken_edit_passes():
     """A red verify with no delivery is CORRECT behaviour, not a miss.
 
     Grading this as a failure would push the agent toward shipping edits that
-    did not pass — the opposite of the point.
+    did not pass -- the opposite of the point.
     """
     r = score_enhance_delivery([_verify(vid=None, ready=False)],
                                "That edit doesn't validate yet because…")
@@ -68,7 +68,7 @@ def test_declining_to_deliver_a_broken_edit_passes():
 
 
 def test_delivering_an_id_no_verify_issued_fails():
-    """Structurally impossible through the tool — so it means a bypass."""
+    """Structurally impossible through the tool -- so it means a bypass."""
     r = score_enhance_delivery([_verify(), _offer("deadbeefdeadbeef")])
     assert r["passed"] is False
     assert r["code"] == "unverified_delivery"
@@ -97,7 +97,7 @@ def test_a_snippet_alongside_the_offer_passes_but_is_flagged():
     """Showing the changed step is encouraged; a whole playbook is the old bug.
 
     We can't reliably tell a snippet from a document, so pass and flag rather
-    than guess — a false failure here would train the agent out of explaining
+    than guess -- a false failure here would train the agent out of explaining
     its edit at all.
     """
     r = score_enhance_delivery([_verify(), _offer()], FULL_PB)
@@ -107,7 +107,7 @@ def test_a_snippet_alongside_the_offer_passes_but_is_flagged():
 
 def test_results_absent_from_the_trace_still_grade():
     """Some harnesses don't thread tool results onto the call record. The gate
-    must degrade to grading the CALL SHAPE rather than skipping silently — a
+    must degrade to grading the CALL SHAPE rather than skipping silently -- a
     gate that quietly stops measuring is worse than no gate."""
     trace = [{"name": "verify_enhancement", "args": {}}, _offer()]
     r = score_enhance_delivery(trace, "Applied.")

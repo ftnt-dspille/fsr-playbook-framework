@@ -1,5 +1,5 @@
 /**
- * MonacoYaml.applyMarkers — Marker[] → monaco.editor.setModelMarkers
+ * MonacoYaml.applyMarkers -- Marker[] → monaco.editor.setModelMarkers
  * mapping. Pins the contract that diagnostics line up on the *correct*
  * line in the editor (start/end line number passthrough, column +200
  * end-column trick, severity mapping, suggestion concat, source code).
@@ -52,7 +52,7 @@ const MARKERS: Marker[] = [
   }
 ];
 
-describe('MonacoYaml.applyMarkers — Marker[] → setModelMarkers mapping', () => {
+describe('MonacoYaml.applyMarkers -- Marker[] → setModelMarkers mapping', () => {
   beforeEach(() => setMarkersSpy.mockClear());
   afterEach(() => cleanup());
 
@@ -73,7 +73,7 @@ describe('MonacoYaml.applyMarkers — Marker[] → setModelMarkers mapping', () 
       startLineNumber: 7,
       endLineNumber: 7,
       startColumn: 3,
-      endColumn: 203, // col + 200 — the squiggle stretches to end-of-line
+      endColumn: 203, // col + 200 -- the squiggle stretches to end-of-line
       source: 'unknown_step_type'
     });
     expect(ms[1]).toMatchObject({

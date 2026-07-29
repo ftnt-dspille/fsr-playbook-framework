@@ -1,4 +1,4 @@
-"""Phase 4 (STATIC_TYPE_FLOW_PLAN) — source→target type check.
+"""Phase 4 (STATIC_TYPE_FLOW_PLAN) -- source→target type check.
 
 The walker now compares a connector param's *target* type (supplied by a
 `param_type_fn`) against the inferred *source* type of a pure reference
@@ -112,7 +112,7 @@ def test_string_var_into_ipv4_param_clean():
 
 
 def test_correct_type_clean():
-    # integer var into an integer param — fine
+    # integer var into an integer param -- fine
     coll = _coll("{{ vars.the_count }}")
     assert "type_mismatch" not in _codes(coll, "int")
 
@@ -171,7 +171,7 @@ def test_to_dict_carries_type_decisions():
 
 # ---- #3: LITERAL param values are owned by the RESOLVER, not the walker ----
 # The resolver's Tier-1/2.3 passes (connector_args.py) validate literal param
-# values against the widget type at *compile* time — more precisely than the
+# values against the widget type at *compile* time -- more precisely than the
 # walker could (it models the real int()/float() coercion: `[1,2,3]`/`{a:1}`/
 # `"abc"`/`true`/`5.5` into an integer param all error as `bad_value`, while
 # `"007"`/`"123"` pass). These tests pin that the resolver owns literal #3 so a

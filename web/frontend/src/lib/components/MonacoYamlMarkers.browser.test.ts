@@ -50,7 +50,7 @@ beforeAll(async () => {
   });
   unmount = u;
   // Wait for Monaco onMount to register the model with markers. There's
-  // no public "ready" event — poll the model registry until our owner
+  // no public "ready" event -- poll the model registry until our owner
   // shows up.
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
@@ -65,7 +65,7 @@ afterAll(() => {
   cleanup();
 });
 
-describe('MonacoYaml + real Monaco — diagnostics land on the correct line', () => {
+describe('MonacoYaml + real Monaco -- diagnostics land on the correct line', () => {
   it('registers exactly the markers we passed under owner "fsrpb"', () => {
     const ms = monaco.editor.getModelMarkers({ owner: 'fsrpb' });
     expect(ms).toHaveLength(2);

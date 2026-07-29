@@ -3,17 +3,17 @@
 The ``STEP_ARG_MODELS`` registry (see ``steps/__init__.py``) is the single
 introspection surface for per-step-type argument shapes. This module turns those
 pydantic models into standard JSON Schema so the MCP authoring tools and the web
-inspector can offer structural validation *before* a compile — agents and humans
+inspector can offer structural validation *before* a compile -- agents and humans
 get "this field is unknown / wrong type" feedback up front instead of a compile
 error round-trip.
 
 Coverage grows with the registry: today ``set_variable`` and ``decision`` are
 modeled, the rest of the step types are not. Unmodeled types return ``None``
 (callers surface a clear "not yet modeled" signal) rather than a misleading empty
-schema. The emitted schema is the raw ``model_json_schema()`` — faithful to the
+schema. The emitted schema is the raw ``model_json_schema()`` -- faithful to the
 model; any prettifying/filtering is a UI concern, not done here.
 
-Pure introspection — no DB, no network — so it ships in the wheel.
+Pure introspection -- no DB, no network -- so it ships in the wheel.
 """
 from __future__ import annotations
 

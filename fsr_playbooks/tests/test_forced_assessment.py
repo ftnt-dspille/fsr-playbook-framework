@@ -1,4 +1,4 @@
-"""P1 — forced written assessment.
+"""P1 -- forced written assessment.
 
 When a turn runs tools but the final assistant block carries no text (only
 tool_use / emitted cards), the provider must force ONE extra no-tools round so
@@ -103,7 +103,7 @@ def test_tools_only_final_forces_assessment(monkeypatch):
     turns = [
         # Round 1: a tool call.
         _FinalMessage([_tool_use("c1", "get_record", {"id": 1})]),
-        # Round 2: end_turn with NO text — only the model deciding to stop.
+        # Round 2: end_turn with NO text -- only the model deciding to stop.
         _FinalMessage([], stop_reason="end_turn"),
         # Round 3: the forced no-tools assessment.
         _FinalMessage([_text("Found C2 beacon. Severity: high. Next: isolate host.")]),
@@ -126,14 +126,14 @@ def test_final_with_text_does_not_force(monkeypatch):
     _patch_dispatch(monkeypatch)
     turns = [
         _FinalMessage([_tool_use("c1", "get_record", {"id": 1})]),
-        # Round 2 already carries a written close — no extra call wanted.
-        _FinalMessage([_text("Done — clean, low severity.")], stop_reason="end_turn"),
+        # Round 2 already carries a written close -- no extra call wanted.
+        _FinalMessage([_text("Done -- clean, low severity.")], stop_reason="end_turn"),
     ]
     client = _FakeClient(turns)
     provider = AnthropicProvider(model="fake", client=client)
 
     asyncio.run(_drain(provider, [Message(role="user", content="triage")]))
-    # Exactly two model round-trips — no forced third.
+    # Exactly two model round-trips -- no forced third.
     assert len(client.messages.calls) == 2
 
 

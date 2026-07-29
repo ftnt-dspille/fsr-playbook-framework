@@ -1,7 +1,7 @@
 """Canned fixtures for :mod:`fsr_playbooks.mcp_server._sim_client`.
 
 Kept separate from the client transport so the data is easy to read, extend,
-and assert against in tests. Everything here is fabricated demo data —
+and assert against in tests. Everything here is fabricated demo data --
 plausible shapes, obviously-synthetic values.
 
 The (connector, operation) registry below is the "lot of tools and functions
@@ -20,7 +20,7 @@ from typing import Any, Callable
 def _noc_scenarios_or_none():
     """NOC scenario manifest (investigation/triage data, connector-owned after
     REORG_PLAN Phase 1). Imported lazily and optionally: the authoring sim path
-    stays usable in the bare library — it simply contributes no NOC scenario
+    stays usable in the bare library -- it simply contributes no NOC scenario
     rows when the connector-owned manifest isn't present."""
     try:
         from . import _noc_scenarios
@@ -78,7 +78,7 @@ def connector_from_healthcheck_path(path: str) -> str:
 
 
 def healthcheck(_name: str) -> dict[str, Any]:
-    return {"status": "available", "message": "simulated — connector reachable"}
+    return {"status": "available", "message": "simulated -- connector reachable"}
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +236,7 @@ def _firewall_block_ip(params: dict) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# NOC scenario — FortiGate "FGT-BRANCH-04" stopped reporting to FortiManager.
+# NOC scenario -- FortiGate "FGT-BRANCH-04" stopped reporting to FortiManager.
 # Deterministic device-down story: unreachable since 03:14, preceded by a WAN1
 # link-down at 03:11; HA peer FGT-BRANCH-04-B is still up; the last policy push
 # was clean (rules out a bad config push -> points at upstream/power).
@@ -263,7 +263,7 @@ def _fmg_jsonrpc(rows: list[dict], url: str) -> dict[str, Any]:
     """Wrap rows in the real `fortinet-fortimanager-json-rpc` get envelope.
 
     The connector's `json_rpc_get` returns the row list under `get_response`
-    (NOT the JSON-RPC `result[].data` shape) — verified live against the
+    (NOT the JSON-RPC `result[].data` shape) -- verified live against the
     connector (v1.2.6). Mirroring it here keeps the offline sim faithful to
     production so digest-shape regressions surface in tests."""
     return {"operation": None, "status": "Success", "message": "",
@@ -308,12 +308,12 @@ def _fmg_json_rpc_get(params: dict) -> Any:
 def _faz_device_identity(params: dict) -> str:
     """The single device a bulk-log query is scoped to, or "".
 
-    NOT `devid` — that param is a device-TYPE bucket (All_FortiGate, …) and the
+    NOT `devid` -- that param is a device-TYPE bucket (All_FortiGate, …) and the
     real op rejects a hostname there. A per-device scope is expressed in
     `filter`, as `devname=<host>` (or `devid=<serial>`, which on FAZ log ROWS is
     the serial). The wrappers were corrected to send that wire shape; this
     fixture has to match it, or the sim would only agree with a call the
-    appliance rejects — which is how the broken wrapper stayed green offline
+    appliance rejects -- which is how the broken wrapper stayed green offline
     while failing 100% of the time live.
     """
     p = params or {}

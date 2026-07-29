@@ -7,7 +7,7 @@ the SAME prompt without duplication. Keeping the import surface here
 callers don't change.
 
 `build_system_prompt(intent)` is the intent-aware builder used by
-chat.py — pass `"enhance"` to append the minimal-diff addendum. The
+chat.py -- pass `"enhance"` to append the minimal-diff addendum. The
 module-level `SYSTEM_PROMPT` remains the build-mode default for
 back-compat with tests and other callers.
 """

@@ -1,4 +1,4 @@
-"""Unit tests for probes.probe_param_types — Tier 2.0/2.1.
+"""Unit tests for probes.probe_param_types -- Tier 2.0/2.1.
 
 Covers:
   * widget_to_observed_type: pure widget → type mapping + picklist
@@ -33,7 +33,7 @@ from probes import probe_param_types as ppt
     ("date", "iso8601"),
     ("datetime", "iso8601"),
     ("textarea", "str"),
-    ("text", None),             # the Tier-2 target — stays untyped
+    ("text", None),             # the Tier-2 target -- stays untyped
     ("uncatalogued_widget", None),
     (None, None),
 ])
@@ -43,7 +43,7 @@ def test_widget_mapping(widget, expected):
 
 def test_options_json_collapses_to_picklist():
     # A text widget with options_json (free-text-with-suggestions) is a
-    # picklist semantically — enum membership applies.
+    # picklist semantically -- enum membership applies.
     assert ppt.widget_to_observed_type(
         "text", '["a","b"]') == "picklist"
     assert ppt.widget_to_observed_type(
@@ -51,7 +51,7 @@ def test_options_json_collapses_to_picklist():
 
 
 # ---------------------------------------------------------------------------
-# name_to_observed_type — Phase 2.0+ name-pattern pass
+# name_to_observed_type -- Phase 2.0+ name-pattern pass
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name,expected", [
@@ -97,7 +97,7 @@ def test_name_to_observed_type(name, expected):
 
 def test_name_pass_does_not_override_widget_signal():
     # If the widget already typed the row (e.g. `email` widget), the
-    # name pass should never re-classify — but verify the API contract:
+    # name pass should never re-classify -- but verify the API contract:
     # widget pass runs first in run_widget_only, name pass only fires
     # when widget pass returned None.
     assert ppt.widget_to_observed_type("integer", None) == "int"
@@ -106,7 +106,7 @@ def test_name_pass_does_not_override_widget_signal():
 
 
 # ---------------------------------------------------------------------------
-# classify_error — one assertion per rule branch
+# classify_error -- one assertion per rule branch
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("msg,expected_type", [
@@ -114,7 +114,7 @@ def test_name_pass_does_not_override_widget_signal():
     ("TypeError: int() argument must be a string, a bytes-like object or a real number, not 'list'", "int"),
     ("ValueError: could not convert string to float: 'abc'", "float"),
     ("TypeError: float() argument must be a string or a real number", "float"),
-    ("Expected boolean, got 'maybe' — invalid bool", "bool"),
+    ("Expected boolean, got 'maybe' -- invalid bool", "bool"),
     ("'10.0.0.X' does not appear to be an IPv4 or IPv6 address", "ipv4"),
     ("OSError: illegal IP address string passed to inet_aton", "ipv4"),
     ("validators.url failed: invalid URL 'not a url'", "url"),
@@ -145,15 +145,15 @@ def test_classify_error_no_match():
 
 def test_classify_error_first_rule_wins():
     # An error mentioning both 'must be one of' and 'int()' should bind
-    # to whichever rule comes first — confirms ordering is deterministic.
+    # to whichever rule comes first -- confirms ordering is deterministic.
     # Today: int rules precede picklist rules.
-    msg = "invalid literal for int() with base 10 — must be one of: 1,2,3"
+    msg = "invalid literal for int() with base 10 -- must be one of: 1,2,3"
     observed, _ = ppt.classify_error(msg)
     assert observed == "int"
 
 
 # ---------------------------------------------------------------------------
-# run_widget_only — in-memory end-to-end
+# run_widget_only -- in-memory end-to-end
 # ---------------------------------------------------------------------------
 
 def _seed_minimal(conn: sqlite3.Connection) -> None:
@@ -183,7 +183,7 @@ def _seed_minimal(conn: sqlite3.Connection) -> None:
             ("c1", "op1", None, None, "flag",   "checkbox", None),
             ("c1", "op1", None, None, "label",  "text",     None),
             ("c1", "op1", None, None, "color",  "select",   '["red","blue"]'),
-            # conditional sub-param — exercises non-NULL parent/condition cols.
+            # conditional sub-param -- exercises non-NULL parent/condition cols.
             ("c1", "op1", "color", "red", "shade", "text", None),
         ],
     )
@@ -221,7 +221,7 @@ def test_run_widget_only_is_idempotent():
 
 
 # ---------------------------------------------------------------------------
-# Live-probe (Phase 2.2) — exercised with a fake run_op so no FSR needed
+# Live-probe (Phase 2.2) -- exercised with a fake run_op so no FSR needed
 # ---------------------------------------------------------------------------
 
 def _seed_live_probe_db(conn: sqlite3.Connection) -> None:
@@ -263,12 +263,12 @@ def _seed_live_probe_db(conn: sqlite3.Connection) -> None:
         "INSERT INTO operations VALUES ('acme', 'lookup_widget')")
     conn.execute(
         "INSERT INTO op_safety VALUES ('acme', 'lookup_widget', 'safe')")
-    # A second op classified unsafe — must be excluded from the universe.
+    # A second op classified unsafe -- must be excluded from the universe.
     conn.execute(
         "INSERT INTO operations VALUES ('acme', 'delete_widget')")
     conn.execute(
         "INSERT INTO op_safety VALUES ('acme', 'delete_widget', 'unsafe')")
-    # And one safe op without a baseline example — must be skipped.
+    # And one safe op without a baseline example -- must be skipped.
     conn.execute(
         "INSERT INTO operations VALUES ('acme', 'list_widgets')")
     conn.execute(

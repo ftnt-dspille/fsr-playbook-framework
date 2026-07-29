@@ -43,7 +43,7 @@ describe('Parent-state → MonacoYaml wiring', () => {
     expect(screen.getByTestId('yaml-mirror').textContent).toBe('initial');
 
     // MonacoYaml.onMount does an async import of `monaco-editor` before
-    // calling editor.create — so the click below MUST happen after the
+    // calling editor.create -- so the click below MUST happen after the
     // editor exists, otherwise the harness state mutates before
     // editor.setValue is even hookable. Spin until the constructor has
     // recorded the initial value through our instrumented stub.

@@ -122,7 +122,7 @@ def build_reference_json(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> 
             "globals": jinja_globals_,
             "tests": jinja_tests_,
             "context_vars": jinja_vars,
-            # legacy alias — old TS code may still read jinja.macros
+            # legacy alias -- old TS code may still read jinja.macros
             "macros": jinja_macros,
         },
         "recipes": recipes,

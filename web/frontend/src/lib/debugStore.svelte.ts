@@ -7,7 +7,7 @@
  *  - The trigger payload editor + watch paths persist across panel
  *    re-mounts (drawer collapse/expand) without losing state.
  *
- * Nothing here talks to the server — DebugPanel still owns the actual
+ * Nothing here talks to the server -- DebugPanel still owns the actual
  * start/step/continue/stop calls and reads `breakpoints` off this
  * store when assembling the `addBreakpoints` arg.
  */
@@ -46,7 +46,7 @@ class DebugStore {
   }
 
   /** Parse `triggerInputJson` to a payload object. Returns `{}` for
-   *  empty / invalid input — callers that need to surface the parse
+   *  empty / invalid input -- callers that need to surface the parse
    *  error can call `parseTriggerInputStrict()` instead. */
   get triggerInput(): Record<string, unknown> {
     try {
@@ -89,7 +89,7 @@ export function resolvePath(root: unknown, path: string): unknown {
 }
 
 /** Build a synthetic `vars` tree from a trace by stitching each step's
- *  output under `steps.<jkey>` — same shape FSR exposes at runtime
+ *  output under `steps.<jkey>` -- same shape FSR exposes at runtime
  *  (see `debug_session._execute_one_step`). The runner mirrors under
  *  both the step id and `name.replace(' ', '_')`; we mirror here too
  *  so a watch path can use either form. */

@@ -1,4 +1,4 @@
-"""probe_op_safety — classify every connector op as safe / unsafe / unknown.
+"""probe_op_safety -- classify every connector op as safe / unsafe / unknown.
 
 Reads `operations` + `operation_params` from the reference store and
 writes one `op_safety` row per op. Used by `verify_playbook`'s typed
@@ -10,7 +10,7 @@ Classifier layers (later layers can override earlier when *stricter*):
   1. Explicit per-op flag on `operations` (rare today; reserved).
   2. HTTP method when known: GET/HEAD → safe.
   3. Op-name prefix safe-pattern → safe.
-  4. Op-name prefix unsafe-pattern → unsafe (overrides 1–3).
+  4. Op-name prefix unsafe-pattern → unsafe (overrides 1-3).
   5. Connector-category bias (firewall/EDR/messaging unsafe-leaning;
      threat-intel/enrichment safe-leaning). Only nudges 'unknown'.
   6. Unclassified → 'unknown'. Treated as unsafe at verify time.
@@ -43,7 +43,7 @@ SAFE_PREFIXES = (
     "get", "list", "search", "find", "fetch", "lookup", "describe",
     "read", "check", "test", "status", "count", "enumerate", "query",
     "show", "export",
-    # Pure-compute / in-memory transforms — read-only by nature: they take a
+    # Pure-compute / in-memory transforms -- read-only by nature: they take a
     # value and return a derived value with no external side effect (e.g.
     # cyops_utilities convert_/parse_/format_/extract_). Added so the safe
     # live-probe can ground their real output envelope; a pure op with an
@@ -55,7 +55,7 @@ SAFE_PREFIXES = (
 )
 SAFE_SUFFIXES = ("_details", "_info", "_status")
 
-# Verbs that *change* state. Trumps any safe match — conservative wins.
+# Verbs that *change* state. Trumps any safe match -- conservative wins.
 UNSAFE_PREFIXES = (
     "block", "allow", "quarantine", "isolate", "create", "update",
     "delete", "remove", "insert", "upsert", "send", "post", "put",
@@ -129,7 +129,7 @@ def classify(
         evidence.update({"method": method, "source": "http_method"})
         return "unsafe", f"HTTP {method} (state-changing)", evidence
 
-    # Layer 5: category bias — only nudges from 'unknown'.
+    # Layer 5: category bias -- only nudges from 'unknown'.
     cat = (category or "").strip().lower()
     if cat in UNSAFE_CATEGORIES:
         evidence.update({"category": cat, "source": "category_bias"})

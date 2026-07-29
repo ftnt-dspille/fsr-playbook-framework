@@ -5,11 +5,11 @@ Two layers:
 
 * ``_clean_step_arguments`` is a pure function mirroring the editor's save-time
   cleanup (empty-field deletion + for_each loop-mode normalization). We unit-test
-  it directly — it needs no reference DB and pins every documented rule.
+  it directly -- it needs no reference DB and pins every documented rule.
 * End-to-end: compile a minimal fixture per step type and assert the emitted
   top-level argument keys are a subset of what the oracle documents for that type
   (editor-only/UI-state keys excluded). The slim reference DB ships no connector
-  metadata, so connector/code_snippet steps can't resolve offline — those rules
+  metadata, so connector/code_snippet steps can't resolve offline -- those rules
   are covered by the unit layer instead.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ ORACLE = load_oracle()
 
 
 # --------------------------------------------------------------------------
-# Layer 1 — _clean_step_arguments (editor save-time cleanup), pure unit tests
+# Layer 1 -- _clean_step_arguments (editor save-time cleanup), pure unit tests
 # --------------------------------------------------------------------------
 
 def _clean(args):
@@ -68,7 +68,7 @@ def test_for_each_deleted_when_item_empty():
 
 # for_each loop-mode defaulting moved from the emitter to the AUTHORING parser
 # (so the emitter stays a faithful serializer and decompiled for_each shapes
-# round-trip byte-for-byte — see the corpus round-trip gate). These compile a
+# round-trip byte-for-byte -- see the corpus round-trip gate). These compile a
 # minimal authored loop and assert the emitted for_each, which is the same wire
 # shape the editor produces.
 def _emit_authored_for_each(fe_body: str) -> dict:
@@ -144,7 +144,7 @@ def test_break_loop_preserved_without_async_or_agent():
 
 
 # --------------------------------------------------------------------------
-# Layer 2 — emitted argument keys ⊆ oracle documented keys, per step type
+# Layer 2 -- emitted argument keys ⊆ oracle documented keys, per step type
 # --------------------------------------------------------------------------
 
 def _emitted_steps(yaml_text: str):
@@ -167,7 +167,7 @@ def _emitted_steps(yaml_text: str):
     return out
 
 
-# Conformance registry — ONE entry per oracle step type (all 21). Each entry is
+# Conformance registry -- ONE entry per oracle step type (all 21). Each entry is
 # one of:
 #   ("check", target_step_name, yaml)  → compile and assert emitted argument keys
 #                                         ⊆ the oracle's documented keys.
@@ -176,7 +176,7 @@ def _emitted_steps(yaml_text: str):
 #                                         the wire rules are pinned at the unit
 #                                         layer above instead. Reported as skips.
 #   ("gap",   reason)                  → a Phase-2 coverage gap (no friendly short
-#                                         type yet). Reported as xfails — the
+#                                         type yet). Reported as xfails -- the
 #                                         punch-list the plan asked for.
 #
 # A meta-test below asserts this registry covers every oracle type, so a new
@@ -328,7 +328,7 @@ playbooks:
       - {name: Start, type: start, next: Run}
       - {name: Run, type: code_snippet, code: "print(1)"}
 """),
-    # Resolvable only against live connector metadata (slim DB ships none) —
+    # Resolvable only against live connector metadata (slim DB ships none) --
     # the wire rules for these are pinned at the unit layer above.
     "Connectors": ("live", "needs connector/op metadata absent from the slim DB"),
     "CyopsUtilites": ("live", "end/no_op resolves the cyops_utilities connector, "
@@ -420,7 +420,7 @@ def test_emitted_keys_subset_of_oracle(canonical):
 
 
 # --------------------------------------------------------------------------
-# Layer 3 — targeted assertions for the Phase-1 normalizer fixes
+# Layer 3 -- targeted assertions for the Phase-1 normalizer fixes
 # --------------------------------------------------------------------------
 
 def test_action_trigger_builds_params_from_input_vars():

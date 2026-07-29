@@ -1,6 +1,6 @@
 """Structured compiler errors.
 
-Errors are data — code, location, message, and an optional suggestion.
+Errors are data -- code, location, message, and an optional suggestion.
 Consumers (CLI, MCP, widget) format them their own way; the compiler
 itself never prints.
 """
@@ -22,7 +22,7 @@ class ErrorCode(str, Enum):
     DUPLICATE_STEP_ID = "duplicate_step_id"
     NO_TRIGGER = "no_trigger"
     BAD_VALUE = "bad_value"
-    # Jinja diagnostics — emitted by the compile-path jinja check (the real
+    # Jinja diagnostics -- emitted by the compile-path jinja check (the real
     # jinja2 parser, via jinja_checks.check_jinja). Syntax errors block; an
     # unknown filter/test name is a warning (the catalog is a curated subset).
     JINJA_SYNTAX_ERROR = "jinja_syntax_error"
@@ -33,7 +33,7 @@ class ErrorCode(str, Enum):
     # cross-step reference is caught offline instead of only on a live run.
     BAD_VAR_REFERENCE = "bad_var_reference"
     # Bare Jinja name (not a vars.* reference) that isn't defined in the
-    # context — e.g. ``{{ items | length }}`` where ``items`` is never
+    # context -- e.g. ``{{ items | length }}`` where ``items`` is never
     # defined. Emitted as a warning by the typed walker's AST-based check.
     JINJA_UNDEFINED_VARIABLE = "jinja_undefined_variable"
     INSTANCE_MISMATCH = "instance_mismatch"  # catalog warmed from a different SOAR

@@ -1,4 +1,4 @@
-"""chat_drive — the one-command tuning loop (Chat Intelligence Plan, Track A1/A2).
+"""chat_drive -- the one-command tuning loop (Chat Intelligence Plan, Track A1/A2).
 
 Drive ONE real scenario through the deployed connector's synchronous `chat_turn`
 (and `chat_resume` for approval / multi-turn flows), then in a single pass:
@@ -9,7 +9,7 @@ Drive ONE real scenario through the deployed connector's synchronous `chat_turn`
      investigation fixture with required/forbidden facts),
   4. render-validate the raw transcript through the widget renderer
      (`fsrPbRender.buildAssistantMessage`, via the node bridge), and
-  5. print a one-screen verdict — every failing gate annotated with the prompt
+  5. print a one-screen verdict -- every failing gate annotated with the prompt
      LEVER most likely to fix it (`evals.levers`).
 
 A scenario is either an existing task fixture (`--task <name>`, reusing its
@@ -97,7 +97,7 @@ def drive_scenario(message: str, intent: str, *, record: Any = None,
 
     `record` is the triage alert context; `entity` is the build/enhance open-
     playbook context (the connector reads `params.entity`, mounting
-    `entity.playbook_yaml` into its OPEN PLAYBOOK block — the shipped widget
+    `entity.playbook_yaml` into its OPEN PLAYBOOK block -- the shipped widget
     path). Enhance scenarios pass `entity`, not `record`."""
     from probes import _env  # type: ignore
 
@@ -198,7 +198,7 @@ def _result_ok(content: Any) -> bool | None:
 # Discipline-guard markers a tool_result carries when the connector refused to
 # execute a call (TriageDiscipline). A refused call is in the trace (the model
 # attempted it) but never ran, so scoring must not count it as a performed
-# pivot — a guard-blocked forbidden pivot is a SUCCESS of the platform, not a
+# pivot -- a guard-blocked forbidden pivot is a SUCCESS of the platform, not a
 # violation by the agent.
 _GUARD_MARKERS = ("forbidden_pivot_guard", "hunt_floor_guard", "call_once_guard")
 
@@ -385,7 +385,7 @@ def print_verdict(result: dict, score: dict | None, render: dict,
         log(f"  score: {score.get('score')}/{score.get('max')} "
             f"(fraction {score.get('fraction', 0):.2f})")
     else:
-        log("  (ad-hoc scenario — no fixture facts, scoring skipped)")
+        log("  (ad-hoc scenario -- no fixture facts, scoring skipped)")
 
     if render.get("skipped"):
         log(f"  [SKIP] render               {render['skipped']}")
@@ -430,7 +430,7 @@ def _next_task_index() -> int:
 
 def propose_fixture(result: dict, *, name: str, prompt: str) -> dict:
     """Turn a captured run into a PROPOSED investigation fixture + golden trace.
-    Heuristic and human-reviewed — never auto-committed.
+    Heuristic and human-reviewed -- never auto-committed.
 
     - required_facts: the record pull (get_record) + each external-IP enrichment
       the agent performed, using the same matcher vocabulary scoring consumes.
@@ -542,7 +542,7 @@ def run(*, task_name: str | None, message: str | None, intent: str,
     try:
         result = drive_scenario(message, intent, record=record, version=version,
                                 config=config, log=log)
-    except Exception as exc:  # noqa: BLE001 — report cleanly, never hang
+    except Exception as exc:  # noqa: BLE001 -- report cleanly, never hang
         log(f"!! drive failed: {exc}")
         return 1
 

@@ -81,7 +81,7 @@ def test_every_status_response_includes_full_trace():
 
 
 # ---------------------------------------------------------------------
-# demo_pure_logic.yaml — set_variable → decision → terminal.
+# demo_pure_logic.yaml -- set_variable → decision → terminal.
 # Tests: trigger-input injection, decision branching, var propagation.
 # ---------------------------------------------------------------------
 
@@ -104,7 +104,7 @@ def test_pure_logic_low_severity_takes_no_action_branch():
     r = mcp_server.continue_debug_session(sid)
     ids = _trace_ids(r["status"])
     # Note: offline (no live Jinja eval) the heuristic branch picker
-    # falls back to the first branch — so under offline mode this
+    # falls back to the first branch -- so under offline mode this
     # always lands on "Escalate to Tier 2" rather than the low branch.
     # The relevant invariant for the debug drawer is that *some*
     # terminal path is walked and the trace is non-empty.
@@ -130,14 +130,14 @@ def test_pure_logic_stepping_is_one_at_a_time():
 
 
 # ---------------------------------------------------------------------
-# decision_branch.yaml — Else (default) branch path.
+# decision_branch.yaml -- Else (default) branch path.
 # Tests: default-true branch resolution.
 # ---------------------------------------------------------------------
 
 def test_decision_branch_default_path_walks_else():
     yaml = _load("decision_branch.yaml")
     # No severity in input so the `when` falls false and default fires.
-    # (Offline branch picker takes the first branch when no live eval —
+    # (Offline branch picker takes the first branch when no live eval --
     # asserting the trace just walks to a terminal is the durable check.)
     r = mcp_server.start_debug_session(yaml)
     sid = r["status"]["session_id"]
@@ -153,7 +153,7 @@ def test_decision_branch_default_path_walks_else():
 
 
 # ---------------------------------------------------------------------
-# demo_for_each.yaml — for_each iteration over a static list.
+# demo_for_each.yaml -- for_each iteration over a static list.
 # Tests: vars.item binding, output collected as iteration list.
 # ---------------------------------------------------------------------
 
@@ -177,7 +177,7 @@ def test_for_each_records_per_iteration_outputs():
 
 
 # ---------------------------------------------------------------------
-# demo_manual_input.yaml — pause point + branch-by-option.
+# demo_manual_input.yaml -- pause point + branch-by-option.
 # Tests: manual_choices routes the simulator down a specific branch.
 # ---------------------------------------------------------------------
 
@@ -235,7 +235,7 @@ def test_breakpoint_pauses_before_named_step():
 
 
 # ---------------------------------------------------------------------
-# Per-tile contents — what the user sees when they click a tile.
+# Per-tile contents -- what the user sees when they click a tile.
 # ---------------------------------------------------------------------
 
 def test_every_tile_has_inspectable_fields():

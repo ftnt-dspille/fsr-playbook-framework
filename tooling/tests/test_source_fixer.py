@@ -1,6 +1,6 @@
 """Locks in the line/col math for the source-level auto-fixers.
 
-These guard against silent offset drift when the regexes get tweaked —
+These guard against silent offset drift when the regexes get tweaked --
 the editor relies on the ranges matching exactly so `executeEdits` lands
 the patch where the user expects.
 """
@@ -56,13 +56,13 @@ def test_input_param_ref_only_fires_for_declared_params():
 
 
 def test_step_name_charset_substitutes_disallowed_runs():
-    text = "playbooks:\n  - name: P\n    steps:\n      - name: Find—Records (v2)\n        type: end\n"
+    text = "playbooks:\n  - name: P\n    steps:\n      - name: Find--Records (v2)\n        type: end\n"
     fixes = [f for f in collect_fixes(text) if f.code == "step_name_charset"]
     assert len(fixes) == 1
     f = fixes[0]
     assert f.line == 4
-    assert "—" in f.original
-    assert "—" not in f.replacement and "(" not in f.replacement
+    assert "--" in f.original
+    assert "--" not in f.replacement and "(" not in f.replacement
     # Disallowed runs collapse to `_`; the existing space before `(` is
     # preserved (the regex doesn't munge spaces, only chars outside the
     # designer charset).
@@ -186,7 +186,7 @@ def test_collect_fixes_is_sorted_by_position():
     text = (
         "playbooks:\n  - name: P\n    parameters: [severity]\n"
         "    steps:\n"
-        "      - name: Find—Records\n"   # L5 charset
+        "      - name: Find--Records\n"   # L5 charset
         "        type: stop\n"             # L6 stop
         "        conditions:\n"
         "          - display: yes\n"     # L8 norway

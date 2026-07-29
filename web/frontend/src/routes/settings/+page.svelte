@@ -12,7 +12,7 @@
   let err = $state<string | null>(null);
   let selected = $state<string>('lmstudio');
 
-  // Form state — separate from saved snapshot so the user can probe
+  // Form state -- separate from saved snapshot so the user can probe
   // before clobbering config.
   let formBase = $state('');
   let formKey = $state('');
@@ -31,7 +31,7 @@
       // Default `selected` to whichever provider is currently active
       // server-side, falling back to whatever the user already chose.
       // Without this the page mounted on a hardcoded "lmstudio" even
-      // when the user had been using Anthropic — the form looked
+      // when the user had been using Anthropic -- the form looked
       // empty/stale and any model-list fetch hit the wrong backend.
       const active = snapshot.active_provider;
       if (active && snapshot.providers[active]) {
@@ -45,7 +45,7 @@
       hydrateForm();
       // Auto-probe the saved config so the user sees whether the
       // stored key/URL is currently valid the moment they open the
-      // page. No button — explicit `Test` was misleading (the form
+      // page. No button -- explicit `Test` was misleading (the form
       // value could pass while the saved key was rejected).
       void runLiveCheck();
     } catch (e: any) {
@@ -64,13 +64,13 @@
     testStatus = 'testing';
     testMsg = '';
     try {
-      // No form overrides — probe whatever is *actually* saved so the
+      // No form overrides -- probe whatever is *actually* saved so the
       // status reflects what `/api/chat` would use.
       const result = await testProvider(selected, {});
       if (result.ok) {
         testStatus = 'ok';
         testMsg = result.latency_ms != null
-          ? `Saved credentials reachable (${result.latency_ms} ms)${result.note ? ' — ' + result.note : ''}`
+          ? `Saved credentials reachable (${result.latency_ms} ms)${result.note ? ' -- ' + result.note : ''}`
           : (result.note ?? 'Saved credentials reachable.');
       } else {
         testStatus = 'fail';
@@ -274,7 +274,7 @@
           type="password"
           bind:value={formKey}
           placeholder={current.api_key_set
-            ? '•••••••••• (configured — type to replace)'
+            ? '•••••••••• (configured -- type to replace)'
             : selected === 'lmstudio'
             ? 'lm-studio (placeholder; LM Studio ignores it)'
             : 'sk-ant-…'}
@@ -283,7 +283,7 @@
       </label>
 
       <!-- Live status of the SAVED credentials. Runs automatically on
-           page load, provider change, and after Save. No button — what
+           page load, provider change, and after Save. No button -- what
            the chat uses is the only thing worth showing. -->
       {#if current.configured}
         <div class="flex items-center gap-2 text-sm">
@@ -345,7 +345,7 @@
           Save
         </button>
         <!-- When this provider is already the one chat uses, the tab
-             pill above shows an "active" badge — duplicate it here as
+             pill above shows an "active" badge -- duplicate it here as
              a disabled button would just be confusing. Only show the
              verb when switching is actually possible. -->
         {#if !isActive}

@@ -1,4 +1,4 @@
-// FSRPB TypeScript compiler — widget-runnable.
+// FSRPB TypeScript compiler -- widget-runnable.
 //
 // Loads `data/fsr_reference.json` (produced by the Python probes) and
 // compiles a YAML playbook to FortiSOAR import JSON. Mirrors the Python
@@ -19,5 +19,5 @@ export function loadReference(json: string): Reference {
 }
 
 export function compile(_yaml: string, _ref: Reference): unknown {
-  throw new Error("not yet implemented — see Phase 3b in FSR_PLAYBOOK_YAML_PLAN.md");
+  throw new Error("not yet implemented -- see Phase 3b in FSR_PLAYBOOK_YAML_PLAN.md");
 }

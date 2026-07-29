@@ -11,9 +11,9 @@
     "require_deliverable": false
   },
   "forbidden_facts": [
-    {"tool": "run_op", "connector": "virustotal", "label": "VirusTotal lookup — no external indicator on a disk-latency ITOps alert"},
-    {"tool": "run_op", "connector": "shodan", "label": "Shodan lookup — no external indicator on a disk-latency ITOps alert"},
-    {"tool": "run_op", "connector": "abuseipdb", "label": "AbuseIPDB lookup — no external indicator on a disk-latency ITOps alert"}
+    {"tool": "run_op", "connector": "virustotal", "label": "VirusTotal lookup -- no external indicator on a disk-latency ITOps alert"},
+    {"tool": "run_op", "connector": "shodan", "label": "Shodan lookup -- no external indicator on a disk-latency ITOps alert"},
+    {"tool": "run_op", "connector": "abuseipdb", "label": "AbuseIPDB lookup -- no external indicator on a disk-latency ITOps alert"}
   ],
   "notes": "Restraint test: an ITOps disk-latency alert has no IPs/external indicators. A good triage pulls the record and correlates on the host; it must NOT gratuitously fire threat-intel enrichment. Pinned to a real live alert UUID."
 }

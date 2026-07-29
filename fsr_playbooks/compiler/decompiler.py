@@ -25,7 +25,7 @@ _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 # decompiler resolves them instead of falling through as raw canonicals.
 #
 # `cybersponse.action` (uuid f414d039, ManualStart / Execute-menu ACTION_TRIGGER)
-# is the record-listing twin of `cybersponse.abstract_trigger` — both compile
+# is the record-listing twin of `cybersponse.abstract_trigger` -- both compile
 # FROM friendly `start` (the forward map's `SHORT_TYPE_TO_FSR["start"]`); the
 # split happens at emit time in `resolver/normalizers.py`, where a `start` step
 # bound to a `module` is rewritten to `cybersponse.action`. On the reverse
@@ -36,14 +36,14 @@ _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 # non-lossy: the normalizer re-derives `cybersponse.action` from the `module`
 # argument on recompile (round-trip verified).
 #
-# The codebase already agrees `cybersponse.action` is a `start` trigger —
+# The codebase already agrees `cybersponse.action` is a `start` trigger --
 # `step_param_audit.TYPE_NAME_TO_RESOLVER` and
 # `tests/wire_shape_oracle._TITLE_TO_TYPE` both list it; only this reverse map
 # was missing it.
 #
 # NOTE: the `cybersponse.pre_*` canonicals (pre_create/pre_update/pre_delete)
 # exist in the step_types table but are deliberately NOT mapped here. They have
-# no `start_on_*` twin — `start_on_create/update/delete` recompile to the
+# no `start_on_*` twin -- `start_on_create/update/delete` recompile to the
 # `post_*` triggers, so aliasing `pre_create -> start_on_create` would silently
 # flip a pre-event trigger to post-event. Those decompile as raw canonicals
 # until a dedicated friendly short type exists for them.
@@ -53,7 +53,7 @@ _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 # all compile TO canonical `Connectors` (resolver/_constants.py).
 # `_FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}` is a last-wins
 # comprehension, so without this overlay it resolves `Connectors` to
-# `delete_record` (the last entry) — mislabeling EVERY plain connector step on
+# `delete_record` (the last entry) -- mislabeling EVERY plain connector step on
 # pull as `delete_record`. That mislabel is a live round-trip break:
 # `delete_record` carries a strict argument whitelist (`_normalize_delete_record_args`
 # `_FRIENDLY`/`_CANONICAL`) that rejects the box-injected envelope keys
@@ -62,7 +62,7 @@ _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 # on recompile (3 errors in scheduled-daily-recon etc.). The generic `connector`
 # type has no whitelist, so resolving `Connectors` -> `connector` clears them.
 #
-# `delete_record`/`stop`/`end` are one-way authoring sugars — they compile down
+# `delete_record`/`stop`/`end` are one-way authoring sugars -- they compile down
 # to a `Connectors` step (cyops_utilities make_cyops_request DELETE / no_op) and
 # have no distinct canonical type to recover on pull, so the round-trip contract
 # for them is the authoring path, not the corpus round-trip
@@ -70,7 +70,7 @@ _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 # `step_param_audit.TYPE_NAME_TO_RESOLVER["Connectors"] == "connector"` and its
 # comment notes "pulled deletes map via Connectors above". Only this reverse
 # map was the holdout. A pulled delete-shaped step still round-trips correctly
-# as a `connector` step — its args are already in the expanded canonical wire
+# as a `connector` step -- its args are already in the expanded canonical wire
 # shape (params.iri/method=DELETE); only the friendly sugar is not recovered.
 _EXTRA_CANONICAL_TO_SHORT: dict[str, str] = {
     "cybersponse.action": "start",
@@ -78,13 +78,13 @@ _EXTRA_CANONICAL_TO_SHORT: dict[str, str] = {
     # `ApprovalManualInput` (uuid a19333c2) is the DISTINCT canonical the
     # normalizer now stamps for an approval gate (`is_approval: true`), sharing
     # the `manual_input` dispatcher + InputBased render mode with plain
-    # `ManualInput` (uuid fc04082a) — see resolver/normalizers.py and
+    # `ManualInput` (uuid fc04082a) -- see resolver/normalizers.py and
     # mi_output_catalog.APPROVAL_MI_STEP_TYPES. `SHORT_TYPE_TO_FSR` is 1:1
     # (`manual_input -> ManualInput`), so `_FSR_TO_SHORT` misses this variant
     # and a pulled approval step would fall through as raw
     # `type: ApprovalManualInput` (fails friendly revalidation). Map it back to
     # `manual_input`; the `is_approval: true` flag rides in `arguments`, so the
-    # forward path re-derives the ApprovalManualInput step type on recompile —
+    # forward path re-derives the ApprovalManualInput step type on recompile --
     # a clean round-trip.
     "ApprovalManualInput": "manual_input",
     # `CyopsUtilites` (uuid 0109f35d) is the live-box canonical the FortiSOAR
@@ -130,7 +130,7 @@ _FSR_TO_SHORT.update(_EXTRA_CANONICAL_TO_SHORT)
 # Pure editor-only UI-state keys the FSR designer auto-adds to a step's
 # `arguments:` but which carry NO runtime meaning: `__recommend` (the schema-
 # derived field-name suggestions the form shows) and `_showJson` (the JSON-vs-
-# form toggle). The wire oracle lists both in `EDITOR_ONLY_KEYS` ("never emit —
+# form toggle). The wire oracle lists both in `EDITOR_ONLY_KEYS` ("never emit --
 # editor-only or layout noise"); no compiler branch reads them and no ruleset
 # requires them (`rulesets/_shared.py` gates only `operation`, noting these two
 # are "auto-added by the FSR designer to both step types"). On pull they ride
@@ -155,7 +155,7 @@ _EDITOR_NOISE_KEYS: tuple[str, ...] = ("__recommend", "_showJson")
 
 # Canonical argument keys only an action-trigger (start + module ->
 # cybersponse.action) carries. Used to scope the start-step minimification to
-# action-triggers — a plain `cybersponse.abstract_trigger` start has none of
+# action-triggers -- a plain `cybersponse.abstract_trigger` start has none of
 # these, so it falls through to the generic `arguments:` pass-through.
 _ACTION_TRIGGER_CANONICAL_MARKERS = frozenset({
     "noRecordExecution", "singleRecordExecution", "executeButtonText",
@@ -192,7 +192,7 @@ def _step_modules(out: dict) -> list[str]:
 def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
     """Decompile FSR WorkflowCollection JSON into authored-style YAML.
 
-    Single-source-of-truth for the YAML serialization shape — the CLI
+    Single-source-of-truth for the YAML serialization shape -- the CLI
     pull/diff/decompile commands and the `generate_recipe` MCP tool
     both go through here so a recipe stored to the DB looks identical
     to a recipe pulled from a live FSR.
@@ -260,7 +260,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
 
 # Phase G: hoist remaining step args to the step's top level (no `arguments:`
 # wrapper). Strip wire-envelope keys that would collide with IR step fields:
-# `name` (connector display label — re-derived by the compiler from the
+# `name` (connector display label -- re-derived by the compiler from the
 # connector catalog; the step's `name` is the canvas node name) and
 # `description` (if already at step level as an IR field).
 _STEP_IR_FIELD_NAMES = frozenset({
@@ -271,7 +271,7 @@ _STEP_IR_FIELD_NAMES = frozenset({
 
 def _hoist_args(out: dict, args: dict) -> None:
     """Merge `args` into `out` at step level, skipping IR-field collisions."""
-    # `name` in args is the connector display label — collides with step.name.
+    # `name` in args is the connector display label -- collides with step.name.
     # Preserve as `display_name:` if it differs from the step name (custom
     # label); strip if it matches (re-derived by the compiler from catalog).
     # Must run before the IR-field loop below, which would otherwise pop it.
@@ -286,7 +286,7 @@ def _hoist_args(out: dict, args: dict) -> None:
         if isinstance(child, dict):
             for k, v in child.items():
                 args.setdefault(k, v)
-        # If it's a list (empty []), just drop it — no child params.
+        # If it's a list (empty []), just drop it -- no child params.
     for k in list(args):
         if k in _STEP_IR_FIELD_NAMES and k in out:
             args.pop(k)
@@ -304,7 +304,7 @@ def _decompile_step(s, pb_name: str | None = None,
     (``start`` + ``module``) minimification: the normalizer defaults the trigger
     button label to the playbook name, so we emit ``button_label`` only when the
     persisted label differs. ``None`` (direct test callers) suppresses that
-    default-suppression — every distinct ``title`` is emitted."""
+    default-suppression -- every distinct ``title`` is emitted."""
 
     out: dict = {"type": s.type, "name": s.name or s.id}
     args = dict(s.arguments) if isinstance(s.arguments, dict) else None
@@ -336,11 +336,11 @@ def _decompile_step(s, pb_name: str | None = None,
         for _noise_key in _EDITOR_NOISE_KEYS:
             args.pop(_noise_key, None)
 
-    # Strip empty-string `timeout` — the live box stamps `timeout: ""` as a
+    # Strip empty-string `timeout` -- the live box stamps `timeout: ""` as a
     # default; the compiler's typed-args model expects int and rejects "".
     # An empty timeout is always a no-op, so strip it unconditionally.
     # Also strip dict timeout (branch-resume variant {days, hours, minutes,
-    # step_iri}) — wire-internal routing data the box stamps on manual_input
+    # step_iri}) -- wire-internal routing data the box stamps on manual_input
     # steps; the typed-args model expects int, not dict.
     if isinstance(args, dict):
         tv = args.get("timeout")
@@ -407,7 +407,7 @@ def _decompile_step(s, pb_name: str | None = None,
     # from it; the emitter then serializes that as `arguments.resources`. On the
     # reverse trip the live box hands back `resources` (the canonical wire shape)
     # with NO `module` key, so the hoist loop above misses it and `resources` stays
-    # buried in `arguments:` — recompile then sees no `module` and downgrades the
+    # buried in `arguments:` -- recompile then sees no `module` and downgrades the
     # trigger to plain `cybersponse.abstract_trigger`, losing the Execute-menu
     # button identity. Lift `resources` back to a friendly `module:` (single) /
     # `modules:` (list) so the round-trip is non-lossy. `module` already set by the
@@ -443,13 +443,13 @@ def _decompile_step(s, pb_name: str | None = None,
         # round-trip break without this reverse-translation.
         friendly: dict = {}
         # route: the Execute-menu button identity. ALWAYS preserve when present
-        # — dropping it regenerates a different uuid5 (normalizer lines 251-253),
+        # -- dropping it regenerates a different uuid5 (normalizer lines 251-253),
         # breaking the round-trip gate and orphaning the live button on
         # pull->edit->push. Lives under arguments: (the parser hoist list does
         # not include route; a step-level route is silently dropped).
         if args.get("route") is not None:
             friendly["route"] = args["route"]
-        # requires_record (default True) / run_mode (default per_record) — reverse
+        # requires_record (default True) / run_mode (default per_record) -- reverse
         # the noRecordExecution/singleRecordExecution pair the normalizer writes
         # (normalizer lines 272-273). Emit only the non-default value.
         no_rec = bool(args.get("noRecordExecution", False))
@@ -460,12 +460,12 @@ def _decompile_step(s, pb_name: str | None = None,
             friendly["run_mode"] = "once_for_all"
         # button_label: the persisted Trigger Button Label (FSR's `title`). The
         # normalizer defaults title to the playbook name (lines 215-217), so emit
-        # only when it differs — otherwise the YAML repeats the playbook name.
+        # only when it differs -- otherwise the YAML repeats the playbook name.
         title = args.get("title")
         if title and (pb_name is None or title != pb_name):
             friendly["button_label"] = title
         # Declared input variables. When empty, both inputVariables and the
-        # step_variables the normalizer derives from it are defaults — drop them
+        # step_variables the normalizer derives from it are defaults -- drop them
         # (the normalizer re-creates them). When non-empty, keep inputVariables
         # and the already-hoisted step_variables (it carries the per-var jinja refs).
         input_vars = args.get("inputVariables") or []
@@ -596,7 +596,7 @@ def _decompile_step(s, pb_name: str | None = None,
         #     (`connector_args.py::_resolve_connector_action_args`:
         #     `if "version" not in a and crow["version"]: a["version"]=...`),
         #     and an author never sets it, so it is ALWAYS a re-derived
-        #     default — strip it (recompile re-adds it from the same catalog
+        #     default -- strip it (recompile re-adds it from the same catalog
         #     row; round-trip stable warm AND cold).
         #   - `step_variables: []`: the empty default input-binding envelope
         #     (hoisted to step level above). A NON-empty `step_variables`
@@ -607,21 +607,21 @@ def _decompile_step(s, pb_name: str | None = None,
         #   - `config: ""`: the "use the connector's default config" sentinel
         #     (`if "config" not in a: a["config"]=""` in connector_args.py). A
         #     real config UUID (a specific chosen configuration) is load-bearing
-        #     — keep it; drop only the empty default so the round-trip is
+        #     -- keep it; drop only the empty default so the round-trip is
         #     byte-stable (an original step with no `config` would otherwise
         #     gain `config: ""` on the first recompile and drift).
         # This is the shared logic the delete_record fix relies on: with the
         # `Connectors -> connector` overlay above, pulled delete-shaped steps
         # arrive here as `connector` too, so this single branch retires
         # `fix_delete_record_mistype`'s envelope strip (the recipe becomes a
-        # no-op). `name`/`operationTitle` (also re-derived from catalog rows —
+        # no-op). `name`/`operationTitle` (also re-derived from catalog rows --
         # `crow["label"]`/`orow["title"]`, connector_args.py:653-656) are
         # stripped ONLY when a catalog (the `db` connection threaded from
         # `decompile_to_yaml`) confirms the value equals the re-derived
         # default; an author-customized label is preserved. When `db` is None
         # (direct `_decompile_step` call / unwarmed catalog) they pass through
-        # untouched — safe, round-trip stable as-is. `connector`/`operation`/
-        # `params` are load-bearing wire the author/source owns — never touched.
+        # untouched -- safe, round-trip stable as-is. `connector`/`operation`/
+        # `params` are load-bearing wire the author/source owns -- never touched.
         #
         # SCOPE: friendly `connector` only. The raw-canonical `CyopsUtilites`
         # step type (uuid 0109f35d, the built-in cyops_utilities no_op terminal)
@@ -630,7 +630,7 @@ def _decompile_step(s, pb_name: str | None = None,
         # envelope is stripped by this branch (recompile re-adds it via the
         # `utilities` re-add path, normalizers.py:215-237). That mapping is a
         # canonical step-type change on recompile (`CyopsUtilites` -> `Connectors`)
-        # — see the LIVE-VERIFY PENDING note on the overlay entry.
+        # -- see the LIVE-VERIFY PENDING note on the overlay entry.
         args.pop("version", None)
         if out.get("step_variables") == []:
             out.pop("step_variables", None)
@@ -641,8 +641,8 @@ def _decompile_step(s, pb_name: str | None = None,
         # only when absent (`if "name" not in a and crow["label"]` etc.), so
         # a value that matches the catalog default is provably re-derived and
         # safe to drop (recompile re-stamps it). A mismatch is an author
-        # customization — keep it. Skipped entirely without a catalog (db is
-        # None on direct calls / unwarmed slim DB) — round-trip stable as-is.
+        # customization -- keep it. Skipped entirely without a catalog (db is
+        # None on direct calls / unwarmed slim DB) -- round-trip stable as-is.
         if db is not None:
             _c = args.get("connector")
             _o = args.get("operation")
@@ -754,7 +754,7 @@ def _decompile_step(s, pb_name: str | None = None,
                 args.pop("config", None)
             if out.get("step_variables") == []:
                 out.pop("step_variables", None)
-        # Strip stale legacy `from_str` — older smtp connectors used this
+        # Strip stale legacy `from_str` -- older smtp connectors used this
         # as a top-level argument; the current schema has `from` in params.
         # The real value lives in params.from (hoisted above); from_str is
         # always a stale leftover the compiler rejects as unknown.
@@ -766,7 +766,7 @@ def _decompile_step(s, pb_name: str | None = None,
         # `expand_record_crud` rewrites friendly `module:` -> wire `collection`
         # (create) / `collectionType` (update), and friendly `record:` -> wire
         # `collection` (update). Reverse so a pulled step surfaces the friendly
-        # keys (`module:` / `record:`) instead of the wire IRIs — and so the
+        # keys (`module:` / `record:`) instead of the wire IRIs -- and so the
         # compiler's A1 rules (`module:` mandatory; `collection:` rejected on
         # update) accept the decompiled YAML on recompile. On update,
         # `collectionType:` (wire module IRI) -> `module:` and `collection:`
@@ -792,7 +792,7 @@ def _decompile_step(s, pb_name: str | None = None,
                     args["module"] = coll[len("/api/3/"):]
                 else:
                     args["collection"] = coll
-        # `resource:` is the wire key for the record payload — emit the
+        # `resource:` is the wire key for the record payload -- emit the
         # friendly `fields:` alias instead. Both compile to the same wire
         # key, so recompile accepts either.
         if "resource" in args:
@@ -839,7 +839,7 @@ def _decompile_step(s, pb_name: str | None = None,
             if filters_out:
                 args["filters"] = filters_out
             else:
-                # Empty filters — keep the wire `query:` envelope so the
+                # Empty filters -- keep the wire `query:` envelope so the
                 # validator's required-`query` check passes on recompile.
                 args["query"] = q
             limit = q.get("limit")
@@ -868,7 +868,7 @@ def _decompile_step(s, pb_name: str | None = None,
 
     if s.next:
         out["next"] = s.next
-    # Any leftover branches (no matching condition/option) — surface as
+    # Any leftover branches (no matching condition/option) -- surface as
     # an explicit `branches:` so info isn't lost; the parser rejects this
     # shape so a user must rewrite by hand. Rare in practice.
     if branches_remaining:
@@ -936,7 +936,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
     id_by_uuid: dict[str, str] = {}
     canonical_by_uuid: dict[str, str] = {}
     short_by_uuid: dict[str, str] = {}
-    # Raw arguments per step uuid — the trigger's `inputVariables` are read back
+    # Raw arguments per step uuid -- the trigger's `inputVariables` are read back
     # out of this to recover the playbook's declared parameters (see below).
     _step_args_by_uuid: dict[str, dict[str, Any]] = {}
     for s in raw_steps:
@@ -1008,7 +1008,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
         # options. The emitter stamps step_iri on each condition/option as a
         # direct UUID pointer to the target step (more reliable than the route
         # label, which is often None). Without this, branches lose their `next`
-        # targets when routes are unlabeled — steps become "unreachable from
+        # targets when routes are unlabeled -- steps become "unreachable from
         # the trigger" on recompile.
         for _key in ("conditions",):
             _list = raw_args.get(_key)
@@ -1095,7 +1095,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
         else:
             contains = []
 
-        # Auto-comment fold for notes — title pattern is
+        # Auto-comment fold for notes -- title pattern is
         # "<PREFIX>: <step display name>" where PREFIX ∈
         # {Note, TODO, FIX, NOTE, WARN, HACK, XXX}. The prefix carries
         # the comment category and is preserved in the body via the
@@ -1162,7 +1162,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
     # have a non-empty one that still OMITS parameters the trigger declares.
     # Reading only the top-level field therefore lost declarations, and a
     # pulled playbook came back referencing `vars.input.params.X` with nothing
-    # declaring X — the compiler (correctly) rejecting its own decompiler's
+    # declaring X -- the compiler (correctly) rejecting its own decompiler's
     # output.
     #
     # So union the two rather than treating either as authoritative. Same

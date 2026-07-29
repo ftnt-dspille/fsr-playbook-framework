@@ -1,4 +1,4 @@
-"""Linter v1 — raw-YAML + IR rules that catch FSR foot-guns.
+"""Linter v1 -- raw-YAML + IR rules that catch FSR foot-guns.
 
 The compiler's other passes work off the parsed IR, but a few important
 checks need the *original YAML text* because YAML 1.1 has already
@@ -111,7 +111,7 @@ def _check_step_id_uuid(s: Step, pi: int, si: int) -> CompileError | None:
     """Warn when a step `id:` looks like a UUID. Compiles fine but
     breaks every cross-reference idiom (`branches: { yes: <id> }`,
     `next: <id>`) and makes the YAML unreadable. Real-world failure
-    mode from feedback session 60743f70 — agent emitted
+    mode from feedback session 60743f70 -- agent emitted
     `id: 550e8400-...` for every step instead of short slugs.
     """
     if not s.id or not _UUID_RE.match(s.id):
@@ -148,7 +148,7 @@ def _check_step_name(s: Step, pi: int, si: int) -> CompileError | None:
         severity="warning",
         message=(f"step name {name!r} contains characters outside "
                  "[A-Za-z0-9 _] (the FSR designer rejects these on save) "
-                 f"— auto-renamed to {fixed!r}"),
+                 f"-- auto-renamed to {fixed!r}"),
         path=f"playbooks[{pi}].steps[{si}].name",
     )
 
@@ -277,7 +277,7 @@ def _check_code_snippet(s: Step, pi: int, si: int) -> list[CompileError]:
 # (run 686525) contradicted its premise: an API-triggered notrigger run populated
 # `vars.input.params.first_name` correctly and had no `vars.inputs` key at all.
 # The `vars.inputs` (plural) form is specific to the designer "Run" button path,
-# which we can't distinguish statically — so the check was a false positive for
+# which we can't distinguish statically -- so the check was a false positive for
 # the common API/child-workflow case. See docs/plans/PILOT_STATIC_ANALYSIS_GAP_PLAN.md
 # (gap E) for the evidence and the open question.
 

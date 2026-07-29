@@ -1,4 +1,4 @@
-"""find_containment_actions — configured + tier>=3 response-action discovery.
+"""find_containment_actions -- configured + tier>=3 response-action discovery.
 
 These exercise the library-owned connector-discovery surface
 (`fsr_playbooks.mcp_server.tools_connector_discovery`) against the full
@@ -47,7 +47,7 @@ def test_find_containment_actions_filters_to_destructive(monkeypatch):
 
 def test_find_containment_probe_failure_fails_open(monkeypatch):
     """A healthcheck probe *failure* (timeout / unreachable endpoint) must NOT
-    drop a configured containment op — the gate must fall back to the listing
+    drop a configured containment op -- the gate must fall back to the listing
     status. Regression for the GA-demo repro where a timed-out warmup probe
     cached an 'error' verdict and find_containment_actions returned count:0 on
     a healthy box."""

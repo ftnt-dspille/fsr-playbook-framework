@@ -1,4 +1,4 @@
-"""WIRE_SHAPE_GAP_PLAN Phase 3 — the universal step envelope.
+"""WIRE_SHAPE_GAP_PLAN Phase 3 -- the universal step envelope.
 
 `when`, `ignore_errors`, `do_until`, `message`, `agent`, `apply_async`,
 `pickFromTenant` are valid on (nearly) every step type. Authors may write them
@@ -167,7 +167,7 @@ def test_message_block_accepts_tenant():
     """Shipped Fortinet content addresses a comment at a tenant.
 
     The allowlist rejected `tenant` outright, so MSSP-aware stock playbooks
-    could not compile at all — and an agent asked to edit one could not return
+    could not compile at all -- and an agent asked to edit one could not return
     a compiling result no matter how good its edit was. Confirmed against 400
     stock playbooks pulled from a live appliance: `tenant` is the ONLY message
     key real content uses outside the original allowlist, and it appears in 9
