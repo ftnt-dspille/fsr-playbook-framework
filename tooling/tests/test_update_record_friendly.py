@@ -141,3 +141,61 @@ def test_link_must_be_a_mapping(db_path):
         '        link: indicators\n')
     r = compile_yaml(y, db_path)
     assert any("link" in e.message for e in r.errors), [e.message for e in r.errors]
+
+
+# --- unlink: the detach counterpart --------------------------------------
+# `__unlink` was measured on 8.0 alongside `__link`: seed an alert with 2
+# indicators, unlink 1, and 1 remains. Without it, detaching means reading the
+# collection, dropping one entry and writing the rest back through `fields:` --
+# which races anything else touching that record and, if the read comes back
+# short, silently discards the difference.
+
+_UNLINK_Y = _LINK_Y.replace("        link:\n", "        unlink:\n")
+
+
+def test_unlink_lands_inside_resource(db_path):
+    a = _args(compile_yaml(_UNLINK_Y, db_path))
+    assert a["resource"] == {
+        "__unlink": {"indicators": ["11111111-2222-3333-4444-555555555555"]}}
+    assert "unlink" not in a
+
+
+def test_unlink_merges_with_explicit_fields(db_path):
+    y = _UNLINK_Y.replace(
+        '        unlink:\n',
+        '        fields:\n          status: /api/3/picklists/x\n        unlink:\n')
+    a = _args(compile_yaml(y, db_path))
+    assert a["resource"]["status"] == "/api/3/picklists/x"
+    assert "__unlink" in a["resource"]
+
+
+def test_link_and_unlink_coexist_in_one_step(db_path):
+    """Attaching and detaching in a single write is one PUT, not two steps --
+    both primitives ride in the same resource payload."""
+    y = _LINK_Y + (
+        '        unlink:\n'
+        '          assets: ["66666666-7777-8888-9999-000000000000"]\n')
+    a = _args(compile_yaml(y, db_path))
+    assert set(a["resource"]) == {"__link", "__unlink"}
+    assert a["resource"]["__unlink"]["assets"] == [
+        "66666666-7777-8888-9999-000000000000"]
+
+
+def test_unlink_must_be_a_mapping(db_path):
+    y = _UNLINK_Y.replace(
+        '        unlink:\n          indicators: ["11111111-2222-3333-4444-555555555555"]\n',
+        '        unlink: indicators\n')
+    r = compile_yaml(y, db_path)
+    assert any("unlink" in e.message for e in r.errors), [e.message for e in r.errors]
+
+
+def test_explicit_wire_unlink_is_not_clobbered(db_path):
+    """An author who already writes the wire shape under `fields:` keeps it."""
+    y = _LINK_Y.replace(
+        '        link:\n          indicators: ["11111111-2222-3333-4444-555555555555"]\n',
+        '        fields:\n'
+        '          __unlink:\n'
+        '            indicators: ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]\n')
+    a = _args(compile_yaml(y, db_path))
+    assert a["resource"]["__unlink"]["indicators"] == [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]

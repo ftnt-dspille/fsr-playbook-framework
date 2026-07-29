@@ -83,7 +83,7 @@ playbooks:
 | `connector` | Calls a connector operation. | `connector`, `operation`, `params`, `config` |
 | `find_record` | Queries records from a module. | `module`, `filters: [{field, operator, value}]`, `limit`, `logic`, `sort`, `select`, `relationships`, `max_relations` |
 | `create_record` | Creates a new record. | `module` (required), `fields: {field: value}`, `operation`, `is_upsert` |
-| `update_record` | Updates an existing record. | `record` (IRI), `module` (required), `fields: {field: value}`, `link: {rel: [uuid]}` (append), `operation` |
+| `update_record` | Updates an existing record. | `record` (IRI), `module` (required), `fields: {field: value}`, `link:`/`unlink: {rel: [uuid]}` (append/detach), `operation` |
 | `delete_record` | Deletes a record. | `record:`, or `module:` + `record_id:`, or `module:` + `filters:` (bulk); `show_deleted:` |
 | `manual_input` | Pauses for human input (form or buttons). | `title`, `description`, `options`, `inputs`, `email`, `assign_to`, `is_approval` |
 | `delay` | Waits for a duration or event. | `seconds` (or `minutes`/`hours`/`days`) |
@@ -410,15 +410,29 @@ per-field overrides, `OverwriteTags`, `AppendTags`, and omitting them entirely)
 and **every one replaced the collection**. The keys are accepted for wire
 fidelity; do not rely on them to preserve data. Use `link:`.
 
-To REMOVE a related record, the wire key is `__unlink` (measured: 2 linked
-indicators, unlink 1, leaves 1). There is no friendly key for it yet -- write it
-under `fields:`:
+To REMOVE a related record, use `unlink:` -- the same primitive in reverse
+(measured: 2 linked indicators, unlink 1, leaves 1):
 
 ```yaml
+- name: Detach indicator
+  type: update_record
+  module: alerts
+  record: "{{ vars.item['@id'] }}"
+  unlink:
+    indicators: ["<uuid>"]
   fields:
-    __unlink:
-      indicators: ["<uuid>"]
+    description: written in the same step
 ```
+
+`link:` and `unlink:` can appear in one step -- both ride in the same `resource`
+payload, so attaching and detaching is a single PUT, not two steps. The wire
+keys (`__link` / `__unlink`) are still accepted under `fields:` if you prefer
+to write them out.
+
+Reach for `unlink:` rather than rewriting the collection by hand: detaching via
+`fields:` means reading the current list, dropping one entry and writing the
+rest back, which races anything else touching that record and silently discards
+the difference if the read comes back short.
 
 ### `delete_record`
 

@@ -1,7 +1,7 @@
 # FortiSOAR Playbook Step Wire Shapes (editor-derived)
 
 Authoritative per-step argument shapes extracted from the FortiSOAR 8.0 editor
-bundle (`800_app.min.js`, beautified) — what the editor actually compiles before POST,
+bundle (`800_app.min.js`, beautified) -- what the editor actually compiles before POST,
 replacing values inferred from playbook JSON. Each row cites the step's editor
 controller/constant. Generated 2026-06-25 via a 21-agent extraction workflow.
 
@@ -69,18 +69,18 @@ confidence **high**
 
 <details><summary>evidence</summary>
 
-- 800_app.beautified.js:638 — TRIGGER_PARENT_STEP_TYPE constant definition
-- 800_app.beautified.js:23703-23842 — csTrigger directive full implementation (trigger editor UI controller)
-- 800_app.beautified.js:23714-23726 — Common trigger argument initialization
-- 800_app.beautified.js:23776-23781 — API_TRIGGER specific initialization
-- 800_app.beautified.js:23782-23794 — ACTION_TRIGGER specific initialization
-- 800_app.beautified.js:23797 — singleRecordExecution/noRecordExecution computation
-- 800_app.beautified.js:23825-23826 — authentication_methods watch handler
-- 800_app.beautified.js:23827-23828 — route watch handler
-- 800_app.beautified.js:23830-23831 — _promptexpanded and inputVariables[n]._expanded UI state
-- 800_app.beautified.js:23834-23836 — displayConditions and fieldbasedtrigger initialization
-- 800_app.beautified.js:34552-34572 — Compile-time step_variables.input transforms by trigger type
-- 800_app.beautified.js:34600 — Generic step properties (for_each, do_until, when, ignore_errors) validation
+- 800_app.beautified.js:638 -- TRIGGER_PARENT_STEP_TYPE constant definition
+- 800_app.beautified.js:23703-23842 -- csTrigger directive full implementation (trigger editor UI controller)
+- 800_app.beautified.js:23714-23726 -- Common trigger argument initialization
+- 800_app.beautified.js:23776-23781 -- API_TRIGGER specific initialization
+- 800_app.beautified.js:23782-23794 -- ACTION_TRIGGER specific initialization
+- 800_app.beautified.js:23797 -- singleRecordExecution/noRecordExecution computation
+- 800_app.beautified.js:23825-23826 -- authentication_methods watch handler
+- 800_app.beautified.js:23827-23828 -- route watch handler
+- 800_app.beautified.js:23830-23831 -- _promptexpanded and inputVariables[n]._expanded UI state
+- 800_app.beautified.js:23834-23836 -- displayConditions and fieldbasedtrigger initialization
+- 800_app.beautified.js:34552-34572 -- Compile-time step_variables.input transforms by trigger type
+- 800_app.beautified.js:34600 -- Generic step properties (for_each, do_until, when, ignore_errors) validation
 
 </details>
 
@@ -99,7 +99,7 @@ confidence **high**
 | `params` | string |  | False |  | [system key] Parameters. Present in 20/1386 instances. Becomes step variable. |
 | `result` | string |  | False |  | [system key] Result reference. Present in 2/1386 instances. Becomes step variable. |
 | `task_id` | string |  | False |  | [system key] Task identifier. Present in 3/1386 instances. Becomes step variable. |
-| `[key: string]` | unknown |  | False |  | User-defined variables (arbitrary dynamic keys). ~1203/1386 instances have additional keys. Each becomes a step variable available to subsequent steps as {{vars.step_name.variable_name}}. Cannot use reserved words: input, step_variables, do_until, ignore_errors, when, for_each, items, result, reques |
+| `[key: string]` | unknown |  | False |  | User-defined variables (arbitrary dynamic keys). ~1203/1386 instances have additional keys. Each becomes a step variable available to subsequent steps. NOTE: this row's claim of a step-scoped `{{vars.step_name.variable_name}}` path is bundle-derived and does NOT hold -- measured on 8.0, the scoped path renders empty and only the bare `{{vars.variable_name}}` resolves. Both render without erroring, so the scoped form fails silently. Cannot use reserved words: input, step_variables, do_until, ignore_errors, when, for_each, items, result, reques |
 
 **Compile transforms:** SetVariable compile-time cleanup (line 34487): removes empty/undefined when, do_until, for_each, message fields. Validation (lines 34499-34502): rejects if arguments has 'input' key. Step variable generation (lines 25491-25493): excludes for_each and do_until from step variables. UI controller excludes these from editing: condition, mock_result, ignore_errors, variables, timeout (line 38189)."
 
@@ -567,7 +567,7 @@ confidence **high**
 | `timeout` | object |  | False |  | Timeout configuration for awaiting response. Validated at line 37947-37951 (max 7 days, 168 hours, 10080 minutes). |
 | `message` | object |  | False |  | Message/logging metadata (system key). Not usually set for ManualInput. |
 
-**Compile transforms:** Line 34525: delete i.arguments.response_mapping.connecteStepsLength — connecteStepsLength is an editor-only tracking key for counting connected downstream steps; removed during compile before POST. Line 34514: Similar pattern for ManualDecision, but different structure. Line 34540-34544: Cleanup transforms — if inputExternalUser=false, clear external_channel_list and emailRecipients; if inputInternalUsers=false, clear inline_channel_list and externalRecipients; if agent_id is set and Slack channel exists, remove Slack channel. Line 34533-34535: When unauthenticated_input=true, force owner_detail fields to null/empty/false. Line 37898-37927: Default initialization sets type='InputBased', empty input.schema, empty response_mapping options, null/empty owner_detail, and hardcoded success message.
+**Compile transforms:** Line 34525: delete i.arguments.response_mapping.connecteStepsLength -- connecteStepsLength is an editor-only tracking key for counting connected downstream steps; removed during compile before POST. Line 34514: Similar pattern for ManualDecision, but different structure. Line 34540-34544: Cleanup transforms -- if inputExternalUser=false, clear external_channel_list and emailRecipients; if inputInternalUsers=false, clear inline_channel_list and externalRecipients; if agent_id is set and Slack channel exists, remove Slack channel. Line 34533-34535: When unauthenticated_input=true, force owner_detail fields to null/empty/false. Line 37898-37927: Default initialization sets type='InputBased', empty input.schema, empty response_mapping options, null/empty owner_detail, and hardcoded success message.
 
 <details><summary>evidence</summary>
 
@@ -709,7 +709,7 @@ confidence **high**
 | `ignore_errors` | string | false | False |  | Suppress errors; standard connector-step key |
 | `message` | string | null | False |  | Notification: {content, records, tags?, tenant?, thread?, type?, parentstepid?}; standard connector-step key |
 
-**Compile transforms:** The bundle processes arguments only on load: the ie() function (line 34207) converts empty arrays to {} for step_variables, resource, arguments, params. No deletions or mutations occur at POST-save time — all controller-set arguments persist unchanged in the playbook JSON.
+**Compile transforms:** The bundle processes arguments only on load: the ie() function (line 34207) converts empty arrays to {} for step_variables, resource, arguments, params. No deletions or mutations occur at POST-save time -- all controller-set arguments persist unchanged in the playbook JSON.
 
 <details><summary>evidence</summary>
 
@@ -741,7 +741,7 @@ confidence **high**
 
 - 800_app.beautified.js:33934-33936 (stepTypeWidget registration)
 - 800_app.beautified.js:38171-38182 (SetAPIKeysCtrl definition)
-- app.beautified.js:32352-32354, 36589-36600 (prior build — identical)
+- app.beautified.js:32352-32354, 36589-36600 (prior build -- identical)
 - fsr-schema.ts:1345-1349 (inferred schema match)
 
 </details>
@@ -813,10 +813,10 @@ confidence **high**
 ### **TIER 3: Common Envelope Keys Omitted / Inconsistently Documented**
 
 9. **Universal Keys Missing From Per-Step Docs**
-   - `name` (step display name) — present in SetVariables, Connector, but not documented universally
-   - `group` (step grouping) — mentioned in Trigger but not others
-   - `left`, `top`, `width`, `height` (layout positioning) — never documented
-   - `ignore_errors` — present in ALL steps but documented inconsistently:
+   - `name` (step display name) -- present in SetVariables, Connector, but not documented universally
+   - `group` (step grouping) -- mentioned in Trigger but not others
+   - `left`, `top`, `width`, `height` (layout positioning) -- never documented
+   - `ignore_errors` -- present in ALL steps but documented inconsistently:
      - Some: "boolean, default: false"
      - Some: "boolean, default: '', deleted if false"
      - Decision step excludes it at line 34545 ("excluded from arguments")
@@ -850,7 +850,7 @@ confidence **high**
     - **Action:** Trace through ManualInputCtrl initialization and event handlers to extract exact structure
 
 14. **Decision conditions[n] Field Semantics**
-    - `step_iri`, `condition`, `default`, `option`, `step_name` — unclear which are mutually exclusive
+    - `step_iri`, `condition`, `default`, `option`, `step_name` -- unclear which are mutually exclusive
     - `condition` Jinja evaluation order vs `default` fallback logic not documented
     - **Action:** Extract decision routing algorithm from compiler (line 34489-34490); test with multi-condition decision step
 
@@ -861,9 +861,9 @@ confidence **high**
     - **Action:** Extract Query class definition from codebase; document filter operators and precedence
 
 16. **Loop Execution Mode Semantics**
-    - `__bulk=true, batch_size=100` — what's the API behavior? Batch insert? Transaction?
+    - `__bulk=true, batch_size=100` -- what's the API behavior? Batch insert? Transaction?
     - Line 11542: bulk defaults to batch_size=100 if not set; where does 100 come from?
-    - parallel=true vs sequential=false — async vs sync?
+    - parallel=true vs sequential=false -- async vs sync?
     - **Action:** Test loop modes against demo appliance; document performance implications
 
 ---

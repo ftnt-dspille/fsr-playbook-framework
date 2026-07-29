@@ -69,6 +69,7 @@ class RecordCrudArgs(StrictArgs):
     record: Optional[str] = None
     field_operations: Optional[dict] = None
     link: Optional[dict] = None
+    unlink: Optional[dict] = None
     tags_operation: Optional[str] = None
 
 
@@ -102,9 +103,10 @@ def expand_record_crud(
     if "fields" in a and "resource" not in a:
         a["resource"] = a.pop("fields")
     elif isinstance(a.get("fields"), dict) and isinstance(a.get("resource"), dict):
-        # `link:` builds `resource` (as `resource.__link`) before this runs, so
-        # a step with BOTH keys must merge rather than discard `fields` --
-        # dropping it silently shipped an update that wrote nothing.
+        # `link:`/`unlink:` build `resource` (as `resource.__link` /
+        # `resource.__unlink`) before this runs, so a step with BOTH keys must
+        # merge rather than discard `fields` -- dropping it silently shipped an
+        # update that wrote nothing.
         merged = dict(a.pop("fields"))
         merged.update(a["resource"])       # explicit resource/__link wins
         a["resource"] = merged

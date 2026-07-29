@@ -647,7 +647,8 @@ class NormalizerMixin:
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
         _FRIENDLY = {"module", "mock_result", "condition", "record", "fields",
-                     "field_operations", "tags_operation", "operation", "link"}
+                     "field_operations", "tags_operation", "operation", "link",
+                     "unlink"}
         _CANONICAL = {
             "collection", "collectionType", "resource", "operation",
             "fieldOperation", "__recommend", "_showJson", "step_variables",
@@ -713,18 +714,27 @@ class NormalizerMixin:
         #
         # Values may be bare uuids or IRIs. `__link` rides inside the `resource`
         # payload because that dict becomes the PUT body.
-        _link = a.pop("link", None)
-        if _link is not None:
-            if isinstance(_link, dict):
+        #
+        # `unlink:` is the same primitive in reverse (`resource.__unlink`),
+        # measured on 8.0: 2 linked indicators, unlink 1, leaves 1. Detaching
+        # otherwise means reading the collection, removing one entry and
+        # writing the rest back through `fields:` -- which races anything else
+        # touching that record, and drops the lot if the read comes back short.
+        for friendly, wire in (("link", "__link"), ("unlink", "__unlink")):
+            val = a.pop(friendly, None)
+            if val is None:
+                continue
+            if isinstance(val, dict):
                 res = a.setdefault("resource", {})
                 if isinstance(res, dict):
-                    res.setdefault("__link", _link)
+                    res.setdefault(wire, val)
             else:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message=("`link:` must be a mapping of relationship name → "
-                             "list of record uuids/IRIs to attach"),
-                    path=f"{path}.link",
+                    message=(f"`{friendly}:` must be a mapping of relationship "
+                             f"name -> list of record uuids/IRIs to "
+                             + ("attach" if friendly == "link" else "detach")),
+                    path=f"{path}.{friendly}",
                 ))
 
         # NB: `operation:` enum drift is already checked by the corpus
