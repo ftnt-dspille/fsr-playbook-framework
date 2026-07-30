@@ -20,7 +20,9 @@ import pytest
 
 from fsr_playbooks.mcp_server._shared import (
     load_yaml_text,
+    reset_grounded_yaml,
     sanitize_yaml_text,
+    set_grounded_yaml,
 )
 
 # The exact corruption seen on the box: the (R) sign arriving as NUL + "AE".
@@ -80,8 +82,9 @@ class TestLoadYamlText:
     def test_corrupted_document_now_parses(self):
         """The regression: this raised before the sanitizer existed."""
         bad = MINIMAL_PB.format(note=CORRUPTED_FRAGMENT.replace(":", " -"))
-        doc, removed = load_yaml_text(bad)
-        assert removed == 2
+        doc, load = load_yaml_text(bad)
+        assert load.control_chars_removed == 2
+        assert not load.used_grounding
         assert doc["playbooks"][0]["name"] == "Hunt Indicators"
 
     def test_pinning_the_old_behaviour_proves_the_test_bites(self):
@@ -98,8 +101,8 @@ class TestLoadYamlText:
             yaml.safe_load(bad)
 
     def test_empty_document_yields_empty_dict(self):
-        doc, removed = load_yaml_text("")
-        assert doc == {} and removed == 0
+        doc, load = load_yaml_text("")
+        assert doc == {} and load.control_chars_removed == 0
 
     def test_parse_errors_still_propagate(self):
         """Callers own their error contract -- don't swallow real syntax errors."""
@@ -107,6 +110,78 @@ class TestLoadYamlText:
 
         with pytest.raises(yaml.YAMLError):
             load_yaml_text("a:\n  - [unclosed\n")
+
+
+@pytest.fixture
+def grounded():
+    """Bind an open playbook for the turn, as the chat loop does."""
+    tokens = []
+
+    def _bind(text):
+        tokens.append(set_grounded_yaml(text))
+
+    yield _bind
+    for t in reversed(tokens):
+        reset_grounded_yaml(t)
+
+
+GROUND_TRUTH = MINIMAL_PB.format(note="the appliance's own copy")
+
+# Sanitizing cannot save this one: the model also emitted an invalid `\,`
+# escape inside a double-quoted scalar. Taken from the same real .159 payload
+# as CORRUPTED_FRAGMENT -- one model copy, corrupted two different ways, which
+# is why stripping control chars alone is necessary but not sufficient.
+UNSALVAGEABLE = 'playbooks:\n- name: X\n  steps:\n  - mock: "a\\,b"\n'
+
+
+class TestGroundingFallback:
+    def test_unparseable_copy_falls_back_to_the_open_playbook(self, grounded):
+        grounded(GROUND_TRUTH)
+        doc, load = load_yaml_text(UNSALVAGEABLE)
+        assert load.used_grounding is True
+        assert load.grounding_reason           # says why, for the tool note
+        assert doc["playbooks"][0]["name"] == "Hunt Indicators"
+
+    def test_no_grounding_bound_means_the_error_still_raises(self):
+        """Fail loudly rather than invent a document out of nothing."""
+        import yaml
+
+        with pytest.raises(yaml.YAMLError):
+            load_yaml_text(UNSALVAGEABLE)
+
+    def test_a_parseable_copy_is_never_replaced(self, grounded):
+        """Grounding is a repair path, not a silent override of good input."""
+        grounded(GROUND_TRUTH)
+        mine = MINIMAL_PB.format(note="the model's own valid edit")
+        doc, load = load_yaml_text(mine)
+        assert load.used_grounding is False
+        assert doc["playbooks"][0]["steps"][0]["arguments"]["note"] == (
+            "the model's own valid edit")
+
+    def test_identical_text_does_not_pretend_to_recover(self, grounded):
+        """If grounding IS the failing text, re-parsing it changes nothing."""
+        import yaml
+
+        grounded(UNSALVAGEABLE)
+        with pytest.raises(yaml.YAMLError):
+            load_yaml_text(UNSALVAGEABLE)
+
+    def test_opt_out_disables_the_fallback(self, grounded):
+        """`allow_grounding=False` means 'parse exactly this text'."""
+        import yaml
+
+        grounded(GROUND_TRUTH)
+        with pytest.raises(yaml.YAMLError):
+            load_yaml_text(UNSALVAGEABLE, allow_grounding=False)
+
+    def test_grounding_does_not_leak_across_turns(self):
+        """A ContextVar left set would silently ground an unrelated session."""
+        token = set_grounded_yaml(GROUND_TRUTH)
+        reset_grounded_yaml(token)
+        import yaml
+
+        with pytest.raises(yaml.YAMLError):
+            load_yaml_text(UNSALVAGEABLE)
 
 
 class TestNoBareSafeLoadParityGuard:

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -198,23 +200,85 @@ def sanitize_yaml_text(yaml_text: Any) -> tuple[str, int]:
     return clean, len(yaml_text) - len(clean)
 
 
-def load_yaml_text(yaml_text: Any) -> tuple[Any, int]:
-    """``safe_load`` a model-supplied ``yaml_text``, control chars stripped.
+@dataclass(frozen=True)
+class YamlLoad:
+    """What it took to parse a model-supplied ``yaml_text``.
 
-    Returns ``(doc, removed_count)``; ``doc`` is ``{}`` for empty/None input so
-    callers can keep their ``doc.get(...)`` shape. Parse errors propagate --
-    every call site already wraps this in its own ``except`` with its own error
-    contract, and swallowing here would flatten those.
+    Reported rather than hidden: a turn that only worked because we repaired
+    or replaced the model's copy must say so, or a systematic corruption looks
+    like clean input forever.
+    """
 
-    This is the ONE way to parse a `yaml_text` argument. A bare
-    ``yaml.safe_load(yaml_text)`` skips the hygiene above and reintroduces the
-    NUL-byte class of failure; ``test_yaml_text_sanitizer.py`` guards against
-    new ones appearing.
+    control_chars_removed: int = 0
+    used_grounding: bool = False
+    #: The parse error that forced the grounding fallback, for the tool note.
+    grounding_reason: str = ""
+
+
+# The open playbook for the current turn, as read from the appliance. Set by
+# the chat loop (which owns `entity.playbook_yaml`) and read here at tool
+# dispatch. A ContextVar because the turn runs on its own thread/task -- the
+# same reason the active profile and record IRI are bound this way.
+_GROUNDED_YAML: ContextVar[str | None] = ContextVar("_grounded_yaml", default=None)
+
+
+def set_grounded_yaml(yaml_text: str | None) -> Any:
+    """Bind the turn's authoritative open-playbook YAML. Returns a reset token."""
+    return _GROUNDED_YAML.set(yaml_text or None)
+
+
+def reset_grounded_yaml(token: Any) -> None:
+    try:
+        _GROUNDED_YAML.reset(token)
+    except (ValueError, LookupError):      # foreign context -- nothing to undo
+        pass
+
+
+def get_grounded_yaml() -> str | None:
+    return _GROUNDED_YAML.get()
+
+
+def load_yaml_text(yaml_text: Any, *, allow_grounding: bool = True
+                   ) -> tuple[Any, YamlLoad]:
+    """Parse a model-supplied ``yaml_text``, repairing what can be repaired.
+
+    Returns ``(doc, YamlLoad)``; ``doc`` is ``{}`` for empty/None input so
+    callers keep their ``doc.get(...)`` shape.
+
+    Two layers, because a model re-emitting a 20 kB playbook verbatim gets it
+    wrong in more than one way (observed live on one payload: a NUL byte AND a
+    stray ``\\,`` escape):
+
+    1. **Strip** control characters YAML forbids. They can never be authored
+       deliberately, so removing them is always correct.
+    2. **Ground** -- if it still will not parse and the chat loop bound the
+       real open playbook via :func:`set_grounded_yaml`, parse THAT instead.
+       The appliance's own copy is authoritative; the model's is a lossy
+       transcription of it. This is the same instinct as ``apply_patch``
+       falling back to ``decompile_playbook`` when the model's snippet is not
+       a compilable document.
+
+    If both fail, the original parse error propagates -- every call site wraps
+    this in its own ``except`` with its own error contract, and swallowing here
+    would flatten those. Pass ``allow_grounding=False`` where the caller means
+    "parse exactly this text" (e.g. validating a candidate before saving it).
     """
     import yaml as _yaml  # noqa: PLC0415
 
     clean, removed = sanitize_yaml_text(yaml_text)
-    return (_yaml.safe_load(clean) or {}), removed
+    try:
+        return (_yaml.safe_load(clean) or {}), YamlLoad(removed)
+    except _yaml.YAMLError as exc:
+        grounded = get_grounded_yaml() if allow_grounding else None
+        if not grounded:
+            raise
+        g_clean, _ = sanitize_yaml_text(grounded)
+        if g_clean.strip() == clean.strip():
+            raise                      # same text, same failure -- no gain
+        doc = _yaml.safe_load(g_clean) or {}   # a bad grounding is a real error
+        first_line = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+        return doc, YamlLoad(removed, used_grounding=True,
+                             grounding_reason=first_line)
 
 
 # ---------------------------------------------------------------------------

@@ -17,10 +17,37 @@ from ._shared import (
     mcp,
     _db,
     load_yaml_text,
-    sanitize_yaml_text,
 )
 # Import DB_PATH for type hints/direct use (non-patchable usage)
 DB_PATH = _shared.DB_PATH
+
+
+def _yaml_load_note(load: Any) -> dict[str, Any]:
+    """Surface any repair `load_yaml_text` had to perform, for the model.
+
+    Empty dict on a clean parse, so the common case adds nothing to the
+    response. When the model's `yaml_text` needed help, say exactly what --
+    a turn that only succeeded because we repaired or replaced the copy must
+    not read as if the copy were fine.
+    """
+    note: dict[str, Any] = {}
+    if getattr(load, "control_chars_removed", 0):
+        n = load.control_chars_removed
+        note["sanitized_control_chars"] = n
+        note["yaml_text_note"] = (
+            f"stripped {n} control character(s) that YAML forbids from the "
+            "yaml_text you sent; they cannot be authored deliberately, so "
+            "your copy was corrupted in transit"
+        )
+    if getattr(load, "used_grounding", False):
+        note["used_open_playbook"] = True
+        note["yaml_text_note"] = (
+            "the yaml_text you sent could not be parsed "
+            f"({load.grounding_reason}); analysed the OPEN PLAYBOOK read from "
+            "the appliance instead. Do not re-send the playbook body -- it is "
+            "already grounded; describe the change you want instead."
+        )
+    return note
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -74,13 +101,16 @@ def step_through_playbook(yaml_text: str,
         steps_executed: int }
     """
     try:
-        doc, _ctrl_removed = load_yaml_text(yaml_text)
+        doc, _load = load_yaml_text(yaml_text)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"yaml parse failed: {exc}"}
+    # Say what it took to read the model's copy. Silence here would let a
+    # systematically corrupted transcription keep passing as clean input.
+    _load_note = _yaml_load_note(_load)
 
     pbs = doc.get("playbooks") or []
     if not pbs:
-        return {"ok": False, "error": "no playbooks in YAML"}
+        return {"ok": False, "error": "no playbooks in YAML", **_load_note}
     pb = next((p for p in pbs if p.get("name") == playbook), pbs[0])
     steps = pb.get("steps") or []
     # Accept simplified YAML where step identity is the `name` field
@@ -558,6 +588,7 @@ def step_through_playbook(yaml_text: str,
         "trace": trace,
         "first_error": first_error,
         "steps_executed": len(trace),
+        **_load_note,
     }
 
 @mcp.tool()
@@ -583,20 +614,6 @@ def analyze_playbook(yaml_text: str,
 
     See RENDER_PATH_VALIDATOR_PLAN.md for the catalog of checks.
     """
-    # Report (don't hide) a model-corrupted copy: `yaml_text` is the model
-    # re-emitting a playbook it was already handed, and a stray control char
-    # 15 kB in used to kill the whole turn. It is now stripped -- but say so,
-    # or a recurring corruption looks like clean input forever.
-    _clean, _ctrl_removed = sanitize_yaml_text(yaml_text)
-    _ctrl_note = (
-        {"sanitized_control_chars": _ctrl_removed,
-         "note": f"stripped {_ctrl_removed} control character(s) that YAML "
-                 f"forbids from the supplied yaml_text; they cannot be "
-                 f"authored deliberately, so this indicates the copy you "
-                 f"sent was corrupted in transit"}
-        if _ctrl_removed else {}
-    )
-
     sim = step_through_playbook(
         yaml_text=yaml_text,
         playbook=playbook,
@@ -606,9 +623,14 @@ def analyze_playbook(yaml_text: str,
         execute_safe_ops=execute_safe_ops,
         max_steps=max_steps,
     )
+    # `sim` already carries any sanitized_control_chars / used_open_playbook
+    # keys from the load it performed -- pass them straight through.
+    _ctrl_note = {k: sim[k] for k in
+                  ("sanitized_control_chars", "used_open_playbook",
+                   "yaml_text_note") if k in sim}
     if not sim.get("trace"):
         return {**sim, "diagnostics": [],
-                "error_count": 0, "warning_count": 0, **_ctrl_note}
+                "error_count": 0, "warning_count": 0}
 
     from fsr_playbooks.compiler.render_analyzer import diagnostics_dict  # noqa: PLC0415
     # Pull the parsed playbook node so the analyzer can reach into
