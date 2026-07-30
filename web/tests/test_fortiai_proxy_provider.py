@@ -132,6 +132,45 @@ def test_normalize_tools_fortiai_from_openai_shape():
     assert out[0]["schema"]["type"] == "object"
 
 
+def test_normalize_tools_collapses_union_types():
+    """The gateway 400s on `{"type": ["integer", "null"]}` and names nothing,
+    so one nullable property poisons the whole tool payload. This is the exact
+    shape that broke every tool-calling turn: `emit_choice_card.max_select`."""
+    tools = [
+        {"name": "emit_choice_card", "description": "Ask the analyst to choose",
+         "input_schema": {"type": "object", "properties": {
+             "max_select": {"type": ["integer", "null"], "default": None},
+             "prompt": {"type": "string"},
+         }}},
+    ]
+    props = _normalize_tools_fortiai(tools)[0]["schema"]["properties"]
+    assert props["max_select"]["type"] == "integer"
+    assert props["prompt"]["type"] == "string"
+
+
+def test_normalize_tools_collapses_nested_union_types():
+    """A union inside an array's `items` fails identically to a top-level one."""
+    tools = [
+        {"name": "t", "description": "d",
+         "input_schema": {"type": "object", "properties": {
+             "rows": {"type": "array", "items": {"type": "object", "properties": {
+                 "hint": {"type": ["string", "null"]},
+             }}},
+         }}},
+    ]
+    schema = _normalize_tools_fortiai(tools)[0]["schema"]
+    assert schema["properties"]["rows"]["items"]["properties"]["hint"]["type"] == "string"
+
+
+def test_normalize_tools_null_only_union_does_not_stay_a_list():
+    """Degenerate `["null"]` must still emit a scalar type, not a list."""
+    tools = [{"name": "t", "description": "d",
+              "input_schema": {"type": "object",
+                               "properties": {"x": {"type": ["null"]}}}}]
+    assert not isinstance(
+        _normalize_tools_fortiai(tools)[0]["schema"]["properties"]["x"]["type"], list)
+
+
 def test_normalize_tools_fortiai_passthrough():
     tools = [{"name": "x", "description": "X", "schema": {"type": "object"}}]
     out = _normalize_tools_fortiai(tools)

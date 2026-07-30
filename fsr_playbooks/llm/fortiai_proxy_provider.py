@@ -40,6 +40,33 @@ from .provider import (
 from .tools import _resolve_tier as _tier_for, dispatch, anthropic_tools as _anthropic_tools
 
 
+def _collapse_union_types(node: Any) -> Any:
+    """Rewrite JSON-Schema union types to a single type, recursively.
+
+    The gateway rejects ``{"type": ["integer", "null"]}`` outright -- the whole
+    request 400s with ``-30000 "The request payload is invalid"``, naming
+    nothing, so ONE nullable property poisons the entire tool payload. Plain
+    ``{"type": "integer"}`` is accepted (live-verified on 8.0.0, both
+    directions). Optionality is already carried by ``required``, so dropping
+    the ``"null"`` member loses nothing the proxy can act on.
+
+    Recurses through ``properties``/``items``/``$defs`` because a union nested
+    inside an array's ``items`` fails exactly the same way as a top-level one.
+    """
+    if isinstance(node, list):
+        return [_collapse_union_types(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _collapse_union_types(v) for k, v in node.items()}
+    t = out.get("type")
+    if isinstance(t, list):
+        # Prefer the first non-"null" member; a type list of only "null" is
+        # degenerate, so fall back to "string" rather than emitting a list.
+        concrete = [x for x in t if x != "null"]
+        out["type"] = concrete[0] if concrete else "string"
+    return out
+
+
 def _normalize_tools_fortiai(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Translate tool schemas into the fortiai-proxy shape: ``{name, description, schema}``.
 
@@ -48,6 +75,8 @@ def _normalize_tools_fortiai(tools: list[dict[str, Any]]) -> list[dict[str, Any]
     The proxy rejects both OpenAI's ``{type: function, function: {parameters}}``
     and Anthropic's ``{name, description, input_schema}`` -- it requires the
     plain ``schema`` key.  Already-correct shapes pass through untouched.
+
+    Union types are collapsed here too -- see :func:`_collapse_union_types`.
     """
     out: list[dict[str, Any]] = []
     for t in tools or []:
@@ -67,7 +96,7 @@ def _normalize_tools_fortiai(tools: list[dict[str, Any]]) -> list[dict[str, Any]
         out.append({
             "name": name,
             "description": t.get("description", ""),
-            "schema": schema,
+            "schema": _collapse_union_types(schema),
         })
     return out
 
