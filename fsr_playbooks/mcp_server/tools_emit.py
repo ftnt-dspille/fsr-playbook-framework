@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ._shared import mcp, _err, _validate_op_params
+from ._shared import mcp, _err, _validate_op_params, load_yaml_text
 
 
 # Step-name charset rule from system_prompt.md §"Hard rules" #2.
@@ -591,8 +591,7 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
 
     ops_summary: list[dict[str, Any]] = []
     try:
-        import yaml as _yaml
-        doc = _yaml.safe_load(yaml_text)
+        doc, _ = load_yaml_text(yaml_text)
         pbs = (doc or {}).get("playbooks") or []
         steps = (pbs[0] or {}).get("steps") or [] if pbs else []
         for s in steps:
@@ -689,8 +688,7 @@ def emit_enhancement_offer(
     yaml_text = entry["yaml"]
     ops_summary: list[dict[str, Any]] = []
     try:
-        import yaml as _yaml
-        doc = _yaml.safe_load(yaml_text)
+        doc, _ = load_yaml_text(yaml_text)
         pbs = (doc or {}).get("playbooks") or []
         steps = (pbs[0] or {}).get("steps") or [] if pbs else []
         for s in steps:

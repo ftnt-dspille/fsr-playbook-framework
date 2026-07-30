@@ -10,6 +10,7 @@ from ._shared import (
     mcp,
     _err,
     _serialize_compiler_error,
+    load_yaml_text,
 )
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
@@ -178,8 +179,7 @@ def _extract_connectors_and_picklists(yaml_text: str) -> tuple[
         in the document matching `{{ 'PL' | picklist('value') }}`.
     """
     try:
-        import yaml as _yaml  # type: ignore
-        doc = _yaml.safe_load(yaml_text) or {}
+        doc, _ = load_yaml_text(yaml_text)
     except Exception:  # noqa: BLE001
         return [], []
 

@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
 
+from ._shared import load_yaml_text
+
 
 # Sessions auto-expire after this many seconds of inactivity. Touched
 # on every access (start/step/continue/stop/get).
@@ -537,8 +539,7 @@ def build_session(
     `get_store().create(...)` (or `start_session` does both in one
     call)."""
     try:
-        import yaml as _yaml  # noqa: PLC0415
-        doc = _yaml.safe_load(yaml_text) or {}
+        doc, _ = load_yaml_text(yaml_text)
     except Exception as exc:  # noqa: BLE001
         return None, f"yaml parse failed: {exc}"
 

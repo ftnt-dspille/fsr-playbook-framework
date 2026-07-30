@@ -16,6 +16,8 @@ from .tools_picklists import (
 from ._shared import (
     mcp,
     _db,
+    load_yaml_text,
+    sanitize_yaml_text,
 )
 # Import DB_PATH for type hints/direct use (non-patchable usage)
 DB_PATH = _shared.DB_PATH
@@ -72,8 +74,7 @@ def step_through_playbook(yaml_text: str,
         steps_executed: int }
     """
     try:
-        import yaml as _yaml
-        doc = _yaml.safe_load(yaml_text) or {}
+        doc, _ctrl_removed = load_yaml_text(yaml_text)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"yaml parse failed: {exc}"}
 
@@ -582,6 +583,20 @@ def analyze_playbook(yaml_text: str,
 
     See RENDER_PATH_VALIDATOR_PLAN.md for the catalog of checks.
     """
+    # Report (don't hide) a model-corrupted copy: `yaml_text` is the model
+    # re-emitting a playbook it was already handed, and a stray control char
+    # 15 kB in used to kill the whole turn. It is now stripped -- but say so,
+    # or a recurring corruption looks like clean input forever.
+    _clean, _ctrl_removed = sanitize_yaml_text(yaml_text)
+    _ctrl_note = (
+        {"sanitized_control_chars": _ctrl_removed,
+         "note": f"stripped {_ctrl_removed} control character(s) that YAML "
+                 f"forbids from the supplied yaml_text; they cannot be "
+                 f"authored deliberately, so this indicates the copy you "
+                 f"sent was corrupted in transit"}
+        if _ctrl_removed else {}
+    )
+
     sim = step_through_playbook(
         yaml_text=yaml_text,
         playbook=playbook,
@@ -593,15 +608,14 @@ def analyze_playbook(yaml_text: str,
     )
     if not sim.get("trace"):
         return {**sim, "diagnostics": [],
-                "error_count": 0, "warning_count": 0}
+                "error_count": 0, "warning_count": 0, **_ctrl_note}
 
     from fsr_playbooks.compiler.render_analyzer import diagnostics_dict  # noqa: PLC0415
     # Pull the parsed playbook node so the analyzer can reach into
     # `arguments.required_fields` style metadata if it ever needs to;
     # current C3 doesn't, but P5 will.
     try:
-        import yaml as _yaml  # noqa: PLC0415
-        doc = _yaml.safe_load(yaml_text) or {}
+        doc, _ = load_yaml_text(yaml_text)
         pbs = doc.get("playbooks") or []
         pb_node = next((p for p in pbs
                         if p.get("name") == sim.get("playbook")),
@@ -626,6 +640,7 @@ def analyze_playbook(yaml_text: str,
         "warning_count": sum(1 for d in diagnostics if d["severity"] == "warning"),
         "first_error": sim.get("first_error"),
         "steps_executed": sim.get("steps_executed", 0),
+        **_ctrl_note,
     }
 
 @mcp.tool()
@@ -781,8 +796,7 @@ def step_test(yaml_text: str,
       emits, plus a `verification_recorded` flag when run_op fired.
     """
     try:
-        import yaml as _yaml
-        doc = _yaml.safe_load(yaml_text) or {}
+        doc, _ = load_yaml_text(yaml_text)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"yaml parse failed: {exc}"}
 

@@ -14,6 +14,7 @@ from ._shared import (
     _err,
     _db,
     _rows,
+    load_yaml_text,
     REPO_ROOT,
 )
 # Import DB_PATH for local use
@@ -360,8 +361,7 @@ def diagnose_yaml_against_pb_execution(
     steps_in_env = (run_vars.get("steps") or {}) if isinstance(run_vars, dict) else {}
 
     try:
-        import yaml as _yaml
-        doc = _yaml.safe_load(yaml_text) or {}
+        doc, _ = load_yaml_text(yaml_text)
     except Exception as exc:  # noqa: BLE001
         return _err("yaml_parse_failed", f"YAML parse error: {exc}",
                     suggestions=["Run `validate_yaml` first to surface "
