@@ -112,3 +112,6 @@ logs/
 # 14MB, 1389 files. Local-only until the licensing/PII review in
 # docs/plans/playbook-compiler-fidelity-and-agent-surface.md R1 is done.
 scratch/f4_failing/
+
+# ad-hoc live probes (kept on disk, never committed)
+scratch/
