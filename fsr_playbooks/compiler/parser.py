@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from .._yaml_hygiene import sanitize_yaml_text
 from .errors import CompileError, ErrorCode
 from .ir import Annotation, Collection, Playbook, Step
 
@@ -138,6 +139,17 @@ def _slugify(s: str) -> str:
 
 def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
     errors: list[CompileError] = []
+    # Strip control chars the model may have introduced while re-emitting a
+    # playbook verbatim (see `_yaml_hygiene`). This entry point is shared by
+    # compile_yaml / validate_yaml / resolve_yaml / push_playbook, so it is the
+    # WRITE path: a stray NUL here fails a save, not just a read.
+    #
+    # Sanitize only -- deliberately NOT the grounding fallback the tool layer
+    # uses. Callers treat "does this text compile?" as a CLASSIFIER (apply_patch
+    # asks it whether `after_yaml` is a whole document or a snippet); silently
+    # substituting the open playbook would make that always succeed and
+    # mis-classify every snippet as a whole-doc patch.
+    text, _ = sanitize_yaml_text(text)
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError as e:

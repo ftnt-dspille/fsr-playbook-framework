@@ -15,6 +15,7 @@ yields NUL + "AE". One bad byte 15 kB into a 20 kB blob killed the entire turn
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 
@@ -184,6 +185,66 @@ class TestGroundingFallback:
             load_yaml_text(UNSALVAGEABLE)
 
 
+class TestCompilerWritePath:
+    """The compile/validate/push family must survive the same corruption.
+
+    These reach `compiler.parser.parse_yaml`, NOT the tool layer's
+    `load_yaml_text` -- and `push_playbook` WRITES. A stray control char here
+    fails a save, not merely a read.
+    """
+
+    #: Current step shape -- args hoisted to the step top level (the
+    #: `arguments:` wrapper is rejected by the compiler).
+    COMPILER_PB = (
+        "collection: Hunt\n"
+        "playbooks:\n"
+        "- name: Hunt Indicators\n"
+        "  steps:\n"
+        "  - name: Start\n"
+        "    type: start\n"
+        "    note: {note}\n"
+    )
+
+    def test_compiler_parses_a_control_char_corrupted_document(self):
+        from fsr_playbooks.compiler.parser import parse_yaml
+
+        bad = self.COMPILER_PB.format(
+            note=CORRUPTED_FRAGMENT.replace(":", " -"))
+        coll, errors = parse_yaml(bad)
+        parse_errs = [e for e in errors if "YAML parse error" in str(e.message)]
+        assert not parse_errs, (
+            f"control char still breaks the write path: {parse_errs}")
+        assert coll is not None, [f"{e.code}: {e.message}" for e in errors]
+
+    def test_the_write_path_test_bites(self):
+        """Same document, unsanitized, must still break PyYAML."""
+        import yaml
+
+        bad = self.COMPILER_PB.format(
+            note=CORRUPTED_FRAGMENT.replace(":", " -"))
+        with pytest.raises(yaml.YAMLError):
+            yaml.safe_load(bad)
+
+    def test_compiler_does_not_ground(self):
+        """`parse_yaml` doubles as a whole-doc-vs-snippet CLASSIFIER.
+
+        apply_patch asks "does this compile?" to decide whether the model sent
+        a whole document or a snippet. If a grounding fallback fired here, that
+        question would always answer yes and every snippet would be
+        mis-classified as a whole-doc patch.
+        """
+        from fsr_playbooks.compiler.parser import parse_yaml
+
+        tok = set_grounded_yaml(GROUND_TRUTH)
+        try:
+            coll, errors = parse_yaml(UNSALVAGEABLE)
+        finally:
+            reset_grounded_yaml(tok)
+        assert coll is None or errors, (
+            "parse_yaml silently substituted the open playbook -- that breaks "
+            "apply_patch's snippet classification")
+
+
 class TestNoBareSafeLoadParityGuard:
     """Every `yaml_text` entry point must go through `load_yaml_text`.
 
@@ -193,17 +254,35 @@ class TestNoBareSafeLoadParityGuard:
     living in more than one place must have the relationship asserted.
     """
 
-    def test_no_module_hand_rolls_safe_load_of_yaml_text(self):
-        pkg = pathlib.Path(__file__).resolve().parents[1] / "mcp_server"
+    #: The only places allowed to call yaml.safe_load directly. Everything
+    #: else must come through load_yaml_text (tool layer) or parse_yaml
+    #: (compiler), both of which sanitize first.
+    SANCTIONED = {
+        "_shared.py",     # implements load_yaml_text
+        "parser.py",      # compiler entry; sanitizes inline (no grounding)
+    }
+
+    def test_no_module_hand_rolls_a_yaml_parse(self):
+        """Catch `safe_load(<anything>)`, not just the name I happened to fix.
+
+        The first version of this guard grepped for the literal
+        `safe_load(yaml_text)` -- and therefore MISSED
+        `compiler/parser.py`'s `safe_load(text)`, which is the entry for
+        compile_yaml / validate_yaml / push_playbook: the write path, where a
+        corrupted copy is most dangerous. Guarding the route I fixed rather
+        than the concept is exactly how a fix inherits its own blind spot.
+        """
+        pkg = pathlib.Path(__file__).resolve().parents[1]
+        pattern = re.compile(r"\byaml\.safe_load\s*\(|\b_yaml\.safe_load\s*\(")
         offenders = []
         for path in sorted(pkg.rglob("*.py")):
-            if path.name == "_shared.py":       # the one legal home
+            if path.name in self.SANCTIONED or "/tests/" in path.as_posix():
                 continue
-            text = path.read_text(encoding="utf-8")
-            if "safe_load(yaml_text)" in text:
-                offenders.append(path.name)
+            if pattern.search(path.read_text(encoding="utf-8")):
+                offenders.append(str(path.relative_to(pkg)))
         assert offenders == [], (
-            "these modules parse a model-supplied yaml_text without the "
-            "control-char strip; use _shared.load_yaml_text instead: "
-            f"{offenders}"
+            "these modules parse YAML without the control-char strip, so a "
+            "model copy corrupted the way the .159 payload was would fail "
+            "there. Route them through _shared.load_yaml_text (tools) or "
+            f"compiler.parser.parse_yaml: {offenders}"
         )

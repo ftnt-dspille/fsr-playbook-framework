@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .._db import default_db_path
+from .._yaml_hygiene import sanitize_yaml_text  # re-exported: see below
 
 class _FallbackFastMCP:
     """No-op FastMCP shim for connector runtimes.
@@ -157,47 +158,11 @@ def _serialize_compiler_error(e: Any) -> dict[str, Any]:
 # Model-supplied YAML hygiene
 # ---------------------------------------------------------------------------
 
-# C0 control characters that YAML 1.1/1.2 forbid outright in a document.
-# Tab/LF/CR are legal and MUST be preserved; everything else in C0 plus DEL
-# makes the whole document unparseable.
-_ILLEGAL_YAML_CTRL = "".join(
-    chr(c) for c in list(range(0x00, 0x09)) + [0x0B, 0x0C]
-    + list(range(0x0E, 0x20)) + [0x7F]
-)
-_YAML_CTRL_TABLE = {ord(c): None for c in _ILLEGAL_YAML_CTRL}
-
-
-def sanitize_yaml_text(yaml_text: Any) -> tuple[str, int]:
-    """Strip control characters that make model-supplied YAML unparseable.
-
-    Returns ``(clean_text, removed_count)``.
-
-    Why this exists: every `yaml_text` tool argument is the model
-    RE-EMITTING a playbook it was already given, and a long verbatim copy
-    can come back subtly corrupted. Live on .159, `analyze_playbook` on the
-    real 6-step "Hunt Indicators" playbook died with
-
-        yaml parse failed: unacceptable character #x0000: special characters
-        are not allowed in "<unicode string>", position 15305
-
-    because the model wrote the playbook's ``(R)`` sign as a malformed escape
-    (``\\u0000AE`` rather than ``\\u00AE``), which JSON-decodes to NUL + "AE".
-    The record on the box was clean -- 0 NUL bytes, real signs -- and so was
-    the ``entity.playbook_yaml`` the widget sent; only the model's copy was
-    damaged. One bad byte 15 kB into a 20 kB blob then killed the whole turn:
-    no diagnostics, no assistant text, `stop_reason: null`.
-
-    A control character can never be *meant* in authored YAML, so dropping it
-    is always the right repair. It is reported rather than silently swallowed:
-    callers surface ``sanitized_control_chars`` in the tool result so a
-    recurring corruption stays visible instead of looking like clean input.
-    """
-    if not isinstance(yaml_text, str):
-        return "", 0
-    if not any(c in yaml_text for c in _ILLEGAL_YAML_CTRL):
-        return yaml_text, 0          # fast path: the overwhelming majority
-    clean = yaml_text.translate(_YAML_CTRL_TABLE)
-    return clean, len(yaml_text) - len(clean)
+# The control-char primitive lives one layer down (`fsr_playbooks._yaml_hygiene`)
+# so the COMPILER can share it -- compile_yaml/validate_yaml/push_playbook parse
+# model-supplied YAML too, and `compiler/` must not import from `mcp_server/`.
+# Re-exported here because this module is the documented home for tool-layer
+# YAML handling.
 
 
 @dataclass(frozen=True)
