@@ -6,6 +6,15 @@ fails the commit if any internal host string slips in. This is the source-level
 replacement for the old publish-time scrub: the tracked tree must stay clean so
 the repo can be pushed to the public GitHub mirror with ordinary `git push`.
 
+Binary files are scanned too, in full rather than by diff. They used to be
+skipped outright, and that is how `tooling/tests/fixtures/tooling_reference.db`
+reached the public mirror carrying 7,000+ live appliance URLs and the lab admin
+account: a sqlite fixture stores its strings as plain text, but `git diff`
+renders it as "Binary files differ", so the staged-diff scan saw no added lines
+and passed it. There is no cheap way to diff a binary's *added* strings, so any
+match anywhere in the blob is reported -- a whole-file scan on a file format
+that has no line structure to begin with.
+
 What it blocks:
   - live appliance IPs in the lab range  (10.99.x.x)
   - any internal Fortinet subdomain host (*.fortinet.com / *.fortinet.net),
@@ -38,12 +47,55 @@ DENY = [
 ALLOW = [
     re.compile(r"repo\.fortisoar\.fortinet\.com", re.IGNORECASE),
 ]
+
+# Binaries get a NARROWER deny set than source text, and the difference is
+# deliberate. The broad `*.fortinet.com` rule above is right for files we
+# author -- we never have a reason to type an internal hostname. But the
+# reference DBs are vendored: they hold stock connector definitions whose
+# metadata legitimately references public Fortinet product hosts
+# (docs./support./fortiguard.fortinet.com, the FortiCloud SaaS endpoints).
+# Applying the broad rule there reports ~30 such hosts per DB, and a guard that
+# cries wolf on vendor content is a guard people learn to skip.
+#
+# So binaries are scanned only for markers that are unambiguously OURS and
+# could not have arrived from Fortinet: the lab subnet, the lab-internal
+# domains, and the lab admin account.
+BINARY_DENY = [
+    re.compile(rb"\b10\.99\.\d{1,3}\.\d{1,3}\b"),
+    re.compile(rb"\b[a-z0-9][a-z0-9.-]*\.fortilab\.fortinet\.(?:com|net)\b", re.I),
+    re.compile(rb"\bsvl-devops[a-z0-9.-]*\b", re.I),
+    re.compile(rb"\bcsadmin\b", re.I),
+]
 # Files that legitimately *define* the deny patterns (this guard + the hook that
 # runs it). Scanning them would self-match; skip them in both modes.
 SKIP = {
     "scripts/check_infra_leaks.py",
     ".pre-commit-config.yaml",
 }
+
+
+
+def is_binary(blob: bytes) -> bool:
+    """A NUL byte in the first 8 KiB -- the same heuristic git itself uses."""
+    return b"\x00" in blob[:8192]
+
+
+def scan_blob(blob: bytes) -> list[str]:
+    """Every distinct BINARY_DENY hit in a blob, in first-seen order.
+
+    Matched against the raw bytes rather than extracted printable runs: sqlite
+    stores its text unterminated and packed against adjacent cell data, so a
+    `strings(1)`-style pass can fuse a host into a neighbouring value and hide
+    it from an anchored pattern. The deny patterns are self-delimiting, so
+    scanning the whole blob loses nothing and cannot be fooled by framing.
+    """
+    seen: dict[str, None] = {}
+    for rx in BINARY_DENY:
+        for m in rx.finditer(blob):
+            hit = m.group(0).decode("ascii", "replace")
+            if not any(a.search(hit) for a in ALLOW):
+                seen.setdefault(hit, None)
+    return list(seen)
 
 
 def _is_leak(text: str) -> str | None:
@@ -92,16 +144,37 @@ def main() -> int:
             if path in SKIP:
                 continue
             try:
-                with open(path, encoding="utf-8") as fh:
-                    for i, line in enumerate(fh, 1):
-                        leak = _is_leak(line)
-                        if leak:
-                            hits.append(f"{path}:{i}: {leak}")
-            except (OSError, UnicodeDecodeError):
-                continue  # binary / unreadable
+                blob = open(path, "rb").read()
+            except OSError:
+                continue
+            if is_binary(blob):
+                hits += [f"{path}: {leak}  (embedded in binary)"
+                         for leak in scan_blob(blob)]
+                continue
+            try:
+                for i, line in enumerate(blob.decode("utf-8").splitlines(), 1):
+                    leak = _is_leak(line)
+                    if leak:
+                        hits.append(f"{path}:{i}: {leak}")
+            except UnicodeDecodeError:
+                continue
     else:
         for path in _staged_files():
             if path in SKIP:
+                continue
+            # A staged binary has no usable line diff -- git renders it as
+            # "Binary files differ" and _added_lines() returns nothing, which is
+            # exactly how the leaked fixture got through. Scan the staged blob
+            # itself instead of the diff.
+            try:
+                blob = subprocess.run(
+                    ["git", "show", f":{path}"], capture_output=True, check=True,
+                ).stdout
+            except subprocess.CalledProcessError:
+                blob = b""
+            if is_binary(blob):
+                hits += [f"{path}: {leak}  (embedded in binary)"
+                         for leak in scan_blob(blob)]
                 continue
             try:
                 for lineno, text in _added_lines(path):

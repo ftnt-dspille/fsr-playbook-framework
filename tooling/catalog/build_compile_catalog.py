@@ -42,6 +42,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DB = _REPO_ROOT / "data" / "fsr_reference.db"
 DST_DB = _REPO_ROOT / "fsr_playbooks" / "_data" / "fsr_reference.db"
 
+sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+from scrub_infra_from_db import scrub  # noqa: E402
+
 # Globally-stable tables -- populated in the slim DB. Everything else (per-install
 # probed tables, corpus, telemetry, FTS shadow tables) ships with schema only,
 # zero rows.
@@ -218,6 +221,14 @@ def build() -> int:
         dst.commit()
     finally:
         dst.close()
+
+    # This DB is packaged into the wheel, so anything left in it is published
+    # to PyPI. `_copy_connector_baseline` already NULLs the per-instance
+    # connector columns, but that only covers the columns it knows about: a
+    # lab IP still reached the public wheel inside a `step_examples` code
+    # sample. Scrub the finished file as a whole -- it raises rather than
+    # returns if a pattern survives, so the build fails instead of shipping.
+    scrub(DST_DB)
 
     size_mb = DST_DB.stat().st_size / 1e6
     print(f"built {DST_DB.relative_to(_REPO_ROOT)}  ({size_mb:.2f} MB)")

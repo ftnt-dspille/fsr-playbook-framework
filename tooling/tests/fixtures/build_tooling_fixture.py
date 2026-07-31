@@ -33,7 +33,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "tooling"))
+sys.path.insert(0, str(REPO / "scripts"))
 from probes import probe_connectors as pc  # noqa: E402
+from scrub_infra_from_db import scrub  # noqa: E402
 
 DEV = REPO / "data" / "fsr_reference.db"
 SLIM = REPO / "fsr_playbooks" / "_data" / "fsr_reference.db"
@@ -188,6 +190,15 @@ def main() -> int:
     present = [r[0] for r in db.execute(
         "SELECT name FROM connectors ORDER BY name")]
     db.close()
+
+    # 7. scrub infra strings. The dev cache this is assembled from is synced
+    # from a live lab appliance, so its rows carry live URLs -- `source_path`
+    # alone contributed 7,000+ `https://10.99.x.x` values, and an earlier build
+    # of this fixture published them to the public GitHub mirror. Scrubbing
+    # here, rather than only fixing the committed file once, is what keeps a
+    # regeneration from quietly reintroducing them. It raises if anything
+    # survives, so a silent partial scrub cannot pass.
+    scrub(OUT)
     size_mb = OUT.stat().st_size / 1e6
     print(f"\nfixture: {OUT}  ({size_mb:.1f} MB)")
     print(f"connectors ({len(present)}): {', '.join(present)}")
