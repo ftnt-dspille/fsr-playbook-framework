@@ -81,17 +81,21 @@ def _progress(model: str, i: int, n: int, task: str, row: dict[str, Any]) -> Non
 
     stderr, not stdout, so `--json` output stays machine-parseable.
     """
+    # Report the SCORE, never the word "fail". `score` counts quality gates
+    # passed (draft/verified/wiring_resolves/...); `max` counts those that
+    # applied. 5/8 is a graded authoring result, not a broken run -- calling
+    # it FAIL reads as a regression and invites exactly that misreading.
+    # `ERR` is the one genuinely different outcome: the provider call raised.
     if "error" in row:
-        mark = "ERR"
+        mark = "ERR (provider call raised)"
     elif not row.get("max"):
-        # max=0 means no gate applied, NOT a failure -- e.g. gold/echo on a
-        # tool_selection fixture, which scores the terminal tool call those
-        # providers never make. Calling it FAIL reads as a regression.
+        # max=0 = no gate applied. gold/echo make no terminal tool call, so
+        # every tool_selection fixture scores 0/0 for them.
         mark = "n/a (nothing scored)"
     elif row["score"] == row["max"]:
-        mark = "ok"
+        mark = f"{row['score']}/{row['max']} all gates"
     else:
-        mark = f"FAIL {row['score']}/{row['max']}"
+        mark = f"{row['score']}/{row['max']} gates"
     secs = row.get("elapsed_ms", 0) / 1000.0
     print(f"  [{model} {i}/{n}] {task} -- {mark} ({secs:.1f}s)",
           file=sys.stderr, flush=True)
