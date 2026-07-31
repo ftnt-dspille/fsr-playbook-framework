@@ -278,18 +278,29 @@ def _agentic_anthropic_provider() -> Callable:
     return _call
 
 
-def _agentic_lmstudio_provider() -> Callable:
-    """LM Studio's OpenAI-compatible chat-completions endpoint with
-    function-calling. Mirrors `_agentic_anthropic_provider` so the same
-    gates apply."""
-    base_url = os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LMSTUDIO_MODEL", "local-model")
+def _agentic_openai_compatible(*, base_url: str, model: str,
+                               headers: dict[str, str] | None = None,
+                               ) -> Callable:
+    """Agentic loop over any OpenAI-compatible chat-completions endpoint with
+    function-calling. Mirrors `_agentic_anthropic_provider` so the same gates
+    apply. Backs both LM Studio (local, no auth) and Frank (the Fortilab AI
+    gateway, Bifrost virtual key)."""
     import json as _json
     import requests  # type: ignore[import-untyped]
     _, openai_tools, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
-    tools = openai_tools()
+    raw_tools = openai_tools()
+
+    def _tools_now() -> list[dict]:
+        # Per call so a per-task slice (set_tool_slice) applies -- the
+        # tool-selection eval is only meaningful against the surface the
+        # user actually hits.
+        if _TOOL_SLICE is None:
+            return raw_tools
+        return [t for t in raw_tools
+                if (t.get("function") or {}).get("name") in _TOOL_SLICE]
 
     def _call(system: str, prompt: str) -> dict:
+        tools = _tools_now()
         history: list[dict] = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -303,6 +314,7 @@ def _agentic_lmstudio_provider() -> Callable:
                 f"{base_url}/chat/completions",
                 json={"model": model, "messages": history, "tools": tools,
                       "temperature": 0.0},
+                headers=headers or {},
                 timeout=180,
             )
             r.raise_for_status()
@@ -351,12 +363,46 @@ def _agentic_lmstudio_provider() -> Callable:
     return _call
 
 
+def _agentic_lmstudio_provider() -> Callable:
+    """LM Studio's local OpenAI-compatible endpoint. No auth."""
+    return _agentic_openai_compatible(
+        base_url=os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
+        model=os.environ.get("LMSTUDIO_MODEL", "local-model"),
+    )
+
+
+def _agentic_frank_provider() -> Callable:
+    """Frank -- the Fortilab AI gateway, via its Bifrost virtual key.
+
+    Deliberately reads FRANK_* rather than the global OPENAI_* config so
+    switching Frank's model can't silently move an eval baseline (the same
+    isolation the .env comment calls for). Sends the key both as a Bearer
+    token and as `x-bf-vk`, which is how Bifrost accepts a virtual key."""
+    key = os.environ.get("FRANK_API_KEY")
+    if not key:
+        raise RuntimeError("FRANK_API_KEY not set (see .env)")
+    # No default: the gateway is an internal host, and hardcoding it here puts
+    # it in a tracked file that publishes to the public mirror. Required from
+    # the environment like FRANK_API_KEY and FRANK_MODEL either side of it.
+    base_url = os.environ.get("FRANK_BASE_URL")
+    if not base_url:
+        raise RuntimeError("FRANK_BASE_URL not set (see .env)")
+    model = os.environ.get("FRANK_MODEL")
+    if not model:
+        raise RuntimeError("FRANK_MODEL not set (see .env)")
+    return _agentic_openai_compatible(
+        base_url=base_url, model=model,
+        headers={"Authorization": f"Bearer {key}", "x-bf-vk": key},
+    )
+
+
 _LAZY_FACTORIES: dict[str, Callable[[], ProviderFn]] = {
     "anthropic": _anthropic_provider,
     "openai": _openai_provider,
     "lmstudio": _lmstudio_provider,
     "agentic_anthropic": _agentic_anthropic_provider,
     "agentic_lmstudio": _agentic_lmstudio_provider,
+    "agentic_frank": _agentic_frank_provider,
 }
 
 
