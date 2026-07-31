@@ -2,5 +2,6 @@
   "alerts.severity": "Severity",
   "alerts.status": "AlertStatus",
   "alerts.type": "AlertType",
+  "incidents.severity": "Severity",
   "incidents.status": "IncidentStatus"
 }
