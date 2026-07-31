@@ -75,3 +75,33 @@ def test_run_mode_slice_is_a_strict_subset_of_build():
     run = {t["name"] for t in tools_for_run_mode("build")}
     assert run <= base
     assert run != base  # it actually removed something
+
+
+def test_prose_containing_run_as_a_substring_is_not_a_run_request():
+    """The padded-answer fallback matches WORDS, not substrings.
+
+    A model that ignores the one-word contract and answers in prose used to be
+    read as RUN whenever the letters "run" appeared anywhere -- including inside
+    "re-runnable". That narrowed an authoring turn to the run-mode allowlist and
+    stripped the tools it needed.
+    """
+    prose = "Here's a re-runnable playbook:\n```yaml\ncollection: x\n```"
+    assert classify_run_or_author("Design a re-runnable playbook.",
+                                  _fake(prose)) == OTHER
+    assert classify_run_or_author("x", _fake("I authored this for you")) == OTHER
+
+
+def test_padded_one_word_answers_still_classify():
+    assert classify_run_or_author("x", _fake("intent: run")) == RUN
+    assert classify_run_or_author("x", _fake("the intent is author.")) == AUTHOR
+
+
+def test_run_mode_slice_fails_open_when_the_allowlist_is_absent(monkeypatch):
+    """An empty intersection returns the base slice, never an empty tool list.
+
+    Zero advertised tools does not make the model run a playbook -- it makes the
+    turn unable to act at all.
+    """
+    from fsr_playbooks.llm import intents
+    monkeypatch.setattr(intents, "RUN_MODE_KEEP_TOOLS", frozenset({"nope"}))
+    assert intents.tools_for_run_mode("build") == intents.tools_for_intent("build")

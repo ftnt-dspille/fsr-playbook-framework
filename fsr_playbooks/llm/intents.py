@@ -16,6 +16,7 @@ and are vendored wholesale into the connector by ``scripts/build.sh``.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -140,10 +141,14 @@ def classify_run_or_author(message: Any, complete: "Callable[[str, str], str]") 
         if tok.startswith(w):
             return w
     # Model padded the answer ("intent: run") -- look for the token anywhere,
-    # preferring the more specific labels over the catch-all.
-    if RUN in tok:
+    # preferring the more specific labels over the catch-all. Match on WORD
+    # BOUNDARIES: a bare substring scan reads "run" out of "re-runnable" (and
+    # "author" out of "authored"), so a model that ignored the one-word contract
+    # and replied with prose got classified RUN -- which then narrowed the turn
+    # to the run-mode allowlist and stripped the authoring surface it needed.
+    if re.search(rf"\b{RUN}\b", tok):
         return RUN
-    if AUTHOR in tok:
+    if re.search(rf"\b{AUTHOR}\b", tok):
         return AUTHOR
     return OTHER
 
@@ -151,9 +156,15 @@ def classify_run_or_author(message: Any, complete: "Callable[[str, str], str]") 
 def tools_for_run_mode(base_intent: str = "build") -> list[dict[str, Any]]:
     """The tool slice for a classified RUN request: only the run-mode allowlist
     (run_playbook), so it is the model's single available action. Intersected
-    with the base slice so a tool absent there stays absent."""
-    return [t for t in tools_for_intent(base_intent)
-            if t["name"] in RUN_MODE_KEEP_TOOLS]
+    with the base slice so a tool absent there stays absent.
+
+    Fail-open: if the intersection is EMPTY (the allowlist tool isn't in the base
+    slice at all) we return the base slice untouched. Advertising zero tools does
+    not make the model run a playbook -- it makes the turn incapable of doing
+    anything, which is strictly worse than the un-narrowed surface."""
+    base = tools_for_intent(base_intent)
+    narrowed = [t for t in base if t["name"] in RUN_MODE_KEEP_TOOLS]
+    return narrowed or base
 
 # Inline fallbacks used only when the vendored markdown can't be read (keeps
 # the agent functional even if packaging drops the .md files).
