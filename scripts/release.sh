@@ -72,4 +72,6 @@ gh release create "$TAG" --title "$TAG" --notes "$NOTES"
 
 echo ">> release created. Watch the publish workflow:"
 echo "   gh run watch \$(gh run list --workflow=publish.yml --limit 1 --json databaseId -q '.[0].databaseId')"
-echo ">> then bump the connector pin: fsr-playbooks==$VERSION (its build preflight verifies symbols)."
+echo ">> then bump the connector pin + ship. Prefer the one command that waits for"
+echo "   PyPI to actually serve the wheel before shipping:"
+echo "     cd ../../ConnectorsV2/fsr-playbook-builder && make release-ship FW=$VERSION"

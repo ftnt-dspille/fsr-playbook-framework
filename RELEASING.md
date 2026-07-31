@@ -5,6 +5,26 @@ no version string to bump in any file -- the old `fsr_playbooks/__init__.py`
 `__version__ = "..."` and `packaging/.../pyproject.toml` version literals are
 gone. Tag, push, release. That's it.
 
+## Releasing in order to ship the connector? Use `make release-ship` instead
+
+Almost every release exists to get new framework code onto a box. For that, run
+**one command from the connector repo** (`ConnectorsV2/fsr-playbook-builder`):
+
+```sh
+make release-ship FW=next      # release the next patch, then ship the connector
+make release-ship FW=0.6.4     # release that exact version, then ship
+```
+
+It calls `make release` below, then does the step that keeps getting skipped:
+**waits until PyPI actually SERVES the wheel** before shipping. The GitHub
+release only *triggers* the publish workflow, and FortiSOAR pip-installs the
+connector's `requirements.txt` itself at install time -- ship into that gap and
+the install fails, the connector goes live, and every op dies on the version
+guard (hit identically on connector 0.5.54 and 0.5.57). It then symbol-verifies
+the pin bump and ships.
+
+Use the bare `make release` below only when you want a release and nothing else.
+
 ## Cut a release
 
 **Standard path -- one command:**
