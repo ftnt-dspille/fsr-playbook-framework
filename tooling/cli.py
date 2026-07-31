@@ -4572,9 +4572,16 @@ def build_parser() -> argparse.ArgumentParser:
              "the task corpus (Compiles / Runs / Works + gold-fixture byte-equal)",
     )
     sp.add_argument("--models", default="gold,echo",
-                    help="comma-separated provider names (gold, echo, "
-                         "anthropic, openai, lmstudio, agentic_anthropic, "
-                         "agentic_frank, agentic_openai_api)")
+                    help="comma-separated provider names. All of these are "
+                         "BOX-FREE (no live FortiSOAR appliance needed). "
+                         "FREE, no LLM: gold, echo -- but these only generate "
+                         "YAML, so they score 0/0 on tool_selection fixtures. "
+                         "FREE + real tool loop: agentic_frank (default "
+                         "choice for selection/guard questions), "
+                         "agentic_lmstudio (needs LM Studio on :1234). "
+                         "PAID: anthropic, openai, agentic_anthropic, "
+                         "agentic_openai_api (= the production gpt-4.1-mini; "
+                         "use only when the question is about that model).")
     sp.add_argument("--repeat", type=int, default=1,
                     help="run the matrix N times and print a per-model "
                          "consistency screen instead of one matrix; a model "
