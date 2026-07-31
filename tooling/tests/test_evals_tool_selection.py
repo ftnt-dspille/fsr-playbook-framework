@@ -157,3 +157,66 @@ def test_selection_terminal_tools_are_registered():
             continue
         for name in t.terminal_tool:
             assert name in SAFE_TOOLS, f"{t.name}: {name} not in SAFE_TOOLS"
+
+
+# --- model screening --------------------------------------------------------
+
+def _matrix(model_to_scores):
+    """Build a fake matrix: {model: {task: (score, max)}}."""
+    rows = []
+    for m, tasks_ in model_to_scores.items():
+        for t, (s, mx) in tasks_.items():
+            rows.append({"model": m, "task": t, "score": s, "max": mx})
+    return {"tasks": sorted({r["task"] for r in rows}),
+            "models": list(model_to_scores), "rows": rows, "summary": {}}
+
+
+def _stub_runs(monkeypatch, sequence):
+    harness = importlib.import_module("evals.harness")
+    calls = {"n": 0}
+
+    def fake(**_kw):
+        m = sequence[calls["n"] % len(sequence)]
+        calls["n"] += 1
+        return _matrix(m)
+
+    monkeypatch.setattr(harness, "run_matrix", fake)
+    return harness
+
+
+def test_screen_consistent_when_every_repeat_passes(monkeypatch):
+    h = _stub_runs(monkeypatch, [{"m1": {"t": (1, 1)}}])
+    out = h.screen_models(model_names=["m1"], repeats=3)
+    assert out["verdicts"]["m1"] == "consistent"
+    assert out["cells"]["m1"]["t"]["passes"] == 3
+
+
+def test_screen_flaky_when_a_fixture_passes_sometimes(monkeypatch):
+    """The dangerous case -- demos fine, fails in front of a customer."""
+    h = _stub_runs(monkeypatch, [{"m1": {"t": (1, 1)}}, {"m1": {"t": (0, 1)}}])
+    out = h.screen_models(model_names=["m1"], repeats=2)
+    assert out["verdicts"]["m1"] == "flaky"
+
+
+def test_screen_failing_when_a_fixture_never_passes(monkeypatch):
+    h = _stub_runs(monkeypatch, [{"m1": {"t1": (1, 1), "t2": (0, 1)}}])
+    out = h.screen_models(model_names=["m1"], repeats=3)
+    assert out["verdicts"]["m1"] == "failing"
+
+
+def test_screen_counts_provider_errors_as_non_passes(monkeypatch):
+    harness = importlib.import_module("evals.harness")
+    monkeypatch.setattr(harness, "run_matrix", lambda **_kw: {
+        "tasks": ["t"], "models": ["m1"], "summary": {},
+        "rows": [{"model": "m1", "task": "t", "error": "boom",
+                  "score": 0, "max": 0}]})
+    out = harness.screen_models(model_names=["m1"], repeats=2)
+    assert out["cells"]["m1"]["t"]["errors"] == 2
+    assert out["verdicts"]["m1"] == "failing"
+
+
+def test_render_screen_names_every_model_and_verdict(monkeypatch):
+    h = _stub_runs(monkeypatch, [{"m1": {"t": (1, 1)}, "m2": {"t": (0, 1)}}])
+    txt = h.render_screen(h.screen_models(model_names=["m1", "m2"], repeats=2))
+    assert "m1" in txt and "m2" in txt
+    assert "consistent" in txt and "failing" in txt

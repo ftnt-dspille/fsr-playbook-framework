@@ -193,6 +193,84 @@ def run_matrix(
     }
 
 
+# ---------------------------------------------------------------------------
+# Model screening -- rule out inconsistent models, then pick the cheapest
+# survivor. A model that passes 2 runs in 3 is not "mostly working"; it is
+# unusable in a product where the analyst only gets one attempt. So the bar
+# is unanimity across repeats, not an average.
+# ---------------------------------------------------------------------------
+
+def screen_models(
+    *,
+    model_names: list[str],
+    task_names: list[str] | None = None,
+    repeats: int = 3,
+    live: bool = False,
+) -> dict[str, Any]:
+    """Run the matrix `repeats` times and report per-cell pass rates.
+
+    Verdict per model:
+      `consistent` -- every fixture passed every repeat
+      `flaky`      -- at least one fixture passed sometimes (the dangerous
+                      case: it demos fine and fails in front of a customer)
+      `failing`    -- at least one fixture never passed
+    """
+    runs = [run_matrix(model_names=model_names, task_names=task_names,
+                       live=live)
+            for _ in range(repeats)]
+    tasks = runs[0]["tasks"]
+    cells: dict[str, dict[str, dict[str, Any]]] = {}
+    for m in model_names:
+        cells[m] = {}
+        for t in tasks:
+            passes, errors = 0, 0
+            for r in runs:
+                row = next((x for x in r["rows"]
+                            if x["model"] == m and x["task"] == t), None)
+                if row is None or "error" in row:
+                    errors += 1
+                    continue
+                # A cell passes when every counted gate passed. For a
+                # tool_selection fixture that is exactly the terminal call.
+                if row.get("max") and row["score"] == row["max"]:
+                    passes += 1
+            cells[m][t] = {"passes": passes, "of": repeats, "errors": errors}
+    verdicts: dict[str, str] = {}
+    for m in model_names:
+        rates = [c["passes"] for c in cells[m].values()]
+        if all(p == repeats for p in rates):
+            verdicts[m] = "consistent"
+        elif any(p == 0 for p in rates):
+            verdicts[m] = "failing"
+        else:
+            verdicts[m] = "flaky"
+    return {"repeats": repeats, "tasks": tasks, "models": list(model_names),
+            "cells": cells, "verdicts": verdicts, "runs": runs}
+
+
+def render_screen(screen: dict[str, Any]) -> str:
+    reps = screen["repeats"]
+    lines = [f"Model screening -- {reps} repeat(s), "
+             f"{len(screen['tasks'])} fixture(s)", ""]
+    width = max([len(t) for t in screen["tasks"]] + [8])
+    header = f"{'fixture':<{width}}  " + "  ".join(
+        f"{m[:18]:>18}" for m in screen["models"])
+    lines += [header, "-" * len(header)]
+    for t in screen["tasks"]:
+        row = f"{t:<{width}}  "
+        row += "  ".join(
+            f"{(str(screen['cells'][m][t]['passes']) + '/' + str(reps)):>18}"
+            for m in screen["models"])
+        lines.append(row)
+    lines += ["", "Verdict:"]
+    for m in screen["models"]:
+        lines.append(f"  {m:<24} {screen['verdicts'][m]}")
+    lines += ["",
+              "A flaky model is not a cheaper consistent one -- the analyst "
+              "gets one attempt."]
+    return "\n".join(lines)
+
+
 def render_text(matrix: dict[str, Any]) -> str:
     """Compact human-readable summary for the CLI."""
     lines = []

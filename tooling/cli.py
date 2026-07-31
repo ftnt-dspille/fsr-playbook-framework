@@ -2897,6 +2897,16 @@ def cmd_evals(args: argparse.Namespace) -> int:
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     task_filter = ([t.strip() for t in args.tasks.split(",")]
                    if args.tasks else None)
+    if args.repeat and args.repeat > 1:
+        from evals.harness import render_screen, screen_models
+        screen = screen_models(model_names=models, task_names=task_filter,
+                               repeats=args.repeat, live=args.live)
+        if args.json:
+            print(json.dumps(screen, indent=2, default=str))
+        else:
+            print(render_screen(screen))
+        return 0 if any(v == "consistent"
+                        for v in screen["verdicts"].values()) else 1
     matrix = run_matrix(
         model_names=models, task_names=task_filter, live=args.live,
     )
@@ -4561,8 +4571,14 @@ def build_parser() -> argparse.ArgumentParser:
              "the task corpus (Compiles / Runs / Works + gold-fixture byte-equal)",
     )
     sp.add_argument("--models", default="gold,echo",
-                    help="comma-separated provider names "
-                         "(gold, echo, anthropic, openai, lmstudio)")
+                    help="comma-separated provider names (gold, echo, "
+                         "anthropic, openai, lmstudio, agentic_anthropic, "
+                         "agentic_frank, agentic_openai_api)")
+    sp.add_argument("--repeat", type=int, default=1,
+                    help="run the matrix N times and print a per-model "
+                         "consistency screen instead of one matrix; a model "
+                         "is 'consistent' only if every fixture passes every "
+                         "repeat")
     sp.add_argument("--tasks", default=None,
                     help="comma-separated task names; default = all")
     sp.add_argument("--live", action="store_true",
