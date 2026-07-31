@@ -504,7 +504,12 @@ def _intent_step_name(intent: str) -> str:
 @mcp.tool()
 def propose_http_fallback(vendor: str, intent: str, *,
                           prefer_native: bool = True) -> dict[str, Any]:
-    """Decide how to invoke `intent` against `vendor` and emit the step.
+    """Reach an API when no suitable native connector op exists -- give it the
+    vendor and the intent, and it decides deterministically between a native
+    op, the connector's generic api_call, a catalogued HTTP fixture, or a
+    hand-built HTTP step, then emits that step. Try find_operation first;
+    this is the escape hatch for genuine coverage gaps, not the default way
+    to call a vendor.
 
     Deterministic decision tree (LLM does NOT pick the path):
 

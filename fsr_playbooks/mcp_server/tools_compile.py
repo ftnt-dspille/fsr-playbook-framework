@@ -34,7 +34,13 @@ from .tools_discovery import _FRIENDLY_FORMS  # noqa: F401,E402 (re-export)
 
 @mcp.tool()
 def validate_yaml(yaml_text: str) -> dict[str, Any]:
-    """Validate a YAML playbook without producing output JSON.
+    """Fast structural check of a YAML playbook: parse → resolve → validate,
+    returning structured errors with code/path/message/suggestion. Use this
+    while iterating on a draft. It is NOT the pre-submit gate and passing it
+    does not mean the playbook is deliverable -- verify_playbook is the gate
+    that must return ready_to_push=True before you offer anything. Warnings
+    here (unreachable step, missing default branch) do not block compile but
+    almost always mean the playbook misbehaves at runtime, so fix them.
 
     Runs the full compiler pipeline (parse → resolve → validate) and
     returns structured errors.  Each error has: code, path, message,
@@ -287,7 +293,12 @@ def resolve_yaml(yaml_text: str) -> dict[str, Any]:
 
 @mcp.tool()
 def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
-    """Compile a YAML playbook to FortiSOAR WorkflowCollection JSON.
+    """Compile YAML to FortiSOAR WorkflowCollection JSON and confirm it
+    compiles. Returns a summary (workflows, steps, uuid, name); verbose=True
+    adds the importable JSON string. This proves the document is well-formed
+    -- it does NOT check that steps are wired correctly or that ops exist,
+    and it does not deliver anything to the analyst. Gate with
+    verify_playbook, deliver with emit_playbook_offer.
 
     Returns `{ok: true, summary: {workflows, steps, uuid, name}}` by
     default -- the agent rarely needs the full JSON body, just a

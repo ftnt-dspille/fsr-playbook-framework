@@ -63,7 +63,13 @@ def step_through_playbook(yaml_text: str,
                           execute_safe_ops: bool = True,
                           execute_unsafe_ops: bool = False,
                           max_steps: int = 30) -> dict[str, Any]:
-    """Pre-push stepper: walk a playbook step-by-step *without* pushing to FSR.
+    """Pre-push debugger: walk a playbook step by step WITHOUT pushing it,
+    rendering each step's arguments against the accumulated context with the
+    live Jinja engine so you can see exactly where a template or a shape
+    assumption breaks. Safe by default -- only query-class ops execute (and
+    only with execute_safe_ops=True); destructive ops are simulated. This is
+    the right first move when a playbook looks correct but you are unsure
+    the wiring resolves; dry_run_playbook is the heavier live alternative.
 
     For each step in the chosen execution path:
       1. Render its arguments against the accumulated `vars.steps.*` +

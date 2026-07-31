@@ -18,7 +18,11 @@ DB_PATH = _shared.DB_PATH
 
 @mcp.tool()
 def list_picklists() -> dict[str, Any]:
-    """List every picklist `listName.name` known to the FSR instance.
+    """List every picklist name known to this instance -- use it to discover
+    what picklists exist (Severity, AlertStatus, Threat Type) when you do
+    not yet know the name. If you know the module and field instead,
+    picklist_for_field finds the picklist for you; to turn a friendly value
+    into the IRI a playbook needs, use resolve_picklist_value.
 
     Use when the agent needs to discover what picklists exist (e.g.
     'Severity', 'AlertStatus', 'Threat Type') before resolving a value
@@ -48,7 +52,11 @@ def get_picklist(name: str) -> dict[str, Any]:
 
 @mcp.tool()
 def picklist_for_field(module: str, field: str) -> dict[str, Any]:
-    """Auto-discover the picklist behind a (module, field).
+    """Given a module and field (e.g. alerts + severity), find WHICH picklist
+    backs it, plus its valid values. Start here when you are setting a
+    picklist field in a playbook and do not know the picklist name. Then
+    pass the value through resolve_picklist_value -- a playbook field needs
+    the IRI, and a raw string like 'High' will not bind.
 
     Returns the picklist_name plus the offline list of valid string
     values pulled from the local module_fields cache. Tries heuristic
@@ -75,7 +83,12 @@ def picklist_for_field(module: str, field: str) -> dict[str, Any]:
 def resolve_picklist_value(value: str, picklist_name: str | None = None,
                            module: str | None = None,
                            field: str | None = None) -> dict[str, Any]:
-    """Resolve a friendly value (e.g. 'High') to a picklist IRI.
+    """Convert a friendly picklist value ('High') into the IRI a playbook field
+    actually requires. ALWAYS run this before putting a picklist value in
+    YAML: a bare string does not bind, and invented values are a common
+    authoring bug. Give it picklist_name, or module + field to
+    auto-discover. Values already starting with /api/3/ pass through, and a
+    near-miss returns close-match suggestions rather than failing silently.
 
     Provide either `picklist_name`, or both `module` + `field` to
     auto-discover. Strings that already start with '/api/3/' pass
