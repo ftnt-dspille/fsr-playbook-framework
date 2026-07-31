@@ -21,7 +21,7 @@ import pytest
 from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks.compiler.ir import Step
 from fsr_playbooks.compiler.resolver import Resolver
-from fsr_playbooks._db import PACKAGED_SLIM_DB
+from fsr_playbooks._db import PACKAGED_SLIM_DB, is_usable_sqlite
 
 _FULL_DB = Path(__file__).resolve().parents[2] / "data" / "fsr_reference.db"
 
@@ -82,7 +82,9 @@ def test_raw_escape_hatch_passthrough():
     assert args["params"]["iri"] == "/api/wf/api/custom/1/"
 
 
-@pytest.mark.skipif(not _FULL_DB.exists(),
+# `is_usable_sqlite`, not `.exists()`: a stray 0-byte dev cache satisfies
+# exists(), so this stopped skipping and then failed on "no such table".
+@pytest.mark.skipif(not is_usable_sqlite(_FULL_DB),
                     reason="full reference DB (with cyops_utilities) not present")
 def test_end_to_end_compile_against_full_db():
     yaml_text = """

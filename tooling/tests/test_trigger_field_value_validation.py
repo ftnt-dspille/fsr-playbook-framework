@@ -11,19 +11,36 @@ Tests the FieldValueValidator against the reference catalog:
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
+from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler.errors import CompileError, ErrorCode
 from fsr_playbooks.compiler.typed_args import FieldValueValidator
 
 
 def _get_db():
-    """Get the reference database connection."""
-    db_path = (
-        Path(__file__).resolve().parents[1].parent
-        / "data" / "fsr_reference.db"
-    )
-    conn = sqlite3.connect(str(db_path))
+    """Get the reference database connection.
+
+    Two things this used to get wrong, both of which reached beyond this file:
+
+    * it hardcoded the dev cache instead of asking `default_db_path()`, so with
+      no dev cache present every test here ran against an empty DB rather than
+      falling back to the packaged catalog -- the 30 failures that were the
+      standing "pre-existing" baseline of the tooling suite;
+    * it connected read-write, and `sqlite3.connect()` CREATES a zero-byte file
+      at a missing path. That file then satisfied the `.exists()` check in
+      `default_db_path()` and shadowed the packaged catalog for every later
+      process, so running this suite and then `fsr_playbooks/tests` reddened 95
+      unrelated tests with "no such table: picklists".
+
+    Read-only URI mode keeps the second one fixed by construction: it cannot
+    create a file, so this suite can no longer leave one behind.
+    """
+    db_path = default_db_path()
+    return _connect_ro(db_path)
+
+
+def _connect_ro(db_path):
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 

@@ -669,11 +669,15 @@ def _infer_shape(value: Any, _depth: int = 0) -> Any:
 
 def _store_observed_schema(connector: str, op: str, data: Any) -> None:
     """Infer shape from live result and persist to operations + verifications."""
+    from .._db import writable_reference_db
+    target = writable_reference_db()
+    if target is None:
+        return  # packaged catalog: enrichment is skipped, never written to
     shape = _infer_shape(data)
     shape_json = json.dumps(shape)
     import datetime
     ts = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(str(target)) as conn:
         conn.execute(
             "UPDATE operations SET output_schema_observed=? WHERE connector_name=? AND op_name=?",
             (shape_json, connector, op),

@@ -32,6 +32,28 @@ PACKAGED_SLIM_DB = _PKG_DIR / "_data" / "fsr_reference.db"
 REPO_PROBED_DB = _PKG_DIR.parent / "data" / "fsr_reference.db"
 
 
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def is_usable_sqlite(path: Path) -> bool:
+    """True only for a file that is actually a populated sqlite database.
+
+    ``exists()`` is not enough. ``sqlite3.connect()`` creates a **zero-byte**
+    file the moment it is pointed at a missing path, and writes the header only
+    on first write -- so a process that merely opened the dev cache and never
+    wrote leaves a 0-byte file behind. That file then wins the resolution order
+    below and shadows the packaged catalog, and every lookup fails with
+    "no such table: picklists". Running the tooling suite and then the
+    fsr_playbooks suite in one checkout did exactly that: 95 tests red, with
+    nothing in the diff to explain it.
+    """
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(16) == _SQLITE_MAGIC
+    except OSError:
+        return False
+
+
 def default_db_path() -> Path:
     """Return the reference DB to use, honoring ``$FSRPB_DB`` then dev/packaged.
 
@@ -42,9 +64,57 @@ def default_db_path() -> Path:
     env = os.environ.get("FSRPB_DB")
     if env:
         return Path(env)
-    if REPO_PROBED_DB.exists():
+    if is_usable_sqlite(REPO_PROBED_DB):
         return REPO_PROBED_DB
     return PACKAGED_SLIM_DB
+
+
+def writable_reference_db() -> Path | None:
+    """The reference DB if it is ours to write, else ``None``.
+
+    For *opportunistic enrichment* writes -- observed output schemas, live-exec
+    verification rows. These belong in the reference DB proper (the resolver
+    reads `operations` back out of it), so they cannot be diverted to a cache
+    file the way `runtime_cache_db_path` diverts the health table. But they
+    must not land on the packaged catalog: in a checkout that dirties the
+    tracked, shipped `_data/fsr_reference.db` on an ordinary test run, and in a
+    wheel install it writes into ``site-packages``.
+
+    ``None`` means "no writable reference DB" -- callers skip the write. That
+    is the honest outcome for enrichment: it is a nice-to-have that a later
+    ``warmup`` reproduces, never something correctness depends on.
+    """
+    db = default_db_path()
+    return None if db == PACKAGED_SLIM_DB else db
+
+
+def runtime_cache_db_path() -> Path:
+    """Where mutable runtime caches (connector health, …) may be written.
+
+    Deliberately NOT ``default_db_path()``. That can resolve to the packaged
+    slim catalog inside the installed package, and the health cache writes on
+    its *read* path too (``_cached_health`` calls ``CREATE TABLE IF NOT
+    EXISTS``), so a plain lookup mutated package data. Two ways that bites:
+
+    * in a checkout, the tracked ``fsr_playbooks/_data/fsr_reference.db`` came
+      back dirty from an ordinary test run, and nearly rode along in a commit;
+    * installed as a wheel, it writes into ``site-packages`` -- which is
+      root-owned or read-only in plenty of real deployments.
+
+    A DB the caller named (``$FSRPB_DB``) or the dev cache are both writable and
+    already instance-scoped, so they keep taking the cache. Only the packaged
+    read-only case is redirected, to the user cache dir.
+    """
+    env = os.environ.get("FSRPB_CACHE_DB")
+    if env:
+        return Path(env)
+    db = default_db_path()
+    if db != PACKAGED_SLIM_DB:
+        return db
+    root = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    path = Path(root) / "fsr_playbooks" / "runtime_cache.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class WarmupClobberGuard(RuntimeError):

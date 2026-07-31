@@ -44,6 +44,19 @@ def _is_healthy_status(status: Any) -> bool:
     return isinstance(status, str) and status.strip().lower() in _HEALTHY_STATUSES
 
 
+def _health_db() -> str:
+    """Where the connector-health cache lives.
+
+    Resolved per call rather than bound at import so a test (or a caller that
+    sets ``$FSRPB_DB``/``$FSRPB_CACHE_DB`` late) still gets the right file.
+    Not ``DB_PATH``: that can be the packaged catalog, and `_health_table`
+    below is DDL that runs on the read path too -- so reading a cached verdict
+    used to write to package data. See `_db.runtime_cache_db_path`.
+    """
+    from .._db import runtime_cache_db_path
+    return str(runtime_cache_db_path())
+
+
 def _health_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """CREATE TABLE IF NOT EXISTS connector_health (
@@ -66,7 +79,7 @@ def _cached_health(connector: str, version: str,
     any-config verdict written by warmup)."""
     import time
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(_health_db()) as conn:
             _health_table(conn)
             row = conn.execute(
                 "SELECT status, message, checked_ts FROM connector_health "
@@ -96,7 +109,7 @@ def forget_connector_availability(connector: str | None = None) -> None:
     `connector=None` clears all health rows (used when the caller can't name
     the connector from the card)."""
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(_health_db()) as conn:
             _health_table(conn)
             if connector:
                 conn.execute("DELETE FROM connector_health WHERE connector=?",
@@ -113,7 +126,7 @@ def _store_health(connector: str, version: str, status: Any, message: str,
                   config: str = "") -> None:
     import time
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(_health_db()) as conn:
             _health_table(conn)
             conn.execute(
                 "INSERT OR REPLACE INTO connector_health "
@@ -1879,8 +1892,12 @@ def run_op(
 
 def _record_verification(connector: str, op: str, status: str, notes: str) -> None:
     import datetime
+    from .._db import writable_reference_db
+    target = writable_reference_db()
+    if target is None:
+        return  # packaged catalog: enrichment is skipped, never written to
     ts = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
-    with sqlite3.connect(_shared.DB_PATH) as conn:
+    with sqlite3.connect(str(target)) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO verifications (kind, key, method, status, ts, notes)
                VALUES ('operation', ?, 'live_op_exec', ?, ?, ?)""",
