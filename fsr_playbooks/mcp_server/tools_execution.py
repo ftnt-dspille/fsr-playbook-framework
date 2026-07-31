@@ -1913,8 +1913,35 @@ def _record_verification(connector: str, op: str, status: str, notes: str) -> No
 
 
 
+def _fetch_live_collection(client, coll_uuid: str) -> dict[str, Any] | None:
+    """The appliance's current copy of this collection, as a `{"data":[...]}`
+    envelope -- or None when it does not exist yet (a create).
+
+    `$relationships=true` is required: without it the workflows/steps/routes
+    come back as bare IRIs and the pre-write diff would see an empty playbook
+    on the live side and wave every deletion through.
+
+    Any *error* other than a clean 404 returns the sentinel `{}`, which
+    `check_prewrite` treats as an unusable comparison and refuses on. A failed
+    read must never be mistaken for "there was nothing there".
+    """
+    url = (f"/api/3/workflow_collections/{coll_uuid}"
+           "?$relationships=true&$versions=true")
+    try:
+        payload = client.get(url)
+    except Exception as e:  # noqa: BLE001
+        r = getattr(e, "response", None)
+        if getattr(r, "status_code", None) == 404:
+            return None  # genuinely new -- nothing to overwrite
+        return {}  # unknown failure: fail closed, do not assume "empty"
+    if not isinstance(payload, dict) or not payload.get("uuid"):
+        return {}
+    return {"data": [payload]}
+
+
 @mcp.tool()
-def push_playbook(yaml_text: str) -> dict[str, Any]:
+def push_playbook(yaml_text: str,
+                  acknowledged_drops: list[str] | None = None) -> dict[str, Any]:
     """Write a playbook directly to the live FortiSOAR instance, immediately
     and without asking. Prefer emit_playbook_offer for anything an analyst
     is meant to review: that gives them a one-click card and a restore
@@ -1926,10 +1953,26 @@ def push_playbook(yaml_text: str) -> dict[str, Any]:
     Idempotent: PUT first, POST on 404, hard-purge + POST on 409 (matches
     `fsrpb push --mode replace`). Use after `validate_yaml` returns clean.
 
+    This push REPLACES the live playbook, so before writing it diffs what you
+    are about to save against what is on the appliance and REFUSES if a step,
+    route, argument or declared parameter that exists live is missing from
+    yours. If you get `ok: false, code: "would_drop_fields"`, the usual cause
+    is that you rewrote the playbook from memory instead of editing the real
+    one: re-read it (analyze_playbook) and re-apply your change on top.
+
+    Args:
+        yaml_text: the full playbook YAML to write.
+        acknowledged_drops: only when a deletion IS what was asked for -- pass
+            back the exact paths from the refusal's `dropped` list to confirm
+            you mean to remove them. Never pass paths you did not intend to
+            delete; that disables the only protection on this path.
+
     Returns:
         {ok: true, collection_uuid, collection_name, workflows: [{name, uuid}],
          action: "put"|"post"|"purge_post"} on success.
         {ok: false, errors: [...]} on compile failure.
+        {ok: false, code: "would_drop_fields", dropped: [...], error: str}
+         when the write would delete live data.
         {ok: false, error: str} on push failure.
     """
     sys.path.insert(0, str(REPO_ROOT / "tooling"))
@@ -1950,6 +1993,17 @@ def push_playbook(yaml_text: str) -> dict[str, Any]:
         ]}
     coll = result.fsr_json["data"][0]
     client = get_client()
+
+    # HARDEN-1: refuse a save that silently deletes live data. This is the
+    # only point where both documents exist, so it is the only place the
+    # check can be made -- the compiler cannot know what it is overwriting.
+    from fsr_playbooks.compiler.prewrite import check_prewrite
+    live = _fetch_live_collection(client, coll["uuid"])
+    verdict = check_prewrite(live, result.fsr_json, acknowledged_drops)
+    if not verdict.ok:
+        return {"ok": False, "code": "would_drop_fields",
+                "dropped": verdict.dropped, "error": verdict.message}
+
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         try:
