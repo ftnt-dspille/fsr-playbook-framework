@@ -219,6 +219,60 @@ def _score_investigation(trace: list[dict[str, Any]],
     }
 
 
+def _score_tool_selection(trace: list[dict[str, Any]],
+                          terminal_tool: list[str] | None,
+                          forbidden_facts: list[dict[str, Any]] | None,
+                          ) -> dict[str, Any]:
+    """Did the turn reach the terminal tool the ask requires?
+
+    This is the Phase 1.2 instrument, and it deliberately grades ONE thing.
+    The three live failures it exists to catch all looked like competent
+    work -- the model researched, narrated, and stopped -- so anything that
+    rewards research would have scored them green. Only the terminal call
+    counts.
+
+    `decoys_before` is the diagnostic half: which of the fixture's
+    `forbidden_facts` (the wrong-but-plausible tools observed live, e.g.
+    `list_playbook_runs` in place of `run_playbook`) the model called
+    *before* it got there. Calling a decoy is not itself a failure -- the
+    model may reasonably orient first -- so it never flips the gate; it only
+    tells you what the terminal tool is losing to. `calls_before` is the same
+    signal as a scalar, for tracking whether an intervention shortened the
+    path or just moved the stall.
+    """
+    wanted = [t for t in (terminal_tool or [])]
+    if not wanted:
+        return {"passed": False, "skipped": True,
+                "detail": "fixture declares no terminal_tool"}
+    reached_at = None
+    for i, call in enumerate(trace):
+        # A call the discipline guard refused never executed -- the model
+        # picked right but the platform blocked it. Same convention as
+        # _score_investigation's forbidden-pivot handling.
+        if call.get("name") in wanted and not call.get("refused"):
+            reached_at = i
+            break
+    decoys = []
+    for f in (forbidden_facts or []):
+        hit = next((i for i, c in enumerate(trace)
+                    if _fact_matches(f, c) and not c.get("refused")), None)
+        if hit is not None and (reached_at is None or hit < reached_at):
+            decoys.append(_fact_label(f))
+    passed = reached_at is not None
+    return {
+        "passed": passed, "skipped": False,
+        "terminal_tool": wanted,
+        "reached": passed,
+        "calls_before": reached_at if passed else len(trace),
+        "decoys_before": decoys,
+        "detail": (
+            f"reached {trace[reached_at]['name']} after {reached_at} call(s)"
+            if passed else
+            f"never called {' / '.join(wanted)} in {len(trace)} call(s)"
+        ),
+    }
+
+
 def _call_args(call: dict[str, Any]) -> dict[str, Any]:
     args = call.get("args") or call.get("input") or {}
     return args if isinstance(args, dict) else {}
@@ -906,6 +960,7 @@ def score(
     forbidden_facts: list[dict[str, Any]] | None = None,
     investigation_quality: dict[str, Any] | None = None,
     skill_trace_json: str | None = None,
+    terminal_tool: list[str] | None = None,
 ) -> dict[str, Any]:
     """Score a candidate YAML across confidence tiers + agent gates.
 
@@ -918,10 +973,16 @@ def score(
     (`required_facts` matched in the tool-use trace) instead of YAML shape.
     All authoring tiers + adherence become informational; the single gate
     is `investigation_recall` (>= 0.8, with a hard fail on `forbidden_facts`).
+
+    `mode="tool_selection"` scores ONE thing: did the turn reach
+    `terminal_tool`. Every other gate becomes informational, so a turn that
+    researches beautifully and never acts scores zero -- which is exactly
+    the live failure this mode exists to measure.
     """
     out: dict[str, Any] = {"levels": {}}
     refuse = (mode == "refuse")
     investigation = (mode == "investigation")
+    selection = (mode == "tool_selection")
 
     # ----------------- confidence tier 1: draft (compile clean) ------------
     comp = _compile_obj(yaml_text)
@@ -1053,7 +1114,7 @@ def score(
     # standalone authoring tasks (no investigation ops in the trace) and on
     # investigation/refuse modes (no playbook expected), so it only grades a
     # real triage→build chain.
-    if not investigation and not refuse:
+    if not investigation and not refuse and not selection:
         out["levels"]["build_fidelity"] = score_build_fidelity(trace, yaml_text)
     else:
         out["levels"]["build_fidelity"] = {"passed": False, "skipped": True}
@@ -1120,6 +1181,21 @@ def score(
                 out["levels"][k] = {
                     "passed": False, "skipped": True,
                     "detail": "no tool-use trace supplied"}
+
+    # Tool-selection mode: the terminal call is the whole verdict. Demote
+    # every other non-skipped gate so a research-heavy turn can't earn
+    # points for the work it did instead of the work it was asked for.
+    if selection:
+        for k, lv in out["levels"].items():
+            if not lv.get("skipped"):
+                lv["informational"] = True
+        if trace is not None:
+            out["levels"]["terminal_tool_reached"] = _score_tool_selection(
+                trace, terminal_tool, forbidden_facts)
+        else:
+            out["levels"]["terminal_tool_reached"] = {
+                "passed": False, "skipped": True,
+                "detail": "no tool-use trace supplied"}
 
     counted = [v for k, v in out["levels"].items()
                if not v.get("skipped") and not v.get("informational")]

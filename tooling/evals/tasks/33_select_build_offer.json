@@ -1,0 +1,14 @@
+{
+  "name": "select_build_offer",
+  "mode": "tool_selection",
+  "prompt": "Build me a playbook that runs when an alert is created, looks up the alert's source IP in VirusTotal, and sets the alert severity to High when the IP is malicious. Save it when it's ready.",
+  "terminal_tool": "emit_playbook_offer",
+  "prompt_variant": "build",
+  "tool_slice": "build",
+  "forbidden_facts": [
+    {"tool": "get_step_type", "label": "researched step types instead of delivering"},
+    {"tool": "find_connector", "label": "researched connectors instead of delivering"},
+    {"tool": "get_op_schema", "label": "researched op schemas instead of delivering"}
+  ],
+  "notes": "The build-path failure, both observed shapes at once: research-then-prose (get_step_type x4 -> find_connector x3 -> find_operation x2 -> get_op_schema x2 -> stop) and the narrower verify-then-prose (verify_playbook passes, then narrates instead of offering). Either way the analyst gets no playbook, so the terminal tool is emit_playbook_offer, not verify_playbook. Decoys here are legitimate preparatory calls -- they are recorded to show what the offer is losing to, and never fail the gate on their own."
+}

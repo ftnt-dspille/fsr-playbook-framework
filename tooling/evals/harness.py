@@ -18,12 +18,39 @@ from pathlib import Path
 from typing import Any
 
 from agent import load_system_prompt
-from evals.providers import (ProviderFn, extract_yaml, get_provider)
+from evals.providers import (ProviderFn, extract_yaml, get_provider,
+                             set_tool_slice)
 from evals.scoring import score
 from evals.tasks import Task, load_tasks
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNS_DIR = REPO_ROOT / "data" / "eval_runs"
+
+
+# The Phase 1.4 control arm. Deliberately says nothing about *how* to work --
+# no research mandate, no authoring workflow, no persona. If a run request
+# reaches `run_playbook` under this and not under the build prompt, the build
+# prompt is what's overriding tool selection, and the fix is guidance, not the
+# tool surface.
+_NEUTRAL_PROMPT = (
+    "You are a FortiSOAR assistant. You have tools available. Read the "
+    "user's request, decide which tool actually answers it, and call that "
+    "tool. Do not narrate a plan instead of acting."
+)
+
+
+def _prompt_for(task: Task, default: str) -> str:
+    """Resolve the system prompt this task runs under.
+
+    `prompt_variant` is None for every pre-existing fixture, which keeps them
+    on the harness default they were baselined against."""
+    variant = task.prompt_variant
+    if not variant:
+        return default
+    if variant == "neutral":
+        return _NEUTRAL_PROMPT
+    from fsr_playbooks.llm.intents import load_intent_prompt  # noqa: PLC0415
+    return load_intent_prompt(variant)
 
 
 def _gold_lookup_for(tasks: list[Task]):
@@ -90,8 +117,9 @@ def run_matrix(
                 _clr()
             except Exception:
                 pass
+            set_tool_slice(t.tool_slice)
             try:
-                raw = provider(system_prompt, t.prompt)
+                raw = provider(_prompt_for(t, system_prompt), t.prompt)
             except Exception as e:  # noqa: BLE001
                 rows.append({
                     "model": model_name, "task": t.name,
@@ -128,6 +156,7 @@ def run_matrix(
                 required_facts=t.required_facts,
                 forbidden_facts=t.forbidden_facts,
                 investigation_quality=t.investigation_quality,
+                terminal_tool=t.terminal_tool,
             )
             row = {
                 "model": model_name,
@@ -143,6 +172,7 @@ def run_matrix(
                 if usage is not None:
                     row["usage"] = usage
             rows.append(row)
+    set_tool_slice(None)
 
     summary: dict[str, dict[str, float]] = {}
     for m in model_names:

@@ -1,0 +1,14 @@
+{
+  "name": "select_diagnose_failure",
+  "mode": "tool_selection",
+  "prompt": "My \"Phishing Triage\" playbook failed on its last run. Why?",
+  "terminal_tool": "why_did_playbook_fail",
+  "prompt_variant": "build",
+  "tool_slice": "build",
+  "forbidden_facts": [
+    {"tool": "list_playbook_runs", "label": "listed runs instead of diagnosing"},
+    {"tool": "get_run_env", "label": "pulled run env instead of diagnosing"},
+    {"tool": "search_playbooks", "label": "searched playbooks instead of diagnosing"}
+  ],
+  "notes": "why_did_playbook_fail is the orchestrator that chains list_recent_failed_runs -> get_run_env -> diagnose_yaml_against_pb_execution. Its individual links are all separately advertised in the build slice, which is exactly the decoy shape that broke the run path -- so this fixture measures whether the model picks the one-call answer or hand-rolls the chain. Hand-rolling still reaches an answer, so the decoys stay informational; only never diagnosing fails the gate."
+}

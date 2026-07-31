@@ -133,6 +133,27 @@ def _lmstudio_provider() -> ProviderFn:
 _AGENTIC_MAX_TURNS = 12
 
 
+# Per-task tool-slice override, set by the harness around each cell (see
+# `tools_for_intent`). None = advertise the full SAFE_TOOLS registry, which is
+# what every pre-existing task has always run under. Phase 1.2 needs this
+# because the tool-selection number is only meaningful against the surface the
+# user actually hits -- the connector serves an intent slice, not the registry.
+_TOOL_SLICE: list[str] | None = None
+
+
+def set_tool_slice(intent: str | None) -> None:
+    """Restrict the advertised tools to `intents.tools_for_intent(intent)`.
+
+    Pass None to restore the full registry. Resolved to names here (not tool
+    dicts) so the provider keeps ownership of the cache_control marker."""
+    global _TOOL_SLICE
+    if intent is None:
+        _TOOL_SLICE = None
+        return
+    from fsr_playbooks.llm.intents import tools_for_intent  # type: ignore
+    _TOOL_SLICE = [t["name"] for t in tools_for_intent(intent)]
+
+
 def _import_studio_tools():
     """Pull the same SAFE_TOOLS registry the chat backend uses, so agentic
     evals exercise the exact tool surface end users hit. Also returns
@@ -161,13 +182,22 @@ def _agentic_anthropic_provider() -> Callable:
     model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
     anthropic_tools, _, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
     raw_tools = anthropic_tools()
-    # Cache the (static) tool list -- mark the last entry so the cache
-    # breakpoint includes every preceding tool def.
-    tools = [dict(t) for t in raw_tools]
-    if tools:
-        tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
+
+    def _tools_now() -> list[dict]:
+        # Resolved per call so a per-task slice (set_tool_slice) applies.
+        # Unsliced runs rebuild an identical list, so the prompt-cache
+        # breakpoint below still hits across tasks.
+        picked = ([t for t in raw_tools if t["name"] in _TOOL_SLICE]
+                  if _TOOL_SLICE is not None else raw_tools)
+        # Cache the tool list -- mark the last entry so the cache breakpoint
+        # includes every preceding tool def.
+        out = [dict(t) for t in picked]
+        if out:
+            out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
+        return out
 
     def _call(system: str, prompt: str) -> dict:
+        tools = _tools_now()
         # Anthropic accepts `system` as either a string or a list of
         # content blocks; the block form is required to attach
         # cache_control. Static across the whole eval run.
