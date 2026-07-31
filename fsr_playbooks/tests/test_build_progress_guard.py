@@ -114,3 +114,21 @@ def test_inert_on_the_full_default_registry():
     _research_only(g)
     g.note_result("get_record", {}, {"ok": True})
     assert g.outstanding(FULL_SLICE) is False
+
+
+def test_run_request_is_not_nudged_into_authoring():
+    # Live on .159: "Run the Link Similar Alerts playbook." kept the FULL build
+    # slice because the run-mode gate failed open, and called find_connector /
+    # list_playbook_runs / find_operation. Nudging that turn to "draft the full
+    # playbook YAML now" would author something the analyst never asked for.
+    g = BuildProgressGuard()
+    g.note_result("find_connector", {}, {"ok": True})
+    g.note_result("list_playbook_runs", {}, {"ok": True})
+    g.note_result("find_operation", {}, {"ok": True})
+    assert g.outstanding(BUILD_SLICE) is False
+
+
+def test_diagnose_turn_is_not_nudged():
+    g = BuildProgressGuard()
+    g.note_result("why_did_playbook_fail", {}, {"ok": True})
+    assert g.outstanding(BUILD_SLICE) is False

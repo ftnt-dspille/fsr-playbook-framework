@@ -874,6 +874,21 @@ _AUTHORING_PROGRESS_TOOLS = frozenset({
     "verify_enhancement", "emit_enhancement_offer", "emit_patch_proposal",
 })
 
+# Tools that mean the analyst asked to RUN or DIAGNOSE an existing playbook, not
+# to author a new one. This is load-bearing, not defensive: run-mode is supposed
+# to narrow the slice to `run_playbook` alone (RUN_MODE_KEEP_TOOLS), which would
+# make this guard inert -- but that gate fails OPEN to normal build behavior, and
+# it was observed failing open live on .159 ("Run the Link Similar Alerts
+# playbook." kept the full build slice and called find_connector /
+# list_playbook_runs / find_operation). On that slice, without this check, a RUN
+# request would get nudged to "draft the full playbook YAML now" -- authoring
+# something nobody asked for, which is worse than the stall being fixed.
+_RUN_INTENT_TOOLS = frozenset({
+    "run_playbook", "list_playbook_runs", "why_did_playbook_fail",
+    "get_run_env", "dry_run_playbook", "step_through_playbook",
+    "diagnose_yaml_against_pb_execution",
+})
+
 
 class BuildProgressGuard:
     """Tracks a build turn that ran only research tools and never authored.
@@ -888,12 +903,15 @@ class BuildProgressGuard:
     def __init__(self) -> None:
         self._any_tool = False
         self._authored = False
+        self._run_intent = False
         self._forced = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         self._any_tool = True
         if name in _AUTHORING_PROGRESS_TOOLS:
             self._authored = True
+        if name in _RUN_INTENT_TOOLS:
+            self._run_intent = True
 
     def outstanding(self, allowed_names: set[str]) -> bool:
         """True when a build turn is ending with research but no authoring."""
@@ -911,6 +929,9 @@ class BuildProgressGuard:
         if "emit_action_card" in allowed_names:
             return False
         if self._forced or self._authored or not self._any_tool:
+            return False
+        # A run/diagnose turn is not a stalled build -- see _RUN_INTENT_TOOLS.
+        if self._run_intent:
             return False
         return True
 
