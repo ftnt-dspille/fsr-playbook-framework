@@ -12,6 +12,7 @@ two runs cell-by-cell so a CI hook can red-flag regressions.
 from __future__ import annotations
 
 import json
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -70,6 +71,32 @@ def _compile_gold_json(yaml_text: str) -> dict[str, Any] | None:
         return None
 
 
+def _progress(model: str, i: int, n: int, task: str, row: dict[str, Any]) -> None:
+    """Emit one per-fixture line to STDERR as the matrix runs.
+
+    A full-corpus run on a free gateway is minutes per fixture, and the
+    harness otherwise prints nothing until the very end -- so a slow run and
+    a hung one look identical. One 65-minute run was killed on that ambiguity
+    having proven nothing.
+
+    stderr, not stdout, so `--json` output stays machine-parseable.
+    """
+    if "error" in row:
+        mark = "ERR"
+    elif not row.get("max"):
+        # max=0 means no gate applied, NOT a failure -- e.g. gold/echo on a
+        # tool_selection fixture, which scores the terminal tool call those
+        # providers never make. Calling it FAIL reads as a regression.
+        mark = "n/a (nothing scored)"
+    elif row["score"] == row["max"]:
+        mark = "ok"
+    else:
+        mark = f"FAIL {row['score']}/{row['max']}"
+    secs = row.get("elapsed_ms", 0) / 1000.0
+    print(f"  [{model} {i}/{n}] {task} -- {mark} ({secs:.1f}s)",
+          file=sys.stderr, flush=True)
+
+
 def run_matrix(
     *,
     model_names: list[str],
@@ -103,7 +130,7 @@ def run_matrix(
                     "levels": {},
                 })
             continue
-        for t in tasks:
+        for ti, t in enumerate(tasks, 1):
             t0 = time.time()
             # HITL Phase 3: pin per-task approval policy + reset the
             # dispatch wrapper's audit log so the gate scores only this
@@ -121,13 +148,15 @@ def run_matrix(
             try:
                 raw = provider(_prompt_for(t, system_prompt), t.prompt)
             except Exception as e:  # noqa: BLE001
-                rows.append({
+                _err_row = {
                     "model": model_name, "task": t.name,
                     "error": f"provider call: {e!r}",
                     "elapsed_ms": int((time.time() - t0) * 1000),
                     "score": 0, "max": 0, "fraction": 0.0,
                     "levels": {},
-                })
+                }
+                rows.append(_err_row)
+                _progress(model_name, ti, len(tasks), t.name, _err_row)
                 continue
             # Agentic providers return a dict {text, trace, turns}; classic
             # providers return a string. Detect and route.
@@ -172,6 +201,7 @@ def run_matrix(
                 if usage is not None:
                     row["usage"] = usage
             rows.append(row)
+            _progress(model_name, ti, len(tasks), t.name, row)
     set_tool_slice(None)
 
     summary: dict[str, dict[str, float]] = {}
@@ -215,9 +245,11 @@ def screen_models(
                       case: it demos fine and fails in front of a customer)
       `failing`    -- at least one fixture never passed
     """
-    runs = [run_matrix(model_names=model_names, task_names=task_names,
-                       live=live)
-            for _ in range(repeats)]
+    runs = []
+    for _r in range(1, repeats + 1):
+        print(f"-- repeat {_r}/{repeats} --", file=sys.stderr, flush=True)
+        runs.append(run_matrix(model_names=model_names,
+                               task_names=task_names, live=live))
     tasks = runs[0]["tasks"]
     cells: dict[str, dict[str, dict[str, Any]]] = {}
     for m in model_names:
