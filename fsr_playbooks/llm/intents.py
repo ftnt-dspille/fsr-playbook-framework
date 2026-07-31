@@ -16,9 +16,8 @@ and are vendored wholesale into the connector by ``scripts/build.sh``.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 INTENTS = ("triage", "build")
 DEFAULT_INTENT = "build"
@@ -46,8 +45,7 @@ BUILD_ONLY_TOOLS = frozenset({
     # specific playbook auto-runnable via the `run_playbook.auto` resolver (tier 2).
     # It was previously listed here AND added to TRIAGE_ONLY_TOOLS by the
     # connector's register_triage_tools(), so BOTH slices subtracted it and no
-    # model could call it in any intent -- which also left tools_for_run_mode()
-    # with an empty intersection, silently disabling Lever 2 (see below).
+    # model could call it in any intent.
     # Value-level fix card for the OPEN playbook -- meaningless in triage (there
     # is no playbook open to patch), so keep it out of the triage slice.
     "emit_patch_proposal",
@@ -89,94 +87,6 @@ TRIAGE_ONLY_TOOLS: set[str] = {
     "emit_action_card",
     "run_op",
 }
-
-# ---- Lever 2: run-mode slice + run/author classification ------------------
-#
-# Prompt/description tuning could not stop gpt-4.1-mini from mis-routing a
-# "run the deployed playbook X" request into the authoring tools (verify /
-# compile / emit). The deterministic fix removes the temptation: when a turn is
-# classified as "run an existing playbook", we replace the advertised slice with
-# just run_playbook (the allowlist below), so it is the model's only available
-# action. This complements Lever 1 (the dispatch forcing-redirect):
-# Lever 1 catches the blank-yaml+name mis-call; Lever 2 also covers the case
-# where the model fabricates full YAML with no name to key on.
-#
-# Run mode is an ALLOWLIST, not a blacklist. Live proof: merely dropping the
-# authoring tools still let gpt-4.1-mini "investigate" a run request via the
-# left-over read/discovery tools (search_playbooks, list_playbook_runs,
-# find_connector, why_did_playbook_fail, …) and end the turn WITHOUT ever
-# calling run_playbook. With run_playbook as the ONLY tool on the table, the
-# model has one way to act, and it takes it. If the name is approximate,
-# run_playbook resolves (or reports not-found) -- no discovery tool needed.
-RUN_MODE_KEEP_TOOLS = frozenset({"run_playbook"})
-
-RUN = "run"
-AUTHOR = "author"
-OTHER = "other"
-
-# Classifier system prompt. It classifies MEANING, not surface words, so it is
-# language-agnostic -- no keyword/regex list to enumerate or maintain. We parse
-# only our OWN one-word control output (run|author|other), never the analyst's
-# free text, so this introduces no language lock-in.
-_RUN_AUTHOR_SYSTEM = (
-    "You route a SOC analyst's message about FortiSOAR playbooks. Decide the "
-    "analyst's INTENT and reply with EXACTLY one lowercase word:\n"
-    "  run    - they want to RUN / execute / trigger / launch / start a "
-    "playbook that ALREADY EXISTS (they name it, or refer to a deployed / "
-    "existing / saved playbook).\n"
-    "  author - they want to CREATE, build, write, compose, modify, edit, fix, "
-    "or verify playbook YAML.\n"
-    "  other  - anything else: questions, explanations, greetings, alert "
-    "investigation, or unclear.\n"
-    "Judge the meaning regardless of the language the message is written in. "
-    "Answer with one word only: run, author, or other."
-)
-
-
-def classify_run_or_author(message: Any, complete: "Callable[[str, str], str]") -> str:
-    """Classify a message as ``run`` / ``author`` / ``other`` via an injected LLM.
-
-    ``complete(system, user) -> str`` is supplied by the caller (the connector
-    passes its configured provider); this keeps the framework provider-agnostic
-    and the function unit-testable with a fake. Fails OPEN to ``other`` (normal
-    build behavior) on any empty input or provider error -- a classifier hiccup
-    must never block authoring or run.
-    """
-    if not isinstance(message, str) or not message.strip():
-        return OTHER
-    try:
-        raw = complete(_RUN_AUTHOR_SYSTEM, message)
-    except Exception:  # noqa: BLE001 -- fail open, never break the turn
-        return OTHER
-    tok = (raw or "").strip().lower()
-    for w in (RUN, AUTHOR, OTHER):
-        if tok.startswith(w):
-            return w
-    # Model padded the answer ("intent: run") -- look for the token anywhere,
-    # preferring the more specific labels over the catch-all. Match on WORD
-    # BOUNDARIES: a bare substring scan reads "run" out of "re-runnable" (and
-    # "author" out of "authored"), so a model that ignored the one-word contract
-    # and replied with prose got classified RUN -- which then narrowed the turn
-    # to the run-mode allowlist and stripped the authoring surface it needed.
-    if re.search(rf"\b{RUN}\b", tok):
-        return RUN
-    if re.search(rf"\b{AUTHOR}\b", tok):
-        return AUTHOR
-    return OTHER
-
-
-def tools_for_run_mode(base_intent: str = "build") -> list[dict[str, Any]]:
-    """The tool slice for a classified RUN request: only the run-mode allowlist
-    (run_playbook), so it is the model's single available action. Intersected
-    with the base slice so a tool absent there stays absent.
-
-    Fail-open: if the intersection is EMPTY (the allowlist tool isn't in the base
-    slice at all) we return the base slice untouched. Advertising zero tools does
-    not make the model run a playbook -- it makes the turn incapable of doing
-    anything, which is strictly worse than the un-narrowed surface."""
-    base = tools_for_intent(base_intent)
-    narrowed = [t for t in base if t["name"] in RUN_MODE_KEEP_TOOLS]
-    return narrowed or base
 
 # Inline fallbacks used only when the vendored markdown can't be read (keeps
 # the agent functional even if packaging drops the .md files).
@@ -345,6 +255,4 @@ __all__ = [
     "resolve_intent", "load_intent_prompt", "tools_for_intent",
     "classify_message", "gate_directive",
     "TRIVIAL", "CONTINUE", "DIRECTIVE",
-    "RUN_MODE_KEEP_TOOLS", "RUN", "AUTHOR", "OTHER",
-    "classify_run_or_author", "tools_for_run_mode",
 ]

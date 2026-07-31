@@ -906,14 +906,21 @@ _AUTHORING_PROGRESS_TOOLS = frozenset({
 })
 
 # Tools that mean the analyst asked to RUN or DIAGNOSE an existing playbook, not
-# to author a new one. This is load-bearing, not defensive: run-mode is supposed
-# to narrow the slice to `run_playbook` alone (RUN_MODE_KEEP_TOOLS), which would
-# make this guard inert -- but that gate fails OPEN to normal build behavior, and
-# it was observed failing open live on .159 ("Run the Link Similar Alerts
-# playbook." kept the full build slice and called find_connector /
-# list_playbook_runs / find_operation). On that slice, without this check, a RUN
-# request would get nudged to "draft the full playbook YAML now" -- authoring
-# something nobody asked for, which is worse than the stall being fixed.
+# to author a new one. This is load-bearing, not defensive, and it is now the
+# ONLY thing covering that case.
+#
+# There used to be a second mechanism ("Lever 2"): an LLM call per build turn
+# classified run-vs-author and narrowed the slice to `run_playbook` alone. It
+# was deleted because it never actually carried the case it was written for --
+# it failed OPEN to normal build behavior, and was observed doing exactly that
+# live ("Run the Link Similar Alerts playbook." kept the full build slice and
+# called find_connector / list_playbook_runs / find_operation). This check was
+# written for that fail-open path, i.e. for the common case, so removing the
+# classifier removes a per-turn LLM round-trip and no protection.
+#
+# On the full build slice, without this check, a RUN request gets nudged to
+# "draft the full playbook YAML now" -- authoring something nobody asked for,
+# which is worse than the stall being fixed.
 _RUN_INTENT_TOOLS = frozenset({
     "run_playbook", "list_playbook_runs", "why_did_playbook_fail",
     "get_run_env", "dry_run_playbook", "step_through_playbook",
