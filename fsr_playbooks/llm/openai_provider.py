@@ -54,8 +54,10 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    CreateDeliveryGuard,
     EnhanceDeliveryGuard,
     TriageDiscipline,
+    _CREATE_OFFER_TOOL,
     _ENHANCE_OFFER_TOOL,
     compile_errors as _compile_errors,
     drain_with_idle_timeout,
@@ -142,6 +144,15 @@ _DELIVERY_DIRECTIVE = (
     "verified_id {vid!r} to apply it -- a written description is NOT a "
     "substitute for the call. Write the `summary` as one or two plain-English "
     "lines describing what the edit changes."
+)
+
+
+_CREATE_DELIVERY_DIRECTIVE = (
+    "You drafted a playbook and `verify_playbook` cleared it, but you have not "
+    "delivered it. Call `emit_playbook_offer` now -- describing the playbook in "
+    "prose is NOT a substitute for the call, and the analyst has no way to save "
+    "it without the card. Write the `summary` as one or two plain-English lines "
+    "describing what the playbook does."
 )
 
 
@@ -438,6 +449,9 @@ class OpenAIProvider:
         # emit_enhancement_offer rather than narrated. Inert unless the offer
         # tool is in the advertised slice (see EnhanceDeliveryGuard).
         _delivery = EnhanceDeliveryGuard()
+        # CREATE counterpart -- see CreateDeliveryGuard. Inert unless the build
+        # slice advertises emit_playbook_offer AND a verify_playbook passed.
+        _create_delivery = CreateDeliveryGuard()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
@@ -719,6 +733,71 @@ class OpenAIProvider:
                     yield DoneEvent(stop_reason="end_turn")
                     return
 
+                # Create-delivery guard -- verify_playbook passed but the turn
+                # is ending with no offer card. Force ONE round pinned to
+                # emit_playbook_offer and override `yaml` with the blessed
+                # bytes, so the analyst always gets an acceptable card instead
+                # of a sentence promising one.
+                _vyaml = _create_delivery.outstanding(allowed_names)
+                if _vyaml is not None:
+                    _create_delivery.mark_forced()
+                    yield _emit_usage("create_delivery_forced")
+                    offer_schema = next(
+                        (t for t in tools
+                         if (t.get("function") or {}).get("name")
+                         == _CREATE_OFFER_TOOL), None)
+                    if offer_schema is not None:
+                        turn_idx += 1
+                        history.append({
+                            "role": "user",
+                            "content": _CREATE_DELIVERY_DIRECTIVE,
+                        })
+                        try:
+                            resp = await self._client.chat.completions.create(
+                                model=self.model, messages=history,
+                                tools=[offer_schema],
+                                tool_choice={
+                                    "type": "function",
+                                    "function": {"name": _CREATE_OFFER_TOOL},
+                                },
+                                **_max_tokens_param(self.model, 512),
+                            )
+                            msg = resp.choices[0].message
+                            raw = (msg.tool_calls[0].function.arguments
+                                   if msg.tool_calls else "{}")
+                            try:
+                                oargs = json.loads(raw) if raw else {}
+                            except Exception:
+                                oargs = {}
+                            if not isinstance(oargs, dict):
+                                oargs = {}
+                            # Never trust a forced round to carry the right
+                            # bytes -- only verified YAML may reach the card.
+                            oargs["yaml"] = _vyaml
+                            if not str(oargs.get("id") or "").strip():
+                                oargs["id"] = f"offer-{_uuid.uuid4().hex[:8]}"
+                            if not str(oargs.get("summary") or "").strip():
+                                oargs["summary"] = (
+                                    _create_delivery.summary_hint
+                                    or "Playbook drafted and verified."
+                                )
+                            call_id = (msg.tool_calls[0].id
+                                       if msg.tool_calls else _uuid.uuid4().hex[:8])
+                            yield ToolUseEvent(
+                                name=_CREATE_OFFER_TOOL, arguments=oargs,
+                                call_id=call_id,
+                                tier=_tier_for(_CREATE_OFFER_TOOL, oargs))
+                            _t0 = time.perf_counter()
+                            oresult = _guarded_dispatch(_CREATE_OFFER_TOOL, oargs)
+                            _dur = int((time.perf_counter() - _t0) * 1000)
+                            yield ToolResultEvent(
+                                call_id=call_id, result=oresult, duration_ms=_dur)
+                        except Exception:
+                            import logging
+                            logging.exception("forced create delivery failed")
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
+
                 if not text_buf.strip() and any_tools_run and not assessment_forced:
                     assessment_forced = True
                     yield _emit_usage("assessment_forced")
@@ -780,6 +859,7 @@ class OpenAIProvider:
                     yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
                     content_str = _record(name, args, result, dur_ms)
                     _delivery.note_result(name, args, result)
+                    _create_delivery.note_result(name, args, result)
                     tool_messages.append({
                         "role": "tool", "tool_call_id": call_id, "content": content_str,
                     })
@@ -847,6 +927,7 @@ class OpenAIProvider:
                 yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
                 content_str = _record(name, args, result, dur_ms)
                 _delivery.note_result(name, args, result)
+                _create_delivery.note_result(name, args, result)
                 tool_messages.append({
                     "role": "tool", "tool_call_id": call_id, "content": content_str,
                 })

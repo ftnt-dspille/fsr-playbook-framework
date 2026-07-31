@@ -758,3 +758,85 @@ class EnhanceDeliveryGuard:
 
     def mark_forced(self) -> None:
         self._forced = True
+
+
+# ─────────────────────── create-delivery guard ───────────────────────
+#
+# The CREATE counterpart to EnhanceDeliveryGuard, and it exists for the same
+# reason: `emit_playbook_offer` is the mandatory terminal action of a
+# from-scratch build turn -- the card is what carries the YAML and gives the
+# analyst the one-click "Save as Playbook" CTA. A weak model routinely runs the
+# research tools, passes `verify_playbook`, and then writes "Next, I will author
+# a playbook that ..." and ends the turn. From the analyst's seat the chat
+# produced prose and no card, so there is nothing to accept -- the exact failure
+# the enhance guard already fixes one path over.
+#
+# This was an ASYMMETRY, not a design: the enhance guard's docstring notes it is
+# "inert on triage and on create", and nothing covered create. Live on the box
+# the same prompt would sometimes deliver the card and sometimes narrate,
+# because only the model's whim decided it.
+#
+# Same contract as the enhance guard: detector only, no I/O, fires at most once
+# via `mark_forced()`. The provider runs ONE `tool_choice`-pinned round and
+# overrides `yaml` with the bytes the gate actually blessed, so a forced round
+# can't ship YAML that never passed verify.
+
+_CREATE_VERIFY_TOOL = "verify_playbook"
+_CREATE_OFFER_TOOL = "emit_playbook_offer"
+
+
+class CreateDeliveryGuard:
+    """Tracks whether a build turn verified a NEW playbook but never offered it.
+
+    Fires only when `emit_playbook_offer` is in the advertised slice AND a
+    `verify_playbook` returned `ready_to_push`. The triage slice advertises the
+    offer tool too (its trace-compiled close), but triage never calls
+    `verify_playbook`, so the guard stays inert there -- it needs BOTH halves of
+    the pair.
+    """
+
+    def __init__(self) -> None:
+        # Bytes from the most recent PASSING verify. Latest wins: a build turn
+        # commonly verifies, repairs, and re-verifies, and only the last blessed
+        # YAML is what the analyst should be offered.
+        self._verified_yaml: str | None = None
+        self._summary_hint: str = ""
+        self._delivered = False
+        self._forced = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Fold one executed tool result into the delivery state."""
+        if name == _CREATE_OFFER_TOOL:
+            # Only a genuinely successful offer counts as delivery; a rejected
+            # one still needs forcing, so leave `_delivered` False there.
+            if not (isinstance(result, dict) and result.get("ok") is False):
+                self._delivered = True
+            return
+        if name != _CREATE_VERIFY_TOOL or not isinstance(result, dict):
+            return
+        if not result.get("ready_to_push"):
+            return
+        # The blessed bytes are the ones that went IN to verify -- the result is
+        # a punch list, not the document.
+        yaml_text = args.get("yaml_text") or args.get("yaml")
+        if isinstance(yaml_text, str) and yaml_text.strip():
+            self._verified_yaml = yaml_text
+            summary = result.get("summary")
+            if isinstance(summary, str) and summary:
+                self._summary_hint = summary
+
+    def outstanding(self, allowed_names: set[str]) -> str | None:
+        """The verified YAML a passing verify blessed but no offer delivered,
+        or None. Returns None once forced, so the guard fires at most once."""
+        if _CREATE_OFFER_TOOL not in allowed_names:
+            return None
+        if self._forced or self._delivered or not self._verified_yaml:
+            return None
+        return self._verified_yaml
+
+    @property
+    def summary_hint(self) -> str:
+        return self._summary_hint
+
+    def mark_forced(self) -> None:
+        self._forced = True
