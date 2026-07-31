@@ -78,7 +78,20 @@ STRIP = [
     "warmup_runs", "_probe_runs",
     "api_endpoints", "api_endpoint_params", "api_endpoint_examples",
     "operation_examples",
+    # Base64 PNG connector logos, ~0.3 MB and read by nothing under test:
+    # test_mcp_connector_icon seeds and tears down its own `icon_test` row, so
+    # it needs the TABLE, never these rows.
+    "connector_icons",
 ]
+
+# Columns emptied in place (the table itself is still needed). `info_json` is
+# 2.8 MB over 47 rows -- 16% of the fixture -- and the slim-catalog builder
+# already NULLs this exact column, calling it "the only sensitive carrier": it
+# embeds the live `configuration` array with per-instance config UUIDs and
+# sometimes a probe-time appliance URL. Nothing under test reads it; the one
+# consumer (`tools_discovery`) treats it as a fast-path cache and falls back to
+# a live fetch when it is empty.
+NULL_COLUMNS = [("connectors", "info_json")]
 
 
 def _cols(db: sqlite3.Connection, table: str) -> list[str]:
@@ -116,6 +129,9 @@ def main() -> int:
     for t in STRIP:
         if t in existing:
             db.execute(f"DELETE FROM {t}")
+    for table, col in NULL_COLUMNS:
+        if table in existing:
+            db.execute(f'UPDATE "{table}" SET "{col}" = NULL')
 
     # 2. prune connector-scoped tables to the test set
     scoped = _scoped_tables(db)
