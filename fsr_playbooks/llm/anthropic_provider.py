@@ -43,6 +43,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    BuildProgressGuard,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
     TriageDiscipline,
@@ -74,6 +75,13 @@ _ASSESSMENT_DIRECTIVE = (
 # A verify passed but no emit_enhancement_offer followed -- force the call via
 # tool_choice and override verified_id afterward so the forced round can only
 # apply the blessed bytes.
+_BUILD_PROGRESS_DIRECTIVE = (
+    "You have researched the step types and connector operations but have not "
+    "authored anything yet -- describing what you WILL build is not building it. "
+    "Draft the full playbook YAML now and call `verify_playbook` with it, then "
+    "deliver it with `emit_playbook_offer`. Do not end the turn with a plan."
+)
+
 _CREATE_DELIVERY_DIRECTIVE = (
     "You drafted a playbook and `verify_playbook` cleared it, but you have not "
     "delivered it. Call `emit_playbook_offer` now -- describing the playbook in "
@@ -372,6 +380,7 @@ class AnthropicProvider:
         _delivery = EnhanceDeliveryGuard()
         # CREATE counterpart -- see CreateDeliveryGuard.
         _create_delivery = CreateDeliveryGuard()
+        _build_progress = BuildProgressGuard()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
@@ -649,6 +658,22 @@ class AnthropicProvider:
                 # the delivery is a real tool call, then override verified_id
                 # with the blessed handle so the forced call can only apply the
                 # bytes the gate actually cleared.
+                if _build_progress.outstanding(allowed_names):
+                    _build_progress.mark_forced()
+                    yield UsageEvent(
+                        session_id=session_id, turn=turn_idx, model=self.model,
+                        input_tokens=input_tok, output_tokens=output_tok,
+                        cache_read=cache_hit, cache_write=cache_write,
+                        history_chars=history_chars,
+                        stop_reason="build_progress_forced",
+                        self_repair_turn=self_repair_turns,
+                        tool_calls=tool_call_usage, tags=tags,
+                    )
+                    turn_idx += 1
+                    history.append(Message(
+                        role="user", content=_BUILD_PROGRESS_DIRECTIVE))
+                    continue
+
                 _vid = _delivery.outstanding(allowed_names)
                 if _vid is not None:
                     _delivery.mark_forced()
@@ -814,6 +839,7 @@ class AnthropicProvider:
                 # tool_use order intact.
                 _delivery.note_result(name, args, result)
                 _create_delivery.note_result(name, args, result)
+                _build_progress.note_result(name, args, result)
                 content_str = _stringify(result)
                 block = {
                     "type": "tool_result",

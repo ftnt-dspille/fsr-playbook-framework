@@ -54,6 +54,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    BuildProgressGuard,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
     TriageDiscipline,
@@ -146,6 +147,13 @@ _DELIVERY_DIRECTIVE = (
     "lines describing what the edit changes."
 )
 
+
+_BUILD_PROGRESS_DIRECTIVE = (
+    "You have researched the step types and connector operations but have not "
+    "authored anything yet -- describing what you WILL build is not building it. "
+    "Draft the full playbook YAML now and call `verify_playbook` with it, then "
+    "deliver it with `emit_playbook_offer`. Do not end the turn with a plan."
+)
 
 _CREATE_DELIVERY_DIRECTIVE = (
     "You drafted a playbook and `verify_playbook` cleared it, but you have not "
@@ -452,6 +460,8 @@ class OpenAIProvider:
         # CREATE counterpart -- see CreateDeliveryGuard. Inert unless the build
         # slice advertises emit_playbook_offer AND a verify_playbook passed.
         _create_delivery = CreateDeliveryGuard()
+        # Research-but-never-authored detector -- see BuildProgressGuard.
+        _build_progress = BuildProgressGuard()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
@@ -675,6 +685,22 @@ class OpenAIProvider:
                             yield _emit_usage(finish_reason or "", repair_delta=1)
                             continue
 
+                # Build-progress guard -- the turn researched and never authored.
+                # Checked BEFORE the delivery guards because there is nothing to
+                # deliver yet; the point is to get the model INTO the authoring
+                # half. Unlike the delivery guards this does not force a specific
+                # call and does not end the turn: it appends a directive and lets
+                # the loop run on, so the model drafts -> verifies -> offers on
+                # its own and CreateDeliveryGuard still backstops the far end.
+                if _build_progress.outstanding(allowed_names):
+                    _build_progress.mark_forced()
+                    yield _emit_usage("build_progress_forced")
+                    turn_idx += 1
+                    history.append({
+                        "role": "user", "content": _BUILD_PROGRESS_DIRECTIVE,
+                    })
+                    continue
+
                 # Enhance-delivery guard -- a verify passed but no offer
                 # followed. Force ONE round pinned to emit_enhancement_offer so
                 # the delivery is a real tool call, then override verified_id
@@ -860,6 +886,7 @@ class OpenAIProvider:
                     content_str = _record(name, args, result, dur_ms)
                     _delivery.note_result(name, args, result)
                     _create_delivery.note_result(name, args, result)
+                    _build_progress.note_result(name, args, result)
                     tool_messages.append({
                         "role": "tool", "tool_call_id": call_id, "content": content_str,
                     })
@@ -928,6 +955,7 @@ class OpenAIProvider:
                 content_str = _record(name, args, result, dur_ms)
                 _delivery.note_result(name, args, result)
                 _create_delivery.note_result(name, args, result)
+                _build_progress.note_result(name, args, result)
                 tool_messages.append({
                     "role": "tool", "tool_call_id": call_id, "content": content_str,
                 })

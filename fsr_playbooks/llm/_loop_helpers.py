@@ -840,3 +840,79 @@ class CreateDeliveryGuard:
 
     def mark_forced(self) -> None:
         self._forced = True
+
+
+# ─────────────────────── build-progress guard ────────────────────────
+#
+# The failure the delivery guards CANNOT catch: a build turn that researches
+# and then never drafts. Live on .159 (connector 0.5.65, fsr_playbooks 0.6.5,
+# gpt-4.1-mini) a "build me a playbook that ..." turn ran
+#
+#     get_step_type x4 -> find_connector x3 -> find_operation x2 -> get_op_schema x2
+#
+# and ended with prose ("Next, I will author a playbook that ...") -- no
+# validate_yaml, no verify_playbook, no offer. 11 tool calls of pure research
+# against a 16-call budget, so it did not run out of turns; it just stopped.
+#
+# CreateDeliveryGuard is correctly inert here: with no passing verify there are
+# no blessed bytes, and forcing an offer would hand the analyst UNVERIFIED YAML
+# -- the precise thing that guard exists to prevent. So this is a distinct
+# problem with a distinct fix. It is not a delivery failure (nothing was ready
+# to deliver); it is a PROGRESS failure -- the turn never entered the authoring
+# half of the loop at all.
+#
+# Hence: don't force the terminal action, force the NEXT one. The provider
+# injects a directive and CONTINUES the loop rather than terminating, so the
+# model drafts -> verifies -> offers naturally, with CreateDeliveryGuard still
+# backstopping the delivery end. Fires at most once per turn.
+
+# Tools that prove a turn actually entered the authoring half of the loop.
+_AUTHORING_PROGRESS_TOOLS = frozenset({
+    "validate_yaml", "compile_yaml", "verify_playbook",
+    "emit_playbook_offer", "build_playbook_from_trace",
+    # Enhance authors too -- its own pair means the turn is not stalled.
+    "verify_enhancement", "emit_enhancement_offer", "emit_patch_proposal",
+})
+
+
+class BuildProgressGuard:
+    """Tracks a build turn that ran only research tools and never authored.
+
+    Fires only when the slice is genuinely a BUILD slice (it advertises
+    `emit_playbook_offer` AND `verify_playbook`) and at least one tool ran. A
+    turn that ran no tools at all is a conversational reply, not a stalled
+    build, and forcing YAML out of "what can you do?" would be worse than the
+    bug -- so `outstanding()` requires prior tool use.
+    """
+
+    def __init__(self) -> None:
+        self._any_tool = False
+        self._authored = False
+        self._forced = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        self._any_tool = True
+        if name in _AUTHORING_PROGRESS_TOOLS:
+            self._authored = True
+
+    def outstanding(self, allowed_names: set[str]) -> bool:
+        """True when a build turn is ending with research but no authoring."""
+        if _CREATE_OFFER_TOOL not in allowed_names:
+            return False
+        if _CREATE_VERIFY_TOOL not in allowed_names:
+            return False
+        # Both providers treat "emit_action_card is advertised" as "this is a
+        # triage turn" (`_authoring = "emit_action_card" not in allowed_names`).
+        # Reuse that one discriminator rather than inventing a second: when a
+        # caller passes NO tool slice the providers substitute the FULL registry,
+        # which advertises the build pair AND emit_action_card -- and a
+        # research-heavy triage turn on that slice would otherwise be nudged to
+        # go author YAML it was never asked for.
+        if "emit_action_card" in allowed_names:
+            return False
+        if self._forced or self._authored or not self._any_tool:
+            return False
+        return True
+
+    def mark_forced(self) -> None:
+        self._forced = True
