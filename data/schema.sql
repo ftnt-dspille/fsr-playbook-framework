@@ -218,6 +218,47 @@ CREATE INDEX IF NOT EXISTS idx_pbs_type ON playbook_steps(step_type_name);
 CREATE INDEX IF NOT EXISTS idx_pbs_pb   ON playbook_steps(playbook_uuid);
 CREATE INDEX IF NOT EXISTS idx_pbs_src  ON playbook_steps(source);
 
+-- ---------- Solution-pack catalog ----------
+-- The Content Hub record for each pack, from
+-- https://repo.fortisoar.fortinet.com/content-hub/content-hub.json. The pack
+-- zips do NOT carry this, so it is captured at harvest time into
+-- `data/solution_packs/_catalog.json` and ingested from there.
+--
+-- `dir_name` is the on-disk directory (`<name>-<version>`), which is what
+-- `playbook_steps.source_path` contains for sp_harvest rows -- that column is
+-- the join back from a step to the pack that shipped it.
+CREATE TABLE IF NOT EXISTS solution_packs (
+    name        TEXT PRIMARY KEY,             -- 'phishingEmailResponse'
+    label       TEXT,
+    version     TEXT,
+    category    TEXT,
+    dir_name    TEXT,                         -- 'phishingEmailResponse-1.0.3'
+    min_fsr     TEXT,                         -- fsrMinCompatibility
+    ingested_at TEXT NOT NULL
+);
+
+-- Pack -> connector. The mapping that answers "which packs actually use this
+-- connector", which step frequency alone cannot: a connector can be called a
+-- hundred times inside one pack and never appear in another.
+CREATE TABLE IF NOT EXISTS solution_pack_connectors (
+    pack_name     TEXT NOT NULL REFERENCES solution_packs(name) ON DELETE CASCADE,
+    connector     TEXT NOT NULL,              -- apiName, e.g. 'activedirectory'
+    label         TEXT,                       -- display name, e.g. 'Active Directory'
+    PRIMARY KEY (pack_name, connector)
+);
+CREATE INDEX IF NOT EXISTS idx_spc_conn ON solution_pack_connectors(connector);
+
+-- Pack -> pack prerequisites, so a recommended pack can be reported with what
+-- it drags in (263 edges across 121 packs; sOARFramework is depended on most).
+CREATE TABLE IF NOT EXISTS solution_pack_deps (
+    pack_name   TEXT NOT NULL REFERENCES solution_packs(name) ON DELETE CASCADE,
+    depends_on  TEXT NOT NULL,
+    dep_label   TEXT,
+    dep_version TEXT,
+    PRIMARY KEY (pack_name, depends_on)
+);
+CREATE INDEX IF NOT EXISTS idx_spd_dep ON solution_pack_deps(depends_on);
+
 -- ---------- Modules ----------
 CREATE TABLE IF NOT EXISTS modules (
     name        TEXT PRIMARY KEY,             -- 'threat_intel_feeds'

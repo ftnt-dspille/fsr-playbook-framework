@@ -25,7 +25,11 @@ DB_PATH = _shared.DB_PATH
 @mcp.tool()
 def search_playbooks(q: str, limit: int = 10,
                      verbose: bool = False) -> list[dict[str, Any]]:
-    """Full-text search over playbook patterns seen in production.
+    """Full-text search over playbooks seen in production -- pattern mining for
+    "how do others build X". Returns names and collections of reference
+    playbooks, NOT the analyst's own playbooks and NOT run history (that is
+    list_playbook_runs). Use it for inspiration before authoring; slim by
+    default, verbose=True adds descriptions and connector lists.
 
     Returns matching playbook names + collections -- useful for 'how do
     others do X' pattern mining.
@@ -204,6 +208,83 @@ def find_step_examples(step_type: str,
         except (json.JSONDecodeError, KeyError):
             pass
     return rows
+
+
+@mcp.tool()
+def find_solution_packs(connector: str | None = None,
+                        q: str | None = None,
+                        limit: int = 15) -> dict[str, Any]:
+    """Find shipped solution packs, by the connector they use or by name.
+
+    Backed by the Content Hub pack record (`solution_packs`,
+    `solution_pack_connectors`, `solution_pack_deps`), which the pack zips do
+    not carry -- it is captured at harvest time by `harvest_solution_packs`.
+
+    This answers a question step frequency cannot: *which packs actually use
+    this connector*. A connector called a hundred times inside one pack and
+    nowhere else looks dominant in `find_step_examples` but is in fact a
+    single-pack idiom. Use this before treating a corpus pattern as canonical,
+    and to find a shipped pack to read as a worked example.
+
+    Args:
+        connector: filter to packs using this connector, matched against both
+                   apiName ('activedirectory') and label ('Active Directory').
+        q:         substring matched against pack name, label, or category.
+        limit:     max packs (default 15).
+
+    Returns: `{packs: [...], total_matched}`, each pack carrying its
+    connectors, its pack-level prerequisites, and `steps_ingested` -- how many
+    of its steps are in the corpus (0 means the pack ships no playbooks, which
+    is common for module/dashboard-only packs).
+    """
+    with _db() as conn:
+        # A slim packaged catalog may predate these tables; say so rather than
+        # surfacing a bare `no such table` from a tool that looks healthy.
+        have = {r["name"] for r in _rows(
+            conn, "SELECT name FROM sqlite_master WHERE type='table' "
+                  "AND name LIKE 'solution_pack%'", ())}
+        if "solution_packs" not in have:
+            return _err("no_pack_catalog",
+                        "This catalog has no solution-pack tables. Run "
+                        "`python -m tooling.harvest_solution_packs --from-repo` "
+                        "then `python -m tooling.probes.probe_playbook_steps`.")
+
+        sql = ["SELECT DISTINCT p.name, p.label, p.version, p.category,"
+               " p.dir_name, p.min_fsr FROM solution_packs p"]
+        params: list[Any] = []
+        if connector:
+            sql.append("JOIN solution_pack_connectors c ON c.pack_name = p.name")
+        where = []
+        if connector:
+            where.append("(c.connector LIKE '%' || ? || '%'"
+                         " OR c.label LIKE '%' || ? || '%')")
+            params += [connector, connector]
+        if q:
+            where.append("(p.name LIKE '%' || ? || '%' OR p.label LIKE '%' || ? ||"
+                         " '%' OR p.category LIKE '%' || ? || '%')")
+            params += [q, q, q]
+        if where:
+            sql.append("WHERE " + " AND ".join(where))
+        sql.append("ORDER BY p.name LIMIT ?")
+        params.append(limit)
+        packs = _rows(conn, " ".join(sql), tuple(params))
+
+        for p in packs:
+            p["connectors"] = [
+                r["connector"] for r in _rows(
+                    conn, "SELECT connector FROM solution_pack_connectors "
+                          "WHERE pack_name = ? ORDER BY connector", (p["name"],))]
+            p["depends_on"] = [
+                r["depends_on"] for r in _rows(
+                    conn, "SELECT depends_on FROM solution_pack_deps "
+                          "WHERE pack_name = ? ORDER BY depends_on", (p["name"],))]
+            # sp_harvest source_path embeds the on-disk `<name>-<version>` dir,
+            # which is the only link from an ingested step back to its pack.
+            p["steps_ingested"] = _rows(
+                conn, "SELECT COUNT(*) AS n FROM playbook_steps "
+                      "WHERE source_path LIKE ?",
+                (f"%/{p['dir_name']}/%",))[0]["n"]
+    return {"packs": packs, "total_matched": len(packs)}
 
 
 # ---------------------------------------------------------------------------

@@ -71,6 +71,11 @@ data/eval_runs/
 data/fsr_reference.json
 data/drafts.db
 data/store.db
+# Harvested solution packs (~50M: 1,600 playbook JSON + 20M of source zips).
+# Regenerate with `python -m tooling.harvest_solution_packs --from-repo`, which
+# pulls them unauthenticated from the public Content Hub -- same treatment as
+# data/fsr_reference.db above: reproducible, so not carried in git.
+data/solution_packs/
 fsrpb.db
 tooling/store/*.db
 

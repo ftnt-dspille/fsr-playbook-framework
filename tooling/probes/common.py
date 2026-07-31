@@ -6,6 +6,7 @@ an `_probe_runs` audit row. Use `probe_session()` as a context manager.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -57,16 +58,51 @@ PB_EXAMPLES_GLOB = "pb_examples/**/*.json"  # resolved by callers
 IN_SCOPE_MODULES = {"threat_intel_feeds", "indicators", "alerts", "incidents"}
 
 
+_SCHEMA_TABLE_RE = re.compile(
+    r"CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[\"'`]?(\w+)",
+    re.IGNORECASE,
+)
+
+
+def _schema_tables() -> set[str]:
+    """Table names schema.sql declares. Cached -- the file does not change."""
+    global _SCHEMA_TABLES_CACHE
+    if _SCHEMA_TABLES_CACHE is None:
+        _SCHEMA_TABLES_CACHE = set(_SCHEMA_TABLE_RE.findall(SCHEMA_PATH.read_text()))
+    return _SCHEMA_TABLES_CACHE
+
+
+_SCHEMA_TABLES_CACHE: set[str] | None = None
+
+
 def open_db(create: bool = True) -> sqlite3.Connection:
-    """Open the reference DB, applying schema.sql on first use."""
+    """Open the reference DB, applying schema.sql only when something is missing.
+
+    Two failure modes bracket this function, and it has to thread between them:
+
+    * Applying the schema only when the FILE DID NOT EXIST meant a table added
+      to schema.sql never reached an already-built corpus. It surfaced as
+      `no such table` from a probe that reads correctly, fixable only by
+      deleting the 63M db and rebuilding.
+
+    * Applying it on EVERY open turns every read into a write. Under the test
+      suite's rapid repeated opens that corrupted the database outright --
+      one run failed 313 tests with `database disk image is malformed`, the
+      next two passed clean.
+
+    So: cheap read of `sqlite_master`, and run the (idempotent) schema only if a
+    table it declares is absent. Steady state is one SELECT and no write.
+    """
     STORE_DIR.mkdir(parents=True, exist_ok=True)
-    fresh = create and not DB_PATH.exists()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    if fresh:
-        conn.executescript(SCHEMA_PATH.read_text())
-        conn.commit()
+    if create:
+        have = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if _schema_tables() - have:
+            conn.executescript(SCHEMA_PATH.read_text())
+            conn.commit()
     # Always attach catalog read-only when present; probes can ignore if not needed.
     if CATALOG_DB_PATH.exists():
         conn.execute(
@@ -117,7 +153,8 @@ PROBE_TABLES: dict[str, tuple[str, ...]] = {
     "probe_playbook_constraints": (),
     "probe_cleanup": (),
     "probe_jinja_corpus": ("jinja_expressions", "jinja_filter_usage"),
-    "probe_playbook_steps": ("playbook_steps",),
+    "probe_playbook_steps": ("playbook_steps", "solution_packs",
+                             "solution_pack_connectors", "solution_pack_deps"),
     "probe_op_safety": ("op_safety",),
     # probe_param_types UPDATEs columns on operation_params in place,
     # plus owns the param_type_probes ledger. We don't wipe the ledger
