@@ -9,7 +9,6 @@ on the way in; the IR is the human-meaningful subset.
 """
 from __future__ import annotations
 
-import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -881,7 +880,28 @@ def _decompile_step(s, pb_name: str | None = None,
 
 
 def _slugify(name: str, taken: set[str]) -> str:
-    s = re.sub(r"[^a-z0-9_]+", "_", (name or "step").lower()).strip("_") or "step"
+    """Derive a step id from its name, collision-suffixed.
+
+    The base rule MUST be the parser's `_slugify`, because these two have to
+    agree: the decompiler writes `next: <slug>` into the YAML, and the parser
+    re-derives each step's id from its `name:` when the author left `id:` off.
+    If they disagree, the emitted reference points at an id no step will ever
+    have and the playbook fails to recompile with UNKNOWN_NEXT_STEP.
+
+    They disagreed. This function used to strip `[^a-z0-9_]+`, keeping `_` as
+    an allowed character, so a name like "Create Domain Indicator _ Deduplicated"
+    became `create_domain_indicator___deduplicated` (space, kept underscore,
+    space) while the parser collapsed the whole run to a single `_`. Seven step
+    names in the shipped-pack corpus hit it, breaking 42 references across the
+    Threat Intel and indicator-dedup playbooks.
+
+    Importing the parser's rule instead of re-spelling it is the point: a copy
+    is what drifted. The collision suffixing stays here -- the decompiler must
+    disambiguate silently, where the parser reports duplicate ids as an error.
+    """
+    from .parser import _slugify as _base_slugify
+
+    s = _base_slugify(name or "step")
     base = s
     i = 2
     while s in taken:

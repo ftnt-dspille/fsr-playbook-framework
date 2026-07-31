@@ -65,13 +65,25 @@ _RESERVED_VARS_KEYS = {
     "self",           # reserved by FSR's playbook runtime
 }
 
-# Jinja/Python tokens that would break `vars.steps.<name>` attribute access
-# or get parsed as keywords. Short list -- only the ones that actually break.
-_INVALID_JINJA_KEY_TOKENS = {
-    "true", "false", "none", "null",
-    "and", "or", "not", "is", "in", "if", "else", "for",
-    "class", "def", "return", "import", "from", "as", "with",
-}
+# NOTE: there used to be an `_INVALID_JINJA_KEY_TOKENS` set here, rejecting
+# step names like "Return" or "If" on the grounds that `vars.steps.<name>`
+# "won't parse". It does parse. Jinja2 reserves keywords in STATEMENT position
+# only; after a `.` the lexer emits a plain NAME and the parser takes it as an
+# attribute. Every token in that set -- including the Python-only ones that had
+# drifted in (`class`, `def`, `return`, `import`) -- parses fine:
+#
+#     >>> Environment().parse("{{ vars.steps.Return.data }}")   # fine
+#     >>> Environment().parse("{{ vars.steps.none }}")          # fine
+#
+# The only forms Jinja actually rejects are assignment targets bound to its
+# constants (`{% set none = 5 %}` -> "can't assign to 'const'"), and a step
+# name is never an assignment target -- it is only ever read as an attribute.
+# So the rule had no true positive available to it, while blocking compilation
+# of playbooks Fortinet ships and FSR runs (caught by probe_corpus_conformance
+# against a step legitimately named "Return").
+#
+# The adjacent first-character check below IS real and stays: `vars.steps.2foo`
+# genuinely fails to parse.
 
 
 def _step_outgoing(s) -> list[str]:
@@ -443,15 +455,6 @@ def _check_reserved_names(pb: Playbook, pi: int,
         # underscores; case is preserved.
         sname = s.name or s.id
         jinja_key = sname.replace(" ", "_")
-        if jinja_key.lower() in _INVALID_JINJA_KEY_TOKENS:
-            errors.append(CompileError(
-                code=ErrorCode.BAD_VALUE,
-                message=(f"step name {sname!r} normalises to Jinja key "
-                         f"{jinja_key!r}, which is a reserved keyword -- "
-                         f"`vars.steps.{jinja_key}` won't parse"),
-                path=f"{spath}.name",
-                severity="error",
-            ))
         if jinja_key and not (jinja_key[0].isalpha() or jinja_key[0] == "_"):
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
