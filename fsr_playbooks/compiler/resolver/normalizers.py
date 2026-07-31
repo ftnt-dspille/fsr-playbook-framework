@@ -927,11 +927,16 @@ class NormalizerMixin:
         + stamps `version`/`operationTitle` from the catalog.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"body", "from"}
+        # `display_name` is the connector envelope's friendly spelling of wire
+        # `arguments.name`; send_email is a connector-family alias, so a pulled
+        # send_email step carries it and must be able to recompile. Its absence
+        # here is what made the live round-trip test fail on content the box
+        # itself produced.
+        _FRIENDLY = {"body", "from", "display_name"}
         _CANONICAL = {
             "to", "body", "from", "cc", "bcc", "subject", "attachments",
             "config", "connector", "version", "params", "operation",
-            "operationTitle", "step_variables",
+            "operationTitle", "step_variables", "display_name",
         }
         if self._check_unknown_keys(
             a, step.type, _FRIENDLY, _CANONICAL, path, errors,

@@ -661,6 +661,19 @@ class ConnectorArgsMixin:
         # Stamp the connector version onto the step (FSR JSON requires it).
         if "version" not in a and crow["version"]:
             a["version"] = crow["version"]
+        # `display_name:` is the friendly spelling of wire `arguments.name`.
+        # The decompiler renames it on the way out because wire `name` (the
+        # connector's display label) collides with the IR step field `name`
+        # (the canvas node name) -- see `_hoist_args`. This is the inverse, and
+        # it was missing: `display_name` rode through to the wire as a key FSR
+        # does not read, while `name` was re-stamped from the catalog below --
+        # so a custom label survived export and was silently dropped on
+        # re-import. `display_name` is ours, not FSR's: of 2,185 Connectors
+        # steps in the shipped-pack corpus, 2,183 carry `name` and none carry a
+        # meaningful `display_name`.
+        display_name = a.pop("display_name", None)
+        if display_name is not None and "name" not in a:
+            a["name"] = display_name
         # The UI's connector-step header reads `arguments.name` (display
         # title) and `arguments.operationTitle`. Without them the canvas
         # shows "UNDEFINED <version>". The exporter writes them; we mirror.
