@@ -133,6 +133,27 @@ def _lmstudio_provider() -> ProviderFn:
 _AGENTIC_MAX_TURNS = 12
 
 
+# Per-task tool-slice override, set by the harness around each cell (see
+# `tools_for_intent`). None = advertise the full SAFE_TOOLS registry, which is
+# what every pre-existing task has always run under. Phase 1.2 needs this
+# because the tool-selection number is only meaningful against the surface the
+# user actually hits -- the connector serves an intent slice, not the registry.
+_TOOL_SLICE: list[str] | None = None
+
+
+def set_tool_slice(intent: str | None) -> None:
+    """Restrict the advertised tools to `intents.tools_for_intent(intent)`.
+
+    Pass None to restore the full registry. Resolved to names here (not tool
+    dicts) so the provider keeps ownership of the cache_control marker."""
+    global _TOOL_SLICE
+    if intent is None:
+        _TOOL_SLICE = None
+        return
+    from fsr_playbooks.llm.intents import tools_for_intent  # type: ignore
+    _TOOL_SLICE = [t["name"] for t in tools_for_intent(intent)]
+
+
 def _import_studio_tools():
     """Pull the same SAFE_TOOLS registry the chat backend uses, so agentic
     evals exercise the exact tool surface end users hit. Also returns
@@ -161,13 +182,22 @@ def _agentic_anthropic_provider() -> Callable:
     model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
     anthropic_tools, _, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
     raw_tools = anthropic_tools()
-    # Cache the (static) tool list -- mark the last entry so the cache
-    # breakpoint includes every preceding tool def.
-    tools = [dict(t) for t in raw_tools]
-    if tools:
-        tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
+
+    def _tools_now() -> list[dict]:
+        # Resolved per call so a per-task slice (set_tool_slice) applies.
+        # Unsliced runs rebuild an identical list, so the prompt-cache
+        # breakpoint below still hits across tasks.
+        picked = ([t for t in raw_tools if t["name"] in _TOOL_SLICE]
+                  if _TOOL_SLICE is not None else raw_tools)
+        # Cache the tool list -- mark the last entry so the cache breakpoint
+        # includes every preceding tool def.
+        out = [dict(t) for t in picked]
+        if out:
+            out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
+        return out
 
     def _call(system: str, prompt: str) -> dict:
+        tools = _tools_now()
         # Anthropic accepts `system` as either a string or a list of
         # content blocks; the block form is required to attach
         # cache_control. Static across the whole eval run.
@@ -248,18 +278,29 @@ def _agentic_anthropic_provider() -> Callable:
     return _call
 
 
-def _agentic_lmstudio_provider() -> Callable:
-    """LM Studio's OpenAI-compatible chat-completions endpoint with
-    function-calling. Mirrors `_agentic_anthropic_provider` so the same
-    gates apply."""
-    base_url = os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LMSTUDIO_MODEL", "local-model")
+def _agentic_openai_compatible(*, base_url: str, model: str,
+                               headers: dict[str, str] | None = None,
+                               ) -> Callable:
+    """Agentic loop over any OpenAI-compatible chat-completions endpoint with
+    function-calling. Mirrors `_agentic_anthropic_provider` so the same gates
+    apply. Backs both LM Studio (local, no auth) and Frank (the Fortilab AI
+    gateway, Bifrost virtual key)."""
     import json as _json
     import requests  # type: ignore[import-untyped]
     _, openai_tools, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
-    tools = openai_tools()
+    raw_tools = openai_tools()
+
+    def _tools_now() -> list[dict]:
+        # Per call so a per-task slice (set_tool_slice) applies -- the
+        # tool-selection eval is only meaningful against the surface the
+        # user actually hits.
+        if _TOOL_SLICE is None:
+            return raw_tools
+        return [t for t in raw_tools
+                if (t.get("function") or {}).get("name") in _TOOL_SLICE]
 
     def _call(system: str, prompt: str) -> dict:
+        tools = _tools_now()
         history: list[dict] = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -273,6 +314,7 @@ def _agentic_lmstudio_provider() -> Callable:
                 f"{base_url}/chat/completions",
                 json={"model": model, "messages": history, "tools": tools,
                       "temperature": 0.0},
+                headers=headers or {},
                 timeout=180,
             )
             r.raise_for_status()
@@ -321,12 +363,66 @@ def _agentic_lmstudio_provider() -> Callable:
     return _call
 
 
+def _agentic_lmstudio_provider() -> Callable:
+    """LM Studio's local OpenAI-compatible endpoint. No auth."""
+    return _agentic_openai_compatible(
+        base_url=os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
+        model=os.environ.get("LMSTUDIO_MODEL", "local-model"),
+    )
+
+
+def _agentic_frank_provider() -> Callable:
+    """Frank -- the Fortilab AI gateway, via its Bifrost virtual key.
+
+    Deliberately reads FRANK_* rather than the global OPENAI_* config so
+    switching Frank's model can't silently move an eval baseline (the same
+    isolation the .env comment calls for). Sends the key both as a Bearer
+    token and as `x-bf-vk`, which is how Bifrost accepts a virtual key."""
+    key = os.environ.get("FRANK_API_KEY")
+    if not key:
+        raise RuntimeError("FRANK_API_KEY not set (see .env)")
+    # No default: the gateway is an internal host, and hardcoding it here puts
+    # it in a tracked file that publishes to the public mirror. Required from
+    # the environment like FRANK_API_KEY and FRANK_MODEL either side of it.
+    base_url = os.environ.get("FRANK_BASE_URL")
+    if not base_url:
+        raise RuntimeError("FRANK_BASE_URL not set (see .env)")
+    model = os.environ.get("FRANK_MODEL")
+    if not model:
+        raise RuntimeError("FRANK_MODEL not set (see .env)")
+    return _agentic_openai_compatible(
+        base_url=base_url, model=model,
+        headers={"Authorization": f"Bearer {key}", "x-bf-vk": key},
+    )
+
+
+def _agentic_openai_api_provider() -> Callable:
+    """The model FortiSOAR actually runs in production: gpt-4.1-mini.
+
+    Deliberately does NOT read OPENAI_ENDPOINT. That variable points at the
+    Fortilab gateway, which serves two self-hosted models (GLM-5.2, Qwen3.6)
+    and no GPT -- pointing this at it would silently measure a different
+    model than production, which is the exact mistake the first Frank
+    baseline made. Override with EVAL_OPENAI_BASE_URL / EVAL_OPENAI_MODEL."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    return _agentic_openai_compatible(
+        base_url=os.environ.get("EVAL_OPENAI_BASE_URL",
+                                "https://api.openai.com/v1"),
+        model=os.environ.get("EVAL_OPENAI_MODEL", "gpt-4.1-mini"),
+        headers={"Authorization": f"Bearer {key}"},
+    )
+
+
 _LAZY_FACTORIES: dict[str, Callable[[], ProviderFn]] = {
     "anthropic": _anthropic_provider,
     "openai": _openai_provider,
     "lmstudio": _lmstudio_provider,
     "agentic_anthropic": _agentic_anthropic_provider,
     "agentic_lmstudio": _agentic_lmstudio_provider,
+    "agentic_frank": _agentic_frank_provider,
+    "agentic_openai_api": _agentic_openai_api_provider,
 }
 
 

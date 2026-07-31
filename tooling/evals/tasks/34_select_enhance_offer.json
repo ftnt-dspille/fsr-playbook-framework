@@ -1,0 +1,13 @@
+{
+  "name": "select_enhance_offer",
+  "mode": "tool_selection",
+  "prompt": "Here is the playbook I currently have open:\n\n```yaml\ncollection: FSRPB Demo Alert Action\ndescription: Right-click action on alerts -- read severity, decide, stamp.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - Triage Alert\n    description: Reads alert severity and tags the alert with a verdict.\n    is_active: true\n    steps:\n      - name: Triage Alert\n        type: start\n        next: Read severity\n        module: alerts\n        button_label: \"Triage Alert\"\n        requires_record: true\n        run_mode: per_record\n\n      - name: Read severity\n        type: set_variable\n        next: Stamp verdict\n        vars:\n          severity: \"{{ vars.input.records[0].severity.itemValue }}\"\n\n      - name: Stamp verdict\n        type: set_variable\n        vars:\n          verdict: \"escalate\"\n```\n\nAdd a 30-second delay step between reading the severity and stamping the verdict, and apply that change to the playbook.",
+  "terminal_tool": "emit_enhancement_offer",
+  "prompt_variant": "build",
+  "tool_slice": "build",
+  "forbidden_facts": [
+    {"tool": "get_step_type", "label": "researched step types instead of applying the edit"},
+    {"tool": "analyze_playbook", "label": "analyzed instead of applying the edit"}
+  ],
+  "notes": "Enhance is the UPDATE channel (emit_enhancement_offer), distinct from emit_playbook_offer's CREATE. The live failure was the model printing revised YAML at the analyst instead of calling the write tool, so the edit silently never landed. The open playbook is inlined in the prompt because this local harness sends text only -- the shipped widget path mounts it via params.entity.playbook_yaml, which chat_drive.py can exercise separately. The requested edit (insert a delay step) is deliberately trivial: this fixture measures tool choice, not authoring skill."
+}

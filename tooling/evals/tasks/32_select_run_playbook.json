@@ -1,0 +1,14 @@
+{
+  "name": "select_run_playbook",
+  "mode": "tool_selection",
+  "prompt": "Run the \"Block Malicious IP\" playbook.",
+  "terminal_tool": "run_playbook",
+  "prompt_variant": "build",
+  "tool_slice": "build",
+  "forbidden_facts": [
+    {"tool": "find_connector", "label": "researched connectors instead of running"},
+    {"tool": "list_playbook_runs", "label": "listed past runs instead of running"},
+    {"tool": "find_operation", "label": "researched operations instead of running"}
+  ],
+  "notes": "Reproduces the live run-path failure verbatim: the model had run_playbook advertised in the build slice (its description explicitly claims this exact phrasing) and still chose find_connector -> list_playbook_runs -> find_operation, then stopped. Decoys are the three tools it actually called. Paired with 36_select_run_playbook_neutral -- same prompt, same slice, neutral persona -- which is the Phase 1.4 experiment: if this fails and 36 passes, the build prompt is what's overriding tool selection."
+}

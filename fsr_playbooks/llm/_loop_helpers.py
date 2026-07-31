@@ -699,6 +699,35 @@ def compile_errors(yaml_text: str) -> str | None:
 # `verified_id` with the handle recorded here, so a forced round can't deliver
 # the wrong bytes). Capped at one force via `mark_forced()` so it can't loop.
 
+# --- guard-fire telemetry ---------------------------------------------------
+# Every guard forces through `mark_forced()`, so that is the one choke point
+# worth counting. A guard is a compensation for the model not choosing the
+# terminal tool on its own; whether it still earns its keep is an empirical
+# question, and until now nothing recorded the answer. A guard that never
+# fires across a corpus is dead weight that can be deleted; one that fires
+# often is pointing at a description or prompt that still needs work.
+#
+# Process-local and best-effort, mirroring the HITL audit log
+# (`tools.clear_audit_log` / `snapshot_audit_log`): callers clear before a
+# turn and snapshot after. Never affects control flow.
+
+_GUARD_FIRES: list[str] = []
+
+
+def record_guard_fire(guard: str) -> None:
+    """Note that `guard` forced a terminal tool call this turn."""
+    _GUARD_FIRES.append(guard)
+
+
+def snapshot_guard_fires() -> list[str]:
+    """Guards that fired since the last clear, in order."""
+    return list(_GUARD_FIRES)
+
+
+def clear_guard_fires() -> None:
+    _GUARD_FIRES.clear()
+
+
 _ENHANCE_VERIFY_TOOL = "verify_enhancement"
 _ENHANCE_OFFER_TOOL = "emit_enhancement_offer"
 
@@ -758,6 +787,7 @@ class EnhanceDeliveryGuard:
 
     def mark_forced(self) -> None:
         self._forced = True
+        record_guard_fire(type(self).__name__)
 
 
 # ─────────────────────── create-delivery guard ───────────────────────
@@ -840,6 +870,7 @@ class CreateDeliveryGuard:
 
     def mark_forced(self) -> None:
         self._forced = True
+        record_guard_fire(type(self).__name__)
 
 
 # ─────────────────────── build-progress guard ────────────────────────
@@ -937,3 +968,4 @@ class BuildProgressGuard:
 
     def mark_forced(self) -> None:
         self._forced = True
+        record_guard_fire(type(self).__name__)

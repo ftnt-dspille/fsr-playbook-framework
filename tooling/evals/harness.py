@@ -18,12 +18,39 @@ from pathlib import Path
 from typing import Any
 
 from agent import load_system_prompt
-from evals.providers import (ProviderFn, extract_yaml, get_provider)
+from evals.providers import (ProviderFn, extract_yaml, get_provider,
+                             set_tool_slice)
 from evals.scoring import score
 from evals.tasks import Task, load_tasks
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNS_DIR = REPO_ROOT / "data" / "eval_runs"
+
+
+# The Phase 1.4 control arm. Deliberately says nothing about *how* to work --
+# no research mandate, no authoring workflow, no persona. If a run request
+# reaches `run_playbook` under this and not under the build prompt, the build
+# prompt is what's overriding tool selection, and the fix is guidance, not the
+# tool surface.
+_NEUTRAL_PROMPT = (
+    "You are a FortiSOAR assistant. You have tools available. Read the "
+    "user's request, decide which tool actually answers it, and call that "
+    "tool. Do not narrate a plan instead of acting."
+)
+
+
+def _prompt_for(task: Task, default: str) -> str:
+    """Resolve the system prompt this task runs under.
+
+    `prompt_variant` is None for every pre-existing fixture, which keeps them
+    on the harness default they were baselined against."""
+    variant = task.prompt_variant
+    if not variant:
+        return default
+    if variant == "neutral":
+        return _NEUTRAL_PROMPT
+    from fsr_playbooks.llm.intents import load_intent_prompt  # noqa: PLC0415
+    return load_intent_prompt(variant)
 
 
 def _gold_lookup_for(tasks: list[Task]):
@@ -90,8 +117,9 @@ def run_matrix(
                 _clr()
             except Exception:
                 pass
+            set_tool_slice(t.tool_slice)
             try:
-                raw = provider(system_prompt, t.prompt)
+                raw = provider(_prompt_for(t, system_prompt), t.prompt)
             except Exception as e:  # noqa: BLE001
                 rows.append({
                     "model": model_name, "task": t.name,
@@ -128,6 +156,7 @@ def run_matrix(
                 required_facts=t.required_facts,
                 forbidden_facts=t.forbidden_facts,
                 investigation_quality=t.investigation_quality,
+                terminal_tool=t.terminal_tool,
             )
             row = {
                 "model": model_name,
@@ -143,6 +172,7 @@ def run_matrix(
                 if usage is not None:
                     row["usage"] = usage
             rows.append(row)
+    set_tool_slice(None)
 
     summary: dict[str, dict[str, float]] = {}
     for m in model_names:
@@ -161,6 +191,84 @@ def run_matrix(
         "rows": rows,
         "summary": summary,
     }
+
+
+# ---------------------------------------------------------------------------
+# Model screening -- rule out inconsistent models, then pick the cheapest
+# survivor. A model that passes 2 runs in 3 is not "mostly working"; it is
+# unusable in a product where the analyst only gets one attempt. So the bar
+# is unanimity across repeats, not an average.
+# ---------------------------------------------------------------------------
+
+def screen_models(
+    *,
+    model_names: list[str],
+    task_names: list[str] | None = None,
+    repeats: int = 3,
+    live: bool = False,
+) -> dict[str, Any]:
+    """Run the matrix `repeats` times and report per-cell pass rates.
+
+    Verdict per model:
+      `consistent` -- every fixture passed every repeat
+      `flaky`      -- at least one fixture passed sometimes (the dangerous
+                      case: it demos fine and fails in front of a customer)
+      `failing`    -- at least one fixture never passed
+    """
+    runs = [run_matrix(model_names=model_names, task_names=task_names,
+                       live=live)
+            for _ in range(repeats)]
+    tasks = runs[0]["tasks"]
+    cells: dict[str, dict[str, dict[str, Any]]] = {}
+    for m in model_names:
+        cells[m] = {}
+        for t in tasks:
+            passes, errors = 0, 0
+            for r in runs:
+                row = next((x for x in r["rows"]
+                            if x["model"] == m and x["task"] == t), None)
+                if row is None or "error" in row:
+                    errors += 1
+                    continue
+                # A cell passes when every counted gate passed. For a
+                # tool_selection fixture that is exactly the terminal call.
+                if row.get("max") and row["score"] == row["max"]:
+                    passes += 1
+            cells[m][t] = {"passes": passes, "of": repeats, "errors": errors}
+    verdicts: dict[str, str] = {}
+    for m in model_names:
+        rates = [c["passes"] for c in cells[m].values()]
+        if all(p == repeats for p in rates):
+            verdicts[m] = "consistent"
+        elif any(p == 0 for p in rates):
+            verdicts[m] = "failing"
+        else:
+            verdicts[m] = "flaky"
+    return {"repeats": repeats, "tasks": tasks, "models": list(model_names),
+            "cells": cells, "verdicts": verdicts, "runs": runs}
+
+
+def render_screen(screen: dict[str, Any]) -> str:
+    reps = screen["repeats"]
+    lines = [f"Model screening -- {reps} repeat(s), "
+             f"{len(screen['tasks'])} fixture(s)", ""]
+    width = max([len(t) for t in screen["tasks"]] + [8])
+    header = f"{'fixture':<{width}}  " + "  ".join(
+        f"{m[:18]:>18}" for m in screen["models"])
+    lines += [header, "-" * len(header)]
+    for t in screen["tasks"]:
+        row = f"{t:<{width}}  "
+        row += "  ".join(
+            f"{(str(screen['cells'][m][t]['passes']) + '/' + str(reps)):>18}"
+            for m in screen["models"])
+        lines.append(row)
+    lines += ["", "Verdict:"]
+    for m in screen["models"]:
+        lines.append(f"  {m:<24} {screen['verdicts'][m]}")
+    lines += ["",
+              "A flaky model is not a cheaper consistent one -- the analyst "
+              "gets one attempt."]
+    return "\n".join(lines)
 
 
 def render_text(matrix: dict[str, Any]) -> str:

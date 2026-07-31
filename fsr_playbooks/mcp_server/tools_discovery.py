@@ -146,7 +146,14 @@ def _plausible_name_matches(q: str, all_names: list[str],
 def find_connector(q: str, limit: int = 15,
                    verbose: bool = False,
                    db_path: str | None = None) -> dict[str, Any]:
-    """Fuzzy-search connectors by name, label, category, or description.
+    """STEP 1 of building a connector step: find which connector handles a
+    vendor or capability, by name, label, category, or description. Returns
+    terse matches (name/label/category); pass verbose=True for descriptions,
+    and expect a `suggestion` instead of silence on zero hits. This only
+    tells you a connector EXISTS in the catalog -- it does not mean it is
+    installed or configured on this instance. Follow with find_operation to
+    pick the op, and list_configured_connectors before committing to one in
+    a playbook.
 
     Default response is terse (name/label/category only) to keep tool
     cost down. Pass `verbose=True` for full descriptions.
@@ -314,7 +321,12 @@ def find_connector(q: str, limit: int = 15,
 def find_operation(connector: str, q: str = "", limit: int = 10,
                    verbose: bool = False,
                    db_path: str | None = None) -> dict[str, Any]:
-    """List or search operations for a connector.
+    """STEP 2 of building a connector step: list or search the operations a
+    connector exposes. Pass `connector` as the name from find_connector and
+    an optional `q` substring. When exactly one op matches, the response
+    embeds a slim schema -- skip the follow-up get_op_schema in that case;
+    multi-match responses stay terse so you can disambiguate first. On zero
+    hits it suggests near-matching ops, so do not guess op names in a loop.
 
     Pass `connector` as the connector name (from find_connector).
     `q` is an optional substring filter on op name, title, or description.
@@ -871,7 +883,13 @@ def _render_op_schema_md(
 def get_op_schema(connector: str, op: str,
                   verbose: bool = False,
                   db_path: str | None = None) -> dict[str, Any]:
-    """Return the parameter schema for a connector operation.
+    """STEP 3 of building a connector step: get the parameter schema for one
+    connector operation, so you wire its arguments from the real field names
+    instead of guessing. Slim by default (~1.5 KB); verbose=True returns the
+    full output schemas. Skip this when find_operation already embedded a
+    schema for a single match. On a miss it returns `connector_not_found`
+    (call find_connector first) or `not_found` with a `near` list of close
+    op names.
 
     Slim by default (~1.5 KB): `op_name`, `title`, `description`, and a
     trimmed `params` list (name/type/required/options/description). The
@@ -1966,7 +1984,13 @@ for _entry in _FRIENDLY_FORMS.values():
 
 @mcp.tool()
 def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
-    """Return schema and examples for a playbook step type.
+    """Schema and examples for a NON-connector playbook step type --
+    set_variable, decision, manual_input, for_each, delay, and friends. Use
+    the `friendly_form` block it returns: that is the YAML our compiler
+    actually accepts, and it is what you should author against rather than
+    the wire-format args_schema_json. NOT for connector steps -- those are
+    find_connector → find_operation → get_op_schema. Slim by default;
+    verbose=True dumps corpus examples and is rarely needed.
 
     `name` can be the friendly YAML short type (`manual_input`,
     `set_variable`, `decision`, ...) or the canonical FSR name

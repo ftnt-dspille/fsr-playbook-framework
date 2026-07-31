@@ -23,7 +23,12 @@ DB_PATH = _shared.DB_PATH
 @mcp.tool()
 def find_jinja_filter(q: str, limit: int = 15,
                       verbose: bool = False) -> list[dict[str, Any]]:
-    """Search the Jinja filter catalog by name, description, or example.
+    """Look up a Jinja FILTER by name, description, or example -- what it does,
+    its signature, its observed output type, and how often it appears in
+    real playbooks. Use this when you know the filter you want; to discover
+    whole expression idioms instead, use find_jinja_pattern. Follow with
+    get_filter_examples(name) for the long-form doc and more real usages of
+    one filter.
 
     Returns name, signature, description, example, output_type_observed,
     is_trusted (1 = live-tested), and corpus_uses (real-world occurrence
@@ -85,7 +90,12 @@ def _catalog_fallback(q: str, limit: int) -> list[dict[str, Any]]:
 @mcp.tool()
 def find_jinja_pattern(q: str, kind: str | None = None,
                       limit: int = 12) -> list[dict[str, Any]]:
-    """Search the live-corpus Jinja-block catalog by substring + kind.
+    """Search the corpus of real Jinja BLOCKS mined from live workflows --
+    whole idioms like `{% set x = vars.steps.foo %}` or `{% for r in
+    vars.input.records %}`. Use this when you need to know how something is
+    expressed in FortiSOAR playbooks. For a single filter's meaning or
+    signature use find_jinja_filter, and for more usages of one named filter
+    use get_filter_examples.
 
     Use this when you want to learn FSR idioms -- `{% set x = vars.steps.foo %}`,
     `{% for r in vars.input.records %}`, conditional guards, etc -- instead of
@@ -127,7 +137,11 @@ def find_jinja_pattern(q: str, kind: str | None = None,
 
 @mcp.tool()
 def get_filter_examples(name: str, limit: int = 8) -> dict[str, Any]:
-    """Real-world usages of a Jinja filter, mined from the live playbook corpus.
+    """Real-world usages of ONE named Jinja filter, mined from live playbooks,
+    plus its curated long-form doc. Use after find_jinja_filter when you
+    have the filter name and need to see it used in context. Each example is
+    a full `{{ … }}` block from a real workflow, so the input shape and
+    downstream chain are visible.
 
     Returns the filter's curated long-form doc (when present) plus the top
     `limit` distinct expressions where it's used, ordered by frequency.

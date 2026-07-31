@@ -377,8 +377,18 @@ def emit_playbook_offer(
     editable_title: bool = True,
     yaml: str | None = None,
 ) -> dict[str, Any]:
-    """Emit a `playbook_offer` card offering the analyst a one-click
-    "Save as Playbook" CTA (contract §5, `awaiting_playbook_offer`).
+    """CREATE a NEW playbook -- the MANDATORY terminal action of a build turn.
+    Call this to deliver any playbook that does not exist yet, as soon as
+    `verify_playbook` returns `ready_to_push=True`. Nothing you build is real
+    until this runs: a build turn that ends in prose, or that prints YAML at
+    the analyst, has delivered nothing -- do not narrate the result instead,
+    and never tell the analyst to run `push_playbook` themselves. NOT for
+    editing a playbook the analyst already has open; that is
+    `emit_enhancement_offer`. The test is whether the playbook exists yet --
+    new one → this tool, changing an existing one → that one.
+
+    (Emits a `playbook_offer` card with a one-click "Save as Playbook" CTA;
+    contract §5, `awaiting_playbook_offer`.)
 
     Two modes, one terminal affordance:
 
@@ -625,9 +635,12 @@ def emit_enhancement_offer(
     summary: str,
     verified_id: str,
 ) -> dict[str, Any]:
-    """Apply a verified edit to the playbook the analyst has OPEN. This is the
-    MANDATORY terminal action of an enhance turn -- the only thing that makes an
-    edit real.
+    """UPDATE a playbook the analyst ALREADY HAS OPEN -- the MANDATORY terminal
+    action of an enhance turn, and the only thing that makes an edit real.
+    Requires an existing open playbook to edit, and a `verified_id` from
+    `verify_enhancement`. If the analyst asked you to build, create, or write
+    a playbook that does not exist yet, this is the WRONG tool -- there is
+    nothing for it to update -- use `emit_playbook_offer` instead.
 
     Enhance mode's counterpart to `emit_playbook_offer`. That one CREATES a new
     playbook; this one UPDATES the open one in place (the connector routes

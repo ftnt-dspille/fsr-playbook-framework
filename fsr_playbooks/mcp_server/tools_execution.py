@@ -1594,8 +1594,15 @@ def run_op(
     step_name: str = "",
     summarize: bool = True,
 ) -> dict[str, Any]:
-    """Execute a single connector operation on the live FSR instance and return
-    its real output.
+    """Execute ONE connector operation live and return its real output -- the
+    authoritative way to learn what a step actually produces when the static
+    schema is missing or incomplete. Query/investigation/utility ops run
+    automatically; remediation, containment, and management ops are
+    destructive and return {requires_confirmation: true} unless you pass
+    confirm=True. Pass confirm=True only when the analyst has approved the
+    action -- in a triage turn, stage containment with emit_action_card
+    instead of executing it here. The observed output shape is cached, so
+    get_op_schema returns it afterwards for free.
 
     This is the authoritative way to discover what a step produces when
     info.json has no output_schema or the static schema is incomplete.
@@ -1908,7 +1915,13 @@ def _record_verification(connector: str, op: str, status: str, notes: str) -> No
 
 @mcp.tool()
 def push_playbook(yaml_text: str) -> dict[str, Any]:
-    """Compile a YAML playbook and push it to the live FSR instance.
+    """Write a playbook directly to the live FortiSOAR instance, immediately
+    and without asking. Prefer emit_playbook_offer for anything an analyst
+    is meant to review: that gives them a one-click card and a restore
+    point, and is the correct terminal action of a build turn. Reach for
+    push_playbook only when explicitly told to push or deploy right now.
+    Idempotent (PUT, POST on 404, purge+POST on 409); run validate_yaml
+    clean first.
 
     Idempotent: PUT first, POST on 404, hard-purge + POST on 409 (matches
     `fsrpb push --mode replace`). Use after `validate_yaml` returns clean.
@@ -2101,7 +2114,13 @@ def dry_run_playbook(yaml_text: str, playbook: str,
                      timeout_s: int = 180,
                      cleanup: bool = True,
                      use_mock_output: bool = False) -> dict[str, Any]:
-    """Compile + push + run + auto-cleanup. The agent's full E2E loop in one tool.
+    """Compile + push + run + auto-clean a playbook end-to-end on the live
+    instance, to prove it actually executes. This DOES touch the live
+    instance and DOES run the steps' real side effects, so do not use it to
+    test containment or remediation. For a safe pre-push walkthrough that
+    renders every step without executing anything destructive, use
+    step_through_playbook instead. Cleans up the collection afterwards
+    unless cleanup=False.
 
     Args:
         yaml_text: full YAML source.
@@ -2146,7 +2165,12 @@ def dry_run_playbook(yaml_text: str, playbook: str,
 @mcp.tool()
 def healthcheck_connector(name: str, version: str | None = None,
                           config: str | None = None) -> dict[str, Any]:
-    """Live-check whether a single connector configuration is reachable.
+    """Live-check whether ONE connector configuration is reachable right now,
+    after list_configured_connectors has told you it is configured. Use it
+    to confirm the upstream vendor is actually up before recommending an op.
+    Returns status Available (green) or Disconnected (configured, but the
+    upstream is down); a 404 means no configuration exists on this instance
+    at all.
 
     Use after `list_configured_connectors` to confirm the upstream service
     is actually up before recommending an op to the user.

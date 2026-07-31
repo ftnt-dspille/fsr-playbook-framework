@@ -1,0 +1,222 @@
+"""Tool-selection eval scoring (PLAN.md Phase 1.2).
+
+`mode="tool_selection"` grades ONE thing: did the turn reach the terminal
+tool the ask requires. Every other gate is demoted to informational, so a
+turn that researches competently and never acts scores zero -- which is the
+live failure shape this mode exists to measure.
+"""
+from __future__ import annotations
+
+import importlib
+
+scoring = importlib.import_module("evals.scoring")
+tasks = importlib.import_module("evals.tasks")
+
+
+def _call(name, **args):
+    return {"name": name, "args": args}
+
+
+DECOYS = [
+    {"tool": "find_connector", "label": "researched connectors"},
+    {"tool": "list_playbook_runs", "label": "listed past runs"},
+]
+
+
+# --- _score_tool_selection --------------------------------------------------
+
+def test_reached_terminal_tool_passes():
+    trace = [_call("find_connector"), _call("run_playbook", playbook="Block IP")]
+    r = scoring._score_tool_selection(trace, ["run_playbook"], DECOYS)
+    assert r["passed"] is True
+    assert r["calls_before"] == 1
+
+
+def test_research_without_terminal_call_fails():
+    """The exact live failure: three competent calls, no action."""
+    trace = [_call("find_connector"), _call("list_playbook_runs"),
+             _call("find_operation")]
+    r = scoring._score_tool_selection(trace, ["run_playbook"], DECOYS)
+    assert r["passed"] is False
+    assert r["calls_before"] == 3
+    assert "never called run_playbook" in r["detail"]
+
+
+def test_empty_trace_fails_rather_than_skipping():
+    r = scoring._score_tool_selection([], ["run_playbook"], DECOYS)
+    assert r["passed"] is False
+    assert r["skipped"] is False
+
+
+def test_any_of_several_terminal_tools_counts():
+    trace = [_call("emit_enhancement_offer")]
+    r = scoring._score_tool_selection(
+        trace, ["emit_playbook_offer", "emit_enhancement_offer"], None)
+    assert r["passed"] is True
+
+
+def test_refused_terminal_call_does_not_count():
+    """The model picked right but the guard blocked it -- same convention as
+    _score_investigation's forbidden-pivot handling."""
+    trace = [{"name": "run_playbook", "args": {}, "refused": True}]
+    assert scoring._score_tool_selection(trace, ["run_playbook"], None)["passed"] is False
+
+
+def test_decoys_before_terminal_are_reported_but_do_not_fail():
+    trace = [_call("find_connector"), _call("list_playbook_runs"),
+             _call("run_playbook")]
+    r = scoring._score_tool_selection(trace, ["run_playbook"], DECOYS)
+    assert r["passed"] is True
+    assert r["decoys_before"] == ["researched connectors", "listed past runs"]
+
+
+def test_decoys_after_terminal_are_not_counted():
+    trace = [_call("run_playbook"), _call("find_connector")]
+    r = scoring._score_tool_selection(trace, ["run_playbook"], DECOYS)
+    assert r["decoys_before"] == []
+
+
+def test_missing_terminal_tool_declaration_skips():
+    r = scoring._score_tool_selection([_call("run_playbook")], [], DECOYS)
+    assert r["skipped"] is True
+
+
+# --- score() wiring ---------------------------------------------------------
+
+def _score(trace, terminal_tool):
+    return scoring.score("", trace=trace, final_text="",
+                         mode="tool_selection", terminal_tool=terminal_tool)
+
+
+def test_score_counts_only_the_terminal_gate():
+    """A research-only turn must score 0/1, not partial credit for the
+    authoring gates it happened to satisfy."""
+    out = _score([_call("find_connector")], ["run_playbook"])
+    assert out["max"] == 1
+    assert out["score"] == 0
+    assert out["fraction"] == 0.0
+    assert out["levels"]["terminal_tool_reached"]["passed"] is False
+
+
+def test_score_passes_when_terminal_reached():
+    out = _score([_call("run_playbook")], ["run_playbook"])
+    assert (out["score"], out["max"]) == (1, 1)
+
+
+def test_other_gates_are_informational_not_counted():
+    out = _score([_call("run_playbook")], ["run_playbook"])
+    counted = [k for k, v in out["levels"].items()
+               if not v.get("skipped") and not v.get("informational")]
+    assert counted == ["terminal_tool_reached"]
+
+
+def test_build_fidelity_skipped_in_selection_mode():
+    out = _score([_call("run_playbook")], ["run_playbook"])
+    assert out["levels"]["build_fidelity"]["skipped"] is True
+
+
+def test_no_trace_skips_the_gate():
+    out = scoring.score("", trace=None, mode="tool_selection",
+                        terminal_tool=["run_playbook"])
+    assert out["levels"]["terminal_tool_reached"]["skipped"] is True
+
+
+# --- fixture loading --------------------------------------------------------
+
+def test_selection_fixtures_declare_a_terminal_tool():
+    sel = [t for t in tasks.load_tasks() if t.mode == "tool_selection"]
+    assert sel, "no tool_selection fixtures found"
+    for t in sel:
+        assert t.terminal_tool, f"{t.name} declares no terminal_tool"
+
+
+def test_run_pair_differs_only_by_prompt_variant():
+    """The Phase 1.4 experiment is only valid if the two arms are otherwise
+    identical -- same ask, same tool surface."""
+    by_name = {t.name: t for t in tasks.load_tasks()}
+    build = by_name["select_run_playbook"]
+    neutral = by_name["select_run_playbook_neutral"]
+    assert build.prompt == neutral.prompt
+    assert build.tool_slice == neutral.tool_slice
+    assert build.terminal_tool == neutral.terminal_tool
+    assert (build.prompt_variant, neutral.prompt_variant) == ("build", "neutral")
+
+
+def test_terminal_tool_accepts_string_or_list():
+    assert tasks._as_list("run_playbook") == ["run_playbook"]
+    assert tasks._as_list(["a", "b"]) == ["a", "b"]
+    assert tasks._as_list(None) == []
+
+
+def test_selection_terminal_tools_are_registered():
+    """A terminal tool that isn't in SAFE_TOOLS is never advertised and never
+    dispatchable, so the fixture would measure nothing (the B4 lesson)."""
+    from fsr_playbooks.llm.tools import SAFE_TOOLS
+    for t in tasks.load_tasks():
+        if t.mode != "tool_selection":
+            continue
+        for name in t.terminal_tool:
+            assert name in SAFE_TOOLS, f"{t.name}: {name} not in SAFE_TOOLS"
+
+
+# --- model screening --------------------------------------------------------
+
+def _matrix(model_to_scores):
+    """Build a fake matrix: {model: {task: (score, max)}}."""
+    rows = []
+    for m, tasks_ in model_to_scores.items():
+        for t, (s, mx) in tasks_.items():
+            rows.append({"model": m, "task": t, "score": s, "max": mx})
+    return {"tasks": sorted({r["task"] for r in rows}),
+            "models": list(model_to_scores), "rows": rows, "summary": {}}
+
+
+def _stub_runs(monkeypatch, sequence):
+    harness = importlib.import_module("evals.harness")
+    calls = {"n": 0}
+
+    def fake(**_kw):
+        m = sequence[calls["n"] % len(sequence)]
+        calls["n"] += 1
+        return _matrix(m)
+
+    monkeypatch.setattr(harness, "run_matrix", fake)
+    return harness
+
+
+def test_screen_consistent_when_every_repeat_passes(monkeypatch):
+    h = _stub_runs(monkeypatch, [{"m1": {"t": (1, 1)}}])
+    out = h.screen_models(model_names=["m1"], repeats=3)
+    assert out["verdicts"]["m1"] == "consistent"
+    assert out["cells"]["m1"]["t"]["passes"] == 3
+
+
+def test_screen_flaky_when_a_fixture_passes_sometimes(monkeypatch):
+    """The dangerous case -- demos fine, fails in front of a customer."""
+    h = _stub_runs(monkeypatch, [{"m1": {"t": (1, 1)}}, {"m1": {"t": (0, 1)}}])
+    out = h.screen_models(model_names=["m1"], repeats=2)
+    assert out["verdicts"]["m1"] == "flaky"
+
+
+def test_screen_failing_when_a_fixture_never_passes(monkeypatch):
+    h = _stub_runs(monkeypatch, [{"m1": {"t1": (1, 1), "t2": (0, 1)}}])
+    out = h.screen_models(model_names=["m1"], repeats=3)
+    assert out["verdicts"]["m1"] == "failing"
+
+
+def test_screen_counts_provider_errors_as_non_passes(monkeypatch):
+    harness = importlib.import_module("evals.harness")
+    monkeypatch.setattr(harness, "run_matrix", lambda **_kw: {
+        "tasks": ["t"], "models": ["m1"], "summary": {},
+        "rows": [{"model": "m1", "task": "t", "error": "boom",
+                  "score": 0, "max": 0}]})
+    out = harness.screen_models(model_names=["m1"], repeats=2)
+    assert out["cells"]["m1"]["t"]["errors"] == 2
+    assert out["verdicts"]["m1"] == "failing"
+
+
+def test_render_screen_names_every_model_and_verdict(monkeypatch):
+    h = _stub_runs(monkeypatch, [{"m1": {"t": (1, 1)}, "m2": {"t": (0, 1)}}])
+    txt = h.render_screen(h.screen_models(model_names=["m1", "m2"], repeats=2))
+    assert "m1" in txt and "m2" in txt
+    assert "consistent" in txt and "failing" in txt

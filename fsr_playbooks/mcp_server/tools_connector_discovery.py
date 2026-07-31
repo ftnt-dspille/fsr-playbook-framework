@@ -893,7 +893,12 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
 def list_configured_connectors(probe: bool = False,
                                verbose: bool = False,
                                only: set[str] | None = None) -> dict[str, Any]:
-    """List connectors that are configured AND active on the live FSR instance.
+    """List the connectors actually CONFIGURED and ACTIVE on this instance.
+    Call this BEFORE committing to a connector in a playbook: a connector
+    can appear in find_connector and still be unusable here, because without
+    a configuration it fails at runtime. Returns name + status cheaply;
+    probe=True additionally healthchecks each one concurrently, and
+    verbose=True adds label, version, and config_count.
 
     A connector with no configuration cannot be called -- it'll fail at runtime
     even if it appears in `find_connector`. Use this BEFORE picking which
@@ -1054,7 +1059,12 @@ def list_playbook_runs(playbook: str | None = None,
                        tags_include: str | None = None,
                        tags_exclude: str | None = "system",
                        user_iri: str | None = None) -> dict[str, Any]:
-    """List runs of a single playbook, server-filtered by template_iri.
+    """List RUN HISTORY for one playbook -- past executions and their status,
+    server-filtered by template_iri. Read-only history only: it does NOT
+    execute anything, so if the analyst asked you to run a playbook, that is
+    run_playbook. If they asked why a run failed, prefer
+    why_did_playbook_fail, which chains the diagnosis in one call. Defaults
+    to failures; include_finished=True for all.
 
     Faster + more reliable than `list_recent_failed_runs(playbook=...)`
     when you know which playbook you care about -- the API uses

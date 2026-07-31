@@ -1,0 +1,14 @@
+{
+  "name": "select_run_playbook_neutral",
+  "mode": "tool_selection",
+  "prompt": "Run the \"Block Malicious IP\" playbook.",
+  "terminal_tool": "run_playbook",
+  "prompt_variant": "neutral",
+  "tool_slice": "build",
+  "forbidden_facts": [
+    {"tool": "find_connector", "label": "researched connectors instead of running"},
+    {"tool": "list_playbook_runs", "label": "listed past runs instead of running"},
+    {"tool": "find_operation", "label": "researched operations instead of running"}
+  ],
+  "notes": "Control arm for 32_select_run_playbook. Byte-identical prompt and tool slice; the ONLY difference is the system prompt (harness._NEUTRAL_PROMPT, which mandates no workflow). This is the cheap experiment that routes the whole plan -- neutral green + build red means the fix is guidance (Phase 2b), not tool surgery (Phase 2). Both arms failing points at the tool surface instead."
+}

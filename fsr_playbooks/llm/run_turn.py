@@ -30,7 +30,11 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from .approvals import SuspendedSession
-from ._loop_helpers import extract_yaml_block
+from ._loop_helpers import (
+    clear_guard_fires as _clear_guard_fires,
+    extract_yaml_block,
+    snapshot_guard_fires as _snapshot_guard_fires,
+)
 from .provider import (
     DoneEvent,
     ErrorEvent,
@@ -119,6 +123,13 @@ class TurnResult:
     completes. Consumers persisting post-stream rows use this to
     avoid colliding with the transcript rows the function already
     wrote."""
+    # Guards that had to force a terminal tool call this turn (by class
+    # name). Empty is the healthy case: the model chose the right tool on
+    # its own. A guard is a compensation, so this is how we find out
+    # whether each one still earns its keep -- one that never fires across
+    # a corpus is a deletion candidate, one that fires often is pointing at
+    # a tool description or prompt that still needs work.
+    guards_fired: list[str] = field(default_factory=list)
 
 
 class _TextCoalescer:
@@ -260,6 +271,9 @@ async def run_agent_turn(
     if tags is None:
         tags = {}
 
+    # Guard fires are process-local telemetry; clear at turn start so the
+    # snapshot below belongs to this turn only.
+    _clear_guard_fires()
     result = TurnResult(tags=tags, session_id=session_id)
     coalescer = _TextCoalescer()
     seq_in_turn = 0
@@ -395,6 +409,7 @@ async def run_agent_turn(
         result.transcript.append(err_ev)
 
     result.final_seq = seq_in_turn
+    result.guards_fired = _snapshot_guard_fires()
     return result
 
 
