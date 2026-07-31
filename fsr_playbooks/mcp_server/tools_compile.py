@@ -332,8 +332,12 @@ def build_playbook_from_trace(
     module: str = "",
     guard_containment: bool = True,
 ) -> dict[str, Any]:
-    """Compile a playbook from the session's typed action trace instead of
-    hand-authoring YAML (SKILL_BASED_PLAYBOOK_PLAN §3-5).
+    """Compile a playbook from connector ops THIS SESSION ALREADY RAN, instead
+    of hand-authoring YAML. Only useful after a triage session that actually
+    executed connector ops -- it replays that recorded trace. If this session
+    has run no ops (a plain "build me a playbook that…" request), there is no
+    trace to compile and this returns nothing useful: author the YAML and gate
+    it with `verify_playbook` instead. (SKILL_BASED_PLAYBOOK_PLAN §3-5.)
 
     This is the flag-gated trace-compiler entry point: the agent already
     ran the connector ops during triage, so their real outputs were

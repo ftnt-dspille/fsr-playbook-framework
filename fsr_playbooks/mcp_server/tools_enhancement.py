@@ -303,7 +303,11 @@ def verify_enhancement(
     user_message: str | None = None,
     live_probe: bool = False,
 ) -> dict[str, Any]:
-    """Diff-aware pre-submit gate for enhance mode.
+    """The pre-submit gate for an EDIT to an existing open playbook -- run this
+    before `emit_enhancement_offer`, and only when editing. Requires BOTH the
+    before and after YAML, so it needs a playbook the analyst already has
+    open. Authoring a NEW playbook from scratch has no `before_yaml` to pass:
+    gate that with `verify_playbook` instead.
 
     Runs `verify_playbook(after_yaml)` for the shape check, then
     structurally diffs `before_yaml` vs `after_yaml` and reports

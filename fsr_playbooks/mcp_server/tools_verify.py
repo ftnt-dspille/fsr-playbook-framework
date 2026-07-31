@@ -583,11 +583,13 @@ def verify_playbook(
     disable_checks: list[str] | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any]:
-    """Single forcing-function pre-submit gate.
-
-    Runs compile → typed walk → per-step schema checks (→ optional live
-    probe). Returns one structured punch list. The agent must not show
-    a playbook to the user until this returns `ready_to_push=True`.
+    """The pre-submit gate for a WHOLE playbook you authored -- run this before
+    `emit_playbook_offer`. Takes the full YAML text and runs compile → typed
+    walk → per-step schema checks (→ optional live probe), returning one
+    structured punch list. Never show a playbook to the analyst, and never
+    offer it, until this returns `ready_to_push=True`. NOT for editing a
+    playbook the analyst already has open -- that is gated by
+    `verify_enhancement`, which diffs against the open document.
 
     `disable_checks` (optional): skip groups or individual checks the caller
     doesn't want enforced. Each entry is a GROUP name or a diagnostic `code`.
