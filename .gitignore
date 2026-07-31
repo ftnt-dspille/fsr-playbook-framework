@@ -125,3 +125,9 @@ scratch/
 # these; they are transient and must never be committed.
 *.db-shm
 *.db-wal
+
+# setuptools/wheel scratch. `python -m build` (and the packaging guard's
+# force-include check) leave this behind, and an untracked build/ trips
+# release.sh's clean-tree gate on the next cut.
+build/
+dist/
