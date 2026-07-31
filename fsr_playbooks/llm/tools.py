@@ -993,6 +993,43 @@ def _build_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     return {"type": "object", "properties": props, "required": required}
 
 
+DESCRIPTION_CAP = 1200
+
+# Sections that document the *call*, not when to make it. The parameter names,
+# types and defaults are already in `input_schema`, so repeating them in the
+# description is pure token cost.
+_MACHINE_SECTION = re.compile(
+    r"(?m)^(?:Args|Arguments|Params|Parameters|Returns|Return|Raises|Yields|"
+    r"Examples?|Usage)\s*:\s*$"
+)
+
+
+def tool_description(doc: str, cap: int = DESCRIPTION_CAP) -> str:
+    """Reduce a docstring to the guidance the model needs to *choose* the tool.
+
+    This used to be `doc.split("\\n\\n", 1)[0]` -- first paragraph only. Every
+    "call me when", every "NOT for", and every safety contract written below a
+    blank line was maintained for years and never sent, which is how
+    `run_op` shipped its destructive-op `confirm=True` rules to nobody. Keep
+    whole paragraphs, drop the Args/Returns boilerplate that `input_schema`
+    already carries, and stop at `cap` on a paragraph boundary so one
+    essay-length docstring can't crowd out the other 38 tools.
+    """
+    body = _MACHINE_SECTION.split(doc.strip(), 1)[0].strip()
+    if len(body) <= cap:
+        return body
+    kept: list[str] = []
+    used = 0
+    for para in body.split("\n\n"):
+        if kept and used + len(para) + 2 > cap:
+            break
+        kept.append(para)
+        used += len(para) + 2
+    # A single opening paragraph over the cap is still better truncated than
+    # dropped -- it is the one part we know the model reads.
+    return "\n\n".join(kept)[:cap]
+
+
 def _resolve(name: str) -> Callable[..., Any]:
     fn = getattr(mcp_server, name, None)
     if fn is None or not callable(fn):
@@ -1005,8 +1042,7 @@ def build_registry() -> dict[str, ToolSpec]:
     for name in SAFE_TOOLS:
         fn = _resolve(name)
         desc = inspect.getdoc(fn) or f"{name} (no docstring)"
-        # First-paragraph only; Anthropic limits description length implicitly.
-        short = desc.strip().split("\n\n", 1)[0]
+        short = tool_description(desc)
         static_tier = TOOL_TIERS.get(name, 0)
         confirm_mode = "auto" if static_tier in (0, 1) else ("approve" if static_tier in (2, 3) else "step_up")
         if static_tier < 0:
