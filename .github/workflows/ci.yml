@@ -33,14 +33,28 @@ jobs:
         python: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v6
+        with:
+          # hatch-vcs derives the version from the git tag, so the tags have to
+          # be here. The default shallow clone has none.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
       - name: Install deps
         # The package's declared deps ([mcp] implies [llm]) + test-only tools.
         # Verified to run the full fsr_playbooks suite with nothing else.
+        #
+        # The editable install of the package itself is load-bearing, not
+        # convenience: `__version__` is read back from installed distribution
+        # metadata, so with only the deps installed there is no metadata to
+        # read and the version stays pinned at the "0.0.0+unknown" sentinel.
+        # The suite still imported fsr_playbooks off cwd and mostly passed,
+        # which is why this hid -- but test_version_resolution.py failed on
+        # every run: version_is_known() was False, and the subprocess that
+        # imports from a tmp_path cwd could not find the package at all.
         run: |
           uv venv --python ${{ matrix.python }}
           uv pip install pyyaml "ruamel.yaml" jinja2 openai anthropic "mcp>=1.0" \
                          pytest requests-mock anyio
+          uv pip install --no-deps -e packaging/fsr_playbooks
       - name: Run tests
         # Call the venv interpreter directly -- deterministic, avoids uv trying
         # to sync the root project (which expects a sibling pyfsr checkout).
