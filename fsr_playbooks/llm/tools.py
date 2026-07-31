@@ -1101,6 +1101,18 @@ def dispatch(
     """
     spec = REGISTRY.get(name)
     if spec is None:
+        # Native-MCP tools are materialized lazily, and the ONLY hooks that used
+        # to trigger it were `anthropic_tools()` / `openai_tools()` -- i.e. a
+        # tool list being built for the model. The approval-resume path never
+        # builds one: `resume_agent_turn` → `provider.resume()` calls dispatch()
+        # directly. So an approved tier-3+ MCP action (e.g.
+        # `mcp_soc__block_indicator`) resolved to None here and came back
+        # "unknown tool", silently never executing -- the approve→execute
+        # dead-end. Materialize on the miss (cheap: a bool check once
+        # initialized) and re-look-up before declaring a tool unknown.
+        _ensure_mcp_materialized()
+        spec = REGISTRY.get(name)
+    if spec is None:
         return {"error": f"unknown tool: {name}"}
 
     raw_args = dict(arguments or {})

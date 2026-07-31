@@ -560,3 +560,27 @@ def test_external_and_onbox_servers_coexist():
     M.ensure_initialized()
     assert "mcp_soc__get_alert" in T.REGISTRY
     assert "mcp_partner__lookup" in T.REGISTRY
+
+
+def test_dispatch_materializes_on_miss_without_a_tool_list_build():
+    """The approve→execute dead-end (2026-07-30).
+
+    Materialization used to be triggered ONLY by `anthropic_tools()` /
+    `openai_tools()` -- building a tool list for the model. The approval-resume
+    path never builds one: `resume_agent_turn` → `provider.resume()` calls
+    `dispatch()` directly. So an approved tier-3 native-MCP action resolved to
+    None in REGISTRY and returned "unknown tool", never executing, while the
+    widget showed the card as Approved. dispatch() must materialize on a miss.
+    """
+    M.configure(mcp_allowlist={"soc": {"tools": "*", "tier": "read_only"}},
+                client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
+    # deliberately NO ensure_initialized() and NO anthropic_tools() -- this is a
+    # worker that has only ever served the resume request.
+    assert "mcp_soc__enrich_indicator" not in T.REGISTRY
+
+    r = T.dispatch("mcp_soc__enrich_indicator", {"indicator": "1.2.3.4"})
+
+    assert "unknown tool" not in str(r), (
+        "dispatch() failed to materialize native-MCP tools on a registry miss; "
+        "an approved MCP action would silently never execute")
+    assert r["called"] == "enrich_indicator"
