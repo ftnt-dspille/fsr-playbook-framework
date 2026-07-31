@@ -147,12 +147,22 @@ corpus-gen: ## regenerate the committed round-trip corpus fixtures
 mypy: ## mypy type-check over fsr_playbooks/compiler (default config; not --strict)
 	$(VENV_PY) -m mypy
 
+doctor: ## environment preflight: version resolution, pyfsr floor, reference DB
+	$(VENV_PY) -m fsr_playbooks.doctor
+
 verify: ## green-check for the fsr_playbooks + connector axis (offline)
-	@echo "→ [1/3] mypy (fsr_playbooks/compiler)"
+	@echo "→ [0/4] environment doctor"
+	@# FIRST, and fail-fast. Every check here once presented as a product bug:
+	@# a cwd-dependent version tripped the connector's guard across ~68 tests,
+	@# an ancient pyfsr broke suite collection, and an empty reference DB makes
+	@# broken YAML validate clean. Diagnosing those from the test output costs
+	@# hours; diagnosing them from here costs one line.
+	$(VENV_PY) -m fsr_playbooks.doctor
+	@echo "→ [1/4] mypy (fsr_playbooks/compiler)"
 	$(VENV_PY) -m mypy
-	@echo "→ [2/3] fsr_playbooks tests"
+	@echo "→ [2/4] fsr_playbooks tests"
 	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q
-	@echo "→ [3/3] connector suite (offline; live tests self-skip)"
+	@echo "→ [3/4] connector suite (offline; live tests self-skip)"
 	cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q
 	@echo "✓ verify passed"
 	@echo "  (Angular widget has its own toolchain in WebStorm -- not verifiable here.)"

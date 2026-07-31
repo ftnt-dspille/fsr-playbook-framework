@@ -34,7 +34,28 @@ class Resolver(
     """Main resolver class combining all mixins."""
 
     def __init__(self, db_path: Path):
-        self.conn = sqlite3.connect(db_path)
+        # Open read-only via URI. Plain `sqlite3.connect()` CREATES the file
+        # when it is absent, so a wrong or unvendored path used to manufacture
+        # an empty reference store instead of failing -- after which every
+        # connector/operation lookup missed and broken YAML validated clean.
+        # The resolver only ever reads, so read-only costs nothing and turns
+        # that silent corruption into an immediate, nameable error.
+        from fsr_playbooks.reference_db import ReferenceDbError
+        raw = str(db_path)
+        # `:memory:` and explicit `file:` URIs are constructed by the caller
+        # (tests build a catalog in-process); they are not paths and must not
+        # be existence-checked or forced read-only.
+        if raw == ":memory:" or raw.startswith("file:"):
+            self.conn = sqlite3.connect(raw, uri=raw.startswith("file:"))
+        else:
+            path = Path(db_path)
+            if not path.exists():
+                raise ReferenceDbError(
+                    f"reference DB missing: {path}\n"
+                    f"Set FSR_REFERENCE_DB or vendor the store; the compiler "
+                    f"cannot resolve connectors or operations without it."
+                )
+            self.conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         self.conn.row_factory = sqlite3.Row
 
     def close(self) -> None:

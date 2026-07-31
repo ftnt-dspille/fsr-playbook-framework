@@ -9,9 +9,14 @@ dependencies = [
     "jsonschema>=4.21",
     "jinja2>=3.1",
     "pydantic>=2",
-    # Local sibling repo, installed editable in dev:
-    #   pip install -e ../pyfsr
-    "pyfsr",
+    # Local sibling repo. The floor is NOT decorative: the connector declares
+    # `pyfsr>=0.7.9`, and modules added after that (e.g. `pyfsr.config`) are
+    # imported by tooling here. This used to be a bare "pyfsr" with the editable
+    # install expressed only as a COMMENT -- a comment is not a constraint, so
+    # the resolver was free to take pyfsr 0.2.2 off PyPI, which it did. That
+    # build predated `pyfsr.config` and broke collection of the offline suite.
+    # The floor + [tool.uv.sources] below make the intent machine-enforced.
+    "pyfsr>=0.7.9",
     "mcp>=1.0",
 ]
 
@@ -67,3 +72,9 @@ follow_imports = "silent"
 # Deliberately NOT strict yet -- default checks surface the high-signal
 # union-attr / index / arg-type bugs without drowning in `Any` noise.
 files = ["fsr_playbooks/compiler"]
+
+[tool.uv.sources]
+# Resolve pyfsr from the sibling checkout, editable -- the setup this repo has
+# always assumed but never declared. Without it `uv sync` silently pulls an old
+# PyPI build instead (see the dependency comment above).
+pyfsr = { path = "../pyfsr", editable = true }

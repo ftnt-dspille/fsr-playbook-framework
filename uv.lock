@@ -393,7 +393,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.21" },
     { name = "mcp", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pyfsr" },
+    { name = "pyfsr", editable = "../pyfsr" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
 ]
@@ -925,14 +925,39 @@ wheels = [
 
 [[package]]
 name = "pyfsr"
-version = "0.2.2"
-source = { registry = "https://pypi.org/simple" }
+source = { editable = "../pyfsr" }
 dependencies = [
+    { name = "pydantic" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/9f/861910f8f5af28d31cdcd1fa815810a402989e781e793c51607a9df63caf/pyfsr-0.2.2.tar.gz", hash = "sha256:da1eecc63d6b9eae6058c17b433977ddb7d0653c438ad2153e8ef453fd8f1168", size = 50264, upload-time = "2024-12-25T21:52:05.286Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/21/0c9123dd74ed1c9e61e567ab8f4c55b7eb6615c18206ee3ddb7cd97819b2/pyfsr-0.2.2-py3-none-any.whl", hash = "sha256:f7b47fbb580133e9f3362c726abb4e5c0855e986c8eaaf515f82b56fa000814b", size = 15101, upload-time = "2024-12-25T21:52:03.814Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "coverage", marker = "extra == 'test'", specifier = ">=7.6.9" },
+    { name = "fsr-playbooks", marker = "extra == 'playbooks'", specifier = ">=0.4.11" },
+    { name = "furo", marker = "extra == 'docs'", specifier = ">=2024.8.6" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
+    { name = "mcp", marker = "extra == 'test'", specifier = ">=1.0,<2" },
+    { name = "mypy", marker = "extra == 'typecheck'", specifier = ">=1.13" },
+    { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=4.0.0" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "pytest-cov", marker = "extra == 'test'" },
+    { name = "pytest-mock", marker = "extra == 'test'" },
+    { name = "requests", specifier = ">=2.31.0" },
+    { name = "sphinx", marker = "python_full_version >= '3.12' and extra == 'docs'", specifier = ">=9.1,<10" },
+    { name = "sphinx-autoapi", marker = "extra == 'docs'", specifier = ">=3.8,<4" },
+    { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'", specifier = ">=3.0.0" },
+    { name = "sphinx-copybutton", marker = "extra == 'docs'", specifier = ">=0.5.2" },
+    { name = "sphinx-design", marker = "extra == 'docs'", specifier = ">=0.6.1" },
+]
+provides-extras = ["docs", "mcp", "playbooks", "test", "typecheck"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pre-commit", specifier = ">=3.5" },
+    { name = "pyfsr", extras = ["test", "docs", "mcp", "playbooks", "typecheck"] },
+    { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]

@@ -115,3 +115,8 @@ scratch/f4_failing/
 
 # ad-hoc live probes (kept on disk, never committed)
 scratch/
+
+# SQLite WAL sidecars -- any read of the committed WAL-mode fixture DB spawns
+# these; they are transient and must never be committed.
+*.db-shm
+*.db-wal
