@@ -35,7 +35,19 @@ BUILD_ONLY_TOOLS = frozenset({
     "find_jinja_filter", "find_jinja_pattern", "get_filter_examples",
     "step_through_playbook", "dry_run_playbook",
     "diagnose_yaml_against_pb_execution",
-    "push_playbook", "run_playbook",
+    "push_playbook",
+    # NOTE: `run_playbook` is deliberately NOT here. Running an already-deployed
+    # playbook is a first-class TRIAGE action -- an analyst working an alert wants
+    # to fire the block-IP playbook, an investigation playbook, or a playbook their
+    # own team wrote and expects the chat to be able to drive. Authoring it and
+    # running it are different verbs; only authoring is build-only.
+    # It is safe in triage because it is not auto-run: `_resolve_tier` gives
+    # run_playbook tier 3 (approval card) unless a host explicitly designates a
+    # specific playbook auto-runnable via the `run_playbook.auto` resolver (tier 2).
+    # It was previously listed here AND added to TRIAGE_ONLY_TOOLS by the
+    # connector's register_triage_tools(), so BOTH slices subtracted it and no
+    # model could call it in any intent -- which also left tools_for_run_mode()
+    # with an empty intersection, silently disabling Lever 2 (see below).
     # Value-level fix card for the OPEN playbook -- meaningless in triage (there
     # is no playbook open to patch), so keep it out of the triage slice.
     "emit_patch_proposal",
