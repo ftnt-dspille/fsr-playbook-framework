@@ -3992,6 +3992,7 @@ _PROBES: dict[str, tuple[str, str]] = {
     "jinja-corpus":  ("probes.probe_jinja_corpus",       "mine all Jinja blocks (expr/set/for/if/macro) + filter usage from live workflows"),
     "playbook-steps":("probes.probe_playbook_steps",     "index every step from every FSR playbook JSON export on disk"),
     "op-safety":     ("probes.probe_op_safety",          "classify each op safe/unsafe/unknown for verify_playbook"),
+    "conformance":   ("probes.probe_corpus_conformance",  "compile every shipped solution-pack playbook; report fidelity + validator gaps (offline)"),
 }
 
 
