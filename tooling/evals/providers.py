@@ -396,6 +396,25 @@ def _agentic_frank_provider() -> Callable:
     )
 
 
+def _agentic_openai_api_provider() -> Callable:
+    """The model FortiSOAR actually runs in production: gpt-4.1-mini.
+
+    Deliberately does NOT read OPENAI_ENDPOINT. That variable points at the
+    Fortilab gateway, which serves two self-hosted models (GLM-5.2, Qwen3.6)
+    and no GPT -- pointing this at it would silently measure a different
+    model than production, which is the exact mistake the first Frank
+    baseline made. Override with EVAL_OPENAI_BASE_URL / EVAL_OPENAI_MODEL."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    return _agentic_openai_compatible(
+        base_url=os.environ.get("EVAL_OPENAI_BASE_URL",
+                                "https://api.openai.com/v1"),
+        model=os.environ.get("EVAL_OPENAI_MODEL", "gpt-4.1-mini"),
+        headers={"Authorization": f"Bearer {key}"},
+    )
+
+
 _LAZY_FACTORIES: dict[str, Callable[[], ProviderFn]] = {
     "anthropic": _anthropic_provider,
     "openai": _openai_provider,
@@ -403,6 +422,7 @@ _LAZY_FACTORIES: dict[str, Callable[[], ProviderFn]] = {
     "agentic_anthropic": _agentic_anthropic_provider,
     "agentic_lmstudio": _agentic_lmstudio_provider,
     "agentic_frank": _agentic_frank_provider,
+    "agentic_openai_api": _agentic_openai_api_provider,
 }
 
 
