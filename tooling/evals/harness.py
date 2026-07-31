@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Any
 
 from agent import load_system_prompt
-from evals.providers import (ProviderFn, extract_yaml, get_provider,
+from evals.providers import (ProviderFn, get_provider,
                              set_tool_slice)
-from evals.scoring import score
+from evals.scoring import delivered_yaml, score
 from evals.tasks import Task, load_tasks
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -176,7 +176,11 @@ def run_matrix(
                 turns = None
                 usage = None
                 audit = None
-            yaml_text = extract_yaml(final_text)
+            # Score the playbook the turn DELIVERED (offer card / last gated
+            # doc), falling back to a fenced block in chat. Reading the final
+            # text alone punished every agent that obeyed
+            # `emit_playbook_offer`'s "do not print YAML at the analyst".
+            yaml_text = delivered_yaml(final_text, trace)
             scored = score(
                 yaml_text,
                 gold_json=gold_json_by_task.get(t.name),

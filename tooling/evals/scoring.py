@@ -37,6 +37,47 @@ from typing import Any
 
 _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n", re.IGNORECASE)
 
+# Tool calls that CARRY the delivered playbook. The agent is instructed not to
+# paste YAML at the analyst -- `emit_playbook_offer`'s own description says a
+# turn that "prints YAML at the analyst has delivered nothing" -- so the final
+# chat text is the WRONG place to look for the artifact. A well-behaved turn
+# hands it over in one of these args instead.
+_YAML_BEARING_ARGS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("emit_playbook_offer", ("yaml",)),
+    ("verify_enhancement", ("after_yaml",)),
+    ("verify_playbook", ("yaml_text", "yaml")),
+    ("compile_yaml", ("yaml_text", "yaml")),
+    ("validate_yaml", ("yaml_text", "yaml")),
+)
+
+
+def delivered_yaml(final_text: str, trace: list[dict[str, Any]] | None) -> str:
+    """The YAML the turn actually DELIVERED, not merely the bit it pasted.
+
+    Scoring used to read `extract_yaml(final_text)` alone. That silently
+    penalised every agent that followed our own instructions: deliver through
+    `emit_playbook_offer` and do NOT print YAML at the analyst. Such a turn
+    handed the scorer an empty string, so `draft`, `verified` and `adherence`
+    all failed together -- three gates lost on every fixture, independent of
+    content, which is exactly the flat 5/8 seen across nine unrelated
+    fixtures.
+
+    Preference order: the artifact the analyst would actually receive (the
+    offer card), then what the agent last gated, then a fenced block in chat.
+    """
+    if trace:
+        for name, keys in _YAML_BEARING_ARGS:
+            for call in reversed(trace):
+                if call.get("name") != name or call.get("refused"):
+                    continue
+                args = call.get("args") or {}
+                for k in keys:
+                    v = args.get(k)
+                    if isinstance(v, str) and v.strip():
+                        return v
+    from evals.providers import extract_yaml  # noqa: PLC0415 -- cycle
+    return extract_yaml(final_text or "")
+
 
 def _verify(yaml_text: str, *, live: bool) -> dict[str, Any]:
     from fsr_playbooks.mcp_server import verify_playbook
@@ -698,6 +739,12 @@ def _score_agentic(*, trace: list[dict[str, Any]],
             longest_name = name
 
     has_yaml = bool(_YAML_BLOCK_RE.search(text or ""))
+    # Which terminal card actually carried the playbook, if any.
+    delivered_via = next(
+        (c.get("name") for c in reversed(trace)
+         if c.get("name") in ("emit_playbook_offer", "emit_enhancement_offer")
+         and not c.get("refused")),
+        None)
     out_gates: dict[str, dict[str, Any]] = {
         **_verify_metrics(trace),
         "tool_budget": {
@@ -709,10 +756,19 @@ def _score_agentic(*, trace: list[dict[str, Any]],
             "longest_run": longest, "tool": longest_name,
             "limit": NO_SPIRAL_MAX_CONSECUTIVE,
         },
+        # "adherence" = the turn DELIVERED a playbook, by any sanctioned
+        # route. It used to mean "pasted a fenced ```yaml block in chat",
+        # which was a fair proxy back when that WAS the delivery mechanism.
+        # It is not anymore: delivery is `emit_playbook_offer`, and pasting
+        # YAML at the analyst is the failure mode the tool description
+        # explicitly forbids. Scoring the old behavior rewarded exactly what
+        # the product told the model to stop doing.
         "adherence": {
-            "passed": has_yaml, "skipped": False,
-            "detail": ("yaml block present" if has_yaml
-                       else "no fenced ```yaml block in final text"),
+            "passed": bool(delivered_via or has_yaml), "skipped": False,
+            "detail": (f"delivered via {delivered_via}" if delivered_via
+                       else "yaml block in final text" if has_yaml
+                       else "no playbook delivered (no offer card, no yaml block)"),
+            "delivered_via": delivered_via or ("final_text" if has_yaml else None),
         },
     }
     if audit is not None:
@@ -1149,12 +1205,15 @@ def score(
                 lv["informational"] = True
         adh = out["levels"].get("adherence", {})
         if not adh.get("skipped"):
-            # Invert: success = NO yaml block emitted.
-            had_yaml = bool(adh.get("passed"))
-            adh["passed"] = not had_yaml
-            adh["detail"] = ("correctly refused -- no YAML emitted"
-                             if not had_yaml
-                             else "fabricated YAML for a refuse-mode task")
+            # Invert: success = nothing delivered. Now that `adherence` counts
+            # the offer card as delivery, refuse-mode correctly fails a turn
+            # that emitted a CARD too -- not just one that pasted YAML.
+            delivered = bool(adh.get("passed"))
+            adh["passed"] = not delivered
+            adh["detail"] = ("correctly refused -- nothing delivered"
+                             if not delivered
+                             else f"delivered a playbook for a refuse-mode task "
+                                  f"(via {adh.get('delivered_via')})")
 
     # Investigation-mode: grade on pivot recall, not YAML. Authoring tiers
     # and adherence (a YAML block) are irrelevant to a triage/hunt task, so
