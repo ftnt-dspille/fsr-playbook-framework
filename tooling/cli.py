@@ -2940,13 +2940,40 @@ def cmd_evals(args: argparse.Namespace) -> int:
             print(render_screen(screen))
         return 0 if any(v == "consistent"
                         for v in screen["verdicts"].values()) else 1
-    matrix = run_matrix(
-        model_names=models, task_names=task_filter, live=args.live,
-    )
+    # Checkpoint every finished row. `save_run` writes only after the whole
+    # matrix completes, so without this a crash in the last task discards the
+    # entire run -- 74 minutes and 33 scored tasks were lost that way once.
+    # Always on: the cost is one appended line per task.
+    from evals.harness import CRASH_LOG, recover_rows  # noqa: F401
+    CRASH_LOG.parent.mkdir(parents=True, exist_ok=True)
+    if CRASH_LOG.exists():
+        CRASH_LOG.unlink()
+
+    try:
+        matrix = run_matrix(
+            model_names=models, task_names=task_filter, live=args.live,
+            checkpoint_path=CRASH_LOG,
+        )
+    except BaseException:
+        # Includes KeyboardInterrupt: an interrupted run should still tell you
+        # where its results went rather than leaving them to be found later.
+        done = recover_rows(CRASH_LOG) if CRASH_LOG.exists() else []
+        if done:
+            print(f"\nrun did not complete -- {len(done)} scored task(s) "
+                  f"checkpointed to {CRASH_LOG}", file=sys.stderr)
+            print("recover with: evals.harness.recover_rows(<that path>)",
+                  file=sys.stderr)
+        raise
+
     run_dir = None
     if args.save or args.baseline:
         run_dir = save_run(matrix)
         matrix["run_id"] = run_dir.name
+        # Fold the crash log into the run dir so the artifact is self-contained.
+        try:
+            CRASH_LOG.replace(run_dir / "rows.jsonl")
+        except OSError:
+            pass
 
     if args.json:
         print(json.dumps(matrix, indent=2, default=str))

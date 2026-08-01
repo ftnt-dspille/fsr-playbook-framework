@@ -12,6 +12,7 @@ two runs cell-by-cell so a CI hook can red-flag regressions.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -26,6 +27,9 @@ from evals.tasks import Task, load_tasks
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNS_DIR = REPO_ROOT / "data" / "eval_runs"
+CRASH_LOG = RUNS_DIR / ".in_progress_rows.jsonl"
+"""Rows of the run currently executing. Moved into the run dir on success, so
+its presence means the last run died before `save_run`."""
 
 
 # The Phase 1.4 control arm. Deliberately says nothing about *how* to work --
@@ -101,13 +105,57 @@ def _progress(model: str, i: int, n: int, task: str, row: dict[str, Any]) -> Non
           file=sys.stderr, flush=True)
 
 
+def _checkpoint(path: Path | None, row: dict[str, Any]) -> None:
+    """Append one finished row to the crash log, flushed to disk immediately.
+
+    A long run holds everything in memory until `save_run` writes at the very
+    end, so ANY failure -- a crash in the last task, a kill, an OOM -- discards
+    every completed result. This is the cheap insurance: one JSON object per
+    line, fsync'd, so a dead run can still be read back with `recover_rows`.
+
+    Never raises. A checkpoint that can take the run down with it is worse than
+    no checkpoint at all.
+    """
+    if path is None:
+        return
+    try:
+        with path.open("a") as fh:
+            fh.write(json.dumps(row, default=str) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def recover_rows(path: Path | str) -> list[dict[str, Any]]:
+    """Read back the rows a crashed run checkpointed.
+
+    Tolerates a torn final line -- the process may have died mid-write.
+    """
+    rows: list[dict[str, Any]] = []
+    for line in Path(path).read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # torn tail from a hard kill
+    return rows
+
+
 def run_matrix(
     *,
     model_names: list[str],
     task_names: list[str] | None = None,
     live: bool = False,
+    checkpoint_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Run every (task, model) cell and return a structured matrix."""
+    """Run every (task, model) cell and return a structured matrix.
+
+    `checkpoint_path` appends each finished row as it lands, so a run that
+    dies before `save_run` is still recoverable via `recover_rows`.
+    """
     tasks = load_tasks(task_names)
     if not tasks:
         raise SystemExit("no tasks matched")
@@ -160,6 +208,7 @@ def run_matrix(
                     "levels": {},
                 }
                 rows.append(_err_row)
+                _checkpoint(checkpoint_path, _err_row)
                 _progress(model_name, ti, len(tasks), t.name, _err_row)
                 continue
             # Agentic providers return a dict {text, trace, turns}; classic
@@ -181,20 +230,40 @@ def run_matrix(
             # text alone punished every agent that obeyed
             # `emit_playbook_offer`'s "do not print YAML at the analyst".
             yaml_text = delivered_yaml(final_text, trace)
-            scored = score(
-                yaml_text,
-                gold_json=gold_json_by_task.get(t.name),
-                live=live,
-                trace=trace,
-                final_text=final_text,
-                audit=audit,
-                expected_approvals=t.expected_approvals,
-                mode=t.mode,
-                required_facts=t.required_facts,
-                forbidden_facts=t.forbidden_facts,
-                investigation_quality=t.investigation_quality,
-                terminal_tool=t.terminal_tool,
-            )
+            try:
+                scored = score(
+                    yaml_text,
+                    gold_json=gold_json_by_task.get(t.name),
+                    live=live,
+                    trace=trace,
+                    final_text=final_text,
+                    audit=audit,
+                    expected_approvals=t.expected_approvals,
+                    mode=t.mode,
+                    required_facts=t.required_facts,
+                    forbidden_facts=t.forbidden_facts,
+                    investigation_quality=t.investigation_quality,
+                    terminal_tool=t.terminal_tool,
+                )
+            except Exception as e:  # noqa: BLE001
+                # Scoring compiles the delivered YAML, so it can raise for
+                # reasons that have nothing to do with this task -- a transient
+                # `sqlite3.OperationalError: disk I/O error` on the reference DB
+                # once killed a 74-minute run at task 34/36 and, because
+                # `save_run` only writes after ALL tasks finish, took every
+                # completed result with it. One task must not be able to
+                # discard the run: record it and keep going.
+                _err_row = {
+                    "model": model_name, "task": t.name,
+                    "error": f"scoring: {e!r}",
+                    "elapsed_ms": int((time.time() - t0) * 1000),
+                    "score": 0, "max": 0, "fraction": 0.0,
+                    "levels": {},
+                }
+                rows.append(_err_row)
+                _checkpoint(checkpoint_path, _err_row)
+                _progress(model_name, ti, len(tasks), t.name, _err_row)
+                continue
             row = {
                 "model": model_name,
                 "task": t.name,
@@ -209,6 +278,7 @@ def run_matrix(
                 if usage is not None:
                     row["usage"] = usage
             rows.append(row)
+            _checkpoint(checkpoint_path, row)
             _progress(model_name, ti, len(tasks), t.name, row)
     set_tool_slice(None)
 
