@@ -1248,7 +1248,13 @@ def dispatch(
     # Validation errors don't fail the dispatch -- they're surfaced as
     # tool results so the model can see and potentially fix bad args.
     try:
-        from .tool_models import TOOL_MODELS
+        from .tool_models import TOOL_MODELS, coerce_json_string_args
+        # A structured argument emitted as a JSON *string* is decoded here,
+        # before the gate AND before the tool runs -- coercing only for the gate
+        # would hand the tool body a string, trading a loud rejection for a
+        # silent wrong answer. See `coerce_json_string_args` for why this is
+        # generic rather than another per-model widening.
+        raw_args = coerce_json_string_args(name, raw_args)
         if name in TOOL_MODELS:
             try:
                 TOOL_MODELS[name](**raw_args)

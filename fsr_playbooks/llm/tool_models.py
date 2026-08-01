@@ -69,6 +69,15 @@ class SearchModuleRecordsArgs(BaseModel):
     module: str
     filters: Optional[dict[str, Any] | list[dict[str, Any]]] = None
     limit: Optional[int] = None
+    # DECLARED, not left to `extra="allow"`, and not decoration: only declared
+    # fields get JSON-string coercion (see `coerce_json_string_args`), and the
+    # agent emits `fields` as a JSON string in the same breath as `filters`.
+    # Mirrors the real signature: search_module_records(module, q, limit,
+    # filters, fields, sort). `sort` and `q` admit a plain string, so they are
+    # never coerced -- `sort="stepNumber"` is the common, correct form.
+    q: Optional[str] = None
+    fields: Optional[list[str]] = None
+    sort: Optional[str | list] = None
 
 
 class RunOpArgs(BaseModel):
@@ -191,3 +200,99 @@ TOOL_MODELS = {
     "list_configured_connectors": ListConfiguredConnectorsArgs,
     "search_alerts": SearchAlerts,
 }
+
+
+# ---------------------------------------------------------------------------
+# JSON-string argument coercion
+# ---------------------------------------------------------------------------
+# A model that emits a structured argument as a JSON *string* cannot recover
+# from being told no. Observed, six calls in one turn:
+#
+#   filters: "{\"ztpfDevices.uuid\": \"5b23...\"}"   -> rejected
+#   filters: "[{\"field\": ..., \"value\": ...}]"    -> rejected
+#
+# Both STRUCTURES are correct -- dict form and list form are exactly what the
+# model above accepts. The only thing wrong is the string wrapper, and the
+# error ("Input should be a valid dictionary; Input should be a valid list")
+# names the two accepted types without ever saying "you sent a string". So the
+# model reads it as "my structure is wrong", permutes structure until it gives
+# up, falls back to a free-text `q=`, gets `total: 0`, and answers from that.
+#
+# The cost is not the wasted calls. It is that a FILTERED READ SILENTLY
+# RETURNED NOTHING and the turn continued as though the device had no steps.
+#
+# This is the same defect as run_op's stringified `params`, one tool over --
+# which is why the fix is here and generic rather than a third per-model patch.
+# `SearchModuleRecordsArgs` was ALREADY widened once for the list-vs-dict shape
+# ("the single most frequent tool error in live ztpf sessions"); the failure
+# came straight back one layer out. Widening models one shape at a time loses
+# this race.
+#
+# Scope, deliberately narrow:
+#   * Only DECLARED fields. An `extra="allow"` field's intended type is unknown
+#     and guessing at it is how a coercion layer starts corrupting data.
+#   * Never a field that can be a `str`. A summary or a YAML body that happens
+#     to start with `{` must arrive exactly as sent.
+#   * Only a value that both looks like JSON and parses to a container. A
+#     string that merely starts with `{` and does not parse is left alone to
+#     fail validation with its own error.
+import json  # noqa: E402
+import types  # noqa: E402
+import typing  # noqa: E402
+
+
+def _accepts_str(annotation: Any) -> bool:
+    """True when `annotation` admits a plain `str` anywhere in its union.
+
+    Conservative by construction: an annotation this cannot decompose returns
+    True, so the field is left untouched.
+    """
+    if annotation is str or annotation is Any:
+        return True
+    if annotation is None or annotation is type(None):
+        # `Optional[...]` puts NoneType in every union. Counting it as
+        # str-accepting would disable coercion on every optional field, which
+        # is all of them.
+        return False
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union or origin is types.UnionType:
+        # Only a UNION's members are alternatives. Recursing into a generic's
+        # type PARAMETERS instead would read `dict[str, Any]` as "accepts str"
+        # (because its key type is `str`) and quietly disable coercion on the
+        # one field this whole layer exists for.
+        return any(_accepts_str(a) for a in typing.get_args(annotation))
+    return origin is None and annotation not in (dict, list, tuple, set)
+
+
+def coerce_json_string_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Return `args` with JSON-string values decoded for `name`'s declared,
+    non-``str`` fields. Unknown tool, or nothing to do, returns `args` itself.
+
+    Call this BEFORE validation *and* before invoking the tool: coercing only
+    for the gate would let a string past the gate and hand it to the tool body,
+    which is a worse failure than the rejection it replaced -- silent instead
+    of loud.
+    """
+    model = TOOL_MODELS.get(name)
+    if model is None or not isinstance(args, dict) or not args:
+        return args
+    out: Optional[dict[str, Any]] = None
+    for key, field in model.model_fields.items():
+        value = args.get(key)
+        if not isinstance(value, str):
+            continue
+        stripped = value.strip()
+        if not stripped[:1] in ("{", "["):
+            continue
+        if _accepts_str(field.annotation):
+            continue
+        try:
+            decoded = json.loads(stripped)
+        except (ValueError, TypeError):
+            continue  # not JSON after all -- let it fail with its own error
+        if not isinstance(decoded, (dict, list)):
+            continue
+        if out is None:
+            out = dict(args)
+        out[key] = decoded
+    return out if out is not None else args

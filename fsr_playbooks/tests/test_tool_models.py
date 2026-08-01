@@ -10,6 +10,10 @@ registered tool accepts).
 """
 import inspect
 
+import json
+import typing
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -197,3 +201,124 @@ def test_gate_model_covers_all_real_required_params(tool_name):
         f"{sorted(missing)}; declared={sorted(declared)}"
     )
 
+
+
+# ---------------------------------------------------------------------------
+# JSON-string argument coercion.
+#
+# Observed live: the agent emitted `filters` as a JSON STRING six times in one
+# turn. Both structures it tried were valid; only the string wrapper was wrong,
+# and the error never said so. It gave up, fell back to free-text `q=`, got
+# `total: 0`, and answered from that -- a filtered read that silently returned
+# nothing. These tests are about that, not about the parsing.
+# ---------------------------------------------------------------------------
+from fsr_playbooks.llm.tool_models import coerce_json_string_args as _coerce
+
+
+def test_a_stringified_dict_filter_is_decoded():
+    out = _coerce("search_module_records",
+                  {"module": "m", "filters": '{"ztpfDevices.uuid": "abc"}'})
+    assert out["filters"] == {"ztpfDevices.uuid": "abc"}
+
+
+def test_a_stringified_list_filter_is_decoded():
+    """The other shape the agent alternates between when the first is refused."""
+    out = _coerce("search_module_records",
+                  {"module": "m",
+                   "filters": '[{"field": "status", "op": "eq", "value": "R"}]'})
+    assert out["filters"] == [{"field": "status", "op": "eq", "value": "R"}]
+
+
+def test_a_stringified_run_op_params_is_decoded():
+    """The same defect one tool over -- the reason this is generic."""
+    out = _coerce("run_op", {"connector": "c", "op": "o",
+                             "params": '{"ip": "1.2.3.4"}'})
+    assert out["params"] == {"ip": "1.2.3.4"}
+
+
+def test_a_string_field_is_never_touched():
+    """A summary or YAML body that happens to start with `{` must arrive
+    exactly as sent. Coercion that guessed here would corrupt data to fix a
+    validation error."""
+    out = _coerce("search_module_records",
+                  {"module": "m", "q": '{"looks": "like json"}'})
+    assert out["q"] == '{"looks": "like json"}'
+    assert _coerce("search_module_records",
+                   {"module": "m", "sort": "stepNumber"})["sort"] == "stepNumber"
+
+
+def test_an_undeclared_field_is_never_touched():
+    """`extra="allow"` fields have no known intended type. Guessing at one is
+    how a coercion layer starts corrupting data."""
+    args = {"module": "m", "not_a_declared_field": '{"a": 1}'}
+    assert _coerce("search_module_records", args)["not_a_declared_field"] \
+        == '{"a": 1}'
+
+
+def test_a_string_that_is_not_json_is_left_to_fail_with_its_own_error():
+    args = {"module": "m", "filters": "{not json at all"}
+    assert _coerce("search_module_records", args)["filters"] == "{not json at all"
+
+
+def test_a_json_scalar_is_not_a_container_and_is_left_alone():
+    assert _coerce("run_op", {"connector": "c", "op": "o",
+                              "params": "[1, 2, 3]"})["params"] == [1, 2, 3]
+    # ... but a bare scalar never looks like JSON to us in the first place.
+    assert _coerce("run_op", {"connector": "c", "op": "o",
+                              "params": "12"})["params"] == "12"
+
+
+def test_an_unknown_tool_and_an_untouched_call_return_the_input_unchanged():
+    args = {"filters": '{"a": 1}'}
+    assert _coerce("no_such_tool", args) is args
+    clean = {"module": "m", "filters": {"a": 1}}
+    assert _coerce("search_module_records", clean) is clean
+
+
+def test_the_stringified_filter_now_passes_the_gate_it_used_to_bounce_off():
+    """End-to-end at the boundary: the model that rejected this is the one the
+    agent hit six times."""
+    from fsr_playbooks.llm.tool_models import (SearchModuleRecordsArgs,
+                                               TOOL_MODELS)
+    raw = {"module": "m", "filters": '{"ztpfDevices.uuid": "abc"}',
+           "fields": '["id", "name"]'}
+    with pytest.raises(Exception):
+        SearchModuleRecordsArgs(**raw)
+    ok = TOOL_MODELS["search_module_records"](
+        **_coerce("search_module_records", raw))
+    assert ok.filters == {"ztpfDevices.uuid": "abc"}
+    assert ok.fields == ["id", "name"]
+
+
+def test_every_container_field_in_every_model_survives_a_stringified_value():
+    """The parity guard. This defect has now arrived twice (run_op `params`,
+    search `filters`) and been patched per-model once already -- widening models
+    one shape at a time loses that race. So assert the PROPERTY across the whole
+    registry: any declared field that cannot be a plain string must accept its
+    own JSON-string form after coercion. A new tool with a dict argument
+    inherits the fix, or fails here."""
+    from fsr_playbooks.llm.tool_models import TOOL_MODELS, _accepts_str
+
+    checked = 0
+    for tool, model in TOOL_MODELS.items():
+        for fname, field in model.model_fields.items():
+            if _accepts_str(field.annotation):
+                continue
+            origin = typing.get_origin(field.annotation)
+            members = typing.get_args(field.annotation) or (field.annotation,)
+            sample: Any
+            if any(typing.get_origin(m) is dict or m is dict for m in members):
+                sample = {"k": "v"}
+            elif any(typing.get_origin(m) is list or m is list for m in members):
+                sample = [{"k": "v"}] if fname == "filters" else ["a"]
+            else:
+                continue  # int/bool fields: not a container, not this class
+            del origin
+            out = _coerce(tool, {fname: json.dumps(sample)})
+            assert out[fname] == sample, (
+                f"{tool}.{fname} is a container field that does not survive "
+                f"being sent as a JSON string -- the agent WILL send it that "
+                f"way, and the error it gets back names types, never the string")
+            checked += 1
+    assert checked >= 4, f"the guard checked only {checked} fields; it should " \
+                         f"cover run_op.params and search.filters at minimum"
