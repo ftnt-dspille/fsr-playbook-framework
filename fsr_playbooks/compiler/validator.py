@@ -26,7 +26,7 @@ _VARS_STEPS_RE = re.compile(
 # Top-level keys present on every workflow's `vars` context at runtime.
 # Setting one of these via SetVariable shadows the FSR-provided value
 # silently, breaking later steps that read it. Sourced from the corpus
-# + live runs (see store/JINJA_IDIOMS.md, /api/wf/api/workflows env dump).
+# + live runs (see data/JINJA_IDIOMS.md, /api/wf/api/workflows env dump).
 _RESERVED_VARS_KEYS = {
     # Authoritative list per FSR docs ("Reserved Keywords"). Setting any
     # of these via SetVariable either silently shadows the FSR-provided

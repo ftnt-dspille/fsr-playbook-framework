@@ -1,6 +1,6 @@
 """LLM-evaluation harness for FSR playbook authoring.
 
-`python/eval/` runs a fixed task set through one or more LLM providers
+`tooling/evals/` runs a fixed task set through one or more LLM providers
 and scores each candidate playbook against the success ladder
 (Compiles: parses + static checks pass, Runs: live FSR executes,
 Works: post-run assertions hold) plus an optional gold-fixture

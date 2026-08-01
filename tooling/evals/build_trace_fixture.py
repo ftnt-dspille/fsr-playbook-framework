@@ -18,10 +18,10 @@ These fixtures are the trace-compiler side of the **default-flip** parity
 evidence: feed each into ``scoring.score_wiring_resolution`` and assert every
 value-matched wire resolves with no static error.
 
-Run as a script to (re)write ``store/trace_fixtures/<scenario>.json``:
+Run as a script to (re)write ``data/trace_fixtures/<scenario>.json``:
 
-    python python/evals/build_trace_fixture.py            # write + verify all
-    python python/evals/build_trace_fixture.py --check    # verify only, no write
+    python tooling/evals/build_trace_fixture.py            # write + verify all
+    python tooling/evals/build_trace_fixture.py --check    # verify only, no write
 """
 from __future__ import annotations
 

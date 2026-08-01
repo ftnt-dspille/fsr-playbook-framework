@@ -10,7 +10,7 @@ Each scenario:
   4. Polls the run to terminal status.
   5. Pulls the full run env via `?step_detail=true`.
   6. Writes a fixture JSON under
-     ``python/tests/fixtures/render_path_probe/<scenario>.json`` with
+     ``tooling/tests/fixtures/render_path_probe/<scenario>.json`` with
      the playbook YAML, the run status, the env, and per-step results.
   7. Best-effort cleans up the probe collection.
 
@@ -22,7 +22,7 @@ Usage:
 Requires `.env` with FSR_BASE_URL + auth, same as the other probes.
 
 The fixtures this writes are consumed by
-``python/tests/test_render_path_fixtures.py``. Tests skip cleanly when
+``tooling/tests/test_render_path_fixtures.py``. Tests skip cleanly when
 the fixtures are absent -- re-run this probe whenever a new construct
 needs covering or when FSR semantics may have shifted.
 """

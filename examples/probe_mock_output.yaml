@@ -1,5 +1,5 @@
 # Probe playbook for mock-output validation. Pushed + run by
-# python/probes/probe_mock_output.py.
+# tooling/probes/probe_mock_output.py.
 #
 # Shape: start → connector (unconfigured target with mock_result) →
 # set_variable (captures the connector output into `mocked_value`).

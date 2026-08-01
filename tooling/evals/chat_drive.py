@@ -20,7 +20,7 @@ trace + render verdict only, no scoring).
 a proposed `tasks/<NN>_<slug>.json` + a `golden_traces/<name>.json`.
 
 Live: needs `.env` FSR creds and a reachable, deployed connector. Costs credits.
-The offline regression guard is `python/tests/test_golden_traces_pin.py`.
+The offline regression guard is `tooling/tests/test_golden_traces_pin.py`.
 """
 from __future__ import annotations
 

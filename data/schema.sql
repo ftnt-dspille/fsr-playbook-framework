@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS step_examples (
 CREATE INDEX IF NOT EXISTS idx_step_examples_type ON step_examples(step_type_name);
 
 -- Full per-step corpus, ingested from FSR playbook JSON exports (SP bundles,
--- store/incoming drops, live FSR pulls). Unlike step_examples (which is a
+-- data/incoming drops, live FSR pulls). Unlike step_examples (which is a
 -- 3-row sampling per type used for quick LLM context), this table holds
 -- EVERY step from EVERY playbook we've seen -- used to mine real-world
 -- argument shapes when tightening linting/validation.

@@ -11,8 +11,8 @@ Needs a live FSR (.env: FSR_BASE_URL/creds) + ANTHROPIC_API_KEY. Costs
 credits. Read-only against pinned alert/incident UUIDs.
 
 Usage:
-    uv run python python/evals/calibrate_investigation.py
-    uv run python python/evals/calibrate_investigation.py --only invest_outbound_cleartext_c2
+    uv run python tooling/evals/calibrate_investigation.py
+    uv run python tooling/evals/calibrate_investigation.py --only invest_outbound_cleartext_c2
 """
 from __future__ import annotations
 
@@ -169,7 +169,7 @@ def main() -> None:
                     help="seconds to wait between fixtures (rate-limit drain)")
     ap.add_argument("--capture", action="store_true",
                     help="bank each passing fixture's golden trace to "
-                         "python/evals/golden_traces/ for the offline test")
+                         "tooling/evals/golden_traces/ for the offline test")
     ap.add_argument("--baseline", default=None, metavar="STAMP",
                     help="prior calibrate run stamp to diff against (recall + "
                          "gate PASS<->FAIL flips); e.g. 20260530T120000Z")

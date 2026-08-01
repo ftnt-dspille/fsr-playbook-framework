@@ -143,8 +143,6 @@ def main() -> int:
     # 3. overlay slim-resident connectors (common columns only, to be robust
     #    against any schema drift between the two DBs)
     db.execute("ATTACH ? AS slim", (str(SLIM),))
-    slim_tables = set(r[0] for r in db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"))  # main+attached
     ph2 = ",".join("?" * len(FROM_SLIM))
     for t, key in scoped:
         try:

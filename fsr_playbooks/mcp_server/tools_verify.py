@@ -806,7 +806,7 @@ def verify_playbook(
 
 def _write_type_trace(yaml_text: str, playbook: str | None, walk) -> str | None:
     """Phase 5 -- persist a per-branch, per-step type trace to
-    store/verify_traces/<yaml_sha>.json for troubleshooting. Best-effort;
+    data/verify_traces/<yaml_sha>.json for troubleshooting. Best-effort;
     never raises. Returns the path written (str) or None."""
     try:
         import hashlib

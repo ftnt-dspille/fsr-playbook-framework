@@ -1,6 +1,6 @@
 """Reference store endpoints -- for editor autocompletion + Browse tab.
 
-Read-only against ../store/fsr_reference.db. Cheap queries; no caching
+Read-only against ../data/fsr_reference.db. Cheap queries; no caching
 yet (the DB is local SQLite, sub-millisecond reads).
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
 
 # Friendly shorthand types the YAML compiler accepts. Source of truth:
-# python/compiler/resolver.py SHORT_TYPE_TO_FSR. Mirrored here so the
+# fsr_playbooks/compiler/resolver/ SHORT_TYPE_TO_FSR. Mirrored here so the
 # editor doesn't have to import Python.
 STEP_TYPE_HINTS: list[dict[str, str]] = [
     {"name": "start", "detail": "manual / designer trigger"},
@@ -232,7 +232,7 @@ def list_modules() -> list[dict[str, Any]]:
 
 
 # Operator catalog per leaf-value type -- trimmed from
-# `store/QUERY_API.md` §2.1 to surface only the ops that make
+# `data/QUERY_API.md` §2.1 to surface only the ops that make
 # semantic sense for the field type. Keeps the UI from offering
 # `like` on a boolean or `gt` on a picklist.
 _OPERATORS_BY_TYPE: dict[str, list[str]] = {
@@ -560,7 +560,7 @@ def sample_record(module: str, limit: int = 5) -> dict[str, Any]:
 def list_example_prompts() -> list[dict[str, Any]]:
     """Sample chat prompts for testing the agent.
 
-    Sourced from `python/evals/tasks/*.json` so the eval corpus and the
+    Sourced from `tooling/evals/tasks/*.json` so the eval corpus and the
     UI picker stay in lockstep -- adding a task file gives you a new
     option in the chat starter dropdown automatically.
     """

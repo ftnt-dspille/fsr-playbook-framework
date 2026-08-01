@@ -59,7 +59,7 @@
             <li>A run viewer that streams the CLI's output, rebuilds the runtime <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">vars</code> tree, and indexes failures for triage.</li>
           </ol>
           <p class="mt-3 text-[var(--text-muted)]">
-            Everything sits on top of the existing <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">fsrpb</code> CLI and the <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">store/</code> reference DBs -- the same code path agents use over stdio MCP.
+            Everything sits on top of the existing <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">fsrpb</code> CLI and the <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">data/</code> reference DBs -- the same code path agents use over stdio MCP.
           </p>
         </section>
 
@@ -76,16 +76,16 @@
 │  /api/health  /api/yaml/*  /api/playbook/*              │
 │  /api/chat (SSE)  /api/ref/*  /api/examples/*           │
 │  /api/debug/*  (stateful debug-runner sessions)         │
-│  imports → ../python/  (compiler, mcp_server, _env)     │
+│  imports → ../tooling/  (compiler, mcp_server, _env)     │
 └────────────┬──────────────────────┬─────────────────────┘
              │                      │
        in-process              subprocess
              │                      │
    ┌─────────▼──────────┐  ┌────────▼────────────────────┐
-   │ python/compiler/   │  │ python -m cli push|run      │
-   │ python/mcp_server  │  │ → live FortiSOAR over HTTPS │
-   │ python/probes/_env │  │   using .env credentials    │
-   │ store/*.db         │  │                             │
+   │ fsr_playbooks/compiler/   │  │ python -m cli push|run      │
+   │ fsr_playbooks/mcp_server  │  │ → live FortiSOAR over HTTPS │
+   │ tooling/probes/_env │  │   using .env credentials    │
+   │ data/*.db         │  │                             │
    └────────────────────┘  └─────────────────────────────┘`}</pre>
           <p class="mt-3 text-[var(--text-muted)]">
             The web layer never re-implements anything. Authoring tools import the Python modules directly; Push / Run / env-fetch subprocess the existing CLI. The MCP server (<code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">python -m mcp_server</code>) exposes the same Python functions over stdio to outside agents.
@@ -183,7 +183,7 @@
         <section id="inventory">
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Inventory</h2>
           <p>
-            Live audit of every connector, operation, parameter, step type, Jinja filter, picklist, mined playbook, and third-party API entry in <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">store/</code>. Cross-store search returns results across all categories at once. The trust ladder shows which rows are confirmed-live + tested vs. only mined.
+            Live audit of every connector, operation, parameter, step type, Jinja filter, picklist, mined playbook, and third-party API entry in <code class="rounded bg-[var(--bg-elevated)] px-1 text-sm">data/</code>. Cross-store search returns results across all categories at once. The trust ladder shows which rows are confirmed-live + tested vs. only mined.
           </p>
         </section>
 
@@ -296,7 +296,7 @@ OPENAI_API_KEY=...`}</pre>
         <section id="tests">
           <h2 class="mb-3 text-xl font-semibold text-[var(--text-default)]">Running tests</h2>
           <pre class="overflow-auto rounded border border-[var(--border-soft)] bg-[var(--bg-canvas)] p-4 font-mono text-xs leading-tight text-[var(--text-muted)]">{`# Core Python (compiler, MCP tools, debug runner)
-python -m pytest python/tests/ -q
+python -m pytest tooling/tests/ -q
 
 # Web backend
 cd web && python -m pytest tests/ -q
@@ -307,7 +307,7 @@ cd web/frontend && pnpm test`}</pre>
 
         <footer class="mt-12 border-t border-[var(--border-soft)] pt-4 text-xs text-[var(--text-faint)]">
           Source: <code class="rounded bg-[var(--bg-elevated)] px-1">web/PLAN.md</code>,
-          <code class="rounded bg-[var(--bg-elevated)] px-1">CHAT_APP_PLAN.md</code>, and the implementation under <code class="rounded bg-[var(--bg-elevated)] px-1">python/mcp_server</code>, <code class="rounded bg-[var(--bg-elevated)] px-1">web/backend</code>, and <code class="rounded bg-[var(--bg-elevated)] px-1">web/frontend</code>.
+          <code class="rounded bg-[var(--bg-elevated)] px-1">CHAT_APP_PLAN.md</code>, and the implementation under <code class="rounded bg-[var(--bg-elevated)] px-1">fsr_playbooks/mcp_server</code>, <code class="rounded bg-[var(--bg-elevated)] px-1">web/backend</code>, and <code class="rounded bg-[var(--bg-elevated)] px-1">web/frontend</code>.
         </footer>
       </div>
     </div>

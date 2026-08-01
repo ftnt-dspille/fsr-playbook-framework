@@ -15,8 +15,8 @@ Two halves of the evidence:
   the authoring tasks). This script prints the command to gather it.
 
 Run:
-    python python/evals/parity_report.py            # write store/eval_runs/parity_<stamp>.md
-    python python/evals/parity_report.py --stdout    # print only, don't write
+    python tooling/evals/parity_report.py            # write data/eval_runs/parity_<stamp>.md
+    python tooling/evals/parity_report.py --stdout    # print only, don't write
 """
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def gold_rows() -> list[dict[str, Any]]:
 
 def _live_section(live_path: str | None) -> list[str]:
     """Render the hand-author baseline from a persisted live-sample artifact
-    (store/eval_runs/live_handauthor_*.json), if one is supplied. The headline
+    (data/eval_runs/live_handauthor_*.json), if one is supplied. The headline
     finding: the model reaches the same `verified` bar, but only via a multi-turn
     verify-repair loop -- the cost the trace compiler eliminates."""
     if not live_path:
@@ -199,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--stdout", action="store_true",
                     help="print the report only; do not write a file")
     ap.add_argument("--live-results",
-                    help="path to a store/eval_runs/live_handauthor_*.json artifact "
+                    help="path to a data/eval_runs/live_handauthor_*.json artifact "
                          "to render the hand-author baseline half")
     args = ap.parse_args(argv)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())

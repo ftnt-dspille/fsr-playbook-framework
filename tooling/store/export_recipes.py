@@ -1,4 +1,4 @@
-"""Generate `store/RECIPES.md` -- copy-paste YAML templates for the patterns
+"""Generate `data/RECIPES.md` -- copy-paste YAML templates for the patterns
 agents actually need.
 
 Three sources stitched together:

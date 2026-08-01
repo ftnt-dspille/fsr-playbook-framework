@@ -1,5 +1,5 @@
-// Authoritative list of MCP tools exposed by python/mcp_server.
-// Source of truth: the @mcp.tool() decorators across python/mcp_server/tools_*.py.
+// Authoritative list of MCP tools exposed by fsr_playbooks/mcp_server.
+// Source of truth: the @mcp.tool() decorators across fsr_playbooks/mcp_server/tools_*.py.
 // Mirror this when adding/removing tools so /capabilities + /docs stay accurate.
 
 export type Tool = {

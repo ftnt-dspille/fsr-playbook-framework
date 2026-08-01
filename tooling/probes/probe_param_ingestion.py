@@ -14,7 +14,7 @@ received python type per widget.
 
 Run:  PYTHONPATH=python .venv/bin/python -m probes.probe_param_ingestion
 Env:  reuses FSR_BASE_URL / auth from .env (same as the other probes).
-Output: prints the matrix + writes store/probe_results/param_ingestion_coercion.json.
+Output: prints the matrix + writes data/probe_results/param_ingestion_coercion.json.
 
 Requires the connector deployed with `echo_param_types` (>= 0.3.122).
 """

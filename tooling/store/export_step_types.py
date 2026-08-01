@@ -1,4 +1,4 @@
-"""Generate `store/STEP_TYPES.md` -- agent cheatsheet for FortiSOAR playbook
+"""Generate `data/STEP_TYPES.md` -- agent cheatsheet for FortiSOAR playbook
 step types, ordered by real-world frequency on the live instance.
 
 Each step type entry shows:

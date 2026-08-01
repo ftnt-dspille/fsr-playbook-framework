@@ -187,7 +187,7 @@ def generate_recipe(
         return _err("info_json_missing",
                     f"info.json not found at {info_json_path}",
                     suggestions=["check the path",
-                                 "extract from store/rpm_cache/"])
+                                 "extract from data/rpm_cache/"])
     try:
         info = json.loads(p.read_text())
     except Exception as exc:  # noqa: BLE001

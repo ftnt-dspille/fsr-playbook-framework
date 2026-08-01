@@ -8,7 +8,7 @@ equality on every run -- any silent change to step ordering, arg
 shapes, or picklist macros breaks the test loudly instead of leaking
 into a real recipe months later.
 
-Two fixtures live under `python/tests/fixtures/recipes/`:
+Two fixtures live under `tooling/tests/fixtures/recipes/`:
 - `synthetic_threat_feed_info.json` + `.gold.json`
 - `synthetic_data_ingest_info.json` + `.gold.json`
 

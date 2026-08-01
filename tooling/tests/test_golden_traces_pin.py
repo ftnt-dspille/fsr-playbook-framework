@@ -1,6 +1,6 @@
 """Offline regression pin for the committed investigation golden traces.
 
-`python/evals/golden_traces/*.json` are tool-call traces banked from a *live*,
+`tooling/evals/golden_traces/*.json` are tool-call traces banked from a *live*,
 known-good agent run (by `calibrate_investigation.py --capture` or
 `chat_drive.py --capture-fixture`). They encode "this is what a good
 investigation of fixture X looked like".
@@ -77,7 +77,7 @@ def test_golden_trace_still_clears_its_fixture(golden_path: Path):
     task = _tasks_by_name().get(fixture_name)
     assert task is not None, (
         f"golden {golden_path.name} references unknown fixture {fixture_name!r} "
-        "-- add the fixture under python/evals/tasks/ or remove the golden"
+        "-- add the fixture under tooling/evals/tasks/ or remove the golden"
     )
     assert task.mode == "investigation", (
         f"{fixture_name}: golden pin only applies to investigation fixtures"

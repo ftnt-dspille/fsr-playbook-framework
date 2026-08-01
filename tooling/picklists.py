@@ -6,7 +6,7 @@ Replaces the runner's hardcoded `_MODULE_PICKLIST_FIELDS` table. Used by:
   - compiler         (future: compile-time validation of picklist values)
 
 Discovery strategy for `(module, field) → picklist_name`:
-  1. Check on-disk cache (store/picklist_name_map.json).
+  1. Check on-disk cache (data/picklist_name_map.json).
   2. Read valid item values from local DB (`module_fields.picklist_options`).
   3. Live-fetch all picklist names from `/api/3/picklist_names`.
   4. Score each picklist by Jaccard overlap of itemValues vs. valid values;

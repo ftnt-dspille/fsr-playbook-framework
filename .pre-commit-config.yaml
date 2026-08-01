@@ -13,7 +13,10 @@ repos:
       - id: ruff
         name: ruff (lint)
         # No --fix: fail fast and let the dev decide, matching the pytest hook.
-        files: '^(python/|fsr_playbooks/)'
+        # `tooling/` (not the pre-REORG `python/`) -- this pattern still named
+        # the deleted directory, so ruff silently skipped every tooling/ file
+        # at commit time while `make lint` checked it.
+        files: '^(tooling/|fsr_playbooks/)'
         # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
         # a `--no-verify` commit that bypassed the pre-commit gate -- the actual
         # root cause of the 0.4.15 CI ruff break). The push-time pass is a ~1s
@@ -72,7 +75,7 @@ repos:
         # fsr_playbooks/ holds the compiler + MCP tools the suite exercises, and
         # tooling/ holds the chat-intelligence code that tooling/tests covers -- a
         # change in either must trigger the suite (tooling/ was missing before).
-        files: '^(python/|fsr_playbooks/|tooling/|store/schema\.sql|examples/|pytest\.ini)'
+        files: '^(fsr_playbooks/|tooling/|data/schema\.sql|examples/|pytest\.ini)'
         # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
         # a `--no-verify` commit that bypassed pre-commit -- same hole the ruff
         # hook's pre-push stage exists for). ~14s on a code push; the safety net

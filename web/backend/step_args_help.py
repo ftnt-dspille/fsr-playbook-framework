@@ -3,8 +3,8 @@
 Powers the Monaco hover popup over `arguments:` (and child keys) in the
 chat-app editor. Source-of-truth for what each friendly step type
 accepts, drawn from:
-  - the resolver normalizers in `python/compiler/resolver.py`,
-  - the validator co-presence rules in `python/compiler/validator.py`,
+  - the resolver normalizers in `fsr_playbooks/compiler/resolver/`,
+  - the validator co-presence rules in `fsr_playbooks/compiler/validator.py`,
   - corpus findings in `MI_DECISION_VALIDATION_AUDIT.md`,
   - the canonical step-type catalog in `MANUAL_INPUT.md`.
 

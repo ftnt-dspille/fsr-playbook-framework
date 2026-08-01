@@ -1,4 +1,4 @@
-"""Generate `store/FSR_CUSTOM_JINJA.md` -- agent-facing cheatsheet for the
+"""Generate `data/FSR_CUSTOM_JINJA.md` -- agent-facing cheatsheet for the
 filters / globals / tests that ship with FortiSOAR's workflow engine and
 aren't in stock Jinja2 or Ansible.
 

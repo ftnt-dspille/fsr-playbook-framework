@@ -203,7 +203,7 @@
       body:
         'Run the same authoring tasks across Claude, GPT, and a local model. Score on compile, resolve, dry-run, and gold-fixture match. Turn "LLM-agnostic" from a claim into a measurement.',
       notes: [
-        'python/eval/harness.py runs three storyboards × three models',
+        'tooling/evals/harness.py runs three storyboards × three models',
         'Output: a per-model rubric you can show to stakeholders'
       ]
     },
@@ -231,7 +231,7 @@
       code: 'PRMT',
       title: 'Externalized system prompt',
       body:
-        'Move the implicit web-app prompt to python/agent/system_prompt.md. Document the contract: tools, success-ladder discipline, when to ask the user, what counts as done.',
+        'Move the implicit web-app prompt to tooling/agent/system_prompt.md. Document the contract: tools, success-ladder discipline, when to ask the user, what counts as done.',
       notes: ['Required for any LLM to drive the product consistently']
     },
     {

@@ -1,6 +1,6 @@
 """Declarative task fixtures for the eval harness.
 
-Each task is a JSON file under `python/eval/tasks/` shaped:
+Each task is a JSON file under `tooling/evals/tasks/` shaped:
 
     {
       "name": "manual_alert_create",

@@ -11,8 +11,8 @@ Pairs with:
   * the SOC Assistant widget -- open it on the printed IRI / deep-link to triage.
 
 Usage:
-    python python/seed_noc_alert.py --scenario vpn_tunnel_down --dry-run
-    python python/seed_noc_alert.py --scenario vpn_tunnel_down     # live (needs .env)
+    python tooling/scratch/seed_noc_alert.py --scenario vpn_tunnel_down --dry-run
+    python tooling/scratch/seed_noc_alert.py --scenario vpn_tunnel_down     # live (needs .env)
 """
 from __future__ import annotations
 

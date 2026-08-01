@@ -62,7 +62,7 @@ def picklist_for_field(module: str, field: str) -> dict[str, Any]:
     values pulled from the local module_fields cache. Tries heuristic
     names first (e.g. 'AlertStatus' for alerts.status), then falls back
     to a Jaccard-overlap match against all live picklist values. Result
-    persists to store/picklist_name_map.json.
+    persists to data/picklist_name_map.json.
 
     Args:
         module: lowercase module name, e.g. 'alerts', 'incidents'.

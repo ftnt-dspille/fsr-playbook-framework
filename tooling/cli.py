@@ -20,7 +20,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-# Local sibling modules (recover.py, picklists.py, …) and the legacy `python/`
+# Local sibling modules (recover.py, picklists.py, …) and the legacy `tooling/`
 # layout live alongside this file, not in an installed package. Put this dir on
 # sys.path so deferred `from recover import …` / `from probes import …` resolve
 # no matter how the CLI was launched: `python cli.py`, `python -m python.cli`,
@@ -466,7 +466,7 @@ def cmd_push(args: argparse.Namespace) -> int:
                           recursively upserts children, sidestepping
                           Doctrine cascade-persist 409s. No hard-delete.
                           Foreign workflows under the collection are
-                          preserved. See ``python/preflight.py``.
+                          preserved. See ``tooling/preflight.py``.
       create            -- POST only. Fails with 409 if UUID/name collides
                           (live or soft-deleted).
       update            -- PUT only. Fails with 404 if no record.

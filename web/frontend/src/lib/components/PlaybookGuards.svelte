@@ -4,7 +4,7 @@
    * runtime gotchas at edit-time, before the user clicks Save.
    *
    * Two checks today; both stem from real failures the round-trip
-   * probe surfaced (see `python/probes/probe_round_trip.py`):
+   * probe surfaced (see `tooling/probes/probe_round_trip.py`):
    *
    *   1. Multi-trigger detected -- FSR allows exactly one trigger per
    *      playbook. The compiler rejects this, but only at save time;

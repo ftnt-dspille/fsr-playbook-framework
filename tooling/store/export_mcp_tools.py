@@ -1,4 +1,4 @@
-"""Generate store/MCP_TOOLS.md from mcp_server.py via AST.
+"""Generate data/MCP_TOOLS.md from mcp_server.py via AST.
 
 Run: python tooling/store/export_mcp_tools.py
 

@@ -12,9 +12,9 @@ see in the demo is what the connector does. It doubles as the manual
 harness behind the investigation-recall eval (scoring.mode='investigation').
 
 Usage:
-    uv run python python/demo_hunt.py \
+    uv run python tooling/scratch/demo_hunt.py \
         --record alerts:d39ecc9a-2968-42d5-948d-ce96fd76b227
-    uv run python python/demo_hunt.py --prompt "Investigate ... and stage containment"
+    uv run python tooling/scratch/demo_hunt.py --prompt "Investigate ... and stage containment"
 
 Needs a live FSR (.env: FSR_BASE_URL/creds) and ANTHROPIC_API_KEY.
 """

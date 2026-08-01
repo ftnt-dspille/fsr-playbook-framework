@@ -13,7 +13,7 @@ Run:  PYTHONPATH=python .venv/bin/python -m probes.probe_set_variable_coercion
 Env:  reuses FSR_BASE_URL / FSR_PORT / FSR_USERNAME+PASSWORD (or FSR_API_TOKEN)
       from .env (same as the other probes).
 
-Output: prints the matrix and writes store/probe_results/set_variable_coercion.json.
+Output: prints the matrix and writes data/probe_results/set_variable_coercion.json.
 Cleans up the throwaway collection (hardDelete) unless PROBE_NO_CLEANUP=1.
 """
 from __future__ import annotations

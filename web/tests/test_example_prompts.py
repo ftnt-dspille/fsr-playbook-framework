@@ -1,6 +1,6 @@
 """GET /api/ref/example-prompts surfaces the eval-task corpus to the
 chat UI's prompt picker. Adding/removing a JSON file under
-`python/evals/tasks/` must show up here without code changes."""
+`tooling/evals/tasks/` must show up here without code changes."""
 from fastapi.testclient import TestClient
 
 from backend.app import app

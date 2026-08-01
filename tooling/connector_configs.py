@@ -7,7 +7,7 @@ created out-of-band on each FSR box. This module:
 
   - Lists configurations for a connector (live, via /api/integration/connectors/).
   - Resolves friendly config name → config_id (UUID).
-  - Caches the resolution to `store/connector_config_map.json` so repeat
+  - Caches the resolution to `data/connector_config_map.json` so repeat
     compiles don't need a live API.
 
 Used by:

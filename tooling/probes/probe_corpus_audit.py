@@ -32,14 +32,14 @@ from .common import REPO_ROOT
 PROBE_NAME = "probe_corpus_audit"
 
 # Universal step-level wrappers allowed across every step type.
-# Mirrors python/compiler/resolver/catalog.py:_UNIVERSAL_STEP_KEYS.
+# Mirrors fsr_playbooks/compiler/resolver/catalog.py:_UNIVERSAL_STEP_KEYS.
 UNIVERSAL_STEP_KEYS: set[str] = {
     "when", "for_each", "do_until", "ignore_errors", "message", "name",
     "agent", "agentId", "apply_async", "pass_input_record",
     "pass_parent_env", "mock_result", "useMockOutput", "condition",
 }
 
-# Canonical-keys snapshot, mined from python/compiler/resolver/normalizers.py.
+# Canonical-keys snapshot, mined from fsr_playbooks/compiler/resolver/normalizers.py.
 # Keyed by FSR's internal step_type_name (the column value in
 # playbook_steps.step_type_name). Update this map when the corresponding
 # _FRIENDLY / _CANONICAL set in the resolver changes. The audit's whole
@@ -110,7 +110,7 @@ EXPECTED_KEYS: dict[str, dict[str, set[str]]] = {
 }
 
 # Friendly→canonical projection used by the resolver
-# (python/compiler/resolver/picklists.py:_INPUT_FIELD_KINDS). Each value
+# (fsr_playbooks/compiler/resolver/picklists.py:_INPUT_FIELD_KINDS). Each value
 # tuple is (formType, dataType, type, templateUrl). Drift against the
 # corpus is what I14 audits.
 _WEBADDR = "app/components/form/fields/webAddress.html"

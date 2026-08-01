@@ -32,7 +32,7 @@ so it stays safe by default.
 
 Creds: the live tools self-load `.env` from the repo root via `probes._env`.
 
-Run:    python python/fsr_read_mcp.py        (stdio transport)
+Run:    python tooling/fsr_read_mcp.py        (stdio transport)
 Config: registered in .claude/settings.json as the `fsr-read` MCP server.
 """
 from __future__ import annotations
@@ -41,8 +41,8 @@ import os
 import sys
 from pathlib import Path
 
-# Make `fsr_playbooks` (repo root) and `probes` (python/) importable, and run from
-# the repo root so store/ + .env relative paths resolve regardless of cwd.
+# Make `fsr_playbooks` (repo root) and `probes` (tooling/) importable, and run from
+# the repo root so data/ + .env relative paths resolve regardless of cwd.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 for _p in (str(REPO_ROOT), str(REPO_ROOT / "tooling")):
     if _p not in sys.path:

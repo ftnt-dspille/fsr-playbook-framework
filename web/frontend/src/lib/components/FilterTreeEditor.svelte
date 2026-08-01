@@ -2,7 +2,7 @@
   /**
    * Recursive AND/OR filter-tree editor for triggers + FindRecords.
    *
-   * Wire shape (mirrors FortiSOAR's Query API -- see store/QUERY_API.md
+   * Wire shape (mirrors FortiSOAR's Query API -- see data/QUERY_API.md
    * §2.2 "Logic groups"):
    *
    *   { logic: "AND" | "OR",

@@ -6,7 +6,7 @@ endpoint set so the same playbook follows the user across the toggle.
 
 Storage layout:
 - `examples/*.yaml` on disk → read-only "example" kind.
-- SQLite-backed drafts in `store/drafts.db`:
+- SQLite-backed drafts in `data/drafts.db`:
     drafts(name PK, yaml, created_ts, updated_ts)
     draft_revisions(id PK, draft_name FK, yaml, reason, is_auto, created_ts)
 

@@ -190,7 +190,7 @@
   }
 
   // Sample prompts for testing the agent. Sourced from the eval-task
-  // corpus (python/evals/tasks/*.json) via /api/ref/example-prompts so
+  // corpus (tooling/evals/tasks/*.json) via /api/ref/example-prompts so
   // the picker stays in sync with the harness -- adding a task file
   // shows up here automatically.
   let examplePrompts = $state<ExamplePrompt[]>([]);

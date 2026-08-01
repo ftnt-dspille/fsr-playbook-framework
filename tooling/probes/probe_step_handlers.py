@@ -1,6 +1,6 @@
 """probe_step_handlers -- ingest workflow.eval.FUNCTION_MAP signatures.
 
-Source: `store/incoming/function_map.json`, produced by running
+Source: `data/incoming/function_map.json`, produced by running
 `scripts/internal/dump_function_map.py` on the FSR appliance.
 
 The 43 step types exposed by `/api/3/workflow_step_types/` carry an

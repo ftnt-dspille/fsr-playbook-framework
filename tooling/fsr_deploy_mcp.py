@@ -14,7 +14,7 @@ Connector location: `$FSR_CONNECTOR_DIR`, else the usual sibling layout
 Creds for the live check / install come from the framework `.env` (the
 connector's deploy.sh sources it itself).
 
-Run:    python python/fsr_deploy_mcp.py        (stdio)
+Run:    python tooling/fsr_deploy_mcp.py        (stdio)
 Config: register in .mcp.json / .claude/settings.json as `fsr-deploy`.
 """
 from __future__ import annotations

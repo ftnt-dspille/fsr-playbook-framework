@@ -6,7 +6,7 @@ is deterministic, so the same task corpus can be rerun against new
 models without changing the scoring.
 
 Run archive: `save_run(matrix)` writes the matrix + a markdown report
-to `store/eval_runs/<run_id>/`. `delta_vs(prior_run_id, current)` diffs
+to `data/eval_runs/<run_id>/`. `delta_vs(prior_run_id, current)` diffs
 two runs cell-by-cell so a CI hook can red-flag regressions.
 """
 from __future__ import annotations
@@ -441,7 +441,7 @@ def _new_run_id() -> str:
 
 
 def save_run(matrix: dict[str, Any], run_id: str | None = None) -> Path:
-    """Persist the matrix under store/eval_runs/<run_id>/.
+    """Persist the matrix under data/eval_runs/<run_id>/.
 
     Writes matrix.json + report.md. Returns the run directory."""
     run_id = run_id or _new_run_id()

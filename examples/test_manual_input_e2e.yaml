@@ -22,7 +22,7 @@ playbooks:
           before_input: "ready"
 
       - name: Choose action
-        # Schema mirrored from corpus minimum (store/MANUAL_INPUT.md §2).
+        # Schema mirrored from corpus minimum (data/MANUAL_INPUT.md §2).
         # All listed fields are present on every working ManualInput step
         # in the live corpus; omitting them drops the run with a malformed-
         # URL error in the manual-input handler.

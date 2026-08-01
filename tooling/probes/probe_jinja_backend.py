@@ -1,6 +1,6 @@
 """probe_jinja_backend -- ingest the introspection dump from FSR's workflow env.
 
-Source: `store/incoming/filters.json`, produced by running
+Source: `data/incoming/filters.json`, produced by running
 `scripts/internal/dump_jinja_filters.py` on the FSR appliance and scp'ing back.
 
 This is the canonical truth -- `inspect.signature()` on the actual Python

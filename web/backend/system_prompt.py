@@ -1,6 +1,6 @@
 """System prompt loader.
 
-The prompt body lives in `python/agent/system_prompt.md` so that the
+The prompt body lives in `tooling/agent/system_prompt.md` so that the
 web backend, the MCP-driven CLI agent, and the eval harness all read
 the SAME prompt without duplication. Keeping the import surface here
 (`from backend.system_prompt import SYSTEM_PROMPT`) means existing

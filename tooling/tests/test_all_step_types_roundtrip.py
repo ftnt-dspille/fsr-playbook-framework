@@ -30,7 +30,6 @@ root; it is skipped otherwise. Run it with ``pytest -m live``.
 from __future__ import annotations
 
 import os
-import re
 import time
 from pathlib import Path
 
@@ -162,7 +161,7 @@ def test_offline_semantic_roundtrip_clean(db_path):
     res = compile_yaml(YAML_PATH.read_text(), db_path)
     assert res.fsr_json is not None
     ok, diffs = roundtrip(res.fsr_json, db_path)
-    assert ok, f"offline roundtrip diffs:\n  " + "\n  ".join(diffs[:20])
+    assert ok, "offline roundtrip diffs:\n  " + "\n  ".join(diffs[:20])
 
 
 def test_offline_decompile_read_flags_match_matrix(db_path):
@@ -309,7 +308,7 @@ def test_live_full_decompile_roundtrip(live_client, db_path):
     # 5. Offline semantic round-trip on the pulled canonical too (the recompiled
     #    envelope must be self-consistent under decompile->reemit).
     ok, diffs = roundtrip(cp.fsr_json, db_path)
-    assert ok, f"pulled-canonical roundtrip diffs:\n  " + "\n  ".join(diffs[:20])
+    assert ok, "pulled-canonical roundtrip diffs:\n  " + "\n  ".join(diffs[:20])
 
 
 # ---------------------------------------------------------------------------

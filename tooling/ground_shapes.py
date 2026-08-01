@@ -48,7 +48,7 @@ def _fetch_env_raw(pk: str) -> dict:
         try:
             r = cl.session.get(cl.base_url.rstrip("/") + ep,
                                verify=cl.verify_ssl, timeout=30)
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             continue
         if r.status_code == 200:
             d = r.json()

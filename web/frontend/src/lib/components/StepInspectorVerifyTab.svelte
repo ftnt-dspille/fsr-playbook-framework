@@ -134,7 +134,7 @@
     (node.arguments as Record<string, unknown> | undefined)?.mock_result !== undefined
   );
 
-  // Mirrors `_SAFE_NAME_PREFIXES` in python/mcp_server.py -- kept local so
+  // Mirrors `_SAFE_NAME_PREFIXES` in fsr_playbooks/mcp_server/tools_discovery.py -- kept local so
   // we can pre-grey the Run button without a round-trip. The server still
   // gates destructive ops via `requires_confirmation`, so this is just UX.
   const SAFE_PREFIXES = [

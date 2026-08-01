@@ -1,4 +1,4 @@
-"""Generate `store/CONNECTORS.md` -- agent cheatsheet for every connector,
+"""Generate `data/CONNECTORS.md` -- agent cheatsheet for every connector,
 operation, and parameter known to the live FSR instance.
 
 Output shape is optimized for grep + LLM context: one heading per connector

@@ -18,7 +18,7 @@ set -euo pipefail
 # Resolve repo root + the python entrypoint regardless of where the
 # hook fires from (worktree vs main checkout).
 ROOT="$(git rev-parse --show-toplevel)"
-PY="${ROOT}/python/cli.py"
+PY="${ROOT}/tooling/cli.py"
 
 if [[ ! -f "$PY" ]]; then
   echo "fsrpb pre-commit: cli.py not found at $PY -- skipping" >&2

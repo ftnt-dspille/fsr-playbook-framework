@@ -2,7 +2,7 @@
  * Deterministic English summarizer for FSR filter trees.
  *
  * The filter shape is the same nested AND/OR tree the FSR query API
- * uses (see `store/QUERY_API.md` §2.2). We turn it into one short
+ * uses (see `data/QUERY_API.md` §2.2). We turn it into one short
  * sentence the user can read at a glance -- "on create of high-severity
  * phishing alerts that aren't escalated" instead of dumping the JSON.
  *

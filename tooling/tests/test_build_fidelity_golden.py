@@ -1,6 +1,6 @@
 """B4 -- frozen golden pin for the live-proven triage→build chain.
 
-`python/tests/fixtures/build_goldens/b4_triage_build.json` is a FROZEN capture of
+`tooling/tests/fixtures/build_goldens/b4_triage_build.json` is a FROZEN capture of
 a real, known-good live run (connector 0.3.126, session `loop-f279bdb5`,
 2026-06-07) -- the run that proved `grounding 1.0` after muting the
 `siem_events_for_incident` / `_siem_pubv2_query` internal `execute_api_request`

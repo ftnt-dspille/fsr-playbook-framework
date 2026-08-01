@@ -1,7 +1,7 @@
 """Corpus-mined step-type examples + deterministic English summaries.
 
 Powers the Examples tab on every step type. Reads ``playbook_steps``
-(the trained ``store/fsr_reference.db``) and:
+(the trained ``data/fsr_reference.db``) and:
 
   1. Maps the friendly step type the visual editor uses
      (``decision``, ``manual_input``, …) to the corpus's

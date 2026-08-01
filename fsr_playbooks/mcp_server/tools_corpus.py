@@ -88,7 +88,7 @@ def review_chat_session(session_id: str) -> dict[str, Any]:
     tool results, UUID step ids, set_variable typos, missing
     `collection:` recurrences, unknown connector/op references, and
     sessions that never deployed. Source-of-truth for the patterns
-    is `python/chat_review.py`.
+    is `tooling/chat_review.py`.
 
     Returns: `{session_id, headline, findings[], stats}`. Each finding
     has `{severity: error|warning|info, code, title, detail, turn?,
@@ -174,7 +174,7 @@ def find_step_examples(step_type: str,
     """Search the `playbook_steps` corpus for real-world examples of a step type.
 
     Backed by `probe_playbook_steps`, which indexes every step from every
-    FSR playbook JSON export on disk (SP bundles + store/incoming drops).
+    FSR playbook JSON export on disk (SP bundles + data/incoming drops).
     Use this when tightening linting/validation to mine real-world
     argument shapes -- e.g. "show me every ManualInput that uses
     formType=lookup" or "every Decision with a timeout block".
