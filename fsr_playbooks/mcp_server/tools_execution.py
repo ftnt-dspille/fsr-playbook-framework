@@ -1978,7 +1978,12 @@ def push_playbook(yaml_text: str,
          action: "put"|"post"|"purge_post"} on success.
         {ok: false, errors: [...]} on compile failure.
         {ok: false, code: "would_drop_fields", dropped: [...], error: str}
-         when the write would delete live data.
+         when the write would delete live data. Re-send the exact `dropped`
+         paths as `acknowledged_drops` if the deletion is intended.
+        {ok: false, code: "live_unreadable", dropped: [], error: str} when the
+         appliance's current state could not be established. NOT the same as
+         "nothing would be dropped": do NOT retry with acknowledged_drops --
+         no acknowledgement can clear it. Re-read the live playbook first.
         {ok: false, error: str} on push failure.
     """
     sys.path.insert(0, str(REPO_ROOT / "tooling"))
@@ -2019,7 +2024,12 @@ def push_playbook(yaml_text: str,
                           f"a shape we can diff against: {e}")}
     verdict = check_prewrite(live, result.fsr_json, acknowledged_drops)
     if not verdict.ok:
-        return {"ok": False, "code": "would_drop_fields",
+        # Propagate the verdict's OWN class. Hardcoding "would_drop_fields"
+        # here reported an unreadable live pull -- which carries an empty
+        # `dropped` -- as a field-loss refusal, so a caller following the
+        # documented remedy retried with an empty acknowledgement against a
+        # guard that can never accept one.
+        return {"ok": False, "code": verdict.code or "would_drop_fields",
                 "dropped": verdict.dropped, "error": verdict.message}
 
     import tempfile

@@ -21,7 +21,9 @@ Policy: **fail closed, and name the dropped path.** A drop is not always a bug -
 "delete the notify step" is a perfectly good request -- so the guard does not try
 to read intent, which it cannot do reliably. It refuses, reports exactly which
 paths disappeared, and lets the caller re-issue the write with those paths named
-in `acknowledged`. That turns a silent deletion into a deliberate one.
+in `acknowledged` (`acknowledged_drops` at the `push_playbook` boundary -- keep
+the user-facing copy naming the parameter the caller actually passes). That
+turns a silent deletion into a deliberate one.
 
     verdict = check_prewrite(live_json, outgoing_json, db_path)
     if not verdict.ok:
@@ -48,6 +50,20 @@ class PreWriteVerdict:
     acknowledged: list[str] = field(default_factory=list)
     """Dropped paths the caller explicitly named, so they were allowed."""
     message: str = ""
+    code: str = ""
+    """Machine-readable refusal class. Empty when `ok`.
+
+    Callers BRANCH on this, so the classes must not be conflated. In
+    particular an unreadable live pull is NOT a field-loss refusal: it carries
+    an empty `dropped`, so a caller that saw one code for both would read
+    "nothing dropped" and retry with an empty acknowledgement forever -- a
+    refusal that can never be satisfied by the remedy it appears to offer.
+
+    `would_drop_fields`  -- named paths would be deleted; acknowledgeable.
+    `live_unreadable`    -- we could not establish what is live; NOT
+                            acknowledgeable, and never satisfiable by retrying
+                            with acknowledgements.
+    """
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +71,7 @@ class PreWriteVerdict:
             "dropped": list(self.dropped),
             "acknowledged": list(self.acknowledged),
             "message": self.message,
+            "code": self.code,
         }
 
 
@@ -183,9 +200,12 @@ def check_prewrite(
     except UnexpandedRelationshipsError as exc:
         return PreWriteVerdict(
             ok=False,
+            code="live_unreadable",
             message=(
                 f"{exc} Re-read the collection with `?$relationships=true` and "
-                "retry; refusing to overwrite a live playbook we could not read."
+                "retry; refusing to overwrite a live playbook we could not read. "
+                "Acknowledgements cannot clear this -- there is nothing to "
+                "acknowledge until the live document can be read."
             ),
         )
     except Exception as exc:
@@ -194,6 +214,7 @@ def check_prewrite(
         # situation in which a blind overwrite does the most damage.
         return PreWriteVerdict(
             ok=False,
+            code="live_unreadable",
             message=(
                 f"pre-write safety check could not run ({type(exc).__name__}: {exc}); "
                 "refusing the save rather than overwriting the live playbook unchecked"
@@ -214,11 +235,12 @@ def check_prewrite(
         ok=False,
         dropped=unacked,
         acknowledged=acked,
+        code="would_drop_fields",
         message=(
             f"refusing to save: {len(unacked)} field(s) present in the live playbook "
             f"are missing from what you are about to write:\n  - {listed}{more}\n"
             "If a deletion IS what was asked for, re-issue the save with those exact "
-            "paths in `acknowledged`. Otherwise re-read the live playbook and "
+            "paths in `acknowledged_drops`. Otherwise re-read the live playbook and "
             "re-apply your edit on top of it -- do not write a partial document."
         ),
     )

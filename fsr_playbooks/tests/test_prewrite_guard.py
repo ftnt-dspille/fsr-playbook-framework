@@ -194,6 +194,108 @@ def test_acknowledging_one_drop_does_not_permit_another():
 
 
 # --------------------------------------------------------------------------- #
+# The refusal must say WHICH KIND it is, and offer a remedy that exists.
+#
+# Both classes carry `ok: False`, but only one is acknowledgeable. They were
+# once reported under a single code, distinguishable only by `dropped` being
+# empty -- so a caller doing the documented thing (re-send the dropped paths)
+# retried an unreadable-live refusal with an empty acknowledgement, forever.
+# --------------------------------------------------------------------------- #
+
+def _unexpanded(name: str = "linear_baseline") -> dict:
+    """A live pull that came back without `?$relationships=true`."""
+    live = _load(name)
+    live["data"][0].pop("workflows", None)
+    return live
+
+
+def test_field_loss_and_unreadable_live_are_different_codes():
+    """The two refusals must not be conflated -- their remedies differ."""
+    live = _load("linear_baseline")
+    outgoing = copy.deepcopy(live)
+    _workflows(outgoing)[0]["steps"].pop()
+
+    loss = check_prewrite(live, outgoing)
+    unreadable = check_prewrite(_unexpanded(), _load("linear_baseline"))
+
+    assert loss.code == "would_drop_fields"
+    assert unreadable.code == "live_unreadable"
+    assert loss.code != unreadable.code, (
+        "one code for both refusals leaves `dropped == []` as the only "
+        "discriminator, which reads as 'nothing was dropped'"
+    )
+
+
+def test_unreadable_live_is_not_acknowledgeable():
+    """No acknowledgement may satisfy a refusal we cannot even diff."""
+    for ack in ([], ["anything"], None,
+                ["collection.workflows[Simple Note].steps[Set B]"]):
+        verdict = check_prewrite(_unexpanded(), _load("linear_baseline"), ack)
+        assert not verdict.ok, f"acknowledgement {ack!r} cleared an unreadable live pull"
+        assert verdict.code == "live_unreadable"
+        assert verdict.dropped == []
+
+
+def test_unexpanded_live_refuses_a_total_wipe():
+    """The 8dbf8b9 case: unexpanded live must not read as 'nothing there'."""
+    wipe = _load("linear_baseline")
+    wipe["data"][0]["workflows"] = []
+    verdict = check_prewrite(_unexpanded(), wipe)
+    assert not verdict.ok, "an unexpanded pull approved wiping every workflow"
+    assert verdict.code == "live_unreadable"
+
+
+def test_field_loss_message_names_the_real_parameter():
+    """The remedy must name the parameter the caller actually passes.
+
+    `check_prewrite`'s kwarg is `acknowledged`, but the surface a user meets is
+    `push_playbook(acknowledged_drops=...)`. The copy shipped naming the former,
+    so following it verbatim raised an unknown-argument error.
+    """
+    import inspect
+
+    from fsr_playbooks.mcp_server.tools_execution import push_playbook
+
+    live = _load("linear_baseline")
+    outgoing = copy.deepcopy(live)
+    _workflows(outgoing)[0]["steps"].pop()
+    message = check_prewrite(live, outgoing).message
+
+    param = "acknowledged_drops"
+    assert param in inspect.signature(push_playbook).parameters
+    assert f"`{param}`" in message, (
+        f"refusal copy must name `{param}`, the parameter the caller passes"
+    )
+
+
+def test_the_documented_remedy_actually_clears_the_refusal():
+    """End-to-end on the advice as written: re-send `dropped`, get a pass."""
+    live = _load("linear_baseline")
+    outgoing = copy.deepcopy(live)
+    _workflows(outgoing)[0]["steps"].pop()
+
+    refused = check_prewrite(live, outgoing)
+    assert refused.code == "would_drop_fields"
+    assert refused.dropped, "a field-loss refusal must name what it would drop"
+
+    retried = check_prewrite(live, outgoing, refused.dropped)
+    assert retried.ok, retried.message
+
+
+def test_code_is_empty_when_the_write_is_allowed():
+    """`code` is a refusal class; a pass must not carry one."""
+    live = _load("linear_baseline")
+    assert check_prewrite(live, copy.deepcopy(live)).code == ""
+    assert check_prewrite(None, live).code == ""
+
+
+def test_code_crosses_the_wire():
+    """Callers branch on `code`, so `as_dict` must carry it."""
+    payload = check_prewrite(_unexpanded(), _load("linear_baseline")).as_dict()
+    assert json.loads(json.dumps(payload))["code"] == "live_unreadable"
+
+
+# --------------------------------------------------------------------------- #
 # Fail-closed: an unusable comparison must refuse, not shrug.
 # --------------------------------------------------------------------------- #
 
