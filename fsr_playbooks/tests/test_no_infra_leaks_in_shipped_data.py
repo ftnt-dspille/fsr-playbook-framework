@@ -5,9 +5,9 @@ in it is published to PyPI; `tooling/tests/fixtures/tooling_reference.db` is
 tracked on the public GitHub mirror. Both are assembled from a dev cache synced
 off a live lab appliance, so live URLs ride along unless something stops them.
 
-Both had already leaked when this test was written: 7,000+ `https://10.99.x.x`
-values in the fixture's `playbook_steps.source_path`, plus the lab admin
-account, and a lab IP inside a `step_examples` code sample in the shipped DB.
+Both had already leaked when this test was written: 7,000+ live appliance URLs
+in the fixture's `playbook_steps.source_path`, plus the lab admin account, and
+a lab IP inside a `step_examples` code sample in the shipped DB.
 The pre-commit guard skipped them, because it read only text files and git
 renders a sqlite blob as "Binary files differ" -- no added lines, nothing to
 scan, silent pass.

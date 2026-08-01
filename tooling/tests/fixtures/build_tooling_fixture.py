@@ -209,7 +209,7 @@ def main() -> int:
 
     # 7. scrub infra strings. The dev cache this is assembled from is synced
     # from a live lab appliance, so its rows carry live URLs -- `source_path`
-    # alone contributed 7,000+ `https://10.99.x.x` values, and an earlier build
+    # alone contributed 7,000+ live appliance URLs, and an earlier build
     # of this fixture published them to the public GitHub mirror. Scrubbing
     # here, rather than only fixing the committed file once, is what keeps a
     # regeneration from quietly reintroducing them. It raises if anything

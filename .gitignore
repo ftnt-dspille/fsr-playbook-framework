@@ -67,6 +67,11 @@ data/fsrpb-chat-sess/
 # These are local-only artifacts; the shipped slim catalog DB is force-added above.
 data/probe_results/
 data/incoming/
+# Lab-specific deny patterns for the infra-leak guard. NEVER commit: naming the
+# lab subnet / appliance domains in a tracked file publishes them on the public
+# mirror, which is precisely what the guard exists to prevent.
+scripts/infra_patterns.local.json
+
 data/eval_runs/
 data/fsr_reference.json
 data/drafts.db

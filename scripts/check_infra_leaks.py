@@ -15,16 +15,27 @@ and passed it. There is no cheap way to diff a binary's *added* strings, so any
 match anywhere in the blob is reported -- a whole-file scan on a file format
 that has no line structure to begin with.
 
-What it blocks:
-  - live appliance IPs in the lab range  (10.99.x.x)
-  - any internal Fortinet subdomain host (*.fortinet.com / *.fortinet.net),
-    which covers the internal GitLab box, fortilab, and fndn hosts
-  - FortiCloud instance hosts            (*.forticloud.com)
+What it blocks, in two layers:
+
+  - **generic** (in this file): vendor product subdomains --
+    *.fortinet.com / *.fortinet.net / *.forticloud.com. Public names, so
+    stating them here discloses nothing.
+  - **local** (`scripts/infra_patterns.local.json`, gitignored): the specific
+    lab subnet, appliance domains, and account names.
+
+The split is the point. Writing a lab subnet or an internal domain into a
+tracked file publishes it on the public mirror -- handing a reader of this
+repo the exact strings to go looking for, via the guard meant to protect
+them. So the shape of the rule is public and the values stay local.
 
 Allowed (public, safe to ship):
   - repo.fortisoar.fortinet.com          (public connector repo)
   - sample @fortinet.com email addresses (no dot before "fortinet", so the
     host regex below never matches them)
+
+Without the local file only the generic layer applies, and the guard says so
+on every run. A fresh public clone is therefore usable, and an overlay that
+has gone missing is visible rather than silent.
 
 Run automatically via .pre-commit-config.yaml; run manually with:
     python scripts/check_infra_leaks.py            # scan staged changes
@@ -32,16 +43,17 @@ Run automatically via .pre-commit-config.yaml; run manually with:
 """
 from __future__ import annotations
 
+import json
+import pathlib
 import re
 import subprocess
 import sys
 
 DENY = [
-    re.compile(r"\b10\.99\.\d{1,3}\.\d{1,3}\b"),
+    # Vendor product subdomains. Public and generic -- naming these discloses
+    # nothing, and they are the rules a public contributor still benefits from.
     re.compile(r"\b[a-z0-9][a-z0-9.-]*\.fortinet\.(?:com|net)\b", re.IGNORECASE),
     re.compile(r"\b[a-z0-9][a-z0-9.-]*\.forticloud\.com\b", re.IGNORECASE),
-    # Internal lab admin account -- never ship as an example credential.
-    re.compile(r"\bcsadmin\b", re.IGNORECASE),
 ]
 # Known-public strings that match a DENY pattern but are intentionally shipped.
 ALLOW = [
@@ -60,17 +72,82 @@ ALLOW = [
 # So binaries are scanned only for markers that are unambiguously OURS and
 # could not have arrived from Fortinet: the lab subnet, the lab-internal
 # domains, and the lab admin account.
-BINARY_DENY = [
-    re.compile(rb"\b10\.99\.\d{1,3}\.\d{1,3}\b"),
-    re.compile(rb"\b[a-z0-9][a-z0-9.-]*\.fortilab\.fortinet\.(?:com|net)\b", re.I),
-    re.compile(rb"\bsvl-devops[a-z0-9.-]*\b", re.I),
-    re.compile(rb"\bcsadmin\b", re.I),
-]
+# Empty by default: every marker narrow enough to be worth scanning a binary
+# for is, by definition, specific to our infrastructure -- so it belongs in the
+# local overlay, not here.
+BINARY_DENY: list[re.Pattern[bytes]] = []
+# ---------------------------------------------------------------------------
+# Local-only overlay
+# ---------------------------------------------------------------------------
+# The patterns above are the *shape* of the problem. The specific lab subnet,
+# appliance domains, and account names are loaded from a gitignored file so
+# they are never published by the very guard meant to protect them -- writing a
+# lab subnet or an internal domain into a tracked file tells a reader of the
+# public mirror exactly what to go looking for.
+#
+# Format (`scripts/infra_patterns.local.json`)::
+#
+#     {"text": ["<regex>", ...], "binary": ["<regex>", ...],
+#      "allow": ["<regex>", ...],
+#      "replace": [["<regex>", "<re.sub template>"], ...]}
+#
+# `replace` is not used by this guard -- it is read by
+# `scripts/scrub_infra_from_db.py`, which rewrites already-committed fixtures.
+# It lives in the same file because a replacement and the deny pattern it
+# answers are the same secret stated twice; splitting them across a tracked and
+# an untracked file is how they drift.
+#
+# Absent (a fresh public clone, or CI): the overlay is empty and only the
+# generic rules above apply. Printed on every run so an inactive overlay is
+# visible rather than silent -- a guard that quietly does nothing is worse than
+# no guard.
+_OVERLAY_PATH = pathlib.Path(__file__).with_name("infra_patterns.local.json")
+
+
+def _load_overlay() -> tuple[list, list, list]:
+    if not _OVERLAY_PATH.exists():
+        return [], [], []
+    try:
+        cfg = json.loads(_OVERLAY_PATH.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"infra-leak guard: cannot read {_OVERLAY_PATH.name}: {exc}",
+              file=sys.stderr)
+        return [], [], []
+    return (
+        [re.compile(p, re.IGNORECASE) for p in cfg.get("text", [])],
+        [re.compile(p.encode(), re.IGNORECASE) for p in cfg.get("binary", [])],
+        [re.compile(p, re.IGNORECASE) for p in cfg.get("allow", [])],
+    )
+
+
+def overlay_replacements() -> list[tuple[re.Pattern[str], str]]:
+    """(pattern, re.sub template) pairs from the overlay's `replace` key.
+
+    Public entry point for `scrub_infra_from_db.py`. Empty without the overlay,
+    which is correct: with no local patterns loaded there is nothing this repo
+    can name that needs rewriting.
+    """
+    if not _OVERLAY_PATH.exists():
+        return []
+    try:
+        cfg = json.loads(_OVERLAY_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    return [(re.compile(p, re.IGNORECASE), t) for p, t in cfg.get("replace", [])]
+
+
+_TEXT_EXTRA, _BINARY_EXTRA, _ALLOW_EXTRA = _load_overlay()
+DENY += _TEXT_EXTRA
+BINARY_DENY += _BINARY_EXTRA
+ALLOW += _ALLOW_EXTRA
+OVERLAY_ACTIVE = bool(_TEXT_EXTRA or _BINARY_EXTRA)
+
 # Files that legitimately *define* the deny patterns (this guard + the hook that
 # runs it). Scanning them would self-match; skip them in both modes.
 SKIP = {
     "scripts/check_infra_leaks.py",
     ".pre-commit-config.yaml",
+    "scripts/infra_patterns.local.json",
 }
 
 

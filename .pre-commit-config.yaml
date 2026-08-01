@@ -25,7 +25,8 @@ repos:
     hooks:
       - id: infra-leak-guard
         name: infra-leak guard (no internal hosts in tracked source)
-        # Blocks 10.99.x.x, *.fortinet.com/.net, *.forticloud.com from entering
+        # Blocks vendor subdomains, plus the lab-specific patterns in the
+        # gitignored scripts/infra_patterns.local.json, from entering
         # the public mirror. Scans staged additions only. Uses a bare python3 --
         # the script has no third-party deps, so it runs without the venv.
         entry: python3 scripts/check_infra_leaks.py

@@ -3,9 +3,10 @@
 
 The reference DBs are assembled from a dev cache that is itself synced from a
 live lab appliance, so live URLs ride along into anything built from it:
-`playbook_steps.source_path` alone carried 7,000+ `https://10.99.x.x` rows into
-the public mirror. This is the counterpart to `check_infra_leaks.py` -- the
-guard refuses them, this removes the ones already there.
+`playbook_steps.source_path` alone carried 7,000+ live appliance URLs into the
+public mirror. This is the counterpart to `check_infra_leaks.py` -- the guard
+refuses them, this removes the ones already there. Both read their patterns
+from the same gitignored overlay, so neither states a lab host itself.
 
 Two things make a naive scrub insufficient, and both are handled here:
 
@@ -25,33 +26,30 @@ self-cleaning:
 """
 from __future__ import annotations
 
-import re
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_infra_leaks import scan_blob  # noqa: E402
+from check_infra_leaks import overlay_replacements, scan_blob  # noqa: E402
 
-# RFC5737 TEST-NET-3: reserved for documentation, routable nowhere.
-DOC_NET = "198.51.100."
-LAB_IP = re.compile(r"\b10\.99\.\d{1,3}\.(\d{1,3})\b")
-REPLACEMENTS: list[tuple[re.Pattern[str], "Callable[[re.Match[str]], str]"]] = [
-    # Keep the last octet so distinct appliances stay distinct: these values are
-    # test fixtures, and collapsing every host to one address would silently
-    # merge rows that a test may rely on telling apart.
-    (LAB_IP, lambda m: DOC_NET + m.group(1)),
-    (re.compile(r"\b[a-z0-9][a-z0-9.-]*\.fortilab\.fortinet\.(?:com|net)\b", re.I),
-     lambda m: "appliance.example.com"),
-    (re.compile(r"\bsvl-devops[a-z0-9.-]*\b", re.I), lambda m: "git.example.com"),
-    (re.compile(r"\bcsadmin\b", re.I), lambda m: "labuser"),
-]
+# The pattern/replacement pairs live in the gitignored overlay
+# (`scripts/infra_patterns.local.json`, key `replace`) alongside the deny
+# patterns they answer. They used to be hardcoded here -- which meant this
+# script, whose job is to keep lab hosts off the public mirror, was itself
+# publishing the lab subnet, the appliance domain, and the admin account name
+# on every clone. Templates are ordinary `re.sub` replacements, so a captured
+# group (e.g. a preserved last octet, which keeps distinct fixture appliances
+# distinct rather than collapsing them onto one address) rides through as `\1`.
+#
+# Empty without the overlay: nothing local is named, so there is nothing to
+# rewrite. `scrub()` says so rather than reporting a clean run it did not do.
+REPLACEMENTS = overlay_replacements()
 
 
 def _rewrite(s: str) -> str:
-    for rx, repl in REPLACEMENTS:
-        s = rx.sub(repl, s)
+    for rx, template in REPLACEMENTS:
+        s = rx.sub(template, s)
     return s
 
 
@@ -62,6 +60,13 @@ def _text_columns(db: sqlite3.Connection, table: str) -> list[str]:
 def scrub(path: str | Path, *, dry_run: bool = False, quiet: bool = False) -> int:
     """Rewrite infra strings in every text cell. Returns the cells changed."""
     path = Path(path)
+    if not REPLACEMENTS:
+        # Silence here would read as "scrubbed, nothing found" on a clone where
+        # the overlay is simply absent -- the one case where the scrub is a
+        # no-op for a reason that has nothing to do with the file's contents.
+        raise SystemExit(
+            "no replacement patterns loaded: scripts/infra_patterns.local.json "
+            "is missing or has no 'replace' key. Nothing was scrubbed.")
     db = sqlite3.connect(path)
     db.text_factory = str
     changed = 0
