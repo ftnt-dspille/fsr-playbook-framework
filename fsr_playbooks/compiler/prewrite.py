@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .roundtrip import normalize_collection
+from .wire import UnexpandedRelationshipsError, require_expanded_collection
 
 
 @dataclass
@@ -169,7 +170,24 @@ def check_prewrite(
         return PreWriteVerdict(ok=True, message="create -- nothing to overwrite")
 
     try:
+        # An UNEXPANDED pull is uncomparable, not empty. Without
+        # `?$relationships=true` the appliance omits `workflows` entirely, and
+        # every comparison below would read that absence as "the live
+        # collection had nothing" -- so a write that deletes every workflow
+        # comes back `ok=True, "no field loss"`. Verified against a live box,
+        # both transports. The check lives HERE, not only at the call site,
+        # because this is the safety-critical function: it must not depend on
+        # every caller remembering a query parameter.
+        require_expanded_collection(live_json)
         losses = diff_losses(live_json, outgoing_json)
+    except UnexpandedRelationshipsError as exc:
+        return PreWriteVerdict(
+            ok=False,
+            message=(
+                f"{exc} Re-read the collection with `?$relationships=true` and "
+                "retry; refusing to overwrite a live playbook we could not read."
+            ),
+        )
     except Exception as exc:
         # Fail CLOSED. If we cannot establish that the write is safe, we have
         # not established that it is safe. A malformed live pull is exactly the

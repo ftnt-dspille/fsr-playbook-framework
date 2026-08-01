@@ -18,10 +18,17 @@ def _env(wf: dict, *, name: str = "_prewrite_wf") -> dict:
 
 
 def test_dict_keyed_steps_do_not_crash_the_gate():
-    """A live GET can return `steps` keyed by id instead of as a list.
-    Iterating that yields string KEYS, so `s["uuid"]` raised TypeError --
-    which the gate turned into "refusing the save" on every edit of such a
-    playbook."""
+    """`steps` keyed by id instead of listed. Iterating that yields string
+    KEYS, so `s["uuid"]` raised TypeError -- which the gate turned into
+    "refusing the save" on every edit of such a playbook.
+
+    NOTE: this shape is INFERRED from that TypeError, never captured. Live
+    probing has since failed to reproduce it on either transport (REST: lists
+    for 7752 steps / 209 collections; on-platform crudhub: lists for 1551
+    steps / 25). The tolerance is cheap and the original crash is still
+    unexplained, so the test stays -- but it is a defensive pin, not a record
+    of observed appliance behaviour. The shape that IS real is an unexpanded
+    pull; see `test_prewrite_unexpanded_pull.py`."""
     live = {"uuid": "w", "name": "n",
             "steps": {"s1": {"uuid": "u1", "name": "one"}}}
     outgoing = {"name": "n", "steps": [{"uuid": "u1", "name": "one"}]}

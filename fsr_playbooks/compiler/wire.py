@@ -2,8 +2,15 @@
 
 `typed_args/` models the arguments we *generate*. This module models the
 other direction: the crudhub responses we *consume*. Nothing covered that,
-which is how a dict-vs-list `steps` shape crashed the pre-write loss gate
-into refusing every edit of an affected playbook (`61a18c1`).
+which is how a nested-container shape crashed the pre-write loss gate into
+refusing every edit of an affected playbook (`61a18c1`).
+
+The most valuable thing this layer found was not a shape mismatch but the
+opposite failure: an **unexpanded** pull (`workflows` absent, because
+`?$relationships=true` was missing) read as "the live collection is empty",
+so the loss gate approved a save that deletes every workflow and called it
+"no field loss". See `UnexpandedRelationshipsError`. Absence and emptiness
+are different facts, and only one of them is safe.
 
 Three properties made that bug survivable, and this module targets each:
 
@@ -43,6 +50,8 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 __all__ = [
     "WireShapeError",
+    "UnexpandedRelationshipsError",
+    "require_expanded_collection",
     "LiveStep",
     "LiveRoute",
     "LiveWorkflow",
@@ -72,13 +81,62 @@ class WireShapeError(ValueError):
         )
 
 
+class UnexpandedRelationshipsError(ValueError):
+    """A live pull came back without its nested records expanded.
+
+    LIVE-VERIFIED on two transports: `/api/3/workflow_collections/<uuid>`
+    returns `workflows` **absent** unless `?$relationships=true` is set --
+    not as IRI strings, not as an empty list. Absent.
+
+    That distinction is safety-critical. "Absent" means *we never learned what
+    is on the appliance*; `[]` means *we looked and it is empty*. Collapse the
+    two and the pre-write loss gate compares a write against a blank -- finds
+    nothing missing, reports "no field loss", and waves through a save that
+    deletes every workflow in the collection. Verified end to end: the guard
+    returned `ok=True` for exactly that write.
+
+    So an unexpanded pull is UNCOMPARABLE, and must be refused rather than
+    treated as empty. This is the same lesson as the original wire bug from the
+    other direction: the dangerous failures are the ones that look like success.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            f"live playbook JSON has no expanded `workflows` ({detail}). "
+            "The pull is missing `?$relationships=true`, so what is on the "
+            "appliance is UNKNOWN -- it must not be read as 'nothing there'."
+        )
+
+
+def require_expanded_collection(payload: Any) -> None:
+    """Raise unless a live envelope carries expanded nested records.
+
+    Call before any comparison that treats absence as emptiness. A collection
+    whose `workflows` key is present-but-empty passes: that is a real, known,
+    empty collection.
+    """
+    for coll in as_record_list((payload or {}).get("data"), path="data"):
+        if "workflows" not in coll:
+            name = coll.get("name") or coll.get("uuid") or "<unnamed>"
+            raise UnexpandedRelationshipsError(f"collection {name!r}")
+
+
 def as_record_list(field: Any, *, path: str = "records") -> List[Dict[str, Any]]:
     """Nested records as a LIST, whichever wire shape they arrived in.
 
-    A live crudhub GET can return `steps`/`routes` keyed by id
-    (`{"<uuid>": {...}}`) where the export JSON returns a list. Iterating the
-    dict form yields its string KEYS, so `s["uuid"]` raised
-    `TypeError: string indices must be integers`.
+    Handles the id-keyed map form (`{"<uuid>": {...}}`) as well as a list,
+    because iterating the map yields string KEYS and `s["uuid"]` then raises
+    `TypeError: string indices must be integers` -- the crash behind `61a18c1`.
+
+    **Status of that shape: UNCONFIRMED, kept as defence.** It was inferred
+    from the TypeError, never captured. Probing since has not reproduced it on
+    either transport -- REST returned lists for 7752 steps across 209
+    collections, and the on-platform crudhub loopback returned lists for 1551
+    steps across 25. Both omit the container entirely when
+    `?$relationships=true` is absent (see `UnexpandedRelationshipsError`, which
+    is the failure mode that turned out to be real). Tolerating the map costs
+    nothing and the original crash is still unexplained, so it stays -- but do
+    not cite it as observed behaviour.
 
     THE one place that coercion lives. Consumers call this (or take already
     normalized input) rather than each defending itself -- a defense repeated
