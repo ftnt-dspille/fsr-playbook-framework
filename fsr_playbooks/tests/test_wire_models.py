@@ -152,3 +152,58 @@ def test_normalize_does_not_invent_absent_containers():
 def test_normalize_leaves_the_list_shape_byte_identical():
     raw = _envelope([_STEP_A, _STEP_B])
     assert normalize_live_collection(raw) == raw
+
+
+# --- fields the compiler READS (typed from live evidence, not from guesswork) --
+
+def test_declared_parameters_are_strictly_typed():
+    """`parameters` is typed `List[str]` deliberately.
+
+    Losing a declared parameter is one of the two original silent-loss defects
+    this subsystem exists for, and every consumer filters to `str` -- so a
+    non-str member would DISAPPEAR from the loss gate's comparison rather than
+    block the save. For a field whose loss is invisible, refusing loudly is the
+    right trade. LIVE: a list in 600/600 workflows, every element `str`.
+    """
+    ok = LiveCollection.model_validate(
+        {"workflows": [{"parameters": ["ip4AddressList", "recordUuid"]}]})
+    assert ok.workflows[0].parameters == ["ip4AddressList", "recordUuid"]
+
+    with pytest.raises(ValidationError):
+        LiveCollection.model_validate({"workflows": [{"parameters": [{"name": "x"}]}]})
+
+
+def test_trigger_step_may_be_null():
+    """LIVE: `str` x599 and `None` x1 across 600 workflows. Typing this bare
+    `str` would have rejected a real playbook -- the probe caught it."""
+    wf = LiveCollection.model_validate(
+        {"workflows": [{"triggerStep": None}]}).workflows[0]
+    assert wf.triggerStep is None
+
+
+def test_groups_go_through_the_same_container_coercion():
+    """`groups` is a nested record container and is iterated in the decompiler,
+    so it gets the same treatment as steps/routes rather than being the one
+    container left defending itself."""
+    listed = LiveCollection.model_validate(
+        {"workflows": [{"groups": [{"uuid": "g1", "name": "block"}]}]})
+    keyed = LiveCollection.model_validate(
+        {"workflows": [{"groups": {"g1": {"uuid": "g1", "name": "block"}}}]})
+    assert listed.model_dump() == keyed.model_dump()
+
+    # Raised inside a validator, so pydantic re-wraps it -- what matters is
+    # that the field and the observed type survive into the message, since a
+    # fail-closed caller quotes it verbatim.
+    with pytest.raises((WireShapeError, ValidationError)) as exc:
+        LiveCollection.model_validate({"workflows": [{"groups": "g1,g2"}]})
+    assert "workflow.groups" in str(exc.value)
+    assert "str" in str(exc.value)
+
+
+def test_step_group_accepts_both_forms_the_decompiler_reads():
+    """LIVE: `None` x2651 / `str` x107. `decompiler._to_uuid` also accepts an
+    expanded dict, so the model does too -- refusing a save over a cosmetic
+    block-membership field would be a bad trade."""
+    for value in (None, "/api/3/workflow_groups/g1", {"uuid": "g1"}):
+        LiveCollection.model_validate(
+            {"workflows": [{"steps": [{"uuid": "s1", "group": value}]}]})

@@ -1115,7 +1115,11 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
             pass
 
     step_by_id = {st.id: st for st in steps_out}
-    for g in wf.get("groups", []) or []:
+    # Coerced, not iterated bare: `groups` is a nested record container like
+    # `steps`/`routes`, and every `g.get(...)` below would raise on a member
+    # that is not a dict. Same pattern as 61a18c1; there is no reason for this
+    # one to be the exception.
+    for g in as_record_list(wf.get("groups"), path="workflow.groups"):
         gtype = g.get("type") or "note"
         gtitle = g.get("name") or "Note"
         gbody = g.get("description") or ""

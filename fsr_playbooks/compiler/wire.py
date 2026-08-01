@@ -44,7 +44,7 @@ different copy of the wire format.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -166,6 +166,10 @@ class _WireRecord(BaseModel):
 class LiveStep(_WireRecord):
     uuid: str = ""
     name: str = ""
+    # Reusable-block membership. LIVE: `None` x2651 / `str` (IRI) x107 -- never
+    # an expanded dict in the sample, but `decompiler._to_uuid` accepts both and
+    # a stricter type here would refuse a save over a cosmetic field.
+    group: Optional[Union[str, Dict[str, Any]]] = None
     # An IRI string in export JSON, an expanded dict under
     # `?$relationships=true`. Both are real; neither is normalized here --
     # `_step_type_key` / `_to_uuid` already read both, and rewriting it would
@@ -210,8 +214,23 @@ class LiveWorkflow(_WireRecord):
     name: str = ""
     steps: List[LiveStep] = []
     routes: List[LiveRoute] = []
+    # Reusable-block records. Iterated bare at `decompiler.py:1118`, i.e. the
+    # exact pattern behind 61a18c1 -- so it goes through the same coercion.
+    groups: List[Dict[str, Any]] = []
 
-    @field_validator("steps", "routes", mode="before")
+    # Declared input names. Typed STRICTLY as `List[str]` on purpose: losing a
+    # declared parameter is one of the two original silent-loss defects this
+    # whole subsystem exists for, and every consumer filters to `str`
+    # (`roundtrip._normalize_workflow`, `decompiler`), so a non-str member
+    # would DISAPPEAR from the loss gate's comparison instead of blocking the
+    # save. Refusing loudly is the right trade for a field whose loss is
+    # invisible. LIVE: list in 600/600 workflows, every element `str`.
+    parameters: Optional[List[str]] = None
+    # LIVE: `str` (IRI) x599 and `None` x1 -- a workflow with no trigger step
+    # is rare but real, so this must stay optional.
+    triggerStep: Optional[str] = None
+
+    @field_validator("steps", "routes", "groups", mode="before")
     @classmethod
     def _coerce_records(cls, v: Any, info: Any) -> Any:
         return as_record_list(v, path=f"workflow.{info.field_name}")
@@ -270,6 +289,8 @@ def normalize_live_collection(payload: Any) -> Dict[str, Any]:
                 w["steps"] = as_record_list(w.get("steps"), path="workflow.steps")
             if "routes" in w:
                 w["routes"] = as_record_list(w.get("routes"), path="workflow.routes")
+            if "groups" in w:
+                w["groups"] = as_record_list(w.get("groups"), path="workflow.groups")
             wfs.append(w)
         if "workflows" in c:
             c["workflows"] = wfs

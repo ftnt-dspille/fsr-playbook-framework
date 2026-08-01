@@ -54,6 +54,8 @@ def test_census_is_a_real_sample_not_a_stub(census):
 def test_every_observed_field_type_is_accepted(census):
     """The core claim: no type the appliance actually emits is rejected."""
     for key, types in census["field_types"].items():
+        if key.endswith("[]"):
+            continue  # element types; covered by test_list_element_types below
         kind, field = key.split(".", 1)
         for type_name in types:
             assert type_name in _SAMPLE, (
@@ -99,3 +101,42 @@ def test_unmodelled_keys_survive_normalization(census):
     got = out["data"][0]["workflows"][0]["steps"][0]
     for k in step_keys:
         assert got.get(k) == "v", f"normalization dropped live key `{k}`"
+
+
+def test_list_element_types(census):
+    """Element types inside list-valued fields we type strictly.
+
+    `workflow.parameters` is `List[str]`: every element the box has ever sent
+    must be a `str`, or the strict type would refuse a real save. The census is
+    the evidence, so this is where that claim is checked rather than assumed.
+    """
+    for key, types in census["field_types"].items():
+        if not key.endswith("[]"):
+            continue
+        base = key[:-2]
+        assert base in census["field_types"], f"orphan element row {key}"
+        if base == "workflow.parameters":
+            assert set(types) == {"str"}, (
+                f"{base} is typed List[str] but the box sent {sorted(types)}; "
+                "either the box changed or the strict type is wrong")
+
+
+def test_a_null_valued_field_is_typed_optional(census):
+    """Any field the box has ever sent as null must be Optional in the model.
+
+    Caught live: `workflow.parameters` is a list in 1863 workflows and **null**
+    in 2; `triggerStep` is a str in 1862 and null in 3. A 60-collection sample
+    showed neither. Sample size is the difference between a type that holds and
+    one that refuses a real customer's save.
+    """
+    from fsr_playbooks.compiler.wire import LiveStep, LiveWorkflow
+
+    models = {"workflow": LiveWorkflow, "step": LiveStep}
+    for key, types in census["field_types"].items():
+        if key.endswith("[]") or "NoneType" not in types:
+            continue
+        kind, field = key.split(".", 1)
+        model = models.get(kind)
+        if model is None or field not in model.model_fields:
+            continue  # route fields / unmodelled: nothing to assert
+        model.model_validate({field: None})  # must not raise

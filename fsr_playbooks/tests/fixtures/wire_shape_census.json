@@ -4,6 +4,9 @@
     "collection.workflows": {
       "list": 209
     },
+    "workflow.groups": {
+      "list": 1865
+    },
     "workflow.routes": {
       "list": 1865
     },
@@ -32,6 +35,10 @@
       "dict": 7688,
       "list": 64
     },
+    "step.group": {
+      "NoneType": 7529,
+      "str": 223
+    },
     "step.name": {
       "str": 7752
     },
@@ -41,8 +48,22 @@
     "step.uuid": {
       "str": 7752
     },
+    "workflow.groups": {
+      "list": 1865
+    },
     "workflow.name": {
       "str": 1865
+    },
+    "workflow.parameters": {
+      "NoneType": 2,
+      "list": 1863
+    },
+    "workflow.parameters[]": {
+      "str": 1080
+    },
+    "workflow.triggerStep": {
+      "NoneType": 3,
+      "str": 1862
     },
     "workflow.uuid": {
       "str": 1865
@@ -61,7 +82,6 @@
       "@id": 7752,
       "@type": 7752,
       "description": 7752,
-      "group": 7752,
       "left": 7752,
       "status": 7752,
       "top": 7752
@@ -76,7 +96,6 @@
       "debug": 1865,
       "deletedAt": 1865,
       "description": 1865,
-      "groups": 1865,
       "id": 1865,
       "importedBy": 1865,
       "isActive": 1865,
@@ -86,7 +105,6 @@
       "modifyDate": 1865,
       "modifyUser": 1865,
       "owners": 1865,
-      "parameters": 1865,
       "playbookOrigin": 1865,
       "priority": 1865,
       "recordTags": 1865,
@@ -97,7 +115,6 @@
       "synchronous": 1865,
       "tag": 1865,
       "triggerLimit": 1865,
-      "triggerStep": 1865,
       "versions": 1865
     }
   },

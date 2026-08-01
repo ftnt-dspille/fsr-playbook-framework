@@ -49,15 +49,26 @@ _CONTAINERS = (
     ("collection", "workflows"),
     ("workflow", "steps"),
     ("workflow", "routes"),
+    # `groups` carries reusable-block membership and is iterated bare at
+    # decompiler.py:1118 -- the same pattern that caused 61a18c1. Measure it.
+    ("workflow", "groups"),
 )
 
 # Scalars the models declare. If the box disagrees with any of these, the
 # model is wrong -- not the box.
 _MODELLED = {
-    "workflow": ("uuid", "name"),
-    "step": ("uuid", "name", "stepType", "arguments"),
+    # Only fields the COMPILER READS. Typing a key nobody reads is ceremony;
+    # typing one the decompiler indexes is how a shape surprise gets caught
+    # before it becomes a TypeError inside a fail-closed guard.
+    "workflow": ("uuid", "name", "parameters", "triggerStep", "groups"),
+    "step": ("uuid", "name", "stepType", "arguments", "group"),
     "route": ("uuid", "name", "label", "sourceStep", "targetStep"),
 }
+
+# Element types inside a list-valued modelled field -- `parameters` is
+# declared input NAMES, and a non-str member there would silently vanish from
+# the loss gate's comparison (it filters to str).
+_ELEMENT_TYPES = {"workflow.parameters"}
 
 
 def _shape(value: Any) -> str:
@@ -83,7 +94,11 @@ class Findings:
     def record_record(self, kind: str, rec: dict[str, Any]) -> None:
         for field in _MODELLED[kind]:
             if field in rec:
-                self.scalars[f"{kind}.{field}"][type(rec[field]).__name__] += 1
+                key = f"{kind}.{field}"
+                self.scalars[key][type(rec[field]).__name__] += 1
+                if key in _ELEMENT_TYPES and isinstance(rec[field], list):
+                    for el in rec[field]:
+                        self.scalars[f"{key}[]"][type(el).__name__] += 1
         for key in rec:
             if key not in _MODELLED.get(kind, ()):
                 self.extra_keys[kind][key] += 1
@@ -104,6 +119,7 @@ def _inspect(payload: dict[str, Any], f: Findings) -> None:
             f.failures.append((name, f"workflows member is {type(wf).__name__}"))
             continue
         f.workflows += 1
+        f.containers["workflow.groups"][_shape(wf.get("groups"))] += 1
         f.record_record("workflow", wf)
         for field, kind in (("steps", "step"), ("routes", "route")):
             f.containers[f"workflow.{field}"][_shape(wf.get(field))] += 1
@@ -134,7 +150,10 @@ def _report(f: Findings) -> int:
 
     print("container shapes actually returned")
     for _, field in _CONTAINERS:
-        key = next(k for k in f.containers if k.endswith(f".{field}"))
+        key = next((k for k in f.containers if k.endswith(f".{field}")), None)
+        if key is None:
+            print(f"  {field:24s} (never present)")
+            continue
         seen = ", ".join(f"{shape} x{n}" for shape, n in f.containers[key].most_common())
         print(f"  {key:24s} {seen or '(never present)'}")
 
