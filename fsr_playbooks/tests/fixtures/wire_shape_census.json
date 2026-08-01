@@ -1,0 +1,105 @@
+{
+  "collections": 209,
+  "containers": {
+    "collection.workflows": {
+      "list": 209
+    },
+    "workflow.routes": {
+      "list": 1865
+    },
+    "workflow.steps": {
+      "list": 1865
+    }
+  },
+  "field_types": {
+    "route.label": {
+      "NoneType": 5088,
+      "str": 988
+    },
+    "route.name": {
+      "str": 6076
+    },
+    "route.sourceStep": {
+      "str": 6076
+    },
+    "route.targetStep": {
+      "str": 6076
+    },
+    "route.uuid": {
+      "str": 6076
+    },
+    "step.arguments": {
+      "dict": 7688,
+      "list": 64
+    },
+    "step.name": {
+      "str": 7752
+    },
+    "step.stepType": {
+      "dict": 7752
+    },
+    "step.uuid": {
+      "str": 7752
+    },
+    "workflow.name": {
+      "str": 1865
+    },
+    "workflow.uuid": {
+      "str": 1865
+    }
+  },
+  "note": "shape census from a live 8.0.0 appliance; regenerate with `probe_wire_shapes.py --census`. Types and counts only.",
+  "steps": 7752,
+  "unmodelled_keys": {
+    "route": {
+      "@id": 6076,
+      "@type": 6076,
+      "group": 6076,
+      "isExecuted": 6076
+    },
+    "step": {
+      "@id": 7752,
+      "@type": 7752,
+      "description": 7752,
+      "group": 7752,
+      "left": 7752,
+      "status": 7752,
+      "top": 7752
+    },
+    "workflow": {
+      "@id": 1865,
+      "@type": 1865,
+      "aliasName": 1865,
+      "collection": 1865,
+      "createDate": 1865,
+      "createUser": 1865,
+      "debug": 1865,
+      "deletedAt": 1865,
+      "description": 1865,
+      "groups": 1865,
+      "id": 1865,
+      "importedBy": 1865,
+      "isActive": 1865,
+      "isEditable": 1865,
+      "isPrivate": 1865,
+      "lastModifyDate": 1865,
+      "modifyDate": 1865,
+      "modifyUser": 1865,
+      "owners": 1865,
+      "parameters": 1865,
+      "playbookOrigin": 1865,
+      "priority": 1865,
+      "recordTags": 1865,
+      "remoteExecutableFlag": 1865,
+      "routes": 1865,
+      "singleRecordExecution": 1865,
+      "steps": 1865,
+      "synchronous": 1865,
+      "tag": 1865,
+      "triggerLimit": 1865,
+      "triggerStep": 1865,
+      "versions": 1865
+    }
+  },
+  "workflows": 1865
+}

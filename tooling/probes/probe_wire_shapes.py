@@ -162,6 +162,9 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="stop after N collections")
     ap.add_argument("--uuid", help="inspect a single collection")
     ap.add_argument("--dump", type=Path, help="write raw payloads here for offline fixtures")
+    ap.add_argument("--census", type=Path,
+                    help="write the SHAPE CENSUS (types + counts only, no playbook "
+                         "content) for the box-free conformance test")
     args = ap.parse_args()
 
     client = get_client()
@@ -196,6 +199,23 @@ def main() -> int:
             dumped.append(payload)
         if i % 10 == 0:
             print(f"  ...{i}/{len(uuids)}", file=sys.stderr)
+
+    if args.census:
+        # Types and counts ONLY -- no names, no arguments, no host. This is the
+        # artifact the committed conformance test reads, so the models stay
+        # pinned to real appliance behaviour without needing a box (and without
+        # putting a customer's playbooks in a public repo).
+        args.census.write_text(json.dumps({
+            "note": ("shape census from a live 8.0.0 appliance; regenerate with "
+                     "`probe_wire_shapes.py --census`. Types and counts only."),
+            "collections": f.collections,
+            "workflows": f.workflows,
+            "steps": f.steps,
+            "containers": {k: dict(v) for k, v in sorted(f.containers.items())},
+            "field_types": {k: dict(v) for k, v in sorted(f.scalars.items())},
+            "unmodelled_keys": {k: dict(v) for k, v in sorted(f.extra_keys.items())},
+        }, indent=2, sort_keys=True) + "\n")
+        print(f"wrote shape census to {args.census}", file=sys.stderr)
 
     if args.dump and dumped:
         args.dump.write_text(json.dumps({"data": dumped}, indent=2))

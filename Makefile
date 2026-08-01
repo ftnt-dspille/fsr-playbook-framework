@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release corpus-gate corpus-gen
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release corpus-gate corpus-gen wire-audit wire-census
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -140,6 +140,16 @@ corpus-gate: ## round-trip fidelity gate over the committed corpus (box-free). C
 	FSRPB_DEV=1 $(VENV_PY) scripts/corpus_gate.py \
 	  $(if $(CORPUS_DIR),--corpus-dir $(CORPUS_DIR),) \
 	  $(if $(MIN_PASS),--min-pass $(MIN_PASS),)
+
+wire-audit: ## LIVE: validate every playbook on the box against the wire models + measure semantic round-trip fidelity. Read-only. Run after any wire/decompiler/emitter change. LIMIT=… FILTER=…
+	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/probe_wire_shapes.py \
+	  $(if $(LIMIT),--limit $(LIMIT),)
+	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/probe_mapping_fidelity.py \
+	  $(if $(LIMIT),--limit $(LIMIT),) $(if $(FILTER),--filter $(FILTER),)
+
+wire-census: ## LIVE: regenerate the committed shape census the box-free conformance test reads
+	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/probe_wire_shapes.py \
+	  --census fsr_playbooks/tests/fixtures/wire_shape_census.json
 
 corpus-triage: ## COMPILABILITY triage over a corpus (box-free): which real playbooks fail to compile, grouped by cause. corpus-gate measures fidelity; this measures acceptance. CORPUS_DIR=… TOP=… MIN_PASS=… ARGS='--markdown'
 	FSRPB_DEV=1 $(VENV_PY) scripts/corpus_compile_triage.py \

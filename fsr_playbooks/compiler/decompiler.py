@@ -1012,7 +1012,19 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
         nxt: str | None = None
         branches: dict[str, str] = {}
         unlabeled: list[str] = []
-        if len(outs) == 1 and not outs[0][1]:
+        # A DECISION step never takes the linear-`next` shortcut, even with a
+        # single unlabeled route out. `next:` means something different on a
+        # decision: the parser warns and synthesizes an `Else` DEFAULT
+        # condition for it, so the emitter writes a route LABELED "Else" where
+        # the appliance had an unlabeled one. That silently rewrites the
+        # routing graph -- the one thing the round-trip contract exists to
+        # preserve -- and `unlabeled_next` already represents this exactly.
+        #
+        # Found by `probe_mapping_fidelity.py`, the single semantic diff in
+        # 209 live collections. It survived because the five-fixture corpus
+        # has no decision step with an unlabeled outgoing route.
+        is_decision = short_by_uuid.get(u) == "decision"
+        if len(outs) == 1 and not outs[0][1] and not is_decision:
             t_uuid, _ = outs[0]
             nxt = id_by_uuid.get(t_uuid)
         else:
