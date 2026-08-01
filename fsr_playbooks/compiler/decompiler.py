@@ -15,6 +15,7 @@ from typing import Any
 
 from .ir import PRIORITY_LIST_NAME, Annotation, Collection, Playbook, Step
 from .resolver import SHORT_TYPE_TO_FSR
+from .wire import as_record_list
 
 _FSR_TO_SHORT = {v: k for k, v in SHORT_TYPE_TO_FSR.items()}
 
@@ -932,10 +933,10 @@ def decompile(fsr_json: dict[str, Any], db_path: Path) -> Collection:
 
     if "data" not in fsr_json or not fsr_json["data"]:
         raise ValueError("not an FSR WorkflowCollection JSON (missing data[])")
-    coll = fsr_json["data"][0]
+    coll = as_record_list(fsr_json.get("data"), path="data")[0]
 
     playbooks: list[Playbook] = []
-    for wf in coll.get("workflows", []):
+    for wf in as_record_list(coll.get("workflows"), path="collection.workflows"):
         playbooks.append(_decompile_workflow(wf, type_by_uuid, priority_by_iri))
 
     return Collection(
@@ -948,8 +949,14 @@ def decompile(fsr_json: dict[str, Any], db_path: Path) -> Collection:
 
 def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
                         priority_by_iri: dict[str, str] | None = None) -> Playbook:
-    raw_steps = wf.get("steps", []) or []
-    raw_routes = wf.get("routes", []) or []
+    # Both wire shapes, coerced in ONE place (`compiler/wire.py`). A live
+    # crudhub GET can key `steps`/`routes` by id where the export JSON lists
+    # them; iterating the dict form yields strings, and every `s.get(...)`
+    # below would raise. This path (pull / decompile) carried the same latent
+    # defect the pre-write gate hit in 61a18c1 -- it just had not been pointed
+    # at such a playbook yet.
+    raw_steps = as_record_list(wf.get("steps"), path="workflow.steps")
+    raw_routes = as_record_list(wf.get("routes"), path="workflow.routes")
 
     # Assign a stable id per step (slug of name)
     taken: set[str] = set()

@@ -45,6 +45,7 @@ except Exception:
 # Without this, the CLI ignored $FSRPB_DB and always opened the dev cache, so
 # the tooling gate couldn't point it at the committed test fixture.
 from fsr_playbooks._db import default_db_path  # noqa: E402
+from fsr_playbooks.compiler.wire import as_record_list  # noqa: E402
 
 DEFAULT_DB = default_db_path()
 
@@ -1068,8 +1069,13 @@ def _fetch_workflow_with_refs(client, ident: str) -> dict | None:
             if not u:
                 continue
             fetched[u] = wf
-            for s in wf.get("steps") or []:
-                args = s.get("arguments") if isinstance(s, dict) else None
+            # `as_record_list`, not a bare iteration: on the id-keyed wire
+            # shape this loop would walk STRINGS, the `isinstance` guard below
+            # would skip every one, and dependency discovery would come back
+            # empty -- a pull that silently drops referenced sub-playbooks
+            # rather than failing. Same defect class as 61a18c1, quieter.
+            for s in as_record_list(wf.get("steps"), path="workflow.steps"):
+                args = s.get("arguments")
                 if not isinstance(args, dict):
                     continue
                 ref = args.get("workflowReference")

@@ -1936,7 +1936,13 @@ def _fetch_live_collection(client, coll_uuid: str) -> dict[str, Any] | None:
         return {}  # unknown failure: fail closed, do not assume "empty"
     if not isinstance(payload, dict) or not payload.get("uuid"):
         return {}
-    return {"data": [payload]}
+    # Validate the wire shape HERE, at the seam, rather than letting untyped
+    # dicts run inward and surface as a `TypeError` from whichever consumer
+    # indexed them first (that is exactly how 61a18c1 hid). `WireShapeError`
+    # names the field and the shape it saw; the caller's fail-closed message
+    # quotes it, so an unreadable pull reads as an unreadable pull.
+    from fsr_playbooks.compiler.wire import normalize_live_collection
+    return normalize_live_collection({"data": [payload]})
 
 
 @mcp.tool()
@@ -1998,7 +2004,19 @@ def push_playbook(yaml_text: str,
     # only point where both documents exist, so it is the only place the
     # check can be made -- the compiler cannot know what it is overwriting.
     from fsr_playbooks.compiler.prewrite import check_prewrite
-    live = _fetch_live_collection(client, coll["uuid"])
+    from pydantic import ValidationError
+
+    from fsr_playbooks.compiler.wire import WireShapeError
+    try:
+        live = _fetch_live_collection(client, coll["uuid"])
+    except (WireShapeError, ValidationError) as e:
+        # Fail closed like the gate itself, but NAME the defect. Folding this
+        # into the generic "could not run" refusal would recreate the failure
+        # mode this whole layer exists to remove: a guard whose output looks
+        # correct while a shape bug hides inside it.
+        return {"ok": False, "code": "live_shape_unreadable",
+                "error": (f"the appliance's copy of this playbook did not match "
+                          f"a shape we can diff against: {e}")}
     verdict = check_prewrite(live, result.fsr_json, acknowledged_drops)
     if not verdict.ok:
         return {"ok": False, "code": "would_drop_fields",

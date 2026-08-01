@@ -11,6 +11,7 @@ from typing import Any
 
 from .decompiler import decompile
 from .emitter import emit
+from .wire import as_record_list
 
 
 def _to_uuid_or_iri(field: Any) -> str:
@@ -36,26 +37,9 @@ def _step_type_key(field: Any) -> str:
     return ""
 
 
-def _as_record_list(field: Any) -> list[dict[str, Any]]:
-    """Nested records as a LIST, whichever wire shape they arrived in.
-
-    A live crudhub GET can return `steps` keyed by id (`{"s1": {...}}`) rather
-    than as a list. Iterating that yields the KEYS -- strings -- so `s["uuid"]`
-    raised `TypeError: string indices must be integers`. Normalization is
-    wrapped by the pre-write loss gate, which fails CLOSED, so the crash
-    surfaced as "refusing the save" on every edit of such a playbook rather
-    than as an error anyone could read.
-    """
-    if isinstance(field, dict):
-        return [v for v in field.values() if isinstance(v, dict)]
-    if isinstance(field, list):
-        return [v for v in field if isinstance(v, dict)]
-    return []
-
-
 def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
     """Strip fields that are layout/metadata-only and won't survive round trip."""
-    steps = _as_record_list(wf.get("steps"))
+    steps = as_record_list(wf.get("steps"), path="workflow.steps")
     steps_by_uuid = {s.get("uuid"): s for s in steps}
     norm_steps = []
     for s in steps:
@@ -75,7 +59,7 @@ def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
     norm_steps.sort(key=lambda x: (x["name"] or "", x["stepType"] or ""))
 
     norm_routes = []
-    for r in _as_record_list(wf.get("routes")):
+    for r in as_record_list(wf.get("routes"), path="workflow.routes"):
         s_uuid = _to_uuid_or_iri(r.get("sourceStep"))
         t_uuid = _to_uuid_or_iri(r.get("targetStep"))
         # FSR treats label="" and label=None equivalently; normalize.
@@ -127,12 +111,14 @@ def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_collection(fsr_json: dict[str, Any]) -> dict[str, Any]:
-    coll = fsr_json["data"][0]
+    coll = as_record_list(fsr_json.get("data"), path="data")[0]
     return {
         "name": coll.get("name"),
         "description": coll.get("description") or "",
         "workflows": sorted(
-            (_normalize_workflow(w) for w in coll.get("workflows", [])),
+            (_normalize_workflow(w)
+             for w in as_record_list(coll.get("workflows"),
+                                     path="collection.workflows")),
             key=lambda x: x["name"] or "",
         ),
     }
