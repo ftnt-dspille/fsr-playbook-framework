@@ -36,11 +36,29 @@ def _step_type_key(field: Any) -> str:
     return ""
 
 
+def _as_record_list(field: Any) -> list[dict[str, Any]]:
+    """Nested records as a LIST, whichever wire shape they arrived in.
+
+    A live crudhub GET can return `steps` keyed by id (`{"s1": {...}}`) rather
+    than as a list. Iterating that yields the KEYS -- strings -- so `s["uuid"]`
+    raised `TypeError: string indices must be integers`. Normalization is
+    wrapped by the pre-write loss gate, which fails CLOSED, so the crash
+    surfaced as "refusing the save" on every edit of such a playbook rather
+    than as an error anyone could read.
+    """
+    if isinstance(field, dict):
+        return [v for v in field.values() if isinstance(v, dict)]
+    if isinstance(field, list):
+        return [v for v in field if isinstance(v, dict)]
+    return []
+
+
 def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
     """Strip fields that are layout/metadata-only and won't survive round trip."""
-    steps_by_uuid = {s["uuid"]: s for s in wf.get("steps", [])}
+    steps = _as_record_list(wf.get("steps"))
+    steps_by_uuid = {s.get("uuid"): s for s in steps}
     norm_steps = []
-    for s in wf.get("steps", []):
+    for s in steps:
         args = dict(s.get("arguments") or {})
         # for_each is a wire-level args key but conceptually a separate
         # construct -- lift it out so it's compared as its own thing and
@@ -57,7 +75,7 @@ def _normalize_workflow(wf: dict[str, Any]) -> dict[str, Any]:
     norm_steps.sort(key=lambda x: (x["name"] or "", x["stepType"] or ""))
 
     norm_routes = []
-    for r in wf.get("routes", []):
+    for r in _as_record_list(wf.get("routes")):
         s_uuid = _to_uuid_or_iri(r.get("sourceStep"))
         t_uuid = _to_uuid_or_iri(r.get("targetStep"))
         # FSR treats label="" and label=None equivalently; normalize.
