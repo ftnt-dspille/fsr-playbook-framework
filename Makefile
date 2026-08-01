@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release corpus-gate corpus-gen wire-audit wire-census
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release corpus-gate corpus-gen tool-gate wire-audit wire-census
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -140,6 +140,23 @@ corpus-gate: ## round-trip fidelity gate over the committed corpus (box-free). C
 	FSRPB_DEV=1 $(VENV_PY) scripts/corpus_gate.py \
 	  $(if $(CORPUS_DIR),--corpus-dir $(CORPUS_DIR),) \
 	  $(if $(MIN_PASS),--min-pass $(MIN_PASS),)
+
+# The 5 `mode=tool_selection` fixtures. Deliberately NOT the whole 36-task
+# corpus: the other 31 are either saturated YAML authoring that corpus-gate
+# already covers, or investigation tasks whose tool loop leans hard on a live
+# appliance -- when that box degrades, their scores slide and read as "the
+# agent regressed" when nothing about the agent changed. These 5 terminate on
+# the first correct tool call, so they barely touch the box and stay honest.
+TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,select_diagnose_failure,select_run_playbook_neutral
+TOOL_GATE_BASELINE ?= 20260801T200941Z
+
+tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3
+	@echo "note: scores DROPPING is the signal. The baseline is 5/5, so this"
+	@echo "      gate can catch a regression but can never show an improvement."
+	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py evals \
+	  --tasks $(TOOL_GATE_TASKS) \
+	  $(if $(REPEAT),--repeat $(REPEAT),) \
+	  $(if $(TOOL_GATE_BASELINE),--baseline $(TOOL_GATE_BASELINE),)
 
 wire-audit: ## LIVE: validate every playbook on the box against the wire models + measure semantic round-trip fidelity. Read-only. Run after any wire/decompiler/emitter change. LIMIT=… FILTER=…
 	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/probe_wire_shapes.py \
