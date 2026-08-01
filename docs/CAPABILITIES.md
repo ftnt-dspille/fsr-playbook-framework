@@ -60,7 +60,7 @@ Run all 11: `fsrpb e2e all`.
 
 ### …let an agent build it for me from a natural-language ask
 
-The MCP server exposes 26 tools (see [`data/MCP_TOOLS.md`](data/MCP_TOOLS.md)) that an LLM uses to do the entire authoring loop.
+The MCP server exposes the whole authoring loop as tools; [`data/MCP_TOOLS.md`](data/MCP_TOOLS.md) is the generated, authoritative list (regenerate with `tooling/store/export_mcp_tools.py` rather than trusting a count quoted in prose -- this line used to say 26, and it is now 72).
 
 Demo prompt:
 > Build me a playbook that takes an IP, looks it up on VirusTotal, and tells me whether it's malicious or clean.
@@ -145,9 +145,9 @@ Pre-talk smoke: `fsrpb e2e all` runs all 11 demo fixtures end-to-end.
 - [`AUTHORING.md`](AUTHORING.md) -- the agent's authoring guide; per-step output-shape table; the `vars.steps.<Underscored_Step_Name>` rule
 - [`data/MCP_TOOLS.md`](data/MCP_TOOLS.md) -- every MCP tool, auto-generated, with full signatures + docstrings
 - [`data/STEP_TYPES.md`](data/STEP_TYPES.md) -- all 43 FSR step types with arg shapes
-- [`data/CONNECTORS.md`](data/CONNECTORS.md) -- 714 connectors, 6,773 ops, signatures-as-cheatsheet
+- [`data/CONNECTORS.md`](data/CONNECTORS.md) -- every connector + operation in the bundled catalog (728 / 6,952 at last refresh), signatures-as-cheatsheet
 - [`data/FSR_CUSTOM_JINJA.md`](data/FSR_CUSTOM_JINJA.md) -- the 32 FortiSOAR-custom Jinja capabilities (grep this first for FSR-flavored Jinja)
-- [`data/JINJA_IDIOMS.md`](data/JINJA_IDIOMS.md) -- 10 corpus-mined patterns
+- [`data/JINJA_IDIOMS.md`](data/JINJA_IDIOMS.md) -- 12 corpus-mined patterns
 - [`data/RECIPES.md`](data/RECIPES.md) -- multi-step composition templates
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) -- the parser → resolver → validator → emitter pipeline
 - [`PRESENTATION_OUTLINE.md`](PRESENTATION_OUTLINE.md) -- slide deck for the talk
