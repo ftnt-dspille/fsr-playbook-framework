@@ -4632,8 +4632,16 @@ def build_parser() -> argparse.ArgumentParser:
              "the task corpus (Compiles / Runs / Works + gold-fixture byte-equal)",
     )
     sp.add_argument("--models", default="agentic_frank",
-                    help="comma-separated provider names. All of these are "
-                         "BOX-FREE (no live FortiSOAR appliance needed). "
+                    help="comma-separated provider names. NOTE: only gold and "
+                         "echo are truly box-free. Every agentic_* provider "
+                         "runs a REAL tool loop, and those tools call a live "
+                         "appliance (connector healthcheck, record reads) -- so "
+                         "a slow or degraded box shows up as lower scores and "
+                         "reads as an agent regression. Trust `mode=tool_"
+                         "selection` fixtures (appliance-light, see "
+                         "`make tool-gate`); treat `mode=investigation` scores "
+                         "as suspect unless the box is known healthy. Set "
+                         "FSR_TIMEOUT to bound the appliance calls. "
                          "DEFAULT: agentic_frank -- free, GLM 5.2 on the "
                          "Fortilab gateway, and a real tool loop, so it is the "
                          "only free provider that can score tool_selection. "
