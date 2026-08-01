@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -203,8 +204,8 @@ def get_grounded_yaml() -> str | None:
     return _GROUNDED_YAML.get()
 
 
-def load_yaml_text(yaml_text: Any, *, allow_grounding: bool = True
-                   ) -> tuple[Any, YamlLoad]:
+def load_yaml_text(yaml_text: Any, *, allow_grounding: bool = True,
+                   ground_when_empty: bool = False) -> tuple[Any, YamlLoad]:
     """Parse a model-supplied ``yaml_text``, repairing what can be repaired.
 
     Returns ``(doc, YamlLoad)``; ``doc`` is ``{}`` for empty/None input so
@@ -227,8 +228,29 @@ def load_yaml_text(yaml_text: Any, *, allow_grounding: bool = True
     this in its own ``except`` with its own error contract, and swallowing here
     would flatten those. Pass ``allow_grounding=False`` where the caller means
     "parse exactly this text" (e.g. validating a candidate before saving it).
+
+    ``ground_when_empty`` is the *durable* half of the same idea. Repairing a
+    corrupt 20 kB echo is treating a symptom; the cure is not making the model
+    echo the document at all. A READ-path tool operating on the playbook that
+    is already open passes ``ground_when_empty=True``, so omitting ``yaml_text``
+    means "the open playbook" instead of "an empty document". The model then
+    has no opportunity to corrupt or silently drop anything, because it never
+    transcribes it.
+
+    It is opt-in per caller, deliberately. For an AUTHORING tool -- validate,
+    compile, push -- empty input must stay empty: silently substituting the
+    OLD document would report success for a document the model never wrote,
+    which is a worse failure than the one this fixes.
     """
     import yaml as _yaml  # noqa: PLC0415
+
+    if ground_when_empty and allow_grounding and not str(yaml_text or "").strip():
+        grounded = get_grounded_yaml()
+        if grounded:
+            g_clean, g_removed = sanitize_yaml_text(grounded)
+            return (_yaml.safe_load(g_clean) or {}), YamlLoad(
+                g_removed, used_grounding=True,
+                grounding_reason="no yaml_text supplied; used the open playbook")
 
     clean, removed = sanitize_yaml_text(yaml_text)
     try:
@@ -707,7 +729,22 @@ def _live_client():
         return None
     if not get_config().is_live():
         return None
-    c = get_client()
+    try:
+        c = get_client()
+    except Exception as exc:  # noqa: BLE001
+        # "Not configured" and "configured but unreachable" are different, and
+        # only the first was handled: get_client() AUTHENTICATES, so a box that
+        # is down raised ConnectionError straight through a function documented
+        # to return None. Callers that say they degrade without a live FSR --
+        # step_through_playbook renders raw values instead of live Jinja --
+        # exploded instead during an outage.
+        #
+        # Deliberately NOT memoised: a box that comes back should reconnect on
+        # the next call rather than stay dead for the life of the process.
+        logging.getLogger(__name__).warning(
+            "live FSR client unavailable (%s: %s); continuing without it",
+            type(exc).__name__, exc)
+        return None
     if c is not None:
         _LIVE_CLIENT_CACHE["client"] = c
     return c

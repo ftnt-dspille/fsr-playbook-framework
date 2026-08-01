@@ -205,23 +205,50 @@ def test_prompt_does_not_claim_a_playbook_can_be_analyzed_by_iri():
             assert f"{tool}({prop}" not in low
 
 
-@pytest.mark.parametrize("tool", ["analyze_playbook", "verify_playbook",
-                                  "validate_yaml", "compile_yaml",
-                                  "step_through_playbook"])
-def test_the_analysis_tools_really_do_require_yaml_text(tool):
-    # The claim the prompt now makes ("every analysis tool takes yaml_text, not a
-    # record") must stay true of the actual schemas, or the prompt is lying again
-    # in the other direction.
-    by_name = {}
+def _build_tool_schema(tool: str) -> dict:
     from fsr_playbooks.llm.intents import tools_for_intent
+    by_name = {}
     for t in tools_for_intent("build"):
         n = t["name"] if isinstance(t, dict) else getattr(t, "name", None)
         by_name[n] = t
     spec = by_name[tool]
-    schema = spec["input_schema"] if isinstance(spec, dict) else spec.input_schema
-    assert "yaml_text" in (schema.get("required") or []), (
-        f"{tool} no longer requires yaml_text -- the prompt's 'pass the OPEN "
-        f"PLAYBOOK YAML as yaml_text' instruction needs revisiting")
+    return spec["input_schema"] if isinstance(spec, dict) else spec.input_schema
+
+
+@pytest.mark.parametrize("tool", ["verify_playbook", "validate_yaml",
+                                  "compile_yaml"])
+def test_the_authoring_tools_really_do_require_yaml_text(tool):
+    # These check the document the MODEL wrote, so they must never fall back to
+    # the open playbook: reporting a clean compile of the OLD document would
+    # tell the model its unwritten draft is fine.
+    assert "yaml_text" in (_build_tool_schema(tool).get("required") or []), (
+        f"{tool} no longer requires yaml_text -- an authoring tool that accepts "
+        "an empty document can silently report on one the model never wrote")
+
+
+@pytest.mark.parametrize("tool", ["analyze_playbook", "step_through_playbook"])
+def test_the_read_path_tools_do_NOT_require_yaml_text(tool):
+    # This test asserted the OPPOSITE until 2026-08-01, and the prompt claim it
+    # guarded ("pass the OPEN PLAYBOOK YAML as yaml_text") was the actual
+    # defect: forcing the model to transcribe a ~20 kB document is how the
+    # document arrived corrupted (a mangled character became a NUL byte and
+    # killed a turn) and how fields silently vanished on the way to a save.
+    # Omitting yaml_text now means "the open playbook", read from the appliance.
+    # Note this is NOT an IRI argument -- the grounding is out-of-band, so
+    # test_prompt_does_not_claim_a_playbook_can_be_analyzed_by_iri still holds.
+    assert "yaml_text" not in (_build_tool_schema(tool).get("required") or []), (
+        f"{tool} requires yaml_text again, so the model must transcribe the "
+        "open playbook to analyse it -- the corruption/field-loss path is back")
+
+
+def test_the_prompt_tells_the_model_to_omit_yaml_text_for_analysis():
+    # Guard the pair: the schema allowing omission is useless if the prompt
+    # still orders the model to paste the document in.
+    assert "omit `yaml_text`" in _FLAT or "omit yaml_text" in _FLAT, (
+        "the analysis tools accept an omitted yaml_text but the build prompt "
+        "never tells the model to omit it")
+    assert "pass that text as `yaml_text`" not in _FLAT, (
+        "the prompt still instructs the model to transcribe the open playbook")
 
 
 def test_prompt_grounds_the_designer_in_the_open_playbook_block():

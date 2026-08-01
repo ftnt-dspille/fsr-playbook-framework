@@ -41,12 +41,24 @@ def _yaml_load_note(load: Any) -> dict[str, Any]:
         )
     if getattr(load, "used_grounding", False):
         note["used_open_playbook"] = True
-        note["yaml_text_note"] = (
-            "the yaml_text you sent could not be parsed "
-            f"({load.grounding_reason}); analysed the OPEN PLAYBOOK read from "
-            "the appliance instead. Do not re-send the playbook body -- it is "
-            "already grounded; describe the change you want instead."
-        )
+        # Two very different reasons land here, and conflating them would
+        # teach the model the wrong lesson. Omitting yaml_text is now the
+        # CORRECT call for the open playbook -- reporting that as a parse
+        # failure would read as a reprimand and push it back to echoing the
+        # document, which is the behaviour we are trying to retire.
+        if "no yaml_text supplied" in (load.grounding_reason or ""):
+            note["yaml_text_note"] = (
+                "no yaml_text supplied, so this ran against the OPEN PLAYBOOK "
+                "read from the appliance. That is the right way to work on the "
+                "open playbook -- keep omitting yaml_text."
+            )
+        else:
+            note["yaml_text_note"] = (
+                "the yaml_text you sent could not be parsed "
+                f"({load.grounding_reason}); analysed the OPEN PLAYBOOK read from "
+                "the appliance instead. Do not re-send the playbook body -- it is "
+                "already grounded; omit yaml_text and describe the change instead."
+            )
     return note
 
 # ---------------------------------------------------------------------------
@@ -55,7 +67,7 @@ def _yaml_load_note(load: Any) -> dict[str, Any]:
 
 
 @mcp.tool()
-def step_through_playbook(yaml_text: str,
+def step_through_playbook(yaml_text: str = "",
                           playbook: str | None = None,
                           input: dict[str, Any] | None = None,
                           branch_choices: dict[str, str] | None = None,
@@ -85,7 +97,13 @@ def step_through_playbook(yaml_text: str,
     before any live write happens.
 
     Args:
-      yaml_text: the simplified-IR YAML.
+      yaml_text: the simplified-IR YAML. **OMIT THIS when you are working on
+        the playbook that is already open** -- leave it empty and the tool
+        reads the appliance's own copy. Do not transcribe the open playbook
+        back to us: re-emitting a large document is how it gets corrupted
+        (a mangled character has arrived as a NUL byte and killed the turn)
+        and how fields silently disappear. Pass yaml_text ONLY for a draft
+        that does not exist on the appliance yet.
       playbook: name of the workflow to step through (default: first one).
       input: vars.input.params.* values.
       branch_choices: {step_id: branch_label} pinning decision-step paths.
@@ -107,7 +125,7 @@ def step_through_playbook(yaml_text: str,
         steps_executed: int }
     """
     try:
-        doc, _load = load_yaml_text(yaml_text)
+        doc, _load = load_yaml_text(yaml_text, ground_when_empty=True)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"yaml parse failed: {exc}"}
     # Say what it took to read the model's copy. Silence here would let a
@@ -598,7 +616,7 @@ def step_through_playbook(yaml_text: str,
     }
 
 @mcp.tool()
-def analyze_playbook(yaml_text: str,
+def analyze_playbook(yaml_text: str = "",
                      playbook: str | None = None,
                      input: dict[str, Any] | None = None,
                      branch_choices: dict[str, str] | None = None,
@@ -617,6 +635,13 @@ def analyze_playbook(yaml_text: str,
     `execute_safe_ops` defaults to False here (vs. True on
     step_through_playbook) because the analyzer is meant to run
     purely offline -- users explicitly opt in to live ops.
+
+    **OMIT `yaml_text` to analyse the OPEN PLAYBOOK** -- the
+    tool reads the appliance's authoritative copy. That is the correct call
+    for "what is wrong with this playbook?". Do not transcribe the open
+    document back to us just to ask about it: re-emitting it is how it gets
+    corrupted and how fields silently vanish. Pass `yaml_text` only for a
+    draft that is not on the appliance yet.
 
     See RENDER_PATH_VALIDATOR_PLAN.md for the catalog of checks.
     """
@@ -643,7 +668,7 @@ def analyze_playbook(yaml_text: str,
     # `arguments.required_fields` style metadata if it ever needs to;
     # current C3 doesn't, but P5 will.
     try:
-        doc, _ = load_yaml_text(yaml_text)
+        doc, _ = load_yaml_text(yaml_text, ground_when_empty=True)
         pbs = doc.get("playbooks") or []
         pb_node = next((p for p in pbs
                         if p.get("name") == sim.get("playbook")),
@@ -824,7 +849,7 @@ def step_test(yaml_text: str,
       emits, plus a `verification_recorded` flag when run_op fired.
     """
     try:
-        doc, _ = load_yaml_text(yaml_text)
+        doc, _ = load_yaml_text(yaml_text, ground_when_empty=True)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"yaml parse failed: {exc}"}
 
