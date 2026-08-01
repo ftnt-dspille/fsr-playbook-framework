@@ -2892,6 +2892,12 @@ def cmd_evals(args: argparse.Namespace) -> int:
         delta_vs, list_runs, load_run, render_delta, render_text,
         run_matrix, save_run,
     )
+    # Providers read their config straight off os.environ. A shell that exports
+    # only *some* of a provider's vars (e.g. FRANK_BASE_URL + FRANK_API_KEY but
+    # not FRANK_MODEL) otherwise ERRs every cell at provider init, which reads
+    # as "the model scored 0" rather than "the harness was misconfigured".
+    from probes import _env  # type: ignore
+    _env._load_dotenv()
     if args.list_runs:
         runs = list_runs()
         if not runs:
