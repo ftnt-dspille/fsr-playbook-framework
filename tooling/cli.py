@@ -2909,6 +2909,27 @@ def cmd_evals(args: argparse.Namespace) -> int:
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     task_filter = ([t.strip() for t in args.tasks.split(",")]
                    if args.tasks else None)
+
+    # Preflight the providers. run_matrix fans a provider-init failure out into
+    # one 0/0 row PER TASK, so a missing env var renders as "the model scored
+    # zero across the corpus" -- a misconfiguration wearing the costume of a
+    # result. Refuse up front instead, and say which var is missing.
+    from evals.providers import get_provider
+    unusable = []
+    for name in models:
+        if name == "gold":
+            continue  # needs a gold_lookup the harness builds; nothing to check
+        try:
+            get_provider(name)
+        except Exception as e:  # noqa: BLE001
+            unusable.append((name, e))
+    if unusable:
+        for name, err in unusable:
+            print(f"provider {name!r} is not usable: {err}", file=sys.stderr)
+        print("\nrefusing to run: a provider that cannot start would be scored "
+              "0/0 on every task, which is indistinguishable from a real "
+              "failing result.", file=sys.stderr)
+        return 2
     if args.repeat and args.repeat > 1:
         from evals.harness import render_screen, screen_models
         screen = screen_models(model_names=models, task_names=task_filter,
@@ -4583,13 +4604,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="LLM-evaluation harness: score each model's authoring on "
              "the task corpus (Compiles / Runs / Works + gold-fixture byte-equal)",
     )
-    sp.add_argument("--models", default="gold,echo",
+    sp.add_argument("--models", default="agentic_frank",
                     help="comma-separated provider names. All of these are "
                          "BOX-FREE (no live FortiSOAR appliance needed). "
+                         "DEFAULT: agentic_frank -- free, GLM 5.2 on the "
+                         "Fortilab gateway, and a real tool loop, so it is the "
+                         "only free provider that can score tool_selection. "
                          "FREE, no LLM: gold, echo -- but these only generate "
-                         "YAML, so they score 0/0 on tool_selection fixtures. "
-                         "FREE + real tool loop: agentic_frank (default "
-                         "choice for selection/guard questions), "
+                         "YAML, so they score 0/0 on tool_selection fixtures; "
+                         "ask for them explicitly when you want the compiler "
+                         "path alone. "
+                         "Other free tool loop: "
                          "agentic_lmstudio (needs LM Studio on :1234). "
                          "PAID: anthropic, openai, agentic_anthropic, "
                          "agentic_openai_api (= the production gpt-4.1-mini; "
