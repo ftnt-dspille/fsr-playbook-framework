@@ -141,6 +141,12 @@ corpus-gate: ## round-trip fidelity gate over the committed corpus (box-free). C
 	  $(if $(CORPUS_DIR),--corpus-dir $(CORPUS_DIR),) \
 	  $(if $(MIN_PASS),--min-pass $(MIN_PASS),)
 
+corpus-triage: ## COMPILABILITY triage over a corpus (box-free): which real playbooks fail to compile, grouped by cause. corpus-gate measures fidelity; this measures acceptance. CORPUS_DIR=… TOP=… MIN_PASS=… ARGS='--markdown'
+	FSRPB_DEV=1 $(VENV_PY) scripts/corpus_compile_triage.py \
+	  $(if $(CORPUS_DIR),--corpus-dir $(CORPUS_DIR),) \
+	  $(if $(TOP),--top $(TOP),) \
+	  $(if $(MIN_PASS),--min-pass $(MIN_PASS),) $(ARGS)
+
 corpus-gen: ## regenerate the committed round-trip corpus fixtures
 	FSRPB_DEV=1 $(VENV_PY) scripts/gen_roundtrip_corpus.py
 
