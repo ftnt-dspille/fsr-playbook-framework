@@ -1,6 +1,6 @@
 """Phase 4b (STATIC_TYPE_FLOW) -- pin the live connector-param ingestion matrix.
 
-The live probe (`python/probes/probe_param_ingestion.py`) proved two things on
+The live probe (`tooling/probes/probe_param_ingestion.py`) proved two things on
 FortiCloud SOAR (build 7.6.5), captured in
 `store/probe_results/param_ingestion_coercion.json`:
 

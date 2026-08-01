@@ -15,8 +15,8 @@ unit tests on either side miss bugs that only show up when FSR
 re-canonicalises what we sent.
 
 Usage:
-    python python/probes/probe_round_trip.py
-    python python/probes/probe_round_trip.py --keep   # leave probe collection on FSR
+    python tooling/probes/probe_round_trip.py
+    python tooling/probes/probe_round_trip.py --keep   # leave probe collection on FSR
 """
 from __future__ import annotations
 

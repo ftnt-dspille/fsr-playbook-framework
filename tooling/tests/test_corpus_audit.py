@@ -1,6 +1,6 @@
 """Tests for probe_corpus_audit (I13 + I14).
 
-Runs against the live `store/fsr_reference.db`. Tests assert the
+Runs against the live `data/fsr_reference.db`. Tests assert the
 audit's shape (not specific drift counts) so the suite isn't fragile
 against corpus changes.
 """

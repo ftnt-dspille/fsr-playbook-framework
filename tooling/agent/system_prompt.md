@@ -276,7 +276,7 @@ When the user asks "why is this playbook broken" or "fix this for me":
 # FSR runtime semantics (live-verified -- do not invent)
 
 These are non-obvious shapes the simulator + analyzer rely on. Don't
-guess -- they're captured from real FSR via `python/probes/probe_render_path.py`.
+guess -- they're captured from real FSR via `tooling/probes/probe_render_path.py`.
 
 - `vars.steps.<for_each_step>` is a **list of per-iteration dicts**,
   NOT the last value. Each dict carries the body's set_var /

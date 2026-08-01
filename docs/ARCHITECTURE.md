@@ -53,7 +53,7 @@ There are three authoring surfaces, all targeting the same compiler:
                               FortiSOAR
 ```
 
-The reference store (`store/fsr_reference.db` + `.json`) is the brain: it
+The reference store (`data/fsr_reference.db` + `.json`) is the brain: it
 is what the resolver/validator consult, what MCP tools query, and what the
 visual editor renders pickers from.
 

@@ -4227,7 +4227,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
     """Run one or more reference-store probes against the live FSR instance.
 
     Each probe fetches a slice of FSR's metadata and writes it into
-    store/fsr_reference.db.  All probes are idempotent -- re-running them
+    data/fsr_reference.db.  All probes are idempotent -- re-running them
     updates the store in place without destroying existing data.
 
     Examples:

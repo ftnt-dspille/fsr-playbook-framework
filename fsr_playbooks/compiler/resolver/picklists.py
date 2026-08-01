@@ -143,7 +143,7 @@ class PicklistMixin:
         "html":     {"formType": "html",     "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/htmlEditor.html"},
         "password": {"formType": "password", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/password.html"},
         # webAddress.html family -- text dataType but typed sub-formats. Confirmed
-        # against live FSR (ipv4/ipv6/domain present in store/fsr_reference.db).
+        # against live FSR (ipv4/ipv6/domain present in data/fsr_reference.db).
         "ipv4":     {"formType": "ipv4",     "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
         "ipv6":     {"formType": "ipv6",     "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
         "domain":   {"formType": "domain",   "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},

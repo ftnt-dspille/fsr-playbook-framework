@@ -668,7 +668,7 @@ def main() -> int:
     with probe_session(PROBE_NAME, sources) as conn:
         # Incremental by default: INSERT OR REPLACE + rpm_fingerprint diff
         # in _repo_rpm let re-runs skip unchanged connectors. To force a full
-        # rebuild, delete store/fsr_reference.db and re-run.
+        # rebuild, delete data/fsr_reference.db and re-run.
         pass
 
         live_count, live_errs = (0, [])

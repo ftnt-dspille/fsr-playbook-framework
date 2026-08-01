@@ -6,10 +6,10 @@ playbooks from a simple, human-readable IR instead of hand-wiring playbook JSON.
 
 It ships three things:
 
-- **Compiler + resolver** (`fsr_playbooks`, `python/`) -- turn the simplified YAML IR
+- **Compiler + resolver** (`fsr_playbooks`, `tooling/`) -- turn the simplified YAML IR
   into FortiSOAR playbook JSON, with a typed walker that resolves variable wiring
   and type-checks source → target across the branch tree.
-- **Reference store** (`store/fsr_reference.db`) -- a SQLite catalog of connectors,
+- **Reference store** (`data/fsr_reference.db`) -- a SQLite catalog of connectors,
   operations, parameters, step types, Jinja filters/macros, and step examples that
   the compiler and agents query to ground every step.
 - **Playbook Studio** (`web/`) -- a FastAPI backend + Svelte 5 visual editor for
@@ -29,18 +29,18 @@ It ships three things:
 
 ```
 fsr_playbooks/    compiler, resolver, typed walker, MCP server (shared with the connector)
-python/      CLI (fsrpb), probes that build the reference DB, extra MCP servers, tests
+tooling/     CLI (fsrpb), probes that build the reference DB, extra MCP servers, tests
 web/         FastAPI backend (:47821) + Svelte 5 Studio editor (:47822)
 ts/          TypeScript compiler (widget-runnable; consumes fsr_reference.json)
-store/       schema + reference DB + agent .md reference exports
+data/        schema + reference DB + agent .md reference exports
 examples/    YAML fixtures + expected playbook JSON
 e2e/         live end-to-end harness (examples/*.test.yaml against a real FSR)
 ```
 
 ## Reference store (SQLite-first)
 
-`store/fsr_reference.db` is the single source of truth for everything an agent or
-the compiler needs -- it's all queryable via SQL. `store/fsr_reference.json` is a
+`data/fsr_reference.db` is the single source of truth for everything an agent or
+the compiler needs -- it's all queryable via SQL. `data/fsr_reference.json` is a
 derived export for the TypeScript compiler / widget. `fsrpb refresh` rebuilds the
 store from probe output.
 
@@ -50,7 +50,8 @@ store from probe output.
 
 ## Setup
 
-Dependencies are managed with [uv](https://docs.astral.sh/uv/). Python **3.11+**.
+Dependencies are managed with [uv](https://docs.astral.sh/uv/). This repo's
+tooling needs Python **3.10+** (`requires-python = ">=3.10"`).
 
 ```sh
 make bootstrap     # fresh clone -> green, testable state (creates .venv, installs deps)
@@ -68,7 +69,7 @@ make verify        # offline green-check: fsr_playbooks + connector test suites
 make tests         # fast pytest (excludes live + slow), incl. the offline golden-trace pin
 make dev           # run backend (:47821) + frontend (:47822) together
 make e2e           # run every examples/*.test.yaml against a live FSR
-make lint          # ruff over fsr_playbooks + python
+make lint          # ruff over fsr_playbooks + tooling
 fsrpb --help       # the CLI (compile, validate, resolve, refresh, query the store)
 ```
 
@@ -78,9 +79,9 @@ Three MCP servers (see `.mcp.json`) expose the toolset to agents / Claude Code:
 
 - **`fsrpb`** (`fsr_playbooks.mcp_server`) -- authoring: compile/validate/resolve YAML,
   find connectors/operations, get step schemas, debug sessions.
-- **`fsr-read`** (`python/fsr_read_mcp.py`) -- read-only live FortiSOAR queries
+- **`fsr-read`** (`tooling/fsr_read_mcp.py`) -- read-only live FortiSOAR queries
   (records, picklists, run_op, verify_playbook).
-- **`fsr-deploy`** (`python/fsr_deploy_mcp.py`) -- connector build/deploy helpers.
+- **`fsr-deploy`** (`tooling/fsr_deploy_mcp.py`) -- connector build/deploy helpers.
 
 ### Triage → build a playbook (Claude Desktop / Claude Code)
 

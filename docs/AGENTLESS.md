@@ -49,8 +49,8 @@ assert_playbook_outcome([
 ])
 ```
 
-Used internally by `python/evals/harness.py`,
-`python/tests/test_assert_outcome.py`, and the diagnose tests.
+Used internally by `tooling/evals/harness.py`,
+`tooling/tests/test_assert_outcome.py`, and the diagnose tests.
 
 ## 2. The `fsrpb` CLI
 

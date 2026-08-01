@@ -18,7 +18,7 @@ summary: 'User-friendly capabilities table: find your goal, follow entry-point (
 
 A capabilities dashboard for users who are new to the toolchain. Find your goal in the left column, follow the entry-point in the middle, and you'll land on either a runnable command or a script the agent can follow end-to-end.
 
-For exhaustive tool / step-type / connector / Jinja docs, see [`store/MCP_TOOLS.md`](store/MCP_TOOLS.md), [`store/STEP_TYPES.md`](store/STEP_TYPES.md), [`store/CONNECTORS.md`](store/CONNECTORS.md), [`store/FSR_CUSTOM_JINJA.md`](store/FSR_CUSTOM_JINJA.md).
+For exhaustive tool / step-type / connector / Jinja docs, see [`data/MCP_TOOLS.md`](data/MCP_TOOLS.md), [`data/STEP_TYPES.md`](data/STEP_TYPES.md), [`data/CONNECTORS.md`](data/CONNECTORS.md), [`data/FSR_CUSTOM_JINJA.md`](data/FSR_CUSTOM_JINJA.md).
 
 ---
 
@@ -33,7 +33,7 @@ The fastest path. Recipes ship as ready-to-push YAML/JSON for two common pattern
 | Threat-feed ingestion (TAXII2-style -- bulk feed → indicators) | `fsrpb generate-recipe --kind threat-feed --info-json <connector>/info.json` | full collection JSON, validates clean, push-ready |
 | Data ingestion (alerts / incidents from a SIEM-style fetch op) | `fsrpb generate-recipe --kind data-ingest --info-json <connector>/info.json --target-module alerts` | full collection JSON |
 
-Behind the scenes the generator queries the live FSR for picklist UUIDs, prechecks that the target connector is installed, and binds output to its matching ruleset for self-validation. See [`store/RECIPES.md`](store/RECIPES.md) for the structural patterns.
+Behind the scenes the generator queries the live FSR for picklist UUIDs, prechecks that the target connector is installed, and binds output to its matching ruleset for self-validation. See [`data/RECIPES.md`](data/RECIPES.md) for the structural patterns.
 
 ### …explore a sample playbook and adapt it
 
@@ -60,7 +60,7 @@ Run all 11: `fsrpb e2e all`.
 
 ### …let an agent build it for me from a natural-language ask
 
-The MCP server exposes 26 tools (see [`store/MCP_TOOLS.md`](store/MCP_TOOLS.md)) that an LLM uses to do the entire authoring loop.
+The MCP server exposes 26 tools (see [`data/MCP_TOOLS.md`](data/MCP_TOOLS.md)) that an LLM uses to do the entire authoring loop.
 
 Demo prompt:
 > Build me a playbook that takes an IP, looks it up on VirusTotal, and tells me whether it's malicious or clean.
@@ -143,11 +143,11 @@ Pre-talk smoke: `fsrpb e2e all` runs all 11 demo fixtures end-to-end.
 ## Where to look next
 
 - [`AUTHORING.md`](AUTHORING.md) -- the agent's authoring guide; per-step output-shape table; the `vars.steps.<Underscored_Step_Name>` rule
-- [`store/MCP_TOOLS.md`](store/MCP_TOOLS.md) -- every MCP tool, auto-generated, with full signatures + docstrings
-- [`store/STEP_TYPES.md`](store/STEP_TYPES.md) -- all 43 FSR step types with arg shapes
-- [`store/CONNECTORS.md`](store/CONNECTORS.md) -- 714 connectors, 6,773 ops, signatures-as-cheatsheet
-- [`store/FSR_CUSTOM_JINJA.md`](store/FSR_CUSTOM_JINJA.md) -- the 32 FortiSOAR-custom Jinja capabilities (grep this first for FSR-flavored Jinja)
-- [`store/JINJA_IDIOMS.md`](store/JINJA_IDIOMS.md) -- 10 corpus-mined patterns
-- [`store/RECIPES.md`](store/RECIPES.md) -- multi-step composition templates
+- [`data/MCP_TOOLS.md`](data/MCP_TOOLS.md) -- every MCP tool, auto-generated, with full signatures + docstrings
+- [`data/STEP_TYPES.md`](data/STEP_TYPES.md) -- all 43 FSR step types with arg shapes
+- [`data/CONNECTORS.md`](data/CONNECTORS.md) -- 714 connectors, 6,773 ops, signatures-as-cheatsheet
+- [`data/FSR_CUSTOM_JINJA.md`](data/FSR_CUSTOM_JINJA.md) -- the 32 FortiSOAR-custom Jinja capabilities (grep this first for FSR-flavored Jinja)
+- [`data/JINJA_IDIOMS.md`](data/JINJA_IDIOMS.md) -- 10 corpus-mined patterns
+- [`data/RECIPES.md`](data/RECIPES.md) -- multi-step composition templates
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) -- the parser → resolver → validator → emitter pipeline
 - [`PRESENTATION_OUTLINE.md`](PRESENTATION_OUTLINE.md) -- slide deck for the talk

@@ -1,6 +1,6 @@
 """Generate store/MCP_TOOLS.md from mcp_server.py via AST.
 
-Run: python python/store/export_mcp_tools.py
+Run: python tooling/store/export_mcp_tools.py
 
 Walks every `@mcp.tool()`-decorated function and emits its name, signature,
 docstring, and section grouping (preserved from the `# ---` banners that
@@ -147,8 +147,8 @@ def main() -> None:
 
     lines: list[str] = []
     lines.append("# MCP Tools -- fsrpb agent surface\n")
-    lines.append("Auto-generated from `python/mcp_server.py` by "
-                 "`python/store/export_mcp_tools.py`. **Do not hand-edit.**\n")
+    lines.append("Auto-generated from `fsr_playbooks/mcp_server/` by "
+                 "`tooling/store/export_mcp_tools.py`. **Do not hand-edit.**\n")
     n_groups = sum(1 for s in SECTION_ORDER if grouped.get(s))
     lines.append(f"**{len(tools)} tools** across **{n_groups} categories**.\n")
 

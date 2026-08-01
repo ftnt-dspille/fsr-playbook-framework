@@ -60,7 +60,7 @@ def _save_cache() -> None:
 # ---------- local DB: valid values per (module, field) ----------
 
 def valid_values(module: str, field: str) -> list[str]:
-    """Return cached itemValues from store/fsr_reference.db (offline)."""
+    """Return cached itemValues from data/fsr_reference.db (offline)."""
     conn = sqlite3.connect(DB_PATH)
     try:
         row = conn.execute(

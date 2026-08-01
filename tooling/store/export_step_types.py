@@ -68,8 +68,8 @@ def build_step_types_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> P
     parts: list[str] = []
     parts.append("# FortiSOAR playbook step types")
     parts.append("")
-    parts.append("Generated from `store/fsr_reference.db` by "
-                 "`python/store/export_step_types.py`. Source-of-truth is the live "
+    parts.append("Generated from `data/fsr_reference.db` by "
+                 "`tooling/store/export_step_types.py`. Source-of-truth is the live "
                  "FSR appliance's `/api/3/workflow_step_types/` endpoint plus mined "
                  "samples from `/api/3/workflow_steps?$relationships=true`.")
     parts.append("")

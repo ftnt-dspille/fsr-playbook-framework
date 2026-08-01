@@ -135,8 +135,8 @@ def build_cheatsheet(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path
     parts: list[str] = []
     parts.append("# FortiSOAR-custom Jinja capabilities")
     parts.append("")
-    parts.append("Generated from `store/fsr_reference.db` by "
-                 "`python/store/export_jinja_cheatsheet.py`. Source-of-truth is the live "
+    parts.append("Generated from `data/fsr_reference.db` by "
+                 "`tooling/store/export_jinja_cheatsheet.py`. Source-of-truth is the live "
                  "FSR appliance via `inspect.signature()` introspection on the workflow "
                  "service's Jinja Environment (`backend_introspect` method).")
     parts.append("")

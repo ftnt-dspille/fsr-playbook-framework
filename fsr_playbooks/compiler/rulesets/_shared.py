@@ -289,7 +289,7 @@ def rule_collection_or_workflow_has_slug(doc: dict) -> Iterable[Issue]:
 
 def _open_ref_db() -> sqlite3.Connection | None:
     """Open the reference store read-only. Honors FSRPB_DB; falls back to
-    the in-tree store/fsr_reference.db. Returns None when nothing usable
+    the in-tree data/fsr_reference.db. Returns None when nothing usable
     is available so the rule degrades quietly on a fresh install.
     """
     from ..._db import PACKAGED_SLIM_DB, REPO_PROBED_DB

@@ -1,4 +1,4 @@
-"""Build `store/fsr_reference.json` from the SQLite reference DB.
+"""Build `data/fsr_reference.json` from the SQLite reference DB.
 
 The TS compiler (and the future FortiSOAR widget) consumes this JSON instead
 of opening SQLite. SQLite stays the agent/dev-loop interface; JSON is the

@@ -63,9 +63,9 @@ from pathlib import Path
 from fsr_playbooks import compile_yaml
 
 # The reference DB resolves connectors, operations, params, step types, and
-# Jinja. It ships with the full framework repo (store/fsr_reference.db), NOT
+# Jinja. It ships with the full framework repo (data/fsr_reference.db), NOT
 # the PyPI wheel -- point this at your copy.
-REFERENCE_DB = Path("store/fsr_reference.db")
+REFERENCE_DB = Path("data/fsr_reference.db")
 
 text = Path("hello_connector.yaml").read_text()
 result = compile_yaml(text, REFERENCE_DB)

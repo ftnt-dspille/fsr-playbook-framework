@@ -75,7 +75,7 @@ _Auto-generated from `cli.build_parser()` -- re-run `python3 scripts/external/du
 
 | arg | help | meta |
 | --- | --- | --- |
-| `--db` | path to fsr_reference.db | default: `store/fsr_reference.db` |
+| `--db` | path to fsr_reference.db | default: `data/fsr_reference.db` |
 
 ### `assert`
 
@@ -406,7 +406,7 @@ Examples:
 Run one or more reference-store probes against the live FSR instance.
 
 Each probe fetches a slice of FSR's metadata and writes it into
-store/fsr_reference.db.  All probes are idempotent -- re-running them
+data/fsr_reference.db.  All probes are idempotent -- re-running them
 updates the store in place without destroying existing data.
 
 Examples:

@@ -1,6 +1,6 @@
 """Corpus-driven validation against the imported playbook_steps table.
 
-`store/fsr_reference.db.playbook_steps` holds ~7.4k real-world step
+`data/fsr_reference.db.playbook_steps` holds ~7.4k real-world step
 argument dicts harvested from disk SP exports + the live FSR. This
 validator mines that corpus for stable enum-like keys (low-cardinality
 string/bool values that appear consistently across samples) and flags

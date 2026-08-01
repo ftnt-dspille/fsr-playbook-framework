@@ -20,8 +20,8 @@ trivially testable: a 200 response confirms the parser recognises
 them.
 
 Usage:
-    python python/probes/probe_visual_editor_wire.py [--module alerts]
-    python python/probes/probe_visual_editor_wire.py --skip-push   # URL checks only
+    python tooling/probes/probe_visual_editor_wire.py [--module alerts]
+    python tooling/probes/probe_visual_editor_wire.py --skip-push   # URL checks only
 
 Cleans up the test collection on success (or leaves it on failure
 for inspection). Exits 0 when every check passes, 1 otherwise.

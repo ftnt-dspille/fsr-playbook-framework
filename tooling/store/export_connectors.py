@@ -70,8 +70,8 @@ def build_connectors_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> P
     parts.append("# FortiSOAR connectors cheatsheet")
     parts.append("")
     parts.append(
-        "Generated from `store/fsr_reference.db` by "
-        "`python/store/export_connectors.py`. Source-of-truth is the live FSR "
+        "Generated from `data/fsr_reference.db` by "
+        "`tooling/store/export_connectors.py`. Source-of-truth is the live FSR "
         "appliance's `/api/integration/connectors/` endpoint plus the catalog "
         "via `/api/query/solutionpacks`."
     )

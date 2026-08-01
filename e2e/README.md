@@ -19,7 +19,7 @@ fsr_stub.py :47920 ← canned FortiSOAR endpoints (dedicated e2e port)
 E2E runs on the 4792X range so it can run alongside a developer's
 `pnpm dev` session (4782X range) without colliding.
 
-The backend writes to `store/drafts.db` (real, shared with dev). Specs
+The backend writes to `data/drafts.db` (real, shared with dev). Specs
 use unique `__e2e_<timestamp>` draft names and clean up in `afterAll`.
 
 ## First-time setup

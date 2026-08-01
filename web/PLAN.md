@@ -40,14 +40,14 @@ Browser app (Mac-local for v1, hostable later) that:
 | Editor | **Monaco** via `@monaco-editor/loader` | YAML mode + diagnostics markers fit our validator output. |
 | Styling | **TailwindCSS** | Fast iteration, no design system to fight. |
 | Package manager | **pnpm** | User pick. |
-| Backend | **FastAPI** (uvicorn, single process) | Imports `python/compiler/`, `python/mcp_server.py` handlers directly. |
+| Backend | **FastAPI** (uvicorn, single process) | Imports `tooling/compiler/`, `tooling/mcp_server.py` handlers directly. |
 | Streaming | **SSE** (chat + run-status) | User pick. Simpler than WS for one-way streams; FastAPI native via `sse-starlette`. |
 | LLM v1 | **Anthropic** (`anthropic` SDK, MessagesStream) | User pick. |
 | LLM later | **OpenAI** behind a `LLMProvider` interface | Pluggable from day 1; second provider lands in Phase 5. |
 | Persistence | **SQLite** at `web/data/studio.db` | Chat sessions, run history, saved YAML drafts. |
 | Auth | **None** (bind `127.0.0.1`) | Single-user. Phase 6 adds shared-secret header for non-localhost. |
 
-**MCP reuse**: direct in-process import of the handler functions from `python/mcp_server.py` (decision deferred to me -- picking direct import). Subprocess + MCP stdio is cleaner but doubles the moving parts and we already own both sides. If we later need true MCP isolation (multi-tenant hosting), refactor then.
+**MCP reuse**: direct in-process import of the handler functions from `tooling/mcp_server.py` (decision deferred to me -- picking direct import). Subprocess + MCP stdio is cleaner but doubles the moving parts and we already own both sides. If we later need true MCP isolation (multi-tenant hosting), refactor then.
 
 **Live-editing model**: full-buffer replace per assistant turn (decision deferred to me -- picking buffer-replace). The model writes the whole YAML each turn; we diff in Monaco and apply. Token-streaming into the editor cell-by-cell looks magical but fights user edits and adds significant complexity. Revisit only if buffer-replace feels too static after Phase 3.
 
@@ -183,7 +183,7 @@ These are not re-explained here. Read the source.
 
 ## Follow-ups captured during Phase 2/3
 
-- **TS port of the Python compiler** -- for tighter Monaco integration (in-browser validate/compile, hover schema from the connector store, completion). Today the editor round-trips to FastAPI for every keystroke; that's fine on localhost but limiting. Plan a port of `python/compiler/` to TypeScript so it can ship as a Web Worker the editor talks to directly, with the FSR reference DB exported as a JSON bundle. Scope: parser → resolver → validator → emitter; reuse the same error codes so server-side and client-side diagnostics interleave cleanly. Land after Phase 5 unless live-editing latency becomes a real complaint.
+- **TS port of the Python compiler** -- for tighter Monaco integration (in-browser validate/compile, hover schema from the connector store, completion). Today the editor round-trips to FastAPI for every keystroke; that's fine on localhost but limiting. Plan a port of `tooling/compiler/` to TypeScript so it can ship as a Web Worker the editor talks to directly, with the FSR reference DB exported as a JSON bundle. Scope: parser → resolver → validator → emitter; reuse the same error codes so server-side and client-side diagnostics interleave cleanly. Land after Phase 5 unless live-editing latency becomes a real complaint.
 
 ## Phase 5 resume notes (2026-05-04)
 
@@ -202,7 +202,7 @@ These are not re-explained here. Read the source.
 
 ## Open questions to revisit (not blocking Phase 0)
 
-1. **Studio SQLite vs reference SQLite** -- keep them separate (`web/data/studio.db` for chat/sessions, `store/fsr_reference.db` for the reference store, opened read-only). Simpler than one shared DB.
+1. **Studio SQLite vs reference SQLite** -- keep them separate (`web/data/studio.db` for chat/sessions, `data/fsr_reference.db` for the reference store, opened read-only). Simpler than one shared DB.
 2. **Monaco YAML schema** -- feed our compiler-derived JSON Schema for `playbooks.yaml` into Monaco's YAML language service for hover/completion before we even talk to the LLM. Probably Phase 3+.
 3. **"Replay session" mode** for demos (from `CHAT_APP_PLAN.md` Day 3) -- defer; live chat is the priority.
 4. **Multi-instance FSR** -- single instance for v1; later use a dropdown bound to named connections in `.env`.

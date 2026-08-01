@@ -83,8 +83,8 @@ def build_recipes_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path
     parts.append("# FortiSOAR playbook recipes")
     parts.append("")
     parts.append(
-        "Generated from `examples/*.yaml` + `store/fsr_reference.db` by "
-        "`python/store/export_recipes.py`. Recipes are *multi-step* "
+        "Generated from `examples/*.yaml` + `data/fsr_reference.db` by "
+        "`tooling/store/export_recipes.py`. Recipes are *multi-step* "
         "compositions -- for per-step shape see `STEP_TYPES.md`, for connector "
         "ops see `CONNECTORS.md`."
     )
@@ -163,7 +163,7 @@ def build_recipes_md(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path
     parts.append("")
     parts.append(
         "**Adding a new recipe**: drop a hand-curated YAML in `examples/`, add "
-        "a row to `EXAMPLE_HEADERS` in `python/store/export_recipes.py`, "
+        "a row to `EXAMPLE_HEADERS` in `tooling/store/export_recipes.py`, "
         "regenerate. Recipe YAMLs double as round-trip regression fixtures."
     )
     parts.append("")
