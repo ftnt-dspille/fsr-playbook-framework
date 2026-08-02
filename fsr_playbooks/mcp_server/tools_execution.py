@@ -2247,9 +2247,17 @@ def run_playbook(playbook: str,
                                        "wf_pk": wf_pk}
                 if not ok:
                     # Pull the full record for step-level diagnostics.
+                    # `step_detail=true` is LOAD-BEARING, not a nicety: without
+                    # it the record carries no `steps` and an empty `result`,
+                    # so a genuinely failed run reports `error_message: None`
+                    # with `failed_steps: []` -- which reads as "no step
+                    # failed" and cost a full misdiagnosis. The explanation was
+                    # one query param away the whole time.
+                    iri = (rec.get("@id") or "").rstrip("/")
                     try:
                         fr = client.session.get(
-                            client.base_url + "/api" + (rec.get("@id") or ""),
+                            client.base_url + "/api" + iri
+                            + "/?format=json&step_detail=true",
                             verify=client.verify_ssl)
                         full = fr.json() if fr.status_code == 200 else rec
                     except Exception:  # noqa: BLE001
@@ -2273,6 +2281,34 @@ def run_playbook(playbook: str,
                                           if isinstance(res, dict) else str(res)),
                             })
                     out["failed_steps"] = failed
+                    # Last resort: a run can still die with nothing on the
+                    # record we recognize -- notably a playbook that declares
+                    # `parameters:` triggered with NO inputs, which dies at the
+                    # start step and looks byte-identical to a product fault.
+                    # Never hand back `failed` with no reason at all.
+                    if not out.get("error_message") and not failed:
+                        try:
+                            rf = client.playbooks.why_failed(
+                                playbook_uuid=wf_uuid)
+                        except Exception:  # noqa: BLE001 -- enrichment only
+                            rf = None
+                        if rf is not None:
+                            if getattr(rf, "error_message", None):
+                                out["error_message"] = rf.error_message
+                            if getattr(rf, "failing_step", None):
+                                out["failed_steps"] = [
+                                    {"name": rf.failing_step,
+                                     "status": status,
+                                     "error": rf.error_message}]
+                    if not out.get("error_message") and not out["failed_steps"]:
+                        out["error_message"] = (
+                            f"run ended {status} but the run record carried no "
+                            "failing step or message. Most often the playbook "
+                            "declares `parameters:` and was triggered with no "
+                            "`input` -- it dies at the start step. Check the "
+                            "declared inputs, then re-read the run with "
+                            "why_did_playbook_fail.")
+
                 return out
         time.sleep(2)
     return {"ok": False, "status": "timeout", "task_id": task_id,
@@ -2302,12 +2338,45 @@ def dry_run_playbook(yaml_text: str, playbook: str,
         cleanup: hard-purge the collection after the run (default True).
             Set False to keep the collection on the instance for inspection.
         use_mock_output: run with each step's `arguments.mock_result` instead
-            of live external calls.
+            of live external calls. NOTE this is a *substitution*, not a kill
+            switch: a step carrying no `mock_result` has nothing to substitute
+            and runs LIVE. Containment steps are therefore checked, and a
+            mocked run refuses to start if any of them is unmocked.
 
     Returns:
         {ok, status, task_id, wf_pk, collection_uuid, error_message?,
          failed_steps?, cleaned_up: bool}.
     """
+    # Fail closed BEFORE pushing: a safety property that depends on a comment
+    # is not a safety property. A "dry run" of a playbook whose containment
+    # step carries no `mock_result` really contains, on a real firewall.
+    if use_mock_output:
+        try:
+            from fsr_playbooks.compiler.skill_compiler import (
+                unmocked_containment_steps as _unmocked)
+            from ._shared import load_yaml_text as _load
+            doc = _load(yaml_text)[0] or {}
+            bad = _unmocked(doc) if isinstance(doc, dict) else []
+        except Exception:  # noqa: BLE001 -- never fail the tool on the check
+            bad = []
+        if bad:
+            return {
+                "ok": False, "stage": "precheck",
+                "error_code": "unmocked_containment",
+                "error": (
+                    "refusing to 'dry run': "
+                    + ", ".join(repr(n) for n in bad)
+                    + " is a state-changing containment step with no "
+                    "`arguments.mock_result`, so useMockOutput would NOT stop "
+                    "it -- it would execute for real."),
+                "unmocked_containment_steps": bad,
+                "suggestions": [
+                    "give each listed step a `mock_result` (a JSON string of a "
+                    "representative response) and re-run",
+                    "use step_through_playbook for a walkthrough that executes "
+                    "nothing",
+                ],
+            }
     push = push_playbook(yaml_text)
     if not push.get("ok"):
         return {"ok": False, "stage": "push", **push}
