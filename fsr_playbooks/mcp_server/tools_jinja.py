@@ -142,11 +142,15 @@ def find_jinja_pattern(q: str, kind: str | None = None,
     if kind:
         sql += " AND kind = ?"
         params.append(kind)
+    # `head = ?` is equality, not LIKE -- bind the RAW q. Binding the escaped
+    # form would silently kill the boost for any query holding `_` or `%`
+    # (`set_variable` arrives as `set\_variable`, which equals no head), and a
+    # ranking that never fires looks exactly like one that found no exact hit.
     sql += (
         " ORDER BY (head = ?) DESC,"
         " occurrences DESC, head LIMIT ?"
     )
-    params.extend([like_q, limit])
+    params.extend([q, limit])
     with _db() as conn:
         return _rows(conn, sql, tuple(params))
 
