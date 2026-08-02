@@ -76,6 +76,7 @@ def test_a_query_that_matches_nothing_says_so_instead_of_returning_bare_empty():
         "must name the one thing a BLOCK search structurally cannot find")
 
 
+@needs_corpus
 def test_a_prose_query_falls_back_to_token_matching():
     """The #48 diagnosis: whole-string LIKE can only match a query that is
     already Jinja text, so a question asked in words matched nothing 7 times
