@@ -653,16 +653,40 @@ def test_power2_mcp_call_lands_on_the_trace_as_a_connector_action(_trace):
     assert call.observed_output == {"attributes": {"network": "203.0.113.0/24"}}
 
 
-def test_builtin_server_call_is_not_traced(_trace):
-    """`soc`/`utility` tools have no connector step to compile to -- recording
-    them would put an uncompilable step in the playbook."""
+def test_builtin_server_call_compiles_via_call_mcp_tool(_trace):
+    """A built-in (`soc`/`utility`) tool has no connector of its own, but the
+    SOC-assistant connector's `call_mcp_tool` op can replay it -- so it records
+    as a step against that op rather than being dropped."""
     M.configure(mcp_allowlist={"soc": {"tools": "*", "tier": "read_only"}},
                 client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
     M.ensure_initialized()
 
     T.dispatch("mcp_soc__enrich_indicator", {"indicator": "1.2.3.4"})
 
+    assert len(_trace.calls) == 1, "built-in MCP call never reached the trace"
+    ri = _trace.calls[0].resolved_inputs
+    assert ri["connector"] == M.SOC_ASSISTANT_CONNECTOR
+    assert ri["operation"] == "call_mcp_tool"
+    assert ri["tool"] == "mcp_soc__enrich_indicator"
+    assert ri["args"] == {"indicator": "1.2.3.4"}
+    assert _trace.calls[0].step_name == "Enrich Indicator"
+
+
+def test_mutating_builtin_is_dropped_and_reported_not_silent(_trace):
+    """`call_mcp_tool` has no approval gate, so the connector won't expose a
+    tier-3 tool to it -- compiling one would ship a step that dies with
+    `unknown_tool`. Drop it, but SAY so."""
+    M.configure(mcp_allowlist={"soc": {"tools": "*", "tier": "mutating"}},
+                client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
+    M.ensure_initialized()
+
+    # A tier-3 tool never reaches `fn` via dispatch -- it returns an approval
+    # card first. The drop matters on the APPROVED execution path, where the
+    # closure does run, so exercise that layer directly.
+    T.REGISTRY["mcp_soc__enrich_indicator"].fn(indicator="1.2.3.4")
+
     assert _trace.calls == []
+    assert "mcp_soc__enrich_indicator" in M.dropped_mutating_mcp()
 
 
 def test_data_envelope_is_unwrapped_and_sets_ref_prefix(_trace):

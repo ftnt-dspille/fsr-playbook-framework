@@ -113,6 +113,7 @@ def reset() -> None:
         llm_tools.TOOL_TIERS.pop(name, None)
     _materialized_names.clear()
     SERVER_MAP.clear()
+    _DROPPED_MUTATING.clear()
     _allowlist = {}
     _client_factory = None
     _initialized = False
@@ -421,6 +422,41 @@ def _make_name(server: str, tool_name: str) -> str:
 
 _CONNECTOR_PREFIX = "connector:"
 
+# The connector whose `call_mcp_tool` op replays a materialized MCP tool from a
+# playbook step. A built-in server's tool compiles to a step against this.
+SOC_ASSISTANT_CONNECTOR = "connector-fsr-soc-assistant"
+
+# Materialized built-in tools dropped from the trace because they're mutating and
+# `call_mcp_tool` can't invoke them. Surfaced on the compile result so the omission
+# is visible rather than silent.
+_DROPPED_MUTATING: list[str] = []
+
+
+def _titleize(tool_name: str) -> str:
+    """`get_alert` -> `Get Alert`. Gives the compiled step a readable name instead
+    of the wire name, matching what `record_run_op` does for a connector op."""
+    return " ".join(p.capitalize() for p in re.split(r"[^a-zA-Z0-9]+", tool_name) if p)
+
+
+def _is_mutating(materialized_name: str) -> bool:
+    """True when the materialized tool is tier-3 (approval-gated)."""
+    try:
+        from ..llm.tools import TOOL_TIERS
+        return int(TOOL_TIERS.get(materialized_name, 1) or 1) >= 3
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _note_dropped_mutating(name: str) -> None:
+    if name not in _DROPPED_MUTATING:
+        _DROPPED_MUTATING.append(name)
+
+
+def dropped_mutating_mcp() -> list[str]:
+    """Mutating built-in MCP tools this session called that could NOT be compiled
+    into a playbook step. The caller surfaces these as a gap."""
+    return list(_DROPPED_MUTATING)
+
 
 def connector_of(server: str) -> str | None:
     """The installed-connector name behind a Power-2 server (``"connector:<name>"``
@@ -460,15 +496,40 @@ def _record_connector_trace(server: str, tool_name: str,
     downstream supplies a default. So an AGENT-BOUND connector reached over native
     MCP compiles to a step with no agent binding, which the workflow engine can't
     route. Unverified against a box: it may be that the catalog's default config
-    for an agent-bound connector is already the agent config, making this moot."""
-    name = connector_of(server)
-    if not name:
-        return          # built-in server: no connector step to compile to
+    for an agent-bound connector is already the agent config, making this moot.
+
+    A BUILT-IN server's tool (``soc``, ``utility``, …) has no connector of its own,
+    but it is still replayable from a playbook: the SOC-assistant connector's
+    ``call_mcp_tool`` op invokes any materialized tool by name. So those record as a
+    connector step against that op rather than being dropped -- one uniform compile
+    target for every MCP call, and no new skill or step type.
+
+    A MUTATING (tier-3) built-in tool is NOT recorded: ``call_mcp_tool`` bypasses the
+    approval-card machinery and the connector deliberately refuses to expose tier-3
+    tools to it, so such a step would fail at runtime with ``unknown_tool``. It is
+    dropped rather than compiled broken -- see ``dropped_mutating_mcp`` on the
+    compile result, which surfaces it instead of losing it silently."""
     try:
         from fsr_playbooks.agent.skill_trace import record_run_op as _record
         data = env.get("data", env) if isinstance(env, dict) else env
         prefix = "data" if (isinstance(env, dict) and "data" in env) else ""
-        _record(name, tool_name, args, data, ref_prefix=prefix)
+
+        name = connector_of(server)
+        if name:
+            # Power-2: the server IS the connector -> a DIRECT connector step.
+            _record(name, tool_name, args, data, ref_prefix=prefix)
+            return
+
+        # Built-in: replay through the SOC-assistant connector's call_mcp_tool.
+        materialized = _make_name(server, tool_name)
+        if _is_mutating(materialized):
+            _note_dropped_mutating(materialized)
+            return
+        _record(
+            SOC_ASSISTANT_CONNECTOR, "call_mcp_tool",
+            {"tool": materialized, "args": dict(args or {})},
+            data, step_name=_titleize(tool_name), ref_prefix=prefix,
+        )
     except Exception:
         pass
 
