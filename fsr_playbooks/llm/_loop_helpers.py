@@ -665,11 +665,11 @@ def extract_yaml_block(text: str) -> str | None:
 # `validate_yaml` / `compile_yaml` are absent for the same reason, one step
 # earlier: they are the scratchpad.
 #
-# NOTE the harness's `conv_scenarios._YAML_CARRIER` is a SUPERSET of this and
-# rightly so -- it answers "what YAML did this turn produce, so I can compile
-# it", which is a different question from "did the user end up with it".
-# `tests/test_yaml_carrier_parity.py` asserts the subset relationship rather
-# than equality, so the two can differ on purpose but not by accident.
+# NOTE this list answers "did the user end up with it", which is NOT the same
+# question as "what YAML did this turn produce, so I can compile it" -- the
+# latter rightly includes the scratchpad tools above. Nothing currently pins
+# the relationship between the two, so if a scoring-side carrier list is ever
+# added, keep this one a subset of it and add a test that says so.
 _DELIVERY_CARRIERS: dict[str, tuple[str, ...]] = {
     "emit_playbook_offer": ("yaml",),
     "emit_patch_proposal": ("after_yaml",),
