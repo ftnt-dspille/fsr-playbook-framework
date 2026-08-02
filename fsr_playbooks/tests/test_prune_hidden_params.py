@@ -127,3 +127,30 @@ def test_visible_params_handles_a_param_with_several_rules():
              ("target", "mode", "B")]
     assert "target" in _visible_params(rules, {"mode": "B", "target": "t"})
     assert "target" not in _visible_params(rules, {"mode": "C", "target": "t"})
+
+
+def test_connector_and_op_inside_arguments_still_prunes():
+    """The shape that made this whole function a silent no-op on a live box.
+
+    A trace whose recorded inputs carried an `arguments:` wrapper keeps
+    `connector`/`operation` inside it rather than at step level. Reading only
+    the step level meant prune_hidden_params returned [] before it ever
+    consulted the catalog: the block_ip_new trace kept both branches, the
+    compiler rejected the param-set conflict, and build_playbook_from_trace
+    produced nothing -- the exact P4 failure this module exists to prevent,
+    reappearing through a different step shape.
+    """
+    step = {"name": "Block IP", "type": "connector",
+            "arguments": {"connector": "fortigate-firewall",
+                          "operation": "block_ip_new",
+                          "method": "Quarantine Based",
+                          "ip_block_policy": "pol1", "ip_type": "IPv4",
+                          "ip": "198.51.100.7", "ip_addresses": "198.51.100.7",
+                          "time_to_live": "1 Day", "duration": 3600,
+                          "vdom": "root"}}
+    dropped = prune_hidden_params(step, _rules_for)
+    assert dropped == ["duration", "ip", "ip_block_policy", "ip_type"], dropped
+    # The routing keys are not op params and must survive the prune.
+    assert step["arguments"]["connector"] == "fortigate-firewall"
+    assert step["arguments"]["operation"] == "block_ip_new"
+    assert step["arguments"]["method"] == "Quarantine Based"
