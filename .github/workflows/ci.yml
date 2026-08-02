@@ -58,6 +58,19 @@ jobs:
       - name: Run tests
         # Call the venv interpreter directly -- deterministic, avoids uv trying
         # to sync the root project (which expects a sibling pyfsr checkout).
+        #
+        # PYTHONPATH=tooling: `probes` is mapped from tooling/ by the ROOT
+        # pyproject, and CI installs packaging/fsr_playbooks instead -- so two
+        # tests in test_open_playbook_grounding.py could only ever pass locally
+        # and failed here on every run, which is how main stayed red across the
+        # 0.6.6/0.6.7/0.6.8 releases. Adding the path rather than skipping the
+        # tests: they cover `_live_client()` degrading gracefully against a
+        # DOWN box, which is precisely the behaviour nobody exercises by hand.
+        # Costs no new dependency -- probes/_env imports only stdlib and
+        # probes.common at module scope; pyfsr is imported inside get_client(),
+        # which these tests monkeypatch and never call.
+        env:
+          PYTHONPATH: tooling
         run: .venv/bin/python -m pytest fsr_playbooks/tests -q -m "not live and not slow"
 
   package:
