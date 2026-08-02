@@ -18,7 +18,21 @@ from fsr_playbooks.mcp_server.tools_jinja import find_jinja_pattern
 # expression rather than for the specific idiom: keyed to the specific one, a
 # genuine ranking regression would present as "corpus absent" and skip itself
 # green. Empty corpus -> skip; present corpus -> every assertion must hold.
-_HAS_CORPUS = bool(find_jinja_pattern("vars", limit=1))
+def _corpus_present() -> bool:
+    """True only when the probe returned a REAL row.
+
+    `bool(rows)` was enough until `find_jinja_pattern` started answering a miss
+    with a one-element `no_match` sentinel instead of `[]` (so a model gets told
+    what was searched rather than a bare empty list). That sentinel is truthy,
+    so on CI -- whose slim DB carries no corpus -- the guard read "corpus
+    present", every assertion ran, and all six died on `KeyError: 'head'`. The
+    guard has to key on the sentinel, not on emptiness.
+    """
+    rows = find_jinja_pattern("vars", limit=1)
+    return bool(rows) and not rows[0].get("no_match")
+
+
+_HAS_CORPUS = _corpus_present()
 needs_corpus = pytest.mark.skipif(
     not _HAS_CORPUS, reason="jinja corpus absent from the slim reference DB")
 
