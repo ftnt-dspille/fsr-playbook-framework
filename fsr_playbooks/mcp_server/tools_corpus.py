@@ -64,18 +64,119 @@ def search_playbooks(q: str, limit: int = 10,
             conn,
             """SELECT collection, workflow, uses_connectors_csv, step_count
                FROM playbooks_seen
-               WHERE collection LIKE '%'||?||'%'
-                  OR workflow LIKE '%'||?||'%'
-                  OR uses_connectors_csv LIKE '%'||?||'%'
+               WHERE collection LIKE '%'||?||'%' ESCAPE '\\'
+                  OR workflow LIKE '%'||?||'%' ESCAPE '\\'
+                  OR uses_connectors_csv LIKE '%'||?||'%' ESCAPE '\\'
                ORDER BY step_count DESC
                LIMIT ?""",
-            (q, q, q, limit),
+            (_like(q), _like(q), _like(q), limit),
         )
+        if not rows:
+            # A whole-string LIKE only ever matches a query that is already a
+            # playbook NAME. The model asks in prose -- "phishing email
+            # triage", "block ip on firewall" -- and a corpus of 1,600+
+            # playbooks that certainly contains the pattern answers with a
+            # bare `[]`, which reads as "nobody does this". Same failure and
+            # same fix as find_jinja_pattern: match per token, rank by how
+            # many distinct tokens a row hits.
+            rows = _token_fallback(conn, q, limit)
+        if not rows:
+            return _no_playbooks(q)
         if not verbose:
             for r in rows:
                 r.pop("uses_connectors_csv", None)
                 r.pop("step_count", None)
         return rows
+
+
+# Words that match half a playbook-name corpus and carry no signal.
+_STOPWORDS = frozenset({
+    "a", "an", "the", "of", "in", "on", "to", "for", "with", "from", "and",
+    "how", "do", "i", "get", "use", "using", "my", "me", "it", "is", "are",
+    "or", "into", "out", "up", "by", "at", "as", "be", "that", "this",
+    "playbook", "playbooks", "workflow", "workflows", "example", "examples",
+})
+
+
+def _like(s: str) -> str:
+    """Escape LIKE wildcards so a query holding `%`/`_` matches literally."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _tokens(q: str) -> list[str]:
+    import re
+    toks = [t for t in re.split(r"[^A-Za-z0-9_.-]+", q or "") if t]
+    seen: dict[str, None] = {}
+    for t in toks:
+        if len(t) > 2 and t.lower() not in _STOPWORDS:
+            seen.setdefault(t.lower(), None)
+    return list(seen)[:8]
+
+
+def _token_fallback(conn: sqlite3.Connection, q: str,
+                    limit: int) -> list[dict[str, Any]]:
+    """Rank playbooks by how many distinct tokens of `q` they mention.
+
+    A 3+-token query must hit at least TWO: one incidental word match
+    ("alert" in a corpus of alert playbooks) is not an answer, and surfacing
+    it is worse than saying nothing -- the model reads a ranked list as a
+    finding and follows it.
+    """
+    toks = _tokens(q)
+    if not toks:
+        return []
+    hit = ("(CASE WHEN collection LIKE '%'||?||'%' ESCAPE '\\' "
+           "OR workflow LIKE '%'||?||'%' ESCAPE '\\' "
+           "OR COALESCE(uses_connectors_csv,'') LIKE '%'||?||'%' ESCAPE '\\' "
+           "THEN 1 ELSE 0 END)")
+    score = " + ".join([hit] * len(toks))
+    params: list[Any] = []
+    for t in toks:
+        params.extend([_like(t)] * 3)
+    sql = (f"""SELECT collection, workflow, uses_connectors_csv, step_count,
+                      ({score}) AS matched_tokens
+               FROM playbooks_seen
+               WHERE ({score}) >= {2 if len(toks) >= 3 else 1}
+               ORDER BY matched_tokens DESC, step_count DESC
+               LIMIT ?""")
+    rows = _rows(conn, sql, tuple(params + params + [limit]))
+    for r in rows:
+        r["match"] = "tokens"
+    if rows:
+        # The explanation goes on the first row only. Repeating a 20-word
+        # note per row triples the payload of a result set whose rows are
+        # two short strings each, and says nothing new on row 7.
+        rows[0]["note"] = (
+            f"no playbook name contains {q!r} verbatim -- these matched "
+            f"{'/'.join(toks)} individually, ranked by how many "
+            "(`matched_tokens`).")
+    return rows
+
+
+def _no_playbooks(q: str) -> list[dict[str, Any]]:
+    """Never hand back a bare `[]` (AGENT_HARDENING_PLAN §H).
+
+    An empty list reads as "no one builds this", and the model either
+    rephrases (the search loop) or tells the user the pattern is unsupported.
+    Say what this corpus actually holds -- playbook NAMES and collections,
+    not step bodies -- and name the tool that answers the question it cannot.
+    """
+    toks = _tokens(q)
+    return [{
+        "no_match": True,
+        "query": q,
+        "searched_tokens": toks,
+        "note": (
+            f"no playbook in the corpus matches {q!r}"
+            + (f" (searched tokens: {'/'.join(toks)})" if toks else "")
+            + ". This corpus indexes playbook NAMES, collections and the "
+              "connectors each uses -- not step bodies, so a search for what "
+              "a playbook DOES will miss unless the name says it. For a "
+              "buildable template use find_recipe; for how a step type is "
+              "used in the wild use find_step_examples; for a vendor action "
+              "use find_connector then find_operation."
+        ),
+    }]
 
 @mcp.tool()
 def review_chat_session(session_id: str) -> dict[str, Any]:

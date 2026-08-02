@@ -6,14 +6,22 @@ import sqlite3
 from typing import Any
 
 from ._shared import (
+    _db,
+    _err,
     mcp,
 )
+from .. import picklists as _pl
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
 
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
+#
+# All five resolve through `fsr_playbooks.picklists`: reference store first,
+# live instance second, `NoPicklistData` (with the fix) last. They previously
+# required BOTH a configured live instance AND this repo's `tooling/` on
+# sys.path -- neither holds on an appliance, so they were dead there.
 
 
 @mcp.tool()
@@ -26,29 +34,33 @@ def list_picklists() -> dict[str, Any]:
 
     Use when the agent needs to discover what picklists exist (e.g.
     'Severity', 'AlertStatus', 'Threat Type') before resolving a value
-    to an IRI. Live-fetched once per process and cached.
+    to an IRI. Answered from the local reference store when it is warmed,
+    so it works with no live instance; falls back to a live fetch.
     """
-    client = _shared._live_client()
-    if client is None:
-        return {"error": "FSR instance not configured"}
-    from picklists import list_picklist_names
-    names = list_picklist_names(client)
-    return {"count": len(names), "names": names}
+    with _db() as conn:
+        try:
+            return _pl.picklist_names(conn, _shared._live_client())
+        except _pl.NoPicklistData as exc:
+            return _err(exc.code, exc.message, suggestions=exc.suggestions)
 
 @mcp.tool()
 def get_picklist(name: str) -> dict[str, Any]:
     """List items of a single picklist as [{itemValue, uuid, iri, ordinal}].
 
+    An unknown NAME returns `unknown_picklist` plus near-matches (not an
+    empty list) -- "this picklist has no values" and "there is no such
+    picklist" are different answers and the agent branches on them
+    differently.
+
     Args:
         name: picklist `listName.name` (e.g. 'AlertStatus', 'Severity').
               Use list_picklists() to discover.
     """
-    client = _shared._live_client()
-    if client is None:
-        return {"error": "FSR instance not configured"}
-    from picklists import picklist_values
-    items = picklist_values(client, name)
-    return {"name": name, "count": len(items), "items": items}
+    with _db() as conn:
+        try:
+            return _pl.picklist_items(conn, name, _shared._live_client())
+        except _pl.NoPicklistData as exc:
+            return _err(exc.code, exc.message, suggestions=exc.suggestions)
 
 @mcp.tool()
 def picklist_for_field(module: str, field: str) -> dict[str, Any]:
@@ -69,15 +81,33 @@ def picklist_for_field(module: str, field: str) -> dict[str, Any]:
         field:  field name, e.g. 'status', 'severity', 'type'.
     """
     client = _shared._live_client()
-    if client is None:
-        return {"error": "FSR instance not configured"}
-    from picklists import picklist_name_for, valid_values
-    pn = picklist_name_for(client, module, field)
-    return {
-        "module": module, "field": field,
-        "picklist_name": pn,
-        "valid_values_local": valid_values(module, field),
-    }
+    with _db() as conn:
+        pn = _pl.picklist_name_for(conn, module, field, client)
+        values = _pl.valid_values(conn, module, field)
+        out = {"module": module, "field": field, "picklist_name": pn,
+               "valid_values_local": values}
+        if pn is None:
+            # §H: never a bare null. Say which of the two misses this is --
+            # unknown field vs. known field with no picklist behind it.
+            try:
+                known_field = bool(conn.execute(
+                    "SELECT 1 FROM module_fields WHERE module_name=? "
+                    "AND field_name=? LIMIT 1", (module, field)).fetchone())
+            except sqlite3.Error:
+                known_field = False
+            out["note"] = (
+                (repr(module + "." + field) + " is not a picklist-backed "
+                 "field -- author it as a plain value, no IRI needed.")
+                if known_field else
+                ("no field " + repr(field) + " on module " + repr(module)
+                 + " in this catalog, which carries the picklist-backed "
+                   "fields. So either the field takes a plain value (no IRI "
+                   "needed), or the catalog is not warmed -- run `warmup` "
+                   "against the target appliance to get its real fields. "
+                   "Check the module name too: lowercase plural, e.g. "
+                   "'alerts'.")
+            )
+        return out
 
 @mcp.tool()
 def resolve_picklist_value(value: str, picklist_name: str | None = None,
@@ -98,28 +128,24 @@ def resolve_picklist_value(value: str, picklist_name: str | None = None,
     Investigating, Pending, Closed, Active, Re-Opened).
     """
     client = _shared._live_client()
-    if client is None:
-        return {"error": "FSR instance not configured"}
-    from picklists import resolve_iri, picklist_name_for, picklist_values
-    pn = picklist_name
-    if pn is None and module and field:
-        pn = picklist_name_for(client, module, field)
-    if pn is None:
-        return {"error": "picklist_name unknown -- provide it, or "
-                         "(module, field) for auto-discovery"}
-    iri = resolve_iri(client, value, picklist_name=pn)
-    if iri:
-        return {"ok": True, "iri": iri, "picklist_name": pn,
-                "value": value}
-    items = picklist_values(client, pn)
-    valid = [it.get("itemValue") for it in items]
-    # Cheap fuzzy: prefix or substring match.
-    vl = value.lower()
-    suggestions = [v for v in valid if v and (
-        v.lower().startswith(vl) or vl in v.lower() or
-        v.lower() in vl)]
-    return {"ok": False, "picklist_name": pn, "value": value,
-            "valid_values": valid, "suggestions": suggestions[:5]}
+    with _db() as conn:
+        pn = picklist_name
+        if pn is None and module and field:
+            pn = _pl.picklist_name_for(conn, module, field, client)
+        if pn is None:
+            return _err(
+                "picklist_unknown",
+                "picklist_name unknown"
+                + (" for " + repr(str(module) + "." + str(field))
+                   if module and field else ""),
+                suggestions=[
+                    "pass picklist_name directly (list_picklists shows them)",
+                    "or pass module + field so it can be auto-discovered",
+                ])
+        try:
+            return _pl.resolve_iri(conn, value, pn, client)
+        except _pl.NoPicklistData as exc:
+            return _err(exc.code, exc.message, suggestions=exc.suggestions)
 
 
 # ---------------------------------------------------------------------------
@@ -163,16 +189,25 @@ def precheck_picklist_value(picklist_name: str,
     Catches typos like 'In Progress' for AlertStatus (which only has
     Open / Investigating / Pending / Closed / Active / Re-Opened).
     Returns close-match suggestions when the value isn't an exact
-    itemValue.
+    itemValue. Checks the local reference store first, so it still
+    catches typos with no live instance -- the VALUES are globally
+    stable even where the per-install IRIs are not.
     """
     client = _shared._live_client()
-    if client is None:
-        return {"ok": False, "code": "no_live_fsr",
-                "message": "FSR instance not configured"}
-    from recipes.prechecks import check_picklist_value
-    result = check_picklist_value(client, picklist_name, value).to_dict()
+    with _db() as conn:
+        try:
+            result = _pl.resolve_iri(conn, value, picklist_name, client)
+        except _pl.NoPicklistData as exc:
+            return _err(exc.code, exc.message, suggestions=exc.suggestions)
+    # `iri_unavailable` means the VALUE checked out and only the per-install
+    # IRI is missing -- that is a pass for a precheck, whose question is
+    # "would this value be rejected?".
+    if result.get("code") == "iri_unavailable":
+        result = dict(result, ok=True)
+    method = ("live_api_get" if result.get("source") == "live"
+              else "reference_db")
     _persist_precheck_verification(
-        "picklist", f"{picklist_name}:{value}", "live_api_get", result,
+        "picklist", f"{picklist_name}:{value}", method, result,
     )
     return result
 

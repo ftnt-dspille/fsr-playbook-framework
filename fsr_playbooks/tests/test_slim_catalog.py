@@ -68,11 +68,24 @@ def test_slim_db_is_present_and_shaped():
         assert conn.execute(
             "SELECT COUNT(*) FROM connector_configs"
         ).fetchone()[0] == 0, "connector_configs must ship empty (per-instance creds)"
-        # picklists are still per-install (instance-specific picklist rows);
-        # warmed, not shipped.
+        # picklists ship VALUES ONLY, for the product built-ins. The value
+        # ('High') is globally stable; the IRI carries a per-install uuid and
+        # would resolve to the WRONG item on any other appliance -- silently,
+        # which is worse than not resolving. Warmup fills the IRIs in.
         assert conn.execute(
             "SELECT COUNT(*) FROM picklists"
-        ).fetchone()[0] == 0, "picklists must ship empty (per-install)"
+        ).fetchone()[0] > 0, (
+            "picklist values must ship -- without them every offline "
+            "picklist lookup is a dead end")
+        assert conn.execute(
+            "SELECT COUNT(*) FROM picklists WHERE COALESCE(item_iri,'') <> ''"
+        ).fetchone()[0] == 0, "per-install picklist IRIs must never ship"
+        # module_fields stays empty: it is what switches the compiler's
+        # picklist validation on, and validating against an unwarmed catalog
+        # rejects values that are valid on a stock appliance.
+        assert conn.execute(
+            "SELECT COUNT(*) FROM module_fields"
+        ).fetchone()[0] == 0, "module_fields must ship empty"
     finally:
         conn.close()
 

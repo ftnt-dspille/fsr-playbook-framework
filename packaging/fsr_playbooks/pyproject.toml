@@ -104,6 +104,7 @@ bypass-selection = true
 "../../fsr_playbooks/catalog.py" = "fsr_playbooks/catalog.py"
 "../../fsr_playbooks/doctor.py" = "fsr_playbooks/doctor.py"
 "../../fsr_playbooks/execution_api.py" = "fsr_playbooks/execution_api.py"
+"../../fsr_playbooks/picklists.py" = "fsr_playbooks/picklists.py"
 "../../fsr_playbooks/reference_db.py" = "fsr_playbooks/reference_db.py"
 "../../fsr_playbooks/protocols.py" = "fsr_playbooks/protocols.py"
 # subpackages (each ships its .py + bundled runtime assets)

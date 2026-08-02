@@ -1919,6 +1919,107 @@ _CANONICAL_TO_SHORT: dict[str, str] = {v: k for k, v in _SHORT_TO_CANONICAL.item
                                        if k != "stop" and k != "end"}
 
 
+# Things the model asks `get_step_type` for that are real FortiSOAR concepts
+# but NOT step types. Looping is a *property* of any step; scheduling is a
+# platform feature outside the playbook document. Both used to fall through to
+# the difflib arm, which answered `for_each` with nothing and `schedule` with
+# "did you mean set_variable?" -- a wrong lead the model then chases, because
+# a suggestion reads as an answer.
+#
+# So answer the CONCEPT, the way find_operation answers a missed op with the
+# nearest real ones: say what the thing actually is, show the YAML, and name
+# the tool/section that carries the detail. Keys are matched after the step
+# type lookup misses, so a real step type can never be shadowed.
+_STEP_CONCEPTS: dict[str, dict[str, Any]] = {
+    "for_each": {
+        "aliases": ("foreach", "for", "loop", "loops", "looping", "iterate",
+                    "iteration", "each", "repeat", "while"),
+        "concept": "step property, not a step type",
+        "message": (
+            "Looping is not a step type in FortiSOAR -- it is the `for_each:` "
+            "key, which ANY step can carry to run once per element of a list. "
+            "There is no loop step to add and no loop to close."
+        ),
+        "yaml": (
+            "- name: Block Each IP\n"
+            "  type: connector\n"
+            "  connector: fortigate-firewall\n"
+            "  operation: block_ip_new\n"
+            "  params:\n"
+            "    ip_addresses: \"{{ vars.item }}\"\n"
+            "  for_each:\n"
+            "    item: \"{{ vars.steps.fetch.records }}\"  # required: a list\n"
+            "    parallel: false        # optional; true only with no shared state\n"
+            "    max_parallel: 5        # optional; cap concurrent iterations\n"
+            "    condition: \"\"          # optional Jinja filter per element\n"
+            "    break_loop: \"\"         # optional; truthy stops the loop\n"
+        ),
+        "notes": [
+            "the current element is always `vars.item` "
+            "(`vars.item.<field>` for object elements)",
+            "`for_each.item` must evaluate to a list, not a single record",
+            "`__bulk: true` (+ `batch_size`) bypasses on-create/on-update "
+            "triggers -- high-volume feeds only",
+        ],
+        "see": "AUTHORING.md 'Looping a step over a list (for_each)'",
+    },
+    "schedule": {
+        "aliases": ("scheduled", "scheduling", "cron", "recurring", "timer",
+                    "periodic", "interval", "every_day", "daily"),
+        "concept": "platform feature, not a step type",
+        "message": (
+            "A playbook is not scheduled from inside itself -- there is no "
+            "schedule step. Give it a plain `start` trigger and schedule THAT "
+            "playbook from the platform (Automation > Schedules), which runs "
+            "it on a cron. The step type's own description says it: "
+            "'Triggered from another playbook using a Reference Playbook step "
+            "or from a schedule.'"
+        ),
+        "yaml": (
+            "- name: Start\n"
+            "  type: start          # referenced/scheduled trigger\n"
+            "  next: Do The Work\n"
+        ),
+        "notes": [
+            "for time-based waiting INSIDE a run, that is the `delay` step "
+            "(`seconds`/`minutes`/`hours`/`days`) -- call "
+            "get_step_type('delay')",
+            "to fire on record activity instead of a clock, use "
+            "`start_on_create` / `start_on_update` / `start_on_delete`",
+            "the schedule itself lives on the appliance, not in this YAML, so "
+            "it is created after the playbook is pushed",
+        ],
+        "see": "AUTHORING.md 'Top-level shape' (trigger steps)",
+    },
+}
+
+_CONCEPT_LOOKUP: dict[str, str] = {}
+for _key, _spec in _STEP_CONCEPTS.items():
+    _CONCEPT_LOOKUP[_key] = _key
+    for _alias in _spec["aliases"]:
+        _CONCEPT_LOOKUP[_alias] = _key
+
+
+def _concept_answer(name: str) -> dict[str, Any] | None:
+    """Answer a NOT-a-step-type question, or None if it isn't one of them."""
+    key = _CONCEPT_LOOKUP.get(name.strip().lower().replace("-", "_")
+                              .replace(" ", "_"))
+    if key is None:
+        return None
+    spec = _STEP_CONCEPTS[key]
+    return {
+        "ok": True,
+        "not_a_step_type": True,
+        "query": name,
+        "concept": key,
+        "kind": spec["concept"],
+        "message": spec["message"],
+        "yaml": spec["yaml"],
+        "notes": spec["notes"],
+        "see": spec["see"],
+    }
+
+
 def _render_step_type_md(short: str, ff: dict, st_row: dict) -> str:
     """Compact markdown for a step type. Replaces the nested
     friendly_form JSON with a single annotated YAML skeleton + the
@@ -2054,6 +2155,13 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
                 (canonical,),
             )
         if not rows:
+            # Before guessing at a typo: is this a real concept that simply
+            # isn't a step type? `for_each` and `schedule` are the two the
+            # model asks for, and a near-match list is the wrong answer to
+            # both -- it sends it looking for a step that does not exist.
+            concept = _concept_answer(name)
+            if concept is not None:
+                return concept
             known = list(_SHORT_TO_CANONICAL.keys()) + [
                 r["name"] for r in _rows(
                     conn, "SELECT name FROM step_types", ()

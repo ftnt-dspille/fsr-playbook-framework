@@ -119,6 +119,60 @@ _CONNECTOR_NULL_COLUMNS = ("info_json", "source_code", "rpm_fingerprint")
 _CONNECTOR_SOURCE_TAG = "packaged"
 
 
+# Picklist *values* shipped as a baseline, with ``item_iri`` NULLed.
+#
+# A picklist row is two things glued together: an itemValue ('High') which is
+# globally stable for a product built-in, and an IRI carrying a per-install
+# UUID. Shipping both would mis-resolve on another instance, so the whole
+# table used to ship empty -- and that made every offline picklist lookup a
+# dead end (`list_picklists`, `get_picklist`, `precheck_picklist_value` all
+# had nothing to read, on top of importing modules that don't ship).
+#
+# Splitting the row fixes the useful half: VALUES ship, IRIs do not. Value
+# validation ("is 'In Progress' a real AlertStatus?" -- it is not) now works
+# with no appliance, and `resolve_iri` returns `iri_unavailable` with
+# `value_is_valid: true` rather than pretending the value is wrong. ``warmup``
+# overwrites these rows with the target's real IRIs, same as ``modules``.
+#
+# Product built-ins only. A solution-pack or customer-authored picklist is not
+# globally stable, so it stays warmed-only.
+PICKLIST_BASELINE: tuple[str, ...] = (
+    "AlertState",
+    "AlertStatus",
+    "AlertType",
+    "ApprovalStatus",
+    "AssetCategory",
+    "AssetStatus",
+    "AssetType",
+    "CampaignStatus",
+    "Closure Reason",
+    "Comment Type",
+    "Criticality",
+    "Email Classification",
+    "Enrichment Status",
+    "EscalatedToIncident",
+    "IncidentPhase",
+    "IncidentStatus",
+    "IncidentType",
+    "IndicatorReputation",
+    "IndicatorStatus",
+    "IndicatorType",
+    "KillChainPhases",
+    "PeopleType",
+    "SLAState",
+    "SOC Role",
+    "Severity",
+    "TaskPriority",
+    "TaskStatus",
+    "TaskType",
+    "TrafficLightProtocol",
+    "VulnerabilityStatus",
+    "WarRoomStatus",
+    "WorkflowPriority",
+    "YesNoInput",
+)
+
+
 def _objects(conn: sqlite3.Connection, schema: str, kind: str) -> list[tuple[str, str]]:
     """Return (name, sql) for schema objects of ``kind`` in attached ``schema``,
     skipping internal and FTS virtual tables (their shadow tables can't be
@@ -136,6 +190,46 @@ def _objects(conn: sqlite3.Connection, schema: str, kind: str) -> list[tuple[str
 def _table_columns(conn: sqlite3.Connection, table: str, schema: str = "src") -> list[str]:
     """Column names of ``table`` in attached ``schema`` (in declared order)."""
     return [r[1] for r in conn.execute(f'PRAGMA {schema}.table_info("{table}")')]
+
+
+def _copy_picklist_baseline(dst: sqlite3.Connection) -> dict[str, int]:
+    """Copy ``PICKLIST_BASELINE`` values with ``item_iri`` blanked.
+
+    Dropping the IRI is the whole point: a per-install UUID reaching the wheel
+    would resolve to the wrong item on every other appliance, silently. The
+    blank is ``''`` and not NULL only because the source schema declares
+    ``item_iri TEXT NOT NULL`` and the slim DB copies that schema verbatim;
+    both readers (`fsr_playbooks.picklists`, the resolver) treat a falsy IRI
+    as "value known, IRI unavailable". ``warmup`` overwrites these rows with
+    the target's real IRIs (same PK). ``src`` must already be ATTACHed.
+    """
+    names = [n for n in PICKLIST_BASELINE]
+    placeholders = ",".join("?" * len(names))
+    dst.execute(
+        "INSERT INTO main.picklists (list_name, item_value, item_iri) "
+        f"SELECT list_name, item_value, '' FROM src.picklists "
+        f"WHERE list_name IN ({placeholders})",
+        names,
+    )
+    shipped = {r[0] for r in dst.execute(
+        "SELECT DISTINCT list_name FROM main.picklists")}
+    for missing in sorted(set(names) - shipped):
+        print(f"  warn: baseline picklist {missing!r} absent from source",
+              file=sys.stderr)
+
+    # NOT shipped: `module_fields`. Shipping the field -> picklist mapping
+    # would make `picklist_for_field` answer offline, which is a real gain,
+    # but it also switches the COMPILER's picklist validation on against an
+    # unwarmed catalog -- `_resolve_picklist_friendly_tokens` bails when a
+    # module has no picklist-backed fields, so that mapping is the gate. Tried
+    # it: the probe box's `IncidentStatus` has no 'Closed' (Awaiting / In
+    # Progress / Inactive / Open / Resolved), so seven in-repo fixtures
+    # started failing to compile on a value that is fine on a stock
+    # appliance. The values are stable enough to *offer*, not to *reject*
+    # against. So the tools read `picklists` directly and
+    # `picklist_for_field` says "run warmup" until the catalog is warmed.
+    return {"picklists": dst.execute(
+        "SELECT COUNT(*) FROM main.picklists").fetchone()[0]}
 
 
 def _copy_connector_baseline(dst: sqlite3.Connection) -> dict[str, int]:
@@ -208,6 +302,7 @@ def build() -> int:
 
         # Scrubbed connector baseline (definitions only; instance cols NULLed).
         copied.update(_copy_connector_baseline(dst))
+        copied.update(_copy_picklist_baseline(dst))
 
         # Indexes then views (views may reference tables; build after rows).
         for _name, sql in _objects(dst, "src", "index"):
@@ -281,11 +376,36 @@ def check() -> int:
         n = conn.execute('SELECT COUNT(*) FROM "connector_configs"').fetchone()[0]
         if n != 0:
             problems.append(f"connector_configs has {n} rows (should be empty)")
-        # picklists are still per-install (instance-specific picklist rows);
-        # warmed, not shipped.
-        n = conn.execute('SELECT COUNT(*) FROM "picklists"').fetchone()[0]
+        # picklists ship VALUES only. Every IRI must be blank -- one leaked
+        # per-install UUID resolves to the wrong item on every other
+        # appliance, and does it silently.
+        n = conn.execute(
+            'SELECT COUNT(*) FROM "picklists" '
+            "WHERE COALESCE(item_iri, '') <> ''"
+        ).fetchone()[0]
         if n != 0:
-            problems.append(f"per-install table 'picklists' has {n} rows (should be empty)")
+            problems.append(
+                f"'picklists' has {n} rows with a non-NULL item_iri "
+                "(per-install UUIDs must never ship)")
+        shipped_lists = {r[0] for r in conn.execute(
+            'SELECT DISTINCT list_name FROM "picklists"').fetchall()}
+        missing_lists = sorted(set(PICKLIST_BASELINE) - shipped_lists)
+        if missing_lists:
+            problems.append(f"baseline picklists missing: {missing_lists}")
+        # module_fields stays empty: it is the gate on the compiler's picklist
+        # validation, and validating against an unwarmed catalog rejects
+        # values that are valid on a stock appliance (see
+        # _copy_picklist_baseline).
+        n = conn.execute('SELECT COUNT(*) FROM "module_fields"').fetchone()[0]
+        if n != 0:
+            problems.append(
+                f"'module_fields' has {n} rows (should be empty -- it "
+                "switches on compile-time picklist validation)")
+        extra_lists = sorted(shipped_lists - set(PICKLIST_BASELINE))
+        if extra_lists:
+            problems.append(
+                f"non-baseline picklists shipped: {extra_lists} "
+                "(only product built-ins are globally stable)")
     finally:
         conn.close()
     if problems:

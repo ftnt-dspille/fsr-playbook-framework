@@ -227,10 +227,53 @@ def _token_fallback(conn: Any, q: str, kind: str | None,
             "the idiom may be a FILTER: try find_jinja_filter.")
     if not rows:
         return _no_pattern(q, toks)
-    for r in rows:
+    return _cap(rows, note)
+
+
+# Payload budget for the fallback, in serialized characters. The exact-match
+# path is self-limiting -- a query that matches verbatim matches few things.
+# The fallback is the opposite: it deliberately widens, so it returns `limit`
+# rows every time, and it fires on the prose queries the model asks in bulk.
+# Measured at ~9 KB for a 4-token query, which is a fifth of a turn's context
+# spent on a guess, repeated 7-10 times in the #48 build turn.
+_FALLBACK_CHAR_BUDGET = 6000
+# Below this many rows the answer stops being a ranked list, so the budget
+# yields rather than cutting deeper.
+_FALLBACK_MIN_ROWS = 3
+_RAW_CHARS = 400
+
+
+def _cap(rows: list[dict[str, Any]], note: str) -> list[dict[str, Any]]:
+    """Trim a fallback result set to `_FALLBACK_CHAR_BUDGET`.
+
+    Three cuts, cheapest first: the note goes on the first row only (it says
+    nothing new on row 9, and repeating it cost ~30% of the payload); an
+    outsized `raw` block is truncated with its length stated, since a
+    400-char idiom is already past the point of being an example; and rows
+    beyond the budget are dropped with a count, never silently
+    (AGENT_HARDENING_PLAN §H -- a truncated list that looks complete is a
+    worse answer than a short one that says so).
+    """
+    import json as _json
+
+    kept: list[dict[str, Any]] = []
+    used = 0
+    for i, r in enumerate(rows):
         r["match"] = "tokens"
-        r["note"] = note
-    return rows
+        raw = r.get("raw")
+        if isinstance(raw, str) and len(raw) > _RAW_CHARS:
+            r["raw"] = raw[:_RAW_CHARS] + f"… <{len(raw)} chars, truncated>"
+        if i == 0:
+            r["note"] = note
+        cost = len(_json.dumps(r, default=str))
+        if kept and len(kept) >= _FALLBACK_MIN_ROWS and used + cost > _FALLBACK_CHAR_BUDGET:
+            kept[0]["truncated"] = (
+                f"{len(rows) - len(kept)} more matches omitted to stay within "
+                "the response budget -- narrow `q` or set `kind` for the rest")
+            break
+        used += cost
+        kept.append(r)
+    return kept
 
 
 def _no_pattern(q: str, toks: list[str]) -> list[dict[str, Any]]:

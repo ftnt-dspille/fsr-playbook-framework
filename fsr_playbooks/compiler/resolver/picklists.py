@@ -167,8 +167,15 @@ class PicklistMixin:
             "SELECT item_iri FROM picklists WHERE list_name=? AND item_value=?",
             (list_name, value),
         ).fetchone()
-        if row:
+        if row and row[0]:
             return row[0]
+        if row:
+            # The value is real but this catalog carries no IRI for it -- the
+            # shipped baseline blanks them because picklist IRIs are
+            # per-install. Keep the friendly value: rewriting to '' would wipe
+            # the field, and reporting BAD_VALUE would be a lie about a value
+            # that IS valid. `warmup` fills the IRI in.
+            return value
         # Build a "did you mean" suggestion from the same picklist.
         candidates = [r[0] for r in self.conn.execute(
             "SELECT item_value FROM picklists WHERE list_name=?",
