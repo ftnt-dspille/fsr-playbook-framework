@@ -17,7 +17,6 @@ import sqlite3
 import pytest
 
 from fsr_playbooks._db import default_db_path
-from fsr_playbooks.compiler.errors import CompileError
 from fsr_playbooks.compiler.resolver.picklists import PicklistMixin
 
 
