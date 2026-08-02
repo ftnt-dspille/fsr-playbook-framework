@@ -50,6 +50,7 @@ from ._loop_helpers import (
     _CREATE_OFFER_TOOL,
     _ENHANCE_OFFER_TOOL,
     compile_errors as _compile_errors,
+    wrapup_directive,
     drain_with_idle_timeout,
     extract_yaml_block as _extract_yaml_block,
     shrink_history as _shrink_history,
@@ -1001,17 +1002,11 @@ class AnthropicProvider:
         # agent finished or got cut off. Force one more no-tools round
         # so the model can summarize where it landed and what's left.
         turn_idx += 1
+        _directive, _wrapup_tokens = wrapup_directive(history)
         async for ev in self._wrapup_call(
             history=history,
-            directive=(
-                f"You've used the full tool-turn budget "
-                f"({MAX_TOOL_TURNS} rounds) without finishing. Stop "
-                f"calling tools. In 2-4 sentences, tell the user: "
-                f"(1) what state the YAML is in (valid? warnings? "
-                f"errors?), (2) what specifically is left to do, and "
-                f"(3) one concrete next step they can take. Do not "
-                f"re-emit the YAML."
-            ),
+            directive=_directive,
+            max_tokens=_wrapup_tokens,
             cached_system=cached_system, session_id=session_id,
             turn_idx=turn_idx, tags=tags,
             self_repair_turns=self_repair_turns,

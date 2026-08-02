@@ -651,6 +651,154 @@ def extract_yaml_block(text: str) -> str | None:
     return matches[-1].group(1) if matches else None
 
 
+# Tools whose YAML argument actually REACHES THE ANALYST: the offer/patch cards
+# the widget renders, plus `push_playbook` (after which the playbook exists in
+# FortiSOAR whether or not it was ever shown).
+#
+# `verify_playbook` / `verify_enhancement` are deliberately ABSENT, and that is
+# the whole point of the distinction. They are gates: passing one means the
+# bytes are good, not that anybody received them. Live shape -- a turn drafted a
+# playbook, cleared `verify_playbook`, ran out of tool budget before calling
+# `emit_playbook_offer`, and was then told "do not re-emit the YAML". The
+# playbook was correct, verified, and invisible.
+#
+# `validate_yaml` / `compile_yaml` are absent for the same reason, one step
+# earlier: they are the scratchpad.
+#
+# NOTE the harness's `conv_scenarios._YAML_CARRIER` is a SUPERSET of this and
+# rightly so -- it answers "what YAML did this turn produce, so I can compile
+# it", which is a different question from "did the user end up with it".
+# `tests/test_yaml_carrier_parity.py` asserts the subset relationship rather
+# than equality, so the two can differ on purpose but not by accident.
+_DELIVERY_CARRIERS: dict[str, tuple[str, ...]] = {
+    "emit_playbook_offer": ("yaml",),
+    "emit_patch_proposal": ("after_yaml",),
+    "push_playbook": ("yaml_text",),
+}
+
+
+def analyst_has_the_yaml(history: list[dict[str, Any]]) -> bool:
+    """Would the user actually END UP with a playbook from this turn?
+
+    Not "was a playbook written anywhere" -- the two come apart, and the gap is
+    where the bug lives. A turn can draft YAML, push it through `validate_yaml`
+    twice, and end with the analyst holding nothing, because a tool argument is
+    not a deliverable. Observed live on `build_plain_request_no_record`: the
+    fixed wrap-up correctly detected authoring, said "do not re-emit the YAML",
+    and the playbook died inside the tool call it was validated in.
+
+    So delivery means one of two things:
+      * a fenced ```yaml block in assistant TEXT -- what the widget saves; or
+      * a call to a DELIVERY carrier (see `_DELIVERY_CARRIERS`), because build
+        turns are fenceless in practice and the offer card is the real product.
+
+    Anything else -- research, validation, compilation -- is work in progress.
+    """
+    for msg in history:
+        # ASSISTANT turns only. Tool results carry other people's playbooks --
+        # `search_playbooks` returns the corpus, fenced -- and scanning every
+        # role made "the model read a playbook" indistinguishable from "the
+        # model wrote one". Observed: a 39-call research turn that authored
+        # nothing scored as delivered, took the do-not-re-emit branch, and left
+        # the analyst with a status paragraph. The user turn is excluded for
+        # the same reason: YAML the analyst pasted in is input, not output.
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and extract_yaml_block(content):
+            return True
+        # OpenAI shape: tool calls carry a JSON-encoded arguments string.
+        for call in (msg.get("tool_calls") or []):
+            fn = (call or {}).get("function") or {}
+            if _carries_delivery(fn.get("name"), fn.get("arguments")):
+                return True
+        # Anthropic shape: content is a block list with tool_use inputs.
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text" and extract_yaml_block(
+                        str(block.get("text") or "")):
+                    return True
+                if block.get("type") == "tool_use" and _carries_delivery(
+                        block.get("name"), block.get("input")):
+                    return True
+    return False
+
+
+def _carries_delivery(name: Any, args: Any) -> bool:
+    """True when THIS tool is a delivery carrier and its body is substantive.
+
+    Accepts both the raw dict and the JSON string OpenAI sends. A stub body is
+    ignored: `yaml_text: ""` on a probing call delivers nothing.
+    """
+    keys = _DELIVERY_CARRIERS.get(str(name or ""))
+    if not keys:
+        return False
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:  # noqa: BLE001 -- a malformed arg blob carries nothing
+            return False
+    if not isinstance(args, dict):
+        return False
+    return any(isinstance(args.get(k), str) and len(args[k].strip()) > 40
+               for k in keys)
+
+
+# One no-tools round is forced when the tool budget runs out, so the chat never
+# just goes silent. What that round should SAY depends on whether anything was
+# built, and conflating the two states is how a turn came to guarantee nothing.
+_WRAPUP_HAVE_YAML = (
+    "You've used the full tool-turn budget ({n} rounds) without finishing. "
+    "Stop calling tools. In 2-4 sentences, tell the user: (1) what state the "
+    "YAML is in (valid? warnings? errors?), (2) what specifically is left to "
+    "do, and (3) one concrete next step they can take. Do not re-emit the YAML."
+)
+
+_WRAPUP_NO_YAML = (
+    "You've used the full tool-turn budget ({n} rounds) and the user still has "
+    "no playbook -- anything you only passed to validate_yaml does not count, "
+    "they never saw it. Stop calling tools and deliver it now, from "
+    "what you already know -- this is your last round, so anything you leave "
+    "out the user does not get. Emit ONE complete playbook in a single ```yaml "
+    "fence: every workflow, every step, no placeholders and no ellipses. Then "
+    "in 1-2 sentences name what you could not verify and what to check first. "
+    "A draft you flag as unverified is useful; silence is not."
+)
+
+
+def wrapup_directive(history: list[dict[str, Any]],
+                     max_turns: int = MAX_TOOL_TURNS) -> tuple[str, int]:
+    """The forced wrap-up round's directive and its token budget.
+
+    Returns `(directive, max_tokens)`. Lives here rather than inline in each
+    provider because both had their own copy of the same string, and a rule
+    duplicated across providers drifts silently -- the failure then reads as a
+    model difference between Frank and the box.
+
+    The bug this fixes: the only directive that existed asked "what state is the
+    YAML in?" and ended "Do not re-emit the YAML" -- sound advice when a
+    playbook exists, and a guarantee of an empty turn when none does. An
+    unmounted build request fans out across connector/step-type/Jinja lookups,
+    exhausts all {n} rounds before authoring anything, and was then explicitly
+    told not to deliver. The user asked for a playbook and got a paragraph
+    about how the research went. 2/2 reproducible; the record-mounted rows are
+    unaffected because grounding cuts the research roughly threefold.
+
+    The no-YAML branch gets the FULL output ceiling, not a bespoke number. 512
+    is ample for a status paragraph and 4096 is not enough for a real playbook
+    either -- driven at 4096 the wrap-up delivered an unterminated ```yaml fence
+    cut off mid-step, which is worse than silence because it looks like a
+    deliverable. This round is an authoring round; a cap is a ceiling and not a
+    spend (see DEFAULT_MAX_OUTPUT_TOKENS), so there is nothing to save by
+    guessing lower.
+    """
+    if analyst_has_the_yaml(history):
+        return _WRAPUP_HAVE_YAML.format(n=max_turns), 512
+    return _WRAPUP_NO_YAML.format(n=max_turns), DEFAULT_MAX_OUTPUT_TOKENS
+
+
 def compile_errors(yaml_text: str) -> str | None:
     """Run the same compiler the editor uses; return a bullet list of
     blocking errors or None if clean. Imported lazily so a missing

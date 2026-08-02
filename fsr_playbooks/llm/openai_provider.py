@@ -61,6 +61,7 @@ from ._loop_helpers import (
     _CREATE_OFFER_TOOL,
     _ENHANCE_OFFER_TOOL,
     compile_errors as _compile_errors,
+    wrapup_directive,
     drain_with_idle_timeout,
     extract_yaml_block as _extract_yaml_block,
 )
@@ -970,18 +971,16 @@ class OpenAIProvider:
             any_tools_run = True
             yield _emit_usage(finish_reason or "tool_calls")
 
-        # Tool-turn budget exhausted -- one no-tools wrap-up round.
+        # Tool-turn budget exhausted -- one no-tools wrap-up round. What it is
+        # told to do depends on whether anything was built (see
+        # `wrapup_directive`): a turn that researched until the budget ran out
+        # and never authored must DELIVER here, not narrate.
         turn_idx += 1
+        _directive, _wrapup_tokens = wrapup_directive(history)
         async for ev in self._wrapup_call(
             history=history,
-            directive=(
-                f"You've used the full tool-turn budget ({MAX_TOOL_TURNS} "
-                f"rounds) without finishing. Stop calling tools. In 2-4 "
-                f"sentences, tell the user: (1) what state the YAML is in "
-                f"(valid? warnings? errors?), (2) what specifically is left to "
-                f"do, and (3) one concrete next step they can take. Do not "
-                f"re-emit the YAML."
-            ),
+            directive=_directive,
+            max_tokens=_wrapup_tokens,
             session_id=session_id, turn_idx=turn_idx, tags=tags,
             self_repair_turns=self_repair_turns,
             stop_reason_label="max_tool_turns_summary",
