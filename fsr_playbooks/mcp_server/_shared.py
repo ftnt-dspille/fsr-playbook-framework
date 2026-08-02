@@ -580,6 +580,84 @@ def _validate_op_params(connector: str, op: str,
     )
 
 
+def op_branch_for(connector: str, op: str,
+                  params: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Describe which conditional BRANCH of an operation's schema `params`
+    selected, one entry per discriminator param that is actually set.
+
+    Several response ops are discriminated unions: `fortigate-firewall`'s
+    `block_ip_new` takes `ip_addresses` only under `method: Quarantine Based`,
+    and `ip_block_policy` only under `Policy Based`. Set the wrong branch's
+    field and the op reports Success having acted on nothing.
+
+    `_validate_op_params` already resolves the active branch to decide which
+    `required` checks apply -- but it resolves it PRIVATELY and throws it away,
+    so an approval card renders a set of fields with no statement of the branch
+    that made them the right fields. Nothing carried the choice. This returns
+    it, so the card can.
+
+    Each entry: `{param, value, title, activates: [...], inactive: [...]}` --
+    the discriminator, the value chosen, and the child params that value does
+    and does not switch on. Empty list when the op has no conditional params,
+    none is set, or the store can't answer (never raises; a missing branch
+    annotation must not be able to block a card)."""
+    if not connector or not op:
+        return []
+    params = params or {}
+    try:
+        with _db() as conn:
+            rows = _rows(
+                conn,
+                "SELECT param_name, title, parent_param_name, condition_value "
+                "FROM operation_params WHERE connector_name=? AND op_name=?",
+                (connector, op),
+            )
+    except sqlite3.Error:
+        return []
+    if not rows:
+        return []
+
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    title_of: dict[str, Any] = {}
+    for r in rows:
+        title_of.setdefault(r["param_name"], r["title"])
+        parent = r["parent_param_name"]
+        parent = str(parent) if parent not in (None, "") else None
+        if parent is not None:
+            children_by_parent.setdefault(parent, []).append(r)
+
+    out: list[dict[str, Any]] = []
+    for parent, kids in children_by_parent.items():
+        if parent not in params:
+            continue
+        chosen = params.get(parent)
+        def _hit(child: dict[str, Any]) -> bool:
+            expected = child["condition_value"]
+            if expected in (None, ""):
+                return False
+            if isinstance(chosen, list):
+                return any(str(i) == str(expected) for i in chosen)
+            return str(chosen) == str(expected)
+        on = {k["param_name"] for k in kids if _hit(k)}
+        # A param can be catalogued under SEVERAL branches (fortigate's `vdom`
+        # hangs off both block methods). Active anywhere wins -- listing it as
+        # inactive too would read as "this field is ignored", which is the exact
+        # misread the annotation exists to prevent.
+        activates = sorted(on)
+        inactive = sorted({k["param_name"] for k in kids if not _hit(k)} - on)
+        if not activates and not inactive:
+            continue
+        out.append({
+            "param": parent,
+            "value": chosen,
+            "title": title_of.get(parent) or parent,
+            "activates": activates,
+            "inactive": inactive,
+        })
+    out.sort(key=lambda e: e["param"])
+    return out
+
+
 def _coerces_to_int(val: Any) -> bool:
     if isinstance(val, bool):
         return False

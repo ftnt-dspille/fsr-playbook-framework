@@ -252,18 +252,29 @@ def emit_action_card(
     # gates it behind a malicious-verdict decision (`insert_containment_guard`).
     from ..agent.skill_trace import record_staged_action
     record_staged_action(connector, operation, args)
-    return {
-        "ok": True,
-        "card": {
-            "type": "action_card",
-            "id": id,
-            "connector": connector,
-            "operation": operation,
-            "summary": summary,
-            "args": args,
-            "editable_fields": editable_fields,
-        },
+    card: dict[str, Any] = {
+        "type": "action_card",
+        "id": id,
+        "connector": connector,
+        "operation": operation,
+        "summary": summary,
+        "args": args,
+        "editable_fields": editable_fields,
     }
+    # State the branch, don't just imply it. For a discriminated op (fortigate
+    # `block_ip_new` takes `ip_addresses` under `method: Quarantine Based` and
+    # `ip_block_policy` under `Policy Based`) the validator resolved the active
+    # branch and discarded it, so the analyst saw a set of fields with nothing
+    # saying WHICH branch made them the right fields -- and the wrong branch is
+    # a silent no-op reported as Success. Annotation only: never blocks a card.
+    from ._shared import op_branch_for
+    try:
+        branch = op_branch_for(connector, operation, args)
+    except Exception:  # noqa: BLE001
+        branch = []
+    if branch:
+        card["branch"] = branch
+    return {"ok": True, "card": card}
 
 
 @mcp.tool()

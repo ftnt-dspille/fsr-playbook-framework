@@ -122,3 +122,35 @@ def test_trace_build_replays_staged_containment_guarded():
     confirm = next(s for s in pb["steps"] if s["name"] == "Confirm Containment")
     assert confirm["type"] == "manual_input"
     assert {o["display"]: o["next"] for o in confirm["options"]}["Confirm"] == "Block Ip New"
+
+
+# --- the card states the branch it chose ----------------------------------------
+#
+# `block_ip_new` is a discriminated union: `ip_addresses` applies only under
+# `method: Quarantine Based`. Picking the wrong branch is a silent no-op the
+# connector reports as Success, so the card must say which branch it is on.
+
+def test_action_card_carries_the_discriminated_branch_it_chose():
+    from fsr_playbooks.mcp_server import emit_action_card
+
+    r = emit_action_card(
+        id="c1", connector="fortigate-firewall", operation="block_ip_new",
+        summary="Block IP",
+        args={"method": "Quarantine Based", "ip_addresses": "203.0.113.9",
+              "time_to_live": "1 Hour"},
+        editable_fields=["ip_addresses"])
+    assert r["ok"], r
+    branch = {b["param"]: b for b in r["card"].get("branch") or []}
+    assert "method" in branch, "card does not say which block method it chose"
+    m = branch["method"]
+    assert m["value"] == "Quarantine Based"
+    assert "ip_addresses" in m["activates"]
+    assert "ip_block_policy" in m["inactive"]
+    # A param catalogued under both branches is active, never listed as ignored.
+    assert not (set(m["activates"]) & set(m["inactive"]))
+
+
+def test_branch_annotation_is_absent_for_a_flat_operation():
+    from fsr_playbooks.mcp_server._shared import op_branch_for
+
+    assert op_branch_for("fortigate-firewall", "no_such_op_at_all", {}) == []
