@@ -1317,7 +1317,8 @@ def _run_op_via_agent_playbook(connector: str, op: str,
                                version: str, agent_id: str,
                                client, timeout_s: int = 120,
                                step_name: str = "",
-                               summarize: bool = True) -> dict[str, Any]:
+                               summarize: bool = True,
+                               state_changing: bool = False) -> dict[str, Any]:
     """Execute an agent-bound op ONCE via a force-fail playbook and return its
     real result. Builds [connector op] -> [set_variable boom={{ 1/0 }}],
     pushes the UNWRAPPED collection, triggers it, polls to the (expected)
@@ -1464,6 +1465,18 @@ def _run_op_via_agent_playbook(connector: str, op: str,
                         _agent_id=agent_id)
 
         data = step_res.get("data", step_res) if isinstance(step_res, dict) else step_res
+        # Same no-op guard as the direct execute path -- an agent-routed
+        # containment op reports its empty outcome buckets identically.
+        if state_changing:
+            empty = _acted_on_nothing(data)
+            if empty is not None:
+                msg = (f"{connector}.{op} returned success but acted on "
+                       f"nothing: every result bucket is empty ({empty}). The "
+                       f"action did NOT take effect -- do not report it as done.")
+                _record_verification(connector, op, "tested_fail", msg[:2000])
+                return _err("action_had_no_effect", msg,
+                            suggestions=_NO_EFFECT_SUGGESTIONS,
+                            data=data, _via_agent=True, _agent_id=agent_id)
         shape = _infer_shape(data)
         _store_observed_schema(connector, op, data)
         # Trace recorder (§2) -- full agent-routed output is the wiring source too.
@@ -1577,6 +1590,62 @@ def _classify_execute_error(connector: str, op: str,
         ],
         status=str(status) if status is not None else "?",
     )
+
+
+_NO_EFFECT_SUGGESTIONS = [
+    "Check which param actually carries the targets for THIS branch -- "
+    "`get_op_schema` lists a select param's children under its `onchange`, and "
+    "they are NOT required-checked, so a wrong or blank one succeeds silently.",
+    "Confirm the value you passed is non-empty: in a compiled step it is "
+    "usually a Jinja ref, which renders empty when the upstream step returned "
+    "no rows.",
+]
+
+
+def _acted_on_nothing(data: Any) -> str | None:
+    """A short reason when a state-changing op reports success but its result
+    says it touched nothing -- otherwise None.
+
+    Containment/remediation ops report per-target OUTCOME BUCKETS: one list per
+    thing that could happen, and every target lands in exactly one. FortiGate's
+    `block_ip_new` returns::
+
+        {"already_blocked": [], "newly_blocked": [], "error_with_block": [],
+         "vdom_not_exist": []}
+
+    All four empty means the target list it iterated was empty -- nothing was
+    attempted, nothing errored, and the envelope still comes back
+    `status: Success`. Live-verified on 8.0.0: calling that op with the Policy
+    branch's `ip` param instead of the Quarantine branch's `ip_addresses` gives
+    exactly that response and the appliance's ban list is unchanged, while the
+    correct param returns `{"newly_blocked": ["<ip>"], ...}` and really blocks.
+
+    The platform will not catch this for us: its required-field check reaches
+    top-level params but NOT the conditional children under a param's
+    `onchange` branch, so the one param naming the targets can be blank or
+    missing and the call still succeeds. And in a compiled playbook the value is
+    usually a Jinja ref -- an upstream enrichment step that returns no rows
+    renders it empty, and the containment step then "succeeds" having blocked
+    nobody.
+
+    That is the P2 failure we most need to not have: gated correctly, approved
+    by a human, reported as done, nothing contained. So a state-changing op
+    whose entire result is empty buckets is reported as a FAILURE, not a
+    success -- the agent must not be able to narrate a block that never
+    happened.
+
+    Deliberately narrow. Only a dict of 2+ keys whose values are ALL empty
+    lists qualifies: that is the bucket-envelope signature. A bare `[]`, an
+    empty dict, or a mixed-type payload is left alone -- plenty of ops
+    legitimately return nothing, and this must never fire on a safe read.
+    """
+    if not isinstance(data, dict) or len(data) < 2:
+        return None
+    if not all(isinstance(v, list) for v in data.values()):
+        return None
+    if any(v for v in data.values()):
+        return None
+    return ", ".join(sorted(data))
 
 
 # ---------------------------------------------------------------------------
@@ -1811,7 +1880,8 @@ def run_op(
             agent_id = ""
         return _run_op_via_agent_playbook(
             connector, op, params or {}, exec_config, version, agent_id, client,
-            step_name=step_name, summarize=summarize)
+            step_name=step_name, summarize=summarize,
+            state_changing=risk != "safe")
 
     body = {
         "connector": connector,
@@ -1850,6 +1920,25 @@ def run_op(
         )
 
     data = resp.get("data", resp)
+
+    # A state-changing op that reports success while its result says it touched
+    # nothing is a failure. Checked BEFORE the schema store and the skill trace
+    # so a no-op call is neither cached as this op's output shape nor compiled
+    # into a playbook with the params that produced it.
+    if risk != "safe":
+        empty = _acted_on_nothing(data)
+        if empty is not None:
+            msg = (f"{connector}.{op} returned success but acted on nothing: "
+                   f"every result bucket is empty ({empty}). The action did "
+                   f"NOT take effect -- do not report it as done.")
+            _record_verification(connector, op, "tested_fail", msg[:2000])
+            return _err(
+                "action_had_no_effect", msg,
+                suggestions=_NO_EFFECT_SUGGESTIONS,
+                status=exec_status or "Success",
+                data=data,
+            )
+
     shape = _infer_shape(data)
     # Store the FULL observed schema (accuracy matters for authoring), then
     # return a SUMMARIZED payload to the agent. Enrichment ops (VirusTotal,
