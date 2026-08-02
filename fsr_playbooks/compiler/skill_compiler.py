@@ -565,6 +565,115 @@ def insert_containment_guard(
     return compiled
 
 
+# Step plumbing that sits in the same dict as the op params (Phase G puts
+# connector args at step level), so it must never be mistaken for a target.
+_STEP_PLUMBING_KEYS = frozenset({
+    "name", "type", "next", "conditions", "default", "operation", "connector",
+    "config", "params", "arguments", "step_variables", "ignore_errors",
+    "retry", "mock_result", "description", "options", "message", "vars",
+})
+
+
+def _sole_jinja_expr(value: Any) -> Optional[str]:
+    """The inner expression of a value that is exactly one Jinja block, else None.
+
+    `"{{ vars.steps.enrich.ip }}"` -> `"vars.steps.enrich.ip"`. Anything mixed
+    with literal text, or holding more than one block, yields None: we only
+    assert on a param whose whole value is a reference, so there is no case
+    where a non-empty literal makes the check pass vacuously."""
+    if not isinstance(value, str):
+        return None
+    v = value.strip()
+    if not (v.startswith("{{") and v.endswith("}}")) or v.count("{{") != 1:
+        return None
+    inner = v[2:-2].strip()
+    return inner or None
+
+
+def insert_containment_target_check(compiled: Dict[str, Any]) -> Dict[str, Any]:
+    """Skip a containment step whose target params render empty.
+
+    A containment op that iterates an empty target list does nothing and still
+    returns `status: Success` -- live-verified on FortiGate's `block_ip_new`,
+    which answers with all-empty outcome buckets and an unchanged ban list. In
+    a compiled playbook the target is a Jinja ref, so an upstream enrichment
+    returning no rows produces exactly that with no typo involved: gated
+    correctly, approved by a human, reported as done, nobody contained.
+
+    `run_op` already refuses that call during triage. The engine has no such
+    validator, so the guard has to be carried IN the artifact:
+
+      … → [decision: Containment Target Present]  present → containment
+                                                  default → [Containment Target Empty]
+
+    Asserted BEFORE the call, not after: the cause is an empty render, and
+    checking it up front means the firewall is never touched and the run is in
+    the same safe state as an analyst pressing Stop. So the branch lands where
+    Stop lands -- past containment, run continuing -- with a marker naming the
+    reason, rather than failing the run. A failed run is close to
+    information-free here (`error_message` is often None on a just-failed run;
+    the diagnostics cover Jinja render failures, not runtime step errors), so
+    dead-ending would trade a silent no-op for an unexplained red run.
+
+    Only params whose ENTIRE value is one Jinja block are asserted; a step with
+    no such param returns `compiled` unchanged (no guess). Idempotent. Run this
+    BEFORE `insert_containment_confirm`, which then rewires the present branch
+    through the human gate -- check, then ask, then contain."""
+    steps: List[Dict[str, Any]] = compiled.get("steps", [])
+    ci = next((i for i, s in enumerate(steps)
+               if s.get("type") == "connector"
+               and _is_containment_op(
+                   (s.get("arguments") or s).get("operation"))),
+              None)
+    if ci is None:
+        return compiled
+    cont = steps[ci]
+    cont_name = cont["name"]
+    dec_name, empty_name = "Containment Target Present", "Containment Target Empty"
+    if any(s.get("name") == dec_name for s in steps):
+        return compiled                       # already checked
+
+    container = cont.get("arguments") or cont
+    inner = container.get("params")
+    params = inner if isinstance(inner, dict) else container
+    exprs = [e for k, v in params.items()
+             if k not in _STEP_PLUMBING_KEYS
+             for e in (_sole_jinja_expr(v),) if e]
+    if not exprs:
+        return compiled                       # nothing referenced: nothing to assert
+
+    # `| default('', true) | length` is shape-agnostic -- a missing ref, an
+    # empty string, an empty list and an empty dict all measure 0.
+    when = "{{ " + " and ".join(
+        f"((({e}) | default('', true)) | length) > 0" for e in exprs) + " }}"
+
+    empty = {"type": "set_variable", "name": empty_name,
+             "vars": {"containment_skipped": True,
+                      "containment_skipped_reason": "empty_target"}}
+    if cont.get("next"):                      # else the marker ends the run
+        empty["next"] = cont["next"]
+    dec = {"type": "decision", "name": dec_name,
+           "conditions": [{"display": "target present", "when": when,
+                           "next": cont_name}],
+           "default": empty_name}
+
+    if compiled.get("first_step") == cont_name:
+        compiled["first_step"] = dec_name
+    for s in steps:
+        if s.get("next") == cont_name:
+            s["next"] = dec_name
+        for cond in (s.get("conditions") or []):
+            if isinstance(cond, dict) and cond.get("next") == cont_name:
+                cond["next"] = dec_name
+        if s.get("default") == cont_name:
+            s["default"] = dec_name
+
+    steps[ci:ci] = [dec]
+    steps.append(empty)
+    compiled["steps"] = steps
+    return compiled
+
+
 def insert_containment_confirm(compiled: Dict[str, Any]) -> Dict[str, Any]:
     """Put an analyst Confirm/Stop manual-input step in front of containment.
 

@@ -422,6 +422,10 @@ def build_playbook_from_trace(
     # recognized in the enrichment outputs).
     if guard_containment:
         compiled = sc.insert_containment_guard(compiled, trace)
+        # Skip containment outright when its target params render empty -- the
+        # op would report Success having acted on nothing. Before the confirm
+        # gate, so an analyst is never asked to approve a no-op.
+        compiled = sc.insert_containment_target_check(compiled)
         # The verdict guard no-ops when it recognizes no verdict field, which
         # would leave containment ungated. The Confirm/Stop step runs either
         # way, so a compiled playbook never contains without a human saying yes.
