@@ -351,9 +351,35 @@ _INVESTIGATION_TOOLS: set[str] = {
 _INVESTIGATION_PREFIXES: tuple[str, ...] = ("siem_", "faz_", "fmg_")
 
 
+def _is_read_only_mcp_evidence(name: str) -> bool:
+    """True for a materialized `mcp_<server>__<tool>` that is read-only.
+
+    Native MCP tools carry the same evidence weight as the curated hunt tools --
+    `mcp_soc__enrich_indicator` and `mcp_fortisiem__get_context_by_entity` ARE
+    investigation -- but they are materialized at runtime, so no static list can
+    name them and the `siem_`/`faz_`/`fmg_` prefixes don't match. Tier is the
+    honest signal: the materializer records tier 1 for a read-only server rule
+    and 3 for a mutating one, so a containment tool like
+    `mcp_soc__block_indicator` is excluded by construction rather than by name.
+
+    Fail-closed: an unknown or untiered name credits nothing.
+    """
+    if not name.startswith("mcp_") or "__" not in name:
+        return False
+    try:
+        from . import tools as _llm_tools
+        return _llm_tools.TOOL_TIERS.get(name) == 1
+    except Exception:  # noqa: BLE001 - never let crediting break a turn
+        return False
+
+
 def counts_as_investigation(name: str) -> bool:
     """True when `name` is evidence gathering and should credit the hunt floor."""
-    return name in _INVESTIGATION_TOOLS or name.startswith(_INVESTIGATION_PREFIXES)
+    if name in _CONTAINMENT_STAGING_TOOLS:
+        return False
+    return (name in _INVESTIGATION_TOOLS
+            or name.startswith(_INVESTIGATION_PREFIXES)
+            or _is_read_only_mcp_evidence(name))
 
 
 def credit_as_investigation(*names: str) -> None:

@@ -526,3 +526,79 @@ def test_hunt_floor_unlocks_after_investigation():
         "a blocked call must not be recorded, or the promised retry hits "
         "the call-once guard instead of succeeding"
     )
+
+
+# --- the hunt floor must credit native MCP evidence (tracker #60) ------------
+# Live on .159, `chat_action_card` failed 2 of 6 runs on the box model, and the
+# separation was perfect: every PASS had >=3 credited evidence calls (4, 5, 4),
+# every FAIL had exactly 2 -- while each FAIL had also run 1-3 `mcp_*`
+# investigation calls that credited nothing. The agent then reported the refusal
+# in prose ("I must complete three required investigation steps first"), which
+# read as a flake because whether it tripped depended on which enrichment path
+# the model happened to pick that run: native (credited) or MCP (not).
+#
+# It got likelier as native MCP got more reliable -- fixing the materializer's
+# token herd (#66) meant MORE evidence flowing through uncredited names.
+
+def test_read_only_mcp_tools_credit_the_hunt_floor():
+    from fsr_playbooks.llm import _loop_helpers as H
+    from fsr_playbooks.llm import tools as T
+
+    T.TOOL_TIERS["mcp_soc__enrich_indicator"] = 1
+    T.TOOL_TIERS["mcp_fortisiem__get_context_by_entity"] = 1
+    try:
+        assert H.counts_as_investigation("mcp_soc__enrich_indicator")
+        assert H.counts_as_investigation("mcp_fortisiem__get_context_by_entity")
+    finally:
+        T.TOOL_TIERS.pop("mcp_soc__enrich_indicator", None)
+        T.TOOL_TIERS.pop("mcp_fortisiem__get_context_by_entity", None)
+
+
+def test_mutating_mcp_tools_do_not_credit_the_floor():
+    """`mcp_soc__block_indicator` is containment. Crediting it would let the
+    floor be satisfied by the very act it exists to gate."""
+    from fsr_playbooks.llm import _loop_helpers as H
+    from fsr_playbooks.llm import tools as T
+
+    T.TOOL_TIERS["mcp_soc__block_indicator"] = 3
+    try:
+        assert not H.counts_as_investigation("mcp_soc__block_indicator")
+    finally:
+        T.TOOL_TIERS.pop("mcp_soc__block_indicator", None)
+
+
+def test_untiered_mcp_name_credits_nothing():
+    """Fail closed: a name the materializer never tiered is not evidence."""
+    from fsr_playbooks.llm import _loop_helpers as H
+
+    assert not H.counts_as_investigation("mcp_unknown__whatever")
+    assert not H.counts_as_investigation("mcp_malformed")
+
+
+def test_discovery_tools_still_do_not_credit_the_floor():
+    """Unchanged: listing actions is not evidence, and `emit_action_card` must
+    never credit the floor it is gated by."""
+    from fsr_playbooks.llm import _loop_helpers as H
+
+    assert not H.counts_as_investigation("find_containment_actions")
+    assert not H.counts_as_investigation("emit_action_card")
+    assert not H.counts_as_investigation("get_record")
+
+
+def test_the_live_failing_trace_would_now_clear_the_floor():
+    """The exact turn-1 traces from the .159 measurement: the three that failed
+    had 2 credited calls and >=1 uncredited MCP evidence call each."""
+    from fsr_playbooks.llm import _loop_helpers as H
+    from fsr_playbooks.llm import tools as T
+
+    failing_trace = ["find_containment_actions", "search_module_records",
+                     "search_module_records", "find_containment_actions",
+                     "mcp_soc__enrich_indicator", "find_containment_actions"]
+    T.TOOL_TIERS["mcp_soc__enrich_indicator"] = 1
+    try:
+        credited = sum(1 for t in failing_trace if H.counts_as_investigation(t))
+        assert credited >= H.MIN_INVESTIGATION_BEFORE_CONTAINMENT, (
+            f"still {credited} of {H.MIN_INVESTIGATION_BEFORE_CONTAINMENT} -- "
+            "this trace stays locked out of containment")
+    finally:
+        T.TOOL_TIERS.pop("mcp_soc__enrich_indicator", None)
