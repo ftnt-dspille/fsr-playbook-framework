@@ -40,6 +40,30 @@ fast tests, then tags `vX.Y.Z`, pushes `main`+tag, and cuts the GitHub Release -
 which triggers the `Publish to PyPI` workflow (`.github/workflows/publish.yml`,
 Trusted Publishing / OIDC -- no stored token).
 
+### The pipelines are WATCHED, not printed
+
+`release.sh` blocks on GitHub Actions in two places, and both are gates rather
+than notifications:
+
+1. **After pushing `main`, before tagging** -- it waits for `ci.yml` on that
+   commit. A red `main` stops the release with nothing tagged and nothing
+   published, which is the only point at which stopping is still free.
+2. **After cutting the Release** -- it waits for `publish.yml` on the tag, so a
+   failed upload is a named failure with the run URL and the failing job's log
+   tail, not a downstream mystery.
+
+On failure it prints the run URL and the last 40 lines of the failing job.
+`SKIP_CI_WATCH=1 make release VERSION=...` releases past a red `main` on
+purpose; there is no flag for it, so the choice shows up in shell history.
+
+> **Why this was added.** The first time `ci_watch.sh` was pointed at `main`
+> (2026-08-02) it found CI had been failing for **five consecutive runs**,
+> spanning releases 0.6.6, 0.6.7 and 0.6.8 -- all of which published to PyPI and
+> shipped to a box. Nothing had lied: `publish.yml` builds and uploads, it does
+> not run the tests, so a green publish and a red test suite coexisted happily
+> and the only thing watching either was a `gh run watch` line printed for a
+> human who never ran it.
+
 > **Why a command, not manual steps:** the release once drifted -- `v0.4.21` was
 > tagged locally but never turned into a GitHub Release, so PyPI stalled at
 > `0.4.20` while the connector kept importing symbols only present in later

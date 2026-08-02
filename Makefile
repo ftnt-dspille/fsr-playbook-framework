@@ -13,7 +13,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release corpus-gate corpus-gen tool-gate wire-audit wire-census
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen tool-gate wire-audit wire-census
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -72,6 +72,10 @@ tests: ## fast pytest (excludes live + slow); incl. the offline golden-trace pin
 release: ## cut a PyPI release: make release VERSION=0.4.23 [NOTES="..."] (see RELEASING.md)
 	@[ -n "$(VERSION)" ] || { echo "usage: make release VERSION=X.Y.Z [NOTES=\"...\"]"; exit 2; }
 	@bash scripts/release.sh "$(VERSION)" "$(NOTES)"
+
+ci-watch: ## Watch CI on the current commit and fail if it is red (WORKFLOW=ci.yml REF=<sha>)
+	@bash scripts/ci_watch.sh --workflow "$(or $(WORKFLOW),ci.yml)" \
+	    --ref "$(or $(REF),$(shell git rev-parse HEAD))" --label "$(or $(WORKFLOW),CI)"
 
 # ── Chat Intelligence tuning loop (docs/plans/CHAT_INTELLIGENCE_PLAN.md) ──
 # chat-fast   = A4 cheap loop: offline STRUCTURE/contract guards (no API, secs).

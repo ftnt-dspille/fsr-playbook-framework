@@ -60,9 +60,37 @@ fi
 echo ">> running fast tests"
 make tests
 
-# --- tag, push, release ----------------------------------------------------
-echo ">> tagging $TAG and pushing main + tag to $REMOTE"
+# --- push main, then WAIT ON CI before making anything permanent -----------
+# Order matters. Pushing main is reversible; a tag + GitHub Release is not, and
+# the release is what triggers the PyPI upload. So CI is gated BEFORE the tag:
+# a red main should stop a release, not be discovered after one.
+#
+# This gate was added on 2026-08-02 after `ci_watch.sh` was pointed at main for
+# the first time and found it had been RED for five consecutive runs -- across
+# releases 0.6.6, 0.6.7 and 0.6.8, every one of which published and shipped to a
+# box. `publish.yml` builds and uploads; it does not run the tests. So the whole
+# chain was green-looking while the test workflow was failing the entire time.
+#
+# SKIP_CI_WATCH=1 releases anyway. Deliberately an env var and not a flag: it
+# should read as an exception someone chose, in the shell history, not as an
+# option on equal footing with the default.
+echo ">> pushing main to $REMOTE"
 git push "$REMOTE" main
+MAIN_SHA="$(git rev-parse HEAD)"
+
+if [[ "${SKIP_CI_WATCH:-0}" == "1" ]]; then
+    echo ">> SKIP_CI_WATCH=1 -- NOT waiting for CI. You are releasing untested main."
+else
+    bash "$ROOT/scripts/ci_watch.sh" --workflow ci.yml --ref "$MAIN_SHA" \
+        --label "CI on main" || {
+        echo "release: CI is red on main -- NOTHING was tagged or released." >&2
+        echo "  Fix it, or release anyway with:  SKIP_CI_WATCH=1 $0 $VERSION" >&2
+        exit 1
+    }
+fi
+
+# --- tag, release, and watch the upload ------------------------------------
+echo ">> tagging $TAG and pushing it to $REMOTE"
 git tag "$TAG"
 git push "$REMOTE" "$TAG"
 
@@ -70,8 +98,18 @@ git push "$REMOTE" "$TAG"
 echo ">> cutting GitHub release $TAG (triggers Publish to PyPI)"
 gh release create "$TAG" --title "$TAG" --notes "$NOTES"
 
-echo ">> release created. Watch the publish workflow:"
-echo "   gh run watch \$(gh run list --workflow=publish.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+# Watched, not printed. The old code echoed a `gh run watch` command for a human
+# to run, which meant a failed upload surfaced downstream as `release_and_ship`
+# polling PyPI for its full 600s timeout and then reporting "not on PyPI" -- the
+# symptom, ten minutes late, with nothing about the cause.
+bash "$ROOT/scripts/ci_watch.sh" --workflow publish.yml --ref "$TAG" \
+    --label "Publish to PyPI ($TAG)" || {
+    echo "release: the PyPI upload for $TAG FAILED. The tag and GitHub Release" >&2
+    echo "  exist, so this version is now BURNT -- PyPI rejects re-uploads of a" >&2
+    echo "  version it has already seen, and a re-run publishing the same tag" >&2
+    echo "  cannot succeed. Fix the workflow and release the NEXT patch." >&2
+    exit 1
+}
 echo ">> then bump the connector pin + ship. Prefer the one command that waits for"
 echo "   PyPI to actually serve the wheel before shipping:"
 echo "     cd ../../ConnectorsV2/fsr-playbook-builder && make release-ship FW=$VERSION"
