@@ -15,6 +15,9 @@
     }
   },
   "field_types": {
+    "route.isExecuted": {
+      "bool": 6076
+    },
     "route.label": {
       "NoneType": 5088,
       "str": 988
@@ -75,8 +78,7 @@
     "route": {
       "@id": 6076,
       "@type": 6076,
-      "group": 6076,
-      "isExecuted": 6076
+      "group": 6076
     },
     "step": {
       "@id": 7752,

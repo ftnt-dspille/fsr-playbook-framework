@@ -207,6 +207,13 @@ class LiveRoute(_WireRecord):
     label: Optional[str] = None
     sourceStep: Any = None
     targetStep: Any = None
+    # Runtime-executed flag on every route the box sends (6076/6076 in the
+    # live census; always bool). The emitter writes `False`; the decompiler
+    # does not read it (it is a run-state field, not a compile input). Typed
+    # strictly so a shape drift -- the box sending a string or int where it
+    # has always sent a bool -- is caught here rather than passing through
+    # `extra="allow"` unseen (#32: type the remaining live wire keys).
+    isExecuted: Optional[bool] = None
 
 
 class LiveWorkflow(_WireRecord):
