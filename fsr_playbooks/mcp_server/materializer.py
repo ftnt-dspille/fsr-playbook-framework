@@ -419,6 +419,60 @@ def _make_name(server: str, tool_name: str) -> str:
     return f"mcp_{slug}__{tool_name}"
 
 
+_CONNECTOR_PREFIX = "connector:"
+
+
+def connector_of(server: str) -> str | None:
+    """The installed-connector name behind a Power-2 server (``"connector:<name>"``
+    → ``"<name>"``), else None for a built-in server (``"soc"``, ``"utility"``, …).
+
+    A Power-2 MCP tool IS a connector action: the server carries the connector and
+    the tool name is the operation. That 1:1 is what lets a native-MCP call compile
+    to a DIRECT connector step rather than a generic run-a-tool step."""
+    if not isinstance(server, str) or not server.startswith(_CONNECTOR_PREFIX):
+        return None
+    return server[len(_CONNECTOR_PREFIX):].strip() or None
+
+
+def _record_connector_trace(server: str, tool_name: str,
+                            args: dict[str, Any], env: Any) -> None:
+    """Record a Power-2 MCP call on the active skill trace as a
+    ``run_connector_action`` -- the same SkillCall shape ``run_op`` records -- so
+    a native-MCP investigation compiles to the same direct connector steps as a
+    ``run_op`` one. Before this, every MCP call was invisible to the trace and a
+    trace-built playbook silently omitted exactly those steps.
+
+    Mirrors ``run_op``'s recording contract: unwrap a ``data`` envelope and set
+    ``ref_prefix`` accordingly, so value-match wiring sees the shape a runtime
+    ``vars.steps.<name>.*`` reference will actually resolve against.
+
+    Best-effort and no-op'd unless a session wrapper installed an active trace --
+    a recorder must never break a live tool call.
+
+    The native gateway resolves the connector configuration server-side and never
+    tells the caller which one ran, so we record ``config=""`` -- unlike ``run_op``,
+    which pins the id it resolved. That is fine for ``config``: the compiler fills
+    a config-less connector step with the connector's default from the warmed
+    catalog (``resolver/connector_args.py`` ``_resolve_connector_args``), offline.
+
+    KNOWN GAP -- the ``agent`` binding has no such fallback. ``run_op`` records the
+    agent id when it routes through one; an MCP call cannot know it, and nothing
+    downstream supplies a default. So an AGENT-BOUND connector reached over native
+    MCP compiles to a step with no agent binding, which the workflow engine can't
+    route. Unverified against a box: it may be that the catalog's default config
+    for an agent-bound connector is already the agent config, making this moot."""
+    name = connector_of(server)
+    if not name:
+        return          # built-in server: no connector step to compile to
+    try:
+        from fsr_playbooks.agent.skill_trace import record_run_op as _record
+        data = env.get("data", env) if isinstance(env, dict) else env
+        prefix = "data" if (isinstance(env, dict) and "data" in env) else ""
+        _record(name, tool_name, args, data, ref_prefix=prefix)
+    except Exception:
+        pass
+
+
 def _make_fn(
     client: Any,
     server: str,
@@ -446,9 +500,14 @@ def _make_fn(
             raw = client.mcp.call_tool_at(
                 url, call_headers, tool_name,
                 arguments=kwargs or None, verify=verify)
-        else:
-            raw = client.mcp.call_tool(server, tool_name, arguments=kwargs or None)
-        return _envelope(raw)
+            return _envelope(raw)
+        raw = client.mcp.call_tool(server, tool_name, arguments=kwargs or None)
+        env = _envelope(raw)
+        # On-box Power-2 calls only: an EXTERNAL server is not an installed
+        # connector, so it has no direct connector step to compile to even if an
+        # operator named its rule "connector:…".
+        _record_connector_trace(server, tool_name, kwargs, env)
+        return env
     fn.__name__ = _make_name(server, tool_name)
     return fn
 

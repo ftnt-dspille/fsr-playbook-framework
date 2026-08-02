@@ -618,6 +618,13 @@ def compile_trace(
         "pruned": pruned,
         "start_step": start_step,
         "first_step": first,
+        # The catalog lookup this compile already opened. compile_and_verify
+        # re-emits the steps and has to re-prune them, and building a SECOND
+        # Resolver there is not free: it warms a connector-config cache that
+        # makes the emitter fill in a default `config` for steps whose trace
+        # recorded none, changing emitted YAML that has nothing to do with
+        # pruning. Hand the existing lookup over instead.
+        "_rules_for": rules_for,
     }
 
 

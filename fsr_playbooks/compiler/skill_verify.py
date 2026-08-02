@@ -140,6 +140,17 @@ def compile_and_verify(
 
     # Re-emit steps with only the surviving wires; repaired params fall back
     # to the literal and join the gap list.
+    #
+    # This rebuilds each step from `call.resolved_inputs`, which means it
+    # DISCARDS everything compile_trace did to the step dicts it produced --
+    # including the hidden-param prune. That silently un-did the prune on the
+    # only path that matters: compile_trace pruned, and then these fresh steps
+    # overwrote the result, so the live block_ip_new trace kept both branches
+    # of its conditional and P4 produced no playbook. Two releases were cut
+    # against the wrong suspect (the step SHAPE) because the unit tests drove
+    # compile_trace directly and never came through here. So re-prune the
+    # re-emitted steps, and keep `pruned` reporting what actually survived.
+    rules_for = compiled.pop("_rules_for", None) or sc._rules_lookup()
     new_steps: List[Dict[str, Any]] = []
     calls = trace.calls
     for i, call in enumerate(calls):
@@ -148,6 +159,9 @@ def compile_and_verify(
             continue
         wired = compiled["wiring"].get(call.step_name, {})
         step = skill.compile(call.resolved_inputs, wired, call.step_name)
+        dropped = sc.prune_hidden_params(step, rules_for)
+        if dropped:
+            compiled.setdefault("pruned", {})[call.step_name] = dropped
         nxt = calls[i + 1].step_name if i + 1 < len(calls) else None
         if nxt:
             step["next"] = nxt

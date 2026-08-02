@@ -584,3 +584,139 @@ def test_dispatch_materializes_on_miss_without_a_tool_list_build():
         "dispatch() failed to materialize native-MCP tools on a registry miss; "
         "an approved MCP action would silently never execute")
     assert r["called"] == "enrich_indicator"
+
+
+# --- Power-2 MCP calls feed the skill trace -----------------------------------
+#
+# A native-MCP tool on a `connector:<name>` server IS a connector action: the
+# server carries the connector, the tool name is the operation. Before this,
+# `_make_fn` never touched the trace, so an investigation conducted over native
+# MCP compiled to a playbook that SILENTLY OMITTED exactly those steps --
+# `build_playbook_from_trace` only ever saw `run_op` calls.
+
+import yaml as _yaml
+
+from fsr_playbooks.agent import skill_trace as ST
+from fsr_playbooks.mcp_server import build_playbook_from_trace
+
+
+@pytest.fixture
+def _trace():
+    t = ST.SkillTrace()
+    ST.set_active_trace(t)
+    yield t
+    ST.set_active_trace(None)
+
+
+def _conn_client(payload):
+    """Stub whose connector-server tool returns `payload`."""
+    class _MCP:
+        def list_tools(self, server):
+            return CONN_TOOLS
+        def call_tool(self, server, name, arguments=None):
+            return payload
+    class _Client:
+        def supports_native_mcp(self):
+            return True
+        mcp = _MCP()
+    return _Client()
+
+
+CONN_TOOLS = [{"name": "get_ip_report", "description": "ip report",
+               "input_schema": {"type": "object",
+                                "properties": {"ip": {"type": "string"}}}}]
+
+
+def _materialize_conn(payload, server="connector:virustotal"):
+    M.configure(mcp_allowlist={server: {"tools": "*", "tier": "read_only"}},
+                client_factory=lambda: _conn_client(payload))
+    M.ensure_initialized()
+
+
+def test_connector_of_splits_power2_server_from_builtin():
+    assert M.connector_of("connector:fortigate-firewall") == "fortigate-firewall"
+    assert M.connector_of("soc") is None
+    assert M.connector_of("") is None
+
+
+def test_power2_mcp_call_lands_on_the_trace_as_a_connector_action(_trace):
+    _materialize_conn({"attributes": {"network": "203.0.113.0/24"}})
+
+    T.dispatch("mcp_connector_virustotal__get_ip_report", {"ip": "203.0.113.77"})
+
+    assert len(_trace.calls) == 1, "native-MCP call never reached the trace"
+    call = _trace.calls[0]
+    assert call.skill_id == "run_connector_action"
+    assert call.resolved_inputs["connector"] == "virustotal"
+    assert call.resolved_inputs["operation"] == "get_ip_report"
+    assert call.resolved_inputs["ip"] == "203.0.113.77"
+    assert call.observed_output == {"attributes": {"network": "203.0.113.0/24"}}
+
+
+def test_builtin_server_call_is_not_traced(_trace):
+    """`soc`/`utility` tools have no connector step to compile to -- recording
+    them would put an uncompilable step in the playbook."""
+    M.configure(mcp_allowlist={"soc": {"tools": "*", "tier": "read_only"}},
+                client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
+    M.ensure_initialized()
+
+    T.dispatch("mcp_soc__enrich_indicator", {"indicator": "1.2.3.4"})
+
+    assert _trace.calls == []
+
+
+def test_data_envelope_is_unwrapped_and_sets_ref_prefix(_trace):
+    """Mirrors `run_op`'s contract: refs resolve as `vars.steps.<name>.data.*`,
+    so the wiring compiler must match against the UNWRAPPED payload."""
+    _materialize_conn({"data": {"attributes": {"network": "203.0.113.0/24"}}})
+
+    T.dispatch("mcp_connector_virustotal__get_ip_report", {"ip": "203.0.113.77"})
+
+    call = _trace.calls[0]
+    assert call.ref_prefix == "data"
+    assert call.observed_output == {"attributes": {"network": "203.0.113.0/24"}}
+
+
+def test_no_active_trace_does_not_break_the_call():
+    _materialize_conn({"ok": True})
+    ST.set_active_trace(None)
+
+    res = T.dispatch("mcp_connector_virustotal__get_ip_report", {"ip": "1.2.3.4"})
+
+    assert res == {"ok": True}
+
+
+def test_external_server_named_like_a_connector_is_not_traced(_trace):
+    """An external MCP server is not an installed connector, so it has no direct
+    connector step -- even if an operator names the rule `connector:…`."""
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist={"connector:partner": {"url": EXT_URL, "tools": "*"}},
+                client_factory=lambda: client)
+    M.ensure_initialized()
+
+    T.dispatch("mcp_connector_partner__lookup", {"q": "x"})
+
+    assert _trace.calls == []
+
+
+def test_mcp_only_investigation_compiles_to_direct_connector_steps(_trace, monkeypatch):
+    """The end-to-end goal: an investigation conducted ENTIRELY over native MCP
+    compiles to a playbook of direct connector steps, wired from observed output
+    -- not to run-a-tool passthrough, and not to an empty trace."""
+    # The compile path backfills connector bindings, which reaches a live box
+    # when env creds are configured. Keep this tier hermetic.
+    import fsr_playbooks.mcp_server.tools_execution as TE
+    monkeypatch.setattr(TE, "_live_client_for_grounding", lambda: None)
+    _materialize_conn({"attributes": {"network": "203.0.113.0/24"}})
+    T.dispatch("mcp_connector_virustotal__get_ip_report", {"ip": "203.0.113.77"})
+
+    out = build_playbook_from_trace(_trace.to_json(), name="MCP Enrich")
+
+    assert out["ok"] is True, out
+    steps = _yaml.safe_load(out["yaml"])["playbooks"][0]["steps"]
+    conn = [s for s in steps if s.get("type") == "connector"]
+    assert len(conn) == 1
+    args = conn[0].get("arguments", conn[0])
+    assert args.get("connector") == "virustotal"
+    assert args.get("operation") == "get_ip_report"
+
