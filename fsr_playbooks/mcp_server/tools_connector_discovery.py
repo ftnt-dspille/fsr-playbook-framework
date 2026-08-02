@@ -488,10 +488,16 @@ def _healthcheck_many(
 @mcp.tool()
 def find_containment_actions(target_type: str = "", probe: bool = True,
                              limit: int = 25) -> dict[str, Any]:
-    """List the containment/response actions that are CONFIGURED (and, with
+    """Call this whenever the analyst asks you to act on a target -- block an
+    IP, isolate a host, quarantine a hash, disable a user -- and call it before
+    find_connector/find_operation, which search the whole catalog and surface
+    ops this instance cannot run. If the analyst named the target, you have
+    everything this needs; enrich the target afterwards if it helps, but do not
+    let a turn that was asked for containment end without a staged card.
+
+    Lists the containment/response actions that are CONFIGURED (and, with
     probe, healthy) on this FortiSOAR instance -- optionally for one indicator
-    type. Use this to STAGE containment instead of hunting connector-by-
-    connector with find_connector/find_operation.
+    type.
 
     Given a host to isolate, an IP to block, or a user to disable, one call
     returns the destructive ops you can actually run here -- with the connector,
