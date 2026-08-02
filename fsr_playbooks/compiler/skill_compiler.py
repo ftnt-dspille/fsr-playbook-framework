@@ -312,13 +312,24 @@ def prune_hidden_params(step: Dict[str, Any], rules_for) -> List[str]:
     inner = params.get("params")
     target = inner if isinstance(inner, dict) else params
     # Phase G puts these at step level, but a trace whose recorded inputs
-    # carried an `arguments:` wrapper keeps them inside it. Reading only the
-    # step level made this whole function a silent no-op for that shape: on a
-    # live box the block_ip_new trace kept both branches, the compiler rejected
-    # the param-set conflict, and P4 produced no playbook -- the same failure
-    # this function was written to fix, reappearing through a different shape.
-    connector = step.get("connector") or target.get("connector")
-    operation = step.get("operation") or target.get("operation")
+    # carried an `arguments:` wrapper keeps them inside it -- and when that
+    # wrapper also nests `params:`, they sit in the container BETWEEN the step
+    # and the params, i.e. all three levels occur in the wild. Missing any one
+    # makes this function a silent no-op for that shape: on a live box the
+    # block_ip_new trace kept both branches, the compiler rejected the
+    # param-set conflict, and P4 produced no playbook -- the same failure this
+    # function was written to fix, reappearing through a different shape. It
+    # regressed twice on exactly that, so search every level rather than
+    # enumerating the shapes seen so far.
+    def _routing_key(key: str) -> Any:
+        for scope in (step, params, target):
+            value = scope.get(key)
+            if value:
+                return value
+        return None
+
+    connector = _routing_key("connector")
+    operation = _routing_key("operation")
     if not connector or not operation:
         return []
     try:

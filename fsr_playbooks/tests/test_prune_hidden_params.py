@@ -16,6 +16,8 @@ wrong to emit fields FSR would never transmit. Pruning them is fidelity.
 `prune_hidden_params` is driven with an explicit rules table here so the test
 pins the logic rather than whatever the shipped catalog happens to contain.
 """
+import pytest
+
 from fsr_playbooks.compiler.skill_compiler import (
     _visible_params, prune_hidden_params,
 )
@@ -154,3 +156,48 @@ def test_connector_and_op_inside_arguments_still_prunes():
     assert step["arguments"]["connector"] == "fortigate-firewall"
     assert step["arguments"]["operation"] == "block_ip_new"
     assert step["arguments"]["method"] == "Quarantine Based"
+
+
+def test_connector_in_the_arguments_wrapper_around_nested_params_still_prunes():
+    """The shape that survived the FIRST fix and failed live a second time.
+
+    When the `arguments:` wrapper also nests `params:`, the routing keys sit in
+    the container BETWEEN the step and the params -- neither at step level (the
+    original lookup) nor alongside the params (the first fix's lookup). The
+    prune silently returned [] again, the block_ip_new trace kept both branches
+    a second time, and P4 produced no playbook on a live box after a release
+    that was supposed to have fixed exactly this.
+
+    Hence the parametrised shapes below: pin every level, not the two that have
+    burned us so far.
+    """
+    step = {"name": "Block IP", "type": "connector",
+            "arguments": {"connector": "fortigate-firewall",
+                          "operation": "block_ip_new",
+                          "params": {"method": "Quarantine Based",
+                                     "ip_block_policy": "pol1", "ip_type": "IPv4",
+                                     "ip": "198.51.100.7",
+                                     "ip_addresses": "198.51.100.7",
+                                     "time_to_live": "1 Day", "duration": 3600,
+                                     "vdom": "root"}}}
+    dropped = prune_hidden_params(step, _rules_for)
+    assert dropped == ["duration", "ip", "ip_block_policy", "ip_type"], dropped
+    assert step["arguments"]["connector"] == "fortigate-firewall"
+    assert step["arguments"]["params"]["method"] == "Quarantine Based"
+
+
+@pytest.mark.parametrize("place_routing_keys", ["step", "container", "params"])
+def test_routing_keys_are_found_at_every_level(place_routing_keys):
+    """connector/operation appear at all three levels in real traces."""
+    params = {"method": "Quarantine Based", "ip_block_policy": "pol1",
+              "ip_type": "IPv4", "time_to_live": "1 Day", "duration": 3600}
+    keys = {"connector": "fortigate-firewall", "operation": "block_ip_new"}
+    step = {"name": "Block IP", "type": "connector", "arguments": {"params": params}}
+    if place_routing_keys == "step":
+        step.update(keys)
+    elif place_routing_keys == "container":
+        step["arguments"].update(keys)
+    else:
+        params.update(keys)
+
+    assert prune_hidden_params(step, _rules_for) == ["duration", "ip_block_policy", "ip_type"]
