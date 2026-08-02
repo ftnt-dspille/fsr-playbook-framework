@@ -22,6 +22,7 @@ verification is its own pass.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from .skills import get_skill
@@ -750,6 +751,80 @@ def insert_containment_confirm(compiled: Dict[str, Any]) -> Dict[str, Any]:
     steps.extend(extra)
     compiled["steps"] = steps
     return compiled
+
+
+def attach_containment_mock_result(
+    compiled: Dict[str, Any], trace: SkillTrace
+) -> Dict[str, Any]:
+    """Give every containment step the `mock_result` that makes a dry run dry.
+
+    `useMockOutput=true` is a **substitution**, not a kill switch: each step
+    honors its OWN `arguments.mock_result`, and a step that carries none has
+    nothing to substitute, so it **runs live** however the run was triggered.
+    A trace-compiled containment step used to carry no `mock_result` -- so a
+    nominally mocked run of a compiled playbook really blocked an address on a
+    real firewall. (`globalMock` must stay false; some handlers ignore
+    `mock_result` under it.)
+
+    The right payload already exists: the trace recorded what the op ACTUALLY
+    returned when the agent ran it during triage. Stamping that as the step's
+    `mock_result` makes every trace-compiled playbook safely dry-runnable by
+    construction, and the mocked output is realistic enough that downstream
+    steps wired to it still resolve.
+
+    Only containment (state-changing) steps are stamped -- an enrichment step
+    is safe to re-run live, and a stale mocked verdict would be worse than a
+    fresh one. Idempotent: a step that already carries a non-blank
+    `mock_result` is left alone. Emitted as a JSON **string**, the wire shape
+    the editor writes. Mutates and returns `compiled`."""
+    steps: List[Dict[str, Any]] = compiled.get("steps", [])
+    by_name = {c.step_name: c for c in trace.calls}
+    for s in steps:
+        if s.get("type") != "connector":
+            continue
+        args = s.get("arguments") or s
+        if not _is_containment_op(args.get("operation")):
+            continue
+        existing = args.get("mock_result")
+        if isinstance(existing, str) and existing.strip():
+            continue
+        sname = s.get("name")
+        call = by_name.get(sname) if isinstance(sname, str) else None
+        if call is None:
+            continue
+        try:
+            payload = json.dumps(call.observed_output)
+        except (TypeError, ValueError):
+            continue                          # unserializable -> no claim made
+        args["mock_result"] = payload
+    return compiled
+
+
+def unmocked_containment_steps(doc: Dict[str, Any]) -> List[str]:
+    """Names of containment steps in a playbook doc that carry no
+    `mock_result` -- i.e. the steps that would run FOR REAL under a
+    `useMockOutput=true` "dry run". Empty list means the doc is safe to
+    dry-run. Accepts a `compile_trace` result, an assembled source doc
+    (`playbooks: [...]`), or wire-form JSON (`workflows: [...]`)."""
+    pools: List[List[Dict[str, Any]]] = []
+    if isinstance(doc.get("steps"), list):
+        pools.append(doc["steps"])
+    for key in ("playbooks", "workflows"):
+        for w in (doc.get(key) or []):
+            if isinstance(w, dict) and isinstance(w.get("steps"), list):
+                pools.append(w["steps"])
+    unmocked: List[str] = []
+    for steps in pools:
+        for s in steps:
+            if s.get("type") != "connector":
+                continue
+            args = s.get("arguments") or s
+            if not _is_containment_op(args.get("operation")):
+                continue
+            mr = args.get("mock_result")
+            if not (isinstance(mr, str) and mr.strip()):
+                unmocked.append(s.get("name") or "<unnamed>")
+    return unmocked
 
 
 def compile_trace(

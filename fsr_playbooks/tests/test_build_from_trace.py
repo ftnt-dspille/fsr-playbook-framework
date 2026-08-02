@@ -1,6 +1,7 @@
 """Phase 5 -- build_playbook_from_trace entry point (PLAN §3-5)."""
 from __future__ import annotations
 
+import json
 import yaml
 
 from fsr_playbooks.agent.skill_trace import SkillTrace
@@ -250,3 +251,48 @@ def test_no_containment_means_no_confirmation_step():
     t.record_run_op("virustotal", "get_ip_report", {"ip": "1.2.3.4"}, {"attributes": {}})
     out = build_playbook_from_trace(t.to_json())
     assert "Confirm Containment" not in _steps_by_name(out)
+
+
+# --- containment is dry-runnable by construction -------------------------------
+#
+# useMockOutput=true is a SUBSTITUTION, not a kill switch: a step with no
+# `mock_result` runs live however the run was triggered. So a trace-compiled
+# containment step without one makes a nominally mocked run really contain.
+
+def test_containment_step_carries_its_recorded_output_as_mock_result():
+    out = build_playbook_from_trace(
+        _contain_trace({"attributes": {"last_analysis_stats": {"malicious": 7}}}).to_json())
+    cont = _steps_by_name(out)["Isolate Host"]
+
+    mr = cont.get("mock_result")
+    assert mr, "containment step has no mock_result -- a dry run would contain for real"
+    assert isinstance(mr, str), "mock_result rides the wire as a JSON string"
+    assert json.loads(mr) == {"status": "isolated"}, "the trace's recorded output is the mock"
+
+
+def test_enrichment_steps_are_not_mocked():
+    """Only state-changing steps are stamped -- a stale mocked verdict is worse
+    than re-running a safe enrichment live."""
+    out = build_playbook_from_trace(
+        _contain_trace({"attributes": {"last_analysis_stats": {"malicious": 7}}}).to_json())
+    assert not _steps_by_name(out)["Get Ip Report"].get("mock_result")
+
+
+def test_unmocked_containment_is_reported_on_a_hand_authored_doc():
+    from fsr_playbooks.compiler.skill_compiler import unmocked_containment_steps
+
+    doc = {"playbooks": [{"steps": [
+        {"type": "connector", "name": "Enrich", "operation": "get_ip_report"},
+        {"type": "connector", "name": "Block", "operation": "block_ip_new"},
+        {"type": "connector", "name": "Mocked Block", "operation": "block_ip_new",
+         "mock_result": '{"status": "ok"}'},
+    ]}]}
+    assert unmocked_containment_steps(doc) == ["Block"]
+
+
+def test_a_trace_compiled_playbook_reports_no_unmocked_containment():
+    from fsr_playbooks.compiler.skill_compiler import unmocked_containment_steps
+
+    out = build_playbook_from_trace(
+        _contain_trace({"attributes": {"last_analysis_stats": {"malicious": 7}}}).to_json())
+    assert unmocked_containment_steps(yaml.safe_load(out["yaml"])) == []

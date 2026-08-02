@@ -430,6 +430,11 @@ def build_playbook_from_trace(
         # would leave containment ungated. The Confirm/Stop step runs either
         # way, so a compiled playbook never contains without a human saying yes.
         compiled = sc.insert_containment_confirm(compiled)
+    # Independent of `guard_containment`: a step with no `mock_result` runs LIVE
+    # under useMockOutput=true, so an unmocked containment step makes a "dry
+    # run" really contain. The trace holds the op's own recorded output -- stamp
+    # it, so the artifact is dry-runnable by construction rather than by comment.
+    compiled = sc.attach_containment_mock_result(compiled, trace)
     # Explicit arg overrides; otherwise bind to the module recorded on the
     # trace (the triaged record's module, stamped by the connector). None →
     # bare `start` (a designer-only Referenced trigger).
