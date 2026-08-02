@@ -346,8 +346,11 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
         with catalog_override(db_path):
             return find_operation(connector, q, limit, verbose, db_path=None)
     with _db() as conn:
-        cols = ("op_name, title, description, annotation" if verbose
-                else "op_name, title")
+        # `category` is selected but not returned: it feeds the containment
+        # redirect below, and adding it to the response would change a shape
+        # that golden fixtures pin.
+        cols = ("op_name, title, description, annotation, category" if verbose
+                else "op_name, title, category")
         if q:
             rows = _rows(
                 conn,
@@ -385,7 +388,33 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                 0 if (r.get("verification") or {}).get("status") == "tested_pass" else
                 2 if (r.get("verification") or {}).get("status") == "tested_fail" else 1
             ))
+        # A containment op reached through the CATALOG is the wrong path, and
+        # it fails in a way that only shows up on the box: find_operation
+        # searches every connector the reference store knows, so it happily
+        # returns an op this instance has not configured. Stage a card from
+        # that and the analyst approves an action that cannot run.
+        # find_containment_actions answers the configured-AND-healthy question
+        # in one call. Redirect here, at the moment the wrong path was taken,
+        # rather than hoping a system-prompt rule is recalled.
+        from .tools_connector_discovery import is_containment_op
+        contain_hits = [r["op_name"] for r in rows
+                        if is_containment_op(r.get("op_name", ""),
+                                             r.get("category", ""))]
+        for r in rows:
+            r.pop("category", None)
+
         out: dict[str, Any] = {"matches": rows}
+        if contain_hits:
+            out["containment_redirect"] = (
+                f"{sorted(contain_hits)} are state-changing response actions. "
+                f"These are CATALOG matches -- this instance may not have the "
+                f"connector configured, and a card staged from an unconfigured "
+                f"op cannot run once approved. Call "
+                f"find_containment_actions(target_type=...) instead: it returns "
+                f"only what is configured and healthy HERE, with the tier and "
+                f"required params, ready for emit_action_card. Every one of "
+                f"these must be staged via emit_action_card, never run_op."
+            )
         if op_failed:
             out["warning"] = (
                 f"op(s) {op_failed} on {connector!r} have a tested_fail "

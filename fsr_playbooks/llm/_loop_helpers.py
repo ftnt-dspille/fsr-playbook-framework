@@ -561,13 +561,20 @@ class TriageDiscipline:
                 "hunt_floor_guard": True,
                 "investigation_calls": self.invest_attempts,
                 "required": self.floor,
+                # The retry is the POINT of this guard: it defers containment,
+                # it does not cancel it. Callers keep the block non-terminal for
+                # exactly this reason (see the provider dispatch sites).
+                "resume_call": name,
                 "error": (
-                    f"Do NOT call `{name}` yet -- it was NOT executed. You've run "
-                    f"{self.invest_attempts} of {self.floor} required "
-                    f"investigation steps; staging containment now would act on "
-                    f"an alert you haven't scoped. Do NOT repeat this call. Your "
-                    f"NEXT call must be: {next_step}. After ~{remaining} more "
-                    f"evidence call(s), staging will unlock automatically."
+                    f"Deferred, not cancelled: `{name}` was NOT executed yet. "
+                    f"You've run {self.invest_attempts} of {self.floor} required "
+                    f"investigation steps, and staging containment now would act "
+                    f"on an alert you haven't scoped. Your NEXT call must be: "
+                    f"{next_step}. Then, after ~{remaining} more evidence "
+                    f"call(s), CALL `{name}` AGAIN with the same arguments -- "
+                    f"that retry is required and will succeed. Do not call "
+                    f"`{name}` again before those evidence calls, and do not end "
+                    f"your turn without staging the card the analyst asked for."
                 ),
             }
         return None

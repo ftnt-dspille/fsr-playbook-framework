@@ -491,3 +491,38 @@ def test_containment_verb_in_op_name_escalates_tier():
     # An unclassified op whose name says "isolate" must require approval.
     assert _tier_for_run_op(
         {"connector": "fortinet-fortiedr", "op": "isolate_collector"}) >= 3
+
+
+# ─────────────── hunt floor defers containment, never cancels it ───────────────
+#
+# Card #43's root cause, found on .159: the guard said "Do NOT repeat this
+# call". gpt-4.1-mini obeyed literally -- it ran find_containment_actions,
+# got blocked, investigated well past the floor, and then ended the turn in
+# prose with no card. The analyst was told to wait and never told to come back.
+# The block was always meant to be non-terminal (the provider dispatch sites
+# deliberately don't register it as a failed signature); only the wording said
+# otherwise. These pin the retry instruction so it can't regress into a stop.
+
+def test_hunt_floor_block_instructs_the_retry():
+    d = TriageDiscipline()
+    g = _drive(d, "find_containment_actions", {"target_type": "ip"})
+    assert g is not None and g["hunt_floor_guard"] is True
+    # Structural: the envelope names the call to resume.
+    assert g["resume_call"] == "find_containment_actions"
+    err = g["error"]
+    assert "AGAIN" in err, "the guard must license the retry, not just defer it"
+    assert "Do NOT repeat this call" not in err, (
+        "the old wording read as a cancellation and cost card #43 its P2 evidence"
+    )
+
+
+def test_hunt_floor_unlocks_after_investigation():
+    """The retry the guard promises must actually succeed."""
+    d = TriageDiscipline()
+    assert _drive(d, "find_containment_actions", {"target_type": "ip"}) is not None
+    for _ in range(MIN_INVESTIGATION_BEFORE_CONTAINMENT):
+        _drive(d, "search_module_records", {"module": "alerts", "q": "1.2.3.4"})
+    assert _drive(d, "find_containment_actions", {"target_type": "ip"}) is None, (
+        "a blocked call must not be recorded, or the promised retry hits "
+        "the call-once guard instead of succeeding"
+    )

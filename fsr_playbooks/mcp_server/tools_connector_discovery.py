@@ -118,6 +118,24 @@ _TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
 _CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
 
 
+def is_containment_op(op_name: str, category: str = "") -> bool:
+    """Does this op look like a state-changing response action?
+
+    The name/category half of the test `find_containment_actions` applies (it
+    additionally requires tier >= 3 and a live configured connector, which need
+    a box). Exposed on its own so the *catalog* search path can recognize a
+    containment op without duplicating the verb list -- see `find_operation`,
+    which uses it to point the agent at the configured-and-healthy answer
+    instead of letting a catalog hit become a staged card for an op this
+    instance cannot run.
+    """
+    nm = (op_name or "").lower()
+    if nm.startswith(_NON_ACTION_PREFIXES):
+        return False
+    return ((category or "").lower() in _CONTAINMENT_CATEGORIES
+            or any(v in nm for v in _CONTAINMENT_VERBS))
+
+
 _INTEL_TOKENS: tuple[str, ...] = (
     "reputation", "ioc", "indicator", "intel", "threat", "enrich", "context",
     "lookup", "geo", "whois", "passive", "detection", "verdict",
