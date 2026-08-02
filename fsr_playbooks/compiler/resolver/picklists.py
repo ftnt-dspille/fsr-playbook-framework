@@ -2,11 +2,20 @@
 from __future__ import annotations
 
 import difflib
+import re
 import sqlite3
 from typing import Any
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Step
+
+
+# A real FortiSOAR picklist IRI is `/api/3/picklists/<uuid>`. Tests and recipe
+# templates sometimes carry a placeholder suffix (`/api/3/picklists/x`); those
+# are not opaque uuids the agent copied from another box, and flagging them
+# would be a false positive on the very authoring surface the validation is
+# meant to help. Only validate uuid-shaped IRIs -- the case #15 names.
+_PICKLIST_IRI_RE = re.compile(r"^/api/3/picklists/[0-9a-fA-F-]{32,}$")
 
 
 class PicklistMixin:
@@ -94,9 +103,65 @@ class PicklistMixin:
         """
         if not isinstance(value, str) or not value:
             return value
-        # Pass-through: already canonical, or a Jinja expression that
-        # resolves at runtime.
-        if value.startswith("/api/") or "{{" in value or "{%" in value:
+        # Pass-through: a Jinja expression resolves at runtime.
+        if "{{" in value or "{%" in value:
+            return value
+        # A picklist IRI: validate it resolves to THIS list. A stale or
+        # cross-box IRI (e.g. copied from another appliance) used to pass
+        # through silently and fail at runtime with an opaque
+        # `/api/3/picklists/1c4d...` -- the agent can't self-correct from
+        # a uuid. Resolve it back to a friendly affordance: which list the
+        # IRI actually belongs to (if any) + the valid values for the list
+        # this field expects. Only validate when the list itself is known
+        # to the catalog -- a custom picklist we have no rows for can't be
+        # checked, and flagging it would be a false positive (#15).
+        if value.startswith("/api/3/picklists/") and _PICKLIST_IRI_RE.match(value):
+            known = self.conn.execute(
+                "SELECT 1 FROM picklists WHERE list_name=? LIMIT 1",
+                (list_name,),
+            ).fetchone()
+            if known is None:
+                return value  # unknown list -- can't validate, pass through
+            own = self.conn.execute(
+                "SELECT 1 FROM picklists WHERE list_name=? AND item_iri=?",
+                (list_name, value),
+            ).fetchone()
+            if own is not None:
+                return value  # correct canonical IRI for this list
+            # Not in this list. Is it a real IRI from the WRONG list?
+            wrong = self.conn.execute(
+                "SELECT list_name FROM picklists WHERE item_iri=? LIMIT 1",
+                (value,),
+            ).fetchone()
+            valid = [r[0] for r in self.conn.execute(
+                "SELECT item_value FROM picklists WHERE list_name=?",
+                (list_name,),
+            ).fetchall()]
+            if wrong is not None:
+                msg = (
+                    f"picklist IRI {value!r} belongs to picklist "
+                    f"{wrong[0]!r}, but field expects picklist "
+                    f"{list_name!r}. Valid values for {list_name!r}: "
+                    f"{', '.join(sorted(valid)[:8])}"
+                    f"{'…' if len(valid) > 8 else ''}"
+                )
+            else:
+                msg = (
+                    f"picklist IRI {value!r} is not in the catalog (stale, "
+                    f"or copied from another box). Picklist {list_name!r} "
+                    f"expects: {', '.join(sorted(valid)[:8])}"
+                    f"{'…' if len(valid) > 8 else ''}"
+                )
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=msg,
+                path=vpath,
+                severity="error",
+                check="picklist_iri_drift",
+            ))
+            return value
+        # A non-picklist /api/ IRI (e.g. a record IRI) is not ours to check.
+        if value.startswith("/api/"):
             return value
         row = self.conn.execute(
             "SELECT item_iri FROM picklists WHERE list_name=? AND item_value=?",
