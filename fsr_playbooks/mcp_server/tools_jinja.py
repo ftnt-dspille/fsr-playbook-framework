@@ -117,21 +117,36 @@ def find_jinja_pattern(q: str, kind: str | None = None,
         list of {raw, kind, head, filters_csv, vars_csv, from_playbook,
                  from_step, step_type, occurrences}
     """
+    # Precision ranking: an exact `head` match (the canonical idiom) ranks
+    # above a starts-with match, which ranks above a bare substring match --
+    # all before occurrences DESC. Without this, a broad query like
+    # `vars.steps` returns 12 low-occurrence blocks that happen to contain
+    # the substring, the canonical `{% set x = vars.steps.foo.output %}`
+    # idiom is buried, and the model re-queries with different substrings
+    # hoping for something more specific (8 near-identical calls in one
+    # build turn -- #48). find_jinja_filter has the same boost on `name`;
+    # `head` is the equivalent here. A LIKE pattern with no ESCAPE clause
+    # treats `%` and `_` as wildcards, so bind the user's `q` literally via
+    # a parameterized LIKE with ESCAPE for the starts-with tier only.
     sql = (
         """SELECT raw, kind, head, filters_csv, vars_csv,
                   from_playbook, from_step, step_type, occurrences
            FROM jinja_expressions
-           WHERE (raw LIKE '%'||?||'%'
-              OR head LIKE '%'||?||'%'
-              OR COALESCE(filters_csv,'') LIKE '%'||?||'%'
-              OR COALESCE(vars_csv,'') LIKE '%'||?||'%')"""
+           WHERE (raw LIKE '%'||?||'%' ESCAPE '\\'
+              OR head LIKE '%'||?||'%' ESCAPE '\\'
+              OR COALESCE(filters_csv,'') LIKE '%'||?||'%' ESCAPE '\\'
+              OR COALESCE(vars_csv,'') LIKE '%'||?||'%' ESCAPE '\\')"""
     )
-    params: list = [q, q, q, q]
+    like_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    params: list = [like_q, like_q, like_q, like_q]
     if kind:
         sql += " AND kind = ?"
         params.append(kind)
-    sql += " ORDER BY occurrences DESC LIMIT ?"
-    params.append(limit)
+    sql += (
+        " ORDER BY (head = ?) DESC,"
+        " occurrences DESC, head LIMIT ?"
+    )
+    params.extend([like_q, limit])
     with _db() as conn:
         return _rows(conn, sql, tuple(params))
 
