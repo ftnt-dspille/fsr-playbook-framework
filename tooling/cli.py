@@ -834,6 +834,42 @@ def cmd_push(args: argparse.Namespace) -> int:
         ok, payload_or_err = _upsert()
         action = "BULKUPSERT"
     elif args.mode == "replace":
+        # Drift check -- same guard as safe mode. A replace purges the
+        # entire collection (cascade-delete) then POSTs fresh. If someone
+        # added a workflow via the FSR UI after our last pull, the purge
+        # silently clobbers it. Refuse unless --confirm-overwrite. A pure
+        # import (collection absent on the box) has no drift to check.
+        known_wfs = [
+            w["uuid"] for w in coll_entity.get("workflows", []) if w.get("uuid")
+        ]
+        try:
+            import preflight as _pre
+            foreign = _pre.find_foreign_workflows(client, coll_uuid, known_wfs)
+        except Exception as e:  # noqa: BLE001
+            print(f"drift check failed: {e}", file=sys.stderr)
+            return 3
+        if foreign and not getattr(args, "confirm_overwrite", False):
+            print(
+                f"\nreplace aborted: collection contains "
+                f"{len(foreign)} workflow(s) not in this YAML:",
+                file=sys.stderr,
+            )
+            for w in foreign:
+                state = "recycled" if w.get("deletedAt") else "live"
+                print(
+                    f"  FOREIGN ({state})  {w['uuid']}  {w.get('name')!r}",
+                    file=sys.stderr,
+                )
+            print(
+                "\nThe purge will cascade-delete these. Resolve by:\n"
+                "  - moving these playbooks to a different collection "
+                "via the FSR UI, or\n"
+                "  - adding them to this YAML so they're preserved, or\n"
+                "  - re-running with --confirm-overwrite if you "
+                "intentionally want to clobber them.",
+                file=sys.stderr,
+            )
+            return 3
         # Explicit clean-slate hard-purge. Use only when `safe` won't do
         # -- typically recovery from corrupted orphan rows. Children are
         # deterministic uuid5 so this only deletes uuids THIS YAML emits.
@@ -4496,6 +4532,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "contains workflows not in this YAML. Bulkupsert "
                          "will cascade-remove them. Use only when you "
                          "intentionally want to drop them.")
+    sp.add_argument("--confirm-overwrite", action="store_true",
+                    help="replace mode: proceed even when the target "
+                         "collection contains out-of-band workflows (added "
+                         "via the FSR UI after your last pull). Without this "
+                         "flag, replace mode refuses to purge when drift is "
+                         "detected, preventing a silent clobber of UI edits.")
     sp.set_defaults(func=cmd_push)
 
     sp = sub.add_parser("validate", help="validate YAML against the store")
