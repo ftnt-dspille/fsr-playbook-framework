@@ -174,3 +174,79 @@ def test_record_fields_round_trip_json():
     legacy = SkillTrace()
     assert "record_fields" not in legacy.to_dict()
     assert SkillTrace.from_json(legacy.to_json()).record_fields is None
+
+
+# --- containment carries its own human gate ------------------------------------
+#
+# The tier gate that protects containment during triage is AGENT dispatch logic;
+# a compiled playbook runs without it. So the artifact needs its own gate.
+
+def _contain_trace(enrich_output):
+    t = SkillTrace()
+    t.record_run_op("virustotal", "get_ip_report", {"ip": "203.0.113.77"},
+                    enrich_output, ref_prefix="data")
+    t.record_run_op("fortiedr", "isolate_host", {"host": "203.0.113.77"},
+                    {"status": "isolated"})
+    return t
+
+
+def _steps_by_name(out):
+    doc = yaml.safe_load(out["yaml"])
+    return {s["name"]: s for s in doc["playbooks"][0]["steps"]}
+
+
+def test_containment_is_fronted_by_a_confirm_stop_manual_input():
+    out = build_playbook_from_trace(
+        _contain_trace({"attributes": {"last_analysis_stats": {"malicious": 7}}}).to_json())
+    steps = _steps_by_name(out)
+
+    assert "Confirm Containment" in steps, "containment compiled with no human gate"
+    mi = steps["Confirm Containment"]
+    assert mi["type"] == "manual_input"
+    routes = {o["display"]: o["next"] for o in mi["options"]}
+    assert routes["Confirm"] == "Isolate Host"
+    assert routes["Stop"] != "Isolate Host", "Stop must not reach containment"
+
+
+def test_confirm_gate_is_inserted_even_with_no_recognized_verdict():
+    """The verdict guard no-ops on an unrecognized shape -- which used to leave
+    containment fully ungated. The human gate must not depend on it."""
+    out = build_playbook_from_trace(
+        _contain_trace({"totally": {"unrecognized": "shape"}}).to_json())
+    steps = _steps_by_name(out)
+
+    assert "Confirmed Malicious" not in steps      # verdict guard correctly no-op'd
+    assert "Confirm Containment" in steps          # …but the human gate still ran
+    assert steps["Confirm Containment"]["options"][0]["next"] == "Isolate Host"
+
+
+def test_nothing_reaches_containment_except_through_the_confirmation():
+    """Whatever pointed at containment -- including the verdict decision's
+    malicious branch -- must be rewired into the confirmation."""
+    out = build_playbook_from_trace(
+        _contain_trace({"attributes": {"last_analysis_stats": {"malicious": 7}}}).to_json())
+    steps = _steps_by_name(out)
+    cont = "Isolate Host"
+
+    for name, s in steps.items():
+        if name == "Confirm Containment":
+            continue
+        assert s.get("next") != cont, f"{name}.next reaches containment directly"
+        for cond in (s.get("conditions") or []):
+            assert cond.get("next") != cont, f"{name} branch reaches containment directly"
+        assert s.get("default") != cont, f"{name}.default reaches containment directly"
+
+
+def test_confirm_gate_is_idempotent():
+    t = _contain_trace({"attributes": {"last_analysis_stats": {"malicious": 7}}})
+    out = build_playbook_from_trace(t.to_json())
+    doc = yaml.safe_load(out["yaml"])
+    names = [s["name"] for s in doc["playbooks"][0]["steps"]]
+    assert names.count("Confirm Containment") == 1
+
+
+def test_no_containment_means_no_confirmation_step():
+    t = SkillTrace()
+    t.record_run_op("virustotal", "get_ip_report", {"ip": "1.2.3.4"}, {"attributes": {}})
+    out = build_playbook_from_trace(t.to_json())
+    assert "Confirm Containment" not in _steps_by_name(out)

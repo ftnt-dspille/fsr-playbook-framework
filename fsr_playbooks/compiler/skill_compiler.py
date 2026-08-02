@@ -565,6 +565,84 @@ def insert_containment_guard(
     return compiled
 
 
+def insert_containment_confirm(compiled: Dict[str, Any]) -> Dict[str, Any]:
+    """Put an analyst Confirm/Stop manual-input step in front of containment.
+
+    The tier gate that protects a containment action during triage is dispatch
+    logic -- it lives in the AGENT loop, and a compiled playbook runs without it.
+    So a trace-built playbook needs its own human gate, carried IN the artifact:
+
+      … → [manual_input: Confirm Containment]  Confirm → containment
+                                               Stop    → skip past it
+
+    This is not redundant with `insert_containment_guard`. That one gates on a
+    recognized malicious-verdict field and returns the chain UNCHANGED when it
+    recognizes none -- so an unrecognized verdict shape today compiles a fully
+    ungated containment step. This runs regardless of whether a verdict was
+    found, so containment is never reached without a human saying yes.
+
+    `manual_input` routes on its own `options` (`{display, next}`), so no
+    decision step is needed for the fork.
+
+    Idempotent (a second call is a no-op) and safe to run after the verdict
+    guard: it rewires `next`, decision `conditions[].next`/`default`, and
+    `first_step` alike, so whatever pointed at containment -- including the
+    verdict decision's malicious branch -- now enters the confirmation."""
+    steps: List[Dict[str, Any]] = compiled.get("steps", [])
+    ci = next((i for i, s in enumerate(steps)
+               if s.get("type") == "connector"
+               and _is_containment_op(
+                   (s.get("arguments") or s).get("operation"))),
+              None)
+    if ci is None:
+        return compiled
+    cont = steps[ci]
+    cont_name = cont["name"]
+    confirm_name = "Confirm Containment"
+    if any(s.get("name") == confirm_name for s in steps):
+        return compiled                       # already gated
+
+    # Stopping continues past containment rather than dead-ending the run.
+    stop_target = cont.get("next")
+    extra: List[Dict[str, Any]] = []
+    if not stop_target:
+        skip_name = "Containment Skipped"
+        if not any(s.get("name") == skip_name for s in steps):
+            extra.append({"type": "set_variable", "name": skip_name,
+                          "vars": {"containment_skipped": True}})
+        stop_target = skip_name
+
+    args = cont.get("arguments") or cont
+    op = args.get("operation") or "containment"
+    connector = args.get("connector") or "connector"
+    confirm = {
+        "type": "manual_input",
+        "name": confirm_name,
+        "message": (f"Run containment `{op}` via `{connector}`? "
+                    f"Choose Stop to skip it and continue."),
+        "options": [{"display": "Confirm", "next": cont_name},
+                    {"display": "Stop", "next": stop_target}],
+    }
+
+    # Everything that pointed at containment now enters the confirmation --
+    # except the confirmation's own Confirm branch.
+    if compiled.get("first_step") == cont_name:
+        compiled["first_step"] = confirm_name
+    for s in steps:
+        if s.get("next") == cont_name:
+            s["next"] = confirm_name
+        for cond in (s.get("conditions") or []):
+            if isinstance(cond, dict) and cond.get("next") == cont_name:
+                cond["next"] = confirm_name
+        if s.get("default") == cont_name:
+            s["default"] = confirm_name
+
+    steps[ci:ci] = [confirm]
+    steps.extend(extra)
+    compiled["steps"] = steps
+    return compiled
+
+
 def compile_trace(
     trace: SkillTrace, *, start_step: str = "Start"
 ) -> Dict[str, Any]:

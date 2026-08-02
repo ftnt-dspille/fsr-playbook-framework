@@ -115,4 +115,10 @@ def test_trace_build_replays_staged_containment_guarded():
     assert "Assess Verdict" in names
     assert "Confirmed Malicious" in names
     dec = next(s for s in pb["steps"] if s["name"] == "Confirmed Malicious")
-    assert dec["conditions"][0]["next"] == "Block Ip New"
+    # ...and behind the analyst Confirm/Stop gate, which now sits between the
+    # verdict decision and containment: the compiled playbook runs without the
+    # agent loop's tier gate, so the artifact carries its own.
+    assert dec["conditions"][0]["next"] == "Confirm Containment"
+    confirm = next(s for s in pb["steps"] if s["name"] == "Confirm Containment")
+    assert confirm["type"] == "manual_input"
+    assert {o["display"]: o["next"] for o in confirm["options"]}["Confirm"] == "Block Ip New"

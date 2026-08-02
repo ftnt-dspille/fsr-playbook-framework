@@ -402,6 +402,12 @@ def build_playbook_from_trace(
             suggestions=["fall back to the hand-author build path"],
         )
 
+    try:
+        from fsr_playbooks.mcp_server.materializer import dropped_mutating_mcp
+        _dropped_mcp = dropped_mutating_mcp()
+    except Exception:  # noqa: BLE001
+        _dropped_mcp = []
+
     render_fn = None
     if live:
         try:
@@ -416,6 +422,10 @@ def build_playbook_from_trace(
     # recognized in the enrichment outputs).
     if guard_containment:
         compiled = sc.insert_containment_guard(compiled, trace)
+        # The verdict guard no-ops when it recognizes no verdict field, which
+        # would leave containment ungated. The Confirm/Stop step runs either
+        # way, so a compiled playbook never contains without a human saying yes.
+        compiled = sc.insert_containment_confirm(compiled)
     # Explicit arg overrides; otherwise bind to the module recorded on the
     # trace (the triaged record's module, stamped by the connector). None →
     # bare `start` (a designer-only Referenced trigger).
@@ -451,6 +461,10 @@ def build_playbook_from_trace(
         "gaps": compiled.get("gaps", {}),
         "repaired": compiled.get("repaired", {}),
         "static_errors": compiled.get("static_errors", []),
+        # Mutating native-MCP tools the session called that can't compile to a
+        # step (call_mcp_tool has no approval gate, so the connector won't expose
+        # them). Reported, not dropped silently.
+        "dropped_mutating_mcp": _dropped_mcp,
     }
 
 
