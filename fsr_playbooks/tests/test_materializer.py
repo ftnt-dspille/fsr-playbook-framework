@@ -36,9 +36,16 @@ SOC_TOOLS = [
 
 
 @pytest.fixture(autouse=True)
-def _clean():
+def _clean(tmp_path, monkeypatch):
+    # Point the CROSS-PROCESS token cache at a per-test dir. It lives under the
+    # system temp dir in production so sibling workers share it; left unset here,
+    # one test's minted token would satisfy the next test's mint (and a token
+    # left behind by a live run on the same machine would satisfy all of them).
+    monkeypatch.setenv("FSRPB_OAUTH_CACHE_DIR", str(tmp_path / "oauth"))
+    M._OAUTH_CACHE.clear()
     M.reset()
     yield
+    M._OAUTH_CACHE.clear()
     M.reset()
 
 
@@ -456,16 +463,29 @@ def test_external_oauth2_refreshes_when_expired(monkeypatch):
                             "client_id": "cid", "client_secret": "sec"}}}},
         client_factory=lambda: client)
     M.ensure_initialized()                                    # mint #1
-    # Force the cached token to look already-expired.
+    # Force the cached token to look already-expired -- BOTH caches. The
+    # in-process one alone is no longer enough: a miss now falls through to the
+    # cross-process cache a sibling worker published (tracker #66), which is the
+    # whole point of it.
     key = ("https://siem/oauth/token", "cid")
     tok, _ = M._OAUTH_CACHE[key]
     M._OAUTH_CACHE[key] = (tok, 0.0)
+    M._oauth_cache_write(key, tok, 0.0)
     T.REGISTRY["mcp_partner__lookup"].fn(q="x")               # must re-mint
     assert calls["n"] == 2
     assert client.calls["call"]["headers"] == {"Authorization": "Bearer tokFRESH"}
 
 
-def test_external_oauth2_mint_failure_is_empty_headers(monkeypatch):
+def test_external_oauth2_mint_failure_skips_the_server(monkeypatch):
+    """A failed mint on an oauth2 rule fails CLOSED.
+
+    This used to assert the opposite -- that the listing went ahead with empty
+    headers ("the server just won\'t authenticate"). Live that produced an
+    unauthenticated request whose 401 surfaced as `unhandled errors in a
+    TaskGroup (1 sub-exception)`, hiding the actual cause (a 429 from the token
+    endpoint) one frame away; see tracker #66. An oauth2 rule that cannot mint
+    has nothing to say to the server, so skip it and mark it for retry.
+    """
     M._OAUTH_CACHE.clear()
     import httpx
 
@@ -473,14 +493,15 @@ def test_external_oauth2_mint_failure_is_empty_headers(monkeypatch):
         raise RuntimeError("token endpoint down")
 
     monkeypatch.setattr(httpx, "post", _boom)
+    monkeypatch.setattr(M.time, "sleep", lambda s: None)
     client = _stub_ext_client({EXT_URL: EXT_TOOLS})
     M.configure(mcp_allowlist={"partner": {"url": EXT_URL,
         "auth": {"oauth2": {"token_url": "https://siem/oauth/token",
                             "client_id": "cid", "client_secret": "sec"}}}},
         client_factory=lambda: client)
-    # Fail-soft: no crash, headers empty (server just won't authenticate).
-    M.ensure_initialized()
-    assert client.calls["list"]["headers"] == {}
+    M.ensure_initialized()   # fail-soft: still no crash
+    assert "list" not in client.calls
+    assert "partner" in M._FAILED_SERVERS
 
 
 def test_external_no_auth_is_empty_headers():
@@ -744,3 +765,208 @@ def test_mcp_only_investigation_compiles_to_direct_connector_steps(_trace, monke
     assert args.get("connector") == "virustotal"
     assert args.get("operation") == "get_ip_report"
 
+
+
+# --- transient failure must not become permanent -----------------------------
+# All of these come from one live incident (tracker #66). On .159, `fsrpb-41mini`
+# advertised 66 tools on some calls and 52 on others -- fortisiem's 14 missing.
+# The box log had it exactly: 15 `list_tools('fortisiem') failed` lines matching
+# 12x HTTP 400 + 3x HTTP 429 from the token endpoint. Reproduced off-box: a
+# sequential mint+list is 10/10, seven concurrent ones are 0-1/7 -- FortiSIEM
+# throttles concurrent client_credentials grants, and a ship restarts every
+# worker at once, so we issue exactly that burst ourselves.
+#
+# Two independent defects made a momentary 429 permanent, and both are pinned
+# here: the mint gave up after one try, and `ensure_initialized` latched
+# `_initialized` before materializing, so the failed server was never retried
+# for the life of the process.
+
+def _patch_flaky_token_endpoint(monkeypatch, fail_times, token="MINTED"):
+    """Token endpoint that raises for the first `fail_times` calls, as the live
+    one does under a concurrent burst, then succeeds."""
+    import httpx
+    calls = {"n": 0}
+
+    def _post(url, data=None, verify=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] <= fail_times:
+            raise RuntimeError("Client error '429 CUSTOM' for url ...")
+        return _FakeTokenResp(token, 300)
+
+    monkeypatch.setattr(httpx, "post", _post)
+    monkeypatch.setattr(M.time, "sleep", lambda s: None)  # no real backoff in tests
+    return calls
+
+
+def _oauth_allowlist(server="fortisiem"):
+    return {server: {
+        "url": EXT_URL,
+        "auth": {"oauth2": {"token_url": "https://siem/oauth/token",
+                            "client_id": "cid", "client_secret": "sec",
+                            "verify": False}},
+        "tools": "*", "tier": "read_only"}}
+
+
+def test_oauth2_mint_retries_through_a_throttled_burst(monkeypatch):
+    """Two 429s then a token: the server must still materialize."""
+    M._OAUTH_CACHE.clear()
+    calls = _patch_flaky_token_endpoint(monkeypatch, fail_times=2, token="tokLATE")
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist=_oauth_allowlist(), client_factory=lambda: client)
+    M.ensure_initialized()
+
+    assert calls["n"] == 3, "mint must retry, not give up on the first 429"
+    assert client.calls["list"]["headers"] == {"Authorization": "Bearer tokLATE"}
+    assert "mcp_fortisiem__lookup" in T.REGISTRY
+
+
+def test_oauth2_mint_gives_up_after_the_attempt_budget(monkeypatch):
+    """Retrying is not retrying forever -- a genuinely dead endpoint still
+    fails soft, leaving the curated surface intact."""
+    M._OAUTH_CACHE.clear()
+    calls = _patch_flaky_token_endpoint(monkeypatch, fail_times=99)
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist=_oauth_allowlist(), client_factory=lambda: client)
+    M.ensure_initialized()  # must not raise
+
+    assert calls["n"] == M._OAUTH_ATTEMPTS
+    # Fail CLOSED. Listing with no Authorization header is what produced the
+    # opaque `unhandled errors in a TaskGroup` line in the live log instead of
+    # naming the 429 -- and it would send an unauthenticated request besides.
+    assert "mcp_fortisiem__lookup" not in T.REGISTRY
+    assert "list" not in client.calls, "must not list unauthenticated"
+    assert "fortisiem" in M._FAILED_SERVERS
+
+
+def test_a_failed_server_is_retried_on_a_later_turn(monkeypatch):
+    """THE #66 defect. A server that failed to materialize must come back on a
+    later turn -- not stay missing until the worker is recycled."""
+    M._OAUTH_CACHE.clear()
+
+    class _Flaky:
+        def __init__(self): self.n = 0
+        def list_tools_at(self, url, headers, verify=None):
+            self.n += 1
+            if self.n == 1:
+                raise RuntimeError("unhandled errors in a TaskGroup (1 sub-exception)")
+            return EXT_TOOLS
+        def call_tool_at(self, url, name, arguments=None, headers=None, verify=None):
+            return {"ok": True}
+    flaky = _Flaky()
+
+    class _C:
+        def supports_native_mcp(self): return True
+        mcp = flaky
+
+    _patch_token_endpoint(monkeypatch, token="tok")
+    M.configure(mcp_allowlist=_oauth_allowlist(), client_factory=lambda: _C())
+
+    M.ensure_initialized()
+    assert "mcp_fortisiem__lookup" not in T.REGISTRY   # lost the race
+    assert "fortisiem" in M._FAILED_SERVERS
+
+    M._FAILED_SERVERS["fortisiem"] = 0.0               # cooldown elapsed
+    M.ensure_initialized()
+    assert "mcp_fortisiem__lookup" in T.REGISTRY, (
+        "a transient failure is still permanent for this worker")
+    assert "fortisiem" not in M._FAILED_SERVERS
+
+
+def test_the_retry_respects_its_cooldown(monkeypatch):
+    """Retrying must not mean hammering a failing endpoint on every turn."""
+    M._OAUTH_CACHE.clear()
+
+    class _Boom:
+        def __init__(self): self.n = 0
+        def list_tools_at(self, url, headers, verify=None):
+            self.n += 1
+            raise RuntimeError("still down")
+        def call_tool_at(self, *a, **k): return {}
+    boom = _Boom()
+
+    class _C:
+        def supports_native_mcp(self): return True
+        mcp = boom
+
+    _patch_token_endpoint(monkeypatch, token="tok")
+    M.configure(mcp_allowlist=_oauth_allowlist(), client_factory=lambda: _C())
+
+    M.ensure_initialized()
+    for _ in range(5):
+        M.ensure_initialized()   # inside the cooldown → no further attempts
+    assert boom.n == 1
+
+    M._FAILED_SERVERS["fortisiem"] = 0.0
+    M.ensure_initialized()
+    assert boom.n == 2
+
+
+def test_a_healthy_server_is_not_retried():
+    """The retry path must only touch servers that FAILED -- a warm worker keeps
+    doing zero materialization work on `ensure_initialized`."""
+    class _Counting:
+        def __init__(self): self.n = 0
+        def list_tools_at(self, url, headers, *, verify=None):
+            self.n += 1
+            return EXT_TOOLS
+        def call_tool_at(self, *a, **k): return {}
+    counting = _Counting()
+
+    class _C:
+        def supports_native_mcp(self): return True
+        mcp = counting
+
+    M.configure(mcp_allowlist={"partner": {"url": EXT_URL, "tools": "*"}},
+                client_factory=lambda: _C())
+    M.ensure_initialized()
+    assert counting.n == 1
+    for _ in range(3):
+        M.ensure_initialized()
+    assert not M._FAILED_SERVERS
+    assert counting.n == 1, "a warm server must not be re-listed every turn"
+
+
+def test_a_sibling_workers_token_is_reused_not_re_minted(monkeypatch):
+    """The herd fix. A second worker must NOT issue its own grant while a valid
+    token is already published -- that burst of 7 simultaneous grants is what
+    FortiSIEM answered with 400/429 (tracker #66)."""
+    calls = _patch_token_endpoint(monkeypatch, token="tokSHARED")
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist=_oauth_allowlist("partner"), client_factory=lambda: client)
+    M.ensure_initialized()
+    assert calls["n"] == 1
+
+    # A sibling worker: same box, same cache dir, cold process state.
+    M._OAUTH_CACHE.clear()
+    M.configure(mcp_allowlist=_oauth_allowlist("partner"), client_factory=lambda: client)
+    M.ensure_initialized()
+
+    assert calls["n"] == 1, "second worker minted its own token instead of sharing"
+    assert client.calls["list"]["headers"] == {"Authorization": "Bearer tokSHARED"}
+
+
+def test_shared_token_file_is_not_world_readable(tmp_path, monkeypatch):
+    """It is a bearer token at rest. Dir 0700, file 0600."""
+    import stat
+    _patch_token_endpoint(monkeypatch, token="tokSECRET")
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist=_oauth_allowlist("partner"), client_factory=lambda: client)
+    M.ensure_initialized()
+
+    path = M._oauth_cache_path(("https://siem/oauth/token", "cid"))
+    assert path.exists()
+    assert stat.S_IMODE(path.stat().st_mode) & 0o077 == 0, "token file is group/world readable"
+    assert stat.S_IMODE(path.parent.stat().st_mode) & 0o077 == 0
+    assert "cid" not in path.name, "the client id must not be readable from a dir listing"
+
+
+def test_a_corrupt_shared_cache_falls_back_to_minting(monkeypatch):
+    """The cache is an optimization, never a dependency."""
+    calls = _patch_token_endpoint(monkeypatch, token="tokOK")
+    key = ("https://siem/oauth/token", "cid")
+    M._oauth_cache_path(key).write_text("{not json")
+    client = _stub_ext_client({EXT_URL: EXT_TOOLS})
+    M.configure(mcp_allowlist=_oauth_allowlist("partner"), client_factory=lambda: client)
+    M.ensure_initialized()
+    assert calls["n"] == 1
+    assert client.calls["list"]["headers"] == {"Authorization": "Bearer tokOK"}

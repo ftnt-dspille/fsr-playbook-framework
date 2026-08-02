@@ -49,6 +49,29 @@ log = logging.getLogger(__name__)
 # (see _make_fn), so a cached-then-refreshed token flows to both list + call.
 _OAUTH_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
 _OAUTH_SKEW_S = 60.0  # refresh this many seconds BEFORE the token actually expires
+_OAUTH_ATTEMPTS = 4   # mint tries before giving up (see _oauth2_bearer)
+# Full-jitter base: sleep U(0, base * 2**(n-1)). Measured against FortiSIEM's
+# token endpoint, which tolerates roughly ONE grant per 3-4s per client: mints
+# 1-2s apart return 400, ~4s apart return 200. A sub-second backoff just
+# re-collides, so the base is seconds, not milliseconds.
+_OAUTH_BACKOFF_S = 2.0
+
+# Cross-process token cache. THE fix for the herd (tracker #66): the workers all
+# restart together on a ship and each minted its own token, so 7 grants hit the
+# endpoint in the same instant and 6 got 400/429. Measured live: one token
+# serves 7 concurrent MCP sessions perfectly (17 tools each) -- it is only the
+# token endpoint that throttles. So mint once per box and share it, and the
+# burst stops existing. With FortiSIEM's expires_in of 86400 that is one grant a
+# day instead of one per worker per ship.
+_OAUTH_CACHE_DIR_ENV = "FSRPB_OAUTH_CACHE_DIR"
+
+# Servers whose materialization FAILED, → the earliest time to try them again.
+# Without this a transient failure was permanent: `ensure_initialized` latches
+# `_initialized` before materializing, so a worker that lost a token-endpoint
+# race stayed without that server until the process was recycled. The latch is
+# right for "already materialized"; it is wrong for "this server errored".
+_FAILED_SERVERS: dict[str, float] = {}
+_RETRY_COOLDOWN_S = 60.0  # don't re-hit a failing server on every single turn
 
 # Cap so a misconfigured allow-list can't flood the LLM tool list (the platform
 # model gates per-server; this is a backstop). Logged when hit -- no silent drop.
@@ -113,6 +136,7 @@ def reset() -> None:
         llm_tools.TOOL_TIERS.pop(name, None)
     _materialized_names.clear()
     SERVER_MAP.clear()
+    _FAILED_SERVERS.clear()
     _DROPPED_MUTATING.clear()
     _allowlist = {}
     _client_factory = None
@@ -126,6 +150,18 @@ def ensure_initialized() -> None:
     leaves REGISTRY unchanged -- the curated SAFE_TOOLS keep working)."""
     global _initialized
     if _initialized:
+        # Already materialized once -- but retry any server that FAILED, once
+        # its cooldown is up. A server can fail for reasons that have nothing to
+        # do with its configuration (a token endpoint rate-limiting the burst of
+        # workers a ship restarts together), and latching that forever left the
+        # agent silently short a whole toolset until the worker recycled.
+        due = [s for s, at in _FAILED_SERVERS.items() if time.time() >= at]
+        if not due:
+            return
+        try:
+            _initialize_impl(only=due)
+        except Exception as exc:  # noqa: BLE001 - never red a session
+            log.warning("MCP materializer retry failed (curated tools remain): %s", exc)
         return
     _initialized = True  # set first so a failure doesn't retry every turn
     if not _allowlist:
@@ -174,7 +210,9 @@ def _build_client() -> Any:
         return None
 
 
-def _initialize_impl() -> None:
+def _initialize_impl(only: list[str] | None = None) -> None:
+    """Materialize the allowlist. ``only`` restricts the pass to named servers --
+    the retry path for ones that failed earlier (see :func:`ensure_initialized`)."""
     client = _build_client()
     if client is None:
         return
@@ -198,6 +236,8 @@ def _initialize_impl() -> None:
     specs: dict[str, ToolSpec] = {}
     tiers: dict[str, int] = {}
     for server, raw_rule in _allowlist.items():
+        if only is not None and server not in only:
+            continue
         rule = _normalize_rule(raw_rule)
         if rule is None:
             continue  # server explicitly disabled (False / None / empty)
@@ -212,6 +252,16 @@ def _initialize_impl() -> None:
         # ``server`` stays the operator's chosen name (→ ``mcp_<name>__<tool>``).
         ext_url = rule.get("url")
         ext_headers = _auth_headers(rule) if ext_url else None
+        # A rule that DECLARES oauth2 but produced no Authorization header means
+        # the mint failed. Listing anyway sends an unauthenticated request, which
+        # is what turned a plain 429 into `unhandled errors in a TaskGroup (1
+        # sub-exception)` in the log -- the real cause a frame away and invisible.
+        # Fail closed and mark the server for retry instead.
+        if ext_url and _rule_wants_oauth2(rule) and not (ext_headers or {}).get("Authorization"):
+            _FAILED_SERVERS[server] = time.time() + _RETRY_COOLDOWN_S
+            log.warning("MCP materializer: %r skipped -- oauth2 token unavailable "
+                        "(will retry in %ds)", server, int(_RETRY_COOLDOWN_S))
+            continue
         ext_verify = rule.get("verify", True) if ext_url else None
         try:
             if ext_url:
@@ -219,10 +269,14 @@ def _initialize_impl() -> None:
             else:
                 tools = mcp.list_tools(server)
         except Exception as exc:  # noqa: BLE001 - one bad server shouldn't abort the rest
-            log.warning("MCP materializer: list_tools(%r) failed: %s", server, exc)
+            _FAILED_SERVERS[server] = time.time() + _RETRY_COOLDOWN_S
+            log.warning("MCP materializer: list_tools(%r) failed (will retry in %ds): %s",
+                        server, int(_RETRY_COOLDOWN_S), exc)
             continue
         if not isinstance(tools, list):
+            _FAILED_SERVERS[server] = time.time() + _RETRY_COOLDOWN_S
             continue
+        _FAILED_SERVERS.pop(server, None)
         # Sort by name before registering. The gateway's list_tools() ordering is
         # not contractual, and REGISTRY insertion order IS the order the tool
         # array goes on the wire -- which is part of the provider prompt-cache
@@ -320,6 +374,61 @@ def _normalize_rule(rule: Any) -> dict[str, Any] | None:
     return {}
 
 
+def _oauth_cache_path(key: tuple[str, str]) -> "Any":
+    """Where the shared token for ``(token_url, client_id)`` lives.
+
+    Filename is a hash: the client id is a credential and must not be readable
+    from a directory listing. Dir 0700, file 0600 -- the token is a bearer at
+    rest, no wider than the client_secret already sitting in the connector
+    config it was minted from.
+    """
+    import hashlib
+    import os
+    import tempfile
+    from pathlib import Path
+
+    base = os.environ.get(_OAUTH_CACHE_DIR_ENV) or os.path.join(
+        tempfile.gettempdir(), "fsrpb-oauth")
+    d = Path(base)
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    digest = hashlib.sha256("\x00".join(key).encode()).hexdigest()[:32]
+    return d / f"{digest}.json"
+
+
+def _oauth_cache_read(key: tuple[str, str]) -> str | None:
+    """A still-valid shared token, or None. Never raises -- a corrupt or
+    unreadable cache just means "mint one"."""
+    import json
+
+    try:
+        path = _oauth_cache_path(key)
+        if not path.exists():
+            return None
+        rec = json.loads(path.read_text())
+        token, exp = rec.get("token"), float(rec.get("exp", 0))
+        if token and time.time() < exp - _OAUTH_SKEW_S:
+            return str(token)
+    except Exception as exc:  # noqa: BLE001 - cache is an optimization, never a dependency
+        log.debug("MCP oauth2: shared cache unreadable (%s)", exc)
+    return None
+
+
+def _oauth_cache_write(key: tuple[str, str], token: str, exp: float) -> None:
+    """Publish a freshly minted token for the other workers. Atomic (write +
+    replace) so a reader never sees a half-written file."""
+    import json
+    import os
+
+    try:
+        path = _oauth_cache_path(key)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"token": token, "exp": exp}))
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("MCP oauth2: could not publish shared token (%s)", exc)
+
+
 def _oauth2_bearer(cfg: dict[str, Any]) -> str | None:
     """Return a valid access token for an OAuth2 client_credentials rule,
     minting a fresh one (and caching it to expiry) when none is cached or the
@@ -346,27 +455,117 @@ def _oauth2_bearer(cfg: dict[str, Any]) -> str | None:
     if cached and time.time() < cached[1] - _OAUTH_SKEW_S:
         return cached[0]
 
+    # Another worker on this box may already hold a valid token.
+    shared = _oauth_cache_read(key)
+    if shared:
+        _OAUTH_CACHE[key] = (shared, time.time() + _OAUTH_SKEW_S * 2)
+        return shared
+
+    # Serialize the mint across processes so the ship-time herd becomes one
+    # grant, not seven. Whoever loses the lock re-reads the cache the winner
+    # just published instead of hitting the endpoint at all. Best-effort: if
+    # locking is unavailable, fall through and mint (the retry loop covers it).
+    lock = _oauth_lock(key)
     try:
-        import httpx
-        data = {"grant_type": cfg.get("grant_type", "client_credentials"),
-                "client_id": client_id, "client_secret": client_secret}
-        if cfg.get("scope"):
-            data["scope"] = cfg["scope"]
-        r = httpx.post(str(token_url), data=data,
-                       verify=bool(cfg.get("verify", False)), timeout=20)
-        r.raise_for_status()
-        body = r.json()
-        token = body.get("access_token")
-        if not token:
-            log.warning("MCP oauth2: token response had no access_token")
-            return None
-        # expires_in is seconds; default to a conservative 5 min if absent.
-        ttl = float(body.get("expires_in", 300))
-        _OAUTH_CACHE[key] = (token, time.time() + ttl)
-        return token
-    except Exception as exc:  # noqa: BLE001 - fail-soft, logged, never abort
-        log.warning("MCP oauth2: token mint failed for %s: %s", token_url, exc)
-        return None
+        with lock:
+            shared = _oauth_cache_read(key)
+            if shared:
+                _OAUTH_CACHE[key] = (shared, time.time() + _OAUTH_SKEW_S * 2)
+                return shared
+            return _mint_with_retry(cfg, key, token_url, client_id, client_secret)
+    except Exception as exc:  # noqa: BLE001 - never fail a turn over locking
+        log.debug("MCP oauth2: lock unavailable (%s); minting unserialized", exc)
+    return _mint_with_retry(cfg, key, token_url, client_id, client_secret)
+
+
+def _oauth_lock(key: tuple[str, str]) -> "Any":
+    """A cross-process lock for minting ``key``'s token. Returns a context
+    manager; a no-op one where ``fcntl`` is unavailable (non-POSIX)."""
+    import contextlib
+
+    try:
+        import fcntl
+    except Exception:  # noqa: BLE001 - not POSIX
+        return contextlib.nullcontext()
+
+    path = _oauth_cache_path(key).with_suffix(".lock")
+
+    @contextlib.contextmanager
+    def _locked():
+        fh = open(path, "a+")  # noqa: SIM115 - closed in finally
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            finally:
+                fh.close()
+
+    return _locked()
+
+
+def _mint_with_retry(cfg: dict[str, Any], key: tuple[str, str],
+                     token_url: Any, client_id: Any,
+                     client_secret: Any) -> str | None:
+    """Mint a token, retrying a throttled endpoint. Called under the mint lock.
+
+    Publishes every successful token to the shared cross-process cache so the
+    other workers never issue their own grant.
+    """
+    # Retry with jittered backoff. The workers all restart together on a ship
+    # and each materializes independently, so every mint for a given server is
+    # issued in the same instant -- a thundering herd we create ourselves.
+    # FortiSIEM's token endpoint answers that burst with 429 (and, in the
+    # majority of cases observed, a bare 400): live, a sequential mint+list is
+    # 10/10 while seven concurrent ones are 0-1/7. One mint failing used to cost
+    # the whole server on that worker for the life of the process.
+    import random
+
+    last = ""
+    for attempt in range(_OAUTH_ATTEMPTS):
+        if attempt:
+            # Full jitter -- a fixed backoff would just re-synchronize the herd.
+            time.sleep(random.uniform(0, _OAUTH_BACKOFF_S * (2 ** (attempt - 1))))
+        try:
+            import httpx
+            data = {"grant_type": cfg.get("grant_type", "client_credentials"),
+                    "client_id": client_id, "client_secret": client_secret}
+            if cfg.get("scope"):
+                data["scope"] = cfg["scope"]
+            r = httpx.post(str(token_url), data=data,
+                           verify=bool(cfg.get("verify", False)), timeout=20)
+            r.raise_for_status()
+            body = r.json()
+            token = body.get("access_token")
+            if not token:
+                log.warning("MCP oauth2: token response had no access_token")
+                return None  # a well-formed refusal, not congestion -- don't retry
+            # expires_in is seconds; default to a conservative 5 min if absent.
+            ttl = float(body.get("expires_in", 300))
+            exp = time.time() + ttl
+            _OAUTH_CACHE[key] = (token, exp)
+            _oauth_cache_write(key, token, exp)
+            if attempt:
+                log.info("MCP oauth2: token minted for %s on attempt %d",
+                         token_url, attempt + 1)
+            return token
+        except Exception as exc:  # noqa: BLE001 - fail-soft, logged, never abort
+            last = str(exc)
+            log.debug("MCP oauth2: mint attempt %d/%d failed for %s: %s",
+                      attempt + 1, _OAUTH_ATTEMPTS, token_url, exc)
+    log.warning("MCP oauth2: token mint failed for %s after %d attempts: %s",
+                token_url, _OAUTH_ATTEMPTS, last)
+    return None
+
+
+def _rule_wants_oauth2(rule: dict[str, Any]) -> bool:
+    """True when the rule declares an oauth2 / client_credentials auth block --
+    i.e. an empty header set means "the mint failed", not "public server"."""
+    auth = rule.get("auth")
+    if not isinstance(auth, dict):
+        return False
+    return isinstance(auth.get("oauth2") or auth.get("client_credentials"), dict)
 
 
 def _auth_headers(rule: dict[str, Any]) -> dict[str, str]:
