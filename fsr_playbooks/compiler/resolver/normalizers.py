@@ -1398,10 +1398,25 @@ class NormalizerMixin:
                 od["assignedToRecord"] = True
             a["owner_detail"] = od
         title = a.pop("title", None) or step.name or "Awaiting input"
+        # A bare `message: "text"` is the friendly way to write the prompt, but
+        # FSR's `message` argument is NOT prose -- on a real appliance it is the
+        # comment/notification object `{content, records, tags, tenant, type}`
+        # (11 of 12 manual_inputs captured from live playbooks). Passing a string
+        # through made the engine call `.get()` on it and the RUN DIED with
+        # `'str' object has no attribute 'get'` -- offline validation was clean,
+        # so this only ever showed up as a failed run. The prompt already has a
+        # home in `input.schema.description`, so fold it in there and drop the
+        # scalar rather than synthesising a `type` picklist IRI we cannot know.
+        # A dict `message` is a real FSR notification and rides through untouched.
+        message = a.get("message")
+        if isinstance(message, str):
+            a.pop("message")
         # FSR's runtime rejects a manual_input with an empty description body even
         # though it validates fine offline. Fall back to the title (always
         # non-empty) so a description-less prompt still runs. See AGENT_DX_PLAN D1.
-        description = a.pop("description", None) or title
+        description = (a.pop("description", None)
+                       or (message if isinstance(message, str) and message.strip() else None)
+                       or title)
         raw_options = a.pop("options", None) or [{"option": "Continue", "primary": True}]
         options: list[dict[str, Any]] = []
         # Per-option `next:` -- promote into the step's branch map so the
