@@ -236,6 +236,101 @@ def _step_param_container(step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _rules_lookup():
+    """A `(connector, op) -> visibility rules` callable backed by the reference
+    DB, or a no-op when the DB isn't available.
+
+    Opened once per compile rather than per step. Degrading to a no-op is
+    deliberate: without the catalog we cannot know which params are hidden, and
+    emitting the trace unpruned (today's behaviour) beats refusing to build.
+    """
+    try:
+        from .._db import default_db_path
+        from .resolver import Resolver
+        resolver = Resolver(default_db_path())
+    except Exception:  # noqa: BLE001 -- no catalog: leave params untouched
+        return lambda _c, _o: []
+
+    def _lookup(connector: str, operation: str):
+        return resolver.operation_param_rules(connector, operation)
+
+    return _lookup
+
+
+def _visible_params(
+    rules: List[Tuple[str, Optional[str], Optional[str]]],
+    provided: Dict[str, Any],
+) -> set:
+    """Names in `provided` that FSR would actually SHOW, per the catalog rules.
+
+    A param is visible iff it has no gating parent, or some rule's parent is
+    itself visible AND that parent's provided value equals the condition.
+    Resolved to a fixed point because gating nests (block_ip_new: `duration` is
+    gated on `time_to_live`, which is gated on `method`).
+    """
+    by_name: Dict[str, List[Tuple[Optional[str], Optional[str]]]] = {}
+    for name, parent, cond in rules:
+        by_name.setdefault(name, []).append((parent, cond))
+    visible = {n for n in provided if not by_name.get(n)
+               or any(p is None for p, _ in by_name[n])}
+    changed = True
+    while changed:
+        changed = False
+        for name in provided:
+            if name in visible:
+                continue
+            for parent, cond in by_name.get(name, []):
+                if (parent in visible
+                        and str(provided.get(parent)) == str(cond)):
+                    visible.add(name)
+                    changed = True
+                    break
+    return visible
+
+
+def prune_hidden_params(step: Dict[str, Any], rules_for) -> List[str]:
+    """Drop params the chosen discriminator values make invisible. Returns the
+    dropped names.
+
+    A trace records every param the agent SENT, and a model routinely sends a
+    set spanning two branches of a conditional -- observed live on
+    `fortigate-firewall.block_ip_new`, where the recorded call carried
+    method='Quarantine Based' together with the Policy-Based-only
+    `ip_block_policy`/`ip_type`, and time_to_live='1 Day' together with
+    `duration` (only valid under 'Custom Time'). The compiler correctly rejects
+    that as a param-set conflict, so the trace compiled to NOTHING and the
+    analyst got no playbook -- P4 failing on exactly the containment op it
+    exists to bottle.
+
+    Pruning is FIDELITY, not leniency: FSR hides non-visible fields and does
+    not send them, so the pruned set is what actually executed. Keeping them
+    would emit a playbook that provably cannot run.
+    """
+    params = _step_param_container(step)
+    if step.get("type") != "connector" or not isinstance(params, dict):
+        return []
+    inner = params.get("params")
+    target = inner if isinstance(inner, dict) else params
+    connector, operation = step.get("connector"), step.get("operation")
+    if not connector or not operation:
+        return []
+    try:
+        rules = rules_for(str(connector), str(operation))
+    except Exception:  # noqa: BLE001 -- a catalog miss must not break the build
+        return []
+    if not rules:
+        return []
+    # Only consider names the catalog actually knows; `config`, jinja wiring
+    # keys and other step plumbing are not operation params.
+    known = {n for n, _, _ in rules}
+    provided = {k: v for k, v in target.items() if k in known}
+    visible = _visible_params(rules, provided)
+    dropped = sorted(set(provided) - visible)
+    for name in dropped:
+        target.pop(name, None)
+    return dropped
+
+
 def _safe_var_name(param: str, used: set) -> str:
     """A jinja-safe, unique set_variable key derived from a param name."""
     base = "".join(c if (c.isalnum() or c == "_") else "_" for c in param) or "input"
@@ -465,7 +560,9 @@ def compile_trace(
     steps: List[Dict[str, Any]] = []
     wiring: Dict[str, Dict[str, str]] = {}
     gaps: Dict[str, List[str]] = {}
+    pruned: Dict[str, List[str]] = {}
 
+    rules_for = _rules_lookup()
     calls = trace.calls
     for i, call in enumerate(calls):
         skill = get_skill(call.skill_id)
@@ -473,6 +570,16 @@ def compile_trace(
             continue
         wired, unwired = wire_inputs(call.resolved_inputs, calls[:i])
         step = skill.compile(call.resolved_inputs, wired, call.step_name)
+        # Drop params the recorded discriminator values make invisible, BEFORE
+        # wiring/gaps are reported -- a pruned param is not a gap, it is a
+        # field FSR would never have sent.
+        dropped = prune_hidden_params(step, rules_for)
+        if dropped:
+            pruned[call.step_name] = dropped
+            for name in dropped:
+                wired.pop(name, None)
+                if name in unwired:
+                    unwired.remove(name)
         # Chain linearly in trace order (decision/branch rewires are the
         # caller's job; this is the dependency-ordered backbone).
         nxt = calls[i + 1].step_name if i + 1 < len(calls) else None
@@ -490,6 +597,7 @@ def compile_trace(
         "steps": steps,
         "wiring": wiring,
         "gaps": gaps,
+        "pruned": pruned,
         "start_step": start_step,
         "first_step": first,
     }
