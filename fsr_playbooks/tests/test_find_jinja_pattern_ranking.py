@@ -52,8 +52,30 @@ def test_kind_filter_still_applies():
     assert all(r["kind"] == "expr" for r in rows)
 
 
-def test_empty_query_returns_empty():
-    assert find_jinja_pattern("zzzNoSuchIdiomZzz", limit=3) == []
+def test_a_query_that_matches_nothing_says_so_instead_of_returning_bare_empty():
+    """A bare `[]` reads as "there is no such idiom", so the model rephrases
+    and asks again -- the #48 loop. Say what was searched instead."""
+    rows = find_jinja_pattern("zzzNoSuchIdiomZzz", limit=3)
+    assert len(rows) == 1 and rows[0]["no_match"] is True
+    assert "zzzNoSuchIdiomZzz" in rows[0]["note"]
+    assert "find_jinja_filter" in rows[0]["note"], (
+        "must name the one thing a BLOCK search structurally cannot find")
+
+
+def test_a_prose_query_falls_back_to_token_matching():
+    """The #48 diagnosis: whole-string LIKE can only match a query that is
+    already Jinja text, so a question asked in words matched nothing 7 times
+    out of 11 and the model just rephrased it."""
+    rows = find_jinja_pattern("for record in vars.steps.find", limit=3)
+    assert rows and not rows[0].get("no_match")
+    assert any("for record in" in r["raw"] for r in rows)
+
+
+def test_one_accidental_token_hit_is_not_an_answer():
+    """`here` is inside `where`. A 3+-word query needs two tokens, or the
+    model chases a coincidence."""
+    rows = find_jinja_pattern("zzzz nothing here", limit=3)
+    assert len(rows) == 1 and rows[0]["no_match"] is True
 
 
 @needs_corpus

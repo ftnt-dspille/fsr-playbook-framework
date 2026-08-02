@@ -152,7 +152,111 @@ def find_jinja_pattern(q: str, kind: str | None = None,
     )
     params.extend([q, limit])
     with _db() as conn:
-        return _rows(conn, sql, tuple(params))
+        rows = _rows(conn, sql, tuple(params))
+        if rows:
+            return rows
+        # Whole-string LIKE can only ever match a query that is already Jinja
+        # text. A model asking in WORDS -- "for record in loop", "join loop
+        # list string", "current date time now" -- matches nothing, gets a bare
+        # [], and rephrases. Measured on the #48 repro: 7 of 11 distinct
+        # find_jinja_pattern queries in one build turn returned zero, and the
+        # tool was called 7-10 times per turn circling two unanswered
+        # questions. An empty result is not "no such idiom", it is the search
+        # being literal about a question asked in prose.
+        #
+        # So fall back to per-token matching, ranked by how many distinct query
+        # tokens a block hits. Same rows, a query shape the model actually uses.
+        return _token_fallback(conn, q, kind, limit)
+
+
+# Words that match half the corpus and carry no signal for a Jinja search.
+_STOPWORDS = frozenset({
+    "a", "an", "and", "the", "of", "in", "on", "to", "for", "with", "from",
+    "how", "do", "i", "get", "use", "using", "my", "me", "it", "is", "are",
+    "or", "into", "out", "up", "by", "at", "as", "be", "that", "this",
+})
+
+
+def _token_fallback(conn: Any, q: str, kind: str | None,
+                    limit: int) -> list[dict[str, Any]]:
+    """Rank blocks by how many distinct tokens of `q` they contain.
+
+    A block matching 3 of the query's 4 words beats one matching 1, and ties
+    break on corpus frequency -- so a prose question lands on the canonical
+    idiom rather than on nothing. A 3+-word query must hit at least TWO
+    tokens: one 4-letter accident ("here" inside "where") is not an answer,
+    and surfacing it is worse than saying nothing -- the model chases it."""
+    import re as _re
+
+    toks = [t for t in _re.split(r"[^A-Za-z0-9_:.]+", q or "") if t]
+    toks = [t for t in toks if len(t) > 1 and t.lower() not in _STOPWORDS]
+    # De-dupe case-insensitively, keep order, and cap: each token costs a LIKE.
+    seen: dict[str, None] = {}
+    for t in toks:
+        seen.setdefault(t.lower(), None)
+    toks = list(seen)[:8]
+    if not toks:
+        return _no_pattern(q, [])
+
+    def _esc(t: str) -> str:
+        return t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    hit = ("(CASE WHEN raw LIKE '%'||?||'%' ESCAPE '\\' "
+           "OR COALESCE(head,'') LIKE '%'||?||'%' ESCAPE '\\' "
+           "OR COALESCE(filters_csv,'') LIKE '%'||?||'%' ESCAPE '\\' "
+           "OR COALESCE(vars_csv,'') LIKE '%'||?||'%' ESCAPE '\\' "
+           "THEN 1 ELSE 0 END)")
+    score = " + ".join([hit] * len(toks))
+    params: list = []
+    for t in toks:
+        params.extend([_esc(t)] * 4)
+    sql = (f"""SELECT raw, kind, head, filters_csv, vars_csv,
+                      from_playbook, from_step, step_type, occurrences,
+                      ({score}) AS matched_tokens
+               FROM jinja_expressions
+               WHERE ({score}) >= {2 if len(toks) >= 3 else 1}""")
+    params = params + list(params)          # score appears in SELECT and WHERE
+    if kind:
+        sql += " AND kind = ?"
+        params.append(kind)
+    sql += " ORDER BY matched_tokens DESC, occurrences DESC, head LIMIT ?"
+    params.append(limit)
+    rows = _rows(conn, sql, tuple(params))
+    note = (f"no block contains {q!r} verbatim -- these matched "
+            f"{'/'.join(toks)} individually, ranked by how many. If none fits, "
+            "the idiom may be a FILTER: try find_jinja_filter.")
+    if not rows:
+        return _no_pattern(q, toks)
+    for r in rows:
+        r["match"] = "tokens"
+        r["note"] = note
+    return rows
+
+
+def _no_pattern(q: str, toks: list[str]) -> list[dict[str, Any]]:
+    """Never hand back a bare `[]` (AGENT_HARDENING_PLAN §H).
+
+    An empty list reads as "there is no such idiom", so the model rephrases and
+    asks again -- which is the loop #48 is about. Say what was searched, and
+    name the ONE thing a block search structurally cannot find: a filter. Most
+    of the unanswered #48 queries (`get_current_date`, `to_datetime`,
+    `strftime`) were filter questions asked of the block corpus."""
+    from fsr_playbooks.compiler.jinja_checks import _KNOWN_FILTERS
+
+    near = sorted(n for n in _KNOWN_FILTERS
+                  if any(t in n.lower() for t in toks or [q.lower()]))[:5]
+    msg = (f"no Jinja BLOCK in the corpus matches {q!r}"
+           + (f" (searched tokens: {'/'.join(toks)})" if toks else "")
+           + ". This corpus holds whole `{% %}`/`{{ }}` blocks only.")
+    if near:
+        msg += (f" {q!r} looks like a FILTER name -- call "
+                f"find_jinja_filter or get_filter_examples for: "
+                f"{', '.join(near)}.")
+    else:
+        msg += (" If you are after a single filter's meaning or signature, "
+                "that is find_jinja_filter, not this tool.")
+    return [{"no_match": True, "query": q, "note": msg,
+             "candidate_filters": near}]
 
 @mcp.tool()
 def get_filter_examples(name: str, limit: int = 8) -> dict[str, Any]:
