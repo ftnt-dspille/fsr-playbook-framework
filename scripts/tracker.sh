@@ -50,11 +50,48 @@ declare -A COMPONENT_OPT=(
   [pyfsr]=88cbc450 [harness]=aaf424fd [cross-repo]=cb216349
 )
 
-# Resolve an issue number to its project item ID
+# Resolve an issue number to its project item ID.
+#
+# The API error must NOT be swallowed. This used to `2>/dev/null` the gh call
+# and pipe whatever came out into python3, so a GraphQL rate-limit -- routine
+# when several agents share the 5000/hr budget -- surfaced as a JSONDecodeError
+# traceback, and set_field then reported "no board item for #N", which reads as
+# "that card isn't on the board" rather than "GitHub said no". Two people can
+# chase a phantom board-membership bug from that. Name the real cause.
+# The board listing, fetched at most once per process. A `--limit 500` v2 list
+# is the most expensive call this script makes and several commands wanted it,
+# so `create` alone used to spend four of them setting four fields -- enough to
+# hit the shared 5000/hr GraphQL budget on its own when other agents are active.
+_BOARD_JSON=""
+_BOARD_RC=""
+_board_json() {
+  if [[ -z "$_BOARD_RC" ]]; then
+    local raw="" rc=0
+    raw=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --limit 500 \
+            --format json 2>&1) || rc=$?
+    if (( rc != 0 )) || [[ "$raw" != \{* ]]; then
+      case "$raw" in
+        *"rate limit"*)
+          echo "tracker: GitHub GraphQL rate limit exceeded -- board fields not read/written." >&2
+          echo "         Check with: gh api rate_limit --jq .resources.graphql" >&2 ;;
+        *) echo "tracker: could not list board items: ${raw:-gh exited $rc}" >&2 ;;
+      esac
+      _BOARD_RC=2
+    else
+      _BOARD_JSON="$raw"; _BOARD_RC=0
+    fi
+  fi
+  (( _BOARD_RC == 0 )) || return "$_BOARD_RC"
+  printf '%s' "$_BOARD_JSON"
+}
+
 item_id() {
-  local num="$1"
-  gh project item-list "$PROJECT_NUM" --owner "$OWNER" --limit 500 --format json 2>/dev/null \
-    | python3 -c "
+  local num="$1" rc=0
+  # Check the fetch separately: in `_board_json | python3` the pipeline's status
+  # is python's, so a failed board read would silently look like "no such item".
+  _board_json >/dev/null || rc=$?
+  (( rc == 0 )) || return "$rc"
+  _board_json | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 for item in data.get('items', []):
@@ -135,8 +172,12 @@ cmd_create() {
 
 set_field() {
   local num="$1" field="$2" value="$3"
-  local iid; iid=$(item_id "$num")
-  [[ -n "$iid" ]] || { echo "no board item for #$num" >&2; return 1; }
+  # rc 2 = the board could not be READ (rate limit / API error); item_id has
+  # already said so. Empty output with rc 0 is the genuine "not on the board".
+  local iid="" rc=0
+  iid=$(item_id "$num") || rc=$?
+  (( rc == 0 )) || { echo "tracker: could not set $field on #$num (see above)." >&2; return 2; }
+  [[ -n "$iid" ]] || { echo "no board item for #$num (issue exists but is not on the board)" >&2; return 1; }
   local fid="" oid=""
   case "$field" in
     STATUS)   fid="$STATUS_FIELD";   oid=$(resolve_opt STATUS "$value") ;;
@@ -163,24 +204,36 @@ cmd_show() {
   state=$(gh api "repos/$REPO/issues/$num" --jq '.state' 2>/dev/null)
   title=$(gh api "repos/$REPO/issues/$num" --jq '.title' 2>/dev/null)
   echo "#$num [$state] $title"
-  # Show board fields
-  local iid; iid=$(item_id "$num")
-  if [[ -n "$iid" ]]; then
-    gh project item-list "$PROJECT_NUM" --owner "$OWNER" --limit 500 --format json 2>/dev/null \
-      | python3 -c "
+  # Show board fields. `show` printing ONLY the title used to be ambiguous
+  # between "this card has no board fields" and "the board read failed" -- say
+  # which. Reuses the cached listing rather than paying for a second one.
+  local rc=0
+  _board_json >/dev/null || rc=$?
+  if (( rc != 0 )); then
+    echo "  (board fields unavailable -- see error above)"
+    return 0
+  fi
+  local iid; iid=$(item_id "$num") || true
+  if [[ -z "$iid" ]]; then
+    echo "  (not on the board)"
+    return 0
+  fi
+  _board_json | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 for item in data.get('items', []):
     if item['id'] != '$iid': continue
+    shown = False
     for fv in item.get('fieldValues', []):
         name = fv.get('name', '')
         val = fv.get('text') or fv.get('title') or ''
         if name and val:
-            print(f'  {name}: {val}')
+            print(f'  {name}: {val}'); shown = True
         elif name and fv.get('optionIds'):
-            print(f'  {name}: (set)')
-    " 2>/dev/null
-  fi
+            print(f'  {name}: (set)'); shown = True
+    if not shown:
+        print('  (on the board, no fields set)')
+"
 }
 
 cmd_list() {
