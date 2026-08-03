@@ -869,6 +869,20 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                 "items": {"type": "string"},
                 "description": "Args keys the user is allowed to edit before confirm.",
             },
+            "requested_by": {
+                "type": "string",
+                "enum": ["analyst", "agent"],
+                "description": (
+                    "Who initiated this containment. Set `analyst` ONLY when the "
+                    "user explicitly asked for this action in their message (e.g. "
+                    "'isolate that host', 'block that IP'); set `agent` (the "
+                    "default) when YOU decided containment was warranted. An "
+                    "explicit order is not a finding you have to earn -- an "
+                    "`analyst` card stages immediately so the approver decides, "
+                    "while an `agent` card must clear the investigation floor "
+                    "first. Do not claim `analyst` to bypass the floor."
+                ),
+            },
         },
     },
     "emit_patch_proposal": {

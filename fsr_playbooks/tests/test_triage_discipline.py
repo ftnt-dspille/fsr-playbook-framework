@@ -602,3 +602,105 @@ def test_the_live_failing_trace_would_now_clear_the_floor():
             "this trace stays locked out of containment")
     finally:
         T.TOOL_TIERS.pop("mcp_soc__enrich_indicator", None)
+
+
+# --- an explicit analyst order is not a finding to be earned (tracker #60) ---
+# The floor exists to stop the agent from contain-first-scope-later. Answering
+# "isolate that host" with a refusal was never its job -- but the guard sees
+# only (name, args), and the order lives in the message text one layer up. So
+# the intent is DECLARED on the call. These pin that the exemption is scoped,
+# fails closed, and does not touch the approval gate.
+
+def _fresh():
+    from fsr_playbooks.llm._loop_helpers import TriageDiscipline
+    return TriageDiscipline()
+
+
+_CARD = {
+    "id": "c1", "connector": "fortinet-fortigate", "operation": "block_ip",
+    "summary": "Block 8.8.8.8", "args": {"ip": "8.8.8.8"},
+    "editable_fields": ["ip"],
+}
+
+
+def test_analyst_ordered_card_stages_with_zero_investigation():
+    d = _fresh()
+    assert d.invest_attempts == 0
+    assert d.evaluate("emit_action_card", {**_CARD, "requested_by": "analyst"}) is None
+
+
+def test_agent_initiated_card_still_hits_the_floor():
+    """The exemption must not become a general bypass -- an unset or `agent`
+    field keeps the pre-#60 behavior exactly."""
+    for args in ({**_CARD}, {**_CARD, "requested_by": "agent"}):
+        blocked = _fresh().evaluate("emit_action_card", args)
+        assert blocked is not None and blocked.get("hunt_floor_guard"), (
+            f"agent-initiated containment cleared the floor: {args!r}")
+
+
+def test_declared_intent_fails_closed_on_junk():
+    """Anything but the exact string keeps the floor -- a typo or a truthy-
+    looking value must not open the gate."""
+    for val in ("Analyst!", "yes", "true", "user", "", None, 1, ["analyst"]):
+        blocked = _fresh().evaluate("emit_action_card",
+                                    {**_CARD, "requested_by": val})
+        assert blocked is not None and blocked.get("hunt_floor_guard"), (
+            f"requested_by={val!r} bypassed the floor")
+
+
+def test_analyst_ordered_discovery_clears_the_floor():
+    """The .159 matrix (row TO) proved the exemption was unreachable when it
+    covered `emit_action_card` alone: a card names a connector + operation, so
+    the agent MUST discover them first, and that call was floor-gated. Two
+    `hunt_floor_guard` blocks, terminal=end_turn, no card."""
+    assert _fresh().evaluate(
+        "find_containment_actions",
+        {"target_type": "ip", "requested_by": "analyst"}) is None
+
+
+def test_the_live_failing_TO_sequence_now_stages_a_card():
+    """The REAL agent path, in order -- the thing the direct-call unit tests
+    skipped. Discovery declares the order; the card that discovery exists to
+    feed must inherit it, or the order is merely refused one step later."""
+    d = _fresh()
+    assert d.evaluate("find_containment_actions",
+                      {"target_type": "ip", "requested_by": "analyst"}) is None
+    assert d.evaluate("emit_action_card", _CARD) is None, (
+        "declared on discovery, dropped on staging -- the order still dies")
+
+
+def test_stickiness_needs_a_declaration_first():
+    """The sticky flag must not be reachable without a declared order."""
+    d = _fresh()
+    assert d.evaluate("find_containment_actions", {"target_type": "ip"}) is not None
+    blocked = d.evaluate("emit_action_card", _CARD)
+    assert blocked is not None and blocked.get("hunt_floor_guard")
+
+
+def test_discovery_exemption_fails_closed():
+    for val in ("Analyst!", "user", "", None, True):
+        blocked = _fresh().evaluate("find_containment_actions",
+                                    {"target_type": "ip", "requested_by": val})
+        assert blocked is not None and blocked.get("hunt_floor_guard"), (
+            f"requested_by={val!r} bypassed the floor on discovery")
+
+
+def test_declared_intent_reaches_the_sink_without_typeerror():
+    """The advertised schema and the registered signature must not drift: an
+    arg the model is TOLD it may send has to be accepted at dispatch. Pinning
+    the signature, since a TypeError here would surface as a failed card."""
+    import inspect
+    from fsr_playbooks.llm import tools as T
+
+    schema = T.TOOL_SCHEMA_OVERRIDES["emit_action_card"]
+    assert "requested_by" in schema["properties"]
+    assert schema["properties"]["requested_by"]["enum"] == ["analyst", "agent"]
+    assert "requested_by" not in schema["required"]
+
+    from fsr_playbooks.mcp_server import tools_emit
+    fn = getattr(tools_emit.emit_action_card, "fn", tools_emit.emit_action_card)
+    sig = inspect.signature(fn)
+    for prop in schema["properties"]:
+        assert prop in sig.parameters, (
+            f"schema advertises `{prop}` but the registered tool won't accept it")
+    assert sig.parameters["requested_by"].default is None

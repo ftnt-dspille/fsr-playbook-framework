@@ -200,12 +200,20 @@ def emit_action_card(
     summary: str,
     args: dict[str, Any],
     editable_fields: list[str],
+    requested_by: str | None = None,
 ) -> dict[str, Any]:
     """Emit an `action_card` so the widget renders an editable preview
     of a connector operation and halts the turn until the user confirms
     or cancels. On confirm, the widget calls chat_resume with the
     (possibly-edited) args and the agent runs the operation in the
-    next turn."""
+    next turn.
+
+    `requested_by` is declared intent consumed by the hunt-floor guard
+    upstream (`_loop_helpers.TriageDiscipline`), not by the card: an
+    analyst-ordered containment stages without first clearing the
+    investigation floor. Accepted-and-ignored here so the advertised
+    schema and the registered signature can't drift -- an arg the model
+    is told it may send must not TypeError at dispatch."""
     for label, val in (("id", id), ("connector", connector),
                        ("operation", operation), ("summary", summary)):
         if not isinstance(val, str) or not val.strip():

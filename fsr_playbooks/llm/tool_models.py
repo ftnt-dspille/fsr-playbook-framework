@@ -109,6 +109,11 @@ class EmitActionCardArgs(BaseModel):
     summary: str
     args: dict[str, Any]
     editable_fields: list[str]
+    # Declared intent (tracker #60). "analyst" means the user explicitly ordered
+    # this containment, which exempts the card from the hunt floor -- see
+    # `_loop_helpers.TriageDiscipline`. Optional and defaulted so an unset field
+    # keeps the pre-#60 behavior exactly.
+    requested_by: Optional[str] = None
 
 
 class EmitPatchProposalArgs(BaseModel):

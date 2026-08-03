@@ -412,6 +412,37 @@ _TI_CONNECTOR_TOKENS: tuple[str, ...] = (
 # pivot ≈ 3 genuine evidence calls before containment may be staged.
 MIN_INVESTIGATION_BEFORE_CONTAINMENT = 3
 
+
+def _is_analyst_ordered(name: str, args: Any) -> bool:
+    """True when the model DECLARED that the analyst explicitly ordered this
+    containment (tracker #60).
+
+    The floor exists to stop the agent from contain-first-scope-later. It was
+    never meant to answer an explicit order with a refusal -- but that is what
+    it did, because the guard sees only `(name, args)`: the analyst's "isolate
+    that host" lives in the message text one layer up and is invisible here.
+    So the intent is declared ON the call rather than inferred from phrasing;
+    a regex over the user's wording would put a phrasing-dependent branch in a
+    security gate, where a miss is another silent refusal.
+
+    This exempts STAGING, not execution. The card still goes to a human, and
+    the tier/approval gate is untouched -- that gate is what actually stops a
+    bad action, and this changes nothing about it.
+
+    Covers BOTH staging tools. Scoping it to `emit_action_card` alone was
+    unreachable in practice: a card names a connector + operation, so the agent
+    must call `find_containment_actions` first to discover them -- and that call
+    is floor-gated too, so an explicit order died at step one and never reached
+    the exempted step two. The live .159 matrix caught this (row TO: two
+    `hunt_floor_guard` blocks on discovery, `terminal=end_turn`, no card) after
+    the unit tests missed it by calling `emit_action_card` directly.
+
+    Fails closed -- anything but the exact string keeps the floor.
+    """
+    if name not in _CONTAINMENT_STAGING_TOOLS:
+        return False
+    return str((args or {}).get("requested_by") or "").strip().lower() == "analyst"
+
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
@@ -487,6 +518,9 @@ class TriageDiscipline:
             self._called.update(state.called_once_sigs)
         # Hunt floor is permanently satisfied if state says so
         self._hunt_floor_met = state is not None and getattr(state, "hunt_floor_met", False)
+        # Set once the model declares an explicit analyst order on a staging
+        # call; see `_is_analyst_ordered`. Turn-scoped -- not seeded from state.
+        self._analyst_ordered = False
         # How many distinct evidence tools remain before the floor lifts --
         # surfaced in the block message so the model knows it's making progress.
         self._lock = threading.Lock()
@@ -565,8 +599,18 @@ class TriageDiscipline:
         # 3. Hunt floor -- no containment before real investigation. Prescriptive:
         # weak models re-spam a blocked tool when told "retry later", so name the
         # ONE next call to make and forbid re-calling the blocked tool.
+        # An explicit order declared on EITHER staging call covers the rest of
+        # the turn. Without this, a model that correctly declares intent on
+        # `find_containment_actions` (the tool whose docstring asks for it) then
+        # loses the exemption on the `emit_action_card` that call exists to feed
+        # -- and the order is refused one step later than before. Turn-scoped on
+        # purpose: this instance is rebuilt per turn, so a declared order never
+        # outlives the message that gave it.
+        if _is_analyst_ordered(name, args):
+            self._analyst_ordered = True
         if (name in _CONTAINMENT_STAGING_TOOLS
                 and not (self._authoring and name == "find_containment_actions")
+                and not self._analyst_ordered
                 and not self._hunt_floor_met
                 and self.invest_attempts < self.floor):
             remaining = self.floor - self.invest_attempts

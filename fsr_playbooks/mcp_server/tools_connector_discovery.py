@@ -505,13 +505,23 @@ def _healthcheck_many(
 
 @mcp.tool()
 def find_containment_actions(target_type: str = "", probe: bool = True,
-                             limit: int = 25) -> dict[str, Any]:
+                             limit: int = 25,
+                             requested_by: str = "") -> dict[str, Any]:
     """Call this whenever the analyst asks you to act on a target -- block an
     IP, isolate a host, quarantine a hash, disable a user -- and call it before
     find_connector/find_operation, which search the whole catalog and surface
     ops this instance cannot run. If the analyst named the target, you have
     everything this needs; enrich the target afterwards if it helps, but do not
     let a turn that was asked for containment end without a staged card.
+
+    Set `requested_by='analyst'` when the user EXPLICITLY ordered the action in
+    their message ("block that IP", "isolate that host"); otherwise leave it
+    unset. An explicit order is not a finding you have to earn, so an
+    analyst-ordered call is exempt from the investigation floor -- and because
+    a card cannot be built without first discovering the op, the exemption has
+    to start HERE or it can never be reached (tracker #60: scoping it to
+    `emit_action_card` alone left the agent blocked at this call and it never
+    staged anything). Do not claim `analyst` to bypass the floor.
 
     Lists the containment/response actions that are CONFIGURED (and, with
     probe, healthy) on this FortiSOAR instance -- optionally for one indicator
