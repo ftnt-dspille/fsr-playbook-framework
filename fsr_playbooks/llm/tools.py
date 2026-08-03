@@ -616,6 +616,43 @@ def _build_preview(name: str, args: dict[str, Any]) -> dict[str, Any]:
     return {"tool": name, "args": masked}
 
 
+# The argument that names the SUBJECT of a call, per tool. Ordered: the first
+# key present wins. Deliberately small and explicit -- a generic "first string
+# arg" heuristic picks up ids and flags and reads worse than no summary at all.
+_APPROVAL_SUBJECT_KEYS: dict[str, tuple[str, ...]] = {
+    "run_playbook": ("playbook", "playbook_uuid"),
+    "resume_playbook": ("run_pk", "playbook"),
+    "run_op": ("op", "operation"),
+}
+_APPROVAL_VERB: dict[str, str] = {
+    "run_playbook": "Run playbook",
+    "resume_playbook": "Resume playbook run",
+}
+
+
+def _default_approval_summary(name: str, args: dict[str, Any]) -> "str | None":
+    """A plain-language line for an approval card whose caller supplied no
+    `_summary`. Returns None when nothing readable can be derived -- a bad
+    summary is worse than none, because the host renders it as the card's
+    subject.
+
+    `run_op` is excluded on purpose: its host card already heads with
+    `connector.operation`, so a derived line would just repeat it.
+    """
+    if not isinstance(args, dict) or name == "run_op":
+        return None
+    subject = ""
+    for key in _APPROVAL_SUBJECT_KEYS.get(name, ()):
+        val = args.get(key)
+        if isinstance(val, (str, int)) and str(val).strip():
+            subject = str(val).strip()
+            break
+    if not subject:
+        return None
+    verb = _APPROVAL_VERB.get(name)
+    return f"{verb}: {subject}" if verb else f"{name}: {subject}"
+
+
 def _args_hash(name: str, args: dict[str, Any]) -> str:
     payload = json.dumps({"tool": name, "args": args or {}}, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
@@ -1074,6 +1111,31 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "emit_playbook_offer": {
+        "type": "object",
+        "required": ["id", "summary"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1,
+                   "description": "Stable card id; echoed back on accept/decline."},
+            "summary": {"type": "string", "minLength": 1,
+                        "description": "The body text the analyst reads."},
+            "title_suggestion": {"type": "string", "default": None,
+                                 "description": "Optional pre-filled playbook name."},
+            "editable_title": {"type": "boolean", "default": True},
+            "yaml": {
+                "type": "string", "default": None,
+                "description": (
+                    "DO NOT pass this in a triage session. In triage the "
+                    "draft is compiled automatically from the recorded ops "
+                    "you ran this session -- pass only id + summary. This "
+                    "field is for the build/authoring path only, where the "
+                    "agent has hand-authored validated YAML and the "
+                    "compiler has no trace to build from."
+                ),
+            },
+        },
+    },
 }
 
 
@@ -1444,6 +1506,16 @@ def dispatch(
             summary = ("I found something worth changing while working on your "
                        "playbook, but you didn't ask me to change anything. "
                        "Want me to draft the edit for you to review?")
+        if not summary:
+            # `_summary` is the MODEL's optional argument, so most approvals
+            # arrive with none -- and the host then heads the card with the bare
+            # tool name ("Approval required: run_playbook") and nothing that
+            # says WHAT is about to run. Worse, a host that falls back to
+            # rendering the raw args when there is no summary shows the analyst
+            # a JSON dump. Derive a plain-language default from the call itself
+            # so an approval always states its subject. Never overrides a
+            # model-supplied summary.
+            summary = _default_approval_summary(name, raw_args)
         envelope = {
             "pending_approval": True,
             "approval_id": approval_id,
