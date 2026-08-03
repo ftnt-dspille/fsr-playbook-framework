@@ -71,6 +71,78 @@ def _looks_structured(s: str) -> bool:
     return any(c.isdigit() for c in s) or any(c in s for c in ".:/")
 
 
+def _try_parse_json(s: str) -> Optional[Any]:
+    """Parse `s` as JSON if it looks like a JSON object/array, else None."""
+    if not isinstance(s, str) or not s.strip().startswith(("{", "[")):
+        return None
+    try:
+        return json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _find_record_field_expr(
+    record_fields: Dict[str, Any], target: Any,
+) -> Optional[str]:
+    """A full Jinja expression that resolves ``target`` from the trigger
+    record via ``vars.input.records[0]``, or None.
+
+    Handles JSON-string record fields (e.g. ``sourcedata``) by parsing
+    them and building a ``(vars.input.records[0].<field> | from_json).<inner>``
+    expression, using FortiSOAR's ``from_json`` Jinja filter.
+
+    Examples:
+        record_fields = {"sourceIp": "1.2.3.4"}, target = "1.2.3.4"
+        -> "{{ vars.input.records[0].sourceIp }}"
+
+        record_fields = {"sourcedata": '{"x": {"host": "smith"}}'}, target = "smith"
+        -> "{{ (vars.input.records[0].sourcedata | from_json).x.host }}"
+    """
+    # Fast path: simple walk (no JSON parsing)
+    suffix = _find_value_path(record_fields, target)
+    if suffix is not None:
+        return "{{ vars.input.records[0]" + suffix + " }}"
+    # Slow path: parse JSON-string fields and search inside
+    if not _is_wirable_value(target):
+        return None
+    for k, v in record_fields.items():
+        parsed = _try_parse_json(v) if isinstance(v, str) else None
+        if parsed is None:
+            continue
+        inner = _find_value_path(parsed, target)
+        if inner is not None:
+            return ("{{ (vars.input.records[0]" + _key_access(k)
+                    + " | from_json)" + inner + " }}")
+    return None
+
+
+def _embeddable_record_scalars(
+    record_fields: Dict[str, Any],
+) -> List[Tuple[str, str]]:
+    """``(scalar, jinja_expr)`` for IOC-shaped values in ``record_fields``,
+    including values nested inside JSON-string fields.
+
+    Analogous to :func:`_embeddable_scalars` but returns full Jinja
+    expressions (with ``| from_json`` for JSON-blob fields) instead of
+    path suffixes, so callers can use them directly as ``record_vars``
+    values.
+    """
+    found: List[Tuple[str, str]] = []
+    # Simple walk
+    for scalar, path in _embeddable_scalars(record_fields):
+        found.append((scalar, "{{ vars.input.records[0]" + path + " }}"))
+    # JSON blob walk
+    for k, v in record_fields.items():
+        parsed = _try_parse_json(v) if isinstance(v, str) else None
+        if parsed is None:
+            continue
+        for scalar, inner_path in _embeddable_scalars(parsed):
+            expr = ("{{ (vars.input.records[0]" + _key_access(k)
+                    + " | from_json)" + inner_path + " }}")
+            found.append((scalar, expr))
+    return found
+
+
 def _key_access(k: str) -> str:
     """Jinja key access; bracket-quote keys that aren't bare-identifier safe
     (e.g. `hydra:member`)."""
@@ -385,22 +457,22 @@ def _wire_nested_dict_leaves(
             continue
         if not _is_wirable_value(v):
             continue
-        suffix = _find_value_path(record_fields, v)
+        ref = _find_record_field_expr(record_fields, v)
         embed_spans: List[Tuple[int, int]] = []
-        if suffix is None and isinstance(v, str):
-            for fval, fsuffix in _embeddable_scalars(record_fields):
+        if ref is None and isinstance(v, str):
+            for fval, fexpr in _embeddable_record_scalars(record_fields):
                 embed_spans = _embedded_spans(v, fval)
                 if embed_spans:
-                    suffix = fsuffix
+                    ref = fexpr
                     break
-        if suffix is None:
+        if ref is None:
             continue
-        key = (type(v), v, suffix)
+        key = (type(v), v, ref)
         var = val_to_var.get(key)
         if var is None:
             var = _safe_var_name(k, used_vars)
             val_to_var[key] = var
-            record_vars[var] = "{{ vars.input.records[0]" + suffix + " }}"
+            record_vars[var] = ref
         staged = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) + "." + var + " }}"
         if embed_spans and isinstance(v, str):
             d[k] = _apply_spans(v, [(s, e, staged) for s, e in embed_spans])
@@ -458,25 +530,25 @@ def wire_record_inputs(
         remaining: List[str] = []
         for param in params:
             literal = container.get(param)
-            suffix = (_find_value_path(record_fields, literal)
-                      if _is_wirable_value(literal) else None)
+            ref = (_find_record_field_expr(record_fields, literal)
+                   if _is_wirable_value(literal) else None)
             # Embedded fallback: an IOC-shaped record-field value sitting INSIDE
             # a query string (`srcIpAddr = <alert_ip>`) parameterizes too, so a
             # trace-built hunt re-runs on the triggering record's IOC. All
             # occurrences are replaced (bidirectional `src… OR dst…` hunts).
             embed_spans: List[Tuple[int, int]] = []
-            if suffix is None and isinstance(literal, str):
-                for fval, fsuffix in _embeddable_scalars(record_fields):
+            if ref is None and isinstance(literal, str):
+                for fval, fexpr in _embeddable_record_scalars(record_fields):
                     embed_spans = _embedded_spans(literal, fval)
                     if embed_spans:
-                        suffix = fsuffix
+                        ref = fexpr
                         break
             # Nested-dict fallback: a dict-valued gap (e.g. `call_mcp_tool`'s
             # `args: {ip: "1.2.3.4, ...}`) can't be matched as a whole. Recurse
             # into its leaves and parameterize each one that matches a record
             # field, so an IP nested inside `args.ip` wires to
             # `vars.input.records[0].destinationIp` just like a top-level param.
-            if suffix is None and isinstance(literal, dict):
+            if ref is None and isinstance(literal, dict):
                 _wire_nested_dict_leaves(
                     literal, record_fields, record_vars, used_vars,
                     val_to_var)
@@ -484,15 +556,15 @@ def wire_record_inputs(
                 # longer an unwired gap. If none matched, it stays a gap.
                 if _has_jinja_ref(literal):
                     continue
-            if suffix is None:
+            if ref is None:
                 remaining.append(param)
                 continue
-            key = (type(literal), literal, suffix)
+            key = (type(literal), literal, ref)
             var = val_to_var.get(key)
             if var is None:
                 var = _safe_var_name(param, used_vars)
                 val_to_var[key] = var
-                record_vars[var] = "{{ vars.input.records[0]" + suffix + " }}"
+                record_vars[var] = ref
             staged = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) + "." + var + " }}"
             if embed_spans and isinstance(literal, str):
                 container[param] = _apply_spans(

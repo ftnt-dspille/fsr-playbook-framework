@@ -177,6 +177,102 @@ def test_record_fields_round_trip_json():
     assert SkillTrace.from_json(legacy.to_json()).record_fields is None
 
 
+# --- JSON-blob record fields (#74) ----------------------------------------------
+#
+# Record fields like `sourcedata` carry a JSON string with nested values
+# (hostName, destIpAddr).  The compiler must parse these and parameterize
+# gap values found inside, using the `| from_json` Jinja filter.
+
+def test_json_blob_field_whole_value_match():
+    """A gap param whose literal matches a value nested inside a JSON-string
+    record field is parameterized via `| from_json`."""
+    blob = json.dumps({"incident_data": {"incidentTarget": {
+        "destIpAddr": "102.220.160.21", "hostName": "smithDesktop"}}})
+    t = SkillTrace(module="incidents",
+                   record_fields={"destinationIp": "102.220.160.21",
+                                  "sourcedata": blob})
+    t.record_run_op("fortinet-fsr-soc-assistant", "call_mcp_tool",
+                    {"tool": "siem_search_host",
+                     "args": {"host": "smithDesktop", "window": "2h"}},
+                    {"results": []}, step_name="siem_search_host")
+    out = build_playbook_from_trace(t.to_json(), name="JSON Blob Match")
+    assert out["ok"] is True
+    doc, steps = _conn_steps(out)
+    assert "Set Inputs" in steps
+    si = steps["Set Inputs"]["vars"]
+    # the host is extracted from the JSON blob via from_json
+    assert "smithDesktop" not in out["yaml"]
+    assert any("from_json" in v for v in si.values())
+    # the gap is resolved
+    assert "siem_search_host" not in (out.get("gaps") or {})
+
+
+def test_json_blob_field_simple_field_still_works():
+    """A record with both a simple field and a JSON blob field parameterizes
+    the simple field normally (no from_json) and the blob field with from_json."""
+    blob = json.dumps({"incident_data": {"incidentTarget": {
+        "destIpAddr": "102.220.160.21", "hostName": "smithDesktop"}}})
+    t = SkillTrace(module="incidents",
+                   record_fields={"destinationIp": "10.0.0.5",
+                                  "sourcedata": blob})
+    t.record_run_op("virustotal", "query_ip", {"ip": "10.0.0.5"},
+                    {"attributes": {}}, ref_prefix="data")
+    t.record_run_op("fortinet-fsr-soc-assistant", "call_mcp_tool",
+                    {"tool": "siem_search_host",
+                     "args": {"host": "smithDesktop", "window": "2h"}},
+                    {"results": []}, step_name="siem_search_host")
+    out = build_playbook_from_trace(t.to_json(), name="Mixed Fields")
+    assert out["ok"] is True
+    doc, steps = _conn_steps(out)
+    si = steps["Set Inputs"]["vars"]
+    # simple field: no from_json
+    ip_ref = si.get("ip", "")
+    assert "from_json" not in ip_ref
+    assert ip_ref == "{{ vars.input.records[0].destinationIp }}"
+    # blob field: from_json
+    host_ref = si.get("host", "")
+    assert "from_json" in host_ref
+
+
+def test_json_blob_field_not_json_stays_literal():
+    """A record field that looks like JSON but isn't (malformed) should not
+    break compilation -- the gap param stays literal."""
+    t = SkillTrace(module="incidents",
+                   record_fields={"sourcedata": "{not valid json"})
+    t.record_run_op("fortinet-fsr-soc-assistant", "call_mcp_tool",
+                    {"tool": "siem_search_host",
+                     "args": {"host": "smithDesktop", "window": "2h"}},
+                    {"results": []}, step_name="siem_search_host")
+    out = build_playbook_from_trace(t.to_json(), name="Bad JSON")
+    assert out["ok"] is True
+    doc, steps = _conn_steps(out)
+    # no Set Inputs -- the host couldn't be parameterized
+    # (smithDesktop isn't in record_fields and the JSON didn't parse)
+    assert "siem_search_host" in (out.get("gaps") or {})
+
+
+def test_json_blob_embedded_ioc_in_query_string():
+    """An IOC-shaped value inside a JSON blob can be used for embedded
+    (substring) matching in a query string, with the from_json filter."""
+    blob = json.dumps({"incident_data": {"incidentTarget": {
+        "destIpAddr": "10.99.249.42"}}})
+    t = SkillTrace(module="alerts",
+                   record_fields={"sourcedata": blob})
+    t.record_run_op("fortinet-fortisiem", "query_events",
+                    {"query": "srcIpAddr = 10.99.249.42"},
+                    {"events": []}, step_name="siem_query")
+    out = build_playbook_from_trace(t.to_json(), name="Embedded JSON IOC")
+    assert out["ok"] is True
+    doc, steps = _conn_steps(out)
+    assert "Set Inputs" in steps
+    si = steps["Set Inputs"]["vars"]
+    # the IOC is extracted from the JSON blob via from_json
+    assert any("from_json" in v for v in si.values())
+    assert "10.99.249.42" not in out["yaml"]
+    # the gap is resolved
+    assert "siem_query" not in (out.get("gaps") or {})
+
+
 # --- containment carries its own human gate ------------------------------------
 #
 # The tier gate that protects containment during triage is AGENT dispatch logic;
