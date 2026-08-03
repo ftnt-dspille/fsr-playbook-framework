@@ -228,15 +228,16 @@ def _persist_precheck_verification(kind: str, key: str, method: str,
     else:
         return
     import datetime
+    from .._db import writable_reference_db
+    target = writable_reference_db()
+    if target is None:
+        return  # packaged catalog: enrichment is skipped, never written to
     ts = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
     notes = (result.get("message") or result.get("code") or "")[:500]
-    try:
-        with sqlite3.connect(_shared.DB_PATH) as conn:
-            conn.execute(
-                """INSERT OR REPLACE INTO verifications
-                   (kind, key, method, status, ts, notes)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (kind, key, method, status, ts, notes),
-            )
-    except Exception:
-        pass
+    with sqlite3.connect(str(target)) as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO verifications
+               (kind, key, method, status, ts, notes)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (kind, key, method, status, ts, notes),
+        )

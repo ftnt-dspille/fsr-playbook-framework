@@ -255,11 +255,11 @@ def test_json_blob_embedded_ioc_in_query_string():
     """An IOC-shaped value inside a JSON blob can be used for embedded
     (substring) matching in a query string, with the from_json filter."""
     blob = json.dumps({"incident_data": {"incidentTarget": {
-        "destIpAddr": "10.99.249.42"}}})
+        "destIpAddr": "198.51.100.42"}}})
     t = SkillTrace(module="alerts",
                    record_fields={"sourcedata": blob})
     t.record_run_op("fortinet-fortisiem", "query_events",
-                    {"query": "srcIpAddr = 10.99.249.42"},
+                    {"query": "srcIpAddr = 198.51.100.42"},
                     {"events": []}, step_name="siem_query")
     out = build_playbook_from_trace(t.to_json(), name="Embedded JSON IOC")
     assert out["ok"] is True
@@ -268,7 +268,7 @@ def test_json_blob_embedded_ioc_in_query_string():
     si = steps["Set Inputs"]["vars"]
     # the IOC is extracted from the JSON blob via from_json
     assert any("from_json" in v for v in si.values())
-    assert "10.99.249.42" not in out["yaml"]
+    assert "198.51.100.42" not in out["yaml"]
     # the gap is resolved
     assert "siem_query" not in (out.get("gaps") or {})
 
