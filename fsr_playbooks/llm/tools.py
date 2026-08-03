@@ -19,6 +19,7 @@ import os
 import re
 import sqlite3
 import time
+from contextvars import ContextVar
 import typing
 import uuid
 from dataclasses import dataclass
@@ -473,7 +474,88 @@ def set_run_playbook_auto_resolver(fn: "Callable[[dict], bool] | None") -> None:
     _RUN_PLAYBOOK_AUTO_RESOLVER = fn
 
 
+# ── The change affordance ────────────────────────────────────────────────────
+#
+# A turn may only PROPOSE a change to the analyst's playbook if the analyst
+# reached for a change. Live in a chat session the analyst asked, in prose, only
+# for an explanation; the model explained, then -- having noticed a real defect
+# while explaining -- authored a fix and ended the turn on an enhancement offer.
+# Two symptoms from that one overrun: a change proposed to someone who never
+# asked for one, and a composer locked behind the typing indicator for five
+# extra model round-trips after the prose had visibly finished.
+#
+# The obvious fix is to detect "they only asked me to explain" from the message.
+# We deliberately do NOT: that is a natural-language judgement, and any lexical
+# form of it works in English and silently fails everywhere else, while a model
+# call to decide a gate makes the gate itself probabilistic -- the thing the
+# tier gate exists to avoid.
+#
+# So this gates the TRANSITION, not the request. The host declares whether this
+# turn carries a change affordance -- something the analyst did through a
+# control we own (a change quick-action chip, or approving a card) rather than
+# something they might have meant. Without one, the write frontier escalates to
+# tier 3: the existing HITL machinery suspends the turn into a card and asks. It
+# costs one extra click on a free-typed change request, and it is language-
+# independent because it never reads the analyst's words at all.
+#
+# Default True (fail-open): a host that never calls `set_change_affordance`
+# behaves exactly as before.
+_CHANGE_AFFORDANCE: ContextVar[bool] = ContextVar("_change_affordance", default=True)
+
+# Gating an edit to an EXISTING playbook, or delivering one. Kept deliberately
+# tight:
+#
+#   * not the analysis tools -- noticing a defect while explaining is the good
+#     part, and the model should still say so in prose;
+#   * not `compile_yaml` / `verify_playbook` / `build_playbook_from_trace` --
+#     those are the NEW-playbook authoring path. Authoring a playbook the
+#     analyst doesn't have yet changes nothing of theirs, and gating it would
+#     put a card in front of the ordinary build flow. Hosts scope this gate to
+#     turns with an open playbook for the same reason.
+#
+# `push_playbook` is already tier 3 unconditionally; listed for intent.
+WRITE_FRONTIER_TOOLS = frozenset({
+    "verify_enhancement",
+    "emit_enhancement_offer", "emit_playbook_offer", "emit_patch_proposal",
+    "push_playbook",
+})
+
+
+def set_change_affordance(present: bool) -> Any:
+    """Declare whether THIS turn carries an analyst-made change affordance.
+    Returns a token for ``reset_change_affordance``. A ContextVar because the
+    turn runs on its own thread/task, same as the grounded-YAML bind."""
+    return _CHANGE_AFFORDANCE.set(bool(present))
+
+
+def reset_change_affordance(token: Any) -> None:
+    """Undo ``set_change_affordance``. Never raises -- an un-reset bind would
+    leak the gate into the next turn on this worker, so callers put it in a
+    ``finally`` and we swallow the token-mismatch that a re-entrant bind
+    would otherwise raise."""
+    try:
+        _CHANGE_AFFORDANCE.reset(token)
+    except (RuntimeError, ValueError, LookupError):
+        # RuntimeError is the real one: CPython raises it for a token already
+        # used, or one created on another context. Fail OPEN -- a gate latched
+        # on by a leaked token would card a legitimate flow with nothing to
+        # tell the analyst why.
+        _CHANGE_AFFORDANCE.set(True)
+
+
+def _change_affordance_present() -> bool:
+    try:
+        return bool(_CHANGE_AFFORDANCE.get())
+    except LookupError:  # pragma: no cover - defensive
+        return True
+
+
 def _resolve_tier(name: str, args: dict[str, Any]) -> int:
+    # BEFORE the static table: the write frontier is mostly tier 0 (authoring is
+    # local shaping), so a static-tier early return would skip the gate entirely
+    # -- exactly the "gate that selects nothing" shape.
+    if name in WRITE_FRONTIER_TOOLS and not _change_affordance_present():
+        return max(TOOL_TIERS.get(name, 0), 3)
     static = TOOL_TIERS.get(name, 0)
     if static >= 0:
         return static
@@ -1352,15 +1434,29 @@ def dispatch(
             return precard
 
         approval_id = uuid.uuid4().hex
+        gated_change = (name in WRITE_FRONTIER_TOOLS
+                        and not _change_affordance_present())
+        if gated_change and not summary:
+            # This card is not "approve this tool call" -- the analyst never
+            # asked for a change, so the honest question is whether they want
+            # one drafted at all. Say that in their terms; the raw args (two
+            # whole YAML documents, for verify_enhancement) are noise here.
+            summary = ("I found something worth changing while working on your "
+                       "playbook, but you didn't ask me to change anything. "
+                       "Want me to draft the edit for you to review?")
         envelope = {
             "pending_approval": True,
             "approval_id": approval_id,
             "tier": tier,
             "tool": name,
-            "preview": _build_preview(name, raw_args),
+            "preview": ({"tool": name, "args": {}} if gated_change
+                        else _build_preview(name, raw_args)),
             "args_hash": _args_hash(name, raw_args),
             "summary": summary,
             "requires_step_up": tier >= 4,
+            # Lets the host render this as a "shall I?" choice rather than a
+            # destructive-action approval, and lets a grant scope to it.
+            "reason": "unrequested_change" if gated_change else None,
         }
         _record_audit(name, raw_args, tier, "pending", result_preview=envelope)
         return envelope
