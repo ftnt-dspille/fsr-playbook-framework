@@ -35,7 +35,9 @@ from ..agent.skill_trace import SkillCall, SkillTrace
 _MIN_STR_LEN = 4
 
 # Params that are never wired (they identify the step, not its data).
-_SKIP_PARAMS = frozenset({"connector", "operation", "config"})
+# `agent` is agent-binding metadata for agent-routed connectors.
+# `tool` is the MCP tool name on call_mcp_tool steps -- metadata, not data.
+_SKIP_PARAMS = frozenset({"connector", "operation", "config", "agent", "tool"})
 
 
 def _jkey(step_name: str) -> str:
@@ -350,6 +352,62 @@ def prune_hidden_params(step: Dict[str, Any], rules_for) -> List[str]:
     return dropped
 
 
+def _has_jinja_ref(d: Dict[str, Any]) -> bool:
+    """True if any leaf value in `d` is a jinja `{{ ... }}` reference."""
+    for v in d.values():
+        if isinstance(v, str) and "{{" in v:
+            return True
+        if isinstance(v, dict) and _has_jinja_ref(v):
+            return True
+    return False
+
+
+def _wire_nested_dict_leaves(
+    d: Dict[str, Any],
+    record_fields: Optional[Dict[str, Any]],
+    record_vars: Dict[str, str],
+    used_vars: set,
+    val_to_var: Dict[Any, str],
+) -> None:
+    """Recurse into a dict-valued gap param and parameterize each leaf that
+    matches a record field. Mutates `d` in place.
+
+    For `call_mcp_tool`'s `args: {ip: "1.2.3.4", direction: "any"}`, the `ip`
+    leaf matches `record_fields.destinationIp` and is rewritten to
+    `{{ vars.steps.Set Inputs.ip }}`. The `direction` leaf stays literal.
+    """
+    if not record_fields:
+        return
+    for k, v in list(d.items()):
+        if isinstance(v, dict):
+            _wire_nested_dict_leaves(v, record_fields, record_vars,
+                                     used_vars, val_to_var)
+            continue
+        if not _is_wirable_value(v):
+            continue
+        suffix = _find_value_path(record_fields, v)
+        embed_spans: List[Tuple[int, int]] = []
+        if suffix is None and isinstance(v, str):
+            for fval, fsuffix in _embeddable_scalars(record_fields):
+                embed_spans = _embedded_spans(v, fval)
+                if embed_spans:
+                    suffix = fsuffix
+                    break
+        if suffix is None:
+            continue
+        key = (type(v), v, suffix)
+        var = val_to_var.get(key)
+        if var is None:
+            var = _safe_var_name(k, used_vars)
+            val_to_var[key] = var
+            record_vars[var] = "{{ vars.input.records[0]" + suffix + " }}"
+        staged = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) + "." + var + " }}"
+        if embed_spans and isinstance(v, str):
+            d[k] = _apply_spans(v, [(s, e, staged) for s, e in embed_spans])
+        else:
+            d[k] = staged
+
+
 def _safe_var_name(param: str, used: set) -> str:
     """A jinja-safe, unique set_variable key derived from a param name."""
     base = "".join(c if (c.isalnum() or c == "_") else "_" for c in param) or "input"
@@ -413,6 +471,19 @@ def wire_record_inputs(
                     if embed_spans:
                         suffix = fsuffix
                         break
+            # Nested-dict fallback: a dict-valued gap (e.g. `call_mcp_tool`'s
+            # `args: {ip: "1.2.3.4, ...}`) can't be matched as a whole. Recurse
+            # into its leaves and parameterize each one that matches a record
+            # field, so an IP nested inside `args.ip` wires to
+            # `vars.input.records[0].destinationIp` just like a top-level param.
+            if suffix is None and isinstance(literal, dict):
+                _wire_nested_dict_leaves(
+                    literal, record_fields, record_vars, used_vars,
+                    val_to_var)
+                # If at least one leaf was parameterized, this param is no
+                # longer an unwired gap. If none matched, it stays a gap.
+                if _has_jinja_ref(literal):
+                    continue
             if suffix is None:
                 remaining.append(param)
                 continue
