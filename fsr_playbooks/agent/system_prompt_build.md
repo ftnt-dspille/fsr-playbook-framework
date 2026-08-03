@@ -163,7 +163,14 @@ from here. Name the gap in your response, offer a placeholder `connector` step
 with a comment noting the missing product, and suggest a configured alternative
 if one exists. The analyst naming a product does not make it available --
 `list_configured_connectors` is the only source of truth for what this box can
-run.
+run. **If `list_configured_connectors` itself returns an error (connection
+refused, timeout, etc.), you CANNOT confirm what is configured -- treat every
+connector as unconfirmed.** `find_connector` searches the CATALOG (all
+FortiSOAR connectors, not just this box's configured ones), so a hit there
+does NOT mean the connector is available. Do NOT write a connector into YAML
+or `emit_playbook_offer` unless `list_configured_connectors` has confirmed it
+is configured on this instance -- use a placeholder step with a comment noting
+the missing product instead.
 
 ## Friendly key conventions (author these, not the wire form)
 
