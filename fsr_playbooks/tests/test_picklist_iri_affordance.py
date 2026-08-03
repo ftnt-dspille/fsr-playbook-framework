@@ -20,9 +20,17 @@ from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler.resolver.picklists import PicklistMixin
 
 
-# CI ships the slim reference DB, which carries no picklist rows. Probe once
-# for ANY row; empty corpus -> skip the IRI assertions (a genuine regression
-# would still run on a full DB). Mirrors the jinja-ranking test's guard.
+# CI ships the slim reference DB. Probe once for a row this file can actually
+# assert on; no such row -> skip the IRI assertions (a genuine regression would
+# still run on a full DB). Mirrors the jinja-ranking test's guard.
+#
+# The probe must require a NON-EMPTY `item_iri`, not merely any row. The slim
+# catalog ships picklist VALUES but deliberately never IRIs (a value must
+# compile on any box; an IRI is per-appliance), so once values started shipping
+# the any-row probe found 205 rows with `item_iri = ''`, un-skipped this file,
+# and every IRI assertion failed against the empty string -- three red tests on
+# CI describing nothing but the guard's own blind spot. A guard that stopped
+# guarding looks exactly like a corpus that arrived.
 def _probe():
     db = default_db_path()
     if not db.exists():
@@ -30,7 +38,8 @@ def _probe():
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
         row = con.execute(
-            "SELECT list_name, item_value, item_iri FROM picklists LIMIT 1"
+            "SELECT list_name, item_value, item_iri FROM picklists "
+            "WHERE item_iri IS NOT NULL AND item_iri != '' LIMIT 1"
         ).fetchone()
     finally:
         con.close()
@@ -73,7 +82,8 @@ def test_iri_from_the_wrong_list_names_both(resolver):
     list_name, _value, _iri = _PROBE[1]
     wrong = resolver.conn.execute(
         "SELECT list_name, item_iri FROM picklists "
-        "WHERE list_name != ? LIMIT 1", (list_name,)
+        "WHERE list_name != ? AND item_iri IS NOT NULL AND item_iri != '' "
+        "LIMIT 1", (list_name,)
     ).fetchone()
     if wrong is None:
         pytest.skip("corpus has only one picklist")
