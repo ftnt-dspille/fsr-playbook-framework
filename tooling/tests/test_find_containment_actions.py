@@ -107,3 +107,26 @@ def test_find_containment_actions_empty_when_no_response_connector(monkeypatch):
 def test_find_containment_actions_rejects_bad_target():
     out = cd.find_containment_actions(target_type="banana")
     assert out["ok"] is False and out["code"] == "unknown_target_type"
+
+
+def test_canon_target_type_accepts_picklist_labels():
+    # The model passes the FortiSOAR picklist label it read off the record.
+    for label, canon in [("IP Address", "ip"), ("ip_address", "ip"),
+                         ("Hostname", "host"), ("File Hash", "hash"),
+                         ("SHA-256", "hash"), ("Username", "user"),
+                         ("Domain Name", "domain"), ("  Email Address ", "email")]:
+        assert cd._canon_target_type(label) == canon, label
+    # canonical keys pass through, empty stays empty, a real typo stays wrong
+    assert cd._canon_target_type("ip") == "ip"
+    assert cd._canon_target_type("") == ""
+    assert cd._canon_target_type("banana") == "banana"
+    # every alias must land on a real _TARGET_KEYWORDS key
+    assert set(cd._TARGET_ALIASES.values()) <= set(cd._TARGET_KEYWORDS)
+    # ...and no alias may shadow a canonical key
+    assert not (set(cd._TARGET_ALIASES) & set(cd._TARGET_KEYWORDS))
+
+
+def test_find_containment_actions_does_not_reject_picklist_label():
+    # end-to-end: "IP Address" must get past validation (whatever the box says next)
+    out = cd.find_containment_actions(target_type="IP Address", probe=False)
+    assert out.get("code") != "unknown_target_type"

@@ -115,6 +115,42 @@ _TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+# The model reaches for the FortiSOAR picklist *label* it just read off a record
+# ("IP Address", "Hostname", "File Hash") rather than the short key this tool's
+# docstring names. That cost a whole tool call to an `unknown_target_type` error
+# on live turns, twice. Accept the labels; they're unambiguous.
+_TARGET_ALIASES: dict[str, str] = {
+    "ip address": "ip", "ipaddress": "ip", "ip_address": "ip",
+    "ipv4": "ip", "ipv6": "ip", "ipv4 address": "ip", "ipv6 address": "ip",
+    "source ip": "ip", "destination ip": "ip",
+    "hostname": "host", "host name": "host", "computer": "host",
+    "computer name": "host", "device": "host", "machine": "host",
+    "asset": "host", "collector": "endpoint", "agent": "endpoint",
+    "username": "user", "user name": "user", "account": "user",
+    "user account": "user", "identity": "user",
+    "file hash": "hash", "filehash": "hash", "md5": "hash", "sha1": "hash",
+    "sha256": "hash", "sha 256": "hash", "checksum": "hash",
+    "filename": "file", "file name": "file", "file path": "file",
+    "domain name": "domain", "fqdn": "domain",
+    "email address": "email", "emailaddress": "email", "sender": "email",
+    "uri": "url", "link": "url",
+    "process name": "process",
+}
+
+
+def _canon_target_type(target_type: str) -> str:
+    """Normalize a caller-supplied indicator type to a `_TARGET_KEYWORDS` key.
+
+    Returns "" for empty input and passes an unrecognized value through
+    unchanged so the caller still raises `unknown_target_type` for real typos.
+    """
+    t = (target_type or "").strip().lower().replace("-", " ")
+    t = " ".join(t.split())
+    if t in _TARGET_KEYWORDS:
+        return t
+    return _TARGET_ALIASES.get(t, t)
+
+
 _CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
 
 
@@ -548,7 +584,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
          requires_approval, status, required_params:[{name,type}]}],
          "count", "probed"}. Deprecated ops sort last.
     """
-    target = (target_type or "").strip().lower()
+    target = _canon_target_type(target_type)
     keywords = _TARGET_KEYWORDS.get(target)
     if target and keywords is None:
         return {"ok": False, "code": "unknown_target_type",
@@ -757,7 +793,7 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
          runs_on_agent}], "count", "probed"}. When nothing is configured to
         enrich this, returns a `suggested_card` for emit_capability_gap_card.
     """
-    target = (target_type or "").strip().lower()
+    target = _canon_target_type(target_type)
     keywords = _TARGET_KEYWORDS.get(target)
     if target and keywords is None:
         return {"ok": False, "code": "unknown_target_type",
