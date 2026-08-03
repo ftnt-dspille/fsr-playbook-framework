@@ -47,6 +47,7 @@ from ._loop_helpers import (
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
     TriageDiscipline,
+    latest_user_text,
     _CREATE_OFFER_TOOL,
     _ENHANCE_OFFER_TOOL,
     compile_errors as _compile_errors,
@@ -426,6 +427,9 @@ class AnthropicProvider:
             capabilities=(getattr(case_state, "capabilities", None)
                           if case_state is not None else None),
             authoring=_authoring,
+            # The analyst's own words are the only reliable carrier of an
+            # explicit containment order -- see `_detect_analyst_order`.
+            user_text=latest_user_text(messages),
         )
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:

@@ -611,9 +611,9 @@ def test_the_live_failing_trace_would_now_clear_the_floor():
 # the intent is DECLARED on the call. These pin that the exemption is scoped,
 # fails closed, and does not touch the approval gate.
 
-def _fresh():
+def _fresh(**kw):
     from fsr_playbooks.llm._loop_helpers import TriageDiscipline
-    return TriageDiscipline()
+    return TriageDiscipline(**kw)
 
 
 _CARD = {
@@ -704,3 +704,119 @@ def test_declared_intent_reaches_the_sink_without_typeerror():
         assert prop in sig.parameters, (
             f"schema advertises `{prop}` but the registered tool won't accept it")
     assert sig.parameters["requested_by"].default is None
+
+
+# --- #60, second pass: the exemption keyed off the analyst's own message ------
+# The declared `requested_by` path above is unit-proven but INERT live -- the
+# box model set it on 0 of 4 containment calls across 2 runs. These pin the
+# path that actually fires.
+
+from fsr_playbooks.llm._loop_helpers import (  # noqa: E402
+    _detect_analyst_order,
+    latest_user_text,
+)
+
+
+ORDERS = [
+    "Block 10.100.88.102 on the firewall now.",
+    "block that IP",
+    "Isolate the host.",
+    "Please quarantine the endpoint",
+    "isolate DESKTOP-4471 immediately",
+    "I want you to disable that user account",
+    "Go ahead and block it",
+    "Contain this, then write it up.",
+    "Take the host offline.",
+    "you should block the source IP",
+    "Let's isolate that machine.",
+    "Look at alert 12, then block the source IP.",
+    # a descriptive sentence must not veto an order in another clause
+    "The IP was blocked yesterday. Block it on the edge firewall too.",
+]
+
+NOT_ORDERS = [
+    "",
+    "   ",
+    "Should we block this IP?",
+    "Can you tell me if the host was isolated?",
+    "The IP was blocked by the firewall.",
+    "Why was the endpoint quarantined?",
+    "If we block the IP, what breaks?",
+    "This user has already been disabled.",
+    "Summarize alert 12.",
+    "What is the reputation of 8.8.8.8?",
+    "Investigate the excessive mail egress alert.",
+]
+
+
+@pytest.mark.parametrize("text", ORDERS)
+def test_detect_analyst_order_fires_on_an_order(text):
+    assert _detect_analyst_order(text) is True, text
+
+
+@pytest.mark.parametrize("text", NOT_ORDERS)
+def test_detect_analyst_order_stands_down_otherwise(text):
+    assert _detect_analyst_order(text) is False, text
+
+
+def test_the_live_TO_prompt_now_stages_with_no_declared_field():
+    """The exact live row that failed -- and NOT one `requested_by` anywhere.
+
+    This is the whole point: on the shipped path the model never sets the
+    field, so the exemption has to come from the message.
+    """
+    d = _fresh(user_text="Block 10.100.88.102 on the firewall now.")
+    assert d.invest_attempts == 0
+    assert d.evaluate("find_containment_actions", {"target_type": "ip"}) is None
+    assert d.evaluate("emit_action_card", dict(_CARD)) is None
+
+
+def test_an_investigation_request_still_hits_the_floor():
+    """Non-vacuity: same calls, same absent field, ordinary triage phrasing."""
+    d = _fresh(user_text="Investigate alert 12 and tell me what you find.")
+    blocked = d.evaluate("find_containment_actions", {"target_type": "ip"})
+    assert blocked is not None and blocked.get("hunt_floor_guard")
+
+
+def test_no_user_text_is_the_pre_60_behavior():
+    d = _fresh()
+    blocked = d.evaluate("find_containment_actions", {"target_type": "ip"})
+    assert blocked is not None and blocked.get("hunt_floor_guard")
+
+
+def test_latest_user_text_reads_the_last_user_message():
+    class M:
+        def __init__(self, role, content):
+            self.role, self.content = role, content
+
+    assert latest_user_text([M("user", "first"), M("assistant", "hi"),
+                             M("user", "Block that IP.")]) == "Block that IP."
+    # a tool_result turn carries no analyst words -- skip past it
+    msgs = [M("user", "Block that IP."), M("assistant", "ok"),
+            M("user", [{"type": "tool_result", "content": "{}"}])]
+    assert latest_user_text(msgs) == "Block that IP."
+    # text blocks on a user turn are the analyst's words
+    assert latest_user_text([M("user", [{"type": "text", "text": "Isolate it."}])]) \
+        == "Isolate it."
+    assert latest_user_text([]) == ""
+    assert latest_user_text(None) == ""
+    assert latest_user_text([M("assistant", "no user turn here")]) == ""
+
+
+def test_every_provider_seeds_the_discipline_from_the_user_message():
+    """Drift guard. Three providers each build their own TriageDiscipline; a
+    new one (or a refactor of an old one) that forgets `user_text` silently
+    reverts #60 to the inert declared-field path with no test going red.
+    """
+    import pathlib
+    import re as _re
+    llm = pathlib.Path(__file__).resolve().parents[1] / "llm"
+    builders = [p for p in llm.glob("*.py")
+                if "TriageDiscipline(" in p.read_text()]
+    assert len(builders) >= 3, f"expected every provider, found {builders}"
+    for p in builders:
+        src = p.read_text()
+        for call in _re.findall(r"TriageDiscipline\((.*?)\n\s*\)", src, _re.S):
+            assert "user_text=" in call, (
+                f"{p.name} builds TriageDiscipline without user_text= -- the "
+                "analyst-order exemption is inert there")

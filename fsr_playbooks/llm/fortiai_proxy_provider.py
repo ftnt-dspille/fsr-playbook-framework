@@ -22,6 +22,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     TriageDiscipline,
+    latest_user_text,
     compile_errors as _compile_errors,
     extract_yaml_block as _extract_yaml_block,
 )
@@ -253,6 +254,9 @@ class FortiAIProxyProvider:
             capabilities=(getattr(case_state, "capabilities", None)
                           if case_state is not None else None),
             authoring=_authoring,
+            # The analyst's own words are the only reliable carrier of an
+            # explicit containment order -- see `_detect_analyst_order`.
+            user_text=latest_user_text(messages),
         )
 
         # Build initial history (flat messages the proxy understands).
