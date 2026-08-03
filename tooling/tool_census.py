@@ -90,10 +90,37 @@ _BOX_GATED = frozenset({
 })
 
 # Box-gated tools that exist ONLY once the connector registers them at runtime
-# (see #67: the framework advertises 39, a deployed agent sees 61). They are
+# (see #67: the framework advertises 40, a deployed agent sees 62). They are
 # absent from `SAFE_TOOLS` by design, so a membership check against it is the
 # wrong test for them -- but they still must not read as `never-called`.
-_RUNTIME_ONLY = frozenset({"resume_playbook"})
+#
+# The full 22 are read from the committed manifest at
+# `data/connector_tool_registry.json` (see `_load_manifest`). `_RUNTIME_ONLY`
+# is seeded from that manifest so the test that asserts every census tool is
+# known (`SAFE_TOOLS | _RUNTIME_ONLY`) passes box-free. The manifest is the
+# thing that made the census stop needing a live turn to learn the truth.
+_MANIFEST_PATH = _REPO / "data" / "connector_tool_registry.json"
+
+
+def _load_manifest() -> dict | None:
+    """Read the committed connector tool-registry manifest, or None.
+
+    The manifest is generated from the connector's ``register_*_tools``
+    functions (see ``scripts/export_registry_manifest.py`` in the connector
+    repo). It lists the 22 tools the connector adds to ``SAFE_TOOLS`` at
+    runtime, with their tiers and the register function that adds each.
+
+    Without this, a census built from the framework repo alone is blind to
+    36% of the tool surface -- specifically the P1/P2 half (tracker #67).
+    """
+    try:
+        return json.loads(_MANIFEST_PATH.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+_MANIFEST = _load_manifest()
+_RUNTIME_ONLY = frozenset(_MANIFEST["tools"]) if _MANIFEST else frozenset({"resume_playbook"})
 
 
 def _promise(name: str) -> str:
@@ -193,14 +220,26 @@ def harvest_probe(path: Path) -> tuple[dict, set]:
 
 
 def _registry(runtime: Optional[Path]) -> tuple[list, set]:
-    """(all tool names, names the connector registered at runtime)."""
+    """(all tool names, names the connector registered at runtime).
+
+    The 22 connector-registered tools are read from the committed manifest
+    (`data/connector_tool_registry.json`) by default, so the census is no
+    longer blind to 36% of the surface without a live turn (tracker #67).
+    A `--runtime` dump (if given) is merged on top -- it can add tools the
+    manifest doesn't know about yet (e.g. native-MCP materializations)."""
     sys.path.insert(0, str(_REPO))
     from fsr_playbooks.llm.tools import SAFE_TOOLS
-    base = list(SAFE_TOOLS)
-    if runtime is None:
-        return base, set()
-    names = json.loads(runtime.read_text())
-    return sorted(set(names) | set(base)), set(names) - set(base)
+    base = set(SAFE_TOOLS)
+    late: set = set()
+    # The committed manifest -- the static truth for the connector's 22.
+    if _MANIFEST is not None:
+        late.update(_MANIFEST.get("tools", []))
+    # A live runtime dump (optional, on top of the manifest).
+    if runtime is not None:
+        names = set(json.loads(runtime.read_text()))
+        late.update(names - base)
+    all_names = sorted(base | late)
+    return all_names, late
 
 
 def census(*, runtime: Optional[Path], probe: Optional[Path]) -> dict:

@@ -102,3 +102,38 @@ def test_probe_scenarios_count_toward_p1p2_coverage(tmp_path):
             {"conversation": {"tools_called": ["find_containment_actions"]}}]},
     ]})
     assert tc.census(runtime=None, probe=probe)["meta"]["p1p2_covered_by_corpus"]
+
+
+# --- the committed manifest makes the census box-free (tracker #67) -----------
+
+def test_manifest_is_loaded_and_has_the_22_connector_tools():
+    """The committed manifest at data/connector_tool_registry.json is what
+    lets the census know about the 22 connector-registered tools without a
+    live turn. Without it, the census is blind to 36% of the surface (#67)."""
+    assert tc._MANIFEST is not None, "manifest not found at data/connector_tool_registry.json"
+    assert tc._MANIFEST["connector_registered_count"] == 22
+    assert len(tc._MANIFEST["tools"]) == 22
+    assert len(tc._RUNTIME_ONLY) == 22
+
+
+def test_census_includes_connector_tools_without_runtime():
+    """A census with no --runtime and no --probe must still see all 62 tools
+    (40 framework + 22 connector-registered from the manifest), not the 40
+    the framework advertises at import."""
+    rep = tc.census(runtime=None, probe=None)
+    assert rep["meta"]["tools"] == 62
+    assert rep["meta"]["connector_registered"] == 22
+    names = {t["tool"] for t in rep["tools"]}
+    # A sample of the P1/P2 tools the connector registers
+    for name in ("search_module_records", "get_record", "siem_search_ip",
+                 "create_record", "faz_get_alerts", "fmg_get_device_status",
+                 "resume_playbook", "list_module_playbooks"):
+        assert name in names, f"{name} missing -- manifest not merged"
+
+
+def test_find_step_examples_is_in_the_census():
+    """find_step_examples was called by the model but absent from SAFE_TOOLS
+    (#67). It is now registered, so the census must see it."""
+    rep = tc.census(runtime=None, probe=None)
+    names = {t["tool"] for t in rep["tools"]}
+    assert "find_step_examples" in names
