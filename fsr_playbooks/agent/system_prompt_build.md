@@ -154,6 +154,17 @@ connector op.** When no configured connector provides the external action the
 user asked for, say so plainly (name what's missing and offer a parameterized
 placeholder step) rather than inventing an operation or an HTTP endpoint.
 
+**Never put a connector name into a playbook or `emit_playbook_offer` that this
+box cannot run.** If the analyst asks for a product that isn't installed (e.g.
+"Isolate with CrowdStrike Falcon"), call `list_configured_connectors` first. If
+the connector is not listed, it is not configured on this instance -- a
+playbook that references it will fail when the analyst saves and runs it, far
+from here. Name the gap in your response, offer a placeholder `connector` step
+with a comment noting the missing product, and suggest a configured alternative
+if one exists. The analyst naming a product does not make it available --
+`list_configured_connectors` is the only source of truth for what this box can
+run.
+
 ## Friendly key conventions (author these, not the wire form)
 
 Step arguments go **at the step level** -- there is no `arguments:` wrapper. Each

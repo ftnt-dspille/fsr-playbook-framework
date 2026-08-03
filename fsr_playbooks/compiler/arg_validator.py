@@ -48,6 +48,21 @@ _FRAMEWORK_PARAMS = frozenset({
     "response_mapping",
 })
 
+# Wire kwargs that a specific handler legitimately accepts through its
+# `**kwargs`, keyed by handler name. Without this the generic unknown-arg
+# warning fires on keys the compiler itself emits: the find_record
+# normalizer calls `a.setdefault("checkboxFields", False)` on EVERY
+# find_record step, so every such step in every playbook drew a warning
+# about an argument no author wrote. Same class of false positive as the
+# manual_input block above, but scoped per handler so a genuinely bogus
+# key on some OTHER handler still warns.
+_HANDLER_KWARGS = {
+    # find_data(module, query, partial=True, **kw). checkboxFields pairs with
+    # the `select:` projection -- the editor deletes __selectFields when it is
+    # false, so the resolver always writes it.
+    "find_data": frozenset({"checkboxFields", "__selectFields"}),
+}
+
 
 class ArgValidator:
     def __init__(self, conn: sqlite3.Connection):
@@ -125,8 +140,9 @@ class ArgValidator:
                     path=f"{path}.arguments.{r}",
                 ))
 
+        handler_kwargs = _HANDLER_KWARGS.get(step.handler, frozenset())
         for k in provided:
-            if k in named_params or k in _FRAMEWORK_PARAMS:
+            if k in named_params or k in _FRAMEWORK_PARAMS or k in handler_kwargs:
                 continue
             if accepts_kwargs:
                 # Handler accepts **kwargs so technically the arg is legal
