@@ -77,6 +77,25 @@ _PROMISE_RULES: tuple[tuple[str, str], ...] = (
 )
 
 
+# Tools that CANNOT be called offline no matter how wide the corpus gets:
+# each one's whole job is to touch a live appliance. A sealed run reaches the
+# tier gate or the client and stops, so they land in the same zero bucket as a
+# tool nobody wants -- opposite conclusions from an identical number. Naming
+# them is what keeps a box-free census from proposing to delete P3.
+_BOX_GATED = frozenset({
+    "push_playbook", "dry_run_playbook", "get_run_env",
+    "healthcheck_connector", "diagnose_yaml_against_pb_execution",
+    "run_playbook", "resume_playbook", "list_playbook_runs",
+    "why_did_playbook_fail",
+})
+
+# Box-gated tools that exist ONLY once the connector registers them at runtime
+# (see #67: the framework advertises 39, a deployed agent sees 61). They are
+# absent from `SAFE_TOOLS` by design, so a membership check against it is the
+# wrong test for them -- but they still must not read as `never-called`.
+_RUNTIME_ONLY = frozenset({"resume_playbook"})
+
+
 def _promise(name: str) -> str:
     for key, promise in _PROMISE_RULES:
         if name == key or name.startswith(key):
@@ -134,15 +153,43 @@ def harvest_eval_runs(root: Path) -> tuple[dict, set, int]:
     return dict(stats), tasks, rows
 
 
-def harvest_probe(path: Path) -> dict:
-    """Per-tool call counts from a real-loop probe run (`tools_called` rows)."""
+def harvest_probe(path: Path) -> tuple[dict, set]:
+    """Per-tool call counts from a real-loop probe run. Returns (stats, names).
+
+    Two shapes are accepted, because the two instruments that drive the real
+    agent loop box-free write different files and neither is worth a converter:
+
+      * `{"rows": [{"scenario": ..., "tools_called": [...]}]}` --
+        `guard_fire_rates.py`, six authoring scenarios.
+      * `{"scenarios": [{"scenario": ..., "runs": [{"conversation": {...}}]}]}`
+        -- the connector's `chat_sweep.py --out --keep-conversations`, a
+        twenty-eight scenario corpus that DOES cover triage, investigation and
+        containment. That corpus is the whole point: the archived eval matrices
+        contain no invest_*/contain_* rows at all, so every "unused" verdict on
+        a P1/P2 tool so far was structural rather than observed.
+
+    The returned name set is the scenario names, which is what lets the caller
+    decide whether P1/P2 was actually reachable instead of assuming it.
+    """
     stats: dict[str, dict[str, int]] = collections.defaultdict(
         lambda: {"calls": 0, "result_chars": 0, "fails": 0})
+    seen: set = set()
     data = json.loads(path.read_text())
+
+    def _count(names) -> None:
+        for name in names or []:
+            if name:
+                stats[name]["calls"] += 1
+
     for row in data.get("rows") or []:
-        for name in row.get("tools_called") or []:
-            stats[name]["calls"] += 1
-    return dict(stats)
+        seen.add(row.get("scenario"))
+        _count(row.get("tools_called"))
+    for sc in data.get("scenarios") or []:
+        seen.add(sc.get("scenario") or sc.get("name"))
+        for run in sc.get("runs") or []:
+            conv = run.get("conversation") or {}
+            _count(conv.get("tools_called"))
+    return dict(stats), {s for s in seen if s}
 
 
 def _registry(runtime: Optional[Path]) -> tuple[list, set]:
@@ -159,12 +206,13 @@ def _registry(runtime: Optional[Path]) -> tuple[list, set]:
 def census(*, runtime: Optional[Path], probe: Optional[Path]) -> dict:
     names, late = _registry(runtime)
     eval_stats, tasks, rows = harvest_eval_runs(_REPO / "data" / "eval_runs")
-    probe_stats = harvest_probe(probe) if probe else {}
+    probe_stats, probe_tasks = harvest_probe(probe) if probe else ({}, set())
 
     # A task corpus with no investigation/containment fixtures cannot speak to
-    # P1/P2 tools at all. Detect that rather than assume it.
+    # P1/P2 tools at all. Detect that rather than assume it -- and count the
+    # probe's scenarios, since that is where the offline P1/P2 rows now live.
     covered_p1p2 = any(t and ("invest" in t or "contain" in t or "triage" in t)
-                       for t in tasks)
+                       for t in tasks | probe_tasks)
 
     out = []
     for name in names:
@@ -180,6 +228,10 @@ def census(*, runtime: Optional[Path], probe: Optional[Path]) -> dict:
             verdict = "unreachable-in-corpus"
         elif name in late and not probe:
             verdict = "unreachable-in-corpus"
+        elif name in _BOX_GATED:
+            # Unreachable offline by construction, not unwanted. A cut list
+            # that reads this zero as "never-called" deletes P3.
+            verdict = "needs-box"
         else:
             verdict = "never-called"
         out.append({
