@@ -1025,12 +1025,12 @@ def _is_error_result(result: Any) -> bool:
     `is_error` flag. Recognizes the canonical `{ok: false}` envelope
     (from `_err`) and a bare `{error: ...}` dict.
 
-    Guard-redirect results (kind=='guard_redirect') are steering, not errors,
-    so they don't get flagged."""
+    Guard results (kind=='guard_redirect' or 'guard_defer') are steering, not
+    errors, so they don't get flagged."""
     if not isinstance(result, dict):
         return False
-    # Guard redirects are steering, not errors
-    if result.get("kind") == "guard_redirect":
+    # Guard redirects and deferrals are steering, not errors
+    if result.get("kind") in ("guard_redirect", "guard_defer"):
         return False
     return result.get("ok") is False or "error" in result
 

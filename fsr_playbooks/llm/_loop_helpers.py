@@ -576,9 +576,20 @@ def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
 class TriageDiscipline:
     """Per-session triage guard. ``evaluate(name, args)`` atomically checks the
     three discipline rules and, when the call is allowed, records it -- returning
-    a guard envelope (``{"ok": False, …}``) to short-circuit dispatch or ``None``
-    to proceed. ONE atomic call so the read-only parallel batch (dispatched
-    across threads via ``asyncio.to_thread``) can't race the counter/seen-set.
+    a guard envelope to short-circuit dispatch or ``None`` to proceed. ONE
+    atomic call so the read-only parallel batch (dispatched across threads via
+    ``asyncio.to_thread``) can't race the counter/seen-set.
+
+    Two guard *shapes* are returned, and the distinction is load-bearing
+    (tracker #60):
+
+    * ``kind: "guard_defer"`` (``ok: True``, ``directive``) -- a NON-terminal
+      deferral. The hunt-floor guard uses this: "investigate first, then retry."
+      It must NOT read as a tool failure, or the model ends the turn on a
+      perfectly good reason to stop (an ``ok: false`` tool_result).
+    * ``kind: "guard_redirect"`` (``ok: False``, ``error``) -- a TERMINAL
+      redirect. The forbidden-pivot, call-once and capability guards use this:
+      "don't do this; do something else."
 
     Attempts -- not successes -- count toward the hunt floor, so a config gap or a
     failing enrichment can't deadlock the floor (the model still gets credit for
@@ -737,8 +748,23 @@ class TriageDiscipline:
                     "or pivot the host with `siem_search_host` / `get_ip_context`"
                 )
             return {
-                "ok": False,
-                "kind": "guard_redirect",
+                # A deferral is NOT a failure -- it is steering. The envelope
+                # MUST read as "deferred, go investigate, then retry", not "this
+                # call failed" (tracker #60). On the box model a deferral arrived
+                # as {ok: false, error: ...} -- the same shape as an ordinary tool
+                # failure -- and an ordinary failure is a good reason to end a
+                # turn. That is exactly the 33% failure mode: the model read the
+                # deferral as a failure and stopped. So the deferral gets its OWN
+                # shape: ok: true (the guard succeeded in deferring), kind:
+                # "guard_defer" (distinct from a terminal guard_redirect),
+                # `directive` (not `error`), and `deferred`/`executed` flags so
+                # the model can tell a deferred call from a failed one at a
+                # glance. The terminal guards (forbidden pivot, call-once,
+                # capability) keep the failure-shaped guard_redirect envelope.
+                "ok": True,
+                "kind": "guard_defer",
+                "deferred": True,
+                "executed": False,
                 "hunt_floor_guard": True,
                 "investigation_calls": self.invest_attempts,
                 "required": self.floor,
@@ -746,7 +772,7 @@ class TriageDiscipline:
                 # it does not cancel it. Callers keep the block non-terminal for
                 # exactly this reason (see the provider dispatch sites).
                 "resume_call": name,
-                "error": (
+                "directive": (
                     f"Deferred, not cancelled: `{name}` was NOT executed yet. "
                     f"You've run {self.invest_attempts} of {self.floor} required "
                     f"investigation steps, and staging containment now would act "

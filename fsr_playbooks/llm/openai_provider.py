@@ -994,8 +994,13 @@ class OpenAIProvider:
 
 
 def _is_error_result(result: Any) -> bool:
-    return isinstance(result, dict) and (
-        result.get("ok") is False or "error" in result)
+    if not isinstance(result, dict):
+        return False
+    # Guard redirects and deferrals are steering, not errors (parity with
+    # the Anthropic provider; tracker #60).
+    if result.get("kind") in ("guard_redirect", "guard_defer"):
+        return False
+    return result.get("ok") is False or "error" in result
 
 
 def _stringify(result: Any) -> str:

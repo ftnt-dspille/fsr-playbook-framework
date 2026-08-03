@@ -175,23 +175,29 @@ def test_build_tools_unaffected():
 
 # ─────────────── P2: guard seeding + state mutation ────────────────
 
-def test_guard_rejection_carries_kind_guard_redirect():
-    """All three discipline rejections carry kind='guard_redirect' (design item 6)."""
-    # 1. Hunt floor guard
+def test_guard_rejection_carries_the_right_kind():
+    """Each discipline rejection carries its distinguishing `kind` (design item 6).
+
+    The hunt-floor guard is a DEFERRAL (retry later), not a terminal redirect,
+    so it carries kind='guard_defer' -- a distinct shape from a tool failure
+    (tracker #60). The forbidden-pivot and call-once guards are terminal, so
+    they keep kind='guard_redirect'.
+    """
+    # 1. Hunt floor guard -- a deferral, not a terminal redirect
     d = TriageDiscipline()
     g = d.evaluate("find_containment_actions", {})
     assert g is not None
-    assert g.get("kind") == "guard_redirect"
+    assert g.get("kind") == "guard_defer"
     assert g.get("hunt_floor_guard") is True
 
-    # 2. Forbidden pivot guard
+    # 2. Forbidden pivot guard -- terminal
     d2 = TriageDiscipline()
     g2 = d2.evaluate("run_op", {"connector": "virustotal", "params": {"ip": "10.0.0.1"}})
     assert g2 is not None
     assert g2.get("kind") == "guard_redirect"
     assert g2.get("forbidden_pivot_guard") is True
 
-    # 3. Call-once guard
+    # 3. Call-once guard -- terminal
     d3 = TriageDiscipline()
     _drive(d3, "find_enrichment_actions", {})
     g3 = _drive(d3, "find_enrichment_actions", {})
@@ -310,23 +316,25 @@ def test_no_state_behavior_unchanged():
 
 @pytest.mark.skipif(_is_error_result is None, reason="_is_error_result not available")
 def test_is_error_result_guards_not_errors():
-    """Provider does NOT flag guard_redirect results as is_error (design item 6).
+    """Provider does NOT flag guard results as is_error (design item 6).
 
-    Guard redirects are steering, not errors -- they should be rendered
-    as info-tone steering, not red errors.
+    Guard redirects and deferrals are steering, not errors -- they should be
+    rendered as info-tone steering, not red errors.
     """
     # Regular errors are marked is_error
     assert _is_error_result({"ok": False, "error": "something failed"}) is True
     assert _is_error_result({"error": "missing resource"}) is True
 
-    # Guard-redirect results are NOT marked is_error
+    # Hunt-floor deferral -- new shape (ok: true, directive, not error)
     assert _is_error_result({
-        "ok": False,
-        "kind": "guard_redirect",
+        "ok": True,
+        "kind": "guard_defer",
+        "deferred": True,
         "hunt_floor_guard": True,
-        "error": "Do not call yet",
+        "directive": "Deferred -- investigate first, then retry",
     }) is False
 
+    # Guard-redirect results are NOT marked is_error
     assert _is_error_result({
         "ok": False,
         "kind": "guard_redirect",
@@ -509,11 +517,34 @@ def test_hunt_floor_block_instructs_the_retry():
     assert g is not None and g["hunt_floor_guard"] is True
     # Structural: the envelope names the call to resume.
     assert g["resume_call"] == "find_containment_actions"
-    err = g["error"]
-    assert "AGAIN" in err, "the guard must license the retry, not just defer it"
-    assert "Do NOT repeat this call" not in err, (
+    msg = g["directive"]
+    assert "AGAIN" in msg, "the guard must license the retry, not just defer it"
+    assert "Do NOT repeat this call" not in msg, (
         "the old wording read as a cancellation and cost card #43 its P2 evidence"
     )
+
+
+def test_hunt_floor_deferral_has_a_distinct_shape_from_failure():
+    """The deferral envelope must NOT read as a tool failure (tracker #60).
+
+    The 33% failure mode: the model read {ok: false, error: ...} as 'this call
+    failed' and ended the turn. The deferral now carries ok: true, kind:
+    'guard_defer', `directive` (not `error`), and `deferred`/`executed` flags so
+    a deferral is distinguishable from a failure at a glance.
+    """
+    d = TriageDiscipline()
+    g = _drive(d, "find_containment_actions", {"target_type": "ip"})
+    assert g is not None
+    # NOT a failure shape
+    assert g["ok"] is True, "a deferral is not a failure"
+    assert "error" not in g, "a deferral carries a directive, not an error"
+    # IS a deferral shape
+    assert g["kind"] == "guard_defer"
+    assert g["deferred"] is True
+    assert g["executed"] is False
+    assert "directive" in g
+    # Still carries the hunt-floor markers scoring keys off
+    assert g["hunt_floor_guard"] is True
 
 
 def test_hunt_floor_unlocks_after_investigation():
