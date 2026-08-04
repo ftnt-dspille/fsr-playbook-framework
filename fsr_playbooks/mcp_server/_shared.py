@@ -924,6 +924,7 @@ def _safe_op_category(connector: str, op: str) -> str:
 # before.
 
 _LIVE_CATALOG_PROBE: "Any" = None
+_AUTO_REWARM: "Any" = None
 
 
 def set_live_catalog_probe(fn: "Any") -> None:
@@ -936,6 +937,19 @@ def set_live_catalog_probe(fn: "Any") -> None:
     """
     global _LIVE_CATALOG_PROBE
     _LIVE_CATALOG_PROBE = fn
+
+
+def set_auto_rewarm(fn: "Any") -> None:
+    """Register a connector callback that force-warms the reference catalog.
+
+    Called when the on-miss probe confirms the catalog is stale (the box has
+    a connector the catalog doesn't).  The callback should perform a
+    ``warmup(force=True)`` and invalidate the probe cache.  Signature:
+    ``fn() -> bool`` -- returns True if the warm succeeded.  Absent a
+    callback, the probe returns a hint but does not self-heal (#17).
+    """
+    global _AUTO_REWARM
+    _AUTO_REWARM = fn
 
 
 def box_has_connector(connector: str) -> bool | None:
@@ -966,16 +980,31 @@ def stale_catalog_hint(connector: str) -> dict[str, Any] | None:
     Callers merge this into their ``unknown_connector`` envelope so the agent --
     and the analyst reading the transcript -- see the real cause instead of a
     phantom "doesn't exist".
+
+    When an auto-rewarm callback is registered (``set_auto_rewarm``), a
+    confirmed staleness detection triggers an immediate force-warm so the
+    catalog self-heals on the next retry instead of staying stale until the
+    next re-ship (#17).
     """
     if box_has_connector(connector) is not True:
         return None
+    # Self-heal: the box has a connector the catalog doesn't.  Trigger a
+    # force-warm so the next call finds it.  Best-effort -- the hint is
+    # still returned so the caller can surface the cause even if the warm
+    # fails or no callback is registered.
+    if _AUTO_REWARM is not None:
+        try:
+            _AUTO_REWARM()
+        except Exception:  # noqa: BLE001 -- a diagnostic must never raise
+            pass
     return {
         "code": "stale_catalog",
         "message": (
             f"connector {connector!r} IS installed on this FortiSOAR instance "
             f"but is missing from the reference catalog -- the catalog was "
             f"warmed before it was installed. This is a catalog staleness "
-            f"problem, NOT a missing connector."
+            f"problem, NOT a missing connector. The catalog is being "
+            f"re-warmed automatically; retry in a moment."
         ),
         "suggestions": [
             "Re-warm the catalog (warmup with force=True), then retry.",
