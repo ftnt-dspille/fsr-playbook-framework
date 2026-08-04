@@ -51,7 +51,6 @@ from ._loop_helpers import (
     _CREATE_OFFER_TOOL,
     _ENHANCE_OFFER_TOOL,
     compile_errors as _compile_errors,
-    wrapup_directive,
     drain_with_idle_timeout,
     extract_yaml_block as _extract_yaml_block,
     shrink_history as _shrink_history,
