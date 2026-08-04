@@ -252,6 +252,31 @@ def emit_action_card(
     param_err = _validate_op_params(connector, operation, args)
     if param_err is not None:
         return param_err
+    # Configured-ness check: emit_action_card is triage-only, so a live box is
+    # always available in production. An op that exists in the catalog but has
+    # no active configuration on this instance cannot run once approved -- the
+    # analyst would say yes and execution would fail. Catch it here (before the
+    # card renders) instead of after approval. Fails open on any preflight
+    # hiccup (transient network, no live target, box unreachable) so a real op
+    # is never false-rejected.
+    try:
+        import socket
+        import urllib.parse as _up
+        import os as _os
+        _base = (_os.environ.get("FSR_BASE_URL") or "")
+        if _base:
+            _host = _up.urlparse(_base).hostname
+            _port = _up.urlparse(_base).port or (443 if _base.startswith("https") else 80)
+            _sock = socket.create_connection((_host, _port), timeout=3)
+            _sock.close()
+            from .tools_execution import _preflight_connector, _live_client_for_grounding
+            _client = _live_client_for_grounding()
+            if _client is not None:
+                cfg_err = _preflight_connector(_client, connector)
+                if cfg_err is not None:
+                    return cfg_err
+    except Exception:
+        pass  # fail open -- never block a real op on a preflight hiccup
     # Record the staged action into the session trace so a later trace-built
     # playbook AUTOMATES it -- the analyst was offered this containment but it
     # was never executed, so `run_op` never recorded it and the trace compiler
