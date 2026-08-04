@@ -1013,6 +1013,52 @@ def wrapup_directive(history: list[dict[str, Any]],
     return _WRAPUP_NO_YAML.format(n=max_turns), DEFAULT_MAX_OUTPUT_TOKENS
 
 
+# ---------------------------------------------------------------------------
+# Budget-ask: when the tool-turn budget runs out, ask the analyst before
+# forcing wrap-up. The provider emits a `emit_choice_card` (tier 0) with the
+# args from `budget_ask_card()`; the connector's _wire_transcript splices it
+# into a `choice_card` event, and `_envelope_stop_reason` maps the turn to
+# `awaiting_choice`. On resume:
+#   - "continue" -> a fresh chat_turn with BUDGET_CONTINUE_ROUNDS extra rounds
+#   - "deliver"  -> a fresh chat_turn with no tools (forced wrap-up)
+# Both providers share this so the card text + options are identical.
+# ---------------------------------------------------------------------------
+
+_BUDGET_ASK_PROMPT = (
+    "I've used all {n} of my tool-turn budget researching this. "
+    "Would you like me to continue with more rounds, or deliver "
+    "what I have so far?"
+)
+
+_BUDGET_ASK_OPTIONS = [
+    {"label": "Continue with more rounds",
+     "value": "continue",
+     "hint": "Give the agent 8 more tool rounds to finish the work."},
+    {"label": "Deliver now",
+     "value": "deliver",
+     "hint": "Stop researching and deliver the best draft from what was found."},
+]
+
+# Extra tool rounds granted on a "continue" resume. Deliberately less than the
+# original budget: the turn was already long, and the analyst can ask again.
+BUDGET_CONTINUE_ROUNDS = 8
+
+
+def budget_ask_card(max_turns: int = MAX_TOOL_TURNS) -> dict[str, Any]:
+    """The choice card args the provider emits at budget exhaustion.
+
+    Returns the args dict for a `emit_choice_card` dispatch call. The provider
+    dispatches this directly (tier 0) so the card lands in the transcript and
+    the widget renders it. The turn ends after the card; the analyst's resume
+    decision drives the next turn.
+    """
+    return {
+        "id": "_budget_ask",
+        "prompt": _BUDGET_ASK_PROMPT.format(n=max_turns),
+        "options": list(_BUDGET_ASK_OPTIONS),
+    }
+
+
 def compile_errors(yaml_text: str) -> str | None:
     """Run the same compiler the editor uses; return a bullet list of
     blocking errors or None if clean. Imported lazily so a missing

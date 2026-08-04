@@ -149,6 +149,7 @@ class LLMProvider(Protocol):
         tools: list[dict[str, Any]],
         tags: dict[str, Any] | None = None,
         case_state: Any | None = None,
+        max_tool_turns: int | None = None,
     ) -> AsyncIterator[Event]:
         """Stream events for one user turn. Implementations MUST emit
         a `UsageEvent` after each LLM round-trip (before any tool

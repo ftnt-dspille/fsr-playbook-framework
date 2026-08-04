@@ -217,6 +217,7 @@ async def run_agent_turn(
     coalesce_text: bool = True,
     timeout_secs: float = 600,
     case_state: Any = None,              # CaseState | None, kept as Any to keep this file's imports cheap
+    max_tool_turns: int | None = None,   # budget-ask resume (None → provider default)
 ) -> TurnResult:
     """Drive one user turn through the provider and return the transcript.
 
@@ -287,7 +288,7 @@ async def run_agent_turn(
         async with _total_timeout(timeout_secs):
             async for ev in provider.stream(
                 system=system, messages=messages, tools=tools, tags=tags,
-                case_state=case_state,
+                case_state=case_state, max_tool_turns=max_tool_turns,
             ):
                 await _fire_event_callback(on_event, ev)
                 result.transcript.append(ev)

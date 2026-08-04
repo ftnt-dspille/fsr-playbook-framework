@@ -366,6 +366,7 @@ class AnthropicProvider:
         tools: list[dict[str, Any]],
         tags: dict[str, Any] | None = None,
         case_state: Any = None,  # CaseState | None, kept as Any to avoid import
+        max_tool_turns: int | None = None,  # budget-ask resume (None → MAX_TOOL_TURNS)
     ) -> AsyncIterator[Event]:
         import uuid as _uuid
 
@@ -490,7 +491,8 @@ class AnthropicProvider:
             else:
                 cached_tools.append(t)
 
-        for _turn in range(MAX_TOOL_TURNS):
+        _turn_budget = max_tool_turns or MAX_TOOL_TURNS
+        for _turn in range(_turn_budget):
             turn_idx += 1
             # Compact older turns: dedupe idempotent-tool results and
             # cap older validate_yaml/compile_yaml bodies. Only mutates
@@ -1001,23 +1003,23 @@ class AnthropicProvider:
                 tool_calls=tool_call_usage, tags=tags,
             )
 
-        # Tool-turn budget exhausted. Without a final assistant message
-        # the chat just goes silent -- the user can't tell whether the
-        # agent finished or got cut off. Force one more no-tools round
-        # so the model can summarize where it landed and what's left.
-        turn_idx += 1
-        _directive, _wrapup_tokens = wrapup_directive(history)
-        async for ev in self._wrapup_call(
-            history=history,
-            directive=_directive,
-            max_tokens=_wrapup_tokens,
-            cached_system=cached_system, session_id=session_id,
-            turn_idx=turn_idx, tags=tags,
-            self_repair_turns=self_repair_turns,
-            stop_reason_label="max_tool_turns_summary",
-        ):
-            yield ev
+        # Tool-turn budget exhausted -- emit a choice card asking the
+        # analyst whether to continue with more rounds or deliver what we
+        # have. The card is a real tool dispatch (tier 0) so it lands in the
+        # transcript and the connector's _wire_transcript post-processes it
+        # into a choice_card event the widget renders. On resume: "continue"
+        # -> a fresh turn with the same tools; "deliver" -> a fresh no-tools
+        # wrap-up turn.
+        from ._loop_helpers import budget_ask_card
+        _card = budget_ask_card(_turn_budget)
+        _card_result = dispatch("emit_choice_card", _card, _internal=True)
+        yield ToolUseEvent(
+            name="emit_choice_card", arguments=_card, call_id="_budget_ask",
+            tier=0,
+        )
+        yield ToolResultEvent(call_id="_budget_ask", result=_card_result)
         yield DoneEvent(stop_reason="max_tool_turns")
+        return
 
 
 def _is_error_result(result: Any) -> bool:
