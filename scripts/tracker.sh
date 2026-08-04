@@ -223,14 +223,22 @@ import sys, json
 data = json.load(sys.stdin)
 for item in data.get('items', []):
     if item['id'] != '$iid': continue
+    # \`gh project item-list --format json\` returns each board field as a FLAT
+    # top-level key on the item ('status', 'promise', 'horizon', 'needs box',
+    # 'component') -- there is no 'fieldValues' array. Reading one meant \`show\`
+    # reported '(no fields set)' for every card on the board, including cards
+    # whose fields had just been written successfully.
+    skip = {'id', 'content', 'title', 'repository'}
     shown = False
-    for fv in item.get('fieldValues', []):
-        name = fv.get('name', '')
-        val = fv.get('text') or fv.get('title') or ''
-        if name and val:
+    for name in ('status', 'promise', 'horizon', 'needs box', 'component'):
+        val = item.get(name)
+        if val:
             print(f'  {name}: {val}'); shown = True
-        elif name and fv.get('optionIds'):
-            print(f'  {name}: (set)'); shown = True
+    for name, val in sorted(item.items()):
+        if name in skip or name in ('status', 'promise', 'horizon', 'needs box', 'component'):
+            continue
+        if val:
+            print(f'  {name}: {val}'); shown = True
     if not shown:
         print('  (on the board, no fields set)')
 "
