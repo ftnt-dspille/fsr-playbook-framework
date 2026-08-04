@@ -88,6 +88,36 @@ TRIAGE_ONLY_TOOLS: set[str] = {
     "run_op",
 }
 
+# The "run an ALREADY-DEPLOYED playbook" verb, exempt from BOTH subtractions.
+#
+# `run_playbook` was already deliberately in both slices -- authoring a playbook
+# and running one are different verbs. But the tools that make a run USABLE were
+# split across the two sets, so neither intent held the whole verb:
+#
+#   build had run_playbook but not resume_playbook -- it could START a run it
+#   could not RESUME, so a run that paused on a manual-input step was stranded
+#   in that intent. This is the same false premise that produced the
+#   `run_not_permitted` outage ("run_playbook only surfaces via a persona's
+#   tools.allow" -- it does not; it is in the build slice, which binds no
+#   persona). That fix unblocked approval; it did not close the gap behind it.
+#
+#   triage had list_module_playbooks but not search_playbooks -- it could
+#   enumerate one module's playbooks but had no global search, so naming a
+#   playbook the analyst describes in prose ("run the block-IP one") depended on
+#   the model already knowing the name or uuid.
+#
+# Exempting a named set is the point: the two frozensets were each written for a
+# different purpose (one means "authoring", the other "live investigation"), and
+# hand-editing both to agree about a THIRD concern is how they drift apart.
+# `test_run_verb_whole_in_every_intent` asserts the invariant directly.
+#
+# Deliberately NOT here: `push_playbook` (deploying a NEW playbook is authoring,
+# not running a deployed one) and the YAML/authoring surface generally.
+RUN_VERB_TOOLS = frozenset({
+    "run_playbook", "resume_playbook",
+    "search_playbooks", "list_module_playbooks",
+})
+
 # Inline fallbacks used only when the vendored markdown can't be read (keeps
 # the agent functional even if packaging drops the .md files).
 _FALLBACK_BUILD_PROMPT = (
@@ -244,16 +274,23 @@ def tools_for_intent(intent: str) -> list[dict[str, Any]]:
     - ``build``  -- the full registry minus the triage-only (containment-staging
       ``emit_action_card``, direct ``run_op``, alert/incident investigation)
       tools, so authoring mode never stages containment action-cards.
+
+    ``RUN_VERB_TOOLS`` survives BOTH subtractions: running an already-deployed
+    playbook is a whole verb in either intent, and splitting it across the two
+    sets left build able to start a run it could not resume.
+
+    ``TRIAGE_ONLY_TOOLS`` is read at CALL time (not import time) because the
+    connector extends it during registration -- keep the subtraction here.
     """
     from fsr_playbooks.llm.tools import anthropic_tools
-    if resolve_intent(intent) == "triage":
-        return [t for t in anthropic_tools() if t["name"] not in BUILD_ONLY_TOOLS]
-    return [t for t in anthropic_tools() if t["name"] not in TRIAGE_ONLY_TOOLS]
+    drop = (BUILD_ONLY_TOOLS if resolve_intent(intent) == "triage"
+            else TRIAGE_ONLY_TOOLS) - RUN_VERB_TOOLS
+    return [t for t in anthropic_tools() if t["name"] not in drop]
 
 
 __all__ = [
     "INTENTS", "DEFAULT_INTENT", "BUILD_ONLY_TOOLS", "TRIAGE_ONLY_TOOLS",
-    "ENHANCE_ONLY_TOOLS",
+    "ENHANCE_ONLY_TOOLS", "RUN_VERB_TOOLS",
     "resolve_intent", "load_intent_prompt", "tools_for_intent",
     "classify_message", "gate_directive",
     "TRIVIAL", "CONTINUE", "DIRECTIVE",
