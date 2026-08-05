@@ -3025,8 +3025,19 @@ def cmd_evals(args: argparse.Namespace) -> int:
         except FileNotFoundError as e:
             print(f"warning: {e}", file=sys.stderr)
         else:
+            delta = delta_vs(prior, matrix)
             print()
-            print(render_delta(delta_vs(prior, matrix)))
+            print(render_delta(delta))
+            regressed = [c for c in delta["cells"]
+                         if c.get("status") == "regressed"]
+            if regressed:
+                print(f"\nFAIL: {len(regressed)} task(s) regressed vs "
+                      f"baseline {args.baseline}", file=sys.stderr)
+                for c in regressed:
+                    print(f"  {c['model']}/{c['task']}: "
+                          f"{c['before']:.0%} -> {c['after']:.0%}",
+                          file=sys.stderr)
+                return 1
 
     any_progress = any(s.get("score", 0) > 0
                        for s in matrix["summary"].values())
