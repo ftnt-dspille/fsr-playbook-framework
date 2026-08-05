@@ -6,6 +6,7 @@
 #   make dev         -- both, in parallel; Ctrl-C kills the group
 #   make e2e         -- run every examples/*.test.yaml against the live FSR
 #   make tests       -- fast pytest (excludes live + slow)
+#   make tests-random-- every offline suite under 3 randomized orders
 #
 # Notes:
 #   - Backend reads .env at the repo root (FSR_BASE_URL, ANTHROPIC_API_KEY, …).
@@ -32,7 +33,8 @@ sync: ## create .venv (if missing) and install all editable deps via uv
 	@[ -d .venv ] || env -u VIRTUAL_ENV uv venv --python 3.13
 	@# Clear a stray VIRTUAL_ENV/conda env so deps land in THIS repo's .venv,
 	@# not whatever venv the caller happened to have active.
-	env -u VIRTUAL_ENV -u CONDA_PREFIX uv pip install -e ../pyfsr -e . -e ./web pytest requests-mock anyio ruff
+	@# pytest-randomly powers `make tests-random` (the order-dependence gate).
+	env -u VIRTUAL_ENV -u CONDA_PREFIX uv pip install -e ../pyfsr -e . -e ./web pytest pytest-randomly requests-mock anyio ruff
 
 preflight: ## check dev ports are free; print holders if not
 	@for p in $(PORT_BACKEND) $(PORT_FRONTEND); do \
@@ -68,6 +70,25 @@ e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
 
 tests: ## fast pytest (excludes live + slow); incl. the offline golden-trace pin
 	$(PY) -m pytest tooling/tests/ -q -m "not live and not slow"
+
+# Order-dependence gate (PLAN_testing_that_can_fail 0.3). A suite whose tests
+# leak state into one another can go green for reasons unrelated to the code --
+# the same "passes for the wrong reason" family as everything else in that plan,
+# one level up. pytest-randomly shuffles collection; three FIXED seeds keep this
+# target reproducible while still varying the order (a random seed per run turns
+# a real leak into an intermittent red nobody can reproduce).
+#
+# It found two real leaks on the day it was added: the FSR live-client seam that
+# `local_turn` rebinds and never restores, and the global approval-grant table.
+RANDOM_SEEDS ?= 1 7 42
+tests-random: ## run every offline suite under 3 randomized collection orders
+	@for s in $(RANDOM_SEEDS); do \
+	  echo "→ seed $$s"; \
+	  $(VENV_PY) -m pytest fsr_playbooks/tests/ -q --randomly-seed=$$s || exit 1; \
+	  $(VENV_PY) -m pytest tooling/tests/ -q -m "not live and not slow" --randomly-seed=$$s || exit 1; \
+	  (cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q --randomly-seed=$$s) || exit 1; \
+	done
+	@echo "✓ no order-dependent tests under seeds: $(RANDOM_SEEDS)"
 
 release: ## cut a PyPI release: make release VERSION=0.4.23 [NOTES="..."] (see RELEASING.md)
 	@[ -n "$(VERSION)" ] || { echo "usage: make release VERSION=X.Y.Z [NOTES=\"...\"]"; exit 2; }

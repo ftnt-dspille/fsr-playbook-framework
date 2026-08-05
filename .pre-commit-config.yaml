@@ -26,6 +26,20 @@ repos:
 
   - repo: local
     hooks:
+      - id: hook-liveness
+        name: hook liveness (no gate that selects nothing)
+        # The meta-gate. Two hooks below were scoped to `^python/` after the
+        # REORG renamed that directory to `tooling/`; they matched zero files,
+        # so ruff and pytest silently stopped running at commit time and the
+        # output was indistinguishable from a clean pass. Asserts every `files:`
+        # / `exclude:` pattern in THIS file still selects a tracked path.
+        # always_run + pass_filenames: false -- a liveness check that could
+        # itself go dead would be the joke writing itself.
+        entry: python3 scripts/check_hook_liveness.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: infra-leak-guard
         name: infra-leak guard (no internal hosts in tracked source)
         # Blocks vendor subdomains, plus the lab-specific patterns in the
