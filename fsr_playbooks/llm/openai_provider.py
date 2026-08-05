@@ -470,7 +470,10 @@ class OpenAIProvider:
         # Own the wire format: openai_tools() when the caller passed nothing,
         # else coerce whatever shape we were handed (the connector advertises
         # Anthropic-shaped tools for triage) into the OpenAI envelope.
-        tools = _normalize_tools(tools) if tools else openai_tools()
+        # `tools is not None` (not `if tools`): the budget-ask "deliver" path
+        # passes tools=[] to force a no-research wrap-up turn; `if tools` would
+        # silently replace [] with the full tool list, defeating the guard.
+        tools = _normalize_tools(tools) if tools is not None else openai_tools()
 
         # Defense-in-depth for the intent tool-slice (see llm/intents.py):
         # dispatch will run ANY tool name, so refuse names the caller didn't

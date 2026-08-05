@@ -260,21 +260,12 @@ def emit_action_card(
     # hiccup (transient network, no live target, box unreachable) so a real op
     # is never false-rejected.
     try:
-        import socket
-        import urllib.parse as _up
-        import os as _os
-        _base = (_os.environ.get("FSR_BASE_URL") or "")
-        if _base:
-            _host = _up.urlparse(_base).hostname
-            _port = _up.urlparse(_base).port or (443 if _base.startswith("https") else 80)
-            _sock = socket.create_connection((_host, _port), timeout=3)
-            _sock.close()
-            from .tools_execution import _preflight_connector, _live_client_for_grounding
-            _client = _live_client_for_grounding()
-            if _client is not None:
-                cfg_err = _preflight_connector(_client, connector)
-                if cfg_err is not None:
-                    return cfg_err
+        from .tools_execution import _preflight_connector, _live_client_for_grounding
+        _client = _live_client_for_grounding()
+        if _client is not None:
+            cfg_err = _preflight_connector(_client, connector)
+            if cfg_err is not None:
+                return cfg_err
     except Exception:
         pass  # fail open -- never block a real op on a preflight hiccup
     # Record the staged action into the session trace so a later trace-built

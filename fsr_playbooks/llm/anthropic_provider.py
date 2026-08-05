@@ -386,10 +386,12 @@ class AnthropicProvider:
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
-        # Allow callers to pass tools=None or tools=[] and have the
-        # provider supply its own. Keeps the route handler ignorant of
-        # which schema shape applies.
-        if not tools:
+        # Allow callers to pass tools=None to have the provider supply its
+        # own. Keeps the route handler ignorant of which schema shape applies.
+        # `is None` (not `not tools`): the budget-ask "deliver" path passes
+        # tools=[] to force a no-research wrap-up turn; `not tools` would
+        # silently replace [] with the full tool list.
+        if tools is None:
             tools = anthropic_tools()
 
         # Defense-in-depth for the intent tool-slice (see llm/intents.py).
