@@ -9,7 +9,9 @@
 #   scripts/tracker.sh comment  <num> "body"            # post a comment
 #   scripts/tracker.sh close    <num> ["reason"]        # close (completed|not_planned)
 #   scripts/tracker.sh reopen   <num>                    # reopen
-#   scripts/tracker.sh create   "title" "body"          # create an issue
+#   scripts/tracker.sh create   "title" "body" [--promise P] [--horizon H] \
+#                               [--needsbox N] [--component C] [--label L]
+#                                                       # create an issue
 #   scripts/tracker.sh status   <num> Todo|InProgress|Done
 #   scripts/tracker.sh promise  <num> "P1 investigate|P2 gating|..."
 #   scripts/tracker.sh horizon  <num> NOW|NEXT|LATER|PARKED
@@ -20,7 +22,7 @@
 #
 # Examples:
 #   scripts/tracker.sh close 60 "completed"
-#   scripts/tracker.sh create "Some new finding" "The body text..." promise "P2 gating" horizon NOW needsbox "box-free"
+#   scripts/tracker.sh create "Some new finding" "The body text..." --promise "P2 gating" --horizon NOW --needsbox "box-free"
 #   scripts/tracker.sh status 69 InProgress
 #
 set -euo pipefail
@@ -144,14 +146,27 @@ cmd_create() {
   local title="$1" body="${2:-}"
   local labels="" promise="" horizon="" needsbox="" component=""
   shift 2 || true
+  # Parse BEFORE creating anything. An unrecognised flag used to warn and carry
+  # on, so `create ... promise "P2 gating"` (the spelling this file's own
+  # examples used to show, without the dashes) created the issue and silently
+  # dropped every board field -- a card that looks filed but is invisible to
+  # every board filter. Refuse instead, while refusing is still free.
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --label) labels="${labels:+$labels,}$2"; shift 2 ;;
-      --promise) promise="$2"; shift 2 ;;
-      --horizon) horizon="$2"; shift 2 ;;
-      --needsbox) needsbox="$2"; shift 2 ;;
-      --component) component="$2"; shift 2 ;;
-      *) echo "unknown create flag: $1" >&2; shift ;;
+      --label|--promise|--horizon|--needsbox|--component)
+        [[ $# -ge 2 ]] || { echo "tracker: $1 needs a value" >&2; exit 2; }
+        case "$1" in
+          --label)     labels="${labels:+$labels,}$2" ;;
+          --promise)   promise="$2" ;;
+          --horizon)   horizon="$2" ;;
+          --needsbox)  needsbox="$2" ;;
+          --component) component="$2" ;;
+        esac
+        shift 2 ;;
+      *)
+        echo "tracker: unknown create flag '$1' -- nothing was created." >&2
+        echo "  board fields need the dashes: --promise --horizon --needsbox --component --label" >&2
+        exit 2 ;;
     esac
   done
   local tmp; tmp=$(mktemp); printf '%s' "$body" > "$tmp"
@@ -160,8 +175,22 @@ cmd_create() {
   rm -f "$tmp"
   local num; num=$(echo "$url" | grep -oE '[0-9]+$')
   echo "$url (#$num)"
-  # Link to the board project
-  gh project item-add "$PROJECT_NUM" --owner "$OWNER" --url "$url" 2>/dev/null || true
+  # Link to the board project. Do NOT swallow the error: a failed add is the
+  # difference between a filed card and an invisible one.
+  gh project item-add "$PROJECT_NUM" --owner "$OWNER" --url "$url" >/dev/null \
+    || echo "tracker: could not add #$num to the board" >&2
+  # `item-add` returns before the item is QUERYABLE -- setting a field straight
+  # afterwards raced and reported "no board item for #$num", leaving a fieldless
+  # card that reads as successfully filed. Wait for it to actually appear.
+  local tries=0
+  until [[ -n "$(item_id "$num" 2>/dev/null || true)" ]] || (( tries >= 15 )); do
+    sleep 1; tries=$((tries + 1))
+  done
+  if [[ -z "$(item_id "$num" 2>/dev/null || true)" ]]; then
+    echo "tracker: #$num is not on the board after ${tries}s -- board fields NOT set." >&2
+    echo "  retry with: scripts/tracker.sh promise $num '<value>'  (etc.)" >&2
+    return 1
+  fi
   # Set board fields
   if [[ -n "$promise" ]]; then set_field "$num" PROMISE "$promise"; fi
   if [[ -n "$horizon" ]]; then set_field "$num" HORIZON "$horizon"; fi
