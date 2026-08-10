@@ -322,3 +322,122 @@ def test_every_container_field_in_every_model_survives_a_stringified_value():
             checked += 1
     assert checked >= 4, f"the guard checked only {checked} fields; it should " \
                          f"cover run_op.params and search.filters at minimum"
+
+
+# ---------------------------------------------------------------------------
+# Stringly-typed tool arguments
+#
+# Regression source: the first graded run of the LOCAL matrix (harness +
+# connector sidecar + a gateway-served model). That model emitted EVERY tool
+# argument as a string, and two distinct failures followed:
+#
+#   find_enrichment_actions(limit="25")  -> actions[:limit] raised
+#                                           "slice indices must be integers"
+#   find_containment_actions(probe="False") -> "False" is a NON-EMPTY string,
+#                                           so `if probe:` was True and the
+#                                           call ran with the OPPOSITE of what
+#                                           was asked, returning plausible
+#                                           output and reporting nothing.
+#
+# The root cause was upstream of both: 32 of 39 tools advertised an
+# `input_schema` with NO parameter types, because their modules use
+# `from __future__ import annotations` and `inspect.signature` therefore
+# returns annotations as strings. A model told `{"limit": {"default": 25}}`
+# was never given a contract to break.
+# ---------------------------------------------------------------------------
+
+def test_every_tool_advertises_a_type_for_every_parameter():
+    """The schema we hand the model must name each parameter's type.
+
+    Asserted as a PROPERTY over the whole registry rather than for the two
+    tools that broke: the cause is a module-level `from __future__ import
+    annotations`, so the next tool added to any such module inherits the bug
+    silently. A parameter with a default but no `type` is exactly what the
+    model saw for 32 tools.
+    """
+    from fsr_playbooks.llm.tools import REGISTRY
+
+    untyped = []
+    for name, spec in REGISTRY.items():
+        for pname, prop in (spec.input_schema or {}).get("properties", {}).items():
+            if not isinstance(prop, dict) or "type" not in prop:
+                untyped.append(f"{name}.{pname}")
+    assert not untyped, (
+        "these tool parameters are advertised to the model with NO type, so it "
+        "has no contract to honour and will send whatever it likes (commonly a "
+        f"string for every argument): {untyped[:15]}")
+
+
+def test_declared_int_and_bool_params_survive_their_string_form():
+    """Property over the registry: any int/bool parameter must accept the
+    string a provider actually sends. Per-tool fixes lose this race -- the
+    class already hit two tools in one turn."""
+    from fsr_playbooks.llm.tool_models import coerce_scalar_args
+    from fsr_playbooks.llm.tools import REGISTRY
+
+    checked = 0
+    for name, spec in REGISTRY.items():
+        props = (spec.input_schema or {}).get("properties", {})
+        for pname, prop in props.items():
+            jtype = prop.get("type") if isinstance(prop, dict) else None
+            if jtype == "integer":
+                out = coerce_scalar_args(spec.input_schema, {pname: "25"})
+                assert out[pname] == 25 and isinstance(out[pname], int), \
+                    f"{name}.{pname} (integer) does not survive being sent as \"25\""
+                checked += 1
+            elif jtype == "boolean":
+                out = coerce_scalar_args(spec.input_schema, {pname: "False"})
+                assert out[pname] is False, (
+                    f"{name}.{pname} (boolean) sent as \"False\" stays a truthy "
+                    f"string -- the call would run with the opposite meaning and "
+                    f"report nothing")
+                checked += 1
+    assert checked >= 10, \
+        f"the guard checked only {checked} params; the registry has far more"
+
+
+def test_the_exact_live_args_that_broke_the_matrix():
+    """The verbatim argument dict from the failing transcript."""
+    from fsr_playbooks.llm.tool_models import coerce_scalar_args
+    from fsr_playbooks.llm.tools import REGISTRY
+
+    schema = REGISTRY["find_containment_actions"].input_schema
+    out = coerce_scalar_args(
+        schema,
+        {"limit": "25", "probe": "False", "requested_by": "", "target_type": "ip"},
+    )
+    assert out["limit"] == 25
+    assert out["probe"] is False          # the SILENT half
+    assert out["target_type"] == "ip"     # a real string stays a string
+
+
+@pytest.mark.parametrize("args", [
+    {"limit": "abc"},      # not a number at all
+    {"limit": ""},         # empty
+    {"limit": "25.5"},     # a float where an int is declared
+    {"probe": "maybe"},    # not a boolean spelling
+    {"probe": "0.0"},      # falsy-looking, but not one of the accepted words
+])
+def test_ambiguous_strings_are_left_alone_not_guessed(args):
+    """Coercion must never convert a loud rejection into a silent guess.
+
+    Anything that does not parse unambiguously is passed through untouched so
+    the existing validation / TypeError path still returns the
+    self-correctable "bad arguments for X" the model can act on.
+    """
+    from fsr_playbooks.llm.tool_models import coerce_scalar_args
+    from fsr_playbooks.llm.tools import REGISTRY
+
+    schema = REGISTRY["find_containment_actions"].input_schema
+    assert coerce_scalar_args(schema, args) == args
+
+
+def test_string_parameters_are_never_coerced():
+    """A declared string keeps whatever the model sent, including text that
+    happens to look like a number or a boolean."""
+    from fsr_playbooks.llm.tool_models import coerce_scalar_args
+    from fsr_playbooks.llm.tools import REGISTRY
+
+    schema = REGISTRY["find_containment_actions"].input_schema
+    args = {"target_type": "25", "requested_by": "true"}
+    assert coerce_scalar_args(schema, args) == args

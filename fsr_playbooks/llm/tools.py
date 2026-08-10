@@ -841,6 +841,13 @@ class ToolSpec:
     confirm_mode: str = "auto"  # auto | log | approve | step_up
 
 
+# `types.UnionType` is the runtime type of `X | Y`; it does not exist on the
+# 3.9 SOAR runtime, where such an annotation can only ever arrive as a string
+# (resolved by `_eval_annotation` into a `typing.Union`). Sentinel object, not
+# None, so the identity check below can never accidentally match.
+_UNION_TYPE = getattr(__import__("types"), "UnionType", object())
+
+
 def _py_type_to_json(tp: Any) -> dict[str, Any]:
     """Map a Python annotation to a minimal JSON Schema fragment."""
     if tp is inspect.Parameter.empty or tp is Any:
@@ -848,13 +855,20 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
     origin = get_origin(tp)
     args = get_args(tp)
 
-    if origin is typing.Union or (origin is None and args):
+    # `typing.Optional[str]` and the PEP 604 `str | None` are the same type to
+    # a reader but NOT to `get_origin`: the latter yields `types.UnionType`
+    # (3.10+), which this branch used to miss entirely -- so every `X | None`
+    # parameter fell through and was advertised to the model with no type.
+    if origin is typing.Union or origin is _UNION_TYPE or (origin is None and args):
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:
             return _py_type_to_json(non_none[0])
         # union of primitives → leave loose
         return {}
-    if origin in (list, typing.List):
+    # JSON has no set/tuple: both cross the wire as an array, and the tool's
+    # own signature converts on the way in. Omitting them advertised
+    # `set[str]` parameters with no type at all.
+    if origin in (list, typing.List, set, typing.Set, frozenset, tuple, typing.Tuple):
         inner = args[0] if args else Any
         return {"type": "array", "items": _py_type_to_json(inner) or {}}
     if origin in (dict, typing.Dict):
@@ -867,7 +881,7 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
         return {"type": "number"}
     if tp is bool:
         return {"type": "boolean"}
-    if tp is list:
+    if tp in (list, set, frozenset, tuple):
         return {"type": "array"}
     if tp is dict:
         return {"type": "object"}
@@ -1139,12 +1153,40 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
 }
 
 
+def _resolved_hints(fn: Callable[..., Any]) -> dict[str, Any]:
+    """Real type objects for `fn`'s parameters, defeating PEP 563.
+
+    Most tool modules carry `from __future__ import annotations`, which makes
+    `inspect.signature()` hand back annotations as *strings* -- `'bool'`, not
+    `bool`. `_py_type_to_json` matches on type identity, so every one of those
+    fell through to `{}` and the tool advertised a parameter with a default and
+    **no type**. 32 of 39 tools shipped schemas that told the model nothing
+    about any argument's type.
+
+    That is not cosmetic: it is the upstream cause of the stringly-typed
+    arguments `coerce_scalar_args` now also defends against. A model told only
+    `{"limit": {"default": 25}}` has no contract to honour, so `"25"` is a
+    perfectly reasonable thing for it to send -- and `probe="False"` (truthy!)
+    silently inverted a flag.
+
+    Returns `{}` if the hints cannot be resolved (e.g. a `TYPE_CHECKING`-only
+    import), so `_build_schema` falls back to the raw annotations and the tool
+    still registers -- degrading to exactly the previous behaviour rather than
+    failing to load.
+    """
+    try:
+        return typing.get_type_hints(fn)
+    except Exception:
+        return {}
+
+
 def _build_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     sig = inspect.signature(fn)
+    hints = _resolved_hints(fn)
     props: dict[str, Any] = {}
     required: list[str] = []
     for name, p in sig.parameters.items():
-        schema = _py_type_to_json(p.annotation)
+        schema = _py_type_to_json(hints.get(name, p.annotation))
         if p.default is inspect.Parameter.empty:
             required.append(name)
         else:
@@ -1408,13 +1450,23 @@ def dispatch(
     # Validation errors don't fail the dispatch -- they're surfaced as
     # tool results so the model can see and potentially fix bad args.
     try:
-        from .tool_models import TOOL_MODELS, coerce_json_string_args
+        from .tool_models import (
+            TOOL_MODELS, coerce_json_string_args, coerce_scalar_args,
+        )
         # A structured argument emitted as a JSON *string* is decoded here,
         # before the gate AND before the tool runs -- coercing only for the gate
         # would hand the tool body a string, trading a loud rejection for a
         # silent wrong answer. See `coerce_json_string_args` for why this is
         # generic rather than another per-model widening.
         raw_args = coerce_json_string_args(name, raw_args)
+        # Same argument, one layer wider: some providers emit EVERY argument as
+        # a string, and `coerce_json_string_args` is keyed on TOOL_MODELS (11
+        # tools). This is keyed on the tool's own `input_schema`, so all ~100
+        # get it. Placed HERE, before `_resolve_tier` / `_build_preview` /
+        # `_args_hash`, so the approval card previews and the hash binds the
+        # values that will actually execute -- coercing later would let a
+        # human approve `probe="False"` and a tool then run with probe=True.
+        raw_args = coerce_scalar_args(getattr(spec, "input_schema", None), raw_args)
         if name in TOOL_MODELS:
             try:
                 TOOL_MODELS[name](**raw_args)

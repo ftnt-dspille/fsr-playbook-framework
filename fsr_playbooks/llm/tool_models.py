@@ -5,9 +5,15 @@ calls are caught early. Internal logic remains unchanged.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
+
+# Distinguishes "no coercion applies" from a legitimately coerced falsy value
+# (False, 0, 0.0, [], {}) -- a plain `if coerced:` check would drop exactly the
+# `probe="False" -> False` case this layer exists to fix.
+_MISSING = object()
 
 
 class GetRecordArgs(BaseModel):
@@ -267,6 +273,99 @@ def _accepts_str(annotation: Any) -> bool:
         # one field this whole layer exists for.
         return any(_accepts_str(a) for a in typing.get_args(annotation))
     return origin is None and annotation not in (dict, list, tuple, set)
+
+
+# Exact spellings only. A model that means False writes one of these; anything
+# else ("maybe", "0.0", "") is NOT a boolean we are entitled to invent, and is
+# left alone so validation or the tool body can reject it on its own terms.
+_TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
+_FALSE_STRINGS = frozenset({"false", "0", "no", "off"})
+
+_INT_RE = re.compile(r"^[+-]?\d+$")
+
+
+def coerce_scalar_args(schema: dict[str, Any] | None,
+                       args: dict[str, Any]) -> dict[str, Any]:
+    """Return `args` with string scalars coerced to the types `schema` declares.
+
+    Keyed on the tool's JSON Schema -- i.e. the contract we handed the model --
+    rather than on `TOOL_MODELS`, which covers only a handful of tools. The two
+    tools that first exhibited this (`find_enrichment_actions`,
+    `find_containment_actions`) have no pydantic model, so a TOOL_MODELS-keyed
+    fix would not have touched them. Every registered tool has an
+    `input_schema`; this therefore protects all of them.
+
+    **Why this is not the model's problem to solve.** Some providers emit every
+    argument as a string (`{"limit": "25", "probe": "False"}`) regardless of the
+    declared schema. Two failure modes follow, and the quiet one is worse:
+
+    - ``limit="25"`` reaches ``actions[:limit]`` → *"slice indices must be
+      integers"*. Loud, and the model can often recover.
+    - ``probe="False"`` is a NON-EMPTY string, so ``if probe:`` is **True**.
+      The call runs with the opposite of the requested behaviour, returns
+      plausible output, and nothing anywhere reports a problem.
+
+    Conservative by construction: only `str` values are touched, only when the
+    schema names exactly one non-string type, and only when the text parses
+    unambiguously. Anything else is passed through untouched so the existing
+    validation/TypeError path still produces its self-correctable error --
+    coercion must never turn a loud rejection into a silent guess.
+    """
+    props = (schema or {}).get("properties")
+    if not isinstance(props, dict) or not isinstance(args, dict) or not args:
+        return args
+
+    out: Optional[dict[str, Any]] = None
+    for key, value in args.items():
+        if not isinstance(value, str):
+            continue
+        declared = props.get(key)
+        if not isinstance(declared, dict):
+            continue
+        jtype = declared.get("type")
+        # A schema that also permits a string (`type` absent, or a list of
+        # types including "string") means the string may well be what the tool
+        # wants. Never second-guess that.
+        if not isinstance(jtype, str) or jtype == "string":
+            continue
+
+        text = value.strip()
+        coerced: Any = _MISSING
+        if jtype == "boolean":
+            low = text.lower()
+            if low in _TRUE_STRINGS:
+                coerced = True
+            elif low in _FALSE_STRINGS:
+                coerced = False
+        elif jtype == "integer":
+            if _INT_RE.match(text):
+                coerced = int(text)
+        elif jtype == "number":
+            try:
+                coerced = float(text)
+            except ValueError:
+                pass
+        elif jtype in ("array", "object"):
+            # `coerce_json_string_args` does this too, but only for the ~11
+            # tools with a pydantic model. Repeat it here so the other ~90 get
+            # the same treatment; running twice is harmless (the second pass
+            # sees a non-str and skips).
+            opener = "[" if jtype == "array" else "{"
+            want = list if jtype == "array" else dict
+            if text[:1] == opener:
+                try:
+                    decoded = json.loads(text)
+                except (ValueError, TypeError):
+                    decoded = None
+                if isinstance(decoded, want):
+                    coerced = decoded
+
+        if coerced is _MISSING:
+            continue
+        if out is None:
+            out = dict(args)
+        out[key] = coerced
+    return out if out is not None else args
 
 
 def coerce_json_string_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
