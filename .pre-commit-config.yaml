@@ -16,7 +16,9 @@ repos:
         # `tooling/` (not the pre-REORG `python/`) -- this pattern still named
         # the deleted directory, so ruff silently skipped every tooling/ file
         # at commit time while `make lint` checked it.
-        files: '^(tooling/|fsr_playbooks/)'
+        # Same blind spot as pytest-fast below: the repo-root conftest.py is
+        # real, load-bearing code and was linted by nothing.
+        files: '^(tooling/|fsr_playbooks/|conftest\.py)'
         # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
         # a `--no-verify` commit that bypassed the pre-commit gate -- the actual
         # root cause of the 0.4.15 CI ruff break). The push-time pass is a ~1s
@@ -89,7 +91,12 @@ repos:
         # fsr_playbooks/ holds the compiler + MCP tools the suite exercises, and
         # tooling/ holds the chat-intelligence code that tooling/tests covers -- a
         # change in either must trigger the suite (tooling/ was missing before).
-        files: '^(fsr_playbooks/|tooling/|data/schema\.sql|examples/|pytest\.ini)'
+        # `conftest\.py` is the repo-root one, and it is load-bearing: it holds
+        # the guard that stops an unmarked test reaching an appliance (#113,
+        # #119). Without it in this list, deleting that guard is a commit the
+        # test hook does not even run for -- the gate that would catch the
+        # removal is disarmed by the removal itself.
+        files: '^(fsr_playbooks/|tooling/|data/schema\.sql|examples/|pytest\.ini|conftest\.py)'
         # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
         # a `--no-verify` commit that bypassed pre-commit -- same hole the ruff
         # hook's pre-push stage exists for). ~14s on a code push; the safety net

@@ -57,7 +57,17 @@ def test_the_grounding_resolver_returns_none():
     it, through the real call rather than a patched stand-in."""
     from fsr_playbooks.mcp_server.tools_execution import _live_client_for_grounding
 
-    assert _live_client_for_grounding() is None
+    client = _live_client_for_grounding()
+    # None is the usual answer, but not the only acceptable one: under some
+    # orderings a test has sim mode enabled and this returns a
+    # `SimulatedFSRClient`, which is an offline fake and exactly what the gate
+    # wants. Asserting `is None` here failed on that -- the test was wrong, not
+    # the code. What must never come back is a real client.
+    assert type(client).__name__ != "FortiSOAR", (
+        "the grounding resolver handed back a real pyfsr client inside an "
+        "unmarked test")
+    assert client is None or "Sim" in type(client).__name__, (
+        f"unexpected client type from an offline gate: {type(client).__name__}")
 
 
 def test_emit_action_card_does_not_build_a_client(monkeypatch):
@@ -122,6 +132,34 @@ def test_loopback_still_works():
         pass
     finally:
         s.close()
+
+
+def test_the_guard_file_triggers_the_test_hook():
+    """The guard must not be removable without running the suite that checks it.
+
+    `pytest-fast` in .pre-commit-config.yaml only runs when a path matching its
+    `files:` pattern is staged. The repo-root `conftest.py` -- which holds the
+    guard everything above depends on -- did not match, so deleting the guard
+    was a commit the test hook never fired for. The gate that catches the
+    removal would have been disarmed by the removal itself.
+
+    `hook-liveness` cannot see this: it checks that each pattern still selects
+    SOME tracked file, not that it selects the right ones.
+    """
+    import pathlib
+    import re
+
+    import yaml as _yaml
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    cfg = _yaml.safe_load((root / ".pre-commit-config.yaml").read_text())
+    pattern = next(
+        h["files"] for repo in cfg["repos"] for h in repo["hooks"]
+        if h["id"] == "pytest-fast")
+    assert re.match(pattern, "conftest.py"), (
+        f"the repo-root conftest.py does not match pytest-fast's files pattern "
+        f"({pattern!r}), so removing the offline-gate guard would not run the "
+        "tests that detect its removal")
 
 
 def test_the_marker_is_registered():
