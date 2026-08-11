@@ -569,6 +569,44 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
     return fixes
 
 
+# Diagnostics that describe THIS INSTALL, not the playbook. The catalog only
+# knows connectors that are installed and ingested, so a playbook referencing
+# one this box does not have is reported exactly like a typo -- and the model
+# treats it as a defect it can fix, edits nothing that helps, and verifies
+# again. Measured live (#107): an "explain this playbook, step by step" ask on
+# .159 turned into four verify_playbook calls against `phishme-intelligence`
+# and `placeholder-connector`, and delivered no explanation at all. The
+# repeated-error guard could not stop it -- each attempt produced a DIFFERENT
+# error, so no two signatures matched.
+_ENVIRONMENT_CODES = {
+    "unknown_connector": (
+        "This connector is not in this install's catalog, so verification "
+        "cannot judge these steps. That is a fact about the box, not a defect "
+        "in the playbook: re-running verify_playbook will return the same "
+        "thing. Do not try to fix the playbook to make it pass. If the "
+        "analyst asked you to EXPLAIN or describe the playbook, answer from "
+        "the YAML you already have and say which connectors could not be "
+        "checked."
+    ),
+}
+
+
+def _mark_environment_diagnostic(diag: dict[str, Any]) -> dict[str, Any]:
+    """Tag a diagnostic that reports the INSTALL rather than the playbook.
+
+    Adds `environment: True` and a `remediation` that says re-running will not
+    change the answer. The code and severity are untouched -- an uninstalled
+    connector really does block a push -- but "you cannot fix this by editing"
+    is now on the wire instead of being something the model has to infer from
+    getting the same error twice.
+    """
+    guidance = _ENVIRONMENT_CODES.get(diag.get("code"))
+    if guidance:
+        diag["environment"] = True
+        diag["remediation"] = guidance
+    return diag
+
+
 # ---------------------------------------------------------------------------
 # Tool entry point
 # ---------------------------------------------------------------------------
@@ -669,6 +707,7 @@ def verify_playbook(
         # Promote compile errors directly into required_fixes -- caller
         # gets one shape regardless of which gate failed.
         for ce in compile_errors:
+            _mark_environment_diagnostic(ce)
             if ce["severity"] == "error":
                 required_fixes.append(ce)
             else:

@@ -317,8 +317,6 @@ class ConnectorArgsMixin:
             return
 
         crow = self.connector(connector)
-
-        crow = self.connector(connector)
         if crow is None:
             sug = self.suggest_connector(connector)
             errors.append(CompileError(
