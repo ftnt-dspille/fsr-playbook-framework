@@ -36,8 +36,17 @@ def test_probes_report_not_live():
     Reads through `get_config()` rather than a fresh `EnvConfig()` on purpose --
     the cached module global is what production code sees, and a stale cache
     surviving the env change is exactly how the guard would silently do nothing.
+
+    Skips when `probes._env` is not the real module. `test_list_configured
+    _active_filter.py` installs a fake one into `sys.modules` (no `EnvConfig`),
+    and under a randomized order this test can observe it. That case is not a
+    hole: a seam replaced by a stub has no live path to reach. The socket
+    backstop below is what holds unconditionally, and it is the reason this
+    layer is allowed to be skippable rather than load-bearing.
     """
     probes_env = pytest.importorskip("probes._env")
+    if not hasattr(probes_env, "EnvConfig"):
+        pytest.skip("probes._env is a test stub; no live path to guard")
     assert probes_env.get_config().is_live() is False
 
 
@@ -77,6 +86,42 @@ def test_emit_action_card_does_not_build_a_client(monkeypatch):
                      operation="block_ip_new", summary="test",
                      args={"ip_addresses": "203.0.113.77"},
                      editable_fields=[])
+
+
+def test_a_non_local_socket_is_refused():
+    """The backstop, and the only layer that holds unconditionally.
+
+    Every other check here asserts that some resolver decided not to build a
+    client -- which is a claim about code paths someone has read. This one does
+    not care about paths: an unmarked test that opens a socket to anything
+    off-box fails, whatever route it took to get there. That property is what
+    lets the `is_live` layer above be skippable.
+    """
+    import socket
+
+    with pytest.raises(AssertionError, match="not marked `live`"):
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(
+            ("10.255.255.1", 443))
+
+
+def test_loopback_still_works():
+    """Silencing case. The guard must not break local fixtures, stub servers or
+    anything else bound to loopback -- a backstop that blocks those would get
+    ripped out within a week, and then nothing guards the offline gate."""
+    import socket
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.05)
+    try:
+        # Nothing is listening; ConnectionRefused/timeout both prove the guard
+        # let it through, which is the whole assertion.
+        s.connect(("127.0.0.1", 9))
+    except AssertionError:
+        raise AssertionError("the guard blocked loopback")
+    except OSError:
+        pass
+    finally:
+        s.close()
 
 
 def test_the_marker_is_registered():
