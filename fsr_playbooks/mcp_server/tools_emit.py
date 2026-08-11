@@ -22,8 +22,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ._shared import mcp, _err, _validate_op_params, load_yaml_text
-
+from ._shared import (
+    _err,
+    _validate_op_params,
+    get_grounded_yaml,
+    load_yaml_text,
+    mcp,
+)
 
 # Step-name charset rule from system_prompt.md §"Hard rules" #2.
 _NAME_RE = re.compile(r"^[A-Za-z0-9 _]+$")
@@ -260,7 +265,7 @@ def emit_action_card(
     # hiccup (transient network, no live target, box unreachable) so a real op
     # is never false-rejected.
     try:
-        from .tools_execution import _preflight_connector, _live_client_for_grounding
+        from .tools_execution import _live_client_for_grounding, _preflight_connector
         _client = _live_client_for_grounding()
         if _client is not None:
             cfg_err = _preflight_connector(_client, connector)
@@ -623,6 +628,82 @@ def emit_patch_proposal(
     return {"ok": True, "card": card}
 
 
+def _step_names(yaml_text: str) -> list[str]:
+    """Step `name:` values of the first playbook, in order. [] if unparseable."""
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+        pbs = (doc or {}).get("playbooks") or []
+        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
+        return [str(s["name"]) for s in steps
+                if isinstance(s, dict) and s.get("name")]
+    except Exception:  # noqa: BLE001 -- an unparseable offer fails elsewhere
+        return []
+
+
+def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
+    """Refuse an offer that would overwrite the OPEN playbook, or lose its work.
+
+    Two rules this tool's own docstring already states and never enforced. Both
+    are checked against the grounded document -- the appliance's own copy of
+    what the analyst has open -- so neither depends on classifying the turn,
+    reading the analyst's words, or the model choosing to behave. That matters:
+    the read-only tool slice is keyed on a structured `quick_action`, which only
+    the widget's chips ever send. A free-typed ask, an MCP caller, or any other
+    client reaches this tool with the full authoring surface, so the tool has to
+    hold the line by itself.
+
+    Measured live (session sess-n3d7p4a1, .159): "Explain what this playbook
+    does, step by step, in plain language" ended at a tier-3 offer whose YAML
+    had replaced the phishme-intelligence and carbonblack hunt steps with
+    "Hunt Domains Placeholder" / "Hunt Files Placeholder", summarised as "ready
+    for deployment". Approving it would have gutted a working playbook. The
+    approval card was never the safeguard here -- it asks a human to confirm an
+    action, not to diff two documents.
+
+    Returns an error envelope to refuse, or None to allow.
+    """
+    open_yaml = get_grounded_yaml()
+    if not open_yaml:
+        return None                     # nothing open -- a genuine new build
+
+    open_steps = _step_names(open_yaml)
+    if not open_steps:
+        return None                     # cannot read the open doc: do not block
+
+    # RULE 1 -- new vs existing. "NOT for editing a playbook the analyst
+    # already has open; that is emit_enhancement_offer. The test is whether the
+    # playbook exists yet." Something IS open, so this is an edit.
+    offered_steps = _step_names(yaml_text)
+    lost = [n for n in open_steps if n not in set(offered_steps)]
+
+    # RULE 2 -- loss. Named separately because it is the destructive half and
+    # deserves its own words: a step the analyst has is missing from the offer.
+    if lost:
+        return _err(
+            "offer_drops_open_steps",
+            "This offer is missing "
+            f"{len(lost)} step(s) that the OPEN playbook has: "
+            + ", ".join(repr(n) for n in lost[:6])
+            + ("..." if len(lost) > 6 else "")
+            + ". Accepting it would delete them. If you meant to change the "
+            "open playbook, use verify_enhancement + emit_enhancement_offer, "
+            "which edits it in place and keeps a restore point. If a step "
+            "references a connector this box does not have, say so in prose -- "
+            "replacing it with a placeholder loses the analyst's real step.",
+            suggestions=[
+                "emit_enhancement_offer(verified_id=...) to edit the open playbook",
+                "answer in prose if the analyst only asked you to explain",
+            ],
+        )
+    return _err(
+        "playbook_already_open",
+        "A playbook is already open, so this is an edit, not a new playbook. "
+        "emit_playbook_offer CREATES; use verify_enhancement + "
+        "emit_enhancement_offer to UPDATE the open one in place.",
+        suggestions=["emit_enhancement_offer(id, summary, verified_id)"],
+    )
+
+
 def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
                      title_suggestion: str | None,
                      editable_title: bool) -> dict[str, Any]:
@@ -633,6 +714,10 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
     before the model offers it)."""
     if not isinstance(yaml_text, str) or not yaml_text.strip():
         return _err("missing_field", "yaml must be a non-empty string")
+
+    guard = _guard_against_open_playbook(yaml_text)
+    if guard is not None:
+        return guard
 
     ops_summary: list[dict[str, Any]] = []
     try:
