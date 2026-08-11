@@ -130,3 +130,90 @@ def test_ordinary_tier_3_card_is_unaffected():
     assert env.get("pending_approval") is True
     assert env.get("reason") is None
     assert env["preview"]["args"], "a real approval keeps its preview"
+
+
+# --------------------------------------------------------------------------
+# Read-only turn dispatch gate (tracker #117)
+# --------------------------------------------------------------------------
+# An explain / find_issues chip is a read-only turn. The advertised-list gate
+# (`_READ_ONLY_DROP_TOOLS` in the connector) hides write-frontier tools from
+# the model's tool list, but a hallucinated call still reaches dispatch. The
+# change-affordance gate bumps it to tier 3, staging a "shall I?" approval card
+# -- an unrequested proposal on an explain turn. If approved, the enhancement
+# runs and can DELETE the open playbook's steps. The read-only dispatch gate
+# refuses the call with a clean error instead of staging a card.
+
+@pytest.fixture()
+def read_only():
+    token = T.set_read_only_turn(True)
+    try:
+        yield
+    finally:
+        T.reset_read_only_turn(token)
+
+
+@pytest.fixture()
+def not_read_only():
+    token = T.set_read_only_turn(False)
+    try:
+        yield
+    finally:
+        T.reset_read_only_turn(token)
+
+
+@pytest.mark.parametrize("tool", sorted(T.WRITE_FRONTIER_TOOLS))
+def test_read_only_turn_refuses_write_frontier(tool, read_only):
+    """A hallucinated call to a write-frontier tool on a read-only turn is
+    REFUSED, not carded. The model gets a clean error it can narrate."""
+    env = T.dispatch(tool, {})
+    assert env.get("ok") is False
+    assert env.get("code") == "read_only_turn"
+    assert "read-only" in env.get("error", "").lower()
+
+
+@pytest.mark.parametrize("tool", sorted(T.WRITE_FRONTIER_TOOLS))
+def test_non_read_only_turn_does_not_refuse(tool, not_read_only):
+    """Without the read-only flag, write-frontier tools dispatch normally
+    (they may still hit the change-affordance tier-3 gate, but they are not
+    refused with read_only_turn)."""
+    token = T.set_change_affordance(True)
+    try:
+        env = T.dispatch(tool, {})
+    finally:
+        T.reset_change_affordance(token)
+    assert env.get("code") != "read_only_turn"
+
+
+def test_read_only_turn_does_not_gate_analysis_tools(read_only):
+    """Analysis tools (analyze_playbook, etc.) are NOT refused on a read-only
+    turn -- noticing a defect while explaining is the good part."""
+    for tool in ("analyze_playbook", "get_step_type", "find_operation"):
+        env = T.dispatch(tool, {})
+        assert env.get("code") != "read_only_turn", \
+            f"{tool} should not be refused on a read-only turn"
+
+
+def test_read_only_turn_default_is_false():
+    """A host that never declares a read-only turn behaves exactly as before."""
+    assert T._is_read_only_turn() is False
+
+
+def test_read_only_reset_restores_previous_value():
+    outer = T.set_read_only_turn(True)
+    try:
+        assert T._is_read_only_turn() is True
+        inner = T.set_read_only_turn(False)
+        assert T._is_read_only_turn() is False
+        T.reset_read_only_turn(inner)
+        assert T._is_read_only_turn() is True
+    finally:
+        T.reset_read_only_turn(outer)
+    assert T._is_read_only_turn() is False
+
+
+def test_read_only_reset_with_stale_token_fails_open():
+    """Same fail-open reasoning as reset_change_affordance."""
+    token = T.set_read_only_turn(True)
+    T.reset_read_only_turn(token)
+    T.reset_read_only_turn(token)  # stale: must not raise
+    assert T._is_read_only_turn() is False

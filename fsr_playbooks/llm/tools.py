@@ -19,15 +19,16 @@ import os
 import re
 import sqlite3
 import time
-from contextvars import ContextVar
 import typing
 import uuid
+from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Callable, get_args, get_origin
+from typing import Any, get_args, get_origin
 
 import fsr_playbooks.mcp_server as mcp_server
-from .._db import default_db_path
 
+from .._db import default_db_path
 
 # Allow-list. Names match attribute names on `mcp_server`.
 SAFE_TOOLS: list[str] = [
@@ -385,7 +386,9 @@ def _op_name_is_destructive(op: str) -> bool:
         return False
     try:
         from ..mcp_server.tools_connector_discovery import (
-            _CONTAINMENT_VERBS, _NON_ACTION_PREFIXES)
+            _CONTAINMENT_VERBS,
+            _NON_ACTION_PREFIXES,
+        )
     except Exception:  # noqa: BLE001 -- never harden a tier lookup into a crash
         return False
     if nm.startswith(_NON_ACTION_PREFIXES):
@@ -465,10 +468,10 @@ def _tier_for_simulator(args: dict[str, Any]) -> int:
 # it consults this optional resolver: `fn(args) -> bool`, True ⇒ auto-run (tier
 # 2). Absent/raises/False ⇒ the safe default (tier 3, carded). Registered via
 # `set_run_playbook_auto_resolver`.
-_RUN_PLAYBOOK_AUTO_RESOLVER: "Callable[[dict], bool] | None" = None
+_RUN_PLAYBOOK_AUTO_RESOLVER: Callable[[dict], bool] | None = None
 
 
-def set_run_playbook_auto_resolver(fn: "Callable[[dict], bool] | None") -> None:
+def set_run_playbook_auto_resolver(fn: Callable[[dict], bool] | None) -> None:
     """Install (or clear with ``None``) the run_playbook auto-run resolver."""
     global _RUN_PLAYBOOK_AUTO_RESOLVER
     _RUN_PLAYBOOK_AUTO_RESOLVER = fn
@@ -501,6 +504,20 @@ def set_run_playbook_auto_resolver(fn: "Callable[[dict], bool] | None") -> None:
 # Default True (fail-open): a host that never calls `set_change_affordance`
 # behaves exactly as before.
 _CHANGE_AFFORDANCE: ContextVar[bool] = ContextVar("_change_affordance", default=True)
+
+# A read-only turn (explain / find_issues chip): the write frontier is REFUSED
+# at dispatch, not just hidden from the tool list.  The advertised-list gate
+# (`_READ_ONLY_DROP_TOOLS` in the connector) is not enough -- a model that
+# hallucinates a call to `emit_enhancement_offer` reaches dispatch anyway,
+# the change-affordance gate bumps it to tier 3, and the analyst gets an
+# unrequested "shall I?" approval card on an explain turn.  That card IS the
+# "tier-3 offer" -- if approved, the enhancement runs and can delete the open
+# playbook's steps (tracker #117).  Refusing at dispatch returns a clean
+# error the model can narrate, not a card the analyst must dismiss.
+#
+# Default False (fail-open): a host that never calls `set_read_only_turn`
+# behaves exactly as before.
+_READ_ONLY_TURN: ContextVar[bool] = ContextVar("_read_only_turn", default=False)
 
 # Gating an edit to an EXISTING playbook, or delivering one. Kept deliberately
 # tight:
@@ -541,6 +558,30 @@ def reset_change_affordance(token: Any) -> None:
         # on by a leaked token would card a legitimate flow with nothing to
         # tell the analyst why.
         _CHANGE_AFFORDANCE.set(True)
+
+
+def set_read_only_turn(read_only: bool) -> Any:
+    """Declare whether THIS turn is read-only (explain / find_issues chip).
+
+    Returns a token for ``reset_read_only_turn``.  A ContextVar because the
+    turn runs on its own thread/task, same as ``set_change_affordance``."""
+    return _READ_ONLY_TURN.set(bool(read_only))
+
+
+def reset_read_only_turn(token: Any) -> None:
+    """Undo ``set_read_only_turn``. Never raises -- same fail-open reasoning
+    as ``reset_change_affordance``."""
+    try:
+        _READ_ONLY_TURN.reset(token)
+    except (RuntimeError, ValueError, LookupError):
+        _READ_ONLY_TURN.set(False)
+
+
+def _is_read_only_turn() -> bool:
+    try:
+        return bool(_READ_ONLY_TURN.get())
+    except LookupError:  # pragma: no cover - defensive
+        return False
 
 
 def _change_affordance_present() -> bool:
@@ -630,7 +671,7 @@ _APPROVAL_VERB: dict[str, str] = {
 }
 
 
-def _default_approval_summary(name: str, args: dict[str, Any]) -> "str | None":
+def _default_approval_summary(name: str, args: dict[str, Any]) -> str | None:
     """A plain-language line for an approval card whose caller supplied no
     `_summary`. Returns None when nothing readable can be derived -- a bad
     summary is worse than none, because the host renders it as the card's
@@ -868,10 +909,10 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
     # JSON has no set/tuple: both cross the wire as an array, and the tool's
     # own signature converts on the way in. Omitting them advertised
     # `set[str]` parameters with no type at all.
-    if origin in (list, typing.List, set, typing.Set, frozenset, tuple, typing.Tuple):
+    if origin in (list, list, set, set, frozenset, tuple, tuple):
         inner = args[0] if args else Any
         return {"type": "array", "items": _py_type_to_json(inner) or {}}
-    if origin in (dict, typing.Dict):
+    if origin in (dict, dict):
         return {"type": "object"}
     if tp is str:
         return {"type": "string"}
@@ -1377,6 +1418,26 @@ def dispatch(
     approved = bool(raw_args.pop("_approved", False)) if _internal else False
     summary = raw_args.pop("_summary", None)
 
+    # A read-only turn (explain / find_issues chip): refuse the write frontier
+    # at dispatch, not just at advertisement.  The advertised-list gate
+    # removes these tools from the model's tool list, but a hallucinated call
+    # still reaches dispatch -- and the change-affordance gate bumps it to
+    # tier 3, producing an unrequested "shall I?" approval card.  That card IS
+    # the offer the analyst never asked for; if approved, it can delete the
+    # open playbook's steps (tracker #117).  Refuse with a clean error the
+    # model can narrate ("this is a read-only turn") instead of staging a card.
+    if _is_read_only_turn() and name in WRITE_FRONTIER_TOOLS and not _internal:
+        return {
+            "ok": False,
+            "code": "read_only_turn",
+            "error": (
+                "This is a read-only turn (explain / find issues). "
+                "Write and offer tools are not available. Describe what "
+                "you found in prose; the analyst can ask for a change "
+                "if they want one."
+            ),
+        }
+
     # Models frequently STRINGIFY object-valued args -- `params` is shown as JSON
     # in the tool docs, so they send run_op(params='{"indicator":"1.2.3.4"}')
     # instead of a dict. Neither the arg gate (Optional[dict]) nor the tool fn
@@ -1451,7 +1512,9 @@ def dispatch(
     # tool results so the model can see and potentially fix bad args.
     try:
         from .tool_models import (
-            TOOL_MODELS, coerce_json_string_args, coerce_scalar_args,
+            TOOL_MODELS,
+            coerce_json_string_args,
+            coerce_scalar_args,
         )
         # A structured argument emitted as a JSON *string* is decoded here,
         # before the gate AND before the tool runs -- coercing only for the gate
