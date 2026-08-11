@@ -70,9 +70,17 @@ def _text(s):
     return SimpleNamespace(type="text", text=s)
 
 
-async def _drain(provider, messages):
+# The slice the provider ADVERTISES. Not `tools=[]`: an explicit empty list now
+# means "this turn may call nothing" (the budget-ask deliver path relies on it),
+# so the provider's allowed-names backstop refuses every tool_use and dispatch
+# never runs -- the guard under test would then "pass" over zero dispatches.
+_SLICE = [{"name": "run_op", "description": "", "input_schema": {"type": "object"}}]
+
+
+async def _drain(provider, messages, tools=None):
     out = []
-    async for ev in provider.stream(system="sys", messages=messages, tools=[]):
+    async for ev in provider.stream(system="sys", messages=messages,
+                                    tools=_SLICE if tools is None else tools):
         out.append(ev)
     return out
 

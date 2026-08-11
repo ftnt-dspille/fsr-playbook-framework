@@ -107,9 +107,21 @@ class _ConcurrencyRecorder:
             self.active -= 1
 
 
-async def _drain(provider, messages):
+# The slice the provider ADVERTISES. Not `tools=[]`: an explicit empty list now
+# means "this turn may call nothing" (the budget-ask deliver path relies on it),
+# so the allowed-names backstop refuses every tool_use and dispatch never runs.
+# A parallel-dispatch test that advertises nothing measures zero calls
+# overlapping, which is trivially "not concurrent" for the wrong reason.
+_SLICE = [
+    {"name": n, "description": "", "input_schema": {"type": "object"}}
+    for n in ("find_connector", "search_playbooks", "run_op")
+]
+
+
+async def _drain(provider, messages, tools=None):
     events = []
-    async for ev in provider.stream(system="sys", messages=messages, tools=[]):
+    async for ev in provider.stream(system="sys", messages=messages,
+                                    tools=_SLICE if tools is None else tools):
         events.append(ev)
     return events
 

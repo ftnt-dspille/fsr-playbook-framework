@@ -80,6 +80,18 @@ _BLOCK_IP_TOOLS = [{
                                 "properties": {"ip": {"type": "string"}}}},
 }]
 
+# Same, for the tool this file's streaming test dispatches. `tools=[]` used to
+# mean "provider, use your own list"; it is now an explicit EMPTY slice, so the
+# allowed-names guard refuses every call and dispatch is never reached -- the
+# assertion then fails for a reason that has nothing to do with delta
+# accumulation.
+_FIND_CONNECTOR_TOOLS = [{
+    "type": "function",
+    "function": {"name": "find_connector", "description": "Find a connector",
+                 "parameters": {"type": "object",
+                                "properties": {"q": {"type": "string"}}}},
+}]
+
 
 def test_streams_text_and_usage():
     chunks = [_delta_chunk(content="Hello "), _delta_chunk(content="world."),
@@ -107,7 +119,8 @@ def test_accumulates_tool_call_args_across_deltas():
     with patch("fsr_playbooks.llm.openai_provider.dispatch",
                return_value={"matches": []}) as mock_dispatch, \
          patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=1):
-        events = asyncio.run(_drain(p.stream(system="", messages=[], tools=[], tags={})))
+        events = asyncio.run(_drain(p.stream(
+            system="", messages=[], tools=_FIND_CONNECTOR_TOOLS, tags={})))
     mock_dispatch.assert_called_once()
     name, args = mock_dispatch.call_args[0]
     assert name == "find_connector" and args == {"q": "virustotal"}
