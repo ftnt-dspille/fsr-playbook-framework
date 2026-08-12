@@ -8,13 +8,13 @@ investigation (SIEM/FortiAnalyzer/FortiManager, record reads) lives in the
 connector's fsr_soc_triage. Extracted (transitive closure) from the pre-carve tools_triage.
 """
 from __future__ import annotations
-from . import _shared
 
 import json
 import sqlite3
-from typing import Any, Union
+from typing import Any
 
-from ._shared import mcp, _capability_gap_suggestion
+from . import _shared
+from ._shared import _capability_gap_suggestion, mcp
 from .tools_execution import _fetch_runs_both, _shape_run
 
 DB_PATH = _shared.DB_PATH
@@ -152,6 +152,63 @@ def _canon_target_type(target_type: str) -> str:
 
 
 _CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
+
+# Containment ops with more than one way to do the job, where the branches are
+# NOT equally safe to stage blind.
+#
+# The problem this solves is specific: a branch can be perfectly valid in the
+# schema and impossible to run on THIS device, because it depends on objects
+# somebody provisioned by hand. The agent cannot see that from a schema, so it
+# picks a branch on vibes, fills the required params with plausible-looking
+# placeholders, and stages a card that reads as a real containment and cannot
+# work. That is worse than staging nothing -- the analyst approves a block that
+# never happens.
+#
+# Live example, and the reason this table exists. `fortigate-firewall`
+# `block_ip_new` has two branches:
+#
+#   Quarantine Based -- needs only the IP and a TTL. Works on any FortiGate.
+#   Policy Based     -- needs a named deny POLICY and an IPv4 address GROUP that
+#                       already exist, and the connector resolves the group
+#                       THROUGH the policy name. On a firewall that had neither
+#                       (it enforced an external threat feed instead) the agent
+#                       staged `ip_block_policy: default_policy` /
+#                       `ip_group_name: default_group` -- both invented -- and
+#                       the call fails, or worse returns Success with every
+#                       result bucket empty.
+#
+# Nothing on the box tells the agent which names to use: the FortiGate connector
+# CONFIG carries `url_block_policy` and `app_block_policy` but no
+# `ip_block_policy`, so for IP blocking the policy name is an operation
+# parameter with no discoverable default.
+#
+# So prefer the branch that is self-contained. This is a PREFERENCE surfaced to
+# the agent, not a restriction: the full `params` signature still ships with the
+# action, and an analyst who asks for the policy-based path by name can still
+# get it. Keyed (connector, op) -> {params, why}.
+_PREFERRED_CONTAINMENT_PARAMS: dict[tuple[str, str], dict[str, Any]] = {
+    ("fortigate-firewall", "block_ip_new"): {
+        "params": {"method": "Quarantine Based"},
+        "why": ("Quarantine Based needs only the IP and a TTL, so it works on "
+                "any FortiGate. Policy Based requires a deny policy and an IPv4 "
+                "address group that already exist on the device, and the "
+                "connector looks the group up through the policy name -- names "
+                "this instance cannot tell you, so staging that branch means "
+                "inventing them."),
+    },
+    ("fortigate-firewall", "unblock_ip"): {
+        "params": {"method": "Quarantine Based"},
+        "why": ("Mirror the block: an IP banned via the quarantine list is "
+                "removed from the quarantine list, not from an address group."),
+    },
+    # Deprecated alias of block_ip_new -- same two branches, same trap. Listed
+    # so a box still exposing the old op gets the same steer.
+    ("fortigate-firewall", "block_ip"): {
+        "params": {"method": "Quarantine Based"},
+        "why": ("Same two branches as block_ip_new; the quarantine branch is "
+                "the one that needs no pre-provisioned firewall objects."),
+    },
+}
 
 
 def is_containment_op(op_name: str, category: str = "") -> bool:
@@ -419,7 +476,7 @@ def _connectors_that_could_contain(
 
 def _healthcheck_many(
         client,
-        targets: list[Union[tuple[str, str], tuple[str, str, str]]],
+        targets: list[tuple[str, str] | tuple[str, str, str]],
         deadline_s: float = 20.0,
         timing: dict[str, Any] | None = None) -> dict[str, str]:
     """Healthcheck many (name, version) connectors CONCURRENTLY, returning
@@ -452,13 +509,13 @@ def _healthcheck_many(
         return {}
     import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from .tools_execution import (_live_healthcheck, _cached_health,
-                                  _store_health)
+
+    from .tools_execution import _cached_health, _live_healthcheck, _store_health
 
     per_probe: dict[str, dict[str, Any]] = {}
 
     def _probe(
-            target: Union[tuple[str, str], tuple[str, str, str]]
+            target: tuple[str, str] | tuple[str, str, str]
     ) -> tuple[str, Any]:
         # Returns (name, status); status is None to signal "no authoritative
         # verdict" (probe failure / exception) -- such connectors are OMITTED
@@ -579,9 +636,19 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
             disconnected connector.
         limit: max actions to return (default 25).
 
+    When an action carries `preferred_params`, START from those values and fill
+    the rest around them. They pick between branches of a multi-branch op, and
+    the branch they avoid is one that only works if somebody pre-provisioned
+    objects on the device -- names this instance cannot tell you, so choosing it
+    means inventing them and staging a containment that cannot run.
+    `preferred_params_why` says what the trade is. The full `params` signature
+    still ships, so an analyst who explicitly asks for the other branch can have
+    it; absent that, do not override a preference to look thorough.
+
     Returns:
         {"target_type", "actions": [{connector, op, title, category, tier,
-         requires_approval, status, required_params:[{name,type}]}],
+         requires_approval, status, required_params:[{name,type}],
+         preferred_params?:{...}, preferred_params_why?:str}],
          "count", "probed"}. Deprecated ops sort last.
     """
     target = _canon_target_type(target_type)
@@ -670,6 +737,12 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                 # may take a moment, THEN call run_op.
                 "runs_on_agent": connector in agent_of,
             })
+            # Steer multi-branch ops toward the branch that does not depend on
+            # hand-provisioned device objects (see _PREFERRED_CONTAINMENT_PARAMS).
+            pref = _PREFERRED_CONTAINMENT_PARAMS.get((connector, op))
+            if pref:
+                actions[-1]["preferred_params"] = dict(pref["params"])
+                actions[-1]["preferred_params_why"] = pref["why"]
 
     # 3. Scoped healthcheck: probe ONLY the connectors that carry a candidate
     # action (a handful), not all configured ones. Drop actions whose connector
