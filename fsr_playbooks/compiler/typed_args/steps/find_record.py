@@ -34,13 +34,13 @@ fields; the friendly→canonical transform lives in the normalizer's
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class FindRecordArgs(StrictArgs):
@@ -56,22 +56,22 @@ class FindRecordArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    module: Optional[str] = None
-    query: Optional[Any] = None
-    partial: Optional[bool] = None
-    checkboxFields: Optional[bool] = None
-    filters: Optional[Any] = None
-    limit: Optional[int] = None
-    logic: Optional[str] = None
-    relationships: Optional[bool] = None
-    sort: Optional[list] = None
-    select: Optional[list] = None
-    max_relations: Optional[int] = None
+    module: str | None = None
+    query: Any | None = None
+    partial: bool | None = None
+    checkboxFields: bool | None = None
+    filters: Any | None = None
+    limit: int | None = None
+    logic: str | None = None
+    relationships: bool | None = None
+    sort: list | None = None
+    select: list | None = None
+    max_relations: int | None = None
 
 
 def expand_find_record(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate a find_record step's arguments.
 
     Validation-only: always returns ``None`` (the friendly→canonical

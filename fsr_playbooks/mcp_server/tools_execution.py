@@ -1,6 +1,5 @@
 """MCP tools: Tools Execution"""
 from __future__ import annotations
-from . import _shared
 
 import difflib
 import json
@@ -10,15 +9,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import _shared
 from ._shared import (
-    mcp,
-    _err,
+    REPO_ROOT,
     _capability_gap_suggestion,
     _db,
+    _err,
     _infer_shape,
     _store_observed_schema,
-    REPO_ROOT,
+    mcp,
 )
+
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
 
@@ -1330,6 +1331,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
       timeout → {ok:false, status:"agent_timeout", ...}
     """
     import time
+
     import yaml as _yaml
     # Relative import: works both in dev (fsr_playbooks is top-level) and on the
     # FortiSOAR box (fsr_playbooks is a sub-package of the connector). The compiler
@@ -1481,7 +1483,9 @@ def _run_op_via_agent_playbook(connector: str, op: str,
         _store_observed_schema(connector, op, data)
         # Trace recorder (§2) -- full agent-routed output is the wiring source too.
         try:
-            from fsr_playbooks.agent.skill_trace import record_run_op as _record_skill_call
+            from fsr_playbooks.agent.skill_trace import (
+                record_run_op as _record_skill_call,
+            )
             _prefix = "data" if (isinstance(step_res, dict) and "data" in step_res) else ""
             _record_skill_call(connector, op, params, data,
                                step_name=step_name or None, ref_prefix=_prefix,
@@ -1988,6 +1992,7 @@ def run_op(
 
 def _record_verification(connector: str, op: str, status: str, notes: str) -> None:
     import datetime
+
     from .._db import writable_reference_db
     target = writable_reference_db()
     if target is None:
@@ -2077,9 +2082,10 @@ def push_playbook(yaml_text: str,
     """
     sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
-        from fsr_playbooks.compiler import compile_yaml as _compile
-        from probes._env import get_client, get_config
         from e2e.runner import _push, _PushError
+        from probes._env import get_client, get_config
+
+        from fsr_playbooks.compiler import compile_yaml as _compile
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"import failed: {e!r}"}
     if not get_config().is_live():
@@ -2097,9 +2103,9 @@ def push_playbook(yaml_text: str,
     # HARDEN-1: refuse a save that silently deletes live data. This is the
     # only point where both documents exist, so it is the only place the
     # check can be made -- the compiler cannot know what it is overwriting.
-    from fsr_playbooks.compiler.prewrite import check_prewrite
     from pydantic import ValidationError
 
+    from fsr_playbooks.compiler.prewrite import check_prewrite
     from fsr_playbooks.compiler.wire import WireShapeError
     try:
         live = _fetch_live_collection(client, coll["uuid"])
@@ -2169,9 +2175,9 @@ def run_playbook(playbook: str,
     """
     sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
-        from probes._env import get_client, get_config
         from cli import _resolve_workflow_ident
         from e2e.runner import _fetch_trigger_route_uuid
+        from probes._env import get_client, get_config
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"import failed: {e!r}"}
     if not get_config().is_live():
@@ -2353,7 +2359,9 @@ def dry_run_playbook(yaml_text: str, playbook: str,
     if use_mock_output:
         try:
             from fsr_playbooks.compiler.skill_compiler import (
-                unmocked_containment_steps as _unmocked)
+                unmocked_containment_steps as _unmocked,
+            )
+
             from ._shared import load_yaml_text as _load
             doc = _load(yaml_text)[0] or {}
             bad = _unmocked(doc) if isinstance(doc, dict) else []
@@ -2388,8 +2396,8 @@ def dry_run_playbook(yaml_text: str, playbook: str,
     cleaned = False
     if cleanup:
         try:
-            from probes._env import get_client
             from e2e.runner import _hard_purge
+            from probes._env import get_client
             client = get_client()
             # Re-fetch the workflow uuids in case the push reshaped them.
             sys.path.insert(0, str(REPO_ROOT / "tooling"))

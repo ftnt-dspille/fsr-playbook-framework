@@ -9,8 +9,8 @@ builtins + FSR globals + locally-defined names).  This catches
 """
 from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
-from fsr_playbooks.compiler.typed_walker import walk_playbook
 from fsr_playbooks.compiler.jinja_render import find_undefined_bare_names
+from fsr_playbooks.compiler.typed_walker import walk_playbook
 
 DB = default_db_path()
 

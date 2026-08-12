@@ -13,7 +13,8 @@ import asyncio
 import json
 import os
 import time
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 try:
     from anthropic import AsyncAnthropic
@@ -24,6 +25,31 @@ except ImportError:
     # and its module-level helpers -- import cleanly without it.
     AsyncAnthropic = None  # type: ignore[assignment,misc]
 
+from . import approvals as _approvals
+from ._loop_helpers import (
+    _CREATE_OFFER_TOOL,
+    _ENHANCE_OFFER_TOOL,
+    DEFAULT_MAX_OUTPUT_TOKENS,
+    MAX_PARALLEL_TOOLS,
+    MAX_SELF_REPAIR_TURNS,
+    MAX_TOOL_TURNS,
+    STREAM_TIMEOUT_SECS,
+    BuildProgressGuard,
+    CreateDeliveryGuard,
+    EnhanceDeliveryGuard,
+    TriageDiscipline,
+    drain_with_idle_timeout,
+    latest_user_text,
+)
+from ._loop_helpers import (
+    compile_errors as _compile_errors,
+)
+from ._loop_helpers import (
+    extract_yaml_block as _extract_yaml_block,
+)
+from ._loop_helpers import (
+    shrink_history as _shrink_history,
+)
 from .provider import (
     ApprovalRequestEvent,
     DoneEvent,
@@ -36,27 +62,8 @@ from .provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from . import approvals as _approvals
-from ._loop_helpers import (
-    DEFAULT_MAX_OUTPUT_TOKENS,
-    MAX_PARALLEL_TOOLS,
-    MAX_SELF_REPAIR_TURNS,
-    MAX_TOOL_TURNS,
-    STREAM_TIMEOUT_SECS,
-    BuildProgressGuard,
-    CreateDeliveryGuard,
-    EnhanceDeliveryGuard,
-    TriageDiscipline,
-    latest_user_text,
-    _CREATE_OFFER_TOOL,
-    _ENHANCE_OFFER_TOOL,
-    compile_errors as _compile_errors,
-    drain_with_idle_timeout,
-    extract_yaml_block as _extract_yaml_block,
-    shrink_history as _shrink_history,
-)
-from .tools import anthropic_tools, dispatch, _resolve_tier as _tier_for
-
+from .tools import _resolve_tier as _tier_for
+from .tools import anthropic_tools, dispatch
 
 DEFAULT_MODEL = os.environ.get("STUDIO_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
 
@@ -208,7 +215,7 @@ class AnthropicProvider:
     async def resume(
         self,
         *,
-        suspended: "_approvals.SuspendedSession",
+        suspended: _approvals.SuspendedSession,
         decision: str,  # "approve" | "deny"
     ) -> AsyncIterator[Event]:
         """Resume a turn that was suspended on a pending_approval.
@@ -563,10 +570,15 @@ class AnthropicProvider:
                 # block, retries were exhausted (or it's a non-retryable
                 # error like Auth/BadRequest).
                 import logging
+
                 from anthropic import (
-                    APIConnectionError, APITimeoutError, AuthenticationError,
-                    BadRequestError, PermissionDeniedError, RateLimitError,
+                    APIConnectionError,
                     APIStatusError,
+                    APITimeoutError,
+                    AuthenticationError,
+                    BadRequestError,
+                    PermissionDeniedError,
+                    RateLimitError,
                 )
                 logging.exception("anthropic stream failed")
                 if isinstance(e, AuthenticationError):
@@ -1004,14 +1016,53 @@ class AnthropicProvider:
                 tool_calls=tool_call_usage, tags=tags,
             )
 
-        # Tool-turn budget exhausted -- emit a choice card asking the
-        # analyst whether to continue with more rounds or deliver what we
-        # have. The card is a real tool dispatch (tier 0) so it lands in the
-        # transcript and the connector's _wire_transcript post-processes it
-        # into a choice_card event the widget renders. On resume: "continue"
-        # -> a fresh turn with the same tools; "deliver" -> a fresh no-tools
-        # wrap-up turn.
-        from ._loop_helpers import budget_ask_card
+        # Tool-turn budget exhausted. Two paths:
+        #
+        # 1. Nothing delivered (no YAML, no offer card): skip the budget-ask
+        #    and force the wrap-up directive. The budget-ask asks "continue or
+        #    deliver?" -- but "deliver" is the ONLY sane answer when the analyst
+        #    has nothing, and a chat-sweep (or a distracted analyst) leaves the
+        #    card unanswered, so the turn ends at awaiting_choice with nothing
+        #    delivered. This is the build_plain_request_no_record 3/3 failure:
+        #    the model burns 16 rounds on research and the budget-ask strands
+        #    it. The wrapup_directive tells the model to stop researching and
+        #    deliver from what it already knows -- one forced no-tools round.
+        #
+        # 2. Something IS delivered: the budget-ask is meaningful (the analyst
+        #    might want more rounds to refine). Emit the choice card as before.
+        from ._loop_helpers import (
+            analyst_has_the_yaml,
+            budget_ask_card,
+            wrapup_directive,
+        )
+        # Message is a dataclass; analyst_has_the_yaml expects dicts. Convert.
+        _hist_dicts = [
+            {"role": m.role, "content": m.content} if hasattr(m, "role")
+            else m for m in history
+        ]
+        if not analyst_has_the_yaml(_hist_dicts):
+            _directive, _max_tok = wrapup_directive(history, _turn_budget)
+            yield UsageEvent(
+                session_id=session_id, turn=turn_idx, model=self.model,
+                input_tokens=0, output_tokens=0,
+                cache_read=0, cache_write=0,
+                history_chars=0,
+                stop_reason="max_tool_turns",
+                self_repair_turn=self_repair_turns,
+                tool_calls=[], tags=tags,
+            )
+            turn_idx += 1
+            async for ev in self._wrapup_call(
+                history=history, directive=_directive,
+                cached_system=cached_system, session_id=session_id,
+                turn_idx=turn_idx, tags=tags,
+                self_repair_turns=self_repair_turns,
+                stop_reason_label="max_tool_turns",
+                max_tokens=_max_tok,
+            ):
+                yield ev
+            yield DoneEvent(stop_reason="end_turn")
+            return
         _card = budget_ask_card(_turn_budget)
         _card_result = dispatch("emit_choice_card", _card, _internal=True)
         yield ToolUseEvent(

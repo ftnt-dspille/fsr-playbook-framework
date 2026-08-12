@@ -7,13 +7,12 @@ with "did you mean…" suggestions.
 """
 from __future__ import annotations
 
+import difflib
 import sqlite3
 from pathlib import Path
 
-import difflib
-
 from ..errors import CompileError, ErrorCode
-from ..ir import Collection, PRIORITY_LIST_NAME, Playbook
+from ..ir import PRIORITY_LIST_NAME, Collection, Playbook
 from ._constants import SHORT_TYPE_TO_FSR, _looks_like_uuid
 from .catalog import CatalogLookupMixin
 from .connector_args import ConnectorArgsMixin

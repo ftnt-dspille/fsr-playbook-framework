@@ -39,7 +39,8 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -374,7 +375,7 @@ def _normalize_rule(rule: Any) -> dict[str, Any] | None:
     return {}
 
 
-def _oauth_cache_path(key: tuple[str, str]) -> "Any":
+def _oauth_cache_path(key: tuple[str, str]) -> Any:
     """Where the shared token for ``(token_url, client_id)`` lives.
 
     Filename is a hash: the client id is a credential and must not be readable
@@ -478,7 +479,7 @@ def _oauth2_bearer(cfg: dict[str, Any]) -> str | None:
     return _mint_with_retry(cfg, key, token_url, client_id, client_secret)
 
 
-def _oauth_lock(key: tuple[str, str]) -> "Any":
+def _oauth_lock(key: tuple[str, str]) -> Any:
     """A cross-process lock for minting ``key``'s token. Returns a context
     manager; a no-op one where ``fcntl`` is unavailable (non-POSIX)."""
     import contextlib

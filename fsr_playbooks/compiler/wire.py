@@ -44,7 +44,7 @@ different copy of the wire format.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -121,7 +121,7 @@ def require_expanded_collection(payload: Any) -> None:
             raise UnexpandedRelationshipsError(f"collection {name!r}")
 
 
-def as_record_list(field: Any, *, path: str = "records") -> List[Dict[str, Any]]:
+def as_record_list(field: Any, *, path: str = "records") -> list[dict[str, Any]]:
     """Nested records as a LIST, whichever wire shape they arrived in.
 
     Handles the id-keyed map form (`{"<uuid>": {...}}`) as well as a list,
@@ -169,13 +169,13 @@ class LiveStep(_WireRecord):
     # Reusable-block membership. LIVE: `None` x2651 / `str` (IRI) x107 -- never
     # an expanded dict in the sample, but `decompiler._to_uuid` accepts both and
     # a stricter type here would refuse a save over a cosmetic field.
-    group: Optional[Union[str, Dict[str, Any]]] = None
+    group: str | dict[str, Any] | None = None
     # An IRI string in export JSON, an expanded dict under
     # `?$relationships=true`. Both are real; neither is normalized here --
     # `_step_type_key` / `_to_uuid` already read both, and rewriting it would
     # change what the round-trip corpus compares.
     stepType: Any = None
-    arguments: Optional[Dict[str, Any]] = None
+    arguments: dict[str, Any] | None = None
 
     @field_validator("arguments", mode="before")
     @classmethod
@@ -204,7 +204,7 @@ class LiveStep(_WireRecord):
 class LiveRoute(_WireRecord):
     uuid: str = ""
     name: str = ""
-    label: Optional[str] = None
+    label: str | None = None
     sourceStep: Any = None
     targetStep: Any = None
     # Runtime-executed flag on every route the box sends (6076/6076 in the
@@ -213,17 +213,17 @@ class LiveRoute(_WireRecord):
     # strictly so a shape drift -- the box sending a string or int where it
     # has always sent a bool -- is caught here rather than passing through
     # `extra="allow"` unseen (#32: type the remaining live wire keys).
-    isExecuted: Optional[bool] = None
+    isExecuted: bool | None = None
 
 
 class LiveWorkflow(_WireRecord):
     uuid: str = ""
     name: str = ""
-    steps: List[LiveStep] = []
-    routes: List[LiveRoute] = []
+    steps: list[LiveStep] = []
+    routes: list[LiveRoute] = []
     # Reusable-block records. Iterated bare at `decompiler.py:1118`, i.e. the
     # exact pattern behind 61a18c1 -- so it goes through the same coercion.
-    groups: List[Dict[str, Any]] = []
+    groups: list[dict[str, Any]] = []
 
     # Declared input names. Typed STRICTLY as `List[str]` on purpose: losing a
     # declared parameter is one of the two original silent-loss defects this
@@ -232,10 +232,10 @@ class LiveWorkflow(_WireRecord):
     # would DISAPPEAR from the loss gate's comparison instead of blocking the
     # save. Refusing loudly is the right trade for a field whose loss is
     # invisible. LIVE: list in 600/600 workflows, every element `str`.
-    parameters: Optional[List[str]] = None
+    parameters: list[str] | None = None
     # LIVE: `str` (IRI) x599 and `None` x1 -- a workflow with no trigger step
     # is rare but real, so this must stay optional.
-    triggerStep: Optional[str] = None
+    triggerStep: str | None = None
 
     @field_validator("steps", "routes", "groups", mode="before")
     @classmethod
@@ -246,7 +246,7 @@ class LiveWorkflow(_WireRecord):
 class LiveCollection(_WireRecord):
     uuid: str = ""
     name: str = ""
-    workflows: List[LiveWorkflow] = []
+    workflows: list[LiveWorkflow] = []
 
     @field_validator("workflows", mode="before")
     @classmethod
@@ -259,7 +259,7 @@ class LiveEnvelope(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    data: List[LiveCollection] = []
+    data: list[LiveCollection] = []
 
 
 def parse_live_collection(payload: Any) -> LiveEnvelope:
@@ -274,7 +274,7 @@ def parse_live_collection(payload: Any) -> LiveEnvelope:
     return LiveEnvelope.model_validate(payload)
 
 
-def normalize_live_collection(payload: Any) -> Dict[str, Any]:
+def normalize_live_collection(payload: Any) -> dict[str, Any]:
     """Validate a live pull, then hand back the SAME dicts with nested record
     containers coerced to lists.
 

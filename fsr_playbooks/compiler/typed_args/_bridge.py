@@ -15,7 +15,7 @@ error) from `base.py` in one place.
 """
 from __future__ import annotations
 
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -55,8 +55,8 @@ def validate_args(
     path: str,
     errors: list[CompileError],
     *,
-    extra_context: Optional[dict[str, Any]] = None,
-) -> Optional[M]:
+    extra_context: dict[str, Any] | None = None,
+) -> M | None:
     """Validate `raw` against `model_cls`, bridging to CompileErrors.
 
     `path` is the step-relative dotted prefix the warnings/errors hang off

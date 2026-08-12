@@ -369,8 +369,8 @@ wheels = [
 ]
 
 [[package]]
-name = "fsrpb"
-version = "0.0.1"
+name = "fsr-playbooks"
+version = "0.6.17"
 source = { virtual = "." }
 dependencies = [
     { name = "jinja2" },

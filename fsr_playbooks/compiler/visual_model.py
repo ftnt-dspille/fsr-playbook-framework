@@ -39,7 +39,6 @@ from .samples import (
     extract_samples_block,
 )
 
-
 # ---------------------------------------------------------------------------
 # Node type families -- collapses the 43 step types into ~7 visual templates
 # the canvas renders. Source of truth for icon + color in the frontend.

@@ -7,7 +7,7 @@ Target: /api/ingest-feeds/<module>; on-create triggers intentionally bypassed.
 from __future__ import annotations
 
 import json
-from typing import Iterable
+from collections.abc import Iterable
 
 from . import (
     STEP_INGEST_BULK_FEED,
@@ -31,7 +31,7 @@ from ._shared import (
 )
 
 
-def rule_threatintel_tag_in_sibling_info_json(doc: dict, info_json_path: "str | None" = None) -> Iterable[Issue]:
+def rule_threatintel_tag_in_sibling_info_json(doc: dict, info_json_path: str | None = None) -> Iterable[Issue]:
     """Per the official guide TIM section, the canonical place for the
     `ThreatIntel` tag is the connector's `info.json`, NOT playbook recordTags.
     TAXII2 and AWS Feed prove this -- neither tags any playbook, both work.

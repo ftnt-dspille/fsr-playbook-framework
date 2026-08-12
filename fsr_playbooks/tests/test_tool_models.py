@@ -9,7 +9,6 @@ emit_action_card / emit_choice_card models (required `title`, a field neither
 registered tool accepts).
 """
 import inspect
-
 import json
 import typing
 from typing import Any
@@ -278,8 +277,7 @@ def test_an_unknown_tool_and_an_untouched_call_return_the_input_unchanged():
 def test_the_stringified_filter_now_passes_the_gate_it_used_to_bounce_off():
     """End-to-end at the boundary: the model that rejected this is the one the
     agent hit six times."""
-    from fsr_playbooks.llm.tool_models import (SearchModuleRecordsArgs,
-                                               TOOL_MODELS)
+    from fsr_playbooks.llm.tool_models import TOOL_MODELS, SearchModuleRecordsArgs
     raw = {"module": "m", "filters": '{"ztpfDevices.uuid": "abc"}',
            "fields": '["id", "name"]'}
     with pytest.raises(Exception):

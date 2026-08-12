@@ -21,13 +21,13 @@ legacy behaviour for valid playbooks (zero corpus-emit diff).
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class DecisionCondition(StrictArgs):
@@ -45,10 +45,10 @@ class DecisionCondition(StrictArgs):
 
     option: Any = None
     condition: Any = None
-    next: Optional[str] = None
+    next: str | None = None
     default: Any = None
-    step_iri: Optional[str] = None
-    step_name: Optional[str] = None
+    step_iri: str | None = None
+    step_name: str | None = None
 
 
 class DecisionArgs(StrictArgs):
@@ -61,12 +61,12 @@ class DecisionArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    conditions: Optional[list[DecisionCondition]] = None
+    conditions: list[DecisionCondition] | None = None
 
 
 def expand_decision(
     args: Any, branches: dict, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Promote each condition's `next:` into `branches` and strip it.
 
     Drop-in for the imperative `_normalize_decision_args`: mutates `args` in

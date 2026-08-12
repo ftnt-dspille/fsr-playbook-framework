@@ -1,17 +1,18 @@
 """MCP tools: Tools Compile"""
 from __future__ import annotations
-from . import _shared
 
 import json
 import re
 from typing import Any
 
+from . import _shared
 from ._shared import (
-    mcp,
     _err,
     _serialize_compiler_error,
     load_yaml_text,
+    mcp,
 )
+
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
 
@@ -69,7 +70,10 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
     corrected: dict[str, Any] = {}
     try:
         from fsr_playbooks.compiler.source_fixer import (
-            apply_fixes as _apply_fixes, collect_fixes as _collect_fixes,
+            apply_fixes as _apply_fixes,
+        )
+        from fsr_playbooks.compiler.source_fixer import (
+            collect_fixes as _collect_fixes,
         )
         fixes = _collect_fixes(yaml_text)
         if fixes:
@@ -250,7 +254,8 @@ def resolve_yaml(yaml_text: str) -> dict[str, Any]:
     connectors, picklists = _extract_connectors_and_picklists(yaml_text)
     try:
         from recipes.prechecks import (
-            check_connector_installed, check_picklist_value,
+            check_connector_installed,
+            check_picklist_value,
         )
     except Exception as exc:  # noqa: BLE001
         return {

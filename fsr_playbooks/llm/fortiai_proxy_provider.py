@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 import time
 import uuid as _uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 
@@ -23,7 +24,11 @@ from ._loop_helpers import (
     MAX_TOOL_TURNS,
     TriageDiscipline,
     latest_user_text,
+)
+from ._loop_helpers import (
     compile_errors as _compile_errors,
+)
+from ._loop_helpers import (
     extract_yaml_block as _extract_yaml_block,
 )
 from .provider import (
@@ -38,7 +43,9 @@ from .provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from .tools import _resolve_tier as _tier_for, dispatch, anthropic_tools as _anthropic_tools
+from .tools import _resolve_tier as _tier_for
+from .tools import anthropic_tools as _anthropic_tools
+from .tools import dispatch
 
 
 def _collapse_union_types(node: Any) -> Any:
@@ -157,7 +164,7 @@ class FortiAIProxyProvider:
     async def resume(
         self,
         *,
-        suspended: "_approvals.SuspendedSession",
+        suspended: _approvals.SuspendedSession,
         decision: str,  # "approve" | "deny"
     ) -> AsyncIterator[Event]:
         """Resume a turn suspended on a pending tier-3+ approval.

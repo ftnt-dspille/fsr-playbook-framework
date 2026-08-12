@@ -29,8 +29,6 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from typing import Optional
-
 
 # Matches a value that is *entirely* one `{{ … }}` block (with optional
 # leading/trailing whitespace). Multi-line is fine. We anchor with `\A`/`\Z`
@@ -213,8 +211,8 @@ _HAND_CURATED: dict[str, tuple[str | None, str | None]] = {
 
 
 def filter_signature(
-    name: str, conn: Optional[sqlite3.Connection],
-) -> tuple[Optional[str], Optional[str]]:
+    name: str, conn: sqlite3.Connection | None,
+) -> tuple[str | None, str | None]:
     """Look up `(input_type, output_type)` for a filter, FSR vocab.
 
     Resolution order: hand-curated map (highest authority, ships in
@@ -247,7 +245,7 @@ def chain_filters(expr: str) -> list[str]:
     return _FILTER_NAME_RE.findall(expr or "")
 
 
-def _types_satisfy(producer_out: Optional[str], consumer_in: Optional[str]) -> bool:
+def _types_satisfy(producer_out: str | None, consumer_in: str | None) -> bool:
     """True iff a filter producing `producer_out` can feed one expecting
     `consumer_in`. Both in FSR vocab. None on either side means
     "unknown" and we accept (silence-is-acceptance).
@@ -267,8 +265,8 @@ def _types_satisfy(producer_out: Optional[str], consumer_in: Optional[str]) -> b
 
 
 def validate_chain(
-    expr: str, conn: Optional[sqlite3.Connection],
-) -> Optional[tuple[str, str, str]]:
+    expr: str, conn: sqlite3.Connection | None,
+) -> tuple[str, str, str] | None:
     """Walk filter transitions; return the first (producer, consumer,
     consumer_input_type) that produces an incompatibility, or None
     when the chain checks out.
@@ -279,7 +277,7 @@ def validate_chain(
     fs = chain_filters(expr)
     if len(fs) < 2:
         return None
-    prev_out: Optional[str] = None
+    prev_out: str | None = None
     for i, fname in enumerate(fs):
         in_t, out_t = filter_signature(fname, conn)
         if i > 0 and not _types_satisfy(prev_out, in_t):
@@ -288,7 +286,7 @@ def validate_chain(
     return None
 
 
-def extract_pure_jinja(value: object) -> Optional[str]:
+def extract_pure_jinja(value: object) -> str | None:
     """Return the inner expression when `value` is a *pure* Jinja block.
 
     Returns the trimmed expression text, or None when the value isn't
@@ -300,7 +298,7 @@ def extract_pure_jinja(value: object) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def terminal_filter(expr: str) -> Optional[str]:
+def terminal_filter(expr: str) -> str | None:
     """Return the last filter name in the expression, or None when
     the expression has no filter chain (e.g. `{{ vars.x }}`)."""
     matches = _FILTER_NAME_RE.findall(expr or "")
@@ -310,7 +308,7 @@ def terminal_filter(expr: str) -> Optional[str]:
 def infer_terminal_observed_type(
     value: object,
     conn: sqlite3.Connection,
-) -> Optional[str]:
+) -> str | None:
     """Top-level entry point. Returns the resolver's `observed_type`
     vocabulary string when statically knowable, else None.
 

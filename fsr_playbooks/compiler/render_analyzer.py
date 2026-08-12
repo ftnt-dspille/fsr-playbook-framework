@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import difflib
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from fsr_playbooks.compiler.mi_output_catalog import (
+    APPROVAL_MI_STEP_TYPES,
     MI_OUTPUT_KEYS,
     MI_SYSTEM_KEYS,
-    APPROVAL_MI_STEP_TYPES,
     declared_input_names,
     normalize_mode,
 )

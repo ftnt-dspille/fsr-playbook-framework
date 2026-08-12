@@ -193,7 +193,7 @@ def _compute_predecessors(pb: Playbook) -> dict[str, set[str]]:
     enforce all-paths dominance (FSR runtime would reject the playbook
     on any path where the reference doesn't bind anyway).
     """
-    by_id: dict[str, "Step"] = {s.id: s for s in pb.steps}
+    by_id: dict[str, Step] = {s.id: s for s in pb.steps}
     preds: dict[str, set[str]] = {s.id: set() for s in pb.steps}
     starts = [s.id for s in pb.steps if s.type and s.type.startswith("start")]
     if not starts and pb.steps:

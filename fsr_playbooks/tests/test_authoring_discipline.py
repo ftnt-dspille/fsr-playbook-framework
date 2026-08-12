@@ -16,7 +16,6 @@ from fsr_playbooks.llm.provider import (
     ToolUseEvent,
 )
 
-
 # ──────────── helpers ────────────
 
 _YAML_MANUAL_INPUT = """\

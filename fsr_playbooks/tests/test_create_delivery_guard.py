@@ -12,7 +12,9 @@ These tests pin the detector's contract: it fires exactly when a
 advertised, and at most once.
 """
 from fsr_playbooks.llm._loop_helpers import (
-    CreateDeliveryGuard, _CREATE_OFFER_TOOL, _CREATE_VERIFY_TOOL,
+    _CREATE_OFFER_TOOL,
+    _CREATE_VERIFY_TOOL,
+    CreateDeliveryGuard,
 )
 
 BUILD_SLICE = {_CREATE_OFFER_TOOL, _CREATE_VERIFY_TOOL, "get_step_type"}

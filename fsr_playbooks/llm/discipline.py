@@ -34,7 +34,6 @@ from typing import Any
 
 from .provider import Event, TextEvent, ToolUseEvent
 
-
 # Step types that the system prompt's "Required workflow" §1 says
 # require a ``get_step_type`` call before drafting. Connector is
 # handled separately (§2: find_connector → find_operation).

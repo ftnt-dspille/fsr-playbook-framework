@@ -13,7 +13,6 @@ import asyncio
 import secrets
 import stat
 
-
 from fsr_playbooks.llm import approvals as A
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
 from fsr_playbooks.llm.provider import DoneEvent, ErrorEvent, ToolResultEvent

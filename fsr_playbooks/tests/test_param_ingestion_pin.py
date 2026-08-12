@@ -25,12 +25,13 @@ intent + numeric/bool crossings) remain correct and sufficient.
 """
 import json
 
+# Resolve the repo-root data/ path from this file (…/fsr_playbooks/tests/…).
+from pathlib import Path
+
 import pytest
 
 from fsr_playbooks.compiler.typed_walker import _infer_literal_shape
 
-# Resolve the repo-root data/ path from this file (…/fsr_playbooks/tests/…).
-from pathlib import Path
 _ARTIFACT = (Path(__file__).resolve().parents[2]
              / "data" / "probe_results" / "param_ingestion_coercion.json")
 

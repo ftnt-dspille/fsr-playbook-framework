@@ -14,7 +14,6 @@ from .._yaml_hygiene import sanitize_yaml_text
 from .errors import CompileError, ErrorCode
 from .ir import Annotation, Collection, Playbook, Step
 
-
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 # Declared playbook-parameter types (STATIC_TYPE_FLOW Phase 3). Author-facing

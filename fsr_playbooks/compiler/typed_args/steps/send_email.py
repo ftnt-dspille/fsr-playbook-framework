@@ -23,13 +23,13 @@ DESIGN SPLIT (the manual_input / connector lesson, applied up front):
 """
 from __future__ import annotations
 
-from typing import Any, List, Optional, Union
+from typing import Any
 
 from pydantic import ConfigDict, Field
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class SendEmailArgs(StrictArgs):
@@ -47,18 +47,18 @@ class SendEmailArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    to: Optional[Union[str, List[str]]] = None
-    cc: Optional[Union[str, List[str]]] = None
-    bcc: Optional[Union[str, List[str]]] = None
-    subject: Optional[str] = None
-    body: Optional[Any] = None
-    from_: Optional[str] = Field(default=None, alias="from")
-    attachments: Optional[Any] = None
+    to: str | list[str] | None = None
+    cc: str | list[str] | None = None
+    bcc: str | list[str] | None = None
+    subject: str | None = None
+    body: Any | None = None
+    from_: str | None = Field(default=None, alias="from")
+    attachments: Any | None = None
 
 
 def expand_send_email(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate a send_email step's envelope scalars.
 
     Validation-only: always returns ``None`` (the normalizer's

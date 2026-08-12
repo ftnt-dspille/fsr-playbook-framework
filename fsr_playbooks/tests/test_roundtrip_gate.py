@@ -19,13 +19,13 @@ corpus runner calls.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import fsr_playbooks.compiler.roundtrip as rt
 from fsr_playbooks._db import PACKAGED_SLIM_DB
 from fsr_playbooks.compiler.roundtrip import roundtrip
 
-import sys
 _SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
 import corpus_gate  # noqa: E402

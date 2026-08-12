@@ -13,6 +13,7 @@ import pytest
 
 from fsr_playbooks.mcp_server.tools_jinja import find_jinja_pattern
 
+
 # Every ranking assertion below names a real idiom, so it needs the mined
 # corpus -- which the slim DB shipped to CI does not carry. Probe once for ANY
 # expression rather than for the specific idiom: keyed to the specific one, a

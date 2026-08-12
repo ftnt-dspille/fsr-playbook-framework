@@ -5,11 +5,10 @@ Pure -- `check_jinja` walks an args dict and runs jinja2's parser, which IS the
 FortiSOAR runtime parser, so these findings are zero-false-positive for syntax.
 """
 from fsr_playbooks.compiler.jinja_checks import (
-    check_jinja,
     _KNOWN_FILTERS,
     _KNOWN_TESTS,
+    check_jinja,
 )
-
 
 # --- catalog load ---------------------------------------------------------
 

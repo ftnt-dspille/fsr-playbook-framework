@@ -20,7 +20,8 @@ from __future__ import annotations
 import json
 import os
 import uuid as _uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from openai import (
     APIConnectionError,
@@ -35,7 +36,11 @@ from ._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
+)
+from ._loop_helpers import (
     compile_errors as _compile_errors,
+)
+from ._loop_helpers import (
     extract_yaml_block as _extract_yaml_block,
 )
 from .provider import (
@@ -50,7 +55,6 @@ from .provider import (
     UsageEvent,
 )
 from .tools import dispatch, openai_tools
-
 
 DEFAULT_BASE_URL = os.environ.get(
     "STUDIO_LMSTUDIO_BASE_URL", "http://localhost:1234/v1"

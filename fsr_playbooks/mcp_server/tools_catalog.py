@@ -27,7 +27,6 @@ from urllib.parse import urlparse
 from ._shared import _db, _err, _rows, mcp
 from .tools_discovery import find_operation
 
-
 _BASE_URL_HINT = "{{ vars.input.params.<vendor>_base_url }}"
 _TOKEN_HINT = "{{ vars.input.params.<vendor>_token }}"
 

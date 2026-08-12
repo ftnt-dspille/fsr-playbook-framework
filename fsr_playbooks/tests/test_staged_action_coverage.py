@@ -3,11 +3,27 @@ offered but never executed must still be replayed into a trace-built playbook
 (the `action_coverage` gap, CHAT_INTELLIGENCE §B4)."""
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from fsr_playbooks.agent import skill_trace as st
 from fsr_playbooks.agent.skill_trace import SkillTrace
 from fsr_playbooks.mcp_server import build_playbook_from_trace, emit_action_card
+
+
+@pytest.fixture(autouse=True)
+def _stub_live_grounding(monkeypatch):
+    """Keep this tier hermetic: emit_action_card's preflight calls
+    _live_client_for_grounding() which resolves a real FSR client when
+    .env has creds, making the offline gate depend on appliance
+    reachability (tracker #113). Stub it to None so the preflight path
+    runs without a socket. Also clear the _shared._LIVE_CLIENT_CACHE so
+    a client cached by a prior test (under random ordering, when the box
+    is reachable) doesn't leak into this module's emit_action_card path."""
+    import fsr_playbooks.mcp_server._shared as _shared
+    import fsr_playbooks.mcp_server.tools_execution as TE
+    monkeypatch.setattr(TE, "_live_client_for_grounding", lambda: None)
+    _shared._LIVE_CLIENT_CACHE.clear()
 
 
 def test_record_staged_action_appends_staged_no_output_call():

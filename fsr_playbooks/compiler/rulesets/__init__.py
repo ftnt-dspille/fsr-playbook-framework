@@ -13,8 +13,9 @@ emitter first.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any
 
 # Step type UUIDs (canonical, from data/STEP_TYPES.md and live FSR)
 STEP_CREATE_RECORD = "2597053c-e718-44b4-8394-4d40fe26d357"

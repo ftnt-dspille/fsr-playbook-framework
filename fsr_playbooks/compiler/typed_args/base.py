@@ -21,7 +21,7 @@ appending a warning to the validation context.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -42,13 +42,13 @@ class StrictArgs(BaseModel):
 
 
 def add_warning(
-    context: Optional[dict[str, Any]],
+    context: dict[str, Any] | None,
     message: str,
     *,
     code: ErrorCode = ErrorCode.BAD_VALUE,
     sub_path: str = "",
-    near: Optional[str] = None,
-    suggestion: Optional[str] = None,
+    near: str | None = None,
+    suggestion: str | None = None,
 ) -> None:
     """Append an auto-correct warning to the validation context.
 

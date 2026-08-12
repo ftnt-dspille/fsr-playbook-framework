@@ -8,8 +8,7 @@ references, layout coordinates, and other FSR-internal noise.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
-
+from typing import Any
 
 # FSR system picklist that backs a workflow's execution priority. The resolver
 # maps a playbook's `priority:` name (High/Medium/Low) to the live IRI by
@@ -25,7 +24,7 @@ class Step:
     type: str                        # 'connector' | 'set_variable' | 'decision' | 'start' | ...
     name: str = ""                   # display name (defaults to id)
     arguments: dict[str, Any] = field(default_factory=dict)
-    next: Optional[str] = None       # id of next step (linear flow)
+    next: str | None = None       # id of next step (linear flow)
     branches: dict[str, str] = field(default_factory=dict)  # decision: option -> step id
     # Unlabeled fanout: multiple outgoing routes from the same source where
     # no labels were attached. Rare in practice (~0.5% of playbooks) but the
@@ -36,7 +35,7 @@ class Step:
     # for AI-modified steps; the emitter auto-creates a 'note' annotation
     # positioned to the right of the step. Mutually compatible with
     # explicit `playbook.annotations` entries.
-    comment: Optional[str] = None
+    comment: str | None = None
 
     # FSR's per-step `description` field (distinct from `comment`, which is a
     # canvas sticky-note). Free-form text shown in the step's detail pane.
@@ -49,12 +48,12 @@ class Step:
     # bound as `{{ vars.item }}` (and `vars.item.<field>` for object items).
     # Accepted keys: item (required), parallel, condition, __bulk,
     # batch_size, break_loop. None means no looping.
-    for_each: Optional[dict] = None
+    for_each: dict | None = None
 
     # Filled by the resolver:
-    step_type_uuid: Optional[str] = None
-    step_type_name: Optional[str] = None  # canonical FSR name e.g. 'Connectors'
-    handler: Optional[str] = None         # FUNCTION_MAP key
+    step_type_uuid: str | None = None
+    step_type_name: str | None = None  # canonical FSR name e.g. 'Connectors'
+    handler: str | None = None         # FUNCTION_MAP key
 
 
 @dataclass
@@ -69,8 +68,8 @@ class Annotation:
     kind: str = "note"               # 'note' | 'block' | 'custom'
     title: str = "Note"              # FSR `name`; defaults to "Note" when blank
     body: str = ""                   # FSR `description`; markdown for notes
-    top: Optional[int] = None        # canvas Y; emitter fills in if None
-    left: Optional[int] = None       # canvas X; emitter fills in if None
+    top: int | None = None        # canvas Y; emitter fills in if None
+    left: int | None = None       # canvas X; emitter fills in if None
     height: int = 0                  # 0 means auto-grow (FSR convention for notes)
     width: int = 300
     collapsed: bool = False
@@ -78,8 +77,8 @@ class Annotation:
     contains: list[str] = field(default_factory=list)  # block: step ids inside
     # Marker for auto-generated notes (from step.comment). Not user-set.
     # Lets the decompiler collapse the round-trip back into step.comment.
-    auto_for_step: Optional[str] = None
-    uuid: Optional[str] = None       # filled by emitter
+    auto_for_step: str | None = None
+    uuid: str | None = None       # filled by emitter
 
 
 @dataclass
@@ -113,15 +112,15 @@ class Playbook:
     # Execution priority NAME as authored (e.g. "High"). None = engine default.
     # The agent-routed run_op wrap sets this to "High" so containment ops jump
     # the queue. Resolved to a picklist IRI by the resolver (see priority_iri).
-    priority: Optional[str] = None
+    priority: str | None = None
     # Resolver-filled: the picklist IRI for `priority`, looked up live-synced
     # from the store's `picklists` table (listName WorkflowPriority).
-    priority_iri: Optional[str] = None
+    priority_iri: str | None = None
     trigger: str = "start"           # short-name short-cut for the trigger step type
     # Explicit trigger step id. If unset, emitter falls back to "first step
     # whose type is 'start'". Decompiled playbooks always set this -- they
     # might trigger on cybersponse.post_create, cybersponse.action, etc.
-    trigger_step_id: Optional[str] = None
+    trigger_step_id: str | None = None
     # Input parameter names for this playbook. Callers pass values in
     # via `arguments={name: value}` on a workflow_reference step;
     # inside the playbook, values are read as `{{vars.input.params.<name>}}`.
@@ -132,7 +131,7 @@ class Playbook:
     # `vars.input.params.<name>` shapes in the typed walker.
     parameter_types: dict[str, str] = field(default_factory=dict)
     steps: list[Step] = field(default_factory=list)
-    annotations: list["Annotation"] = field(default_factory=list)
+    annotations: list[Annotation] = field(default_factory=list)
 
 
 @dataclass

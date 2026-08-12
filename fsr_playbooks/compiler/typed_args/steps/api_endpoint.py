@@ -25,13 +25,13 @@ resolver keeps the full transform.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class ApiEndpointArgs(StrictArgs):
@@ -47,13 +47,13 @@ class ApiEndpointArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    route: Optional[str] = None
-    authentication_methods: Optional[list[str]] = None
+    route: str | None = None
+    authentication_methods: list[str] | None = None
 
 
 def expand_api_endpoint(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate an api_endpoint trigger's scalar arguments.
 
     Validation-only: always returns ``None`` (the friendly->canonical transform

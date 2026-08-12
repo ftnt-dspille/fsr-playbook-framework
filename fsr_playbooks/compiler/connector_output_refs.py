@@ -31,7 +31,7 @@ import json
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .errors import CompileError, ErrorCode
 from .ir import Collection
@@ -55,7 +55,7 @@ def _jinja_key(name: str, step_id: str) -> str:
     return base.replace(" ", "_")
 
 
-def _store_data_subkeys(db_path: Path, connector: str, op: str) -> Optional[set[str]]:
+def _store_data_subkeys(db_path: Path, connector: str, op: str) -> set[str] | None:
     """`.data` subkeys as MEASURED from a real run, via the grounded store
     co-located with the reference DB. None if unknown."""
     try:
@@ -74,7 +74,7 @@ def _store_data_subkeys(db_path: Path, connector: str, op: str) -> Optional[set[
     return None
 
 
-def _schema_data_subkeys(conn: sqlite3.Connection, connector: str, op: str) -> Optional[set[str]]:
+def _schema_data_subkeys(conn: sqlite3.Connection, connector: str, op: str) -> set[str] | None:
     """`.data` subkeys from the static `output_schema` -- a last resort (these
     schemas are frequently incomplete or absent)."""
     try:
@@ -103,8 +103,8 @@ def _schema_data_subkeys(conn: sqlite3.Connection, connector: str, op: str) -> O
     return None
 
 
-def _data_subkeys(db_path: Path, conn: Optional[sqlite3.Connection],
-                  connector: str, op: str) -> Optional[set[str]]:
+def _data_subkeys(db_path: Path, conn: sqlite3.Connection | None,
+                  connector: str, op: str) -> set[str] | None:
     """Best available `.data` subkeys: measured run first, static schema next."""
     keys = _store_data_subkeys(db_path, connector, op)
     if keys:
@@ -134,7 +134,7 @@ def _connector_steps(coll: Collection) -> dict[str, dict[str, tuple[str, str]]]:
 
 def rewrite_connector_output_refs(
     coll: Collection, db_path: Path,
-    conn: Optional[sqlite3.Connection] = None,
+    conn: sqlite3.Connection | None = None,
 ) -> list[CompileError]:
     """Rewrite `vars.steps.<connstep>.<x>` → `.data.<field>` in place; return
     warn-and-fix diagnostics. Only rewrites when the target field is
@@ -158,7 +158,7 @@ def rewrite_connector_output_refs(
             if not steps_map:
                 continue
             # subkeys cache per (connector, op) for this playbook
-            cache: dict[tuple[str, str], Optional[set[str]]] = {}
+            cache: dict[tuple[str, str], set[str] | None] = {}
             for s in pb.steps:
                 if not isinstance(s.arguments, dict):
                     continue
@@ -187,7 +187,7 @@ def _rewrite_in_node(node: Any, step, steps_map, cache, db_path, conn, fixes) ->
     return node
 
 
-def _subkeys(cache, db_path, conn, connector, op) -> Optional[set[str]]:
+def _subkeys(cache, db_path, conn, connector, op) -> set[str] | None:
     key = (connector, op)
     if key not in cache:
         cache[key] = _data_subkeys(db_path, conn, connector, op)

@@ -14,7 +14,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen tool-gate wire-audit wire-census
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen tool-gate mypy-gate wire-audit wire-census
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -205,22 +205,27 @@ corpus-gen: ## regenerate the committed round-trip corpus fixtures
 mypy: ## mypy type-check over fsr_playbooks/compiler (default config; not --strict)
 	$(VENV_PY) -m mypy
 
+mypy-gate: ## ratchet gate: fail on NEW mypy errors in llm/ + mcp_server/ (baseline docs/typing/mypy_ratchet.json)
+	$(VENV_PY) scripts/mypy_gate.py
+
 doctor: ## environment preflight: version resolution, pyfsr floor, reference DB
 	$(VENV_PY) -m fsr_playbooks.doctor
 
 verify: ## green-check for the fsr_playbooks + connector axis (offline)
-	@echo "→ [0/4] environment doctor"
+	@echo "→ [0/5] environment doctor"
 	@# FIRST, and fail-fast. Every check here once presented as a product bug:
 	@# a cwd-dependent version tripped the connector's guard across ~68 tests,
 	@# an ancient pyfsr broke suite collection, and an empty reference DB makes
 	@# broken YAML validate clean. Diagnosing those from the test output costs
 	@# hours; diagnosing them from here costs one line.
 	$(VENV_PY) -m fsr_playbooks.doctor
-	@echo "→ [1/4] mypy (fsr_playbooks/compiler)"
+	@echo "→ [1/5] mypy (fsr_playbooks/compiler)"
 	$(VENV_PY) -m mypy
-	@echo "→ [2/4] fsr_playbooks tests"
+	@echo "→ [2/5] mypy ratchet (fsr_playbooks/llm + mcp_server)"
+	$(VENV_PY) scripts/mypy_gate.py
+	@echo "→ [3/5] fsr_playbooks tests"
 	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q
-	@echo "→ [3/4] connector suite (offline; live tests self-skip)"
+	@echo "→ [4/5] connector suite (offline; live tests self-skip)"
 	cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q
 	@echo "✓ verify passed"
 	@echo "  (Angular widget has its own toolchain in WebStorm -- not verifiable here.)"

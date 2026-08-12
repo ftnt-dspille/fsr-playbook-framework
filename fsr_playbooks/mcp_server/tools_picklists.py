@@ -1,16 +1,17 @@
 """MCP tools: Tools Picklists"""
 from __future__ import annotations
-from . import _shared
 
 import sqlite3
 from typing import Any
 
+from .. import picklists as _pl
+from . import _shared
 from ._shared import (
     _db,
     _err,
     mcp,
 )
-from .. import picklists as _pl
+
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
 
@@ -228,6 +229,7 @@ def _persist_precheck_verification(kind: str, key: str, method: str,
     else:
         return
     import datetime
+
     from .._db import writable_reference_db
     target = writable_reference_db()
     if target is None:

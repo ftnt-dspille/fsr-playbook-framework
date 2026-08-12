@@ -19,9 +19,9 @@ pins the logic rather than whatever the shipped catalog happens to contain.
 import pytest
 
 from fsr_playbooks.compiler.skill_compiler import (
-    _visible_params, prune_hidden_params,
+    _visible_params,
+    prune_hidden_params,
 )
-
 
 # (param_name, parent_param_name, condition_value) -- the catalog's shape.
 # Mirrors fortigate-firewall.block_ip_new's real nesting.

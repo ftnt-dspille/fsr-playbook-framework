@@ -8,8 +8,8 @@ These are mutually exclusive.
 
 Covers: emitter.py _emit_step cleanup logic.
 """
-from fsr_playbooks.compiler.ir import Collection, Playbook, Step
 from fsr_playbooks.compiler.emitter import emit
+from fsr_playbooks.compiler.ir import Collection, Playbook, Step
 
 
 def test_workflow_reference_apply_async_deletes_break_loop():

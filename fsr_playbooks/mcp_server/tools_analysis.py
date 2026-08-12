@@ -5,19 +5,18 @@ import json
 import sqlite3
 from typing import Any
 
-from . import _shared
-from . import tools_execution
-from . import tools_discovery
-from .tools_picklists import (
-    precheck_picklist_value,
-    _persist_precheck_verification,
-    _map_http_auth,
-)
+from . import _shared, tools_discovery, tools_execution
 from ._shared import (
-    mcp,
     _db,
     load_yaml_text,
+    mcp,
 )
+from .tools_picklists import (
+    _map_http_auth,
+    _persist_precheck_verification,
+    precheck_picklist_value,
+)
+
 # Import DB_PATH for type hints/direct use (non-patchable usage)
 DB_PATH = _shared.DB_PATH
 
@@ -188,7 +187,9 @@ def step_through_playbook(yaml_text: str = "",
         # producer's output_shape.
         try:
             from fsr_playbooks.compiler.render_paths import (  # noqa: PLC0415
-                consumed_paths_dict, extract_picklist_refs)
+                consumed_paths_dict,
+                extract_picklist_refs,
+            )
             raw_args_for_extract = (cur.get("arguments")
                                     or cur.get("args") or {})
             step_record["consumed_paths"] = consumed_paths_dict(
@@ -864,7 +865,9 @@ def step_test(yaml_text: str,
     # Match the IR's id-synthesis: when a step omits `id:`, the parser
     # slugifies `name:` (lowercase, non-alphanum → `_`). The visual layer
     # sends that synthesized id, so we must apply the same algorithm here.
-    from fsr_playbooks.compiler.parser import _slugify  # local import: avoid cold-start cost
+    from fsr_playbooks.compiler.parser import (
+        _slugify,  # local import: avoid cold-start cost
+    )
     target = None
     for s in steps:
         if not isinstance(s, dict):

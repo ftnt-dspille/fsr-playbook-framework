@@ -36,13 +36,13 @@ DESIGN SPLIT (the manual_input lesson, applied up front):
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class ConnectorArgs(StrictArgs):
@@ -63,18 +63,18 @@ class ConnectorArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    connector: Optional[str] = None
-    operation: Optional[str] = None
-    config: Optional[str] = None
-    version: Optional[str] = None
-    agent: Optional[str] = None
-    operationTitle: Optional[str] = None
-    params: Optional[Any] = None
+    connector: str | None = None
+    operation: str | None = None
+    config: str | None = None
+    version: str | None = None
+    agent: str | None = None
+    operationTitle: str | None = None
+    params: Any | None = None
 
 
 def expand_connector(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate a connector step's envelope scalars.
 
     Validation-only: always returns ``None`` (the resolver's

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from fsr_playbooks.mcp_server.tools_execution import _acted_on_nothing
 
-
 BLOCK_IP_BUCKETS = ["already_blocked", "newly_blocked", "error_with_block",
                     "vdom_not_exist"]
 

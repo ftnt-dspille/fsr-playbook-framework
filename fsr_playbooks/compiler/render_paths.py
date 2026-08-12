@@ -11,8 +11,9 @@ Pure offline -- no live FSR, no jinja rendering, just AST walk.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 from jinja2 import Environment, nodes
 from jinja2.exceptions import TemplateSyntaxError

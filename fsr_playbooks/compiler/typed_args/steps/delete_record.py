@@ -33,13 +33,14 @@ The unknown-key strict-whitelist guard stays in the resolver
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError, ErrorCode
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class DeleteRecordArgs(StrictArgs):
@@ -55,12 +56,12 @@ class DeleteRecordArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    module: Optional[str] = None
-    modules: Optional[str] = None
-    record: Optional[Any] = None
-    record_id: Optional[Any] = None
-    query: Optional[Any] = None
-    show_deleted: Optional[bool] = None
+    module: str | None = None
+    modules: str | None = None
+    record: Any | None = None
+    record_id: Any | None = None
+    query: Any | None = None
+    show_deleted: bool | None = None
 
 
 def expand_delete_record(
@@ -68,7 +69,7 @@ def expand_delete_record(
     path: str,
     errors: list[CompileError],
     resolve_module: Callable[[str, str, list[CompileError]], str],
-) -> Optional[dict]:
+) -> dict | None:
     """Expand a friendly delete_record step into the canonical cyops_utilities
     DELETE connector shape.
 

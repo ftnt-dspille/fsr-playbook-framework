@@ -23,11 +23,10 @@ verification is its own pass.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from .skills import get_skill
 from ..agent.skill_trace import SkillCall, SkillTrace
-
+from .skills import get_skill
 
 # A param value is only trusted for value-match if it is non-trivial -- short
 # ints, booleans, and tiny strings coincide across unrelated steps too often
@@ -71,7 +70,7 @@ def _looks_structured(s: str) -> bool:
     return any(c.isdigit() for c in s) or any(c in s for c in ".:/")
 
 
-def _try_parse_json(s: str) -> Optional[Any]:
+def _try_parse_json(s: str) -> Any | None:
     """Parse `s` as JSON if it looks like a JSON object/array, else None."""
     if not isinstance(s, str) or not s.strip().startswith(("{", "[")):
         return None
@@ -82,8 +81,8 @@ def _try_parse_json(s: str) -> Optional[Any]:
 
 
 def _find_record_field_expr(
-    record_fields: Dict[str, Any], target: Any,
-) -> Optional[str]:
+    record_fields: dict[str, Any], target: Any,
+) -> str | None:
     """A full Jinja expression that resolves ``target`` from the trigger
     record via ``vars.input.records[0]``, or None.
 
@@ -117,8 +116,8 @@ def _find_record_field_expr(
 
 
 def _embeddable_record_scalars(
-    record_fields: Dict[str, Any],
-) -> List[Tuple[str, str]]:
+    record_fields: dict[str, Any],
+) -> list[tuple[str, str]]:
     """``(scalar, jinja_expr)`` for IOC-shaped values in ``record_fields``,
     including values nested inside JSON-string fields.
 
@@ -127,7 +126,7 @@ def _embeddable_record_scalars(
     path suffixes, so callers can use them directly as ``record_vars``
     values.
     """
-    found: List[Tuple[str, str]] = []
+    found: list[tuple[str, str]] = []
     # Simple walk
     for scalar, path in _embeddable_scalars(record_fields):
         found.append((scalar, "{{ vars.input.records[0]" + path + " }}"))
@@ -151,11 +150,11 @@ def _key_access(k: str) -> str:
     return f"[{k!r}]"
 
 
-def _find_value_path(output: Any, target: Any) -> Optional[str]:
+def _find_value_path(output: Any, target: Any) -> str | None:
     """Return a jinja access suffix (e.g. `.attributes.ip` or
     `['hydra:member'][0].ip`) into `output` whose leaf equals `target`, or
     None. Depth-first; returns the first (shallowest-leftmost) match."""
-    def _walk(node: Any, path: str) -> Optional[str]:
+    def _walk(node: Any, path: str) -> str | None:
         if node == target and type(node) == type(target):
             return path
         if isinstance(node, dict):
@@ -175,10 +174,10 @@ def _find_value_path(output: Any, target: Any) -> Optional[str]:
     return _walk(output, "")
 
 
-def _embeddable_scalars(output: Any) -> List[Tuple[str, str]]:
+def _embeddable_scalars(output: Any) -> list[tuple[str, str]]:
     """`(scalar, path)` for distinctive, IOC-shaped string leaves of an output --
     the candidates for embedded (substring) wiring."""
-    found: List[Tuple[str, str]] = []
+    found: list[tuple[str, str]] = []
 
     def _walk(node: Any, path: str) -> None:
         if isinstance(node, str):
@@ -196,7 +195,7 @@ def _embeddable_scalars(output: Any) -> List[Tuple[str, str]]:
     return found
 
 
-def _embedded_spans(value: str, scalar: str) -> List[Tuple[int, int]]:
+def _embedded_spans(value: str, scalar: str) -> list[tuple[int, int]]:
     """All non-overlapping bounded-token spans of `scalar` in `value`. Each must
     be flanked by non-alphanumeric chars so we never wire a partial IOC
     (`1.2.3.4` inside `1.2.3.40`). `scalar == value` (a whole-value match,
@@ -204,7 +203,7 @@ def _embedded_spans(value: str, scalar: str) -> List[Tuple[int, int]]:
     hunt (`srcIpAddr = X OR destIpAddr = X`) wires BOTH, not just the first."""
     if scalar == value or not scalar:
         return []
-    spans: List[Tuple[int, int]] = []
+    spans: list[tuple[int, int]] = []
     start = 0
     while True:
         idx = value.find(scalar, start)
@@ -219,11 +218,11 @@ def _embedded_spans(value: str, scalar: str) -> List[Tuple[int, int]]:
     return spans
 
 
-def _apply_spans(value: str, repls: List[Tuple[int, int, str]]) -> str:
+def _apply_spans(value: str, repls: list[tuple[int, int, str]]) -> str:
     """Rewrite `value`, replacing each `(start, end, text)` span. Spans are
     applied left-to-right; overlapping spans (a later one starting before the
     previous ended) are dropped so the longest/earliest wins."""
-    out: List[str] = []
+    out: list[str] = []
     last = 0
     for start, end, text in sorted(repls, key=lambda r: (r[0], -(r[1] - r[0]))):
         if start < last:
@@ -235,13 +234,13 @@ def _apply_spans(value: str, repls: List[Tuple[int, int, str]]) -> str:
     return "".join(out)
 
 
-def _embedded_substitution(value: str, prior: List["SkillCall"]) -> Optional[str]:
+def _embedded_substitution(value: str, prior: list[SkillCall]) -> str | None:
     """If distinctive prior-output scalars appear as bounded tokens INSIDE the
     string `value` (e.g. the IP in `srcIpAddr = 1.2.3.4`), return `value` with
     EVERY such occurrence replaced by its `{{ vars.steps... }}` ref so the param
     is re-runnable, else None. Whole-value matches are handled by the caller;
     closest producer wins on overlap."""
-    repls: List[Tuple[int, int, str]] = []
+    repls: list[tuple[int, int, str]] = []
     for src in reversed(prior):           # closest producer first (stable on ties)
         for scalar, path in _embeddable_scalars(src.observed_output):
             ref = _ref_for(src, path)
@@ -261,16 +260,16 @@ def _ref_for(call: SkillCall, suffix: str) -> str:
 
 
 def wire_inputs(
-    inputs: Dict[str, Any], prior: List[SkillCall]
-) -> Tuple[Dict[str, str], List[str]]:
+    inputs: dict[str, Any], prior: list[SkillCall]
+) -> tuple[dict[str, str], list[str]]:
     """Value-match each wirable input against earlier observed outputs.
 
     Returns `(wired_refs, unwired)` where `wired_refs` maps a param to a
     `{{ vars.steps... }}` reference and `unwired` lists wirable params that
     found no producer (candidates for parameterize / set_variable / gap).
     """
-    wired: Dict[str, str] = {}
-    unwired: List[str] = []
+    wired: dict[str, str] = {}
+    unwired: list[str] = []
     for param, value in inputs.items():
         if param in _SKIP_PARAMS or not _is_wirable_value(value):
             continue
@@ -300,7 +299,7 @@ def wire_inputs(
 _SET_INPUTS_STEP = "Set Inputs"
 
 
-def _step_param_container(step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _step_param_container(step: dict[str, Any]) -> dict[str, Any] | None:
     """The dict that holds a step's wirable params. Phase G: connector
     args are at step level (no `arguments:` wrapper), so the step dict
     itself is the param container. `set_variable` uses `vars`."""
@@ -333,8 +332,8 @@ def _rules_lookup():
 
 
 def _visible_params(
-    rules: List[Tuple[str, Optional[str], Optional[str]]],
-    provided: Dict[str, Any],
+    rules: list[tuple[str, str | None, str | None]],
+    provided: dict[str, Any],
 ) -> set:
     """Names in `provided` that FSR would actually SHOW, per the catalog rules.
 
@@ -343,7 +342,7 @@ def _visible_params(
     Resolved to a fixed point because gating nests (block_ip_new: `duration` is
     gated on `time_to_live`, which is gated on `method`).
     """
-    by_name: Dict[str, List[Tuple[Optional[str], Optional[str]]]] = {}
+    by_name: dict[str, list[tuple[str | None, str | None]]] = {}
     for name, parent, cond in rules:
         by_name.setdefault(name, []).append((parent, cond))
     visible = {n for n in provided if not by_name.get(n)
@@ -363,7 +362,7 @@ def _visible_params(
     return visible
 
 
-def prune_hidden_params(step: Dict[str, Any], rules_for) -> List[str]:
+def prune_hidden_params(step: dict[str, Any], rules_for) -> list[str]:
     """Drop params the chosen discriminator values make invisible. Returns the
     dropped names.
 
@@ -424,7 +423,7 @@ def prune_hidden_params(step: Dict[str, Any], rules_for) -> List[str]:
     return dropped
 
 
-def _has_jinja_ref(d: Dict[str, Any]) -> bool:
+def _has_jinja_ref(d: dict[str, Any]) -> bool:
     """True if any leaf value in `d` is a jinja `{{ ... }}` reference."""
     for v in d.values():
         if isinstance(v, str) and "{{" in v:
@@ -435,11 +434,11 @@ def _has_jinja_ref(d: Dict[str, Any]) -> bool:
 
 
 def _wire_nested_dict_leaves(
-    d: Dict[str, Any],
-    record_fields: Optional[Dict[str, Any]],
-    record_vars: Dict[str, str],
+    d: dict[str, Any],
+    record_fields: dict[str, Any] | None,
+    record_vars: dict[str, str],
     used_vars: set,
-    val_to_var: Dict[Any, str],
+    val_to_var: dict[Any, str],
 ) -> None:
     """Recurse into a dict-valued gap param and parameterize each leaf that
     matches a record field. Mutates `d` in place.
@@ -458,7 +457,7 @@ def _wire_nested_dict_leaves(
         if not _is_wirable_value(v):
             continue
         ref = _find_record_field_expr(record_fields, v)
-        embed_spans: List[Tuple[int, int]] = []
+        embed_spans: list[tuple[int, int]] = []
         if ref is None and isinstance(v, str):
             for fval, fexpr in _embeddable_record_scalars(record_fields):
                 embed_spans = _embedded_spans(v, fval)
@@ -494,11 +493,11 @@ def _safe_var_name(param: str, used: set) -> str:
 
 
 def wire_record_inputs(
-    steps: List[Dict[str, Any]],
-    gaps: Dict[str, List[str]],
-    record_fields: Optional[Dict[str, Any]],
-    first_step: Optional[str],
-) -> Tuple[Dict[str, str], List[Dict[str, Any]], Optional[str]]:
+    steps: list[dict[str, Any]],
+    gaps: dict[str, list[str]],
+    record_fields: dict[str, Any] | None,
+    first_step: str | None,
+) -> tuple[dict[str, str], list[dict[str, Any]], str | None]:
     """Parameterize one-off triage IOCs to the trigger record.
 
     For every gap param (a value with no earlier producer that would
@@ -518,16 +517,16 @@ def wire_record_inputs(
     if not record_fields:
         return {}, steps, first_step
     by_name = {s.get("name"): s for s in steps}
-    record_vars: Dict[str, str] = {}
+    record_vars: dict[str, str] = {}
     used_vars: set = set()
-    val_to_var: Dict[Any, str] = {}
+    val_to_var: dict[Any, str] = {}
 
     for sname, params in list(gaps.items()):
         step = by_name.get(sname)
         container = _step_param_container(step) if step else None
         if container is None:
             continue
-        remaining: List[str] = []
+        remaining: list[str] = []
         for param in params:
             literal = container.get(param)
             ref = (_find_record_field_expr(record_fields, literal)
@@ -536,7 +535,7 @@ def wire_record_inputs(
             # a query string (`srcIpAddr = <alert_ip>`) parameterizes too, so a
             # trace-built hunt re-runs on the triggering record's IOC. All
             # occurrences are replaced (bidirectional `src… OR dst…` hunts).
-            embed_spans: List[Tuple[int, int]] = []
+            embed_spans: list[tuple[int, int]] = []
             if ref is None and isinstance(literal, str):
                 for fval, fexpr in _embeddable_record_scalars(record_fields):
                     embed_spans = _embedded_spans(literal, fval)
@@ -594,17 +593,17 @@ _VERDICT_BOOL_FIELDS = frozenset({
     "blacklisted", "isblacklisted", "is_blacklisted"})
 
 
-def _is_containment_op(op: Optional[str]) -> bool:
+def _is_containment_op(op: str | None) -> bool:
     op = (op or "").lower()
     return any(h in op for h in _CONTAINMENT_OP_HINTS)
 
 
-def _find_verdict(output: Any) -> Optional[Tuple[str, str]]:
+def _find_verdict(output: Any) -> tuple[str, str] | None:
     """`(jinja_suffix, kind)` for a malicious-verdict signal in `output`, or None.
     `kind` is 'bool' (a True flag like `knownMalicious`) or 'count' (a `malicious`
     integer > 0, e.g. VT's `last_analysis_stats.malicious`). Conservative: only
     recognized fields count, so an unrecognized output yields no guess."""
-    def _walk(node: Any, path: str) -> Optional[Tuple[str, str]]:
+    def _walk(node: Any, path: str) -> tuple[str, str] | None:
         if isinstance(node, dict):
             for k, v in node.items():
                 if not isinstance(k, str):
@@ -631,8 +630,8 @@ def _find_verdict(output: Any) -> Optional[Tuple[str, str]]:
 
 
 def insert_containment_guard(
-    compiled: Dict[str, Any], trace: SkillTrace
-) -> Dict[str, Any]:
+    compiled: dict[str, Any], trace: SkillTrace
+) -> dict[str, Any]:
     """Gate a containment op behind a malicious-verdict decision.
 
     A trace that enriches an IOC then contains it compiles to an UNCONDITIONAL
@@ -647,7 +646,7 @@ def insert_containment_guard(
     Safe-by-default: the default branch SKIPS containment, so a wrong/absent
     verdict never over-contains. No recognized signal → returns `compiled`
     unchanged (no guess). Mutates and returns `compiled`."""
-    steps: List[Dict[str, Any]] = compiled.get("steps", [])
+    steps: list[dict[str, Any]] = compiled.get("steps", [])
     by_name = {c.step_name: c for c in trace.calls}
 
     ci = next((i for i, s in enumerate(steps)
@@ -659,8 +658,8 @@ def insert_containment_guard(
         return compiled
     cont = steps[ci]
 
-    verdict: Optional[Tuple[str, str]] = None
-    enrich: Optional["SkillCall"] = None
+    verdict: tuple[str, str] | None = None
+    enrich: SkillCall | None = None
     for s in reversed(steps[:ci]):            # closest enrichment first
         if s.get("type") != "connector":
             continue
@@ -683,7 +682,7 @@ def insert_containment_guard(
 
     cont_name = cont["name"]
     false_target = cont.get("next")
-    extra: List[Dict[str, Any]] = []
+    extra: list[dict[str, Any]] = []
     if not false_target:                      # nothing after containment → skip marker
         skip_name = "Containment Skipped"
         extra.append({"type": "set_variable", "name": skip_name,
@@ -718,7 +717,7 @@ _STEP_PLUMBING_KEYS = frozenset({
 })
 
 
-def _sole_jinja_expr(value: Any) -> Optional[str]:
+def _sole_jinja_expr(value: Any) -> str | None:
     """The inner expression of a value that is exactly one Jinja block, else None.
 
     `"{{ vars.steps.enrich.ip }}"` -> `"vars.steps.enrich.ip"`. Anything mixed
@@ -734,7 +733,7 @@ def _sole_jinja_expr(value: Any) -> Optional[str]:
     return inner or None
 
 
-def insert_containment_target_check(compiled: Dict[str, Any]) -> Dict[str, Any]:
+def insert_containment_target_check(compiled: dict[str, Any]) -> dict[str, Any]:
     """Skip a containment step whose target params render empty.
 
     A containment op that iterates an empty target list does nothing and still
@@ -763,7 +762,7 @@ def insert_containment_target_check(compiled: Dict[str, Any]) -> Dict[str, Any]:
     no such param returns `compiled` unchanged (no guess). Idempotent. Run this
     BEFORE `insert_containment_confirm`, which then rewires the present branch
     through the human gate -- check, then ask, then contain."""
-    steps: List[Dict[str, Any]] = compiled.get("steps", [])
+    steps: list[dict[str, Any]] = compiled.get("steps", [])
     ci = next((i for i, s in enumerate(steps)
                if s.get("type") == "connector"
                and _is_containment_op(
@@ -818,7 +817,7 @@ def insert_containment_target_check(compiled: Dict[str, Any]) -> Dict[str, Any]:
     return compiled
 
 
-def insert_containment_confirm(compiled: Dict[str, Any]) -> Dict[str, Any]:
+def insert_containment_confirm(compiled: dict[str, Any]) -> dict[str, Any]:
     """Put an analyst Confirm/Stop manual-input step in front of containment.
 
     The tier gate that protects a containment action during triage is dispatch
@@ -841,7 +840,7 @@ def insert_containment_confirm(compiled: Dict[str, Any]) -> Dict[str, Any]:
     guard: it rewires `next`, decision `conditions[].next`/`default`, and
     `first_step` alike, so whatever pointed at containment -- including the
     verdict decision's malicious branch -- now enters the confirmation."""
-    steps: List[Dict[str, Any]] = compiled.get("steps", [])
+    steps: list[dict[str, Any]] = compiled.get("steps", [])
     ci = next((i for i, s in enumerate(steps)
                if s.get("type") == "connector"
                and _is_containment_op(
@@ -857,7 +856,7 @@ def insert_containment_confirm(compiled: Dict[str, Any]) -> Dict[str, Any]:
 
     # Stopping continues past containment rather than dead-ending the run.
     stop_target = cont.get("next")
-    extra: List[Dict[str, Any]] = []
+    extra: list[dict[str, Any]] = []
     if not stop_target:
         skip_name = "Containment Skipped"
         if not any(s.get("name") == skip_name for s in steps):
@@ -897,8 +896,8 @@ def insert_containment_confirm(compiled: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def attach_containment_mock_result(
-    compiled: Dict[str, Any], trace: SkillTrace
-) -> Dict[str, Any]:
+    compiled: dict[str, Any], trace: SkillTrace
+) -> dict[str, Any]:
     """Give every containment step the `mock_result` that makes a dry run dry.
 
     `useMockOutput=true` is a **substitution**, not a kill switch: each step
@@ -920,7 +919,7 @@ def attach_containment_mock_result(
     fresh one. Idempotent: a step that already carries a non-blank
     `mock_result` is left alone. Emitted as a JSON **string**, the wire shape
     the editor writes. Mutates and returns `compiled`."""
-    steps: List[Dict[str, Any]] = compiled.get("steps", [])
+    steps: list[dict[str, Any]] = compiled.get("steps", [])
     by_name = {c.step_name: c for c in trace.calls}
     for s in steps:
         if s.get("type") != "connector":
@@ -943,20 +942,20 @@ def attach_containment_mock_result(
     return compiled
 
 
-def unmocked_containment_steps(doc: Dict[str, Any]) -> List[str]:
+def unmocked_containment_steps(doc: dict[str, Any]) -> list[str]:
     """Names of containment steps in a playbook doc that carry no
     `mock_result` -- i.e. the steps that would run FOR REAL under a
     `useMockOutput=true` "dry run". Empty list means the doc is safe to
     dry-run. Accepts a `compile_trace` result, an assembled source doc
     (`playbooks: [...]`), or wire-form JSON (`workflows: [...]`)."""
-    pools: List[List[Dict[str, Any]]] = []
+    pools: list[list[dict[str, Any]]] = []
     if isinstance(doc.get("steps"), list):
         pools.append(doc["steps"])
     for key in ("playbooks", "workflows"):
         for w in (doc.get(key) or []):
             if isinstance(w, dict) and isinstance(w.get("steps"), list):
                 pools.append(w["steps"])
-    unmocked: List[str] = []
+    unmocked: list[str] = []
     for steps in pools:
         for s in steps:
             if s.get("type") != "connector":
@@ -972,7 +971,7 @@ def unmocked_containment_steps(doc: Dict[str, Any]) -> List[str]:
 
 def compile_trace(
     trace: SkillTrace, *, start_step: str = "Start"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compile a SkillTrace into a list of candidate YAML source-form steps
     chained in trace order, with value-match wiring applied.
 
@@ -980,10 +979,10 @@ def compile_trace(
     {step_name: [param,...]}}`. The caller assembles these into a playbook
     doc, then runs the §4 verify loop before push.
     """
-    steps: List[Dict[str, Any]] = []
-    wiring: Dict[str, Dict[str, str]] = {}
-    gaps: Dict[str, List[str]] = {}
-    pruned: Dict[str, List[str]] = {}
+    steps: list[dict[str, Any]] = []
+    wiring: dict[str, dict[str, str]] = {}
+    gaps: dict[str, list[str]] = {}
+    pruned: dict[str, list[str]] = {}
 
     rules_for = _rules_lookup()
     calls = trace.calls
@@ -1034,13 +1033,13 @@ def compile_trace(
 
 
 def assemble_playbook(
-    compiled: Dict[str, Any],
+    compiled: dict[str, Any],
     *,
     name: str = "Triage Playbook",
     collection: str = "00 - FSR Studio",
     trigger: str = "start",
-    module: Optional[str] = None,
-) -> Dict[str, Any]:
+    module: str | None = None,
+) -> dict[str, Any]:
     """Wrap the compiled steps into a full playbook doc (a `start` trigger
     that points at the first real step, then the value-matched steps).
 
@@ -1052,9 +1051,9 @@ def assemble_playbook(
     authored from a triage session should run from the record they triage."""
     start = compiled.get("start_step", "Start")
     first = compiled.get("first_step")
-    steps: List[Dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
     if first:
-        start_step: Dict[str, Any] = {"type": "start", "name": start, "next": first}
+        start_step: dict[str, Any] = {"type": "start", "name": start, "next": first}
         if module:
             start_step["module"] = module
         steps.append(start_step)
@@ -1074,18 +1073,18 @@ def assemble_playbook(
     }
 
 
-def to_yaml(doc: Dict[str, Any]) -> str:
+def to_yaml(doc: dict[str, Any]) -> str:
     """Canonical YAML emission (matches the decompiler's dumper)."""
     import yaml
     return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
 
 
-def render_context(trace: SkillTrace, upto: Optional[int] = None) -> Dict[str, Any]:
+def render_context(trace: SkillTrace, upto: int | None = None) -> dict[str, Any]:
     """Build a `vars.steps.*` render context from captured outputs, keyed
     exactly as runtime (honoring `ref_prefix`), for the §4 verify loop.
     `upto` limits to the first N calls (a step only sees earlier outputs)."""
     calls = trace.calls if upto is None else trace.calls[:upto]
-    steps_ctx: Dict[str, Any] = {}
+    steps_ctx: dict[str, Any] = {}
     for call in calls:
         payload = call.observed_output
         if call.ref_prefix:
@@ -1094,7 +1093,7 @@ def render_context(trace: SkillTrace, upto: Optional[int] = None) -> Dict[str, A
     return {"vars": {"steps": steps_ctx}}
 
 
-def _source_step_of(ref: str, jkey_to_name: Dict[str, str]) -> Optional[str]:
+def _source_step_of(ref: str, jkey_to_name: dict[str, str]) -> str | None:
     """Recover the human step name a wire reads from (e.g.
     `{{ vars.steps.Enrich_Indicator.data.x }}` -> `Enrich Indicator`).
     Matches the `vars.steps.<jkey>` segment against actual trace step
@@ -1106,11 +1105,11 @@ def _source_step_of(ref: str, jkey_to_name: Dict[str, str]) -> Optional[str]:
     return jkey_to_name.get(m.group(1))
 
 
-def _wiring_label(wired: Dict[str, str], gaps: List[str],
-                  jkey_to_name: Dict[str, str]) -> str:
+def _wiring_label(wired: dict[str, str], gaps: list[str],
+                  jkey_to_name: dict[str, str]) -> str:
     """Plain-English wiring summary for the reviewable-draft card (contract
     §5, 2.6.0) -- never raw jinja. Surfaces gaps as an explicit confirm-me."""
-    parts: List[str] = []
+    parts: list[str] = []
     for param, ref in wired.items():
         src = _source_step_of(ref, jkey_to_name)
         parts.append(f"{param} from {src}" if src else param)
@@ -1125,8 +1124,8 @@ def _wiring_label(wired: Dict[str, str], gaps: List[str],
 
 
 def summarize_for_offer(
-    trace: SkillTrace, compiled: Dict[str, Any]
-) -> Dict[str, Any]:
+    trace: SkillTrace, compiled: dict[str, Any]
+) -> dict[str, Any]:
     """Build the contract v2.6.0 reviewable-draft fields (`ops_summary` +
     `draft_steps`) from a compiled trace. Pure, no MCP/IO -- the
     `emit_playbook_offer` tool calls this so per-step wiring labels and
@@ -1141,8 +1140,8 @@ def summarize_for_offer(
     gaps = compiled.get("gaps", {})
     jkey_to_name = {_jkey(c.step_name): c.step_name for c in trace.calls}
 
-    ops_summary: List[Dict[str, Any]] = []
-    draft_steps: List[Dict[str, Any]] = []
+    ops_summary: list[dict[str, Any]] = []
+    draft_steps: list[dict[str, Any]] = []
     for call in trace.calls:
         skill = get_skill(call.skill_id)
         if skill is None:
@@ -1151,7 +1150,7 @@ def summarize_for_offer(
         step_gaps = gaps.get(name, [])
         verified = not step_gaps
         ri = call.resolved_inputs or {}
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "skill_id": call.skill_id,
             "step_type": skill.step_type,
             "label": name,

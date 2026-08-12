@@ -26,15 +26,20 @@ import asyncio
 import contextlib
 import inspect
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Optional
 
-from .approvals import SuspendedSession
 from ._loop_helpers import (
     clear_guard_fires as _clear_guard_fires,
+)
+from ._loop_helpers import (
     extract_yaml_block,
+)
+from ._loop_helpers import (
     snapshot_guard_fires as _snapshot_guard_fires,
 )
+from .approvals import SuspendedSession
 from .provider import (
     DoneEvent,
     ErrorEvent,
@@ -96,7 +101,7 @@ KIND_TOOL_USE = "tool_use"
 KIND_TOOL_RESULT = "tool_result"
 
 
-EventCallback = Optional[Callable[[Event], Optional[Awaitable[None]]]]
+EventCallback = Optional[Callable[[Event], Awaitable[None] | None]]
 
 
 @dataclass
@@ -113,11 +118,11 @@ class TurnResult:
     `validate_yaml` / `compile_yaml`, mirroring chat.py behavior.
     """
     transcript: list[Event] = field(default_factory=list)
-    stop_reason: Optional[str] = None
-    session_id: Optional[str] = None
-    last_assistant_yaml: Optional[str] = None
+    stop_reason: str | None = None
+    session_id: str | None = None
+    last_assistant_yaml: str | None = None
     tags: dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    error: str | None = None
     final_seq: int = 0
     """Next available seq value in the current turn after the stream
     completes. Consumers persisting post-stream rows use this to
@@ -144,8 +149,8 @@ class _TextCoalescer:
 
     def __init__(self) -> None:
         self.buf: list[str] = []
-        self.turn: Optional[int] = None
-        self.seq: Optional[int] = None
+        self.turn: int | None = None
+        self.seq: int | None = None
 
     def append(self, text: str, *, turn: int, seq: int) -> None:
         if not self.buf:
@@ -154,7 +159,7 @@ class _TextCoalescer:
         self.buf.append(text)
 
     def flush(
-        self, sink, session_id: Optional[str],
+        self, sink, session_id: str | None,
     ) -> bool:
         """Returns True if a row was written."""
         if not self.buf or session_id is None or sink is None:
@@ -182,7 +187,7 @@ async def _fire_event_callback(cb: EventCallback, ev: Event) -> None:
         await out
 
 
-def _yaml_tags(yaml_text: Optional[str]) -> dict[str, Any]:
+def _yaml_tags(yaml_text: str | None) -> dict[str, Any]:
     """Pull the playbook collection name + content hash out of YAML.
     Standalone duplicate of web/backend/routes/chat.py's helper so
     fsr_playbooks has no dependency on the web app. Behavior must stay in
@@ -207,12 +212,12 @@ async def run_agent_turn(
     provider: LLMProvider,
     system: str,
     messages: list[Message],
-    tools: Optional[list[dict[str, Any]]] = None,
-    tags: Optional[dict[str, Any]] = None,
+    tools: list[dict[str, Any]] | None = None,
+    tags: dict[str, Any] | None = None,
     on_event: EventCallback = None,
     history_sink: Any = None,            # HistorySink protocol; Any to keep this file's imports cheap
     turn_for_history: int = 0,
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     user_message_seq_base: int = -100,
     coalesce_text: bool = True,
     timeout_secs: float = 600,
@@ -423,7 +428,7 @@ async def resume_agent_turn(
     history_sink: Any = None,
     turn_for_history: int = 0,
     coalesce_text: bool = True,
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
 ) -> TurnResult:
     """Resume a HITL-suspended turn after the user approves or denies.
 

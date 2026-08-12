@@ -36,13 +36,14 @@ catalog-bound and run before/after the transform:
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError, ErrorCode
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class RecordCrudArgs(StrictArgs):
@@ -64,13 +65,13 @@ class RecordCrudArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    module: Optional[str] = None
-    is_upsert: Optional[bool] = None
-    record: Optional[str] = None
-    field_operations: Optional[dict] = None
-    link: Optional[dict] = None
-    unlink: Optional[dict] = None
-    tags_operation: Optional[str] = None
+    module: str | None = None
+    is_upsert: bool | None = None
+    record: str | None = None
+    field_operations: dict | None = None
+    link: dict | None = None
+    unlink: dict | None = None
+    tags_operation: str | None = None
 
 
 def expand_record_crud(
@@ -79,7 +80,7 @@ def expand_record_crud(
     path: str,
     errors: list[CompileError],
     resolve_module: Callable[[str, str, list[CompileError]], str],
-) -> Optional[dict]:
+) -> dict | None:
     """Rewrite a friendly `module:` into the canonical collection IRI.
 
     Returns the transformed dict, or ``None`` to leave `step.arguments`

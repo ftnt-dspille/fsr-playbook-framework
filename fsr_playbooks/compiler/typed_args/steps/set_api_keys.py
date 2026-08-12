@@ -16,13 +16,13 @@ normalizer owns the ``_check_unknown_keys`` against the two-key canonical set.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class SetApiKeysArgs(StrictArgs):
@@ -36,13 +36,13 @@ class SetApiKeysArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    public_key: Optional[str] = None
-    private_key: Optional[str] = None
+    public_key: str | None = None
+    private_key: str | None = None
 
 
 def expand_set_api_keys(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate a set_api_keys step's envelope scalars.
 
     Validation-only: always returns ``None`` (the normalizer does no transform).

@@ -8,9 +8,11 @@ and without renaming the coarse `code` (which every consumer relies on).
 """
 from fsr_playbooks.compiler.errors import CompileError, ErrorCode
 from fsr_playbooks.mcp_server.tools_verify import (
-    verify_playbook, _resolve_disabled_codes, _finalize, CHECK_GROUPS,
+    CHECK_GROUPS,
+    _finalize,
+    _resolve_disabled_codes,
+    verify_playbook,
 )
-
 
 # ---- unit: CompileError carries the sub-tag --------------------------------
 

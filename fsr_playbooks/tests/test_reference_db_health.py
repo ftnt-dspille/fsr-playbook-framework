@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 
 from fsr_playbooks.reference_db import (
-    ReferenceDbError, health, require_populated,
+    ReferenceDbError,
+    health,
+    require_populated,
 )
 
 

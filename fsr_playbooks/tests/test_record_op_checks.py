@@ -16,7 +16,6 @@ from fsr_playbooks.compiler.record_op_checks import (
     check_unknown_record_fields,
 )
 
-
 # --- unknown module field (resource keys) --------------------------------
 
 def test_unknown_record_field_is_warning():

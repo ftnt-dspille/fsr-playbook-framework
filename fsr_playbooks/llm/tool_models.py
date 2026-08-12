@@ -6,9 +6,9 @@ calls are caught early. Internal logic remains unchanged.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Distinguishes "no coercion applies" from a legitimately coerced falsy value
 # (False, 0, 0.0, [], {}) -- a plain `if coerced:` check would drop exactly the
@@ -28,10 +28,10 @@ class GetRecordArgs(BaseModel):
     """
     model_config = ConfigDict(extra="allow", coerce_numbers_to_str=True)
 
-    iri: Optional[str] = None
-    module: Optional[str] = None
-    uuid: Optional[str] = None
-    record_id: Optional[str] = None
+    iri: str | None = None
+    module: str | None = None
+    uuid: str | None = None
+    record_id: str | None = None
     # Accept a bool OR a list of relationship names. The registered tool takes a
     # bool ("hydrate related records inline"), but the agent naturally reaches
     # for `relationships=["ztpfArtifacts"]` to expand a *named* relationship --
@@ -39,12 +39,12 @@ class GetRecordArgs(BaseModel):
     # dead-ending the very "summarize the related steps" turn ztpf devices need.
     # A name-list is coerced to True (hydrate all) in the tool; a bad value can
     # never regress a lookup into a validation error.
-    relationships: Optional[bool | list[str]] = None
-    full: Optional[bool] = None
-    include: Optional[list[str]] = None
+    relationships: bool | list[str] | None = None
+    full: bool | None = None
+    include: list[str] | None = None
 
     @model_validator(mode="after")
-    def _one_identifier(self) -> "GetRecordArgs":
+    def _one_identifier(self) -> GetRecordArgs:
         if not (self.iri or (self.module and (self.uuid or self.record_id))):
             raise ValueError(
                 "identify the record via `iri` alone, or `module` plus "
@@ -73,17 +73,17 @@ class SearchModuleRecordsArgs(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     module: str
-    filters: Optional[dict[str, Any] | list[dict[str, Any]]] = None
-    limit: Optional[int] = None
+    filters: dict[str, Any] | list[dict[str, Any]] | None = None
+    limit: int | None = None
     # DECLARED, not left to `extra="allow"`, and not decoration: only declared
     # fields get JSON-string coercion (see `coerce_json_string_args`), and the
     # agent emits `fields` as a JSON string in the same breath as `filters`.
     # Mirrors the real signature: search_module_records(module, q, limit,
     # filters, fields, sort). `sort` and `q` admit a plain string, so they are
     # never coerced -- `sort="stepNumber"` is the common, correct form.
-    q: Optional[str] = None
-    fields: Optional[list[str]] = None
-    sort: Optional[str | list] = None
+    q: str | None = None
+    fields: list[str] | None = None
+    sort: str | list | None = None
 
 
 class RunOpArgs(BaseModel):
@@ -92,8 +92,8 @@ class RunOpArgs(BaseModel):
 
     connector: str = Field(...)
     op: str = Field(...)
-    params: Optional[dict[str, Any]] = None
-    confirm: Optional[bool] = None
+    params: dict[str, Any] | None = None
+    confirm: bool | None = None
 
 
 class EmitActionCardArgs(BaseModel):
@@ -119,7 +119,7 @@ class EmitActionCardArgs(BaseModel):
     # this containment, which exempts the card from the hunt floor -- see
     # `_loop_helpers.TriageDiscipline`. Optional and defaulted so an unset field
     # keeps the pre-#60 behavior exactly.
-    requested_by: Optional[str] = None
+    requested_by: str | None = None
 
 
 class EmitPatchProposalArgs(BaseModel):
@@ -137,11 +137,11 @@ class EmitPatchProposalArgs(BaseModel):
     title: str
     before_yaml: str
     after_yaml: str
-    rationale: Optional[str] = None
-    target_step: Optional[str] = None
-    target_path: Optional[str] = None
-    tier: Optional[int] = None
-    reply_tool: Optional[str] = None
+    rationale: str | None = None
+    target_step: str | None = None
+    target_path: str | None = None
+    tier: int | None = None
+    reply_tool: str | None = None
 
 
 class EmitChoiceCardArgs(BaseModel):
@@ -156,9 +156,9 @@ class EmitChoiceCardArgs(BaseModel):
     id: str
     prompt: str
     options: list[dict[str, Any]]
-    multi: Optional[bool] = None
-    min_select: Optional[int] = None
-    max_select: Optional[int] = None
+    multi: bool | None = None
+    min_select: int | None = None
+    max_select: int | None = None
 
 
 class ValidateYamlArgs(BaseModel):
@@ -173,8 +173,8 @@ class CompileYamlArgs(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     yaml_text: str = Field(...)
-    name: Optional[str] = None
-    collection: Optional[str] = None
+    name: str | None = None
+    collection: str | None = None
 
 
 class ResolveYamlArgs(BaseModel):
@@ -193,8 +193,8 @@ class SearchAlerts(BaseModel):
     """Arguments for the search_alerts tool."""
     model_config = ConfigDict(extra="allow")
 
-    query: Optional[str] = None
-    limit: Optional[int] = None
+    query: str | None = None
+    limit: int | None = None
 
 
 # Mapping of tool names to their argument models
@@ -315,7 +315,7 @@ def coerce_scalar_args(schema: dict[str, Any] | None,
     if not isinstance(props, dict) or not isinstance(args, dict) or not args:
         return args
 
-    out: Optional[dict[str, Any]] = None
+    out: dict[str, Any] | None = None
     for key, value in args.items():
         if not isinstance(value, str):
             continue
@@ -380,7 +380,7 @@ def coerce_json_string_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
     model = TOOL_MODELS.get(name)
     if model is None or not isinstance(args, dict) or not args:
         return args
-    out: Optional[dict[str, Any]] = None
+    out: dict[str, Any] | None = None
     for key, field in model.model_fields.items():
         value = args.get(key)
         if not isinstance(value, str):

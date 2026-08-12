@@ -34,7 +34,8 @@ import json
 import os
 import time
 import uuid as _uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from openai import (
     APIConnectionError,
@@ -49,6 +50,8 @@ from openai import (
 
 from . import approvals as _approvals
 from ._loop_helpers import (
+    _CREATE_OFFER_TOOL,
+    _ENHANCE_OFFER_TOOL,
     DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
@@ -58,11 +61,13 @@ from ._loop_helpers import (
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
     TriageDiscipline,
-    latest_user_text,
-    _CREATE_OFFER_TOOL,
-    _ENHANCE_OFFER_TOOL,
-    compile_errors as _compile_errors,
     drain_with_idle_timeout,
+    latest_user_text,
+)
+from ._loop_helpers import (
+    compile_errors as _compile_errors,
+)
+from ._loop_helpers import (
     extract_yaml_block as _extract_yaml_block,
 )
 from .provider import (
@@ -77,8 +82,8 @@ from .provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from .tools import _resolve_tier as _tier_for, dispatch, openai_tools
-
+from .tools import _resolve_tier as _tier_for
+from .tools import dispatch, openai_tools
 
 DEFAULT_BASE_URL = (
     os.environ.get("OPENAI_ENDPOINT")
@@ -309,7 +314,7 @@ class OpenAIProvider:
     async def resume(
         self,
         *,
-        suspended: "_approvals.SuspendedSession",
+        suspended: _approvals.SuspendedSession,
         decision: str,  # "approve" | "deny"
     ) -> AsyncIterator[Event]:
         """Resume a turn suspended on a pending tier-3+ approval.
@@ -979,14 +984,31 @@ class OpenAIProvider:
             any_tools_run = True
             yield _emit_usage(finish_reason or "tool_calls")
 
-        # Tool-turn budget exhausted -- emit a choice card asking the
-        # analyst whether to continue with more rounds or deliver what we
-        # have. The card is a real tool dispatch (tier 0) so it lands in the
-        # transcript and the connector's _wire_transcript post-processes it
-        # into a choice_card event the widget renders. On resume: "continue"
-        # -> a fresh turn with the same tools; "deliver" -> a fresh no-tools
-        # wrap-up turn.
-        from ._loop_helpers import budget_ask_card
+        # Tool-turn budget exhausted. Two paths (see anthropic_provider for
+        # the full rationale): when nothing has been delivered, skip the
+        # budget-ask choice card and force the wrap-up directive -- the model
+        # must be TOLD to deliver, not asked "continue or deliver?". Only
+        # emit the budget-ask when something IS delivered and the choice is
+        # meaningful.
+        from ._loop_helpers import (
+            analyst_has_the_yaml,
+            budget_ask_card,
+            wrapup_directive,
+        )
+        if not analyst_has_the_yaml(history):
+            _directive, _max_tok = wrapup_directive(history, _turn_budget)
+            yield _emit_usage("max_tool_turns")
+            turn_idx += 1
+            async for ev in self._wrapup_call(
+                history=history, directive=_directive,
+                session_id=session_id, turn_idx=turn_idx, tags=tags,
+                self_repair_turns=self_repair_turns,
+                stop_reason_label="max_tool_turns",
+                max_tokens=_max_tok,
+            ):
+                yield ev
+            yield DoneEvent(stop_reason="end_turn")
+            return
         _card = budget_ask_card(_turn_budget)
         _card_result = dispatch("emit_choice_card", _card, _internal=True)
         yield ToolUseEvent(

@@ -12,9 +12,9 @@ mirroring ``test_delete_record``.
 """
 from __future__ import annotations
 
+from fsr_playbooks._db import PACKAGED_SLIM_DB
 from fsr_playbooks.compiler.ir import Step
 from fsr_playbooks.compiler.resolver import Resolver
-from fsr_playbooks._db import PACKAGED_SLIM_DB
 
 
 def _normalize(arguments: dict, step_type: str = "create_record") -> tuple[dict, list]:

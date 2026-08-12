@@ -22,13 +22,13 @@ catalog-independent and byte-identical with the imperative path.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError, ErrorCode  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class CodeSnippetArgs(StrictArgs):
@@ -45,14 +45,14 @@ class CodeSnippetArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    code: Optional[str] = None
-    python: Optional[str] = None
-    config: Optional[Any] = None
+    code: str | None = None
+    python: str | None = None
+    config: Any | None = None
 
 
 def expand_code_snippet(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Expand friendly code args into the canonical CodeSnippet shape.
 
     Returns the canonical dict, or ``None`` to leave `step.arguments` unchanged

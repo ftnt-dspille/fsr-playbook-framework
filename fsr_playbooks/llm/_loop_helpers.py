@@ -12,7 +12,6 @@ import json
 import re
 from typing import Any
 
-
 # Per-turn OUTPUT-token ceiling, shared by every provider loop.
 #
 # This was a hardcoded 4096 in all three providers -- not configurable, not
@@ -246,6 +245,7 @@ MAX_PARALLEL_TOOLS = 8
 # indefinitely; this caps it so the turn fails cleanly instead of hanging.
 # Overrideable via ANTHROPIC_STREAM_TIMEOUT_SECS env for local testing.
 import os as _os
+
 STREAM_TIMEOUT_SECS: int = int(_os.environ.get("ANTHROPIC_STREAM_TIMEOUT_SECS", "300"))
 
 
@@ -339,10 +339,11 @@ _CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
 # containment locked on the analyst's follow-up "isolate that host" turn.
 _INVESTIGATION_TOOLS: set[str] = {
     "search_module_records", "run_op",
-    "siem_events_for_incident", "siem_search_host", "siem_search_ip",
+    "siem_search", "siem_events_for_incident",
     "get_host_context", "get_user_context", "get_ip_context",
     "get_device_info", "get_incident_details", "get_associated_events_new",
-    "faz_get_alerts", "faz_search_ip", "faz_raw_query",
+    "faz_search", "faz_get_alerts", "faz_raw_query",
+    "fmg_device",
 }
 # Second line of defence against the same drift: whole read-only hunt FAMILIES
 # count even when an individual name was never registered here. These prefixes

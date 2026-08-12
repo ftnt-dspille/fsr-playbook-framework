@@ -1,6 +1,5 @@
 """MCP tools: Tools Recipe"""
 from __future__ import annotations
-from . import _shared, tools_jinja
 
 import json
 import re
@@ -9,14 +8,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import _shared, tools_jinja
 from ._shared import (
-    mcp,
-    _err,
+    REPO_ROOT,
     _db,
+    _err,
     _rows,
     load_yaml_text,
-    REPO_ROOT,
+    mcp,
 )
+
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
 
@@ -50,10 +51,10 @@ def _tools_triage_or_err():
 # import time, exactly as it does for the run_playbook auto-resolver
 # (`llm.tools.set_run_playbook_auto_resolver`). Absent a connector (bare
 # library), the troubleshooter degrades cleanly to `no_failed_run_provider`.
-_FAILED_RUN_PROVIDER: "Any" = None
+_FAILED_RUN_PROVIDER: Any = None
 
 
-def set_failed_run_provider(fn: "Any") -> None:
+def set_failed_run_provider(fn: Any) -> None:
     """Register the connector callable that lists recent failed runs.
 
     Signature: ``fn(limit: int = ..., playbook: str | None = ...) ->
@@ -195,8 +196,10 @@ def generate_recipe(
 
     sys.path.insert(0, str(REPO_ROOT / "tooling"))
     try:
-        from recipes import (generate_data_ingest_recipe,  # noqa: PLC0415
-                             generate_threat_feed_recipe)
+        from recipes import (  # noqa: PLC0415
+            generate_data_ingest_recipe,
+            generate_threat_feed_recipe,
+        )
         if kind == "threat-feed":
             fsr_json = generate_threat_feed_recipe(
                 info, connector_config_uuid=config_uuid,
@@ -529,7 +532,8 @@ def why_did_playbook_fail(
         try:
             sys.path.insert(0, str(REPO_ROOT / "tooling"))
             from cli import (  # type: ignore
-                _fetch_workflow_with_refs, _decompile_to_yaml,
+                _decompile_to_yaml,
+                _fetch_workflow_with_refs,
             )
             from probes import _env as _env_mod  # type: ignore
         except Exception as exc:  # noqa: BLE001

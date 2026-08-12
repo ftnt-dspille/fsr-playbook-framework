@@ -5,9 +5,9 @@ event stream so the SSE route doesn't care which backend it's talking to.
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Literal, Protocol, Union
-
+from typing import Any, Literal, Protocol, Union
 
 Role = Literal["user", "assistant"]
 

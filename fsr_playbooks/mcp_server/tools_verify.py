@@ -24,7 +24,6 @@ import json
 import sys
 from typing import Any
 
-from ._shared import mcp, REPO_ROOT, DB_PATH, _err, _db
 from fsr_playbooks.compiler.record_op_checks import (
     check_connector_config,
     check_op_params,
@@ -33,6 +32,7 @@ from fsr_playbooks.compiler.record_op_checks import (
     check_unknown_record_fields,
 )
 
+from ._shared import DB_PATH, REPO_ROOT, _db, _err, mcp
 
 # ---------------------------------------------------------------------------
 # Check toggles -- let a caller (e.g. pyfsr) skip groups of compiler checks.
@@ -684,7 +684,8 @@ def verify_playbook(
                 verbose, disable_checks, db_path=None)
 
     try:
-        from fsr_playbooks.compiler import compile_yaml as _compile, parse_yaml
+        from fsr_playbooks.compiler import compile_yaml as _compile
+        from fsr_playbooks.compiler import parse_yaml
         from fsr_playbooks.compiler.typed_walker import walk_playbook
     except ImportError as exc:
         return _err("compiler_unavailable", str(exc))

@@ -35,13 +35,14 @@ catalog-bound and run before/after the transform:
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError, ErrorCode
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 from ..trigger import expand_when
 
 
@@ -58,7 +59,7 @@ class PostCreateUpdateArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    module: Optional[str] = None
+    module: str | None = None
 
 
 def expand_post_create_update(
@@ -67,7 +68,7 @@ def expand_post_create_update(
     path: str,
     errors: list[CompileError],
     resolve_module: Callable[[str, str, list[CompileError]], str],
-) -> Optional[dict]:
+) -> dict | None:
     """Rewrite friendly ``module:``/``modules:`` + ``when:`` into the canonical
     ``resource``/``resources`` + ``fieldbasedtrigger`` shape.
 

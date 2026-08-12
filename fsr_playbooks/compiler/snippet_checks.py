@@ -32,7 +32,7 @@ surfaces light up with no wiring change.
 from __future__ import annotations
 
 import ast
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 
 class SnippetFinding(NamedTuple):
@@ -76,15 +76,15 @@ SANDBOX_CONSTRAINTS: dict[str, dict] = {
 }
 
 
-def _constraints_for(version: Optional[str]) -> dict:
+def _constraints_for(version: str | None) -> dict:
     return SANDBOX_CONSTRAINTS.get(version or "", _DEFAULT_CONSTRAINTS)
 
 
 def check_snippet(
-    code: Optional[str],
+    code: str | None,
     *,
-    version: Optional[str] = None,
-    allow_imports: Optional[bool] = None,
+    version: str | None = None,
+    allow_imports: bool | None = None,
 ) -> list[SnippetFinding]:
     """Statically vet a code-snippet body.
 

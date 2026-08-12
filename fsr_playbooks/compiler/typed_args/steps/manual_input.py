@@ -37,13 +37,11 @@ an `options` entry is a bare string *or* a dict).
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
-from .._bridge import validate_args
 
 # The closed set of input-field `kind:` values, derived from the single source
 # of truth -- the resolver's live-grounded `PicklistMixin._INPUT_FIELD_KINDS`
@@ -52,6 +50,8 @@ from .._bridge import validate_args
 # can NEVER drift. If a kind is added/removed in the resolver, this `Literal`
 # and the JSON Schema it emits track it automatically.
 from ...resolver.picklists import PicklistMixin
+from .._bridge import validate_args
+from ..base import StrictArgs
 
 # Build the Literal[...] from the dict keys at import time. `Literal.__getitem__`
 # accepts the tuple of kind strings and returns the parametrized type.
@@ -84,17 +84,17 @@ class InputVariableArgs(StrictArgs):
 
     name: str
     kind: InputFieldKind
-    label: Optional[str] = None
-    tooltip: Optional[str] = None
-    required: Optional[bool] = None
-    default: Optional[Any] = None
-    options: Optional[Any] = None
-    module: Optional[Any] = None
-    picklist: Optional[Any] = None
+    label: str | None = None
+    tooltip: str | None = None
+    required: bool | None = None
+    default: Any | None = None
+    options: Any | None = None
+    module: Any | None = None
+    picklist: Any | None = None
     # `type` is the canonical formType/dataType escape hatch the resolver's
     # pass-through uses; friendly authoring rarely sets it, but it is in the
     # resolver's whitelist, so we allow it to avoid a false UNKNOWN_PARAM.
-    type: Optional[Any] = None
+    type: Any | None = None
 
 
 # Which per-kind sibling is REQUIRED for the field to be usable. Mirrors the
@@ -125,18 +125,18 @@ class ManualInputArgs(StrictArgs):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     # Friendly authoring scalars.
-    title: Optional[str] = None
-    description: Optional[str] = None
-    email: Optional[Any] = None
-    assign_to: Optional[Any] = None
+    title: str | None = None
+    description: str | None = None
+    email: Any | None = None
+    assign_to: Any | None = None
     # Canonical scalar flags (FSR booleans; pydantic coerces true/false/0/1/"yes"…).
-    is_approval: Optional[bool] = None
-    isRecordLinked: Optional[bool] = None
-    unauthenticated_input: Optional[bool] = None
+    is_approval: bool | None = None
+    isRecordLinked: bool | None = None
+    unauthenticated_input: bool | None = None
     # Audience/email-template scalars.
-    timeout: Optional[int] = None
-    internal_email_subject: Optional[str] = None
-    external_email_subject: Optional[str] = None
+    timeout: int | None = None
+    internal_email_subject: str | None = None
+    external_email_subject: str | None = None
     # The friendly form fields a manual_input collects. Nested typing makes the
     # 29-kind contract introspectable via `get_step_arg_schema("manual_input")`
     # -- the discover win (was: `inputs` was `Any`, schema emitted `{}`). The
@@ -144,12 +144,12 @@ class ManualInputArgs(StrictArgs):
     # resolver; this is the introspection + per-entry validation surface. A
     # wrong-typed entry (`name: 123`, unknown `kind`) is a clean BAD_VALUE /
     # UNKNOWN_PARAM here, additive to the resolver's own checks.
-    inputs: Optional[list[InputVariableArgs]] = None
+    inputs: list[InputVariableArgs] | None = None
 
 
 def expand_manual_input(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate a manual_input step's scalar arguments.
 
     Validation-only: always returns ``None``. The friendly->canonical transform

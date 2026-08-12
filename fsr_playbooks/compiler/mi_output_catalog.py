@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # Resume-body metadata FSR injects on every MI output frame regardless
 # of mode. Safe to read; not part of the declared form.
 MI_SYSTEM_KEYS: frozenset[str] = frozenset({

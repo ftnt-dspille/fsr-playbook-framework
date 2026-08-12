@@ -11,7 +11,6 @@ import yaml
 from fsr_playbooks.compiler import skills
 from fsr_playbooks.compiler.parser import parse_yaml
 
-
 DEMO_CORE = {"run_connector_action", "set_variable", "manual_input", "decision"}
 
 

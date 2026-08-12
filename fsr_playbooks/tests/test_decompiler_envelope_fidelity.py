@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import yaml
 
-from fsr_playbooks.compiler import compile_yaml
-from fsr_playbooks.compiler.decompiler import decompile_to_yaml, _decompile_step
-from fsr_playbooks.compiler.ir import Step
 from fsr_playbooks._db import PACKAGED_SLIM_DB
+from fsr_playbooks.compiler import compile_yaml
+from fsr_playbooks.compiler.decompiler import _decompile_step, decompile_to_yaml
+from fsr_playbooks.compiler.ir import Step
 
 
 def _roundtrip_steps(yaml_text: str):
@@ -640,8 +640,8 @@ def test_code_snippet_minified_preserves_real_config_uuid():
     load-bearing -- the minimification must PRESERVE it (can't reverse-resolve
     to the name without the catalog; round-trip stable as a UUID). Only the
     empty default `config: ""` is dropped."""
-    from fsr_playbooks.compiler.ir import Step
     from fsr_playbooks.compiler.decompiler import _decompile_step
+    from fsr_playbooks.compiler.ir import Step
     s = Step(id="cs", type="code_snippet", name="cs", arguments={
         "connector": "code-snippet", "operation": "python_inline_code_editor",
         "operationTitle": "Execute Python Code", "version": "2.1.4",
@@ -657,8 +657,8 @@ def test_code_snippet_without_python_function_passes_through():
     body to recover) falls through to the generic pass-through -- its envelope
     is preserved, not stripped (the minimification only fires when there is a
     code body to extract)."""
-    from fsr_playbooks.compiler.ir import Step
     from fsr_playbooks.compiler.decompiler import _decompile_step
+    from fsr_playbooks.compiler.ir import Step
     s = Step(id="cs", type="code_snippet", name="cs", arguments={
         "connector": "code-snippet", "operation": "python_inline_code_editor",
         "version": "2.1.4",
@@ -773,8 +773,9 @@ def test_connector_preserves_customized_name_and_operationTitle():
     it. Requires the `db` connection (threaded from `decompile_to_yaml`); a
     direct call without it falls through (see next test)."""
     import sqlite3
-    from fsr_playbooks.compiler.ir import Step
+
     from fsr_playbooks.compiler.decompiler import _decompile_step
+    from fsr_playbooks.compiler.ir import Step
     conn = sqlite3.connect(PACKAGED_SLIM_DB)
     conn.row_factory = sqlite3.Row
     try:
@@ -808,8 +809,8 @@ def test_connector_without_db_preserves_name_and_operationTitle():
     as-is (the values are present, just not minimized). Backward-compatible
     contract: existing direct-call tests are unaffected by the catalog-gated
     strip."""
-    from fsr_playbooks.compiler.ir import Step
     from fsr_playbooks.compiler.decompiler import _decompile_step
+    from fsr_playbooks.compiler.ir import Step
     s = Step(id="c", type="connector", name="Call", arguments={
         "connector": "abuseipdb", "operation": "get_ip_blacklist",
         "name": "AbuseIPDB", "operationTitle": "Get IP Blacklist",

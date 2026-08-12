@@ -1,6 +1,5 @@
 """MCP tools: Tools Discovery"""
 from __future__ import annotations
-from . import _shared
 
 import difflib
 import json
@@ -10,15 +9,17 @@ import sqlite3
 import sys
 from typing import Any
 
+from . import _shared
 from ._shared import (
-    mcp,
-    _err,
+    REPO_ROOT,
     _db,
+    _err,
     _rows,
     _verifications_for,
-    REPO_ROOT,
     catalog_override,
+    mcp,
 )
+
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
 
@@ -38,7 +39,10 @@ def get_step_arg_schema(step_type: str) -> dict[str, Any]:
     caller can tell "not modeled yet" from an empty schema and discover what IS
     available.
     """
-    from ..compiler.typed_args.schema import emit_step_arg_schema, list_modeled_step_types
+    from ..compiler.typed_args.schema import (
+        emit_step_arg_schema,
+        list_modeled_step_types,
+    )
 
     schema = emit_step_arg_schema(step_type)
     if schema is None:

@@ -1,6 +1,29 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
 [project]
+# This is the DEV project: the `fsrpb` CLI + tooling. The PUBLISHED library is a
+# separate dist built from packaging/fsr_playbooks. Keep the names distinct --
+# calling this one `fsr_playbooks` makes an editable checkout answer
+# `importlib.metadata.version("fsr-playbooks")`, so a dev laptop impersonates the
+# wheel the connector pins.
+#
+# The version is NOT hardcoded, for the same reason it isn't over in
+# packaging/fsr_playbooks: `fsr_playbooks/__init__.py` resolves `__version__` by
+# trying ("fsr-playbooks", "fsr_playbooks", "fsrpb"), and on a dev checkout only
+# THIS dist is installed -- so whatever is written here becomes the framework's
+# reported version, and `version_is_known()` returns True for it. A literal
+# ("0.0.1", or a hand-typed "0.6.17") therefore makes `__version__` a string a
+# human last remembered to retype: it reads correct until the next tag, then
+# silently lies. That is the cwd-dependent-version failure the 30-line comment
+# in __init__.py exists to prevent and `make doctor` [0/5] was built to catch.
+#
+# setuptools-scm reads the same git tag hatch-vcs stamps into the real wheel
+# (hatch-vcs wraps setuptools-scm), with the same `no-guess-dev` scheme, so a
+# dev checkout and a release build report identically and neither can drift.
 name = "fsrpb"
-version = "0.0.1"
+dynamic = ["version"]
 description = "FortiSOAR Playbook YAML compiler + reference store"
 requires-python = ">=3.10"
 dependencies = [
@@ -29,6 +52,14 @@ fsrpb = "fsrpb_main:main"
 # Typing audit tooling (TYPING_GAP_IDENTIFICATION_PLAN). `uv sync --group typing`.
 typing = ["mypy>=2.1"]
 
+[tool.setuptools_scm]
+# `.git` is at this pyproject's own directory, so no `root` override is needed
+# (unlike packaging/fsr_playbooks, which sits two levels down and sets
+# root = "../.."). `no-guess-dev` matches that sibling and pyfsr, so an untagged
+# commit reads `0.6.18.post1.devN+g<sha>` in both places rather than optimistically
+# guessing the NEXT release -- a dev checkout must never claim to be 0.6.19.
+version_scheme = "no-guess-dev"
+
 [tool.setuptools]
 # fsr_playbooks lives at the repo root; non-shipped tooling lives under tooling/.
 package-dir = {"" = ".", "probes" = "tooling/probes", "store" = "tooling/store", "e2e" = "tooling/e2e"}
@@ -37,6 +68,7 @@ packages = [
     "probes", "store", "e2e",
     "fsr_playbooks",
     "fsr_playbooks.compiler", "fsr_playbooks.compiler.resolver", "fsr_playbooks.compiler.rulesets",
+    "fsr_playbooks.compiler.typed_args", "fsr_playbooks.compiler.typed_args.steps",
     "fsr_playbooks.mcp_server",
     "fsr_playbooks.llm",
     "fsr_playbooks.agent",
@@ -50,9 +82,9 @@ target-version = "py310"
 extend-exclude = ["web/frontend", "store", ".venv", "tooling/scratch"]
 
 [tool.ruff.lint]
-# Start with pyflakes (F): unused imports/vars, redefinitions, undefined names,
-# f-strings without placeholders. Broaden (E/I/UP/B) in a follow-up sweep.
-select = ["F"]
+# Pyflakes (F) + pyupgrade (UP) + isort (I). Broaden further (E/B) in a
+# follow-up sweep.
+select = ["F", "UP", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 # Package __init__ files re-export submodule symbols (and, in mcp_server,
@@ -60,11 +92,24 @@ select = ["F"]
 # "unused import" is the intended public surface / registration side effect.
 "**/__init__.py" = ["F401"]
 
-# Typing audit (TYPING_GAP_IDENTIFICATION_PLAN). REPORT-ONLY for now -- run
-# `mypy fsr_playbooks/compiler/` to regenerate docs/typing/mypy_baseline.md.
-# Not a CI gate (decision recorded in the plan): the enforced gate is the
-# shape-contract ratchet; mypy graduates to fail-on-new once NormalizerMixin
-# gets a Protocol and clears the 45 attr-defined baseline errors.
+# B023 (function-uses-loop-variable): all 37 findings are false positives --
+# each closure/lambda is called immediately within the same loop iteration
+# (re.sub replacement, asyncio.gather, set comprehension, direct yield), never
+# deferred. Triaged under #108; annotate any future real bug with `# noqa: B023`
+# rather than broadening this ignore.
+"fsr_playbooks/compiler/connector_output_refs.py" = ["B023"]
+"fsr_playbooks/compiler/visual_model.py" = ["B023"]
+"fsr_playbooks/compiler/parser.py" = ["B023"]
+"fsr_playbooks/compiler/resolver/rewriters.py" = ["B023"]
+"fsr_playbooks/llm/openai_provider.py" = ["B023"]
+"fsr_playbooks/llm/anthropic_provider.py" = ["B023"]
+"fsr_playbooks/mcp_server/_shared.py" = ["B023"]
+"fsr_playbooks/mcp_server/tools_analysis.py" = ["B023"]
+
+# Typing audit (TYPING_GAP_IDENTIFICATION_PLAN). The compiler/ scope is a
+# clean mypy gate (0 errors). The llm/ + mcp_server/ scopes use a ratchet
+# baseline (docs/typing/mypy_ratchet.json) enforced by `make mypy-gate` --
+# fails on NEW errors, passes at or below the committed floor.
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true

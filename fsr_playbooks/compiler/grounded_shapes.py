@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Shape vocabulary mirrors compiler.typed_walker (kept in sync by hand; both are
 # small and stable). Duplicated rather than imported to keep this module free of
@@ -85,7 +85,7 @@ def _list_item_shape(items: list, depth: int) -> Shape:
     """
     if not items:
         return _scalar("any")
-    item: Optional[Shape] = None
+    item: Shape | None = None
     for el in items:
         s = shape_from_value(el, depth + 1)
         item = s if item is None else merge_shape(item, s)
@@ -158,14 +158,14 @@ class GroundedShapeStore:
     optional keys); ``shape_for`` serves the current best shape.
     """
 
-    def __init__(self, shapes: Optional[dict[str, Shape]] = None,
-                 path: Optional[Path] = None):
+    def __init__(self, shapes: dict[str, Shape] | None = None,
+                 path: Path | None = None):
         self._shapes: dict[str, Shape] = dict(shapes or {})
         self._path = path
 
     # -- persistence ------------------------------------------------------- #
     @classmethod
-    def load(cls, path: Path) -> "GroundedShapeStore":
+    def load(cls, path: Path) -> GroundedShapeStore:
         p = Path(path)
         data: dict[str, Shape] = {}
         if p.exists():
@@ -175,7 +175,7 @@ class GroundedShapeStore:
                 data = {}
         return cls(data, path=p)
 
-    def save(self, path: Optional[Path] = None) -> None:
+    def save(self, path: Path | None = None) -> None:
         src = path or self._path
         target = Path(src) if src else None
         if target is None:
@@ -184,7 +184,7 @@ class GroundedShapeStore:
         target.write_text(json.dumps(self._shapes, indent=2, sort_keys=True))
 
     # -- access ------------------------------------------------------------ #
-    def shape_for(self, connector: str, op: str) -> Optional[Shape]:
+    def shape_for(self, connector: str, op: str) -> Shape | None:
         return self._shapes.get(_key(connector, op))
 
     def observe(self, connector: str, op: str, value: Any) -> Shape:
@@ -210,6 +210,6 @@ def grounded_probe(store: GroundedShapeStore):
     Returns None for un-observed ops so the walker falls back to its existing
     inference (never worse than today; strictly better where we have data).
     """
-    def _probe(connector: str, op: str, _arguments: dict) -> Optional[Shape]:
+    def _probe(connector: str, op: str, _arguments: dict) -> Shape | None:
         return store.shape_for(connector, op)
     return _probe

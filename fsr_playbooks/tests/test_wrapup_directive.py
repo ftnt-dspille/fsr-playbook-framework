@@ -20,10 +20,11 @@ never reaches that branch -- which is why its own docstring notes its live case
 "did not run out of turns".
 """
 from fsr_playbooks.llm._loop_helpers import (
-    DEFAULT_MAX_OUTPUT_TOKENS, MAX_TOOL_TURNS, analyst_has_the_yaml,
+    DEFAULT_MAX_OUTPUT_TOKENS,
+    MAX_TOOL_TURNS,
+    analyst_has_the_yaml,
     wrapup_directive,
 )
-
 
 PLAYBOOK = """```yaml
 name: fixture

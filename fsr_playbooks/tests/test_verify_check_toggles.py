@@ -3,7 +3,9 @@ individual checks. Disabled diagnostics move to evidence.suppressed (never
 silent) and stop blocking ready_to_push.
 """
 from fsr_playbooks.mcp_server.tools_verify import (
-    verify_playbook, _resolve_disabled_codes, CHECK_GROUPS,
+    CHECK_GROUPS,
+    _resolve_disabled_codes,
+    verify_playbook,
 )
 
 # A playbook with a hard Jinja syntax error (missing endif).

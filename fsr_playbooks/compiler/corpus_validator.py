@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import Counter, defaultdict
-from typing import Optional
 
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Step
@@ -66,7 +65,7 @@ class CorpusValidator:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         # step_type_name -> {key: set(observed_values)}
-        self._enums: Optional[dict[str, dict[str, set]]] = None
+        self._enums: dict[str, dict[str, set]] | None = None
         # step_type_name -> set(keys present in 100% of corpus samples)
         self._always_keys: dict[str, set[str]] = {}
 

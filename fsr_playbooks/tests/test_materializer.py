@@ -8,8 +8,8 @@ REGISTRY unchanged.
 """
 import pytest
 
-from fsr_playbooks.mcp_server import materializer as M
 from fsr_playbooks.llm import tools as T
+from fsr_playbooks.mcp_server import materializer as M
 
 
 def _stub_client(tools_by_server, *, supports=True):

@@ -17,7 +17,8 @@ import sqlite3
 import pytest
 
 from fsr_playbooks import picklists as pl
-from fsr_playbooks.mcp_server import _shared, tools_picklists as t
+from fsr_playbooks.mcp_server import _shared
+from fsr_playbooks.mcp_server import tools_picklists as t
 
 SLIM_DB = _shared.REPO_ROOT / "fsr_playbooks" / "_data" / "fsr_reference.db"
 

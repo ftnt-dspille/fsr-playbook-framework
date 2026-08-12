@@ -8,9 +8,10 @@ connector op is caught by the Phase 4 source→target check.
 from fsr_playbooks.compiler import parse_yaml
 from fsr_playbooks.compiler.ir import Collection, Playbook, Step
 from fsr_playbooks.compiler.typed_walker import (
-    _param_type_to_shape, _pure_single_ref, walk_playbook,
+    _param_type_to_shape,
+    _pure_single_ref,
+    walk_playbook,
 )
-
 
 # ---- parser: mapping vs list ----------------------------------------------
 

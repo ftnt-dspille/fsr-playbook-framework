@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 
 from fsr_playbooks.llm import tools as tools_mod
-from fsr_playbooks.llm.tools import REGISTRY, ToolSpec, dispatch, _AUTHORING_YAML_TOOLS
+from fsr_playbooks.llm.tools import _AUTHORING_YAML_TOOLS, REGISTRY, ToolSpec, dispatch
 
 
 @pytest.fixture

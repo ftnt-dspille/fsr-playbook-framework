@@ -7,8 +7,8 @@ coalesce_text=True, and that a timed-out stream surfaces an ErrorEvent.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import AsyncIterator
 
 from fsr_playbooks.llm.provider import (
     DoneEvent,
@@ -20,7 +20,6 @@ from fsr_playbooks.llm.provider import (
     UsageEvent,
 )
 from fsr_playbooks.llm.run_turn import run_agent_turn
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -200,6 +199,7 @@ def test_resume_history_keys_on_supplied_session_id():
     every recorded resume-turn message (incl. superseded skipped tools) must be
     keyed on the real id so the turn threads onto the real session's history."""
     from types import SimpleNamespace
+
     from fsr_playbooks.llm.run_turn import resume_agent_turn
 
     synthetic = "a1b2c3d4"        # provider-internal uuid4().hex[:8]

@@ -1,19 +1,20 @@
 """MCP tools: Tools Corpus"""
 from __future__ import annotations
-from . import _shared
 
 import json
 import sqlite3
 import sys
 from typing import Any
 
+from . import _shared
 from ._shared import (
-    mcp,
-    _err,
-    _db,
-    _rows,
     REPO_ROOT,
+    _db,
+    _err,
+    _rows,
+    mcp,
 )
+
 # Import DB_PATH for local use
 DB_PATH = _shared.DB_PATH
 

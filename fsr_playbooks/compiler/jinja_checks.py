@@ -81,6 +81,7 @@ def _load_known() -> tuple[frozenset[str], frozenset[str]]:
     # The curated jinja_macros table is the superset of known filter names.
     try:
         import sqlite3
+
         from fsr_playbooks._db import PACKAGED_SLIM_DB
         with sqlite3.connect(str(PACKAGED_SLIM_DB)) as conn:
             rows = conn.execute("SELECT name FROM jinja_macros").fetchall()

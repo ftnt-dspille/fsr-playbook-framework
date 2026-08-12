@@ -29,13 +29,13 @@ name OR a list, and `resources:` is the canonical list form.
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class RecordActionArgs(StrictArgs):
@@ -50,15 +50,15 @@ class RecordActionArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    button_label: Optional[str] = None
-    title: Optional[str] = None
-    requires_record: Optional[bool] = None
-    run_mode: Optional[Literal["per_record", "once_for_all"]] = None
+    button_label: str | None = None
+    title: str | None = None
+    requires_record: bool | None = None
+    run_mode: Literal["per_record", "once_for_all"] | None = None
 
 
 def expand_record_action(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate a record-action step's scalar flags.
 
     Validation-only: always returns ``None`` (the canonical transform stays in

@@ -7,9 +7,8 @@ Verifies that:
 """
 from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
-from fsr_playbooks.compiler.validator import _has_cycle
 from fsr_playbooks.compiler.ir import Playbook, Step
-
+from fsr_playbooks.compiler.validator import _has_cycle
 
 # ---------------------------------------------------------------------------
 # _has_cycle unit tests

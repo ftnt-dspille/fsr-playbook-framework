@@ -6,21 +6,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .arg_validator import ArgValidator
+from .connector_output_refs import rewrite_connector_output_refs
 from .corpus_validator import CorpusValidator
 from .emitter import emit
 from .errors import CompileError, ErrorCode
 from .ir import Collection
 from .linter import lint
 from .parser import parse_yaml
-from .connector_output_refs import rewrite_connector_output_refs
 from .reference_lint import reference_lint
 from .resolver import Resolver
 from .teaching import enrich_diagnostics
 from .validator import validate
-
 
 # Step fields the compiler/parser/emitter rely on. If the loaded `ir.Step`
 # is missing any of these, an install is half-overwritten (a stale wheel
@@ -32,11 +31,11 @@ _EXPECTED_STEP_FIELDS = frozenset({
     "unlabeled_next", "comment", "description", "for_each",
 })
 
-_self_check_error: Optional[str] = None
+_self_check_error: str | None = None
 _self_checked = False
 
 
-def _self_check() -> Optional[str]:
+def _self_check() -> str | None:
     """Detect a half-overwritten / shadowed `fsr_playbooks` install (E10).
 
     Two cheap probes, run once and cached:
@@ -53,7 +52,7 @@ def _self_check() -> Optional[str]:
     if _self_checked:
         return _self_check_error
 
-    problem: Optional[str] = None
+    problem: str | None = None
     try:
         from dataclasses import fields as _dc_fields
 
@@ -91,9 +90,9 @@ def _self_check() -> Optional[str]:
 
 @dataclass
 class CompileResult:
-    fsr_json: Optional[dict[str, Any]] = None
+    fsr_json: dict[str, Any] | None = None
     errors: list[CompileError] = field(default_factory=list)
-    ir: Optional[Collection] = None
+    ir: Collection | None = None
 
     @property
     def ok(self) -> bool:
@@ -107,7 +106,7 @@ class CompileResult:
 
 def compile_yaml(
     text: str, db_path: Path,
-    lax_codes: Optional[set[str]] = None,
+    lax_codes: set[str] | None = None,
     reference_lint_enabled: bool = True,
 ) -> CompileResult:
     """Compile YAML to FSR JSON.

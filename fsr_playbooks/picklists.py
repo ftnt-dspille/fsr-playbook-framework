@@ -34,7 +34,6 @@ import json
 import re
 import sqlite3
 import urllib.parse
-from typing import Optional
 
 _PICKLIST_IRI_RE = re.compile(r"^/api/3/picklists/[0-9a-fA-F-]{32,}$")
 
@@ -216,7 +215,7 @@ def valid_values(conn: sqlite3.Connection, module: str, field: str) -> list:
 
 
 def picklist_name_for(conn: sqlite3.Connection, module: str, field: str,
-                      client=None) -> Optional[str]:
+                      client=None) -> str | None:
     """Which picklist backs `module.field`.
 
     `module_fields.picklist_name` is the recorded answer; when it is absent we

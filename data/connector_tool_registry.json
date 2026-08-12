@@ -1,17 +1,19 @@
 {
   "source": "fsr_soc_triage.registry -- register_triage_tools + register_record_tools + register_ztpf_tools + register_playbook_tools",
-  "note": "The 22 tools the connector registers into the framework's SAFE_TOOLS/TOOL_TIERS at runtime. The framework advertises 40 at import (fsr_playbooks.llm.tools.SAFE_TOOLS); a deployed agent sees 62. This manifest lets the census and lint know the truth without a live turn (tracker #67). Regenerate with scripts/export_registry_manifest.py in the connector repo.",
+  "note": "The 22 tools the connector registers into the framework's SAFE_TOOLS/TOOL_TIERS at runtime. The framework advertises 40 at import (fsr_playbooks.llm.tools.SAFE_TOOLS); a deployed agent sees 65. This manifest lets the census and lint know the truth without a live turn (tracker #67). Regenerate with scripts/export_registry_manifest.py in the connector repo.",
   "framework_safe_tools_count": 40,
-  "connector_registered_count": 22,
-  "runtime_total": 62,
+  "connector_registered_count": 25,
+  "runtime_total": 65,
   "tools": [
     "create_record",
     "faz_event_summary",
     "faz_get_alerts",
     "faz_raw_query",
+    "faz_search",
     "faz_search_by_serial",
     "faz_search_device_events",
     "faz_search_ip",
+    "fmg_device",
     "fmg_get_device_list",
     "fmg_get_device_status",
     "fmg_get_ha_status",
@@ -22,6 +24,7 @@
     "search_module_records",
     "siem_events_for_incident",
     "siem_raw_query",
+    "siem_search",
     "siem_search_host",
     "siem_search_ip",
     "siem_search_user",
@@ -33,9 +36,11 @@
     "faz_event_summary": 1,
     "faz_get_alerts": 1,
     "faz_raw_query": 1,
+    "faz_search": 1,
     "faz_search_by_serial": 1,
     "faz_search_device_events": 1,
     "faz_search_ip": 1,
+    "fmg_device": 1,
     "fmg_get_device_list": 1,
     "fmg_get_device_status": 1,
     "fmg_get_ha_status": 1,
@@ -46,6 +51,7 @@
     "search_module_records": 1,
     "siem_events_for_incident": 1,
     "siem_raw_query": 1,
+    "siem_search": 1,
     "siem_search_host": 1,
     "siem_search_ip": 1,
     "siem_search_user": 1,
@@ -54,16 +60,27 @@
   },
   "registered_by": {
     "register_triage_tools": [
-      "get_record", "search_module_records",
-      "siem_search_ip", "siem_search_host", "siem_search_user",
-      "siem_events_for_incident", "siem_raw_query",
-      "faz_get_alerts", "faz_search_ip", "faz_raw_query",
-      "faz_search_device_events", "faz_search_by_serial", "faz_event_summary",
-      "fmg_get_device_list", "fmg_get_device_status",
-      "fmg_get_ha_status", "fmg_get_policy_package_status"
+      "get_record",
+      "search_module_records",
+      "siem_search",
+      "siem_events_for_incident",
+      "siem_raw_query",
+      "faz_search",
+      "faz_get_alerts",
+      "faz_event_summary",
+      "faz_raw_query",
+      "fmg_device"
     ],
-    "register_record_tools": ["create_record", "update_record"],
-    "register_ztpf_tools": ["test_template"],
-    "register_playbook_tools": ["resume_playbook", "list_module_playbooks"]
+    "register_record_tools": [
+      "create_record",
+      "update_record"
+    ],
+    "register_ztpf_tools": [
+      "test_template"
+    ],
+    "register_playbook_tools": [
+      "resume_playbook",
+      "list_module_playbooks"
+    ]
   }
 }

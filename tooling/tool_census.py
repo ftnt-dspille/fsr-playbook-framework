@@ -134,13 +134,13 @@ def _promise(name: str) -> str:
 # These are where "combine" actually pays: one tool with a `source`/`by`
 # argument instead of N near-identical descriptions competing for the model's
 # attention. Listed so the census can price each family, not to prejudge it.
+# After #69, the per-axis tools are merged: siem_search(by=ip|host|user),
+# faz_search(by=ip|device|serial), fmg_device(by=list|status|ha|policy).
+# The legacy names stay in the census for historical call-count attribution.
 _FAMILIES: dict[str, tuple[str, ...]] = {
-    "siem hunt": ("siem_search_ip", "siem_search_host", "siem_search_user",
-                  "siem_events_for_incident", "siem_raw_query"),
-    "faz hunt": ("faz_search_ip", "faz_search_device_events", "faz_get_alerts",
-                 "faz_event_summary", "faz_raw_query", "faz_search_by_serial"),
-    "fmg device": ("fmg_get_device_list", "fmg_get_device_status",
-                   "fmg_get_ha_status", "fmg_get_policy_package_status"),
+    "siem hunt": ("siem_search", "siem_events_for_incident", "siem_raw_query"),
+    "faz hunt": ("faz_search", "faz_get_alerts", "faz_event_summary", "faz_raw_query"),
+    "fmg device": ("fmg_device",),
     "picklist": ("list_picklists", "get_picklist", "picklist_for_field",
                  "resolve_picklist_value", "precheck_picklist_value"),
     "jinja discovery": ("find_jinja_pattern", "find_jinja_example",

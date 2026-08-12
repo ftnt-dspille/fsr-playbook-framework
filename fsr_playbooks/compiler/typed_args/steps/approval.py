@@ -20,13 +20,13 @@ normalizer owns the setdefaults + ``_check_unknown_keys``.
 """
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class ApprovalArgs(StrictArgs):
@@ -42,15 +42,15 @@ class ApprovalArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    collection: Optional[str] = None
-    resource: Optional[Any] = None
-    timeout: Optional[Union[int, float]] = None
-    response_mapping: Optional[Any] = None
+    collection: str | None = None
+    resource: Any | None = None
+    timeout: int | float | None = None
+    response_mapping: Any | None = None
 
 
 def expand_approval(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate an approval step's envelope scalars.
 
     Validation-only: always returns ``None`` (the normalizer's

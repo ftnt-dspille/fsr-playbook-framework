@@ -19,9 +19,9 @@ rejected.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Descriptor schema
@@ -47,7 +47,7 @@ class ParamSpec:
 # jinja expression string that *overrides* the literal in
 # `resolved_inputs` (the value-match wiring result). The hook must emit
 # exactly one step (the 1:1 rule).
-CompileHook = Callable[[Dict[str, Any], Dict[str, str], str], Dict[str, Any]]
+CompileHook = Callable[[dict[str, Any], dict[str, str], str], dict[str, Any]]
 
 
 @dataclass
@@ -55,14 +55,14 @@ class Skill:
     id: str
     step_type: str                       # YAML source `type:` (one of the 21 FSR step types)
     compile: CompileHook
-    needs: Dict[str, Optional[str]] = field(default_factory=dict)   # {connector?, op?}
-    input_schema: Dict[str, ParamSpec] = field(default_factory=dict)
+    needs: dict[str, str | None] = field(default_factory=dict)   # {connector?, op?}
+    input_schema: dict[str, ParamSpec] = field(default_factory=dict)
     description: str = ""
 
-    def required_params(self) -> List[str]:
+    def required_params(self) -> list[str]:
         return [k for k, s in self.input_schema.items() if s.required]
 
-    def bindable_params(self) -> List[str]:
+    def bindable_params(self) -> list[str]:
         return [k for k, s in self.input_schema.items() if s.jinja_bindable]
 
 
@@ -77,7 +77,7 @@ class Skill:
 # hand-authored one.
 
 
-def _apply_wires(inputs: Dict[str, Any], wired_refs: Dict[str, str]) -> Dict[str, Any]:
+def _apply_wires(inputs: dict[str, Any], wired_refs: dict[str, str]) -> dict[str, Any]:
     """Overlay value-match jinja wires onto the resolved literals."""
     merged = dict(inputs)
     for param, ref in (wired_refs or {}).items():
@@ -86,8 +86,8 @@ def _apply_wires(inputs: Dict[str, Any], wired_refs: Dict[str, str]) -> Dict[str
 
 
 def _compile_run_connector_action(
-    inputs: Dict[str, Any], wired_refs: Dict[str, str], step_name: str
-) -> Dict[str, Any]:
+    inputs: dict[str, Any], wired_refs: dict[str, str], step_name: str
+) -> dict[str, Any]:
     """RunConnectorAction. `inputs` carries `connector`, `operation`, and
     the op params; wired params have their literal swapped for a jinja
     ref. Emits a `type: connector` step with args at step level (Phase G:
@@ -97,7 +97,7 @@ def _compile_run_connector_action(
     operation = merged.pop("operation", None)
     config = merged.pop("config", None)
     agent = merged.pop("agent", None)
-    step: Dict[str, Any] = {"type": "connector", "name": step_name}
+    step: dict[str, Any] = {"type": "connector", "name": step_name}
     if connector is not None:
         step["connector"] = connector
     if operation is not None:
@@ -113,8 +113,8 @@ def _compile_run_connector_action(
 
 
 def _compile_set_variable(
-    inputs: Dict[str, Any], wired_refs: Dict[str, str], step_name: str
-) -> Dict[str, Any]:
+    inputs: dict[str, Any], wired_refs: dict[str, str], step_name: str
+) -> dict[str, Any]:
     """SetVariable. `inputs` is the name→value mapping to stage; wired
     values become jinja refs. Emits the top-level `vars:` form (no
     `arguments:` -- the parser rejects that for set_variable)."""
@@ -123,8 +123,8 @@ def _compile_set_variable(
 
 
 def _compile_manual_input(
-    inputs: Dict[str, Any], wired_refs: Dict[str, str], step_name: str
-) -> Dict[str, Any]:
+    inputs: dict[str, Any], wired_refs: dict[str, str], step_name: str
+) -> dict[str, Any]:
     """ManualTask. Two modes (§1):
 
     - extra-input form: `inputs.fields` → emitted as-is for the form.
@@ -134,7 +134,7 @@ def _compile_manual_input(
 
     `message`/`question` is the prompt text. Manual input never wires its
     own params from prior outputs, so `wired_refs` is unused here."""
-    step: Dict[str, Any] = {"type": "manual_input", "name": step_name}
+    step: dict[str, Any] = {"type": "manual_input", "name": step_name}
     msg = inputs.get("message") or inputs.get("question")
     if msg:
         step["message"] = msg
@@ -148,14 +148,14 @@ def _compile_manual_input(
 
 
 def _compile_decision(
-    inputs: Dict[str, Any], wired_refs: Dict[str, str], step_name: str
-) -> Dict[str, Any]:
+    inputs: dict[str, Any], wired_refs: dict[str, str], step_name: str
+) -> dict[str, Any]:
     """Decision (branch). Branch conditions come from the recorded
     `choice`/`capability_gap`/manual-input `value`s, so branch logic is
     preserved rather than flattened (§3). `inputs.conditions` is a list of
     `{display, when, next}`; `inputs.default` is the else target step
     name. Emits the step-level `conditions:`/`default:` source form."""
-    step: Dict[str, Any] = {"type": "decision", "name": step_name}
+    step: dict[str, Any] = {"type": "decision", "name": step_name}
     conditions = inputs.get("conditions")
     if isinstance(conditions, list) and conditions:
         step["conditions"] = conditions
@@ -170,7 +170,7 @@ def _compile_decision(
 # ---------------------------------------------------------------------------
 
 
-_REGISTRY: Dict[str, Skill] = {}
+_REGISTRY: dict[str, Skill] = {}
 
 
 def register(skill: Skill) -> Skill:
@@ -240,15 +240,15 @@ register(Skill(
 # ---------------------------------------------------------------------------
 
 
-def get_skill(skill_id: str) -> Optional[Skill]:
+def get_skill(skill_id: str) -> Skill | None:
     return _REGISTRY.get(skill_id)
 
 
-def all_skills() -> Dict[str, Skill]:
+def all_skills() -> dict[str, Skill]:
     return dict(_REGISTRY)
 
 
-def skill_for_step_type(step_type: str) -> Optional[Skill]:
+def skill_for_step_type(step_type: str) -> Skill | None:
     """First registered skill compiling to `step_type` (the demo-core set
     is 1:1, so this is unambiguous)."""
     for skill in _REGISTRY.values():

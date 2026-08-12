@@ -294,7 +294,7 @@ def _hoist_args(out: dict, args: dict) -> None:
 
 
 def _decompile_step(s, pb_name: str | None = None,
-                     db: "sqlite3.Connection | None" = None) -> dict:
+                     db: sqlite3.Connection | None = None) -> dict:
     """Emit a step in the canonical authoring surface:
     `name:` only (no `id:`); `conditions:` / `options:` / `vars:` hoisted
     to step level; legacy `arguments.{conditions,options,arg_list}` and

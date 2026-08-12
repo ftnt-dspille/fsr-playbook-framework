@@ -6,7 +6,7 @@ Target: /api/3/<module> or /api/3/upsert/<module>, operation: Overwrite.
 """
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from . import (
     STEP_CREATE_RECORD,

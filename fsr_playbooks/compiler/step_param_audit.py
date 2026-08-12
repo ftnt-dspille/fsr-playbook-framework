@@ -23,7 +23,6 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-
 # Maps the FSR canonical step_type_name (column in `playbook_steps`)
 # to the simplified-IR / resolver short type for cross-referencing.
 TYPE_NAME_TO_RESOLVER: dict[str, str] = {

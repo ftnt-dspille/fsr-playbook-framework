@@ -143,13 +143,13 @@ def _bind_token(approval_id: str, tool: str,
     return hmac.new(_secret(), msg, hashlib.sha256).hexdigest()
 
 
-def bind(s: "SuspendedSession") -> None:
+def bind(s: SuspendedSession) -> None:
     """Compute and attach the HMAC token. Call once, after construction,
     before stashing."""
     s.token = _bind_token(s.approval_id, s.tool, s.args, s.created_at)
 
 
-def verify(s: "SuspendedSession") -> bool:
+def verify(s: SuspendedSession) -> bool:
     """True iff the session's token matches a freshly computed HMAC over its
     current fields. A missing token fails closed."""
     if not s.token:
@@ -322,13 +322,13 @@ _DEFAULT: InMemoryApprovalGateway | SqliteApprovalGateway = (
 
 
 def set_default_gateway(
-    gw: "InMemoryApprovalGateway | SqliteApprovalGateway",
+    gw: InMemoryApprovalGateway | SqliteApprovalGateway,
 ) -> None:
     global _DEFAULT
     _DEFAULT = gw
 
 
-def get_default_gateway() -> "InMemoryApprovalGateway | SqliteApprovalGateway":
+def get_default_gateway() -> InMemoryApprovalGateway | SqliteApprovalGateway:
     return _DEFAULT
 
 

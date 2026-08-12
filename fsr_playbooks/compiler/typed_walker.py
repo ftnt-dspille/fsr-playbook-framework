@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 from .ir import Collection, Playbook, Step
 from .validator import _RESERVED_VARS_KEYS
-
 
 # ---------------------------------------------------------------------------
 # Public data types
@@ -48,7 +48,7 @@ class Diagnostic:
     step: str = ""
     branch: str = ""
     path: str = ""               # YAML-ish path
-    suggestion: Optional[str] = None
+    suggestion: str | None = None
     severity: str = "error"      # "error" (required_fix) | "warning"
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,7 +96,7 @@ class WalkResult:
 
 # Probe callback signature. Takes (connector, op, synthesized_inputs)
 # and returns a Shape (or None to indicate "couldn't probe; fall back").
-ProbeCallback = Callable[[str, str, dict[str, Any]], Optional[Shape]]
+ProbeCallback = Callable[[str, str, dict[str, Any]], Shape | None]
 
 
 # Resolver hook for module field schemas. Takes module name → list of
@@ -116,7 +116,7 @@ OpSafetyFn = Callable[[str, str], str]
 # 'ipv6' | …) or None when the param is untyped / picklist / unknown.
 # Optional; without it Phase 4 source→target checking is skipped. The
 # tag vocabulary mirrors the resolver's `_param_target_observed_type`.
-ParamTypeFn = Callable[[str, str, str], Optional[str]]
+ParamTypeFn = Callable[[str, str, str], str | None]
 
 
 # ---------------------------------------------------------------------------
@@ -524,7 +524,7 @@ def _workflow_reference_output_shape(child: Playbook) -> Shape:
     return _shape_object(keys)
 
 
-def _child_wf_ref_shapes(coll: "Collection") -> dict[str, Shape]:
+def _child_wf_ref_shapes(coll: Collection) -> dict[str, Shape]:
     """Map both child playbook NAME and its resolved IRI → reference output shape.
 
     The parsed IR carries `arguments.target: <name>`; the resolved IR carries
@@ -1038,8 +1038,8 @@ def _validate_branch_jinja(
                                 suggestion = (
                                     " -- this resolves to a Hydra "
                                     "envelope; index the inner list: "
-                                    "`vars.steps.{0}['hydra:member'][0]"
-                                    "`".format(key))
+                                    f"`vars.steps.{key}['hydra:member'][0]"
+                                    "`")
                             elif list_keys:
                                 suggestion = (
                                     " -- this is an object; the list-"

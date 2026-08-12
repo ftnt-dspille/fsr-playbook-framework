@@ -96,7 +96,10 @@ def test_edr_collector_inventory_is_host_enrichment():
     agent?", and the host's absence from EDR only surfaced when the containment
     action failed at execution time with a 400."""
     from fsr_playbooks.mcp_server.tools_connector_discovery import (
-        _INDICATOR_TOKENS, _TARGET_KEYWORDS, _is_enrichment_op)
+        _INDICATOR_TOKENS,
+        _TARGET_KEYWORDS,
+        _is_enrichment_op,
+    )
 
     assert _is_enrichment_op("get_collector_list", "get collector list", "host")
     assert _is_enrichment_op("get_collector_list", "get collector list", "endpoint")
@@ -117,8 +120,8 @@ def test_edr_collector_inventory_is_host_enrichment():
 def test_isolate_is_never_offered_as_enrichment():
     """`isolate_collector` matches the host name heuristic, so only the tier
     guard keeps a containment op out of the enrichment list. Pin that."""
-    from fsr_playbooks.mcp_server.tools_connector_discovery import _is_enrichment_op
     from fsr_playbooks.llm.tools import _tier_for_run_op
+    from fsr_playbooks.mcp_server.tools_connector_discovery import _is_enrichment_op
 
     assert _is_enrichment_op("isolate_collector", "isolate collector", "host")
     assert _tier_for_run_op(

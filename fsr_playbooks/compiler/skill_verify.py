@@ -22,27 +22,27 @@ dangling reference shipping silently.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
-from .skills import get_skill
-from . import skill_compiler as sc
 from ..agent.skill_trace import SkillTrace
-
+from . import skill_compiler as sc
+from .skills import get_skill
 
 # A render function: (template, context) -> {"output": value} | {"error": str}.
 # Defaults to the local engine; the live `tools_jinja.render_jinja` is
 # signature-compatible (its extra args are optional).
-RenderFn = Callable[..., Dict[str, Any]]
+RenderFn = Callable[..., dict[str, Any]]
 
 
-def _local_render(template: str, context: Optional[Dict[str, Any]] = None,
-                  **_ignore: Any) -> Dict[str, Any]:
+def _local_render(template: str, context: dict[str, Any] | None = None,
+                  **_ignore: Any) -> dict[str, Any]:
     """Offline Jinja render with StrictUndefined so a missing path raises
     rather than silently rendering empty -- that strictness is the point:
     a wire that doesn't resolve must surface, not pass."""
     try:
         from jinja2 import Environment, StrictUndefined
-        from jinja2.exceptions import UndefinedError, TemplateError
+        from jinja2.exceptions import TemplateError, UndefinedError
     except ImportError:  # pragma: no cover - jinja2 is a runtime dep
         return {"error": "jinja2 not available"}
     env = Environment(undefined=StrictUndefined,
@@ -56,8 +56,8 @@ def _local_render(template: str, context: Optional[Dict[str, Any]] = None,
         return {"error": str(exc)}
 
 
-def verify_wire(ref: str, context: Dict[str, Any],
-                render_fn: Optional[RenderFn] = None) -> bool:
+def verify_wire(ref: str, context: dict[str, Any],
+                render_fn: RenderFn | None = None) -> bool:
     """True iff `ref` renders to a defined, non-empty value against
     `context`."""
     fn = render_fn or _local_render
@@ -70,12 +70,13 @@ def verify_wire(ref: str, context: Dict[str, Any],
     return out is not None and out != ""
 
 
-def _static_path_errors(steps: List[Dict[str, Any]], first_step: Optional[str],
-                        start_step: str) -> List[str]:
+def _static_path_errors(steps: list[dict[str, Any]], first_step: str | None,
+                        start_step: str) -> list[str]:
     """Reuse parser + validator to surface undefined/unreachable jinja refs
     across the assembled step graph. Returns human-readable messages for
     the jinja-path diagnostics only."""
     import yaml
+
     from .parser import parse_yaml
     from .validator import validate
 
@@ -89,7 +90,7 @@ def _static_path_errors(steps: List[Dict[str, Any]], first_step: Optional[str],
         }],
     }
     coll, perrs = parse_yaml(yaml.safe_dump(doc, sort_keys=False))
-    msgs: List[str] = [
+    msgs: list[str] = [
         e.message for e in perrs
         if getattr(e, "severity", "error") != "warning"
     ]
@@ -104,9 +105,9 @@ def _static_path_errors(steps: List[Dict[str, Any]], first_step: Optional[str],
 
 
 def compile_and_verify(
-    trace: SkillTrace, *, render_fn: Optional[RenderFn] = None,
+    trace: SkillTrace, *, render_fn: RenderFn | None = None,
     start_step: str = "Start",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compile the trace, verify each wire, repair the failures, and run the
     static path check on the repaired graph.
 
@@ -120,12 +121,12 @@ def compile_and_verify(
     # Position of each call so a step only renders against EARLIER outputs.
     pos = {c.step_name: i for i, c in enumerate(trace.calls)}
 
-    verified: Dict[str, Dict[str, bool]] = {}
-    repaired: Dict[str, List[str]] = {}
+    verified: dict[str, dict[str, bool]] = {}
+    repaired: dict[str, list[str]] = {}
 
     for name, wired in list(compiled["wiring"].items()):
         ctx = sc.render_context(trace, upto=pos.get(name, len(trace.calls)))
-        good: Dict[str, str] = {}
+        good: dict[str, str] = {}
         for param, ref in wired.items():
             ok = verify_wire(ref, ctx, render_fn)
             verified.setdefault(name, {})[param] = ok
@@ -151,7 +152,7 @@ def compile_and_verify(
     # compile_trace directly and never came through here. So re-prune the
     # re-emitted steps, and keep `pruned` reporting what actually survived.
     rules_for = compiled.pop("_rules_for", None) or sc._rules_lookup()
-    new_steps: List[Dict[str, Any]] = []
+    new_steps: list[dict[str, Any]] = []
     calls = trace.calls
     for i, call in enumerate(calls):
         skill = get_skill(call.skill_id)
@@ -178,7 +179,7 @@ def compile_and_verify(
     # playbook is module-bound (a per-record manual trigger) does
     # vars.input.records[0] resolve at runtime, so gate on trace.module.
     # Runs after repair so it can rescue values that fell back to literals too.
-    record_vars: Dict[str, str] = {}
+    record_vars: dict[str, str] = {}
     if getattr(trace, "module", None) and getattr(trace, "record_fields", None):
         record_vars, compiled["steps"], compiled["first_step"] = \
             sc.wire_record_inputs(compiled["steps"], compiled["gaps"],

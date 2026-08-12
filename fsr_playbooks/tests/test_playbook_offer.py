@@ -5,7 +5,9 @@ hand-written by the model."""
 from __future__ import annotations
 
 from fsr_playbooks.agent.skill_trace import (
-    SkillTrace, set_active_trace, clear_active_trace,
+    SkillTrace,
+    clear_active_trace,
+    set_active_trace,
 )
 from fsr_playbooks.compiler import skill_compiler as sc
 from fsr_playbooks.compiler import skill_verify as sv

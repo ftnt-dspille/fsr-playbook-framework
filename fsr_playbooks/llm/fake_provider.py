@@ -18,7 +18,8 @@ Example::
 """
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable
+from typing import Any
 
 from .provider import DoneEvent, Event, Message, UsageEvent
 

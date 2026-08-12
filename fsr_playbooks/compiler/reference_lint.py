@@ -20,7 +20,7 @@ shapes -- exactly the cross-step / parent→child references this is meant to ca
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from .errors import CompileError, ErrorCode
 
@@ -47,9 +47,9 @@ _REFERENCE_CODES = frozenset({
 
 
 def reference_lint(
-    coll: "Collection",
-    existing: Optional[list[CompileError]] = None,
-    db_path: Optional[str] = None,
+    coll: Collection,
+    existing: list[CompileError] | None = None,
+    db_path: str | None = None,
 ) -> list[CompileError]:
     """Return compile warnings for unresolvable ``vars.steps.*`` references.
 

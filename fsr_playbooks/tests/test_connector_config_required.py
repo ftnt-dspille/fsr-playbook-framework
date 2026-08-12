@@ -9,6 +9,8 @@ a note that absence from the configured list is not unavailability.
 """
 from fsr_playbooks.mcp_server.tools_discovery import (
     _connector_config_required as needs_config,
+)
+from fsr_playbooks.mcp_server.tools_discovery import (
     find_connector,
 )
 

@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from fsr_playbooks.agent.skill_trace import SkillTrace
-from fsr_playbooks.compiler import skill_verify as sv
 from fsr_playbooks.compiler import skill_compiler as sc
+from fsr_playbooks.compiler import skill_verify as sv
 
 
 def _trace_enrich_then_block():

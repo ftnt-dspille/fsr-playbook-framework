@@ -29,13 +29,13 @@ messages stay byte-identical to the imperative normalizer they replace.
 from __future__ import annotations
 
 import difflib
-from typing import Annotated, Any, Optional, Union
+from typing import Annotated, Any
 
 from pydantic import AliasChoices, ConfigDict, Discriminator, Field, Tag
 
 from ..errors import CompileError, ErrorCode
-from .base import StrictArgs
 from ._bridge import validate_args
+from .base import StrictArgs
 
 # ── operator vocabulary (single source of truth; normalizers re-imports) ──
 # Valid operators FSR's field-based-trigger evaluator honors. A wrong operator
@@ -117,18 +117,18 @@ class WhenLeaf(StrictArgs):
     object/array/datetime emit the IRI-backed shapes (live-grounded).
     """
 
-    field: Optional[str] = None
+    field: str | None = None
     op: str = Field(default="eq", validation_alias=AliasChoices("op", "operator"))
     value: Any = None
-    type: Optional[str] = None
+    type: str | None = None
     # Wire-passthrough (object/array shapes + the `_operator` mirror).
-    value_meta: Optional[dict] = Field(default=None, alias="_value")
-    operator_wire: Optional[str] = Field(default=None, alias="_operator")
-    module: Optional[str] = None
-    template: Optional[str] = None
-    operator_key: Optional[str] = Field(default=None, alias="OPERATOR_KEY")
-    previous_operator: Optional[str] = Field(default=None, alias="previousOperator")
-    previous_template: Optional[str] = Field(default=None, alias="previousTemplate")
+    value_meta: dict | None = Field(default=None, alias="_value")
+    operator_wire: str | None = Field(default=None, alias="_operator")
+    module: str | None = None
+    template: str | None = None
+    operator_key: str | None = Field(default=None, alias="OPERATOR_KEY")
+    previous_operator: str | None = Field(default=None, alias="previousOperator")
+    previous_template: str | None = Field(default=None, alias="previousTemplate")
 
 
 def _filter_kind(v: Any) -> str:
@@ -145,7 +145,7 @@ def _filter_kind(v: Any) -> str:
 # Discriminated union so a malformed leaf reports one precise error
 # (`filters[i].<key>`) instead of one per branch.
 FilterItem = Annotated[
-    Union[Annotated["WhenGroup", Tag("group")], Annotated["WhenLeaf", Tag("leaf")]],
+    Annotated["WhenGroup", Tag("group")] | Annotated["WhenLeaf", Tag("leaf")],
     Discriminator(_filter_kind),
 ]
 
@@ -172,7 +172,7 @@ WhenGroup.model_rebuild()
 # ── normalization walk (op semantics + exact warning paths) ───────────────
 def _normalize_op(
     orig_op: str, leaf_path: str, errors: list[CompileError],
-) -> Optional[tuple[str, Optional[str]]]:
+) -> tuple[str, str | None] | None:
     """Resolve a friendly operator to a canonical one.
 
     Returns (canonical_op, wrap_mode) or None if the operator is invalid
@@ -180,7 +180,7 @@ def _normalize_op(
     warnings the imperative normalizer did, at `<leaf_path>.op`.
     """
     op = orig_op.lower()
-    wrap: Optional[str] = None
+    wrap: str | None = None
     opath = f"{leaf_path}.op"
     if op in _TRIGGER_OP_REWRITE:
         op, wrap = _TRIGGER_OP_REWRITE[op]
@@ -219,7 +219,7 @@ def _normalize_op(
 
 def _leaf_to_filter(
     leaf: WhenLeaf, step_type: str, leaf_path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Build the FSR wire filter dict for one leaf (or None if invalid)."""
     if not leaf.field:
         errors.append(CompileError(
@@ -337,7 +337,7 @@ def _group_to_dict(
 
 def expand_when(
     when: Any, step_type: str, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Compile a friendly `when:` block into a `fieldbasedtrigger` dict.
 
     Drop-in replacement for the imperative `_expand_when`: same friendly

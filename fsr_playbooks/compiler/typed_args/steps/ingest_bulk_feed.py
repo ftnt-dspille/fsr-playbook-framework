@@ -45,13 +45,13 @@ DESIGN SPLIT (the connector / trigger_tenant_playbook precedent):
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class IngestBulkFeedArgs(StrictArgs):
@@ -78,13 +78,13 @@ class IngestBulkFeedArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    collection: Optional[str] = None
-    resource: Optional[Any] = None
+    collection: str | None = None
+    resource: Any | None = None
 
 
 def expand_ingest_bulk_feed(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate an ingest_bulk_feed step's envelope scalars.
 
     Validation-only: always returns ``None`` (there is no friendly->canonical

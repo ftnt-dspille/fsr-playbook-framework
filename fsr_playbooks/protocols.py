@@ -8,7 +8,7 @@ consumer hands fsr_playbooks an object satisfying these protocols at startup.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Protocol
 
 
 @dataclass
@@ -17,9 +17,9 @@ class ProviderConfig:
     that `backend.settings.load_provider` returns; redefined here so
     fsr_playbooks has no inbound dep on the web backend."""
     name: str
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    model: Optional[str] = None
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
 
 
 class ConfigProvider(Protocol):

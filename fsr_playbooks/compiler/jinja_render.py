@@ -17,8 +17,6 @@ gap.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from jinja2 import Environment, nodes
 from jinja2.exceptions import TemplateSyntaxError
 
@@ -42,6 +40,7 @@ def _load_globals_from_db() -> set[str]:
     """Augment the known set with FSR global names from the packaged DB."""
     try:
         import sqlite3
+
         from fsr_playbooks._db import PACKAGED_SLIM_DB
         with sqlite3.connect(str(PACKAGED_SLIM_DB)) as conn:
             rows = conn.execute("SELECT name FROM jinja_globals").fetchall()
@@ -78,7 +77,7 @@ def _collect_local_names(ast: nodes.Node) -> set[str]:
 
 def find_undefined_bare_names(
     template: str,
-    extra_known: Optional[set[str]] = None,
+    extra_known: set[str] | None = None,
 ) -> list[tuple[str, int]]:
     """Parse a Jinja template and return ``(name, lineno)`` for every bare
     ``Name`` node with ``ctx='load'`` that isn't in the known set.

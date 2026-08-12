@@ -13,13 +13,6 @@ implementation; `run_agent_turn` is the *consumer* of that stream.
 """
 from __future__ import annotations
 
-from .run_turn import (
-    TurnResult,
-    run_agent_turn,
-    resume_agent_turn,
-    KIND_USER, KIND_ASSISTANT_TEXT, KIND_TOOL_USE, KIND_TOOL_RESULT,
-)
-
 # --- Frozen public surface (REORG_PLAN Phase 0) ---------------------------
 # Generic LLM runtime consumed by the connector at stable paths. NOTE:
 # triage_* modules are deliberately NOT part of this surface -- they carve out
@@ -36,6 +29,15 @@ from .run_turn import (
 # unnecessary and only invites import-order breakage.
 from . import provider
 from .provider import Message, UsageEvent
+from .run_turn import (
+    KIND_ASSISTANT_TEXT,
+    KIND_TOOL_RESULT,
+    KIND_TOOL_USE,
+    KIND_USER,
+    TurnResult,
+    resume_agent_turn,
+    run_agent_turn,
+)
 
 __all__ = [
     "TurnResult",

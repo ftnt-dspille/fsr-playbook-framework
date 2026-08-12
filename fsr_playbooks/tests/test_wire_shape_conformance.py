@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import pytest
 
+from fsr_playbooks._db import PACKAGED_SLIM_DB
 from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks.compiler.emitter import _clean_step_arguments
-from fsr_playbooks._db import PACKAGED_SLIM_DB
 from fsr_playbooks.tests.wire_shape_oracle import (
     load_oracle,
     normalize_emitted_keys,

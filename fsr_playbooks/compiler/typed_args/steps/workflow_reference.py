@@ -27,13 +27,13 @@ connector lesson). The cross-tenant sibling is ``trigger_tenant_playbook``
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class WorkflowReferenceArgs(StrictArgs):
@@ -53,14 +53,14 @@ class WorkflowReferenceArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    target: Optional[str] = None
-    workflowReference: Optional[str] = None
-    arguments: Optional[Any] = None
+    target: str | None = None
+    workflowReference: str | None = None
+    arguments: Any | None = None
 
 
 def expand_workflow_reference(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Type-validate a workflow_reference step's envelope scalars.
 
     Validation-only: always returns ``None`` (the resolver's

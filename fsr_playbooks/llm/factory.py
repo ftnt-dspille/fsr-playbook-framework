@@ -11,14 +11,15 @@ one backed by the platform-decrypted `config` dict.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from fsr_playbooks.protocols import ConfigProvider
+
 from .provider import LLMProvider
 
-
 _REGISTRY: dict[str, Callable[..., LLMProvider]] = {}
-_CONFIG_PROVIDER: Optional[ConfigProvider] = None
+_CONFIG_PROVIDER: ConfigProvider | None = None
 
 
 def set_config_provider(provider: ConfigProvider) -> None:

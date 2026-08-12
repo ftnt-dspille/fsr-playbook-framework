@@ -106,27 +106,31 @@ def test_probe_scenarios_count_toward_p1p2_coverage(tmp_path):
 
 # --- the committed manifest makes the census box-free (tracker #67) -----------
 
-def test_manifest_is_loaded_and_has_the_22_connector_tools():
+def test_manifest_is_loaded_and_has_the_connector_tools():
     """The committed manifest at data/connector_tool_registry.json is what
-    lets the census know about the 22 connector-registered tools without a
-    live turn. Without it, the census is blind to 36% of the surface (#67)."""
+    lets the census know about the connector-registered tools without a
+    live turn. Without it, the census is blind to ~38% of the surface (#67).
+
+    Count is 25 (not 22) after #69 merged the hunt families: 8 new merged
+    tools + 10 legacy per-axis tools kept in SAFE_TOOLS for backward compat
+    + 7 record/ztpf/playbook tools."""
     assert tc._MANIFEST is not None, "manifest not found at data/connector_tool_registry.json"
-    assert tc._MANIFEST["connector_registered_count"] == 22
-    assert len(tc._MANIFEST["tools"]) == 22
-    assert len(tc._RUNTIME_ONLY) == 22
+    assert tc._MANIFEST["connector_registered_count"] == 25
+    assert len(tc._MANIFEST["tools"]) == 25
+    assert len(tc._RUNTIME_ONLY) == 25
 
 
 def test_census_includes_connector_tools_without_runtime():
-    """A census with no --runtime and no --probe must still see all 62 tools
-    (40 framework + 22 connector-registered from the manifest), not the 40
+    """A census with no --runtime and no --probe must still see all 65 tools
+    (40 framework + 25 connector-registered from the manifest), not the 40
     the framework advertises at import."""
     rep = tc.census(runtime=None, probe=None)
-    assert rep["meta"]["tools"] == 62
-    assert rep["meta"]["connector_registered"] == 22
+    assert rep["meta"]["tools"] == 65
+    assert rep["meta"]["connector_registered"] == 25
     names = {t["tool"] for t in rep["tools"]}
-    # A sample of the P1/P2 tools the connector registers
-    for name in ("search_module_records", "get_record", "siem_search_ip",
-                 "create_record", "faz_get_alerts", "fmg_get_device_status",
+    # A sample of the P1/P2 tools the connector registers (post-merge)
+    for name in ("search_module_records", "get_record", "siem_search",
+                 "create_record", "faz_get_alerts", "fmg_device",
                  "resume_playbook", "list_module_playbooks"):
         assert name in names, f"{name} missing -- manifest not merged"
 

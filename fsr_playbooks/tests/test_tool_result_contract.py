@@ -22,7 +22,6 @@ from fsr_playbooks.llm.tool_result import (
     validate_tool_output,
 )
 
-
 # --------------------------------------------------------------- unit contract
 
 @pytest.mark.parametrize("good", [

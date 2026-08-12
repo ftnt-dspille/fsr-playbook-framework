@@ -11,7 +11,7 @@ they cannot drift out of "compiles". Keyed by the friendly step ``type:``.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .errors import CompileError
@@ -49,7 +49,7 @@ _TEACHING: dict[str, str] = {
 }
 
 
-def _step_type_at(coll: "Collection", path: str) -> Optional[str]:
+def _step_type_at(coll: Collection, path: str) -> str | None:
     """Resolve a ``playbooks[i].steps[j]...`` error path to that step's type."""
     import re
 
@@ -63,7 +63,7 @@ def _step_type_at(coll: "Collection", path: str) -> Optional[str]:
         return None
 
 
-def enrich_diagnostics(coll: "Collection", errors: "list[CompileError]") -> None:
+def enrich_diagnostics(coll: Collection, errors: list[CompileError]) -> None:
     """Append a teaching example to errors on high-foot-gun step types, in place.
 
     Only touches an error whose path resolves to a ``manual_input`` /

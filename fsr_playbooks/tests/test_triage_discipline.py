@@ -721,6 +721,7 @@ def test_declared_intent_reaches_the_sink_without_typeerror():
     arg the model is TOLD it may send has to be accepted at dispatch. Pinning
     the signature, since a TypeError here would surface as a failed card."""
     import inspect
+
     from fsr_playbooks.llm import tools as T
 
     schema = T.TOOL_SCHEMA_OVERRIDES["emit_action_card"]
@@ -746,7 +747,6 @@ from fsr_playbooks.llm._loop_helpers import (  # noqa: E402
     _detect_analyst_order,
     latest_user_text,
 )
-
 
 ORDERS = [
     "Block 10.100.88.102 on the firewall now.",

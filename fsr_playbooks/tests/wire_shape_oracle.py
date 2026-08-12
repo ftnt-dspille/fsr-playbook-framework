@@ -13,13 +13,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 _ORACLE_PATH = Path(__file__).resolve().parents[2] / "docs" / "STEP_WIRE_SHAPES.json"
 
 # Substring (lowercased, matched against the oracle `step` title) -> (canonical FSR
 # step-type name, short YAML type or None if no alias exists yet).
-_TITLE_TO_TYPE: list[tuple[str, tuple[str, Optional[str]]]] = [
+_TITLE_TO_TYPE: list[tuple[str, tuple[str, str | None]]] = [
     ("reverse-engineered connector step", ("Connectors", "connector")),
     ("fastrigger", ("cybersponse.abstract_trigger", "start")),
     ("setvariables step type", ("SetVariable", "set_variable")),
@@ -48,7 +47,7 @@ _TITLE_TO_TYPE: list[tuple[str, tuple[str, Optional[str]]]] = [
 class StepShape:
     title: str
     canonical_name: str
-    short_type: Optional[str]
+    short_type: str | None
     confidence: str
     required_keys: frozenset[str]
     optional_keys: frozenset[str]
@@ -65,7 +64,7 @@ class StepShape:
         return self.required_keys | self.optional_keys
 
 
-def _classify(title: str) -> tuple[str, Optional[str]]:
+def _classify(title: str) -> tuple[str, str | None]:
     t = title.lower()
     for needle, mapped in _TITLE_TO_TYPE:
         if needle in t:

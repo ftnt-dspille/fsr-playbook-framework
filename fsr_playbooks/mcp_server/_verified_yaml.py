@@ -38,7 +38,7 @@ from typing import Any
 # Bounded MRU. A turn issues at most a handful of verifications; the cap only
 # exists so a long-lived worker can't accumulate playbook bodies forever.
 _MAX_ENTRIES = 32
-_REGISTRY: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+_REGISTRY: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
 
 def fingerprint(yaml_text: str) -> str:

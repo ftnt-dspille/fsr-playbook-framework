@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+
 import yaml
 
 from fsr_playbooks.agent.skill_trace import SkillTrace
-from fsr_playbooks.mcp_server import build_playbook_from_trace
 from fsr_playbooks.llm.intents import BUILD_ONLY_TOOLS, tools_for_intent
+from fsr_playbooks.mcp_server import build_playbook_from_trace
 
 
 def _trace_json():

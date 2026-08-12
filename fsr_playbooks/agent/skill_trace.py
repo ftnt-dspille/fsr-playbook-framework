@@ -27,8 +27,7 @@ import json
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # Step-name charset rule (mirrors tools_emit._NAME_RE): letters, digits,
 # spaces, underscores. The recorder generates names that already satisfy
@@ -56,7 +55,7 @@ def _sanitize_step_name(s: str) -> str:
 class SkillCall:
     skill_id: str
     step_name: str                          # stable; becomes the YAML step name
-    resolved_inputs: Dict[str, Any] = field(default_factory=dict)
+    resolved_inputs: dict[str, Any] = field(default_factory=dict)
     observed_output: Any = None             # the real (full) run_op result (the data payload)
     # True when this call was only STAGED (an `emit_action_card` the analyst
     # was offered) and never executed, so `observed_output` is None -- there is
@@ -74,8 +73,8 @@ class SkillCall:
     # and the verify loop (§4) keys its render context the same way.
     ref_prefix: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "skill_id": self.skill_id,
             "step_name": self.step_name,
             "resolved_inputs": self.resolved_inputs,
@@ -89,7 +88,7 @@ class SkillCall:
         return d
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SkillCall":
+    def from_dict(cls, d: dict[str, Any]) -> SkillCall:
         return cls(
             skill_id=d["skill_id"],
             step_name=d["step_name"],
@@ -109,11 +108,11 @@ class SkillTrace:
 
     def __init__(
         self,
-        calls: Optional[List[SkillCall]] = None,
-        module: Optional[str] = None,
-        record_fields: Optional[Dict[str, Any]] = None,
+        calls: list[SkillCall] | None = None,
+        module: str | None = None,
+        record_fields: dict[str, Any] | None = None,
     ) -> None:
-        self.calls: List[SkillCall] = list(calls or [])
+        self.calls: list[SkillCall] = list(calls or [])
         # Friendly module name of the record the triage session ran on
         # (e.g. "alerts", "incidents") -- set by the connector when it opens
         # the per-turn trace scope from the triaged record. NOT derivable
@@ -122,7 +121,7 @@ class SkillTrace:
         # playbook runs from that module's record listing (a manual
         # cybersponse.action trigger) instead of a designer-only Referenced
         # trigger. None → bare `start` (legacy behavior).
-        self.module: Optional[str] = module
+        self.module: str | None = module
         # Field map of the triaged record (the widget-supplied `entity.fields`
         # -- {field_name: value}). Stamped by the connector alongside `module`.
         # The trace-build path value-matches a one-off triage IOC (e.g. the IP
@@ -130,10 +129,10 @@ class SkillTrace:
         # the IOC to `{{ vars.input.records[0].<field> }}` via a Set Inputs
         # step instead of baking the literal in -- making the playbook
         # re-runnable on any record of `module`. None → IOCs stay literal.
-        self.record_fields: Optional[Dict[str, Any]] = record_fields
+        self.record_fields: dict[str, Any] | None = record_fields
         # Tracks how many times each base step name has been used so
         # repeated ops get stable, unique names (`Get Record`, `Get Record 2`).
-        self._name_counts: Dict[str, int] = {}
+        self._name_counts: dict[str, int] = {}
         for c in self.calls:
             base = c.step_name.rsplit(" ", 1)[0] if c.step_name[-1:].isdigit() else c.step_name
             self._name_counts[base] = self._name_counts.get(base, 0) + 1
@@ -151,9 +150,9 @@ class SkillTrace:
         self,
         connector: str,
         op: str,
-        params: Optional[Dict[str, Any]],
+        params: dict[str, Any] | None,
         observed_output: Any,
-        step_name: Optional[str] = None,
+        step_name: str | None = None,
         ref_prefix: str = "",
         config: str = "",
         agent: str = "",
@@ -212,11 +211,11 @@ class SkillTrace:
         self,
         connector: str,
         op: str,
-        params: Optional[Dict[str, Any]],
-        step_name: Optional[str] = None,
+        params: dict[str, Any] | None,
+        step_name: str | None = None,
         config: str = "",
         agent: str = "",
-    ) -> Optional[SkillCall]:
+    ) -> SkillCall | None:
         """Record a STAGED connector action (an `emit_action_card` the analyst
         was offered) as a `run_connector_action` SkillCall with no
         `observed_output` -- it was never executed.
@@ -253,8 +252,8 @@ class SkillTrace:
             staged=True,
         ))
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {"calls": [c.to_dict() for c in self.calls]}
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"calls": [c.to_dict() for c in self.calls]}
         # Emit `module` only when set so a legacy reader (and golden
         # fixtures) see the same shape they always did.
         if self.module:
@@ -267,7 +266,7 @@ class SkillTrace:
         return json.dumps(self.to_dict(), default=str)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SkillTrace":
+    def from_dict(cls, d: dict[str, Any]) -> SkillTrace:
         return cls(
             [SkillCall.from_dict(c) for c in (d.get("calls") or [])],
             module=d.get("module"),
@@ -275,7 +274,7 @@ class SkillTrace:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "SkillTrace":
+    def from_json(cls, text: str) -> SkillTrace:
         if not text:
             return cls()
         return cls.from_dict(json.loads(text))
@@ -288,7 +287,7 @@ class SkillTrace:
 # Process-local active trace -- installed by the connector's session wrapper
 # ---------------------------------------------------------------------------
 
-_active: Optional[SkillTrace] = None
+_active: SkillTrace | None = None
 
 # Recording-mute depth. While > 0, `record_run_op` no-ops. MCP convenience
 # wrappers (e.g. the FortiSIEM pub/v2 query engine) make several internal
@@ -303,17 +302,17 @@ _active: Optional[SkillTrace] = None
 _mute_depth: int = 0
 
 
-def set_active_trace(trace: Optional[SkillTrace]) -> None:
+def set_active_trace(trace: SkillTrace | None) -> None:
     """Install (or clear, with None) the trace that `record_run_op` feeds."""
     global _active
     _active = trace
 
 
-def get_active_trace() -> Optional[SkillTrace]:
+def get_active_trace() -> SkillTrace | None:
     return _active
 
 
-def set_active_trace_module(module: Optional[str]) -> None:
+def set_active_trace_module(module: str | None) -> None:
     """Stamp the triaged module on the active trace (no-op if none active).
 
     Lets the connector record the investigation's subject module once it
@@ -331,7 +330,7 @@ def set_active_trace_module(module: Optional[str]) -> None:
         _active.module = m
 
 
-def set_active_trace_record_fields(fields: Optional[Dict[str, Any]]) -> None:
+def set_active_trace_record_fields(fields: dict[str, Any] | None) -> None:
     """Stamp the triaged record's field map on the active trace (no-op if none
     active or no fields). The trace-build path value-matches one-off IOCs
     against these fields to parameterize them to `vars.input.records[0].*`.
@@ -367,13 +366,13 @@ def mute_recording():
 def record_run_op(
     connector: str,
     op: str,
-    params: Optional[Dict[str, Any]],
+    params: dict[str, Any] | None,
     observed_output: Any,
-    step_name: Optional[str] = None,
+    step_name: str | None = None,
     ref_prefix: str = "",
     config: str = "",
     agent: str = "",
-) -> Optional[SkillCall]:
+) -> SkillCall | None:
     """Module-level convenience: record into the active trace if one is
     installed, else no-op. This is what `run_op` calls -- so studio/tests
     (no active trace) stay on raw run_op, untouched.
@@ -391,11 +390,11 @@ def record_run_op(
 def record_staged_action(
     connector: str,
     op: str,
-    params: Optional[Dict[str, Any]],
-    step_name: Optional[str] = None,
+    params: dict[str, Any] | None,
+    step_name: str | None = None,
     config: str = "",
     agent: str = "",
-) -> Optional[SkillCall]:
+) -> SkillCall | None:
     """Module-level convenience: record a staged connector action into the
     active trace if one is installed, else no-op. This is what `emit_action_card`
     calls -- so studio/tests (no active trace) stay untouched."""

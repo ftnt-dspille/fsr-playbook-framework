@@ -12,7 +12,9 @@ force -- forcing an offer would hand the analyst unverified YAML. So this guard
 detects the distinct "never entered the authoring half" shape instead.
 """
 from fsr_playbooks.llm._loop_helpers import (
-    BuildProgressGuard, _CREATE_OFFER_TOOL, _CREATE_VERIFY_TOOL,
+    _CREATE_OFFER_TOOL,
+    _CREATE_VERIFY_TOOL,
+    BuildProgressGuard,
 )
 
 BUILD_SLICE = {_CREATE_OFFER_TOOL, _CREATE_VERIFY_TOOL,

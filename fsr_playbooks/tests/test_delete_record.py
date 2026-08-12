@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
+from fsr_playbooks._db import PACKAGED_SLIM_DB, is_usable_sqlite
 from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks.compiler.ir import Step
 from fsr_playbooks.compiler.resolver import Resolver
-from fsr_playbooks._db import PACKAGED_SLIM_DB, is_usable_sqlite
 
 _FULL_DB = Path(__file__).resolve().parents[2] / "data" / "fsr_reference.db"
 

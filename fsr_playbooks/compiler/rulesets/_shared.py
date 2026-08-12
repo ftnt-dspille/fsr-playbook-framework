@@ -6,10 +6,9 @@ required tags, three-workflow split (or env_setup variant), step naming.
 """
 from __future__ import annotations
 
-from typing import Iterable
-
 import os
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
 
 from . import (

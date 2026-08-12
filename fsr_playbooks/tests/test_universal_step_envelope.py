@@ -9,8 +9,8 @@ ever see the canonical wire keys.
 """
 from __future__ import annotations
 
-from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks._db import PACKAGED_SLIM_DB
+from fsr_playbooks.compiler import compile_yaml
 
 
 def _emit(yaml_text: str):

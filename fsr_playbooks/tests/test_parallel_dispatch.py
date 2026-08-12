@@ -17,7 +17,6 @@ import asyncio
 import time
 from types import SimpleNamespace
 
-
 from fsr_playbooks.llm import anthropic_provider as ap
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
 from fsr_playbooks.llm.provider import (
@@ -27,7 +26,6 @@ from fsr_playbooks.llm.provider import (
     ToolResultEvent,
     ToolUseEvent,
 )
-
 
 # --- mock anthropic client -------------------------------------------------
 

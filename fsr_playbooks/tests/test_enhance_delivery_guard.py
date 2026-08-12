@@ -6,7 +6,9 @@ pin the detector's contract: it fires exactly when a verify passed and no offer
 followed, only in enhance mode, and at most once.
 """
 from fsr_playbooks.llm._loop_helpers import (
-    EnhanceDeliveryGuard, _ENHANCE_OFFER_TOOL, _ENHANCE_VERIFY_TOOL,
+    _ENHANCE_OFFER_TOOL,
+    _ENHANCE_VERIFY_TOOL,
+    EnhanceDeliveryGuard,
 )
 from fsr_playbooks.llm.intents import ENHANCE_ONLY_TOOLS
 

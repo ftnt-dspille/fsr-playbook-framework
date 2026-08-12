@@ -19,7 +19,8 @@ Grounding (2026-06-26 pilot, .205 warm):
 from __future__ import annotations
 
 import difflib
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 # F applies to record *creation* only. `update_record` is a partial patch --
 # an absent required field is legal there (you're updating a subset), so
@@ -101,7 +102,7 @@ def check_record_module(
 
 def check_required_record_fields(
     *,
-    module: Optional[str],
+    module: str | None,
     resource: Any,
     required_fields: Iterable[str],
     step_id: str = "",
@@ -136,7 +137,7 @@ def check_required_record_fields(
 
 def check_unknown_record_fields(
     *,
-    module: Optional[str],
+    module: str | None,
     resource: Any,
     known_fields: Iterable[str],
     step_id: str = "",
@@ -175,8 +176,8 @@ def check_unknown_record_fields(
 
 def check_op_params(
     *,
-    connector: Optional[str],
-    operation: Optional[str],
+    connector: str | None,
+    operation: str | None,
     params: Any,
     declared_params: Iterable[str],
     required_params: Iterable[str],
@@ -237,7 +238,7 @@ def check_op_params(
 
 def check_connector_config(
     *,
-    connector: Optional[str],
+    connector: str | None,
     config_value: Any,
     configs_known: bool,
     config_names: Iterable[str],

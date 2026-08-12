@@ -18,12 +18,26 @@ See RECONCILIATION_PLAN.md §Phase 1 for the rename map and rationale.
 """
 from __future__ import annotations
 
+# --- trace control (agent.skill_trace) --------------------------------------
+from .agent.skill_trace import mute_recording
+
+# --- op-approval tiering (llm.tools) ----------------------------------------
+from .llm.tools import _tier_for_run_op as tier_for_run_op
+
 # --- reference DB + shared helpers (mcp_server._shared) ---------------------
 from .mcp_server._shared import (
     _VERIF_RANK as VERIF_RANK,
+)
+from .mcp_server._shared import (
     _capability_gap_suggestion as capability_gap_suggestion,
+)
+from .mcp_server._shared import (
     _db as open_reference_db,
+)
+from .mcp_server._shared import (
     _live_client as live_client,
+)
+from .mcp_server._shared import (
     _rows as query_rows,
 )
 
@@ -32,19 +46,25 @@ from .mcp_server._shared import (
 # one import site for the whole execution surface.
 from .mcp_server.tools_execution import (
     _agent_configured_rows as agent_configured_rows,
+)
+from .mcp_server.tools_execution import (
     _cached_health as cached_health,
+)
+from .mcp_server.tools_execution import (
     _fetch_runs_both as fetch_runs,
+)
+from .mcp_server.tools_execution import (
     _live_healthcheck as live_healthcheck,
+)
+from .mcp_server.tools_execution import (
     _shape_run as shape_run,
+)
+from .mcp_server.tools_execution import (
     _store_health as store_health,
+)
+from .mcp_server.tools_execution import (
     run_op,
 )
-
-# --- op-approval tiering (llm.tools) ----------------------------------------
-from .llm.tools import _tier_for_run_op as tier_for_run_op
-
-# --- trace control (agent.skill_trace) --------------------------------------
-from .agent.skill_trace import mute_recording
 
 __all__ = [
     # _shared

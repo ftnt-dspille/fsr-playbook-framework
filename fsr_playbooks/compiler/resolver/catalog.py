@@ -4,7 +4,6 @@ from __future__ import annotations
 import difflib
 import json
 import sqlite3
-from typing import Optional
 
 from ..errors import CompileError, ErrorCode
 from ._constants import SHORT_TYPE_TO_FSR
@@ -63,17 +62,17 @@ class CatalogLookupMixin:
             ),
         ))
         return True
-    def step_type(self, short_or_canonical: str) -> Optional[sqlite3.Row]:
+    def step_type(self, short_or_canonical: str) -> sqlite3.Row | None:
         canonical = SHORT_TYPE_TO_FSR.get(short_or_canonical, short_or_canonical)
         return self.conn.execute(
             "SELECT * FROM step_types WHERE name = ?", (canonical,),
         ).fetchone()
-    def suggest_step_type(self, name: str) -> Optional[str]:
+    def suggest_step_type(self, name: str) -> str | None:
         rows = self.conn.execute("SELECT name FROM step_types").fetchall()
         names = list(SHORT_TYPE_TO_FSR.keys()) + [r["name"] for r in rows]
         m = difflib.get_close_matches(name, names, n=1, cutoff=0.6)
         return m[0] if m else None
-    def handler_for_step_type(self, step_type_row: sqlite3.Row) -> Optional[str]:
+    def handler_for_step_type(self, step_type_row: sqlite3.Row) -> str | None:
         schema = step_type_row["args_schema_json"]
         if not schema:
             return None
@@ -153,8 +152,8 @@ class CatalogLookupMixin:
         return name
 
     def resolve_config_id(
-        self, connector: str, config_name: Optional[str] = None
-    ) -> Optional[str]:
+        self, connector: str, config_name: str | None = None
+    ) -> str | None:
         """Return the per-instance config UUID for ``connector`` (+ optional
         friendly ``config_name``), read from the warmed ``connector_configs``
         table. ``None`` when unwarmed or unknown.
@@ -187,20 +186,20 @@ class CatalogLookupMixin:
             # Table absent on an old/slim DB -- unwarmed, nothing to resolve.
             return None
 
-    def connector(self, name: str) -> Optional[sqlite3.Row]:
+    def connector(self, name: str) -> sqlite3.Row | None:
         return self.conn.execute(
             "SELECT * FROM connectors WHERE name = ?", (name,),
         ).fetchone()
-    def suggest_connector(self, name: str) -> Optional[str]:
+    def suggest_connector(self, name: str) -> str | None:
         rows = self.conn.execute("SELECT name FROM connectors").fetchall()
         m = difflib.get_close_matches(name, [r["name"] for r in rows], n=1, cutoff=0.6)
         return m[0] if m else None
-    def operation(self, connector: str, op: str) -> Optional[sqlite3.Row]:
+    def operation(self, connector: str, op: str) -> sqlite3.Row | None:
         return self.conn.execute(
             "SELECT * FROM operations WHERE connector_name = ? AND op_name = ?",
             (connector, op),
         ).fetchone()
-    def suggest_operation(self, connector: str, op: str) -> Optional[str]:
+    def suggest_operation(self, connector: str, op: str) -> str | None:
         # Score each op by max(ratio(input, op_name), ratio(input, snake_title)).
         # Title match catches the case where the agent guessed an op name from
         # the human-readable label (`get_ip_reputation` ≈ "Get IP Reputation"

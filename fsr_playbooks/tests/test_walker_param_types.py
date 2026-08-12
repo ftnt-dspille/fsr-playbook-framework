@@ -13,10 +13,14 @@ from store contents.
 """
 from fsr_playbooks.compiler.ir import Collection, Playbook, Step
 from fsr_playbooks.compiler.typed_walker import (
-    _pure_single_ref, _shape_to_src_tag, _source_target_compatible,
-    _shape_scalar, _shape_list, _shape_object, walk_playbook,
+    _pure_single_ref,
+    _shape_list,
+    _shape_object,
+    _shape_scalar,
+    _shape_to_src_tag,
+    _source_target_compatible,
+    walk_playbook,
 )
-
 
 # ---- unit: pure-ref detection ---------------------------------------------
 
@@ -181,8 +185,8 @@ import pytest
 
 
 def _lit_compile_codes(value):
-    from fsr_playbooks.compiler import compile_yaml
     from fsr_playbooks._db import default_db_path
+    from fsr_playbooks.compiler import compile_yaml
     yaml_text = f"""
 collection: P
 playbooks:

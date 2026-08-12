@@ -9,7 +9,6 @@ from typing import Any
 from ..errors import CompileError, ErrorCode
 from ..ir import Step
 
-
 # A real FortiSOAR picklist IRI is `/api/3/picklists/<uuid>`. Tests and recipe
 # templates sometimes carry a placeholder suffix (`/api/3/picklists/x`); those
 # are not opaque uuids the agent copied from another box, and flagging them

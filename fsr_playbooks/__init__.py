@@ -30,7 +30,8 @@ from __future__ import annotations
 # hit. Keep the sentinel for a genuine source checkout, but treat it as
 # "unknown", never as a version you can compare.
 try:  # pragma: no cover - trivial import shim
-    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
 except ImportError:  # pragma: no cover
     PackageNotFoundError = Exception  # type: ignore[assignment,misc]
     _pkg_version = None  # type: ignore[assignment]
@@ -57,8 +58,15 @@ def version_is_known() -> bool:
     return __version__ != "0.0.0+unknown"
 
 from fsr_playbooks.compiler import (
-    compile_yaml, parse_yaml, validate, emit,
-    CompileError, ErrorCode, Collection, Playbook, Step,
+    Collection,
+    CompileError,
+    ErrorCode,
+    Playbook,
+    Step,
+    compile_yaml,
+    emit,
+    parse_yaml,
+    validate,
 )
 
 __all__ = [

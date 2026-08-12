@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Optional
 
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Step
@@ -67,9 +66,9 @@ _HANDLER_KWARGS = {
 class ArgValidator:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
-        self._cache: dict[str, Optional[dict]] = {}
+        self._cache: dict[str, dict | None] = {}
 
-    def _handler(self, name: str) -> Optional[dict]:
+    def _handler(self, name: str) -> dict | None:
         if name in self._cache:
             return self._cache[name]
         row = self.conn.execute(

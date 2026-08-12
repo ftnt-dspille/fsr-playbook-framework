@@ -30,7 +30,7 @@ swap is invisible to the ~50 tool call-sites.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from . import _sim_fixtures
 
@@ -116,7 +116,7 @@ def available() -> bool:
     return True
 
 
-def get_client() -> Optional[SimulatedFSRClient]:
+def get_client() -> SimulatedFSRClient | None:
     return SimulatedFSRClient()
 
 

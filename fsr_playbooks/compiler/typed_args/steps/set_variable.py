@@ -20,13 +20,13 @@ semantic transform + precise CompileError paths.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict, Field
 
 from ...errors import CompileError, ErrorCode
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 
 class ArgListEntry(StrictArgs):
@@ -61,7 +61,7 @@ class SetVariableArgs(StrictArgs):
 
 def expand_set_variable(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Unwrap a set_variable step's `arg_list` into the flat wire dict.
 
     Drop-in replacement for the imperative unwrap in

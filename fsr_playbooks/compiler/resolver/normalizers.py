@@ -160,7 +160,7 @@ class NormalizerMixin:
 
     def _resolve_step(
         self, step: Step, path: str, errors: list[CompileError],
-        pb_by_name: dict[str, "Playbook"] | None = None,
+        pb_by_name: dict[str, Playbook] | None = None,
         pb_name: str | None = None,
     ) -> None:
         st = self.step_type(step.type)

@@ -21,13 +21,13 @@ walk -- mirroring how `set_variable` keeps its parser handoff in the resolver.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict
 
 from ...errors import CompileError  # noqa: F401  (re-exported for symmetry)
-from ..base import StrictArgs
 from .._bridge import validate_args
+from ..base import StrictArgs
 
 # FSR-instance-wide constant; identical on every box.
 _RESUME_CHANNEL_UUID = "e2ce87c2-c55a-11ec-9d64-0242ac120002"
@@ -45,15 +45,15 @@ class DelayArgs(StrictArgs):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    seconds: Optional[int] = None
-    minutes: Optional[int] = None
-    hours: Optional[int] = None
-    days: Optional[int] = None
+    seconds: int | None = None
+    minutes: int | None = None
+    hours: int | None = None
+    days: int | None = None
 
 
 def expand_delay(
     args: Any, path: str, errors: list[CompileError],
-) -> Optional[dict]:
+) -> dict | None:
     """Expand friendly duration args into the canonical TimeBased rule shape.
 
     Returns the canonical dict, or ``None`` to leave `step.arguments` unchanged

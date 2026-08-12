@@ -6,8 +6,9 @@ import ipaddress
 import json as _json
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
@@ -18,7 +19,6 @@ from ..typed_args.steps import (
 from ..typed_args.steps import (
     expand_workflow_reference as _expand_workflow_reference_typed,
 )
-
 
 # UUID pattern for cross-collection target: detection.
 _UUID_RE = re.compile(
@@ -532,8 +532,9 @@ class ConnectorArgsMixin:
                         "{{" in p_val or "{%" in p_val):
                     if "{%" not in p_val:
                         from ..jinja_typing import (
+                            extract_pure_jinja,
                             infer_terminal_observed_type,
-                            validate_chain, extract_pure_jinja,
+                            validate_chain,
                         )
                         # Tier 3.1: chain-internal validation. Catches
                         # bugs like `| int | upper` where the agent
@@ -708,7 +709,7 @@ class ConnectorArgsMixin:
 
     def _resolve_workflow_reference_args(
         self, step: Step, path: str, errors: list[CompileError],
-        pb_by_name: dict[str, "Playbook"],
+        pb_by_name: dict[str, Playbook],
     ) -> None:
         """Validate workflow_reference (call-another-playbook) step arguments.
 

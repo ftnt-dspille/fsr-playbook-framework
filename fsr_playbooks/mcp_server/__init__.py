@@ -30,28 +30,72 @@ from . import (
     tools_connector_discovery,
     tools_corpus,
     tools_discovery,
+    tools_emit,
+    tools_enhancement,
     tools_execution,
     tools_jinja,
     tools_picklists,
     tools_recipe,
     tools_verify,
-    tools_enhancement,
-    tools_emit,
 )
 
 # Import shared infrastructure for external use
-from ._shared import mcp, REPO_ROOT, DB_PATH, _safe_op_category, _err, _db, _rows
+from ._shared import DB_PATH, REPO_ROOT, _db, _err, _rows, _safe_op_category, mcp
+
+# Analysis tools
+from .tools_analysis import (
+    _coerce_literal_list,
+    _infer_output_shape,
+    _truthy,
+    analyze_playbook,
+    continue_debug_session,
+    get_debug_session,
+    precheck_connector_installed,
+    start_debug_session,
+    step_debug_session,
+    step_test,
+    step_through_playbook,
+    stop_debug_session,
+    suggest_fix_for_diagnostic,
+    synthesize_http_step,
+)
+
+# Catalog (Phase 0 + 0.5 of CONNECTOR_INTEGRATION_PLAN)
+from .tools_catalog import (
+    find_api_example,
+    find_api_fixture,
+    find_api_product,
+    propose_http_fallback,
+)
+
+# Compilation tools
+from .tools_compile import (
+    _FRIENDLY_FORMS,
+    build_playbook_from_trace,
+    compile_yaml,
+    resolve_yaml,
+    validate_yaml,
+)
 
 # Re-export public tool names
 # (Users import these via `from mcp_server import <tool_name>`)
-
 # Connector & playbook-run discovery (shared with the SOC triage path)
 from .tools_connector_discovery import (
+    find_containment_actions,
+    find_enrichment_actions,
     get_run_env,
     list_configured_connectors,
     list_playbook_runs,
-    find_containment_actions,
-    find_enrichment_actions,
+)
+
+# Corpus tools
+from .tools_corpus import (
+    find_step_examples,
+    find_step_recipe,
+    review_chat_session,
+    review_recent_thumbs_down,
+    search_api_examples,
+    search_playbooks,
 )
 
 # Discovery tools
@@ -67,24 +111,26 @@ from .tools_discovery import (
     get_step_type,
     list_connector_configurations,
 )
-
-# Compilation tools
-from .tools_compile import (
-    _FRIENDLY_FORMS,
-    build_playbook_from_trace,
-    compile_yaml,
-    resolve_yaml,
-    validate_yaml,
+from .tools_emit import (
+    emit_action_card,
+    emit_capability_gap_card,
+    emit_choice_card,
+    emit_decision_step,
+    emit_enhancement_offer,
+    emit_manual_input,
+    emit_patch_proposal,
+    emit_playbook_offer,
 )
+from .tools_enhancement import verify_enhancement
 
 # Execution tools
 from .tools_execution import (
+    _record_verification,
     dry_run_playbook,
     healthcheck_connector,
     push_playbook,
     run_op,
     run_playbook,
-    _record_verification,
 )
 
 # Jinja tools
@@ -96,16 +142,6 @@ from .tools_jinja import (
     render_jinja,
 )
 
-# Corpus tools
-from .tools_corpus import (
-    find_step_examples,
-    find_step_recipe,
-    review_chat_session,
-    review_recent_thumbs_down,
-    search_api_examples,
-    search_playbooks,
-)
-
 # Picklist tools
 from .tools_picklists import (
     get_picklist,
@@ -113,24 +149,6 @@ from .tools_picklists import (
     picklist_for_field,
     precheck_picklist_value,
     resolve_picklist_value,
-)
-
-# Analysis tools
-from .tools_analysis import (
-    analyze_playbook,
-    precheck_connector_installed,
-    step_test,
-    step_through_playbook,
-    start_debug_session,
-    step_debug_session,
-    continue_debug_session,
-    stop_debug_session,
-    get_debug_session,
-    suggest_fix_for_diagnostic,
-    synthesize_http_step,
-    _coerce_literal_list,
-    _infer_output_shape,
-    _truthy,
 )
 
 # Recipe tools
@@ -145,25 +163,6 @@ from .tools_recipe import (
 
 # Verify
 from .tools_verify import verify_playbook
-from .tools_enhancement import verify_enhancement
-from .tools_emit import (
-    emit_action_card,
-    emit_capability_gap_card,
-    emit_choice_card,
-    emit_decision_step,
-    emit_enhancement_offer,
-    emit_manual_input,
-    emit_patch_proposal,
-    emit_playbook_offer,
-)
-
-# Catalog (Phase 0 + 0.5 of CONNECTOR_INTEGRATION_PLAN)
-from .tools_catalog import (
-    find_api_example,
-    find_api_fixture,
-    find_api_product,
-    propose_http_fallback,
-)
 
 # =========================================================================
 # Entry point

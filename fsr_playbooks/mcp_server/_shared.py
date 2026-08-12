@@ -12,6 +12,7 @@ from typing import Any
 from .._db import default_db_path
 from .._yaml_hygiene import sanitize_yaml_text  # re-exported: see below
 
+
 class _FallbackFastMCP:
     """No-op FastMCP shim for connector runtimes.
 
@@ -923,11 +924,11 @@ def _safe_op_category(connector: str, op: str) -> str:
 # which the bare library cannot import. Absent a probe, behavior is exactly as
 # before.
 
-_LIVE_CATALOG_PROBE: "Any" = None
-_AUTO_REWARM: "Any" = None
+_LIVE_CATALOG_PROBE: Any = None
+_AUTO_REWARM: Any = None
 
 
-def set_live_catalog_probe(fn: "Any") -> None:
+def set_live_catalog_probe(fn: Any) -> None:
     """Register the connector callable that lists connector names live on the box.
 
     Signature: ``fn() -> set[str] | list[str] | None``. Return ``None`` (or
@@ -939,7 +940,7 @@ def set_live_catalog_probe(fn: "Any") -> None:
     _LIVE_CATALOG_PROBE = fn
 
 
-def set_auto_rewarm(fn: "Any") -> None:
+def set_auto_rewarm(fn: Any) -> None:
     """Register a connector callback that force-warms the reference catalog.
 
     Called when the on-miss probe confirms the catalog is stale (the box has

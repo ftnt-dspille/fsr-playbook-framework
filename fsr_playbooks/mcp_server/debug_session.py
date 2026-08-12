@@ -27,7 +27,6 @@ from typing import Any
 
 from ._shared import load_yaml_text
 
-
 # Sessions auto-expire after this many seconds of inactivity. Touched
 # on every access (start/step/continue/stop/get).
 _SESSION_TTL_SECONDS = 30 * 60
@@ -110,13 +109,15 @@ class DebugSession:
 def _execute_one_step(s: DebugSession) -> dict[str, Any] | None:
     # Late imports to avoid a circular dep with tools_analysis (which
     # imports debug_session for the new tool surfaces).
-    from . import _shared
-    from . import tools_discovery
-    from . import tools_execution
+    from . import _shared, tools_discovery, tools_execution
     from .tools_analysis import (
-        _next_step, _infer_output_shape, _truthy,
-        _coerce_literal_list, _collect_child_env,
-        _simulate_loop_body, _decision_pick_branch,
+        _coerce_literal_list,
+        _collect_child_env,
+        _decision_pick_branch,
+        _infer_output_shape,
+        _next_step,
+        _simulate_loop_body,
+        _truthy,
         step_through_playbook,
     )
 
@@ -143,7 +144,9 @@ def _execute_one_step(s: DebugSession) -> dict[str, Any] | None:
 
     try:
         from fsr_playbooks.compiler.render_paths import (  # noqa: PLC0415
-            consumed_paths_dict, extract_picklist_refs)
+            consumed_paths_dict,
+            extract_picklist_refs,
+        )
         raw_args_for_extract = cur.get("arguments") or cur.get("args") or {}
         step_record["consumed_paths"] = consumed_paths_dict(
             raw_args_for_extract)
@@ -574,7 +577,10 @@ def build_session(
     # `vars.steps.<X>` Jinja resolves regardless of which form the
     # template author picked.
     from fsr_playbooks.compiler.parser import _slugify  # noqa: PLC0415
-    from fsr_playbooks.compiler.samples import extract_samples_block, overlay_into_vars  # noqa: PLC0415
+    from fsr_playbooks.compiler.samples import (  # noqa: PLC0415
+        extract_samples_block,
+        overlay_into_vars,
+    )
     vars_ctx: dict[str, Any] = {"input": {"params": dict(input or {})},
                                  "steps": {}}
     samples_map, _ = extract_samples_block(yaml_text)

@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 
-def default_log_path(override: "str | Path | None" = None) -> Path:
+def default_log_path(override: str | Path | None = None) -> Path:
     """Resolve the usage-log path. An explicit `override` (e.g. a path the
     connector derived from its own configuration) wins; otherwise the Studio
     backend's STUDIO_USAGE_LOG env var; otherwise the repo-root default.
@@ -61,7 +61,7 @@ def est_tokens(chars: int) -> int:
     return chars // 4
 
 
-def log_turn(record: dict[str, Any], path: "str | Path | None" = None) -> None:
+def log_turn(record: dict[str, Any], path: str | Path | None = None) -> None:
     """Append one JSON line. Failures are swallowed -- telemetry must
     never break the chat path. `path` overrides the default resolution (the
     connector passes a config-derived path; it has no env to read)."""
