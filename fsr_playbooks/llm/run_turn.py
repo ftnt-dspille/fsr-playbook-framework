@@ -28,7 +28,7 @@ import inspect
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ._loop_helpers import (
     clear_guard_fires as _clear_guard_fires,
@@ -101,7 +101,7 @@ KIND_TOOL_USE = "tool_use"
 KIND_TOOL_RESULT = "tool_result"
 
 
-EventCallback = Optional[Callable[[Event], Awaitable[None] | None]]
+EventCallback = Callable[[Event], Awaitable[None] | None] | None
 
 
 @dataclass

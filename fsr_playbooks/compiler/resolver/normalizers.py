@@ -2,56 +2,79 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
-from ._constants import _looks_like_uuid
-# Field-based-trigger `when:` typing now lives in the typed-args layer. The
-# operator tables + `_wrap_like_value` are re-exported here for backward
-# compatibility (tests and any callers import them from this module).
-from ..typed_args.trigger import (  # noqa: F401
-    expand_when as _expand_when_typed,
-    _TRIGGER_OPS,
-    _TRIGGER_OP_ALIASES,
-    _TRIGGER_OP_REWRITE,
-    _wrap_like_value,
+
+# field/value validation for trigger filters against the warmed catalog.
+from ..typed_args import FieldValueValidator
+
+# scalar-field validation for the api_endpoint (Custom API Endpoint) trigger.
+from ..typed_args.steps import expand_api_endpoint as _expand_api_endpoint_typed
+from ..typed_args.steps import expand_approval as _expand_approval_typed
+
+# friendly code/config -> canonical CodeSnippet expansion (Phase 2 model).
+from ..typed_args.steps import expand_code_snippet as _expand_code_snippet_typed
+from ..typed_args.steps import expand_create_task as _expand_create_task_typed
+
+# decision branch-promotion + condition-key typo check (Phase 2 model).
+from ..typed_args.steps import expand_decision as _expand_decision_typed
+
+# friendly-duration → canonical TimeBased expansion (Phase 2 model).
+from ..typed_args.steps import expand_delay as _expand_delay_typed
+
+# friendly delete_record -> canonical cyops_utilities DELETE expansion (Phase 2).
+from ..typed_args.steps import expand_delete_record as _expand_delete_record_typed
+
+# find_record scalar-field type validation (validation-only; Phase 2 model).
+from ..typed_args.steps import expand_find_record as _expand_find_record_typed
+
+# ingest_bulk_feed envelope validation (IngestBulkFeed; for_each mode logic
+# owned by the emitter, collection/operation checks owned by the lint layer).
+from ..typed_args.steps import expand_ingest_bulk_feed as _expand_ingest_bulk_feed_typed
+
+# scalar-field validation for manual_input (transform stays imperative) (Phase 2).
+from ..typed_args.steps import expand_manual_input as _expand_manual_input_typed
+
+# post-write record-trigger (start_on_create/update/delete) module→resource +
+# when→fieldbasedtrigger expansion, catalog-bound via a resolve_module callback.
+from ..typed_args.steps import (
+    expand_post_create_update as _expand_post_create_update_typed,
 )
+
+# scalar-flag validation for the record-action trigger (start + module) (Phase 2).
+from ..typed_args.steps import expand_record_action as _expand_record_action_typed
+
+# friendly module -> canonical collection IRI for record-write steps (Phase 2).
+from ..typed_args.steps import expand_record_crud as _expand_record_crud_typed
+
+# P5 lighter envelope validation-only models (transform stays imperative).
+from ..typed_args.steps import expand_send_email as _expand_send_email_typed
+from ..typed_args.steps import expand_set_api_keys as _expand_set_api_keys_typed
+
 # set_variable arg-shape typing lives in the typed-args layer too (Phase 2,
 # first per-step-type model). The reserved-key rename still runs earlier in
 # the RewriterMixin; this only owns the arg_list → flat-dict unwrap.
 from ..typed_args.steps import expand_set_variable as _expand_set_variable_typed
-# decision branch-promotion + condition-key typo check (Phase 2 model).
-from ..typed_args.steps import expand_decision as _expand_decision_typed
-# friendly-duration → canonical TimeBased expansion (Phase 2 model).
-from ..typed_args.steps import expand_delay as _expand_delay_typed
-# friendly code/config -> canonical CodeSnippet expansion (Phase 2 model).
-from ..typed_args.steps import expand_code_snippet as _expand_code_snippet_typed
-# find_record scalar-field type validation (validation-only; Phase 2 model).
-from ..typed_args.steps import expand_find_record as _expand_find_record_typed
-# friendly delete_record -> canonical cyops_utilities DELETE expansion (Phase 2).
-from ..typed_args.steps import expand_delete_record as _expand_delete_record_typed
-# friendly module -> canonical collection IRI for record-write steps (Phase 2).
-from ..typed_args.steps import expand_record_crud as _expand_record_crud_typed
-# scalar-flag validation for the record-action trigger (start + module) (Phase 2).
-from ..typed_args.steps import expand_record_action as _expand_record_action_typed
-# post-write record-trigger (start_on_create/update/delete) module→resource +
-# when→fieldbasedtrigger expansion, catalog-bound via a resolve_module callback.
-from ..typed_args.steps import expand_post_create_update as _expand_post_create_update_typed
-# scalar-field validation for the api_endpoint (Custom API Endpoint) trigger.
-from ..typed_args.steps import expand_api_endpoint as _expand_api_endpoint_typed
-# scalar-field validation for manual_input (transform stays imperative) (Phase 2).
-from ..typed_args.steps import expand_manual_input as _expand_manual_input_typed
-# P5 lighter envelope validation-only models (transform stays imperative).
-from ..typed_args.steps import expand_send_email as _expand_send_email_typed
-from ..typed_args.steps import expand_create_task as _expand_create_task_typed
-from ..typed_args.steps import expand_set_api_keys as _expand_set_api_keys_typed
-from ..typed_args.steps import expand_approval as _expand_approval_typed
-# ingest_bulk_feed envelope validation (IngestBulkFeed; for_each mode logic
-# owned by the emitter, collection/operation checks owned by the lint layer).
-from ..typed_args.steps import expand_ingest_bulk_feed as _expand_ingest_bulk_feed_typed
-# field/value validation for trigger filters against the warmed catalog.
-from ..typed_args import FieldValueValidator
+
+# Field-based-trigger `when:` typing now lives in the typed-args layer. The
+# operator tables + `_wrap_like_value` are re-exported here for backward
+# compatibility: tests and callers import them FROM THIS MODULE, so they are
+# unused locally and pyflakes wants to delete them.
+#
+# The suppressions must sit on each NAME, never once on the opening `import (`
+# line. isort rewrites this block, and an opening-line suppression does not
+# survive the rewrite -- F401 then removes the re-exports on the next --fix,
+# which is exactly how `_TRIGGER_OPS` briefly stopped being importable here.
+from ..typed_args.trigger import (  # isort: skip
+    _TRIGGER_OP_ALIASES,  # noqa: F401
+    _TRIGGER_OP_REWRITE,  # noqa: F401
+    _TRIGGER_OPS,  # noqa: F401
+    _wrap_like_value,  # noqa: F401
+    expand_when as _expand_when_typed,
+)
+from ._constants import _looks_like_uuid
 
 
 def _rewrite_query_filter_ops(
@@ -399,7 +422,10 @@ class NormalizerMixin:
         # array the live corpus uses.
         input_vars = a.get("inputVariables") or []
         params_shape: Any = {
-            iv["name"]: '{{vars.request.data["%s"]}}' % iv["name"]
+            # Percent-formatting on purpose: this is a Jinja template literal,
+            # so an f-string would have to quadruple every brace to emit the
+            # two Jinja needs (`{{{{vars...}}}}`).
+            iv["name"]: '{{vars.request.data["%s"]}}' % iv["name"]  # noqa: UP031
             for iv in input_vars
             if isinstance(iv, dict) and iv.get("name")
         } or []

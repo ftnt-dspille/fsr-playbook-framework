@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, Union
+from typing import Any, Literal, Protocol
 
 Role = Literal["user", "assistant"]
 
@@ -118,16 +118,18 @@ class UsageEvent:
     kind: Literal["usage"] = "usage"
 
 
-# NOTE: typing.Union, not PEP 604 `X | Y`. This is a runtime assignment
-# (a type alias), so the `|` operator would execute at import time and
-# raise TypeError on Python 3.9 -- the FortiSOAR runtime baseline. The
-# `from __future__ import annotations` above only defers *annotations*,
-# not this expression. Keep it Union-form for 3.9 compatibility.
-Event = Union[
-    TextEvent, ToolUseEvent, ToolResultEvent,
-    DoneEvent, ErrorEvent, UsageEvent,
-    ApprovalRequestEvent,
-]
+# This is a runtime assignment (a type alias), so `|` executes at import time
+# rather than being deferred by `from __future__ import annotations` -- it needs
+# PEP 604 support in the interpreter, not just the annotation grammar. That is
+# satisfied: the FortiSOAR runtime baseline is 3.11 and this package declares
+# `requires-python = ">=3.10"`, so a 3.9 interpreter could never install it.
+# (The Union form here used to be justified by a 3.9 baseline that was already
+# stale -- see CLAUDE.md.)
+Event = (
+    TextEvent | ToolUseEvent | ToolResultEvent
+    | DoneEvent | ErrorEvent | UsageEvent
+    | ApprovalRequestEvent
+)
 
 
 @dataclass

@@ -19,6 +19,8 @@ here: it is consulted only where the model VOLUNTARILY stops calling tools
 never reaches that branch -- which is why its own docstring notes its live case
 "did not run out of turns".
 """
+import json
+
 from fsr_playbooks.llm._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_TOOL_TURNS,
@@ -65,7 +67,7 @@ def test_a_delivery_carrier_counts_as_delivered():
         "tool_calls": [{
             "type": "function",
             "function": {"name": "push_playbook",
-                         "arguments": '{"yaml_text": %s}' % repr(BODY).replace("'", '"')},
+                         "arguments": json.dumps({"yaml_text": BODY})},
         }],
     }]
     assert analyst_has_the_yaml(history) is True

@@ -58,8 +58,7 @@ def _all_workflows(doc: dict) -> Iterable[tuple[int, dict, int, dict]]:
 
 
 def _all_steps(wf: dict) -> Iterable[tuple[int, dict]]:
-    for si, step in enumerate(wf.get("steps", []) or []):
-        yield si, step
+    yield from enumerate(wf.get("steps", []) or [])
 
 
 def detect_rulesets(doc: dict) -> list[str]:
