@@ -9,8 +9,20 @@ finished.
 
 The gate deliberately does NOT read the analyst's words: a lexical check works
 in English and fails silently everywhere else, and a model call to decide a gate
-makes the gate probabilistic. It gates the transition instead -- no affordance,
-the write frontier cards.
+makes the gate probabilistic. It gates the transition instead.
+
+WHAT CHANGED. The gate used to escalate the whole write frontier, which meant a
+free-typed change request paid for TWO approvals: one asking "want me to draft
+the edit?" and then the proposal card's own Apply/Dismiss. The first gated
+nothing -- every emit_* on the frontier is pure, and the card it returns is the
+real gate. So the tier bump is now scoped to `CHANGE_GATED_TOOLS`, which is
+empty: no tool on the frontier writes without a card of its own, and the one
+that does write (`push_playbook`) is unconditionally tier 3 anyway.
+
+What that did NOT touch, and what the tests below still pin: the read-only-turn
+dispatch refusal (#117), which keys off the unchanged WRITE_FRONTIER_TOOLS, and
+the affordance machinery itself, so a future writing tool can be re-armed with
+one name.
 """
 from __future__ import annotations
 
@@ -38,8 +50,48 @@ def with_affordance():
 
 
 @pytest.mark.parametrize("tool", sorted(T.WRITE_FRONTIER_TOOLS))
-def test_write_frontier_escalates_without_an_affordance(tool, no_affordance):
-    assert T._resolve_tier(tool, {}) >= 3
+def test_proposing_a_change_is_not_a_second_approval(tool, no_affordance):
+    """The frontier no longer escalates just because nobody pressed a chip.
+
+    Every emit_* here is PURE -- it validates its args and returns a card. The
+    card IS the gate: Apply is what resumes into the write. Carding the emit
+    too meant a free-typed "fix this one field" cost the analyst an approval
+    that changed nothing, and then a second one on the card itself.
+
+    `push_playbook` is the exception that proves it: it really writes, and it
+    is tier 3 on its own merits with the gate out of the picture entirely.
+    """
+    tier = T._resolve_tier(tool, {})
+    if tool == "push_playbook":
+        assert tier == 3, "the one real writer keeps its own unconditional tier"
+    else:
+        assert tier < 3, (
+            f"{tool} escalated with no affordance -- it changes nothing when "
+            "it runs, so an approval in front of it is a confirmation in "
+            "front of a confirmation")
+
+
+def test_the_gate_can_still_be_armed_for_a_tool_that_really_writes(
+        monkeypatch, no_affordance):
+    """CHANGE_GATED_TOOLS is empty, not deleted.
+
+    An empty gate and a removed gate look identical from the outside, and the
+    difference matters the day a tool that writes WITHOUT a card of its own is
+    added. Arm it here and the escalation, the plain-language question and the
+    dropped payload all still work -- so this is dormant machinery, not dead
+    code someone will delete as unused.
+    """
+    monkeypatch.setattr(T, "CHANGE_GATED_TOOLS", frozenset({"verify_enhancement"}))
+    assert T._resolve_tier("verify_enhancement", {}) >= 3
+    env = T.dispatch("verify_enhancement",
+                     {"before_yaml": "a: 1\n" * 500, "after_yaml": "a: 2\n" * 500})
+    assert env.get("pending_approval") is True
+    assert env.get("reason") == "unrequested_change"
+    assert env["preview"]["args"] == {}, "a 'shall I?' card drops the YAML noise"
+    assert "didn't ask me to change anything" in env["summary"]
+    # …and the tool NEXT to it in the frontier is still ungated, so arming one
+    # name cannot quietly re-arm the whole frontier.
+    assert T._resolve_tier("emit_patch_proposal", {}) < 3
 
 
 @pytest.mark.parametrize("tool", sorted(T.WRITE_FRONTIER_TOOLS))
@@ -101,22 +153,31 @@ def test_reset_with_a_stale_token_fails_open():
     assert T._change_affordance_present() is True
 
 
-def test_gated_card_explains_itself_and_drops_the_yaml_payload():
-    """The card is not "approve this tool call" -- the analyst never asked for
-    a change, so it has to ask the question in their terms. And the raw args of
-    verify_enhancement are two whole YAML documents; they are noise on a
-    'shall I?' prompt."""
+def test_an_unrequested_proposal_reaches_its_own_card_instead():
+    """The behaviour the double-approval hid.
+
+    Live, a free-typed "propose a fix for one field" against an open playbook
+    stopped on "Approval required: emit_patch_proposal -- want me to draft the
+    edit?", and only AFTER approving did the patch card with its own
+    Apply/Dismiss appear. The emit is pure, so the first card gated nothing;
+    now the proposal goes straight to the card that can actually be accepted
+    or dismissed.
+    """
     token = T.set_change_affordance(False)
     try:
-        env = T.dispatch("verify_enhancement",
-                         {"before_yaml": "a: 1\n" * 500,
-                          "after_yaml": "a: 2\n" * 500})
+        env = T.dispatch("emit_patch_proposal", {
+            "id": "p1", "title": "Tighten the timeout",
+            "before_yaml": "timeout: 30\n", "after_yaml": "timeout: 300\n",
+        })
     finally:
         T.reset_change_affordance(token)
-    assert env.get("pending_approval") is True
-    assert env.get("reason") == "unrequested_change"
-    assert env["preview"]["args"] == {}
-    assert "didn't ask me to change anything" in env["summary"]
+    assert env.get("pending_approval") is not True, \
+        "the emit must not stage an approval of its own"
+    card = (env.get("card") or {}) if isinstance(env, dict) else {}
+    assert card.get("type") == "patch_proposal"
+    # The card carries BOTH sides, which is what makes Apply an informed
+    # decision -- the gate that actually protects the playbook.
+    assert card.get("before_yaml") and card.get("after_yaml")
 
 
 def test_ordinary_tier_3_card_is_unaffected():

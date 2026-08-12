@@ -537,6 +537,42 @@ WRITE_FRONTIER_TOOLS = frozenset({
     "push_playbook",
 })
 
+# The subset of the frontier whose TIER the change-affordance gate may raise.
+#
+# It is empty, and that is the point. The gate used to bump the whole frontier
+# to tier 3, so a free-typed "fix this field" against an open playbook stopped
+# on an approval card that asked "want me to draft the edit?" -- and then, on
+# approval, produced a patch_proposal card with its own Apply/Dismiss. Two
+# approvals for one change.
+#
+# The first one gated nothing. Every emit_* on this frontier is PURE: it
+# validates its arguments and returns `{ok, card}`. Nothing is written, and the
+# card it returns is itself the gate for the edit -- Apply is what resumes into
+# `reply_tool` / `update_playbook`. `verify_enhancement` only verifies. The one
+# member that really writes, `push_playbook`, is unconditional tier 3 in
+# TOOL_TIERS and never needed the bump. So the bump could only ever add a
+# confirmation in front of a confirmation.
+#
+# What the gate cost was paid on the COMMON path: a free-typed change request
+# is the ordinary way analysts ask, and it is the case with no affordance, so
+# the tax landed on the legitimate ask while the thing it prevented -- an
+# unrequested proposal -- costs one Dismiss.
+#
+# What survives, because neither depends on the tier bump:
+#
+#   * the read-only-turn REFUSAL at dispatch (see `_is_read_only_turn` below).
+#     That is the actual #117 fix: an explain/find-issues turn refuses the
+#     write frontier outright rather than carding it, and it keys off
+#     WRITE_FRONTIER_TOOLS, which is unchanged.
+#   * the affordance machinery itself (`set_change_affordance`, and the
+#     connector's grant on an approved frontier card). Kept so a host can still
+#     declare intent, and so re-tightening a specific tool is a one-line edit
+#     here rather than a redesign.
+#
+# Add a name here only if running the tool CHANGES the analyst's playbook
+# without a second confirmation of its own.
+CHANGE_GATED_TOOLS: frozenset[str] = frozenset()
+
 
 def set_change_affordance(present: bool) -> Any:
     """Declare whether THIS turn carries an analyst-made change affordance.
@@ -595,7 +631,7 @@ def _resolve_tier(name: str, args: dict[str, Any]) -> int:
     # BEFORE the static table: the write frontier is mostly tier 0 (authoring is
     # local shaping), so a static-tier early return would skip the gate entirely
     # -- exactly the "gate that selects nothing" shape.
-    if name in WRITE_FRONTIER_TOOLS and not _change_affordance_present():
+    if name in CHANGE_GATED_TOOLS and not _change_affordance_present():
         return max(TOOL_TIERS.get(name, 0), 3)
     static = TOOL_TIERS.get(name, 0)
     if static >= 0:
@@ -1611,7 +1647,11 @@ def dispatch(
             return precard
 
         approval_id = uuid.uuid4().hex
-        gated_change = (name in WRITE_FRONTIER_TOOLS
+        # Only a tool the affordance gate actually raised gets the "shall I
+        # draft it?" framing. CHANGE_GATED_TOOLS is empty today, so this is
+        # dormant rather than dead: it is the branch that comes back the moment
+        # a genuinely-writing tool is added to that set.
+        gated_change = (name in CHANGE_GATED_TOOLS
                         and not _change_affordance_present())
         if gated_change and not summary:
             # This card is not "approve this tool call" -- the analyst never
