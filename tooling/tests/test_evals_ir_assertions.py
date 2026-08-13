@@ -253,9 +253,6 @@ UNCALIBRATED_FIXTURES = {
     "noc_sla_breach_repoll",
     "soc_ueba_three_way_decision",
     "soc_http_fallback_no_native_op",
-    "jinja_chain_count_summary",
-    "jinja_chain_ip_extract",
-    "jinja_chain_json_payload",
 }
 
 

@@ -6,6 +6,8 @@ import sqlite3
 
 import pytest
 
+from fsr_playbooks.compiler import jinja_typing as jt
+
 from fsr_playbooks.compiler.jinja_typing import (
     extract_pure_jinja, terminal_filter, infer_terminal_observed_type,
 )
@@ -332,3 +334,42 @@ playbooks:
           oops: "{{ vars.x | int | upper }}"
 """)
     assert codes.count("bad_jinja_filter_chain") == 1
+
+
+# --- sibling expressions are not one chain --------------------------------
+#
+# The chain scan was a flat regex over the whole expression, so filters that
+# never feed each other were walked as if they did. A JSON payload built in one
+# set_variable -- a `| length` count beside a `| map | list` projection -- was
+# reported as "map expects list but length produces integer" and blocked with a
+# REQUIRED fix. The playbook was correct; the grader was not. That is the
+# failure mode a behavioral gate must never have (#127 / AGENT_INTELLIGENCE_PLAN
+# rule 1), because from the agent's seat it is indistinguishable from a real bug.
+
+_PAYLOAD = ("{'count': xs | length, "
+            "'names': xs | map(attribute='value') | list} | to_json")
+
+
+def test_sibling_filters_in_one_expression_are_separate_chains():
+    assert jt.filter_chains(_PAYLOAD) == [["to_json"], ["length"],
+                                          ["map", "list"]]
+
+
+def test_a_correct_json_payload_is_not_a_filter_chain_error():
+    assert jt.validate_chain(_PAYLOAD, None) is None
+
+
+def test_a_real_chain_error_is_still_caught():
+    bad = jt.validate_chain("xs | length | upper", None)
+    assert bad is not None and bad[0] == "length" and bad[1] == "upper"
+
+
+def test_a_real_chain_error_inside_a_dict_value_is_still_caught():
+    bad = jt.validate_chain("{'a': xs | length | upper, 'b': ys | list}", None)
+    assert bad is not None and bad[:2] == ("length", "upper")
+
+
+def test_an_unparseable_expression_keeps_the_old_flat_behavior():
+    # The walker sees pre-resolution templates that need not be valid Jinja
+    # standalone. Falling back to the flat scan is the conservative choice.
+    assert jt.filter_chains("xs | length | ") == jt.filter_chains("xs | length | ")

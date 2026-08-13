@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from typing import Any
 
 # Matches a value that is *entirely* one `{{ … }}` block (with optional
 # leading/trailing whitespace). Multi-line is fine. We anchor with `\A`/`\Z`
@@ -245,6 +246,48 @@ def chain_filters(expr: str) -> list[str]:
     return _FILTER_NAME_RE.findall(expr or "")
 
 
+def filter_chains(expr: str) -> list[list[str]]:
+    """Every INDEPENDENT filter chain in the expression, each in pipe order.
+
+    `chain_filters` regex-scans the whole expression, which flattens filters
+    that never feed each other into one imaginary chain. In
+
+        {{ {'count': xs | length, 'names': xs | map(attribute='v') | list} }}
+
+    `length` and `map` sit in sibling dict values, and the flat scan reports
+    "map expects list but length produces integer" -- a required fix on a
+    correct playbook, which is worse than no check at all. Parsing gives the
+    real shape: two chains, `[length]` and `[map, list]`.
+
+    Falls back to the flat scan when the expression does not parse (the
+    walker sees pre-resolution templates that may not be valid Jinja on
+    their own); an unparseable expression keeps exactly the old behavior.
+    """
+    try:
+        import jinja2
+        from jinja2 import nodes as jnodes
+    except ImportError:  # pragma: no cover - jinja2 is a hard dep
+        return [chain_filters(expr)]
+    try:
+        ast = jinja2.Environment().parse("{{ " + (expr or "") + " }}")
+    except Exception:  # noqa: BLE001 - not valid standalone Jinja
+        return [chain_filters(expr)]
+    chains: list[list[str]] = []
+    for node in ast.find_all(jnodes.Filter):
+        # Only start from the OUTERMOST filter of a chain: a Filter whose
+        # parent is another Filter is an inner link, already walked.
+        if any(node is parent.node
+               for parent in ast.find_all(jnodes.Filter)):
+            continue
+        names: list[str] = []
+        cur: Any = node
+        while isinstance(cur, jnodes.Filter):
+            names.append(cur.name)
+            cur = cur.node
+        chains.append(list(reversed(names)))
+    return chains or [[]]
+
+
 def _types_satisfy(producer_out: str | None, consumer_in: str | None) -> bool:
     """True iff a filter producing `producer_out` can feed one expecting
     `consumer_in`. Both in FSR vocab. None on either side means
@@ -274,15 +317,15 @@ def validate_chain(
     Producer's *output* type drives the comparison; consumer's *input*
     type is what we check against. Unknown sides accept.
     """
-    fs = chain_filters(expr)
-    if len(fs) < 2:
-        return None
-    prev_out: str | None = None
-    for i, fname in enumerate(fs):
-        in_t, out_t = filter_signature(fname, conn)
-        if i > 0 and not _types_satisfy(prev_out, in_t):
-            return (fs[i - 1], fname, in_t or "")
-        prev_out = out_t
+    for fs in filter_chains(expr):
+        if len(fs) < 2:
+            continue
+        prev_out: str | None = None
+        for i, fname in enumerate(fs):
+            in_t, out_t = filter_signature(fname, conn)
+            if i > 0 and not _types_satisfy(prev_out, in_t):
+                return (fs[i - 1], fname, in_t or "")
+            prev_out = out_t
     return None
 
 
