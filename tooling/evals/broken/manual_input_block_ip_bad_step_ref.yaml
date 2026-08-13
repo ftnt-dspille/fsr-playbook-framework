@@ -1,0 +1,58 @@
+# BROKEN on purpose -- the `repair` fixture's before-state.
+#
+# Symptom on the box: the FortiGate step runs with an empty `ip_addresses`
+# and the run "succeeds" having blocked nothing. Cause: the Jinja reference
+# uses the step's YAML id (`analyst_ip_action`), not the underscore-joined
+# DISPLAY name (`Analyst_IP_Action`) FSR resolves at runtime. The two look
+# interchangeable and are not -- the single most common authoring mistake in
+# the corpus.
+#
+# The tempting wrong fix is to delete the reference (or the step); that
+# clears the diagnostic and leaves the playbook useless, which is what
+# `no_collateral_damage` is there to catch.
+
+collection: Eval Repair Fixtures
+description: Deliberately broken playbooks -- the before-state of a repair task.
+visible: true
+
+playbooks:
+  - name: Analyst IP Block Or Allow
+    description: Prompt for an IP, block it on approval, otherwise log.
+    steps:
+      - name: start
+        type: start
+        next: Analyst IP Action
+
+      - name: Analyst IP Action
+        type: manual_input
+        title: Block or allow this IP?
+        description: Enter the IP address and choose an action.
+        inputs:
+          - name: target_ip
+            label: IP address
+            kind: ipv4
+        options:
+          - display: block
+            primary: true
+            next: Block IP
+          - display: allow
+            next: Note Allowed
+
+      - name: Block IP
+        type: connector
+        next: Done
+        connector: fortigate-firewall
+        operation: block_ip_new
+        config: ""
+        params:
+          method: Quarantine Based
+          ip_addresses: "{{ vars.steps.analyst_ip_action.input.target_ip }}"
+
+      - name: Note Allowed
+        type: set_variable
+        next: Done
+        vars:
+          note: "Analyst allowed {{ vars.steps.analyst_ip_action.input.target_ip }}; no block issued."
+
+      - name: Done
+        type: end

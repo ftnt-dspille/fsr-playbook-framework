@@ -1064,6 +1064,60 @@ def score_enhance_delivery(trace: list[dict[str, Any]],
     return out
 
 
+def score_no_collateral_damage(before_yaml: str,
+                               after_yaml: str,
+                               user_message: str | None = None,
+                               ) -> dict[str, Any]:
+    """Did the repair/edit break something it was not asked to touch?
+
+    `draft` and `verified` read the delivered YAML alone, so a fix that also
+    deletes a step, silently renames one (breaking every external
+    `vars.steps.<slug>` reference), or rewrites a branch nobody mentioned
+    scores exactly as well as a surgical one. That is the whole failure mode
+    an analyst fears when approving an edit.
+
+    `verify_enhancement` already computes those regressions and is unused by
+    the matrix. This gate reads its error-severity ones. Warning-severity
+    entries (a stripped annotation) surface in `detail` but do not fail --
+    same bar the tool itself applies to `ready_to_push`.
+    """
+    if not (before_yaml or "").strip():
+        return {"passed": False, "skipped": True,
+                "detail": "fixture carries no before_yaml to diff against"}
+    if not (after_yaml or "").strip():
+        return {"passed": False, "skipped": False,
+                "detail": "the turn delivered no YAML -- nothing to compare"}
+    # An `after` that does not compile produces an EMPTY regression list, and
+    # an empty list read as "nothing broke" is how a turn that delivered a
+    # stub scored this gate 1/1. Unjudgeable is a failure here, not a pass:
+    # the analyst cannot approve what does not compile.
+    if not _compile_obj(after_yaml).get("ok"):
+        return {"passed": False, "skipped": False,
+                "regressions": [], "warnings": [],
+                "detail": ("the delivered YAML did not compile, so collateral "
+                           "damage cannot be judged -- see draft")}
+    try:
+        from fsr_playbooks.mcp_server import verify_enhancement  # noqa: PLC0415
+        out = verify_enhancement(before_yaml, after_yaml,
+                                 user_message=user_message)
+    except Exception as exc:  # noqa: BLE001
+        return {"passed": False, "skipped": True,
+                "detail": f"verify_enhancement unavailable: {exc}"}
+    regs = out.get("regressions") or []
+    errors = [r for r in regs if r.get("severity") == "error"]
+    warns = [r for r in regs if r.get("severity") != "error"]
+    return {
+        "passed": not errors,
+        "skipped": False,
+        "regressions": [str(r.get("kind")) for r in errors],
+        "warnings": [str(r.get("kind")) for r in warns],
+        "detail": ("no step dropped, renamed or rewritten outside the fix"
+                   if not errors else
+                   "; ".join(f"{r.get('kind')} on {r.get('step')}"
+                             for r in errors)),
+    }
+
+
 def score(
     yaml_text: str,
     *,
@@ -1081,6 +1135,8 @@ def score(
     skill_trace_json: str | None = None,
     terminal_tool: list[str] | None = None,
     ir_assertions: list[dict[str, Any]] | None = None,
+    before_yaml: str | None = None,
+    user_message: str | None = None,
 ) -> dict[str, Any]:
     """Score a candidate YAML across confidence tiers + agent gates.
 
@@ -1098,11 +1154,20 @@ def score(
     `terminal_tool`. Every other gate becomes informational, so a turn that
     researches beautifully and never acts scores zero -- which is exactly
     the live failure this mode exists to measure.
+
+    `mode="repair"` grades a TROUBLESHOOT turn -- the verb with zero coverage
+    before this. The fixture supplies `before_yaml` (a broken playbook) and
+    `ir_assertions` describing the condition that must hold once it is fixed.
+    Two things count, and one alone is worthless: the defect is gone
+    (`behavior` + `verified`), AND nothing else moved
+    (`no_collateral_damage`). A "fix" that deletes the failing step satisfies
+    the first and fails the second, which is the point.
     """
     out: dict[str, Any] = {"levels": {}}
     refuse = (mode == "refuse")
     investigation = (mode == "investigation")
     selection = (mode == "tool_selection")
+    repair = (mode == "repair")
 
     # A turn that delivered nothing has nothing to compile. Saying "compile
     # failed" about it is a lie with errors attached, and the errors are about
@@ -1371,6 +1436,25 @@ def score(
             out["levels"]["terminal_tool_reached"] = {
                 "passed": False, "skipped": True,
                 "detail": "no tool-use trace supplied"}
+
+    # ----------------- repair mode: fixed it AND broke nothing -------------
+    # A repair that drops the failing step passes every gate that reads the
+    # delivered YAML alone. This is the half that notices.
+    if repair:
+        out["levels"]["no_collateral_damage"] = score_no_collateral_damage(
+            before_yaml or "", yaml_text, user_message)
+        # Everything that is not "did the defect get fixed" or "did anything
+        # else break" becomes informational -- same discipline as
+        # tool_selection mode.
+        for k, lv in out["levels"].items():
+            if k in ("behavior", "verified", "no_collateral_damage"):
+                lv.pop("informational", None)
+            elif not lv.get("skipped"):
+                lv["informational"] = True
+    else:
+        out["levels"]["no_collateral_damage"] = {
+            "passed": False, "skipped": True,
+            "detail": "not a repair task"}
 
     counted = [v for k, v in out["levels"].items()
                if not v.get("skipped") and not v.get("informational")]

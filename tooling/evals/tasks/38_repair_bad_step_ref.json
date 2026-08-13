@@ -1,0 +1,32 @@
+{
+  "name": "repair_bad_step_ref",
+  "mode": "repair",
+  "prompt": "This playbook ran on the box and reported success, but the FortiGate step blocked nothing -- the run log shows `ip_addresses` arrived empty. Find the defect and return the corrected complete YAML. Change nothing else.",
+  "broken_yaml_path": "tooling/evals/broken/manual_input_block_ip_bad_step_ref.yaml",
+  "gold_yaml_path": "tooling/evals/golds/manual_input_block_ip.yaml",
+  "notes": "The troubleshoot verb, which had zero coverage: select_diagnose_failure only graded that the agent REACHED why_did_playbook_fail, never whether the diagnosis was right. Defect is the corpus's most common authoring mistake -- a Jinja reference to the step's YAML id (`analyst_ip_action`) instead of the underscore-joined display name (`Analyst_IP_Action`). Both gates are load-bearing: deleting the reference or the step clears the diagnostic and passes `verified`, and only `no_collateral_damage` says the playbook was gutted.",
+  "ir_assertions": [
+    {
+      "kind": "arg_text_contains",
+      "type": "connector",
+      "contains": "vars.steps.Analyst_IP_Action.input.target_ip",
+      "note": "the block reads the analyst's IP through the DISPLAY-name path"
+    },
+    {
+      "kind": "connector_op",
+      "connector": "fortigate",
+      "operation_contains": "block_ip",
+      "note": "the block step is still there"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "manual_input"
+      },
+      "to": {
+        "type": "connector"
+      },
+      "note": "the gate still precedes the block -- a fix must not reroute it"
+    }
+  ]
+}

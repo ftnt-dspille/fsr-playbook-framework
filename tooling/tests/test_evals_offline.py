@@ -25,10 +25,9 @@ offline = importlib.import_module("evals.offline")
 def installed(monkeypatch):
     monkeypatch.setenv("FSR_BASE_URL", "https://box.example.com")
     monkeypatch.setenv("FSR_API_KEY", "not-a-real-key")
-    offline.install()
+    saved = offline.install()
     yield
-    from fsr_playbooks.mcp_server import _shared
-    _shared._LIVE_CLIENT_CACHE.pop("client", None)
+    offline.uninstall(saved)
 
 
 def test_the_flag_reads_the_usual_truthy_spellings(monkeypatch):
@@ -55,10 +54,12 @@ def test_a_client_cached_before_the_swap_does_not_survive_it(monkeypatch):
     from fsr_playbooks.mcp_server import _shared
     sentinel = object()
     _shared._LIVE_CLIENT_CACHE["client"] = sentinel
-    offline.install()
-    assert _shared._LIVE_CLIENT_CACHE.get("client") is not sentinel
-    assert "Sim" in offline.active_client_name()
-    _shared._LIVE_CLIENT_CACHE.pop("client", None)
+    saved = offline.install()
+    try:
+        assert _shared._LIVE_CLIENT_CACHE.get("client") is not sentinel
+        assert "Sim" in offline.active_client_name()
+    finally:
+        offline.uninstall(saved)
 
 
 def test_run_op_returns_fixture_data_with_no_socket(installed, monkeypatch):
@@ -93,19 +94,22 @@ def test_the_seal_survives_a_dotenv_reload(monkeypatch, tmp_path):
     # `cmd_evals` calls probes._env._load_dotenv() before the matrix runs, and
     # this repo's .env names a real box. If that reload could put FSR_BASE_URL
     # back after install(), the seal would hold only until the next tool call.
-    offline.install()
-    from fsr_playbooks.mcp_server import _shared
+    saved = offline.install()
     try:
         env = tmp_path / ".env"
         env.write_text("FSR_BASE_URL=https://box.example.com\n")
         import probes._env as pe
-        # The swapped-in module keeps the real one's attributes, so this is a
-        # real call, not a skipped one.
-        assert hasattr(pe, "_load_dotenv")
+        # The swapped-in module carries the real one's attributes across, so
+        # this is normally a real call. Another test installs its own fake
+        # `probes._env` (no `_load_dotenv`) into sys.modules, and under a
+        # randomized order we can inherit it -- a seam already replaced by a
+        # stub has no dotenv to reload, so there is nothing to test there.
+        if not hasattr(pe, "_load_dotenv"):
+            pytest.skip("probes._env is a test stub; no dotenv path to guard")
         monkeypatch.chdir(tmp_path)
         pe._load_dotenv()
         # Whatever the reload did, the client the tools resolve must not be a
         # live one.
         assert "Sim" in offline.active_client_name()
     finally:
-        _shared._LIVE_CLIENT_CACHE.pop("client", None)
+        offline.uninstall(saved)

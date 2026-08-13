@@ -58,6 +58,21 @@ def _prompt_for(task: Task, default: str) -> str:
     return load_intent_prompt(variant)
 
 
+def _user_message_for(task: Task) -> str:
+    """The user turn the model actually sees.
+
+    A repair fixture's prompt is only half the ask -- the other half is the
+    broken playbook. Appending it here (rather than pasting it into every
+    fixture's prompt string) keeps the broken YAML in one file that the
+    scorer also diffs against, so the prompt and the `before` can never
+    drift apart.
+    """
+    broken = task.broken_yaml_text()
+    if not broken:
+        return task.prompt
+    return f"{task.prompt}\n\nHere is the playbook:\n\n```yaml\n{broken}\n```"
+
+
 def _gold_lookup_for(tasks: list[Task]):
     """Build a `prompt -> gold_yaml_text` map for the gold provider."""
     by_prompt = {t.prompt: t.gold_yaml_text() for t in tasks}
@@ -209,7 +224,8 @@ def run_matrix(
                 pass
             set_tool_slice(t.tool_slice)
             try:
-                raw = provider(_prompt_for(t, system_prompt), t.prompt)
+                raw = provider(_prompt_for(t, system_prompt),
+                               _user_message_for(t))
             except Exception as e:  # noqa: BLE001
                 _err_row = {
                     "model": model_name, "task": t.name,
@@ -256,6 +272,8 @@ def run_matrix(
                     investigation_quality=t.investigation_quality,
                     terminal_tool=t.terminal_tool,
                     ir_assertions=t.ir_assertions,
+                    before_yaml=t.broken_yaml_text(),
+                    user_message=_user_message_for(t),
                 )
             except Exception as e:  # noqa: BLE001
                 # Scoring compiles the delivered YAML, so it can raise for

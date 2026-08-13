@@ -75,9 +75,21 @@ class Task:
     # build-vs-neutral experiment a pair of fixtures instead of a one-off
     # script: same prompt text, same tools, only the persona differs.
     prompt_variant: Optional[str] = None
+    # --- repair mode (Phase 2: the troubleshoot verb) ----------------------
+    # Repo-relative path to the BROKEN playbook the fixture asks the agent to
+    # fix. The harness appends it to the prompt, and scoring diffs the
+    # delivered YAML against it so a "fix" that deletes the failing step is
+    # caught by `no_collateral_damage` rather than praised by `verified`.
+    broken_yaml_path: Optional[str] = None
     # Tool slice to advertise: "build" / "triage" (intents.tools_for_intent)
     # or None for the full registry the agentic provider defaults to.
     tool_slice: Optional[str] = None
+
+    def broken_yaml_text(self) -> Optional[str]:
+        if not self.broken_yaml_path:
+            return None
+        p = REPO_ROOT / self.broken_yaml_path
+        return p.read_text(encoding="utf-8") if p.exists() else None
 
     def gold_yaml_text(self) -> Optional[str]:
         if not self.gold_yaml_path:
@@ -113,6 +125,7 @@ def load_tasks(filter_names: list[str] | None = None) -> list[Task]:
             forbidden_facts=data.get("forbidden_facts") or [],
             investigation_quality=data.get("investigation_quality") or {},
             terminal_tool=_as_list(data.get("terminal_tool")),
+            broken_yaml_path=data.get("broken_yaml_path"),
             prompt_variant=data.get("prompt_variant"),
             tool_slice=data.get("tool_slice"),
         ))

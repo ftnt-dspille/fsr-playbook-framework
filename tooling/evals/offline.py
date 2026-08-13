@@ -45,10 +45,11 @@ def enabled() -> bool:
         "1", "true", "yes", "on")
 
 
-def install() -> None:
+def install() -> dict[str, Any]:
     """Point every live seam at the simulated client and seal the env.
 
-    Idempotent: safe to call once per run, or per test.
+    Idempotent: safe to call once per run, or per test. Returns the modules it
+    displaced, for `uninstall()`.
     """
     from fsr_playbooks.mcp_server import _sim_client as sc
     from fsr_playbooks.mcp_server import _shared, tools_execution as te
@@ -71,6 +72,8 @@ def install() -> None:
     env_mod.get_config = sc.get_config      # type: ignore[attr-defined]
     probes_mod = types.ModuleType("probes")
     probes_mod._env = env_mod               # type: ignore[attr-defined]
+    saved = {"probes": sys.modules.get("probes"),
+             "probes._env": sys.modules.get("probes._env")}
     sys.modules["probes"] = probes_mod
     sys.modules["probes._env"] = env_mod
 
@@ -79,6 +82,24 @@ def install() -> None:
     _shared._LIVE_CLIENT_CACHE.pop("client", None)
     te._CONFIGURED_CACHE["rows"] = None
     te._CONFIGURED_CACHE["ts"] = 0.0
+    return saved
+
+
+def uninstall(saved: dict[str, Any]) -> None:
+    """Undo one `install()`, restoring the module objects it displaced.
+
+    A run does not need this -- the process exits. Tests do: the swapped-in
+    `probes._env` lives in `sys.modules` for the rest of the session, and the
+    offline-gate tests assert on the REAL module's `is_live()`. Leaving the
+    stub behind made an unrelated test fail depending on order.
+    """
+    for name, mod in saved.items():
+        if mod is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = mod
+    from fsr_playbooks.mcp_server import _shared
+    _shared._LIVE_CLIENT_CACHE.pop("client", None)
 
 
 def active_client_name() -> str:
