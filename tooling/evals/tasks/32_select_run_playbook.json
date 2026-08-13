@@ -6,9 +6,25 @@
   "prompt_variant": "build",
   "tool_slice": "build",
   "forbidden_facts": [
-    {"tool": "find_connector", "label": "researched connectors instead of running"},
-    {"tool": "list_playbook_runs", "label": "listed past runs instead of running"},
-    {"tool": "find_operation", "label": "researched operations instead of running"}
+    {
+      "tool": "find_connector",
+      "label": "researched connectors instead of running"
+    },
+    {
+      "tool": "list_playbook_runs",
+      "label": "listed past runs instead of running"
+    },
+    {
+      "tool": "find_operation",
+      "label": "researched operations instead of running"
+    }
   ],
-  "notes": "Reproduces the live run-path failure verbatim: the model had run_playbook advertised in the build slice (its description explicitly claims this exact phrasing) and still chose find_connector -> list_playbook_runs -> find_operation, then stopped. Decoys are the three tools it actually called. Paired with 36_select_run_playbook_neutral -- same prompt, same slice, neutral persona -- which is the Phase 1.4 experiment: if this fails and 36 passes, the build prompt is what's overriding tool selection."
+  "notes": "Reproduces the live run-path failure verbatim: the model had run_playbook advertised in the build slice (its description explicitly claims this exact phrasing) and still chose find_connector -> list_playbook_runs -> find_operation, then stopped. Decoys are the three tools it actually called. Paired with 36_select_run_playbook_neutral -- same prompt, same slice, neutral persona -- which is the Phase 1.4 experiment: if this fails and 36 passes, the build prompt is what's overriding tool selection.",
+  "expected_approvals": {
+    "tier_3_plus": {
+      "min": 1,
+      "max": 1
+    }
+  },
+  "expected_approvals_note": "#127: without this the default 'exactly_zero' applies and the fixture marks the agent down for reaching its own terminal_tool -- the ask IS to run a playbook, and run_playbook is tier-3 by default. max=1 still catches escalating more than the task needs."
 }
