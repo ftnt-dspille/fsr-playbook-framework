@@ -1,0 +1,52 @@
+# Gold answer for the `manual_input_block_ip` eval fixture.
+#
+# The analyst types the IP and picks the action; the block is reachable only
+# through that choice, and it blocks THEIR value -- `vars.steps.<step>.input.
+# <field>`, not a literal. The 'allow' arm must not reference the block step's
+# output, which is the unreachable-ref bug the walker exists to catch.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: Analyst IP Block Or Allow
+    description: Prompt for an IP, block it on approval, otherwise log.
+    steps:
+      - name: start
+        type: start
+        next: Analyst IP Action
+
+      - name: Analyst IP Action
+        type: manual_input
+        title: Block or allow this IP?
+        description: Enter the IP address and choose an action.
+        inputs:
+          - name: target_ip
+            label: IP address
+            kind: ipv4
+        options:
+          - display: block
+            primary: true
+            next: Block IP
+          - display: allow
+            next: Note Allowed
+
+      - name: Block IP
+        type: connector
+        next: Done
+        connector: fortigate-firewall
+        operation: block_ip_new
+        config: ""
+        params:
+          method: Quarantine Based
+          ip_addresses: "{{ vars.steps.Analyst_IP_Action.input.target_ip }}"
+
+      - name: Note Allowed
+        type: set_variable
+        next: Done
+        vars:
+          note: "Analyst allowed {{ vars.steps.Analyst_IP_Action.input.target_ip }}; no block issued."
+
+      - name: Done
+        type: end

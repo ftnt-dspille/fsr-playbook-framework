@@ -13,6 +13,10 @@ data/fsr_reference.db-wal
 **/fsr_reference.db
 **/fsr_reference.db-shm
 **/fsr_reference.db-wal
+# …and hand-made copies of it. A `.db.bak` matched none of the patterns
+# above, so `git add -A` swept an internal-IP-laden binary into a commit.
+*.db.bak
+**/*.db.bak
 # ...except the tracked, shipped slim catalog (built by
 # tooling/catalog/build_compile_catalog.py; ~0.6 MB, package-data).
 !fsr_playbooks/_data/fsr_reference.db

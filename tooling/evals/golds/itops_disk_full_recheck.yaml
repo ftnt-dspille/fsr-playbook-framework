@@ -1,0 +1,91 @@
+# Gold answer for the `itops_disk_full_recheck` eval fixture.
+#
+# Look up the host, run the cleanup, THEN decide on what the cleanup reported
+# -- the decision must sit downstream of the connector call, not beside it, or
+# it is branching on a value that does not exist yet.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: Disk Full Auto Cleanup
+    description: Clean /tmp on the affected host, page on-call if still full.
+    steps:
+      - name: On Disk Full Alert
+        type: start_on_create
+        next: Find Affected Host
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - field: tags
+              op: contains
+              value: disk_full
+
+      - name: Find Affected Host
+        type: find_record
+        next: Clean Tmp
+        module: assets
+        filters:
+          - type: primitive
+            field: ipAddress
+            value: "{{ vars.input.records[0].affected_host }}"
+            operator: eq
+            _operator: eq
+
+      - name: Clean Tmp
+        type: connector
+        next: Still Below Threshold
+        connector: ssh
+        operation: run_remote_command
+        config: ""
+        params:
+          cmd: /usr/local/bin/clean_tmp --report-free-pct
+
+      - name: Still Below Threshold
+        type: decision
+        conditions:
+          - display: Still full
+            when: "{{ vars.steps.Clean_Tmp.data.free_pct | int < 10 }}"
+            next: Page On Call
+          - display: Recovered
+            default: true
+            next: Resolve Alert
+
+      - name: Page On Call
+        type: connector
+        next: Done
+        connector: pagerduty
+        operation: create_incident
+        config: ""
+        params:
+          from: itops-oncall@example.com
+          title: "Disk still full on {{ vars.steps.Find_Affected_Host[0].name }}"
+          description: >-
+            Auto-cleanup left {{ vars.steps.Clean_Tmp.data.free_pct }}% free.
+          priority: Priority 2
+          urgency: High
+
+      - name: Resolve Alert
+        type: update_record
+        next: Comment Cleanup Succeeded
+        module: alerts
+        record: "{{ vars.input.records[0]['@id'] }}"
+        operation: Replace
+        fields:
+          status: Closed
+
+      - name: Comment Cleanup Succeeded
+        type: create_record
+        next: Done
+        module: comments
+        operation: Overwrite
+        fields:
+          content: >-
+            Auto-cleanup succeeded; free space now
+            {{ vars.steps.Clean_Tmp.data.free_pct }}%.
+          alerts: "{{ vars.input.records[0]['@id'] }}"
+
+      - name: Done
+        type: end

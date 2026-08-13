@@ -245,13 +245,11 @@ def test_every_gold_that_answers_its_prompt_passes_its_assertions():
 # an agent that keeps getting it wrong, and it is the first thing to suspect
 # when one of these rows never scores.
 #
-# This list is the honest statement of that gap. It shrinks when a fixture
-# gains a gold; it must never grow silently.
-UNCALIBRATED_FIXTURES = {
-    "manual_input_block_ip",
-    "itops_disk_full_recheck",
-    "soc_http_fallback_no_native_op",
-}
+# Every one of them now has a hand-authored gold under tooling/evals/golds/,
+# so the set is empty -- and the check above proves each gold passes its own
+# fixture's assertions. A NEW behavioral fixture with no gold fails this test
+# on the way in, which is the point: write the right answer first.
+UNCALIBRATED_FIXTURES: set = set()
 
 
 def test_which_behavioral_fixtures_have_no_known_correct_answer():

@@ -1,0 +1,65 @@
+# Gold answer for the `soc_http_fallback_no_native_op` eval fixture.
+#
+# The capability gap is the point: no native Akamai block_url op exists, so the
+# correct move is the generic `http` connector rather than inventing an
+# operation. The bearer token comes from a workflow parameter -- never a
+# literal in the YAML -- and the POST is reachable only through the analyst's
+# manual_input.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: Block URL Via Akamai Network Lists
+    description: Analyst supplies a URL; POST it to the Network Lists API.
+    parameters:
+      - akamai_bearer_token
+    steps:
+      - name: start
+        type: start
+        next: Ask For URL
+
+      - name: Ask For URL
+        type: manual_input
+        title: Block a URL via Akamai
+        description: Enter the URL to add to the Network List.
+        inputs:
+          - name: target_url
+            label: URL to block
+            kind: url
+        options:
+          - display: Block
+            primary: true
+            next: Post To Network Lists
+          - display: Cancel
+            next: Done
+
+      - name: Post To Network Lists
+        type: connector
+        next: Comment Response Status
+        connector: http
+        operation: http_post
+        config: ""
+        params:
+          rest_api: /network-list/v2/network-lists/akamai-blocklist/elements
+          header:
+            authorization: "Bearer {{ vars.input.params.akamai_bearer_token }}"
+            Content-Type: application/json
+          data:
+            element: "{{ vars.steps.Ask_For_URL.input.target_url }}"
+
+      - name: Comment Response Status
+        type: create_record
+        next: Done
+        module: comments
+        operation: Overwrite
+        fields:
+          content: >-
+            Akamai Network Lists responded
+            {{ vars.steps.Post_To_Network_Lists.status }} for
+            {{ vars.steps.Ask_For_URL.input.target_url }}.
+          alerts: "{{ vars.input.records[0]['@id'] }}"
+
+      - name: Done
+        type: end
