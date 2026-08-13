@@ -1,0 +1,113 @@
+# BROKEN on purpose -- the before-state of the `repair_loop_over_wrong_field`
+# fixture.
+#
+# Symptom on the box: the run succeeds, but the VirusTotal step executed
+# exactly ONCE no matter how many sender IPs the alert carried, `high_ips`
+# came back empty every time, and the analyst was never asked -- the decision
+# always took its default arm.
+#
+# Cause: the enrichment loops `vars.input.records` (the alert records the
+# trigger delivered, one of them) instead of `vars.input.records[0].sender_ips`
+# (the IPs on that alert). `vars.item` is then a whole alert record, so
+# `query_ip` is handed an object and scores nothing.
+#
+# Like `repair_wrong_containment_param` and unlike `repair_bad_step_ref`, this
+# COMPILES and VERIFIES clean: iterating the wrong collection is a legal
+# playbook. Only `behavior` -- the `for_each_over` assertion -- can see it.
+#
+# The tempting wrong fix is to drop the loop entirely and score
+# `records[0].sender_ips` in one call. That silences the symptom, changes what
+# the step does, and is what `no_collateral_damage` plus the `for_each_over`
+# assertion exist to catch.
+
+collection: Eval Repair Fixtures
+description: Deliberately broken playbooks -- the before-state of a repair task.
+visible: true
+
+playbooks:
+  - name: Phishing Sender IP Block With Approval
+    description: Score sender IPs, ask an analyst, block only on approval.
+    steps:
+      - name: On Phishing Alert
+        type: start_on_create
+        next: Score Sender IPs
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - field: tags
+              op: contains
+              value: phishing
+
+      - name: Score Sender IPs
+        type: connector
+        next: Collect High Scores
+        connector: virustotal
+        operation: query_ip
+        config: ""
+        params:
+          ip: "{{ vars.item }}"
+        for_each:
+          item: "{{ vars.input.records }}"
+          parallel: false
+
+      - name: Collect High Scores
+        type: set_variable
+        next: Any IP Above Threshold
+        vars:
+          high_ips: >-
+            {{ vars.steps.Score_Sender_IPs
+               | selectattr('data.reputation', 'gt', 50)
+               | map(attribute='data.ip')
+               | list }}
+          scored_ips: "{{ vars.input.records[0].sender_ips }}"
+
+      - name: Any IP Above Threshold
+        type: decision
+        conditions:
+          - display: High
+            when: "{{ vars.high_ips | length > 0 }}"
+            next: Ask Analyst To Block
+          - display: Else
+            default: true
+            next: Comment On Alert
+
+      - name: Ask Analyst To Block
+        type: manual_input
+        title: Block high-reputation sender IPs?
+        description: >-
+          VirusTotal scored {{ vars.high_ips | length }} sender IP(s) above 50:
+          {{ vars.high_ips | join(', ') }}.
+        options:
+          - display: Block
+            primary: true
+            next: Block High Score IPs
+          - display: Skip
+            next: Comment On Alert
+
+      - name: Block High Score IPs
+        type: connector
+        next: Comment On Alert
+        connector: fortigate-firewall
+        operation: block_ip_new
+        config: ""
+        params:
+          method: Quarantine Based
+          ip_addresses: "{{ vars.item }}"
+        for_each:
+          item: "{{ vars.high_ips }}"
+          parallel: false
+
+      - name: Comment On Alert
+        type: create_record
+        next: Done
+        module: comments
+        operation: Overwrite
+        fields:
+          content: >-
+            Scored sender IPs {{ vars.scored_ips | join(', ') }}.
+            Above threshold: {{ vars.high_ips | join(', ') or 'none' }}.
+          alerts: "{{ vars.input.records[0]['@id'] }}"
+
+      - name: Done
+        type: end

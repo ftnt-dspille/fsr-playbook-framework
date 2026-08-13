@@ -1,0 +1,31 @@
+{
+  "name": "repair_loop_over_wrong_field",
+  "mode": "repair",
+  "prompt": "This playbook is supposed to score every sender IP on the alert, but on the box the VirusTotal step ran exactly once regardless of how many IPs the alert carried, the high-score list came back empty, and the analyst was never asked. Find the defect and return the corrected complete YAML. Change nothing else.",
+  "broken_yaml_path": "tooling/evals/broken/phish_block_loops_wrong_collection.yaml",
+  "gold_yaml_path": "tooling/evals/golds/soc_phish_block_with_approval.yaml",
+  "notes": "Third repair defect class: the enrichment iterates `vars.input.records` (the one alert the trigger delivered) instead of `records[0].sender_ips`, so `vars.item` is a whole record and query_ip scores nothing. Compiles and verifies clean like `repair_wrong_containment_param` -- looping the wrong collection is a legal playbook -- so `for_each_over` is the only gate that sees it. Deliberately a WIRING defect rather than a parameter-shape one, so the two do not collapse into the same test. The tempting wrong fix is to drop the loop and score `records[0].sender_ips` in a single call: symptom gone, step now does something else, and `no_collateral_damage` plus the loop assertion catch it.",
+  "ir_assertions": [
+    {
+      "kind": "for_each_over",
+      "contains": "sender_ips",
+      "note": "the enrichment loops the alert's sender IPs, one call per IP"
+    },
+    {
+      "kind": "connector_op",
+      "connector": "virustotal",
+      "operation_contains": "query_ip",
+      "note": "the enrichment step is still there -- not deleted to silence it"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "manual_input"
+      },
+      "to": {
+        "connector": "fortigate"
+      },
+      "note": "the gate still precedes the block -- a loop fix must not reroute it"
+    }
+  ]
+}

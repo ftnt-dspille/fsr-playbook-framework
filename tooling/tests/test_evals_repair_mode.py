@@ -121,6 +121,104 @@ def test_repair_demotes_the_gates_that_would_reward_a_rewrite():
     assert counted == {"behavior", "verified", "no_collateral_damage"}, counted
 
 
+def _calibrate(name: str):
+    """(gold row, broken row) for a repair fixture, scored as the matrix does."""
+    t = {x.name: x for x in tasks_mod.load_tasks()}[name]
+    before = t.broken_yaml_text()
+    gold = pathlib.Path(t.gold_yaml_path).read_text()
+
+    def go(after):
+        return scoring.score(after, mode="repair", before_yaml=before,
+                             ir_assertions=t.ir_assertions,
+                             user_message=t.prompt)
+
+    return go(gold), go(before), gold, before, go
+
+
+# --- fixture 40: the containment shape that bans nothing -------------------
+#
+# `block_ip_new` Address Based with the singular `ip` answers Success on a real
+# appliance with every result bucket empty -- live-verified on the lab
+# FortiGate. The prompt gives the agent exactly that symptom.
+#
+# Calibration surprise worth keeping: the compiler ALREADY catches this, as a
+# `param-set conflict`, so the before-state fails `draft` rather than sliding
+# past every static gate. That is a product fact, not an assumption, and it is
+# why `repair_loop_over_wrong_field` exists -- without it the repair corpus
+# would be nothing but compile failures.
+
+def test_fixture_40_gold_passes_and_the_broken_containment_does_not():
+    gold_r, broken_r, *_ = _calibrate("repair_wrong_containment_param")
+    assert gold_r["score"] == gold_r["max"], gold_r["levels"]
+    assert broken_r["levels"]["behavior"]["passed"] is False
+    # The specific defect, not just "something failed".
+    assert "ip_addresses" in broken_r["levels"]["behavior"]["detail"]
+
+
+def test_fixture_40_deleting_the_block_is_caught_only_by_collateral_damage():
+    # The cheapest way to silence "the firewall banned nothing" is to stop
+    # calling the firewall. Every diagnostic clears.
+    _, _, gold, _, go = _calibrate("repair_wrong_containment_param")
+    gutted = gold.replace("""      - name: Block High Score IPs
+        type: connector
+        next: Comment On Alert
+        connector: fortigate-firewall
+        operation: block_ip_new
+        config: ""
+        params:
+          method: Quarantine Based
+          ip_addresses: "{{ vars.item }}"
+        for_each:
+          item: "{{ vars.high_ips }}"
+          parallel: false
+""", "")
+    gutted = gutted.replace("            next: Block High Score IPs",
+                            "            next: Comment On Alert")
+    assert "Block High Score IPs" not in gutted
+
+    r = go(gutted)
+    assert r["levels"]["verified"]["passed"] is True, (
+        "the point of this test is a gutted playbook that still verifies")
+    assert r["levels"]["no_collateral_damage"]["passed"] is False
+    assert "step_dropped" in r["levels"]["no_collateral_damage"]["regressions"]
+
+
+# --- fixture 41: the tier no static gate can see ---------------------------
+#
+# Iterating `vars.input.records` instead of `records[0].sender_ips` is a
+# perfectly legal playbook: it compiles, it verifies, and it scores exactly one
+# thing per run. `for_each_over` is the only gate that can tell.
+
+def test_fixture_41_broken_loop_compiles_and_verifies_and_still_fails():
+    gold_r, broken_r, *_ = _calibrate("repair_loop_over_wrong_field")
+    assert gold_r["score"] == gold_r["max"], gold_r["levels"]
+    assert broken_r["levels"]["draft"]["passed"] is True
+    assert broken_r["levels"]["verified"]["passed"] is True
+    assert broken_r["levels"]["no_collateral_damage"]["passed"] is True
+    # ...and the row is still not full marks, because behavior sees it.
+    assert broken_r["levels"]["behavior"]["passed"] is False
+    assert broken_r["score"] < broken_r["max"]
+
+
+def test_fixture_41_unrolling_the_loop_disagrees_with_the_collateral_gate():
+    # Rule 3 of the plan: a pair of gates that always agree is one gate
+    # wearing two names. Dropping the loop and scoring the whole list in one
+    # call silences the symptom without dropping or renaming a step -- so
+    # `no_collateral_damage` is content and only `behavior` objects.
+    _, _, gold, _, go = _calibrate("repair_loop_over_wrong_field")
+    unrolled = gold.replace("""          ip: "{{ vars.item }}"
+        for_each:
+          item: "{{ vars.input.records[0].sender_ips }}"
+          parallel: false
+""", """          ip: "{{ vars.input.records[0].sender_ips }}"
+""")
+    assert "vars.item" not in unrolled.split("Collect High Scores")[0]
+
+    r = go(unrolled)
+    assert r["levels"]["no_collateral_damage"]["passed"] is True
+    assert r["levels"]["behavior"]["passed"] is False
+
+
 def test_an_uncompilable_answer_cannot_pass_the_collateral_gate():
     # verify_enhancement returns an EMPTY regression list for an `after` that
     # does not compile, and an empty list read as "nothing broke" scored the

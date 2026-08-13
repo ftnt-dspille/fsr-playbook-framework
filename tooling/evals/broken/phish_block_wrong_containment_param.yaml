@@ -1,0 +1,115 @@
+# BROKEN on purpose -- the before-state of the `repair_wrong_containment_param`
+# fixture.
+#
+# Symptom on the box: the run reports Success and the FortiGate step returns
+# `already_blocked` / `newly_blocked` / `error_with_block` / `vdom_not_exist`
+# all EMPTY. Nothing was ever banned.
+#
+# Cause: `block_ip_new` was called Address Based with `ip`. The only branch
+# that contains anything on the appliance is **Quarantine Based** with
+# **`ip_addresses`**; the singular `ip` param is a silent no-op that still
+# answers Success. A containment result with every bucket empty must be read
+# as a failure, and this is the defect class that makes that necessary.
+#
+# The compiler DOES see this one -- `param-set conflict on
+# fortigate-firewall.block_ip_new: method='Address Based' is incompatible with
+# ['ip']` -- so the before-state fails `draft`, like `repair_bad_step_ref`.
+# That is worth knowing rather than assuming: a defect that costs a live
+# containment is statically detectable today. The tier no static gate can see
+# is covered separately by `phish_block_loops_wrong_collection.yaml`.
+#
+# The tempting wrong fixes are both destructive: drop the block step, or
+# swap containment for a comment. Either clears the symptom and leaves the
+# playbook unable to contain anything -- which is `no_collateral_damage`'s job.
+
+collection: Eval Repair Fixtures
+description: Deliberately broken playbooks -- the before-state of a repair task.
+visible: true
+
+playbooks:
+  - name: Phishing Sender IP Block With Approval
+    description: Score sender IPs, ask an analyst, block only on approval.
+    steps:
+      - name: On Phishing Alert
+        type: start_on_create
+        next: Score Sender IPs
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - field: tags
+              op: contains
+              value: phishing
+
+      - name: Score Sender IPs
+        type: connector
+        next: Collect High Scores
+        connector: virustotal
+        operation: query_ip
+        config: ""
+        params:
+          ip: "{{ vars.item }}"
+        for_each:
+          item: "{{ vars.input.records[0].sender_ips }}"
+          parallel: false
+
+      - name: Collect High Scores
+        type: set_variable
+        next: Any IP Above Threshold
+        vars:
+          high_ips: >-
+            {{ vars.steps.Score_Sender_IPs
+               | selectattr('data.reputation', 'gt', 50)
+               | map(attribute='data.ip')
+               | list }}
+          scored_ips: "{{ vars.input.records[0].sender_ips }}"
+
+      - name: Any IP Above Threshold
+        type: decision
+        conditions:
+          - display: High
+            when: "{{ vars.high_ips | length > 0 }}"
+            next: Ask Analyst To Block
+          - display: Else
+            default: true
+            next: Comment On Alert
+
+      - name: Ask Analyst To Block
+        type: manual_input
+        title: Block high-reputation sender IPs?
+        description: >-
+          VirusTotal scored {{ vars.high_ips | length }} sender IP(s) above 50:
+          {{ vars.high_ips | join(', ') }}.
+        options:
+          - display: Block
+            primary: true
+            next: Block High Score IPs
+          - display: Skip
+            next: Comment On Alert
+
+      - name: Block High Score IPs
+        type: connector
+        next: Comment On Alert
+        connector: fortigate-firewall
+        operation: block_ip_new
+        config: ""
+        params:
+          method: Address Based
+          ip: "{{ vars.item }}"
+        for_each:
+          item: "{{ vars.high_ips }}"
+          parallel: false
+
+      - name: Comment On Alert
+        type: create_record
+        next: Done
+        module: comments
+        operation: Overwrite
+        fields:
+          content: >-
+            Scored sender IPs {{ vars.scored_ips | join(', ') }}.
+            Above threshold: {{ vars.high_ips | join(', ') or 'none' }}.
+          alerts: "{{ vars.input.records[0]['@id'] }}"
+
+      - name: Done
+        type: end
