@@ -1,7 +1,7 @@
 {
   "name": "alert_action_var_chain",
-  "prompt": "Author a FortiSOAR playbook with a manual trigger that fetches alert records via a `find_record` step on the `alerts` module, then references the fetched data in a downstream `set_variable` step using `{{ vars.steps.<step_name>.result }}`. Make sure the variable reference uses the underscore-joined step display name (NOT the YAML id), and emit the complete YAML.",
-  "gold_yaml_path": "examples/demo_alert_action.yaml",
+  "prompt": "Author a FortiSOAR playbook with a manual trigger that fetches an alert via a `find_record` step on the `alerts` module (filtered by a `uuid` passed in as a playbook parameter), then updates that same alert with an `update_record` step whose `record` IRI comes from the fetched data via `{{ vars.steps.<step_name> }}`. Make sure the variable reference uses the underscore-joined step display name (NOT the YAML id), and emit the complete YAML.",
+  "gold_yaml_path": "examples/demo_record_find_update.yaml",
   "notes": "Tests the vars.steps.<name> rule that LLMs frequently get wrong (use id or UUID instead).",
   "ir_assertions": [
     {
@@ -17,7 +17,7 @@
     },
     {
       "kind": "arg_text_contains",
-      "type": "set_variable",
+      "type": "update_record",
       "contains": "vars.steps.",
       "note": "downstream step references the fetched data"
     },
@@ -27,7 +27,7 @@
         "type": "find_record"
       },
       "to": {
-        "type": "set_variable"
+        "type": "update_record"
       },
       "note": "the reference is DOWNSTREAM of the fetch, not beside it"
     }

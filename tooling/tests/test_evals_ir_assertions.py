@@ -189,28 +189,28 @@ def test_the_detail_names_what_failed():
 # The failure mode of a behavioral grader is failing a right answer, so the
 # fixtures' assertions are calibrated against the golds -- the closest thing we
 # have to known-correct playbooks. Every gold that actually answers its own
-# prompt must pass. Three do not, and that is a defect in the FIXTURE, not in
-# the assertions:
+# prompt must pass.
 #
-#   hello_connector        prompt asks for smtp `send_email`; the gold
-#                          (examples/hello_connector.yaml) calls fortisiem
-#                          `get_org_name_by_org_id`.
-#   alert_action_var_chain prompt asks for a `find_record` on alerts; the gold
-#                          has no find_record step at all.
-#   record_action_trigger  prompt asks for a record_action trigger + an
-#                          `update_record`; the gold has neither -- and it is
-#                          the SAME file as alert_action_var_chain's, one
-#                          example serving two different prompts and answering
-#                          neither.
+# Three used to fail, and each was a defect in the FIXTURE, not in the
+# assertions (fixed in Phase 0 of docs/AGENT_INTELLIGENCE_PLAN.md):
+#
+#   hello_connector        prompt asked for smtp `send_email`; the gold calls
+#                          fortisiem `get_org_name_by_org_id`. Prompt rewritten
+#                          to the gold's actual behavior.
+#   alert_action_var_chain prompt asked for a `find_record` on alerts; its gold
+#                          (demo_alert_action.yaml) had none. Repointed at
+#                          examples/demo_record_find_update.yaml, which does.
+#   record_action_trigger  prompt asked for an `update_record` the gold does not
+#                          contain -- and the gold was the SAME file as
+#                          alert_action_var_chain's, one example serving two
+#                          prompts and answering neither. Now the sole owner of
+#                          demo_alert_action.yaml, prompt matched to it.
 #
 # A wrong gold makes `matches_example` meaningless for that row and makes the
-# gold control row understate the harness. Listing them here means fixing one
-# turns this test red until the list is updated -- the finding cannot rot.
-KNOWN_MISMATCHED_GOLDS = {
-    "hello_connector",
-    "alert_action_var_chain",
-    "record_action_trigger",
-}
+# gold control row understate the harness. This set stays empty: if a gold
+# starts failing, either the fixture drifted from its gold or an assertion
+# punishes a correct answer.
+KNOWN_MISMATCHED_GOLDS: set = set()
 
 
 def test_every_gold_that_answers_its_prompt_passes_its_assertions():
