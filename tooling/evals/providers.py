@@ -321,7 +321,13 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
                 json={"model": model, "messages": history, "tools": tools,
                       "temperature": 0.0},
                 headers=headers or {},
-                timeout=180,
+                # The long authoring tasks legitimately exceed 180s (14+ tool
+                # calls, each a round trip). Every `ERR (provider call raised)`
+                # on `select_build_offer` and `soc_phish_block_with_approval`
+                # was THIS timeout, not the model failing -- and an ERR row
+                # scores 0, so a client-side limit was reading as an agent
+                # that could not do the task.
+                timeout=float(os.environ.get("EVAL_HTTP_TIMEOUT", "180")),
             )
             r.raise_for_status()
             msg = r.json()["choices"][0]["message"]

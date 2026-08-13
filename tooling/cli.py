@@ -2976,6 +2976,22 @@ def cmd_evals(args: argparse.Namespace) -> int:
             print(render_screen(screen))
         return 0 if any(v == "consistent"
                         for v in screen["verdicts"].values()) else 1
+    if args.replay:
+        from evals.harness import replay_run
+        matrix = replay_run(args.replay, task_filter)
+        if args.json:
+            print(json.dumps(matrix, indent=2, default=str))
+        else:
+            print(render_text(matrix))
+        print(f"\nreplayed {args.replay} against the CURRENT graders -- the "
+              f"agent's behavior is whatever it was at capture time",
+              file=sys.stderr)
+        for g in matrix.get("replay_gaps") or []:
+            print(f"  NOT re-graded -- {g}", file=sys.stderr)
+        if args.save:
+            print(f"archived: {save_run(matrix)}", file=sys.stderr)
+        return 0
+
     # Checkpoint every finished row. `save_run` writes only after the whole
     # matrix completes, so without this a crash in the last task discards the
     # entire run -- 74 minutes and 33 scored tasks were lost that way once.
@@ -4723,6 +4739,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="archive matrix.json + report.md under "
                          "data/eval_runs/<run_id>/ (auto-implied by "
                          "--baseline)")
+    sp.add_argument("--replay", default=None, metavar="RUN_ID",
+                    help="re-score an archived run with today's graders -- no "
+                         "model call, sub-second. Grading and generation are "
+                         "separate problems and only one needs a model. Use "
+                         "this to iterate on gates/ir_assertions; it CANNOT "
+                         "measure a prompt or tool-description change, because "
+                         "the agent's behavior is frozen at capture time.")
     sp.add_argument("--baseline", default=None,
                     help="prior run id to diff against; prints a "
                          "per-cell delta table after the matrix")

@@ -276,6 +276,13 @@ def run_matrix(
                 row["turns"] = turns
                 row["tool_calls"] = len(trace or [])
                 row["trace"] = trace or []
+                # Persist every input `score()` took, so `replay_run` re-grades
+                # the row identically. Without the audit log the approval gate
+                # skips on replay and the row silently loses a counted gate --
+                # a replay that scores differently from the run it replays is
+                # a lying instrument.
+                row["audit"] = audit or []
+                row["final_text"] = final_text or ""
                 if usage is not None:
                     row["usage"] = usage
             rows.append(row)
@@ -597,3 +604,102 @@ def _render_md(matrix: dict[str, Any]) -> str:
             f"({s['fraction']*100:.0f}%)"
         )
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Replay: re-score an archived run with today's graders, no model (#127)
+# ---------------------------------------------------------------------------
+
+def replay_run(run_id: str, task_names: list[str] | None = None) -> dict[str, Any]:
+    """Re-score an archived run's rows against the CURRENT scoring code.
+
+    Generation and grading are separate problems, and only one of them needs a
+    model. A saved row already carries the `yaml` the turn delivered and the
+    `trace` it produced, which is every input `score()` takes -- so iterating on
+    a grader (a new gate, a fixture's `ir_assertions`) does not need another
+    agentic run. That distinction is the difference between a 10-minute loop and
+    a sub-second one, and the slow loop is the reason grader bugs sat in the
+    detail column unread.
+
+    What replay CANNOT tell you: whether a prompt or tool-description change
+    made the agent behave differently. The behaviour is frozen at capture time.
+    Use it to develop graders; use a real run to measure the agent.
+
+    Returns a matrix shaped like `run_matrix`, so every renderer, `delta_vs`
+    and `save_run` work on it unchanged.
+    """
+    prior = load_run(run_id)
+    from evals.tasks import load_tasks
+    tasks = {t.name: t for t in load_tasks()}
+
+    rows: list[dict[str, Any]] = []
+    for old in prior.get("rows", []):
+        if task_names and old.get("task") not in task_names:
+            continue
+        if "error" in old:
+            # A row that never produced a candidate has nothing to re-grade.
+            # Carry it through rather than dropping it: a replay that quietly
+            # shrinks the corpus reads as an improvement.
+            rows.append(dict(old))
+            continue
+        t = tasks.get(old.get("task", ""))
+        if t is None:
+            row = dict(old)
+            row["error"] = "task no longer exists in the corpus"
+            rows.append(row)
+            continue
+        gold_json = None
+        try:
+            scored = score(
+                old.get("yaml") or "",
+                gold_json=gold_json,
+                live=False,
+                trace=old.get("trace"),
+                final_text=old.get("final_text") or "",
+                audit=old.get("audit"),
+                expected_approvals=t.expected_approvals,
+                mode=t.mode,
+                required_facts=t.required_facts,
+                forbidden_facts=t.forbidden_facts,
+                investigation_quality=t.investigation_quality,
+                terminal_tool=t.terminal_tool,
+                ir_assertions=t.ir_assertions,
+            )
+        except Exception as e:  # noqa: BLE001
+            row = dict(old)
+            row["error"] = f"scoring: {e!r}"
+            rows.append(row)
+            continue
+        row = dict(old)
+        row.update({k: scored[k] for k in ("levels", "score", "max", "fraction")})
+        # Runs captured before rows carried `audit` cannot re-grade the
+        # approval gate: it skips, and the row's `max` silently drops by one
+        # against the run being replayed. Say so per row rather than let a
+        # smaller denominator read as a cleaner result.
+        if "audit" not in old and old.get("trace"):
+            row.setdefault("replay_gaps", []).append(
+                "appropriate_approval_requests: this run predates audit "
+                "capture, so the gate is unjudgeable on replay")
+        rows.append(row)
+
+    models = sorted({r["model"] for r in rows})
+    matrix: dict[str, Any] = {
+        "models": models,
+        "tasks": [r["task"] for r in rows if r["model"] == models[0]] if models else [],
+        "rows": rows,
+        "live": False,
+        "replay_of": run_id,
+    }
+    matrix["summary"] = {
+        m: {
+            "score": sum(r.get("score", 0) for r in rows if r["model"] == m),
+            "max": sum(r.get("max", 0) for r in rows if r["model"] == m),
+        }
+        for m in models
+    }
+    for m, s in matrix["summary"].items():
+        s["fraction"] = (s["score"] / s["max"]) if s["max"] else 0.0
+    gaps = sorted({g for r in rows for g in (r.get("replay_gaps") or [])})
+    if gaps:
+        matrix["replay_gaps"] = gaps
+    return matrix
