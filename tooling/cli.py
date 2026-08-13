@@ -2934,6 +2934,11 @@ def cmd_evals(args: argparse.Namespace) -> int:
     # as "the model scored 0" rather than "the harness was misconfigured".
     from probes import _env  # type: ignore
     _env._load_dotenv()
+    # `--offline` is the flag form of EVAL_OFFLINE=1. Set BEFORE the dotenv
+    # credentials get a chance to matter -- run_matrix strips them, but a
+    # provider preflight below must not build a live client either.
+    if getattr(args, "offline", False):
+        os.environ["EVAL_OFFLINE"] = "1"
     if args.list_runs:
         runs = list_runs()
         if not runs:
@@ -4733,6 +4738,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--live", action="store_true",
                     help="enable live Runs gate (resolve + dry-run) "
                          "against the live FSR")
+    sp.add_argument("--offline", action="store_true",
+                    help="bind the agent's tools to the simulated client and "
+                         "strip the FSR_* credentials (= EVAL_OFFLINE=1). A "
+                         "degrading box otherwise scores as agent regression.")
     sp.add_argument("--json", action="store_true",
                     help="emit the full matrix as JSON on stdout")
     sp.add_argument("--save", action="store_true",

@@ -160,6 +160,17 @@ def run_matrix(
     if not tasks:
         raise SystemExit("no tasks matched")
 
+    # EVAL_OFFLINE=1 swaps the live seam for the simulated client and strips
+    # the FSR_* credentials, so a degrading appliance can no longer score as
+    # an agent regression. Done before any provider starts: a client cached
+    # mid-run would outlive the swap.
+    from evals import offline as _offline
+    offline_run = _offline.enabled()
+    if offline_run:
+        _offline.install()
+        print(f"  offline: tools bound to {_offline.active_client_name()}",
+              file=sys.stderr, flush=True)
+
     gold_lookup = _gold_lookup_for(tasks)
     system_prompt = load_system_prompt()
 
@@ -302,6 +313,9 @@ def run_matrix(
 
     return {
         "live": live,
+        # Which substrate produced these numbers. A run that does not say so
+        # invites its rows being compared against ones taken on a box.
+        "offline": offline_run,
         "tasks": [t.name for t in tasks],
         "models": list(model_names),
         "rows": rows,
