@@ -14,6 +14,7 @@ These tests pin fidelity and force the known gap to be declared.
 from __future__ import annotations
 
 import importlib
+import json
 
 harness = importlib.import_module("evals.harness")
 scoring = importlib.import_module("evals.scoring")
@@ -112,3 +113,41 @@ def test_replay_matches_a_real_row_when_every_input_was_captured(monkeypatch):
     assert (m["rows"][0]["score"], m["rows"][0]["max"]) == (live["score"],
                                                             live["max"])
     assert "replay_gaps" not in m
+
+
+def test_a_repair_row_replays_to_the_same_score(tmp_path, monkeypatch):
+    """Replay must be able to re-derive the `before` playbook.
+
+    A repair/enhance row is graded against the document the turn started from,
+    which lives in the fixture rather than in the saved row. `replay_run` has
+    to ask the fixture for it; when it did not, `no_collateral_damage` silently
+    skipped and the replayed row scored 2/2 where the run scored 3/3. A replay
+    that disagrees with the run it replays is worse than no replay.
+    """
+    import pathlib as _p
+
+    from evals import harness
+    from evals.scoring import score
+    from evals.tasks import load_tasks
+
+    t = {x.name: x for x in load_tasks()}["repair_bad_step_ref"]
+    fixed = _p.Path("tooling/evals/golds/manual_input_block_ip.yaml").read_text()
+
+    live = score(fixed, mode=t.mode, ir_assertions=t.ir_assertions,
+                 before_yaml=t.broken_yaml_text(),
+                 user_message=harness._user_message_for(t))
+
+    monkeypatch.setattr(harness, "RUNS_DIR", tmp_path)
+    run_dir = tmp_path / "R"
+    run_dir.mkdir()
+    (run_dir / "matrix.json").write_text(json.dumps({
+        "run_id": "R", "live": False, "tasks": [t.name], "models": ["m"],
+        "rows": [{"model": "m", "task": t.name, "yaml": fixed,
+                  "score": live["score"], "max": live["max"],
+                  "fraction": live["fraction"], "levels": live["levels"],
+                  "elapsed_ms": 1}],
+        "summary": {}}))
+
+    replayed = harness.replay_run("R")["rows"][0]
+    assert (replayed["score"], replayed["max"]) == (live["score"], live["max"])
+    assert replayed["levels"]["no_collateral_damage"]["skipped"] is False

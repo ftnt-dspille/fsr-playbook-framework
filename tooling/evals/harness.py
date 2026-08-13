@@ -710,6 +710,14 @@ def replay_run(run_id: str, task_names: list[str] | None = None) -> dict[str, An
                 investigation_quality=t.investigation_quality,
                 terminal_tool=t.terminal_tool,
                 ir_assertions=t.ir_assertions,
+                # Repair/enhance rows are graded against the playbook the turn
+                # STARTED from. It lives in the fixture, not the row, so replay
+                # can recover it -- but only if it asks. Without these two a
+                # replayed repair row silently loses `no_collateral_damage`
+                # and scores differently from the run it replays, which is the
+                # definition of a lying instrument.
+                before_yaml=t.broken_yaml_text(),
+                user_message=_user_message_for(t),
             )
         except Exception as e:  # noqa: BLE001
             row = dict(old)
