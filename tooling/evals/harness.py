@@ -244,6 +244,7 @@ def run_matrix(
                     forbidden_facts=t.forbidden_facts,
                     investigation_quality=t.investigation_quality,
                     terminal_tool=t.terminal_tool,
+                    ir_assertions=t.ir_assertions,
                 )
             except Exception as e:  # noqa: BLE001
                 # Scoring compiles the delivered YAML, so it can raise for

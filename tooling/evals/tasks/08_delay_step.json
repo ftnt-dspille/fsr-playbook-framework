@@ -2,5 +2,28 @@
   "name": "delay_step",
   "prompt": "Author a FortiSOAR playbook with a manual trigger that pauses for 2 seconds with a delay step, then runs a set_variable step that stamps done=true. Output complete YAML.",
   "gold_yaml_path": "examples/demo_delay.yaml",
-  "notes": "delay step canonical args"
+  "notes": "delay step canonical args",
+  "ir_assertions": [
+    {
+      "kind": "step_type_present",
+      "type": "delay",
+      "note": "has a delay step"
+    },
+    {
+      "kind": "arg_text_contains",
+      "type": "delay",
+      "contains": "2",
+      "note": "pauses 2 seconds"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "delay"
+      },
+      "to": {
+        "type": "set_variable"
+      },
+      "note": "the stamp happens after the pause, not before"
+    }
+  ]
 }

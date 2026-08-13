@@ -2,5 +2,24 @@
   "name": "manual_input_branch",
   "prompt": "Author a FortiSOAR playbook with a manual trigger that pauses on a manual_input step with two options ('approve' and 'reject'). Each option routes to a different set_variable step that stamps the chosen verdict. Output complete YAML.",
   "gold_yaml_path": "examples/demo_manual_input.yaml",
-  "notes": "manual_input step branching"
+  "notes": "manual_input step branching",
+  "ir_assertions": [
+    {
+      "kind": "step_type_present",
+      "type": "manual_input",
+      "note": "pauses for a human"
+    },
+    {
+      "kind": "branch_count",
+      "type": "manual_input",
+      "min": 2,
+      "note": "approve and reject are separate routes"
+    },
+    {
+      "kind": "step_type_present",
+      "type": "set_variable",
+      "min": 2,
+      "note": "each option stamps its own verdict"
+    }
+  ]
 }

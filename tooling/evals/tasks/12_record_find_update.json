@@ -2,5 +2,33 @@
   "name": "record_find_update",
   "prompt": "Author a FortiSOAR playbook with a manual trigger that finds an alert record by name (using find_records) then updates that alert's severity field via update_record on the matched IRI. Output complete YAML.",
   "gold_yaml_path": "examples/demo_record_find_update.yaml",
-  "notes": "find_records + update_record"
+  "notes": "find_records + update_record",
+  "ir_assertions": [
+    {
+      "kind": "step_type_present",
+      "type": "find_record",
+      "note": "finds by name"
+    },
+    {
+      "kind": "step_type_present",
+      "type": "update_record",
+      "note": "updates severity"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "find_record"
+      },
+      "to": {
+        "type": "update_record"
+      },
+      "note": "updates the record it just matched -- order is the point"
+    },
+    {
+      "kind": "arg_text_contains",
+      "type": "update_record",
+      "contains": "vars.steps.",
+      "note": "targets the MATCHED iri, not a hardcoded one"
+    }
+  ]
 }

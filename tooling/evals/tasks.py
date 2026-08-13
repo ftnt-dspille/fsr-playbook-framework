@@ -37,6 +37,13 @@ class Task:
     # Shape for the `appropriate_approval_requests` gate. None = default
     # ("exactly_zero" tier-3+ calls).
     expected_approvals: Optional[dict[str, Any]] = None
+    # Behavioral assertions on the built playbook's IR (#127). Each entry is
+    # one thing the PROMPT actually requires -- the loop iterates the named
+    # field, the approval gate precedes the block -- graded by
+    # `ir_assertions.check_ir_assertions`. None/[] = the fixture asserts
+    # nothing about behavior and the `behavior` level skips, which is the
+    # honest state for a fixture nobody has written assertions for yet.
+    ir_assertions: Optional[list[dict[str, Any]]] = None
     # Scoring mode. `None` = standard authoring task. `"refuse"` = the
     # agent is expected to decline (e.g. `unknown_connector`); authoring
     # gates become informational and adherence inverts. `"investigation"`
@@ -100,6 +107,7 @@ def load_tasks(filter_names: list[str] | None = None) -> list[Task]:
             notes=data.get("notes", ""),
             approval_policy=data.get("approval_policy"),
             expected_approvals=data.get("expected_approvals"),
+            ir_assertions=data.get("ir_assertions") or [],
             mode=data.get("mode"),
             required_facts=data.get("required_facts") or [],
             forbidden_facts=data.get("forbidden_facts") or [],

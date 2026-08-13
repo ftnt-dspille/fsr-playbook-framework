@@ -1061,6 +1061,7 @@ def score(
     investigation_quality: dict[str, Any] | None = None,
     skill_trace_json: str | None = None,
     terminal_tool: list[str] | None = None,
+    ir_assertions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Score a candidate YAML across confidence tiers + agent gates.
 
@@ -1189,6 +1190,21 @@ def score(
         out["levels"]["offer_timing"] = ot
     else:
         out["levels"]["offer_timing"] = {"passed": False, "skipped": True}
+
+    # ----------------- behavior: does it do what was ASKED (#127) ----------
+    # `draft` says it compiles and `verified` says it is statically sound;
+    # neither reads the prompt. This one does -- but only where a fixture has
+    # written down what its prompt requires. Counted, not informational: a
+    # playbook that loops the wrong field is wrong, and the scoreboard's whole
+    # problem was that nothing said so. Skips in the modes that expect no
+    # playbook at all.
+    if refuse or investigation or selection:
+        out["levels"]["behavior"] = {
+            "passed": False, "skipped": True,
+            "detail": "no playbook expected in this mode"}
+    else:
+        from evals.ir_assertions import check_ir_assertions  # noqa: PLC0415
+        out["levels"]["behavior"] = check_ir_assertions(yaml_text, ir_assertions)
 
     # ----------------- example check (orthogonal) --------------------------
     if gold_json is not None:

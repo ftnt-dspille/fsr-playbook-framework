@@ -2,5 +2,28 @@
   "name": "code_snippet",
   "prompt": "Author a FortiSOAR playbook with a manual trigger that takes a 'first_name' parameter, runs a Python code_snippet step that builds a greeting string ('Hello <first_name>'), then a set_variable step that records the greeting. Output complete YAML.",
   "gold_yaml_path": "examples/demo_code_snippet.yaml",
-  "notes": "code_snippet step"
+  "notes": "code_snippet step",
+  "ir_assertions": [
+    {
+      "kind": "step_type_present",
+      "type": "code_snippet",
+      "note": "runs a python step"
+    },
+    {
+      "kind": "arg_text_contains",
+      "type": "code_snippet",
+      "contains": "first_name",
+      "note": "the snippet uses the first_name parameter"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "code_snippet"
+      },
+      "to": {
+        "type": "set_variable"
+      },
+      "note": "the greeting is recorded AFTER it is built"
+    }
+  ]
 }

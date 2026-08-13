@@ -2,5 +2,33 @@
   "name": "virustotal_ip",
   "prompt": "Author a FortiSOAR playbook with a manual trigger that takes an 'ip' parameter, calls the virustotal connector's IP reputation operation, then runs a Decision branching on last_analysis_stats.malicious count, and stamps a verdict via set_variable. Output complete YAML.",
   "gold_yaml_path": "examples/demo_virustotal_ip.yaml",
-  "notes": "connector call + jinja path + Decision"
+  "notes": "connector call + jinja path + Decision",
+  "ir_assertions": [
+    {
+      "kind": "connector_op",
+      "connector": "virustotal",
+      "note": "calls virustotal"
+    },
+    {
+      "kind": "step_type_present",
+      "type": "decision",
+      "note": "branches on the result"
+    },
+    {
+      "kind": "arg_text_contains",
+      "type": "decision",
+      "contains": "malicious",
+      "note": "branches on the malicious count specifically"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "connector"
+      },
+      "to": {
+        "type": "decision"
+      },
+      "note": "decides AFTER the lookup returns"
+    }
+  ]
 }
