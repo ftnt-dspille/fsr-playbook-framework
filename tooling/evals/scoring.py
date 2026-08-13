@@ -1155,6 +1155,10 @@ def score(
     researches beautifully and never acts scores zero -- which is exactly
     the live failure this mode exists to measure.
 
+    `mode="enhance"` grades an EDIT to a playbook the analyst has open: the
+    same "did what was asked + broke nothing" pair as repair, plus
+    `enhance_delivery` -- the edit has to reach the playbook, not the chat log.
+
     `mode="repair"` grades a TROUBLESHOOT turn -- the verb with zero coverage
     before this. The fixture supplies `before_yaml` (a broken playbook) and
     `ir_assertions` describing the condition that must hold once it is fixed.
@@ -1168,6 +1172,7 @@ def score(
     investigation = (mode == "investigation")
     selection = (mode == "tool_selection")
     repair = (mode == "repair")
+    enhance = (mode == "enhance")
 
     # A turn that delivered nothing has nothing to compile. Saying "compile
     # failed" about it is a lie with errors attached, and the errors are about
@@ -1440,14 +1445,26 @@ def score(
     # ----------------- repair mode: fixed it AND broke nothing -------------
     # A repair that drops the failing step passes every gate that reads the
     # delivered YAML alone. This is the half that notices.
-    if repair:
+    if repair or enhance:
         out["levels"]["no_collateral_damage"] = score_no_collateral_damage(
             before_yaml or "", yaml_text, user_message)
         # Everything that is not "did the defect get fixed" or "did anything
         # else break" becomes informational -- same discipline as
         # tool_selection mode.
+        # Enhance mode adds one gate the repair path does not need: did the
+        # edit REACH the playbook. The live failure was an agent that verified
+        # a good edit and then printed it into chat three times -- every tool
+        # call returned ok and nothing was ever written.
+        counted_here = {"behavior", "verified", "no_collateral_damage"}
+        if enhance:
+            out["levels"]["enhance_delivery"] = (
+                score_enhance_delivery(trace, final_text or "")
+                if trace is not None else
+                {"passed": False, "skipped": True,
+                 "detail": "no tool-use trace supplied"})
+            counted_here.add("enhance_delivery")
         for k, lv in out["levels"].items():
-            if k in ("behavior", "verified", "no_collateral_damage"):
+            if k in counted_here:
                 lv.pop("informational", None)
             elif not lv.get("skipped"):
                 lv["informational"] = True

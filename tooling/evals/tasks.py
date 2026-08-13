@@ -81,15 +81,28 @@ class Task:
     # delivered YAML against it so a "fix" that deletes the failing step is
     # caught by `no_collateral_damage` rather than praised by `verified`.
     broken_yaml_path: Optional[str] = None
+    # Enhance mode (Phase 3): the name of a fixture in
+    # `tooling/evals/enhance_scenarios/`, whose `before_yaml` is the playbook
+    # the analyst already has OPEN. Named rather than copied so the matrix
+    # fixture and the deterministic delivery gate grade the same document.
+    before_scenario: Optional[str] = None
     # Tool slice to advertise: "build" / "triage" (intents.tools_for_intent)
     # or None for the full registry the agentic provider defaults to.
     tool_slice: Optional[str] = None
 
     def broken_yaml_text(self) -> Optional[str]:
-        if not self.broken_yaml_path:
-            return None
-        p = REPO_ROOT / self.broken_yaml_path
-        return p.read_text(encoding="utf-8") if p.exists() else None
+        """The playbook the turn starts FROM -- a broken one to repair, or an
+        open one to edit. Both modes diff the delivered YAML against it."""
+        if self.broken_yaml_path:
+            p = REPO_ROOT / self.broken_yaml_path
+            return p.read_text(encoding="utf-8") if p.exists() else None
+        if self.before_scenario:
+            p = (Path(__file__).resolve().parent / "enhance_scenarios"
+                 / f"{self.before_scenario}.json")
+            if not p.exists():
+                return None
+            return json.loads(p.read_text(encoding="utf-8")).get("before_yaml")
+        return None
 
     def gold_yaml_text(self) -> Optional[str]:
         if not self.gold_yaml_path:
@@ -126,6 +139,7 @@ def load_tasks(filter_names: list[str] | None = None) -> list[Task]:
             investigation_quality=data.get("investigation_quality") or {},
             terminal_tool=_as_list(data.get("terminal_tool")),
             broken_yaml_path=data.get("broken_yaml_path"),
+            before_scenario=data.get("before_scenario"),
             prompt_variant=data.get("prompt_variant"),
             tool_slice=data.get("tool_slice"),
         ))

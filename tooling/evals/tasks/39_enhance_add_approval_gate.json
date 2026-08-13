@@ -1,0 +1,32 @@
+{
+  "name": "enhance_add_approval_gate",
+  "mode": "enhance",
+  "prompt": "Add a manual_input step to this playbook that asks the analyst to confirm before the IP is blocked -- a Confirm and a Cancel button. Leave everything else exactly as it is.",
+  "before_scenario": "e1_add_manual_input_gate",
+  "gold_yaml_path": "tooling/evals/golds/enhance_add_approval_gate_after.yaml",
+  "notes": "Phase 3: enhancement quality. The judge (verify_enhancement's regressions) already existed and the matrix never read it, so an edit that dropped a step or silently renamed one scored exactly as well as a surgical one. Three gates count and each catches a different real failure: `behavior` (the gate was actually added, ahead of the block), `no_collateral_damage` (Enrich IP / Block IP / End survive with their names), `enhance_delivery` (the edit reached the playbook instead of being typed into chat -- the live failure this scenario set was written from).",
+  "ir_assertions": [
+    {
+      "kind": "step_type_present",
+      "type": "manual_input",
+      "note": "the confirmation step exists"
+    },
+    {
+      "kind": "branch_count",
+      "type": "manual_input",
+      "min": 2,
+      "note": "Confirm AND Cancel, not one button"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "manual_input"
+      },
+      "to": {
+        "type": "connector",
+        "connector": "fortigate"
+      },
+      "note": "P2: the block is now downstream of the analyst, not beside them"
+    }
+  ]
+}
