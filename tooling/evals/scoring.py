@@ -872,7 +872,8 @@ def score_wiring_resolution(trace_json: str, *, live: bool = False) -> dict[str,
     }
 
 
-def score_offer_timing(trace: list[dict[str, Any]]) -> dict[str, Any]:
+def score_offer_timing(trace: list[dict[str, Any]],
+                       offer_requested: bool = False) -> dict[str, Any]:
     """Eval dimension (SKILL_BASED_PLAYBOOK_PLAN §6 / TODO Track A4): did the
     agent call `emit_playbook_offer` at the RIGHT time?
 
@@ -894,6 +895,14 @@ def score_offer_timing(trace: list[dict[str, Any]]) -> dict[str, Any]:
     `_op_risk` classifies destructive ops by name prefix; an `unknown` op is
     not counted as containment here (same conservative stance as the card's
     advisory). Returns a level dict.
+
+    `offer_requested=True` for a turn where the analyst ASKED for a playbook
+    ("build me a playbook ... save it when it's ready"). There the offer is the
+    deliverable, not an unprompted save prompt, so the only bar is "offered
+    exactly once" -- the rules above all assume an investigation the agent
+    chose to bottle, and applied to a build turn they score the correct answer
+    as premature. That happened: `select_build_offer` lost a point for
+    delivering exactly what it was asked for.
     """
     try:
         from fsr_playbooks.mcp_server.tools_discovery import _op_risk
@@ -914,6 +923,16 @@ def score_offer_timing(trace: list[dict[str, Any]]) -> dict[str, Any]:
             mut_before.append(i)
 
     n = len(offers)
+    if offer_requested:
+        if n == 1:
+            return {"passed": True, "skipped": False, "offers": 1,
+                    "detail": "offered once -- the analyst asked for a playbook"}
+        return {
+            "passed": False, "skipped": False, "offers": n,
+            "detail": ("the analyst asked for a playbook and none was offered"
+                       if n == 0 else
+                       f"offered {n} times (bar: at most once per session)"),
+        }
     if n == 0:
         contained = bool(mut_before)
         return {
@@ -1185,7 +1204,9 @@ def score(
     # from the tool-use trace; informational so it tracks prompt regressions
     # without skewing the YAML-authoring score.
     if trace:
-        ot = score_offer_timing(trace)
+        ot = score_offer_timing(
+            trace,
+            offer_requested="emit_playbook_offer" in (terminal_tool or []))
         ot["informational"] = True
         out["levels"]["offer_timing"] = ot
     else:

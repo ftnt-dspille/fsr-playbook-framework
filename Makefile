@@ -173,17 +173,21 @@ corpus-gate: ## round-trip fidelity gate over the committed corpus (box-free). C
 # agent regressed" when nothing about the agent changed. These 5 terminate on
 # the first correct tool call, so they barely touch the box and stay honest.
 TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,select_diagnose_failure,select_run_playbook_neutral
-TOOL_GATE_BASELINE ?= 20260801T200941Z
+# 20260813T153315Z: agentic_frank 20/20 under the composite score
+# (terminal_tool_reached + offer_timing + appropriate_approval_requests +
+# no_spiral). Captured 2026-08-13 and re-scored with the fixed offer_timing
+# gate, which used to call a REQUESTED build offer premature.
+# data/eval_runs/ is gitignored, so a fresh checkout has no baseline to diff
+# against and must capture its own before a delta means anything.
+TOOL_GATE_BASELINE ?= 20260813T153315Z
 
 tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3
-	@echo "note: the composite authoring score (#127) means a row can now CLIMB,"
-	@echo "      not just drop: terminal_tool_reached + offer_timing +"
-	@echo "      appropriate_approval_requests + no_spiral. The pinned baseline"
-	@echo "      predates it and scores every row 1.0, so until it is replaced"
-	@echo "      every honest row reads as a regression. Re-baseline first:"
-	@echo "      make tool-gate BASELINE= REPEAT=3, then pin the new run id."
+	@echo "note: the score is composite (#127), so a row can CLIMB, not just"
+	@echo "      drop: terminal_tool_reached + offer_timing +"
+	@echo "      appropriate_approval_requests + no_spiral. Every run is saved;"
+	@echo "      re-baseline with 'make tool-gate BASELINE=' and pin the new id."
 	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py evals \
-	  --tasks $(TOOL_GATE_TASKS) \
+	  --tasks $(TOOL_GATE_TASKS) --save \
 	  $(if $(REPEAT),--repeat $(REPEAT),) \
 	  $(if $(TOOL_GATE_BASELINE),--baseline $(TOOL_GATE_BASELINE),)
 

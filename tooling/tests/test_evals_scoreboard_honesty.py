@@ -119,9 +119,12 @@ def _selection(trace, audit=None):
 
 
 def test_reaching_the_terminal_tool_is_no_longer_the_whole_verdict():
-    # Premature offer: reached the terminal tool without running anything
-    # first. Under the old scoreboard this was 1/1.
-    r = _selection([_call("emit_playbook_offer", yaml="x")], audit=[])
+    # Offered twice: reached the terminal tool, and broke the never-offer-twice
+    # bar getting there. Under the old scoreboard this was 1/1.
+    # (Offering ONCE here is correct -- this fixture asked for a playbook --
+    # so the single-offer trace is no longer the example of a docked row.)
+    r = _selection([_call("emit_playbook_offer", yaml="x"),
+                    _call("emit_playbook_offer", yaml="x")], audit=[])
     assert r["levels"]["terminal_tool_reached"]["passed"] is True
     assert r["levels"]["offer_timing"]["passed"] is False
     assert r["max"] > 1

@@ -72,3 +72,37 @@ def test_score_includes_informational_offer_timing_level():
 def test_score_skips_offer_timing_when_no_trace():
     out = scoring.score("", trace=None)
     assert out["levels"]["offer_timing"]["skipped"] is True
+
+
+# --- build turns: the offer IS the deliverable ----------------------------
+#
+# The rules above assume an investigation the agent chose to bottle. On a
+# "build me a playbook ... save it when it's ready" turn, offering with no op
+# executed is the correct answer, and grading it `premature` docks a row for
+# doing what it was asked. `select_build_offer` lost a point that way.
+
+def test_a_requested_build_offer_is_not_premature():
+    lv = scoring.score_offer_timing([_offer()], offer_requested=True)
+    assert lv["passed"] is True and lv["offers"] == 1
+
+
+def test_the_same_trace_is_still_premature_when_unrequested():
+    lv = scoring.score_offer_timing([_offer()])
+    assert lv["passed"] is False and "premature" in lv["detail"]
+
+
+def test_a_requested_build_that_never_offers_fails():
+    trace = [{"name": "get_step_type", "args": {}}]
+    lv = scoring.score_offer_timing(trace, offer_requested=True)
+    assert lv["passed"] is False and lv["offers"] == 0
+
+
+def test_offering_twice_still_fails_when_requested():
+    lv = scoring.score_offer_timing([_offer(), _offer()], offer_requested=True)
+    assert lv["passed"] is False
+
+
+def test_score_wires_the_flag_from_the_fixtures_terminal_tool():
+    r = scoring.score("", mode="tool_selection", trace=[_offer()],
+                      terminal_tool=["emit_playbook_offer"])
+    assert r["levels"]["offer_timing"]["passed"] is True
