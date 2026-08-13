@@ -176,8 +176,12 @@ TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,s
 TOOL_GATE_BASELINE ?= 20260801T200941Z
 
 tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3
-	@echo "note: scores DROPPING is the signal. The baseline is 5/5, so this"
-	@echo "      gate can catch a regression but can never show an improvement."
+	@echo "note: the composite authoring score (#127) means a row can now CLIMB,"
+	@echo "      not just drop: terminal_tool_reached + offer_timing +"
+	@echo "      appropriate_approval_requests + no_spiral. The pinned baseline"
+	@echo "      predates it and scores every row 1.0, so until it is replaced"
+	@echo "      every honest row reads as a regression. Re-baseline first:"
+	@echo "      make tool-gate BASELINE= REPEAT=3, then pin the new run id."
 	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py evals \
 	  --tasks $(TOOL_GATE_TASKS) \
 	  $(if $(REPEAT),--repeat $(REPEAT),) \

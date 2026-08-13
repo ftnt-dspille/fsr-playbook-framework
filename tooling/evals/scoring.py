@@ -36,6 +36,9 @@ import re
 from typing import Any
 
 _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n", re.IGNORECASE)
+# The same fence, capturing its body. Used where prose must NOT be mistaken for
+# a playbook -- see `delivered_yaml`.
+_YAML_FENCED_RE = re.compile(r"```ya?ml\s*\n(.*?)```", re.IGNORECASE | re.DOTALL)
 
 # Tool calls that CARRY the delivered playbook. The agent is instructed not to
 # paste YAML at the analyst -- `emit_playbook_offer`'s own description says a
@@ -64,8 +67,18 @@ def delivered_yaml(final_text: str, trace: list[dict[str, Any]] | None) -> str:
 
     Preference order: the artifact the analyst would actually receive (the
     offer card), then what the agent last gated, then a fenced block in chat.
+
+    The chat fallback is FENCE-ONLY for an agentic turn. `extract_yaml` returns
+    the whole raw text when it finds no fence -- deliberate, because a
+    single-shot local model may forget the fence and the whole reply IS the
+    answer. For a turn with a tool trace that assumption inverts: a turn that
+    delivered no YAML has prose, and handing prose to the compiler produced
+    the parse errors that made `draft` unreadable ("compile failed" on a
+    markdown table, on a sentence containing a backticked id). A turn that
+    never claimed to emit a playbook must score as having emitted none, not as
+    having emitted a broken one.
     """
-    if trace:
+    if trace is not None:
         for name, keys in _YAML_BEARING_ARGS:
             for call in reversed(trace):
                 if call.get("name") != name or call.get("refused"):
@@ -75,6 +88,8 @@ def delivered_yaml(final_text: str, trace: list[dict[str, Any]] | None) -> str:
                     v = args.get(k)
                     if isinstance(v, str) and v.strip():
                         return v
+        m = _YAML_FENCED_RE.search(final_text or "")
+        return m.group(1).strip() if m else ""
     from evals.providers import extract_yaml  # noqa: PLC0415 -- cycle
     return extract_yaml(final_text or "")
 
@@ -631,13 +646,35 @@ def _score_investigation_quality(
     return gates
 
 
+#: The gates below ask "did the agent gate its work before submitting". BOTH
+#: pre-submit gates count. `verify_enhancement` is the enhance-mode one, and
+#: it is not optional there: `emit_enhancement_offer` takes a `verified_id`
+#: that only `verify_enhancement` issues and refuses the call without one. So
+#: an enhance turn that delivered an edit CANNOT have skipped verification --
+#: scoring only `verify_playbook` marked those turns "agent never called
+#: verify" for doing exactly the right thing, and a grader that punishes the
+#: correct behavior is worse than no grader.
+_VERIFY_TOOLS = ("verify_playbook", "verify_enhancement")
+
+#: The composite authoring score for `mode="tool_selection"`: the gates that
+#: count alongside `terminal_tool_reached`. Each measures a behaviour we
+#: already say we care about elsewhere -- offering at the right moment (A4),
+#: not escalating past the tier the task needs (P2 gating), and not looping --
+#: and each was observed FAILING on runs that scored a perfect 1/1.
+_SELECTION_COUNTED_GATES = (
+    "offer_timing",
+    "appropriate_approval_requests",
+    "no_spiral",
+)
+
+
 def _verify_metrics(trace: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Three metrics about the agent's use of `verify_playbook` from
+    """Three metrics about the agent's use of the pre-submit verify tools from
     the call trace. Distinct from the `verified` confidence tier --
     these measure agent *behavior*, not playbook quality. The agent
     can technically ship a YAML it never ran through verify; this gate
     catches that."""
-    verifies = [t for t in trace if t.get("name") == "verify_playbook"]
+    verifies = [t for t in trace if t.get("name") in _VERIFY_TOOLS]
     called = len(verifies) >= 1
     last_ready = bool(verifies[-1].get("verify", {}).get("ready_to_push")) if verifies else False
     iters = len(verifies)
@@ -648,8 +685,15 @@ def _verify_metrics(trace: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {
         "verify_called_before_submit": {
             "passed": called, "skipped": False,
-            "detail": (f"{len(verifies)} verify_playbook call(s)" if called
-                       else "agent never called verify_playbook"),
+            # Name which gate ran: "2 verify call(s)" hides that an enhance
+            # turn used the enhance gate, which is the thing a reader of this
+            # row wants to know.
+            "tools": sorted({str(v.get("name")) for v in verifies}),
+            "detail": (
+                f"{len(verifies)} call(s): "
+                + ", ".join(sorted({str(v.get("name")) for v in verifies}))
+                if called else
+                "agent never called verify_playbook / verify_enhancement"),
         },
         "verify_iterations_until_ready": {
             "passed": called, "skipped": False,
@@ -1040,30 +1084,47 @@ def score(
     investigation = (mode == "investigation")
     selection = (mode == "tool_selection")
 
+    # A turn that delivered nothing has nothing to compile. Saying "compile
+    # failed" about it is a lie with errors attached, and the errors are about
+    # whatever prose got scraped -- which is how the detail column stopped
+    # being read at all. In the modes that never expect a playbook the tiers
+    # are SKIPPED (they are informational there anyway, so the aggregate is
+    # untouched); in build mode "delivered nothing" is still a failure, just an
+    # honestly-labelled one.
+    no_yaml = not (yaml_text or "").strip()
+    empty_detail = "the turn delivered no YAML -- nothing to compile"
+    empty_skip = no_yaml and (refuse or investigation or selection)
+
     # ----------------- confidence tier 1: draft (compile clean) ------------
-    comp = _compile_obj(yaml_text)
+    comp = _compile_obj(yaml_text) if not no_yaml else {"ok": False, "errors": []}
     draft_ok = bool(comp.get("ok"))
     out["levels"]["draft"] = {
         "passed": draft_ok,
-        "skipped": False,
-        "detail": ("compiles" if draft_ok else "compile failed"),
+        "skipped": empty_skip,
+        "detail": (empty_detail if no_yaml
+                   else "compiles" if draft_ok else "compile failed"),
         "errors": comp.get("errors", []) if not draft_ok else [],
     }
+    if no_yaml:
+        out["levels"]["draft"]["code"] = "no_yaml_delivered"
 
     # ----------------- confidence tier 2: verified -------------------------
     # Runs the same fan-out the agent is supposed to call: compile +
     # typed walk + per-step schema checks. live_probe follows the eval
     # mode so offline runs stay deterministic.
-    verify = _verify(yaml_text, live=live)
+    verify = ({} if no_yaml else _verify(yaml_text, live=live))
     verified_ok = bool(verify.get("ready_to_push"))
     out["levels"]["verified"] = {
         "passed": verified_ok,
-        "skipped": False,
+        "skipped": empty_skip,
         "required_fix_count": len(verify.get("required_fixes") or []),
         "warning_count": len(verify.get("warnings") or []),
-        "detail": ("verify_playbook ready_to_push=True" if verified_ok
+        "detail": (empty_detail if no_yaml
+                   else "verify_playbook ready_to_push=True" if verified_ok
                    else f"{len(verify.get('required_fixes') or [])} required fix(es)"),
     }
+    if no_yaml:
+        out["levels"]["verified"]["code"] = "no_yaml_delivered"
 
     # ----------------- confidence tier 3: live_tested ----------------------
     if live:
@@ -1248,6 +1309,24 @@ def score(
         for k, lv in out["levels"].items():
             if not lv.get("skipped"):
                 lv["informational"] = True
+        # …except the gates that measure whether the RIGHT call was made
+        # well. Reaching the terminal tool stays necessary -- it is the whole
+        # reason this mode exists -- but it stopped being sufficient the
+        # moment every fixture reached it. A scoreboard pinned at 5/5 cannot
+        # show an improvement, so "make the agent smarter" had no number to
+        # move; these three were sitting in the informational block already
+        # FAILING on real runs (`offer_timing`: "offered before executing any
+        # action (premature)"; `appropriate_approval_requests`: "1 tier-3+
+        # call(s) -- expected zero"), scored 1/1 all the same.
+        #
+        # Deliberately NOT promoted: `decoys_before`. Calling a
+        # wrong-but-plausible tool on the way is orienting, not failing, and
+        # _score_tool_selection documents that it never flips the gate. It
+        # stays a diagnostic on the terminal row.
+        for k in _SELECTION_COUNTED_GATES:
+            lv = out["levels"].get(k)
+            if lv and not lv.get("skipped"):
+                lv.pop("informational", None)
         if trace is not None:
             out["levels"]["terminal_tool_reached"] = _score_tool_selection(
                 trace, terminal_tool, forbidden_facts)

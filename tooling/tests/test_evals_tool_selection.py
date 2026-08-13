@@ -88,26 +88,32 @@ def _score(trace, terminal_tool):
                          mode="tool_selection", terminal_tool=terminal_tool)
 
 
-def test_score_counts_only_the_terminal_gate():
-    """A research-only turn must score 0/1, not partial credit for the
-    authoring gates it happened to satisfy."""
+def test_research_only_turn_gets_no_credit_for_the_authoring_gates():
+    """A research-only turn must lose the terminal gate outright, not earn
+    partial credit for the authoring gates it happened to satisfy."""
     out = _score([_call("find_connector")], ["run_playbook"])
-    assert out["max"] == 1
-    assert out["score"] == 0
-    assert out["fraction"] == 0.0
     assert out["levels"]["terminal_tool_reached"]["passed"] is False
+    assert out["fraction"] < 1.0
 
 
-def test_score_passes_when_terminal_reached():
+def test_the_terminal_gate_is_necessary_but_no_longer_sufficient():
+    # #127: this used to be (1, 1) -- one gate, and a baseline of 5/5 that
+    # could only stay flat or drop. The composite adds the gates that were
+    # already failing in the informational block, so a run has somewhere to
+    # climb from.
     out = _score([_call("run_playbook")], ["run_playbook"])
-    assert (out["score"], out["max"]) == (1, 1)
+    assert out["levels"]["terminal_tool_reached"]["passed"] is True
+    assert out["max"] > 1
 
 
-def test_other_gates_are_informational_not_counted():
+def test_only_the_composite_gates_are_counted():
     out = _score([_call("run_playbook")], ["run_playbook"])
-    counted = [k for k, v in out["levels"].items()
-               if not v.get("skipped") and not v.get("informational")]
-    assert counted == ["terminal_tool_reached"]
+    counted = {k for k, v in out["levels"].items()
+               if not v.get("skipped") and not v.get("informational")}
+    # `appropriate_approval_requests` needs an audit log this helper does not
+    # pass, so it skips -- a missing instrument must not count as a failure.
+    assert counted == {"terminal_tool_reached", "offer_timing", "no_spiral"}
+    assert counted <= {"terminal_tool_reached", *scoring._SELECTION_COUNTED_GATES}
 
 
 def test_build_fidelity_skipped_in_selection_mode():

@@ -214,8 +214,12 @@ def test_score_investigation_mode_demotes_authoring_gates():
     )
     lv = out["levels"]
     assert lv["investigation_recall"]["passed"] is True
-    # Authoring tiers must not drag/help the score.
-    assert lv["draft"]["informational"] is True
+    # Authoring tiers must not drag/help the score. `draft` is now SKIPPED
+    # rather than informational when the turn delivered no YAML at all (#127:
+    # it used to report "compile failed" with parse errors scraped from the
+    # prose answer) -- either way it is out of the aggregate.
+    assert lv["draft"]["skipped"] is True
+    assert lv["draft"]["code"] == "no_yaml_delivered"
     assert lv["adherence"]["informational"] is True
     # The loose authoring tool_budget is demoted in favor of the tighter
     # investigation ceiling.

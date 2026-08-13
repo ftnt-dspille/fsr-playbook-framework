@@ -259,7 +259,13 @@ def _agentic_anthropic_provider() -> Callable:
                 # Capture the verify_playbook envelope (small, structured)
                 # so the scorer can compute verify-related metrics without
                 # re-running the tool.
-                if name == "verify_playbook" and isinstance(result, dict):
+                # `verify_enhancement` returns the same envelope plus
+                # regressions, and it is the ONLY pre-submit gate on the
+                # enhance path -- capture it too, or every enhance turn reads
+                # as "never reached ready_to_push" for having used the correct
+                # gate.
+                if name in ("verify_playbook", "verify_enhancement") \
+                        and isinstance(result, dict):
                     entry["verify"] = {
                         "ready_to_push": bool(result.get("ready_to_push")),
                         "required_fix_count": len(result.get("required_fixes") or []),
@@ -347,7 +353,13 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
                 if isinstance(result, dict):
                     entry["ok"] = result.get("ok")
                     entry["code"] = result.get("code")
-                if name == "verify_playbook" and isinstance(result, dict):
+                # `verify_enhancement` returns the same envelope plus
+                # regressions, and it is the ONLY pre-submit gate on the
+                # enhance path -- capture it too, or every enhance turn reads
+                # as "never reached ready_to_push" for having used the correct
+                # gate.
+                if name in ("verify_playbook", "verify_enhancement") \
+                        and isinstance(result, dict):
                     entry["verify"] = {
                         "ready_to_push": bool(result.get("ready_to_push")),
                         "required_fix_count": len(result.get("required_fixes") or []),
