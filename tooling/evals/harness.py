@@ -248,10 +248,12 @@ def run_matrix(
     # mid-run would outlive the swap.
     from evals import offline as _offline
     offline_run = _offline.enabled()
+    record_substrate = "live" if not offline_run else "empty"
     if offline_run:
         _offline.install()
-        print(f"  offline: tools bound to {_offline.active_client_name()}",
-              file=sys.stderr, flush=True)
+        record_substrate = _offline.active_box_name()
+        print(f"  offline: tools bound to {_offline.active_client_name()}, "
+              f"records from {record_substrate}", file=sys.stderr, flush=True)
 
     # Which TOOL SET scored this run. The alert/incident hunt tools
     # (get_record, search_module_records, siem_*, faz_*) are registered by the
@@ -416,6 +418,11 @@ def run_matrix(
         # fixtures score zero without the connector's triage tools, so a
         # cross-substrate comparison reads a registry gap as a regression.
         "tool_substrate": substrate,
+        # ...and which RECORDS it could read. `empty` means the record surface
+        # answered every read empty-but-ok, which is indistinguishable from a
+        # box holding nothing -- the investigation rows are unservable and
+        # their zeros are the harness's, not the agent's.
+        "record_substrate": record_substrate,
         "tasks": [t.name for t in tasks],
         "models": list(model_names),
         "rows": rows,

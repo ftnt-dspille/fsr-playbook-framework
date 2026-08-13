@@ -2939,6 +2939,11 @@ def cmd_evals(args: argparse.Namespace) -> int:
     # provider preflight below must not build a live client either.
     if getattr(args, "offline", False):
         os.environ["EVAL_OFFLINE"] = "1"
+    # Which RECORDS the offline run can read. Without a bundle the record
+    # surface answers every read empty-but-ok, and the investigation fixtures
+    # measure an agent triaging an empty box.
+    if getattr(args, "bundle", None):
+        os.environ["EVAL_FIXTURE_BUNDLE"] = args.bundle
     if args.list_runs:
         runs = list_runs()
         if not runs:
@@ -4742,6 +4747,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="bind the agent's tools to the simulated client and "
                          "strip the FSR_* credentials (= EVAL_OFFLINE=1). A "
                          "degrading box otherwise scores as agent regression.")
+    sp.add_argument("--bundle", default=None, metavar="NAME",
+                    help="serve the offline record surface (/api/3, "
+                         "/api/query) from a fixture bundle instead of "
+                         "empty-but-ok (= EVAL_FIXTURE_BUNDLE). "
+                         "`soc_invest_surface` covers the invest_* fixtures; "
+                         "without it they triage a box holding no records.")
     sp.add_argument("--json", action="store_true",
                     help="emit the full matrix as JSON on stdout")
     sp.add_argument("--save", action="store_true",

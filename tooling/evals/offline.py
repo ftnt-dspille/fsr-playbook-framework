@@ -20,10 +20,18 @@ path this module does not know about gets *nothing* rather than a live box.
 An offline run that quietly reached an appliance would be worse than no
 offline mode, because the number would look trustworthy.
 
-Not covered by the sim client: record reads (`/api/3/<module>`). Those return
-an empty-but-ok envelope. A fixture that depends on reading real records is
-not offline-ready yet, and says so by scoring low -- see `FixtureBox` in the
-connector repo for the bundle format that would fill this in.
+Record reads (`/api/3/<module>`, `/api/query/<module>`) need one more piece.
+Unbound, the sim client answers them empty-but-ok, and an investigation fixture
+then runs a dozen reads and learns nothing -- the agent behaves correctly
+against a box holding no records and the HARNESS scores it. `EVAL_FIXTURE_BUNDLE`
+binds a `FixtureBox` (`fsr_playbooks.mcp_server._fixture_box`) over that
+surface: a real record table with the filter/sort/limit semantics the query path
+uses. Opt-in, so every existing offline row keeps the substrate it was measured
+on.
+
+Which bundle -- or none -- is reported by `active_box_name()` and recorded into
+the matrix, for the same reason the tool set is: two runs on different
+substrates are not comparable, and nothing else in the row would say so.
 """
 from __future__ import annotations
 
@@ -51,8 +59,9 @@ def install() -> dict[str, Any]:
     Idempotent: safe to call once per run, or per test. Returns the modules it
     displaced, for `uninstall()`.
     """
+    from fsr_playbooks.mcp_server import _shared
     from fsr_playbooks.mcp_server import _sim_client as sc
-    from fsr_playbooks.mcp_server import _shared, tools_execution as te
+    from fsr_playbooks.mcp_server import tools_execution as te
 
     for key in _SEALED:
         os.environ.pop(key, None)
@@ -82,7 +91,44 @@ def install() -> dict[str, Any]:
     _shared._LIVE_CLIENT_CACHE.pop("client", None)
     te._CONFIGURED_CACHE["rows"] = None
     te._CONFIGURED_CACHE["ts"] = 0.0
+
+    bind_bundle()
     return saved
+
+
+def bundle_name() -> str:
+    """The bundle the caller asked to bind, or `""` for none."""
+    return os.environ.get("EVAL_FIXTURE_BUNDLE", "").strip()
+
+
+def bind_bundle(name: str | None = None) -> Any:
+    """Serve the record surface from a fixture bundle.
+
+    A malformed or missing bundle RAISES. The alternative -- carrying on with
+    an unbound box -- is the "gate that selects zero files" shape: the run
+    completes, every record read comes back empty, and the rows look like an
+    agent that could not investigate.
+    """
+    name = bundle_name() if name is None else name
+    if not name:
+        return None
+    # A bundle may cite a real capture that lives in the connector checkout
+    # (`{"$file": "alert_c2_exfil"}`) instead of copying it -- a copy drifts,
+    # and a drifted fixture reads as a model result. `_fixture_box` resolves
+    # those from `FSR_CONNECTOR_REPO`, the same var this harness already uses
+    # to find the triage tools, so nothing extra is set here.
+    from fsr_playbooks.mcp_server import _fixture_box as fb
+    from fsr_playbooks.mcp_server import _sim_client as sc
+
+    box = fb.FixtureBox(fb.load_bundle(name))
+    sc.bind_box(box)
+    return box
+
+
+def active_box_name() -> str:
+    """Which record substrate is bound: a bundle name, or `"empty"`."""
+    from fsr_playbooks.mcp_server import _sim_client as sc
+    return bundle_name() if sc.active_box() is not None else "empty"
 
 
 def uninstall(saved: dict[str, Any]) -> None:
@@ -98,8 +144,10 @@ def uninstall(saved: dict[str, Any]) -> None:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = mod
-    from fsr_playbooks.mcp_server import _shared
+    from fsr_playbooks.mcp_server import _shared, _sim_client
     _shared._LIVE_CLIENT_CACHE.pop("client", None)
+    # A box bound by one test would otherwise answer the next one's reads.
+    _sim_client.unbind_box()
 
 
 def active_client_name() -> str:
