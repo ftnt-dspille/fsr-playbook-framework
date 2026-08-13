@@ -136,6 +136,44 @@ class _SimSession:
         return _Response(data, status)
 
 
+class _SimConnector:
+    """One row of ``client.connectors.list_configured()``, attribute-shaped.
+
+    `list_configured_connectors` reads `.name/.status/.version/.label/
+    .configurations` off pyfsr's typed objects, not a dict.
+    """
+
+    def __init__(self, row: dict) -> None:
+        self.name = row.get("name")
+        self.status = row.get("status") or "Completed"
+        self.version = row.get("version")
+        self.label = row.get("label") or row.get("name")
+        self.configurations = list(row.get("configs") or [])
+
+
+class _SimConnectorsAPI:
+    """The slice of pyfsr's typed ``client.connectors`` that discovery uses.
+
+    Without it, `list_configured_connectors` raises `AttributeError` and every
+    caller downstream reports `no_fsr_configured` -- which offline meant
+    `find_enrichment_actions` and `find_containment_actions` failed on 9 of 9
+    calls in a five-fixture investigation run. That is not a small gap: those
+    two tools ARE the shortcut past connector discovery, so the agent asked the
+    right question first, got a hard error, and fell back to walking
+    `find_connector` -> `find_operation` -> `get_op_schema` by hand. Half of
+    every investigation's tool budget went there, and it read as the agent
+    overspending.
+
+    Built from the SAME `connector_rows()` the `/api/integration/
+    connector_details/` route serves, so there is one definition of what is
+    configured offline. Two would drift, and a drifted fixture reads as a
+    model result.
+    """
+
+    def list_configured(self) -> list:
+        return [_SimConnector(r) for r in _sim_fixtures.connector_rows()]
+
+
 class SimulatedFSRClient:
     """``pyfsr.FortiSOAR``-shaped client backed by static fixtures."""
 
@@ -144,6 +182,7 @@ class SimulatedFSRClient:
 
     def __init__(self) -> None:
         self.session = _SimSession()
+        self.connectors = _SimConnectorsAPI()
 
     def post(self, path: str, data: Any = None, **_kw: Any) -> Any:
         return _route("POST", path, data)

@@ -89,3 +89,40 @@ def test_firewall_block_is_success():
     data = out["data"]
     assert data["status"] == "success"
     assert data["blockedIp"] == fx._C2_IP
+
+
+def test_client_exposes_a_typed_connectors_api():
+    """`client.connectors.list_configured()` -- the pyfsr shape, not a dict.
+
+    `list_configured_connectors` reads attributes off these objects. When the
+    attribute was missing entirely the call raised, and EVERY caller downstream
+    reported `no_fsr_configured` -- which is how `find_enrichment_actions` and
+    `find_containment_actions` came to fail on 9 of 9 calls in an offline
+    investigation run while looking like the agent choosing to overspend.
+    """
+    client = sc.get_client()
+    rows = client.connectors.list_configured()
+    assert rows, "the simulated roster must not be empty"
+    names = {c.name for c in rows}
+    assert {"virustotal", "fortigate-firewall"} <= names
+    for c in rows:
+        # Every attribute the listing reads. A missing one is an AttributeError
+        # inside a bare `except`, i.e. silently `no_fsr_configured` again.
+        assert c.name and c.status and c.version
+        assert c.label is not None
+        assert c.configurations, "no config => preflight rejects the connector"
+
+
+def test_the_connectors_api_and_the_details_route_agree():
+    """One definition of what is configured offline, not two.
+
+    The typed API and `/api/integration/connector_details/` are read by
+    different callers; if they could disagree, a connector would be offerable
+    by one path and rejected by the other -- the false-positive the listing's
+    active-config filter exists to prevent, reintroduced offline.
+    """
+    client = sc.get_client()
+    typed = {c.name for c in client.connectors.list_configured()}
+    route = {r["name"] for r in client.session.post(
+        "/api/integration/connector_details/", json={}).json()["data"]}
+    assert typed == route
