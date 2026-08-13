@@ -115,6 +115,12 @@ def _progress(model: str, i: int, n: int, task: str, row: dict[str, Any]) -> Non
         mark = f"{row['score']}/{row['max']} all gates"
     else:
         mark = f"{row['score']}/{row['max']} gates"
+    # An unservable row is a real low score, and printing it bare invites the
+    # reading that cost a session: "the agent scored 3/7 on investigation".
+    # It scored 3/7 on an environment missing the tools the fixture requires.
+    uns = row.get("unservable")
+    if isinstance(uns, dict) and uns.get("missing_tools"):
+        mark += f"  [UNSERVABLE: no {', '.join(uns['missing_tools'])}]"
     secs = row.get("elapsed_ms", 0) / 1000.0
     print(f"  [{model} {i}/{n}] {task} -- {mark} ({secs:.1f}s)",
           file=sys.stderr, flush=True)
@@ -159,6 +165,67 @@ def recover_rows(path: Path | str) -> list[dict[str, Any]]:
     return rows
 
 
+def register_triage_tools_if_available() -> str:
+    """Pull in the connector's triage tools when its repo is importable.
+
+    `get_record`, `search_module_records` and the SIEM/FAZ hunt tools live in
+    the connector's `fsr_soc_triage.registry`, which mutates the framework's
+    global REGISTRY at import (the "Option-A posture" `intents.py` documents).
+    Without them five investigation fixtures name tools nothing registers and
+    score zero while the agent works competently -- measured 2026-08-13 as
+    3/7 with recall 0.00.
+
+    Returns the substrate name, which the matrix records. Two rules follow
+    from it and both are load-bearing:
+
+      - a run is only comparable to another run with the SAME substrate;
+      - a registration that RAISES is reported, never swallowed. A silently
+        half-registered registry is the "gate that selects zero files" shape
+        -- it looks exactly like a passing one.
+
+    `FSR_CONNECTOR_REPO` may point at the connector checkout; otherwise this
+    relies on it already being importable.
+    """
+    try:
+        from fsr_playbooks.llm.tools import REGISTRY
+    except Exception:  # noqa: BLE001
+        return "unknown (framework registry unreadable)"
+
+    if "get_record" in REGISTRY:
+        return "framework+connector (already registered)"
+
+    repo = os.environ.get("FSR_CONNECTOR_REPO", "").strip()
+    if repo:
+        # `fsr_soc_triage` sits one level down, inside the connector PACKAGE
+        # dir -- pointing at the repo root is the natural thing to pass and
+        # on its own imports nothing, so accept both and let the caller be
+        # right either way.
+        for cand in (Path(repo) / "connector-fsr-soc-assistant", Path(repo)):
+            if (cand / "fsr_soc_triage").is_dir() and str(cand) not in sys.path:
+                # The connector's own modules must PRECEDE the framework on
+                # the path or its shadowing copies resolve to the wrong one.
+                sys.path.insert(0, str(cand))
+                break
+
+    try:
+        from fsr_soc_triage.registry import (  # type: ignore[import-not-found]
+            register_triage_tools,
+        )
+    except ImportError:
+        return "framework-only (no fsr_soc_triage)"
+
+    try:
+        register_triage_tools()
+    except Exception as exc:  # noqa: BLE001
+        # Loud, not silent: a partial registration would leave some fixtures
+        # servable and others not, with nothing saying which.
+        return f"framework-only (register_triage_tools raised: {exc!r})"
+
+    if "get_record" not in REGISTRY:
+        return "framework-only (registration ran but added no record tools)"
+    return "framework+connector"
+
+
 def run_matrix(
     *,
     model_names: list[str],
@@ -185,6 +252,16 @@ def run_matrix(
         _offline.install()
         print(f"  offline: tools bound to {_offline.active_client_name()}",
               file=sys.stderr, flush=True)
+
+    # Which TOOL SET scored this run. The alert/incident hunt tools
+    # (get_record, search_module_records, siem_*, faz_*) are registered by the
+    # connector, not by this repo -- so the same fixture measures different
+    # things depending on whether the connector is importable, and five
+    # investigation fixtures cannot score at all without it. Recorded rather
+    # than assumed: a run comparing framework-only rows against
+    # framework+connector rows is comparing environments, not agents.
+    substrate = register_triage_tools_if_available()
+    print(f"  tools: {substrate}", file=sys.stderr, flush=True)
 
     gold_lookup = _gold_lookup_for(tasks)
     system_prompt = load_system_prompt()
@@ -334,6 +411,11 @@ def run_matrix(
         # Which substrate produced these numbers. A run that does not say so
         # invites its rows being compared against ones taken on a box.
         "offline": offline_run,
+        # ...and which TOOL SET. `offline` says where the bytes came from;
+        # this says what the agent was even able to call. Five investigation
+        # fixtures score zero without the connector's triage tools, so a
+        # cross-substrate comparison reads a registry gap as a regression.
+        "tool_substrate": substrate,
         "tasks": [t.name for t in tasks],
         "models": list(model_names),
         "rows": rows,
@@ -549,6 +631,20 @@ def delta_vs(prior: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
                           "before": before, "after": after,
                           "detail": str(err)})
             continue
+        # Same contract as `errored`, different cause: this row's required
+        # tools are not registered in the process that scored it, so its
+        # number measures the environment. Comparing it across runs -- or
+        # worse, across REPOS, where the connector supplies those tools --
+        # reads a missing registry as the agent regressing.
+        uns = c.get("unservable") or p.get("unservable")
+        if uns:
+            miss = (uns.get("missing_tools") if isinstance(uns, dict) else None)
+            cells.append({"model": k[0], "task": k[1], "status": "unservable",
+                          "before": before, "after": after,
+                          "detail": (f"required tools not registered: "
+                                     f"{', '.join(miss)}" if miss
+                                     else "required tools not registered")})
+            continue
         if after > before:
             status = "improved"
         elif after < before:
@@ -579,7 +675,7 @@ def render_delta(d: dict[str, Any]) -> str:
         "-" * 70,
     ]
     sym = {"improved": "+", "regressed": "-", "same": "=",
-           "new": "*", "removed": "x", "errored": "!"}
+           "new": "*", "removed": "x", "errored": "!", "unservable": "~"}
     for c in d["cells"]:
         b = c.get("before")
         a = c.get("after")
