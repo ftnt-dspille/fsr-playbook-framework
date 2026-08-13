@@ -181,13 +181,15 @@ TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,s
 # against and must capture its own before a delta means anything.
 TOOL_GATE_BASELINE ?= 20260813T153315Z
 
-tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3
+tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3 OFFLINE=1
 	@echo "note: the score is composite (#127), so a row can CLIMB, not just"
 	@echo "      drop: terminal_tool_reached + offer_timing +"
 	@echo "      appropriate_approval_requests + no_spiral. Every run is saved;"
 	@echo "      re-baseline with 'make tool-gate BASELINE=' and pin the new id."
+	@echo "      OFFLINE=1 binds the tools to the simulated client (no box)."
+	@echo "      2026-08-13: offline reproduced the live baseline exactly, 20/20."
 	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py evals \
-	  --tasks $(TOOL_GATE_TASKS) --save \
+	  --tasks $(TOOL_GATE_TASKS) --save $(if $(OFFLINE),--offline,) \
 	  $(if $(REPEAT),--repeat $(REPEAT),) \
 	  $(if $(TOOL_GATE_BASELINE),--baseline $(TOOL_GATE_BASELINE),)
 
