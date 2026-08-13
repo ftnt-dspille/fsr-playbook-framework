@@ -1,0 +1,50 @@
+# The correct answer to the `enhance_gate_block_on_verdict` fixture (scenario
+# e3). Calibration, not a demo.
+#
+# This is a REWIRE, not an append -- the class of edit that breaks things. A
+# decision is inserted AND `Enrich IP`'s `next:` is repointed at it, so the
+# block is now reachable only through the malicious arm. Everything the
+# analyst did not name keeps its name and its wiring byte for byte: a
+# gratuitous rename of `Block IP` would detach its run history, which is why
+# `verify_enhancement` calls a silent rename an error-severity regression.
+collection: 00 - FSR Studio
+playbooks:
+- name: Suspicious IP Response
+  is_active: true
+  trigger_step_id: start
+  parameters:
+  - ip_to_investigate
+  steps:
+  - type: start
+    name: Start
+    module: alerts
+    button_label: Respond
+    next: Enrich IP
+  - type: connector
+    name: Enrich IP
+    connector: cyops_utilities
+    operation: no_op
+    params: {}
+    next: Is It Malicious
+  - type: decision
+    name: Is It Malicious
+    conditions:
+    - display: Malicious
+      when: '{{ vars.steps.Enrich_IP.data.reputation == "malicious" }}'
+      next: Block IP
+    - display: Else
+      default: true
+      next: End
+  - type: connector
+    name: Block IP
+    connector: fortigate-firewall
+    operation: block_ip
+    params:
+    method: Quarantine Based
+    ip_addresses: '{{ vars.input.params.ip_to_investigate }}'
+    next: End
+  - type: connector
+    name: End
+    connector: cyops_utilities
+    operation: no_op
+    params: {}

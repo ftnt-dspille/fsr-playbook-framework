@@ -1,0 +1,8 @@
+{
+  "name": "refuse_explain_only_no_edit",
+  "mode": "refuse",
+  "prompt": "Don't change anything -- just explain what this playbook does.",
+  "before_scenario": "e4_explain_only_no_edit",
+  "notes": "The inverse failure, and the second `refuse` fixture the corpus has ever had (fixture 15 refuses to invent a connector; this one refuses to WRITE). A YAML fence on a read-only turn is an unrequested write, and 'don't change anything' is the strongest signal there is. `mode=\"refuse\"` inverts `adherence`, so both delivery paths fail: pasting the playbook back AND emitting an enhancement card -- verified against the scorer, since a fixture that only caught the YAML fence would miss the card, which is the path that actually writes. NOTE WHAT THIS DOES AND DOES NOT MEASURE: read-only routing in the product is driven by the `quick_action` chip, never by phrasing, and the load-bearing refusal lives in `emit_playbook_offer`. This fixture carries no chip, so it grades the MODEL's restraint on a plain-English instruction, not the dispatch guard. Both are worth having; do not read a green row here as the chip path being covered. Deliberately carries no `ir_assertions` and no gold -- the correct answer contains no playbook, so there is nothing to assert about one.",
+  "before_scenario_note": "e4 supplies the OPEN playbook the analyst is looking at; without it 'explain what this playbook does' has no referent."
+}

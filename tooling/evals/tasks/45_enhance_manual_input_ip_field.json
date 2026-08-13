@@ -1,0 +1,31 @@
+{
+  "name": "enhance_manual_input_ip_field",
+  "mode": "enhance",
+  "prompt": "Add a manual input step with a field of kind ip_address. Leave every other step exactly as it is.",
+  "before_scenario": "e6_broken_edit_is_not_delivered",
+  "gold_yaml_path": "tooling/evals/golds/enhance_manual_input_ip_field_after.yaml",
+  "notes": "The ask names a kind the validator does not have: `inputs[].kind` is an enum and `ip_address` is not in it (the real one is `ipv4`). Both acceptable outcomes land on the same gold -- author `ipv4` from the start, or author the ask literally, fail verify, fix, deliver. The failure being graded is delivering ANYWAY: `verified` catches pushing the rejected document, `enhance_delivery` catches printing it at the analyst as though it were done. Read alongside the eval-fixtures-can-be-unanswerable finding -- this is the same class of prompt (an ask the catalog rejects) turned deliberately into the thing under test rather than an accident that caps a row.",
+  "ir_assertions": [
+    {
+      "kind": "step_type_present",
+      "type": "manual_input",
+      "note": "the manual input step was added"
+    },
+    {
+      "kind": "arg_text_contains",
+      "type": "manual_input",
+      "contains": "ipv4",
+      "note": "the field uses the kind that EXISTS, not the one the prompt named"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "start"
+      },
+      "to": {
+        "type": "manual_input"
+      },
+      "note": "it is wired into the flow, not parked beside it"
+    }
+  ]
+}

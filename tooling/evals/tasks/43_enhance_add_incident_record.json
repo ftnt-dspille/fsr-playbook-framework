@@ -1,0 +1,35 @@
+{
+  "name": "enhance_add_incident_record",
+  "mode": "enhance",
+  "prompt": "Add a step after Enrich IP that creates an incident record summarising what we found. Leave every other step exactly as it is.",
+  "before_scenario": "e2_add_connector_step",
+  "gold_yaml_path": "tooling/evals/golds/enhance_add_incident_record_after.yaml",
+  "notes": "Third enhance fixture, grading a CATALOG-SHAPE mistake rather than a wiring one: the scenario's own note says 'create a record' is a native `create_record` step, and an agent that reaches for `find_operation` and bolts on a connector op is off the rails before delivery is in question. `step_type_present: create_record` is what says so. The second axis is the insertion POINT -- 'after Enrich IP', not appended at the end; a create_record parked past the block satisfies 'one exists' and answers a different request, which is what the reachability pair pins down.",
+  "ir_assertions": [
+    {
+      "kind": "step_type_present",
+      "type": "create_record",
+      "note": "a NATIVE create_record step, not a connector operation"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "name_contains": "Enrich"
+      },
+      "to": {
+        "type": "create_record"
+      },
+      "note": "it sits AFTER Enrich IP"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "create_record"
+      },
+      "to": {
+        "connector": "fortigate"
+      },
+      "note": "...and BEFORE the block -- inserted into the line, not appended past its end"
+    }
+  ]
+}

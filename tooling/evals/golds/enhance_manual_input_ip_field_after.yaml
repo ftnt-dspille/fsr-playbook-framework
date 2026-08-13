@@ -1,0 +1,59 @@
+# The correct answer to the `enhance_manual_input_ip_field` fixture
+# (scenario e6). Calibration, not a demo.
+#
+# The analyst asks for "a field of kind ip_address" -- and there is no such
+# kind. The validator's enum is boolean | checkbox | date | ... | ipv4 | ipv6
+# | ... so `kind: ip_address` fails to compile. The scenario's own note names
+# the two acceptable outcomes: author `ipv4` from the start, or author
+# `ip_address`, fail verify, fix it, and deliver the corrected document.
+# Both land here.
+#
+# The FAILURE the fixture grades is delivering anyway -- pushing the rejected
+# YAML, or printing it at the analyst as though it were done. That is why
+# `verified` and `enhance_delivery` are both counted: an agent that delivers
+# a document the validator refused fails the first, and one that pastes it
+# into chat fails the second.
+collection: 00 - FSR Studio
+playbooks:
+- name: Suspicious IP Response
+  is_active: true
+  trigger_step_id: start
+  parameters:
+  - ip_to_investigate
+  steps:
+  - type: start
+    name: Start
+    module: alerts
+    button_label: Respond
+    next: Enrich IP
+  - type: connector
+    name: Enrich IP
+    connector: cyops_utilities
+    operation: no_op
+    params: {}
+    next: Ask For IP
+  - type: manual_input
+    name: Ask For IP
+    title: Which IP should be blocked?
+    description: Enter the IP address to contain.
+    inputs:
+    - name: target_ip
+      label: IP address
+      kind: ipv4
+    options:
+    - display: Continue
+      primary: true
+      next: Block IP
+  - type: connector
+    name: Block IP
+    connector: fortigate-firewall
+    operation: block_ip
+    params:
+    method: Quarantine Based
+    ip_addresses: '{{ vars.input.params.ip_to_investigate }}'
+    next: End
+  - type: connector
+    name: End
+    connector: cyops_utilities
+    operation: no_op
+    params: {}

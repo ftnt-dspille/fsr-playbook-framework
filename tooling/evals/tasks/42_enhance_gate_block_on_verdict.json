@@ -1,0 +1,41 @@
+{
+  "name": "enhance_gate_block_on_verdict",
+  "mode": "enhance",
+  "prompt": "Only block the IP if the reputation came back malicious -- otherwise just end. Leave every other step exactly as it is.",
+  "before_scenario": "e3_rewire_a_branch",
+  "gold_yaml_path": "tooling/evals/golds/enhance_gate_block_on_verdict_after.yaml",
+  "notes": "The second enhance fixture, and deliberately the REWIRE case rather than another append: `enhance_add_approval_gate` inserts a step into a straight line, which is the easy half. Here a decision is inserted AND `Enrich IP`'s `next:` is repointed at it, so a correct edit has to touch a step the analyst did not name -- without renaming it. That is the seam where `no_collateral_damage` earns its keep: repointing `Enrich IP` is required, renaming it is a regression, and the two are one keystroke apart. `branch_count` is the gate that separates a real decision from a step that merely mentions the verdict.",
+  "ir_assertions": [
+    {
+      "kind": "step_type_present",
+      "type": "decision",
+      "note": "the verdict is an actual branch, not a comment"
+    },
+    {
+      "kind": "branch_count",
+      "type": "decision",
+      "min": 2,
+      "note": "malicious AND otherwise -- a one-armed decision blocks everything"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "decision"
+      },
+      "to": {
+        "connector": "fortigate"
+      },
+      "note": "the block sits downstream of the decision"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "name_contains": "Enrich"
+      },
+      "to": {
+        "type": "decision"
+      },
+      "note": "Enrich IP was REPOINTED at the decision -- an appended branch the flow never reaches answers nothing"
+    }
+  ]
+}
