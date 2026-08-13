@@ -187,6 +187,16 @@ INVESTIGATION_RECALL_GATE = float(
     os.environ.get("EVAL_INVESTIGATION_RECALL_GATE", "0.8"))
 # Recall alone greenlights a run that flails for 20 calls and never stages a
 # deliverable (live calibration 2026-05-30: 5/5 at recall 1.0 told us nothing).
+# Minimum prose (characters) a refuse-mode turn must produce for its refusal
+# to count as graceful. Deliberately tiny: the target is a SILENT turn, which
+# scored full marks on "delivered nothing" alone until 2026-08-13. Brevity is
+# NOT the failure -- "I can't build that." is a real refusal and passes; the
+# first draft of this bar was 40 and rejected it, which would have made the
+# gate punish a correct answer (rule 1) while chasing rule 4. Anything much
+# larger starts grading the explanation's quality, a different and harder gate.
+REFUSE_MIN_EXPLANATION_CHARS = int(
+    os.environ.get("EVAL_REFUSE_MIN_EXPLANATION_CHARS", "15"))
+
 # These per-fixture quality knobs are the teeth. Defaults apply to every
 # investigation task; a fixture's `investigation_quality` block overrides them.
 INVESTIGATION_TOOL_BUDGET_MAX = int(
@@ -202,6 +212,30 @@ INVESTIGATION_MAX_PARAM_RETRIES = int(
 _DELIVERABLE_TOOLS = (
     "emit_action_card", "emit_choice_card", "emit_capability_gap_card",
 )
+
+
+def unservable_required_tools(
+        required_facts: list[dict[str, Any]] | None) -> list[str]:
+    """Required-fact tools that are NOT registered in this process.
+
+    `_fact_matches` matches on the tool NAME and never asks whether that tool
+    exists, so a fixture naming a tool nothing registers can only score zero.
+    In the framework repo that is five of the seven investigation fixtures:
+    `get_record` / `search_module_records` come from the CONNECTOR's
+    `fsr_soc_triage.registry.register_triage_tools()`.
+
+    Returns [] when the registry cannot be read at all -- an import failure
+    here must not invent an environment problem on top of a real one.
+    """
+    facts = required_facts or []
+    if not facts:
+        return []
+    try:
+        from fsr_playbooks.llm.tools import REGISTRY  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return []
+    return sorted({str(f["tool"]) for f in facts
+                   if f.get("tool") and f["tool"] not in REGISTRY})
 
 
 def _fact_matches(fact: dict[str, Any], call: dict[str, Any]) -> bool:
@@ -1377,11 +1411,25 @@ def score(
             # the offer card as delivery, refuse-mode correctly fails a turn
             # that emitted a CARD too -- not just one that pasted YAML.
             delivered = bool(adh.get("passed"))
-            adh["passed"] = not delivered
-            adh["detail"] = ("correctly refused -- nothing delivered"
-                             if not delivered
-                             else f"delivered a playbook for a refuse-mode task "
-                                  f"(via {adh.get('delivered_via')})")
+            # ...but "delivered nothing" alone is a VACUOUS pass: a turn that
+            # said nothing at all scored full marks, and stonewalling is not
+            # gracefully declining. Both refuse fixtures ask for prose --
+            # fixture 15 to explain that the connector does not exist,
+            # fixture 46 to explain what the playbook does -- so a refusal
+            # has to come with an answer. The bar is deliberately low
+            # (non-empty prose), because grading the QUALITY of the
+            # explanation is a different gate and a much harder one.
+            explained = len((final_text or "").strip()) >= REFUSE_MIN_EXPLANATION_CHARS
+            adh["passed"] = (not delivered) and explained
+            if delivered:
+                adh["detail"] = (f"delivered a playbook for a refuse-mode task "
+                                 f"(via {adh.get('delivered_via')})")
+            elif not explained:
+                adh["detail"] = ("nothing delivered, but nothing explained "
+                                 "either -- a silent turn is not a graceful "
+                                 "refusal")
+            else:
+                adh["detail"] = "correctly refused -- explained, delivered nothing"
 
     # Investigation-mode: grade on pivot recall, not YAML. Authoring tiers
     # and adherence (a YAML block) are irrelevant to a triage/hunt task, so
@@ -1396,9 +1444,32 @@ def score(
             lv = out["levels"].get(k, {})
             if not lv.get("skipped"):
                 lv["informational"] = True
+        # A fixture whose required tools are not REGISTERED in this process
+        # cannot score, and it fails looking exactly like a weak agent.
+        # Measured 2026-08-13: `invest_outbound_cleartext_c2` scored 3/7 with
+        # recall 0.00 in the framework repo, because `get_record` and
+        # `search_module_records` are injected by the connector's
+        # `fsr_soc_triage.registry` and are absent here. The agent had
+        # researched competently throughout.
+        #
+        # The row still FAILS and still counts -- hiding it would let a
+        # genuinely broken fixture masquerade as "not applicable". What it
+        # gains is a name: `unservable` rides out to the matrix so `delta_vs`
+        # can refuse to read it as a regression, the same contract `errored`
+        # already has.
+        missing = unservable_required_tools(required_facts)
+        if missing:
+            out["unservable"] = {
+                "missing_tools": missing,
+                "detail": (f"{len(missing)} required tool(s) not registered in "
+                           f"this process: {', '.join(missing)} -- this row "
+                           f"measures the environment, not the agent"),
+            }
         if trace is not None:
             out["levels"]["investigation_recall"] = _score_investigation(
                 trace, required_facts, forbidden_facts)
+            if missing:
+                out["levels"]["investigation_recall"]["unservable"] = missing
             out["levels"].update(
                 _score_investigation_quality(trace, investigation_quality))
         else:

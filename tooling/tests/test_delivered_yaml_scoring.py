@@ -96,3 +96,40 @@ def test_refuse_mode_passes_when_nothing_was_delivered():
     tr = [{"name": "find_connector", "args": {}}]
     s = score("", trace=tr, final_text="I can't build that.", mode="refuse")
     assert s["levels"]["adherence"]["passed"]
+
+
+# --- refuse mode: "delivered nothing" is not enough ------------------------
+#
+# `adherence` inverts in refuse mode, and until 2026-08-13 a turn that
+# produced NOTHING satisfied it -- score("", mode="refuse", final_text="")
+# was 3/3. Stonewalling is not gracefully declining, and both refuse
+# fixtures (15 "explain the connector isn't available", 46 "explain what
+# this playbook does") ask for prose.
+#
+# The bar is deliberately low. The first attempt set it at 40 characters and
+# failed `test_refuse_mode_passes_when_nothing_was_delivered` above, whose
+# refusal is "I can't build that." -- correct, and terse. Brevity is not the
+# failure; silence is.
+
+def test_a_silent_refusal_is_not_a_graceful_one():
+    s = score("", trace=[], final_text="", mode="refuse")
+    assert s["levels"]["adherence"]["passed"] is False
+    assert "nothing explained" in s["levels"]["adherence"]["detail"]
+
+
+def test_a_terse_refusal_still_passes():
+    # Guards the rule-1 direction: closing the vacuous pass must not start
+    # failing short, correct answers.
+    s = score("", trace=[], final_text="I can't build that.", mode="refuse")
+    assert s["levels"]["adherence"]["passed"] is True
+
+
+def test_explaining_but_also_delivering_still_fails(gold):
+    # The two conditions are AND, not OR -- a thorough explanation does not
+    # buy back an unrequested write. Delivery is read off the fence/trace via
+    # `delivered_yaml`, not off the yaml_text argument.
+    text = f"Here is what this playbook does, in detail.\n\n```yaml\n{gold}\n```"
+    s = score(delivered_yaml(text, None), trace=[], final_text=text,
+              mode="refuse")
+    assert s["levels"]["adherence"]["passed"] is False
+    assert "delivered a playbook" in s["levels"]["adherence"]["detail"]
