@@ -1,0 +1,115 @@
+# Gold answer for the `noc_sla_breach_repoll` eval fixture.
+#
+# The delay is here for its real purpose: wait, then re-READ. After the wait,
+# `vars.input.records[0]` is the state that fired the trigger 15 minutes ago --
+# stale by definition. The acknowledgement check must read the fresh record the
+# second find_record returned, and that ordering (delay -> find_record) is what
+# the fixture asserts.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: SLA Breach Page And Re-Poll
+    description: Page on-call, wait 15 minutes, escalate if unacknowledged.
+    steps:
+      - name: On SLA Breach
+        type: start_on_update
+        next: Page On Call
+        module: incidents
+        when:
+          logic: AND
+          filters:
+            - field: slaPercentage
+              op: changed
+            - field: severity
+              op: in
+              value:
+                - High
+                - Critical
+
+      - name: Page On Call
+        type: connector
+        next: Wait For Acknowledgement
+        connector: pagerduty
+        operation: create_incident
+        config: ""
+        params:
+          from: noc-oncall@example.com
+          title: "SLA breach on ticket {{ vars.input.records[0].name }}"
+          description: >-
+            SLA at {{ vars.input.records[0].slaPercentage }}% on a
+            {{ vars.input.records[0].severity }} ticket.
+          urgency: High
+          priority: Priority 1
+
+      - name: Wait For Acknowledgement
+        type: delay
+        next: Re-Read Ticket
+        minutes: 15
+
+      - name: Re-Read Ticket
+        type: find_record
+        next: Was It Acknowledged
+        module: incidents
+        filters:
+          - type: primitive
+            field: uuid
+            value: "{{ vars.input.records[0].uuid }}"
+            operator: eq
+            _operator: eq
+
+      - name: Was It Acknowledged
+        type: decision
+        conditions:
+          - display: Still unacknowledged
+            when: "{{ not vars.steps.Re_Read_Ticket[0].ackDate }}"
+            next: Escalate To Manager
+          - display: Acknowledged
+            default: true
+            next: Done
+
+      - name: Escalate To Manager
+        type: connector
+        next: At Top Severity Already
+        connector: pagerduty
+        operation: create_incident
+        config: ""
+        params:
+          from: noc-oncall@example.com
+          title: "UNACKNOWLEDGED SLA breach: {{ vars.steps.Re_Read_Ticket[0].name }}"
+          description: No acknowledgement 15 minutes after the first page.
+          urgency: High
+          priority: Priority 1
+
+      - name: At Top Severity Already
+        type: decision
+        conditions:
+          - display: Already Critical
+            when: "{{ vars.steps.Re_Read_Ticket[0].severity == 'Critical' }}"
+            next: Comment Top Severity
+          - display: Can Escalate
+            default: true
+            next: Raise Severity
+
+      - name: Raise Severity
+        type: update_record
+        next: Done
+        module: incidents
+        record: "{{ vars.steps.Re_Read_Ticket[0]['@id'] }}"
+        operation: Replace
+        fields:
+          severity: Critical
+
+      - name: Comment Top Severity
+        type: create_record
+        next: Done
+        module: comments
+        operation: Overwrite
+        fields:
+          content: Already at top severity
+          incidents: "{{ vars.steps.Re_Read_Ticket[0]['@id'] }}"
+
+      - name: Done
+        type: end

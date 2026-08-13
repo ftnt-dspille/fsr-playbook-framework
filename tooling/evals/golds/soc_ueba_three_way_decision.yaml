@@ -1,0 +1,105 @@
+# Gold answer for the `soc_ueba_three_way_decision` eval fixture.
+#
+# Three buckets, not a two-way split, and the middle one is a range. The
+# `default: true` arm is the LOW bucket -- there is exactly one default and it
+# carries no `when`. Every path lands on a step that stamps the same `outcome`
+# var, so a downstream playbook reading it never hits an unreachable ref.
+#
+# The prompt's "internal risk-scoring connector" has no entry in the reference
+# store, so the correct shape is the built-in REST wrapper -- the same move the
+# agent is expected to make.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: Impossible Travel Risk Triage
+    description: Score the user, then contain, review, or dismiss.
+    steps:
+      - name: On Impossible Travel Event
+        type: start_on_create
+        next: Score User
+        module: events
+        when:
+          logic: AND
+          filters:
+            - field: tags
+              op: contains
+              value: impossible_travel
+
+      - name: Score User
+        type: connector
+        next: Branch On Risk Score
+        connector: cyops_utilities
+        operation: api_call
+        config: ""
+        params:
+          method: POST
+          url: https://risk.internal.example.com/score-user
+          body: "{{ {'user_iri': vars.input.records[0].user_iri} | to_json }}"
+
+      - name: Branch On Risk Score
+        type: decision
+        conditions:
+          - display: High
+            when: "{{ vars.steps.Score_User.data.risk_score > 80 }}"
+            next: Lock Account
+          - display: Medium
+            when: >-
+              {{ vars.steps.Score_User.data.risk_score >= 50 and
+                 vars.steps.Score_User.data.risk_score <= 80 }}
+            next: Flag For Tier 2
+          - display: Low
+            default: true
+            next: Close Low Risk
+
+      - name: Lock Account
+        type: connector
+        next: Stamp Contained
+        connector: okta
+        operation: update_user
+        config: ""
+        params:
+          user_id: "{{ vars.input.records[0].user_iri }}"
+
+      - name: Stamp Contained
+        type: update_record
+        next: Record Outcome
+        module: events
+        record: "{{ vars.input.records[0]['@id'] }}"
+        operation: Replace
+        fields:
+          status: Auto-Contained
+
+      - name: Flag For Tier 2
+        type: update_record
+        next: Record Outcome
+        module: events
+        record: "{{ vars.input.records[0]['@id'] }}"
+        operation: Replace
+        fields:
+          status: Pending Tier-2 Review
+          tags: manual_review_required
+
+      - name: Close Low Risk
+        type: update_record
+        next: Record Outcome
+        module: events
+        record: "{{ vars.input.records[0]['@id'] }}"
+        operation: Replace
+        fields:
+          status: Closed - Low Risk
+          tags: auto_dismissed
+
+      - name: Record Outcome
+        type: set_variable
+        next: Done
+        vars:
+          outcome: >-
+            {{ 'contained' if vars.steps.Score_User.data.risk_score > 80
+               else 'tier2_review' if vars.steps.Score_User.data.risk_score >= 50
+               else 'dismissed' }}
+
+      - name: Done
+        type: end

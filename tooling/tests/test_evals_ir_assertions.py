@@ -250,8 +250,6 @@ def test_every_gold_that_answers_its_prompt_passes_its_assertions():
 UNCALIBRATED_FIXTURES = {
     "manual_input_block_ip",
     "itops_disk_full_recheck",
-    "noc_sla_breach_repoll",
-    "soc_ueba_three_way_decision",
     "soc_http_fallback_no_native_op",
 }
 
@@ -286,7 +284,7 @@ def test_fixture_17_still_fails_a_playbook_that_blocks_beside_the_gate():
     from evals.scoring import score
 
     gold = pathlib.Path(
-        "examples/soc_phish_block_with_approval.yaml").read_text()
+        "tooling/evals/golds/soc_phish_block_with_approval.yaml").read_text()
     task = json.loads(pathlib.Path(
         "tooling/evals/tasks/17_soc_phish_block_with_approval.json").read_text())
 

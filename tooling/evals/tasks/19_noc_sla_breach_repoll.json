@@ -1,7 +1,8 @@
 {
   "name": "noc_sla_breach_repoll",
-  "prompt": "Author a FortiSOAR playbook. Trigger: a NOC ticket in the tickets module is updated such that its `sla_pct` field crosses 80 AND its severity is High or Critical. Behavior: page the queue's primary on-call user via PagerDuty with the ticket details. Then wait 15 minutes. After the delay, re-read the same ticket from the tickets module to check its `acknowledged_at` field. If it's still null, page the on-call's manager via PagerDuty AND update the ticket's severity to one notch higher (High \u2192 Critical; Critical stays Critical, but add a comment 'Already at top severity'). If acknowledged, just finish. Output complete YAML.",
-  "notes": "Tests start_on_update with op:changed on sla_pct, a delay step used for its real purpose (wait before re-checking state), a SECOND find_record on the same module to re-read the triggering record (the trigger's vars.input.records[0] is stale after the delay), nested decision on the acknowledged_at value, and a same-severity guard. The walker must NOT let the agent reference vars.input.records[0].acknowledged_at after the delay -- that's the stale-trigger bug this task probes.",
+  "prompt": "Author a FortiSOAR playbook. Trigger: an incident in the incidents module is updated such that its `slaPercentage` field changes AND its severity is High or Critical. Behavior: page the queue's primary on-call user via PagerDuty with the incident details. Then wait 15 minutes. After the delay, re-read the same incident from the incidents module to check its `ackDate` field. If it's still empty, page the on-call's manager via PagerDuty AND update the incident's severity to one notch higher (High -> Critical; Critical stays Critical, but add a comment 'Already at top severity'). If acknowledged, just finish. Output complete YAML.",
+  "gold_yaml_path": "tooling/evals/golds/noc_sla_breach_repoll.yaml",
+  "notes": "Tests start_on_update with op:changed on sla_pct, a delay step used for its real purpose (wait before re-checking state), a SECOND find_record on the same module to re-read the triggering record (the trigger's vars.input.records[0] is stale after the delay), nested decision on the acknowledged_at value, and a same-severity guard. The walker must NOT let the agent reference vars.input.records[0].acknowledged_at after the delay -- that's the stale-trigger bug this task probes. The prompt originally named a `tickets` module with `sla_pct` and `acknowledged_at` fields -- none of which exist in the reference catalog, so the compiler rejected every faithful answer and the row could never clear draft. Retargeted at the stock incidents module's slaPercentage / ackDate.",
   "ir_assertions": [
     {
       "kind": "step_type_present",
@@ -30,7 +31,7 @@
     },
     {
       "kind": "arg_text_contains",
-      "contains": "acknowledged_at",
+      "contains": "ackDate",
       "note": "checks the field the prompt named"
     }
   ]
