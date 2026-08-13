@@ -87,3 +87,25 @@ def test_the_matrix_records_which_substrate_produced_it():
     from evals import harness
     src = inspect.getsource(harness.run_matrix)
     assert '"offline": offline_run' in src
+
+
+def test_the_seal_survives_a_dotenv_reload(monkeypatch, tmp_path):
+    # `cmd_evals` calls probes._env._load_dotenv() before the matrix runs, and
+    # this repo's .env names a real box. If that reload could put FSR_BASE_URL
+    # back after install(), the seal would hold only until the next tool call.
+    offline.install()
+    from fsr_playbooks.mcp_server import _shared
+    try:
+        env = tmp_path / ".env"
+        env.write_text("FSR_BASE_URL=https://box.example.com\n")
+        import probes._env as pe
+        # The swapped-in module keeps the real one's attributes, so this is a
+        # real call, not a skipped one.
+        assert hasattr(pe, "_load_dotenv")
+        monkeypatch.chdir(tmp_path)
+        pe._load_dotenv()
+        # Whatever the reload did, the client the tools resolve must not be a
+        # live one.
+        assert "Sim" in offline.active_client_name()
+    finally:
+        _shared._LIVE_CLIENT_CACHE.pop("client", None)

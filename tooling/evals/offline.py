@@ -57,6 +57,16 @@ def install() -> None:
         os.environ.pop(key, None)
 
     env_mod = types.ModuleType("probes._env")
+    # Carry the real module's other attributes across. A bare stub would break
+    # any caller reaching for `_load_dotenv` / `EnvConfig` -- offline mode
+    # should remove the box, not the module.
+    try:
+        import probes._env as _real
+        for attr in dir(_real):
+            if not attr.startswith("__"):
+                setattr(env_mod, attr, getattr(_real, attr))
+    except Exception:  # noqa: BLE001 - probes may not be importable at all
+        pass
     env_mod.get_client = sc.get_client      # type: ignore[attr-defined]
     env_mod.get_config = sc.get_config      # type: ignore[attr-defined]
     probes_mod = types.ModuleType("probes")
