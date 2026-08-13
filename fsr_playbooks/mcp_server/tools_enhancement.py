@@ -140,9 +140,23 @@ def _diff_collections(before, after, user_message: str | None
     steps_removed: list[str] = []
     steps_modified: list[str] = []
     unchanged_count = 0
+    # Per-step before/after payloads. The name lists above are a good index
+    # but a bad explanation -- the card can only render "what changed" if the
+    # projections survive the flattening.
+    changes: list[dict[str, Any]] = []
 
     # Playbook-level diffs first.
     for name in before_pbs.keys() - after_pbs.keys():
+        changes.append({
+            "playbook": name,
+            "step": None,
+            "kind": "playbook_removed",
+            "type": None,
+            "before": {"steps": [(s.name or s.id)
+                                 for s in before_pbs[name].steps]},
+            "after": None,
+            "changed_fields": [],
+        })
         regressions.append({
             "kind": "playbook_dropped",
             "step": None,
@@ -152,9 +166,17 @@ def _diff_collections(before, after, user_message: str | None
             "message": f"playbook {name!r} was present before and is now missing",
         })
     for name in after_pbs.keys() - before_pbs.keys():
-        # Adding a playbook isn't a regression; surface in diff_summary
-        # but no regressions entry.
-        pass
+        # Adding a playbook isn't a regression, so no regressions entry --
+        # but its steps are the whole change, so they belong in the diff.
+        changes.append({
+            "playbook": name,
+            "step": None,
+            "kind": "playbook_added",
+            "type": None,
+            "before": None,
+            "after": {"steps": [(s.name or s.id) for s in after_pbs[name].steps]},
+            "changed_fields": [],
+        })
 
     for pb_name in before_pbs.keys() & after_pbs.keys():
         bpb = before_pbs[pb_name]
@@ -198,12 +220,30 @@ def _diff_collections(before, after, user_message: str | None
                                         "breaks external vars.steps.<slug>.* "
                                         "consumers -- confirm with the user"),
                         })
+                        changes.append({
+                            "playbook": pb_name,
+                            "step": dn,
+                            "kind": "renamed",
+                            "type": b_steps[dn].type,
+                            "before": {"name": dn},
+                            "after": {"name": an},
+                            "changed_fields": ["name"],
+                        })
                         dropped.discard(dn)
                         added.discard(an)
                         break
 
         for n in dropped:
             steps_removed.append(n)
+            changes.append({
+                "playbook": pb_name,
+                "step": n,
+                "kind": "removed",
+                "type": b_steps[n].type,
+                "before": _step_projection(b_steps[n]),
+                "after": None,
+                "changed_fields": [],
+            })
             regressions.append({
                 "kind": "step_dropped",
                 "step": n,
@@ -216,6 +256,15 @@ def _diff_collections(before, after, user_message: str | None
 
         for n in added:
             steps_added.append(n)
+            changes.append({
+                "playbook": pb_name,
+                "step": n,
+                "kind": "added",
+                "type": a_steps[n].type,
+                "before": None,
+                "after": _step_projection(a_steps[n]),
+                "changed_fields": [],
+            })
 
         for n in common:
             b_proj = _step_projection(b_steps[n])
@@ -224,6 +273,17 @@ def _diff_collections(before, after, user_message: str | None
                 unchanged_count += 1
                 continue
             steps_modified.append(n)
+            changes.append({
+                "playbook": pb_name,
+                "step": n,
+                "kind": "modified",
+                "type": a_steps[n].type,
+                "before": b_proj,
+                "after": a_proj,
+                "changed_fields": sorted(
+                    k for k in b_proj if b_proj[k] != a_proj.get(k)
+                ),
+            })
             # Only flag as a regression if the user didn't explicitly
             # name this step. When referenced is None we skip the flag
             # (no user_message context) but still report it in
@@ -288,6 +348,7 @@ def _diff_collections(before, after, user_message: str | None
         "steps_removed": steps_removed,
         "steps_modified": steps_modified,
         "unchanged": unchanged_count,
+        "changes": changes,
     }
     return regressions, diff_summary
 
@@ -325,7 +386,13 @@ def verify_enhancement(
 
     Returns the verify_playbook contract plus:
       - regressions: [{kind, step, before, after, severity, message}]
-      - diff_summary: {steps_added, steps_removed, steps_modified, unchanged}
+      - diff_summary: {steps_added, steps_removed, steps_modified, unchanged,
+                       changes}. The first four are name lists / a count --
+                       an index. `changes` is the explanation: one entry per
+                       changed step, {playbook, step, kind, type, before,
+                       after, changed_fields}, where before/after are the IR
+                       step projections. `kind` is one of added | removed |
+                       modified | renamed | playbook_added | playbook_removed.
 
     `ready_to_push` is False if verify_playbook would block OR if any
     regression has severity='error'. Warning-severity regressions
@@ -362,7 +429,8 @@ def verify_enhancement(
         out = dict(after_result)
         out["regressions"] = []
         out["diff_summary"] = {"steps_added": [], "steps_removed": [],
-                               "steps_modified": [], "unchanged": 0}
+                               "steps_modified": [], "unchanged": 0,
+                               "changes": []}
         out.setdefault("evidence", {})["before_unparseable"] = {
             "errors": before_errs,
             "note": ("before_yaml did not parse -- skipping regression diff; "
@@ -376,7 +444,8 @@ def verify_enhancement(
         out = dict(after_result)
         out["regressions"] = []
         out["diff_summary"] = {"steps_added": [], "steps_removed": [],
-                               "steps_modified": [], "unchanged": 0}
+                               "steps_modified": [], "unchanged": 0,
+                               "changes": []}
         return _issue_verified_id(out, after_yaml, before_yaml)
 
     # 3. Diff.

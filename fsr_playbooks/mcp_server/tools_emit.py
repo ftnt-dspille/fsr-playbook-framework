@@ -843,6 +843,9 @@ def emit_enhancement_offer(
         "steps_added": list(diff.get("steps_added") or []),
         "steps_removed": list(diff.get("steps_removed") or []),
         "steps_modified": list(diff.get("steps_modified") or []),
+        # The per-step before/after payloads the card renders as the diff.
+        # The name lists above stay as the header index.
+        "changes": list(diff.get("changes") or []),
     }
     # Non-blocking findings still reach the human. verify_enhancement lets
     # warnings through to ready_to_push, so this card is the last place an
