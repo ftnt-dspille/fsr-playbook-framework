@@ -98,6 +98,25 @@ def _user_referenced_steps(user_message: str | None,
     return referenced
 
 
+_RENAME_VERBS = ("rename", "renaming", "re-name", "call it", "change the name",
+                 "change its name", "name it")
+
+
+def _asked_to_rename(user_message: str | None) -> bool:
+    """Did the analyst ask for a rename in so many words?
+
+    Deliberately literal, for the same reason `_user_referenced_steps` is:
+    the exemption this feeds REMOVES a blocking regression, so a loose match
+    would let a gratuitous rename through by accident. A rename nobody asked
+    for is the failure mode; missing an unusual phrasing only costs a warning
+    that reads as an error.
+    """
+    if not user_message:
+        return False
+    msg = user_message.lower()
+    return any(v in msg for v in _RENAME_VERBS)
+
+
 def _expand_by_type(referenced: set[str], user_message: str,
                     name_to_type: dict[str, str]) -> set[str]:
     msg = (user_message or "").lower()
@@ -210,15 +229,34 @@ def _diff_collections(before, after, user_message: str | None
                 dproj = _step_projection(b_steps[dn])
                 for an in list(added):
                     if _step_projection(a_steps[an]) == dproj:
+                        # A rename the analyst asked for BY NAME is not
+                        # silent, and blocking it told them their own
+                        # request was a regression -- `ready_to_push` went
+                        # false and the enhancement card said so. The
+                        # consequence is still real and still surfaced; it
+                        # just stops being a blocker. The exemption is the
+                        # same `referenced` set `behavior_changed_outside_
+                        # diff` already uses, narrowed by an explicit
+                        # rename verb so an unrequested rename cannot
+                        # inherit it from a step merely being mentioned.
+                        requested = (referenced is not None
+                                     and dn in referenced
+                                     and _asked_to_rename(user_message))
                         regressions.append({
-                            "kind": "step_renamed_silently",
+                            "kind": ("step_renamed_as_requested" if requested
+                                     else "step_renamed_silently"),
                             "step": dn,
                             "before": dn,
                             "after": an,
-                            "severity": "error",
-                            "message": (f"step renamed {dn!r} → {an!r}; "
-                                        "breaks external vars.steps.<slug>.* "
-                                        "consumers -- confirm with the user"),
+                            "severity": "warning" if requested else "error",
+                            "message": (
+                                f"step renamed {dn!r} → {an!r} as requested; "
+                                "external vars.steps.<slug>.* consumers that "
+                                "referenced the old name will need updating"
+                                if requested else
+                                f"step renamed {dn!r} → {an!r}; "
+                                "breaks external vars.steps.<slug>.* "
+                                "consumers -- confirm with the user"),
                         })
                         changes.append({
                             "playbook": pb_name,
@@ -403,6 +441,13 @@ def verify_enhancement(
       - step_dropped           (error)
       - step_renamed_silently  (error) -- same shape, new name; breaks
                                           external vars.steps.<slug>.* refs
+      - step_renamed_as_requested (warning) -- the same rename, when the
+                                          analyst named that step AND used a
+                                          rename verb. Their own request must
+                                          not come back as a blocker; the
+                                          broken-consumer consequence still
+                                          surfaces, it just does not stop
+                                          `ready_to_push`.
       - annotation_stripped    (warning)
       - annotation_modified    (warning)
       - ui_metadata_lost       (warning)
