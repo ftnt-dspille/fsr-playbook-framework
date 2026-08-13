@@ -233,3 +233,85 @@ def test_every_gold_that_answers_its_prompt_passes_its_assertions():
         f"unexpected failures: {sorted(failing - KNOWN_MISMATCHED_GOLDS)}; "
         f"now-passing (update the list): "
         f"{sorted(KNOWN_MISMATCHED_GOLDS - failing)}")
+
+
+# --- the other half of calibration: fixtures with NO gold ------------------
+#
+# The check above can only calibrate a fixture that HAS a gold. Fixtures 16-24
+# -- the hard half, and the only ones where behavior really bites (approval
+# gate, three-way branch, re-poll after a delay, exact Jinja) -- carry no gold
+# at all, so nothing has ever proven their assertions pass a correct answer.
+# An assertion that no correct playbook can satisfy is indistinguishable from
+# an agent that keeps getting it wrong, and it is the first thing to suspect
+# when one of these rows never scores.
+#
+# This list is the honest statement of that gap. It shrinks when a fixture
+# gains a gold; it must never grow silently.
+UNCALIBRATED_FIXTURES = {
+    "manual_input_block_ip",
+    "itops_disk_full_recheck",
+    "noc_sla_breach_repoll",
+    "soc_ueba_three_way_decision",
+    "soc_http_fallback_no_native_op",
+    "jinja_chain_count_summary",
+    "jinja_chain_ip_extract",
+    "jinja_chain_json_payload",
+}
+
+
+def test_which_behavioral_fixtures_have_no_known_correct_answer():
+    from evals.tasks import load_tasks
+
+    ungolded = {t.name for t in load_tasks()
+                if t.ir_assertions and not t.gold_yaml_path
+                and t.mode not in ("investigation", "tool_selection", "refuse")}
+    assert ungolded == UNCALIBRATED_FIXTURES, (
+        f"newly uncalibrated (add a gold, or add it here and say why): "
+        f"{sorted(ungolded - UNCALIBRATED_FIXTURES)}; "
+        f"now calibrated (drop from the list): "
+        f"{sorted(UNCALIBRATED_FIXTURES - ungolded)}")
+
+
+# --- fixture 17: the assertion the whole P2 promise rests on ---------------
+#
+# `soc_phish_block_with_approval` is the compound gating task, and its
+# `reachable(manual_input -> fortigate)` assertion had never been evaluated
+# against ANY correct playbook: the fixture had no gold, and the one model run
+# that reached it died on a client timeout. examples/soc_phish_block_with_
+# approval.yaml is now its gold (covered by the calibration test above, which
+# proves the assertions pass a right answer). This proves the other half --
+# that the gate still catches the wrong one.
+
+def test_fixture_17_still_fails_a_playbook_that_blocks_beside_the_gate():
+    import json
+    import pathlib
+
+    from evals.scoring import score
+
+    gold = pathlib.Path(
+        "examples/soc_phish_block_with_approval.yaml").read_text()
+    task = json.loads(pathlib.Path(
+        "tooling/evals/tasks/17_soc_phish_block_with_approval.json").read_text())
+
+    # The threshold decision routes straight to the block, and the analyst is
+    # asked AFTER it ran -- their "Block" button now just goes to the comment.
+    # Same steps, same connectors, compiles and verifies identically, and
+    # containment happens unapproved.
+    ungated = gold.replace("            next: Ask Analyst To Block",
+                           "            next: Block High Score IPs")
+    ungated = ungated.replace("            next: Block High Score IPs\n"
+                              "          - display: Skip",
+                              "            next: Comment On Alert\n"
+                              "          - display: Skip")
+    ungated = ungated.replace("        next: Comment On Alert\n"
+                              "        connector: fortigate-firewall",
+                              "        next: Ask Analyst To Block\n"
+                              "        connector: fortigate-firewall")
+    assert ungated.count("Ask Analyst To Block") == gold.count(
+        "Ask Analyst To Block")
+
+    r = score(ungated, ir_assertions=task["ir_assertions"])
+    assert r["levels"]["draft"]["passed"] is True, "the negative control must \
+still compile -- otherwise it fails for the wrong reason"
+    assert r["levels"]["behavior"]["passed"] is False
+    assert any("P2" in f for f in r["levels"]["behavior"]["failures"])

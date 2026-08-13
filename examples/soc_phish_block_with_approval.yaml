@@ -1,0 +1,107 @@
+# Gold answer for the `soc_phish_block_with_approval` eval fixture -- the
+# compound P2-gating task: score every sender IP, and reach containment ONLY
+# through an analyst's decision.
+#
+# It exists to calibrate the graders, not to demo a feature. The fixture's
+# `reachable(manual_input -> fortigate)` assertion had never been evaluated
+# against any correct playbook, because the fixture had no gold and every model
+# run that reached it died on a client timeout. An assertion no correct answer
+# can satisfy is indistinguishable from an agent that keeps failing.
+#
+# Shape notes worth keeping:
+#   - looping is `for_each:` on an ordinary step, not a loop step type.
+#   - the block runs per high-score IP, downstream of the gate -- never beside
+#     it. That ordering is the whole point of the fixture.
+#   - fortigate `block_ip_new` is Quarantine Based with `ip_addresses`.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: Phishing Sender IP Block With Approval
+    description: Score sender IPs, ask an analyst, block only on approval.
+    steps:
+      - name: On Phishing Alert
+        type: start_on_create
+        next: Score Sender IPs
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - field: tags
+              op: contains
+              value: phishing
+
+      - name: Score Sender IPs
+        type: connector
+        next: Collect High Scores
+        connector: virustotal
+        operation: query_ip
+        config: ""
+        params:
+          ip: "{{ vars.item }}"
+        for_each:
+          item: "{{ vars.input.records[0].sender_ips }}"
+          parallel: false
+
+      - name: Collect High Scores
+        type: set_variable
+        next: Any IP Above Threshold
+        vars:
+          high_ips: >-
+            {{ vars.steps.Score_Sender_IPs
+               | selectattr('data.reputation', 'gt', 50)
+               | map(attribute='data.ip')
+               | list }}
+          scored_ips: "{{ vars.input.records[0].sender_ips }}"
+
+      - name: Any IP Above Threshold
+        type: decision
+        conditions:
+          - display: High
+            when: "{{ vars.high_ips | length > 0 }}"
+            next: Ask Analyst To Block
+          - display: Else
+            default: true
+            next: Comment On Alert
+
+      - name: Ask Analyst To Block
+        type: manual_input
+        title: Block high-reputation sender IPs?
+        description: >-
+          VirusTotal scored {{ vars.high_ips | length }} sender IP(s) above 50:
+          {{ vars.high_ips | join(', ') }}.
+        options:
+          - display: Block
+            primary: true
+            next: Block High Score IPs
+          - display: Skip
+            next: Comment On Alert
+
+      - name: Block High Score IPs
+        type: connector
+        next: Comment On Alert
+        connector: fortigate-firewall
+        operation: block_ip_new
+        config: ""
+        params:
+          method: Quarantine Based
+          ip_addresses: "{{ vars.item }}"
+        for_each:
+          item: "{{ vars.high_ips }}"
+          parallel: false
+
+      - name: Comment On Alert
+        type: create_record
+        next: Done
+        module: comments
+        operation: Overwrite
+        fields:
+          content: >-
+            Scored sender IPs {{ vars.scored_ips | join(', ') }}.
+            Above threshold: {{ vars.high_ips | join(', ') or 'none' }}.
+          alerts: "{{ vars.input.records[0]['@id'] }}"
+
+      - name: Done
+        type: end
