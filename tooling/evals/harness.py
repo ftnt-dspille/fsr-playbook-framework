@@ -486,6 +486,13 @@ def delta_vs(prior: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     For every (model, task) cell present in either run, classify as
     `improved` (score went up), `regressed` (score went down), `same`,
     or `new` / `removed`. Also returns per-model fraction deltas.
+
+    A cell where either side's provider call RAISED is `errored`, never
+    `regressed`. An ERR row scores 0/0 -- it is absent from the aggregate on
+    purpose -- but its `fraction` is 0.0, so a naive comparison reads a read
+    timeout as the agent falling from 100% to 0%. That already happened: every
+    ERR in the 2026-08-13 session was our own client timeout firing, and Frank
+    was called `failing` partly on that basis.
     """
     prior_rows = {_cell_key(r): r for r in prior.get("rows", [])}
     cur_rows = {_cell_key(r): r for r in current.get("rows", [])}
@@ -504,6 +511,12 @@ def delta_vs(prior: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
             continue
         before = p.get("fraction", 0.0)
         after = c.get("fraction", 0.0)
+        err = c.get("error") or p.get("error")
+        if err:
+            cells.append({"model": k[0], "task": k[1], "status": "errored",
+                          "before": before, "after": after,
+                          "detail": str(err)})
+            continue
         if after > before:
             status = "improved"
         elif after < before:
@@ -534,7 +547,7 @@ def render_delta(d: dict[str, Any]) -> str:
         "-" * 70,
     ]
     sym = {"improved": "+", "regressed": "-", "same": "=",
-           "new": "*", "removed": "x"}
+           "new": "*", "removed": "x", "errored": "!"}
     for c in d["cells"]:
         b = c.get("before")
         a = c.get("after")
@@ -543,6 +556,7 @@ def render_delta(d: dict[str, Any]) -> str:
             f"{(f'{b*100:.0f}%' if b is not None else '   --'):>7} "
             f"{(f'{a*100:.0f}%' if a is not None else '   --'):>7}  "
             f"{sym.get(c['status'],'?')} {c['status']}"
+            + (f" -- {c['detail']}" if c.get("detail") else "")
         )
     lines.append("")
     lines.append("Per-model totals:")
