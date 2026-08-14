@@ -670,7 +670,47 @@ def delta_vs(prior: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
         "current_run": current.get("run_id"),
         "cells": cells,
         "per_model": per_model,
+        "substrate": _substrate_delta(prior, current),
     }
+
+
+#: The substrate fields a run records, and what each one means for a diff.
+_SUBSTRATE_FIELDS = (
+    ("tool_substrate", "which tools the agent could call"),
+    ("record_substrate", "what its record reads returned"),
+    ("offline", "whether an appliance was behind the tools"),
+)
+
+
+def _substrate_delta(prior: dict[str, Any],
+                     current: dict[str, Any]) -> dict[str, Any]:
+    """Do these two runs describe the same world?
+
+    The harness has recorded `tool_substrate` / `record_substrate` / `offline`
+    since the registry seam landed, and wrote down the rule that follows from
+    them -- *a run is only comparable to another run with the SAME substrate*
+    -- but nothing enforced it, so the rule lived in a comment.
+
+    It is not hypothetical. The pinned tool-gate baseline `20260813T153315Z`
+    predates the fields entirely and carries none of them, so every
+    `make tool-gate` diff since has been against a run whose tool set is
+    unknown. A cell that moved because the connector's 15 extra tools were
+    registered is indistinguishable, in that diff, from one the agent got
+    wrong.
+
+    `unknown` on either side is a MISMATCH, not a pass: an unlabeled run is
+    exactly the case that cannot be shown comparable.
+    """
+    fields: list[dict[str, Any]] = []
+    for name, meaning in _SUBSTRATE_FIELDS:
+        b = prior.get(name)
+        a = current.get(name)
+        b_s = "unknown" if b is None else str(b)
+        a_s = "unknown" if a is None else str(a)
+        fields.append({"field": name, "meaning": meaning,
+                       "before": b_s, "after": a_s,
+                       "match": b is not None and a is not None and b == a})
+    return {"comparable": all(f["match"] for f in fields), "fields": fields}
 
 
 def render_delta(d: dict[str, Any]) -> str:
@@ -678,6 +718,24 @@ def render_delta(d: dict[str, Any]) -> str:
         f"Eval delta -- prior {d.get('prior_run','?')} → "
         f"current {d.get('current_run','?')}",
         "",
+    ]
+    sub = d.get("substrate") or {}
+    if sub and not sub.get("comparable", True):
+        # Above the table, not below it: by the time someone has read the
+        # cells they have already formed an opinion about the agent.
+        lines += [
+            "!! SUBSTRATE MISMATCH -- these two runs are NOT comparable.",
+            "   A cell that moved may have moved because the world did.",
+        ]
+        for f in sub.get("fields", []):
+            if f.get("match"):
+                continue
+            lines.append(f"   {f['field']}: {f['before']} → {f['after']}"
+                         f"   ({f['meaning']})")
+        lines.append("   Re-baseline against a run taken the same way, or "
+                     "read the cells as unlabeled.")
+        lines.append("")
+    lines += [
         f"{'model':<14} {'task':<28} {'before':>7} {'after':>7}  status",
         "-" * 70,
     ]

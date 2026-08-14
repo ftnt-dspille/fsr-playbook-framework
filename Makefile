@@ -173,13 +173,20 @@ corpus-gate: ## round-trip fidelity gate over the committed corpus (box-free). C
 # agent regressed" when nothing about the agent changed. These 5 terminate on
 # the first correct tool call, so they barely touch the box and stay honest.
 TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,select_diagnose_failure,select_run_playbook_neutral
-# 20260813T153315Z: agentic_frank 20/20 under the composite score
-# (terminal_tool_reached + offer_timing + appropriate_approval_requests +
-# no_spiral). Captured 2026-08-13 and re-scored with the fixed offer_timing
-# gate, which used to call a REQUESTED build offer premature.
+# 20260814T115728Z: agentic_frank 20/20, and the first baseline that SAYS WHAT
+# IT WAS TAKEN ON -- offline=True, tool_substrate=framework+connector,
+# record_substrate=empty. Its predecessor (20260813T153315Z) predates those
+# fields entirely, so every diff against it compared against an unknown world;
+# `delta_vs` now prints a SUBSTRATE MISMATCH banner instead of letting that
+# pass. Run this gate with FSR_CONNECTOR_REPO set to match the pin, or expect
+# (and read) the banner.
+# Captured after two corrections that the diff itself surfaced: a corrupt
+# reference DB that made `find_operation` raise intermittently, and a
+# `no_spiral` gate that counted five lookups of five DIFFERENT step types as a
+# spiral.
 # data/eval_runs/ is gitignored, so a fresh checkout has no baseline to diff
 # against and must capture its own before a delta means anything.
-TOOL_GATE_BASELINE ?= 20260813T153315Z
+TOOL_GATE_BASELINE ?= 20260814T115728Z
 
 tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3 OFFLINE=1
 	@echo "note: the score is composite (#127), so a row can CLIMB, not just"
@@ -188,6 +195,8 @@ tool-gate: ## which tool does the agent reach for? Run after ANY tool-descriptio
 	@echo "      re-baseline with 'make tool-gate BASELINE=' and pin the new id."
 	@echo "      OFFLINE=1 binds the tools to the simulated client (no box)."
 	@echo "      2026-08-13: offline reproduced the live baseline exactly, 20/20."
+	@echo "      A SUBSTRATE MISMATCH banner means the two runs saw different"
+	@echo "      worlds -- fix that before reading a single cell."
 	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py evals \
 	  --tasks $(TOOL_GATE_TASKS) --save $(if $(OFFLINE),--offline,) \
 	  $(if $(REPEAT),--repeat $(REPEAT),) \

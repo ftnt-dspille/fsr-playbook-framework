@@ -791,6 +791,56 @@ def _score_approval_requests(
             "tier_3_plus_calls": tier3, "detail": detail}
 
 
+def _longest_spiral(trace: list[dict[str, Any]]) -> tuple[int, str, str]:
+    """The longest run of repetition WITHOUT progress, and what kind it was.
+
+    Consecutive same-NAME calls are not a spiral. Building a five-step playbook
+    means five `get_step_type` calls in a row -- start, set_variable, decision,
+    end, connector -- and the name-only counter failed exactly that turn
+    (`select_build_offer`, run 20260814T115131Z): every other gate passed, the
+    playbook compiled, verified and was delivered, and this gate called the
+    correct method a spiral. Rule 1 of the plan: a grader that punishes a right
+    answer is worse than no grader.
+
+    Two things ARE spirals, and both mean "the last call told the agent
+    nothing":
+
+      * `identical` -- consecutive calls with the same name AND the same
+        arguments. A deterministic lookup repeated verbatim cannot return
+        anything new. This is also the waste #128 went looking for.
+      * `failing` -- consecutive calls to one tool that all came back failed.
+        The classic flail: retry the same dead tool with fresh guesses.
+
+    Distinct-args, succeeding runs are left to `investigation_no_param_flail`,
+    which is the gate that measures arg-cycling on one op.
+    """
+    def _key(c: dict[str, Any]) -> str:
+        return json.dumps(c.get("args") or {}, sort_keys=True, default=str)
+
+    def _failed(c: dict[str, Any]) -> bool:
+        # `ok is None` means the tool returned something unlabeled -- not a
+        # failure. Only an explicit False or a raised error counts.
+        return c.get("ok") is False or bool(c.get("error"))
+
+    best = (0, "", "")
+    for kind, same in (("identical",
+                        lambda a, b: a.get("name") == b.get("name")
+                        and _key(a) == _key(b)),
+                       ("failing",
+                        lambda a, b: a.get("name") == b.get("name")
+                        and _failed(a) and _failed(b))):
+        run, prev = 0, None
+        for call in trace:
+            if prev is not None and same(prev, call):
+                run += 1
+            else:
+                run = 1 if (kind != "failing" or _failed(call)) else 0
+            prev = call
+            if run > best[0]:
+                best = (run, call.get("name", ""), kind)
+    return best
+
+
 def _score_agentic(*, trace: list[dict[str, Any]],
                    text: str,
                    audit: list[dict[str, Any]] | None = None,
@@ -801,20 +851,7 @@ def _score_agentic(*, trace: list[dict[str, Any]],
     # work-based gates (see _score_investigation_quality).
     trace = [c for c in trace if not c.get("refused")]
     n = len(trace)
-    longest = 0
-    cur_name = None
-    cur_run = 0
-    longest_name = ""
-    for call in trace:
-        name = call.get("name", "")
-        if name == cur_name:
-            cur_run += 1
-        else:
-            cur_name = name
-            cur_run = 1
-        if cur_run > longest:
-            longest = cur_run
-            longest_name = name
+    longest, longest_name, spiral_kind = _longest_spiral(trace)
 
     has_yaml = bool(_YAML_BLOCK_RE.search(text or ""))
     # Which terminal card actually carried the playbook, if any.
@@ -832,7 +869,10 @@ def _score_agentic(*, trace: list[dict[str, Any]],
         "no_spiral": {
             "passed": longest <= NO_SPIRAL_MAX_CONSECUTIVE, "skipped": False,
             "longest_run": longest, "tool": longest_name,
+            "kind": spiral_kind,
             "limit": NO_SPIRAL_MAX_CONSECUTIVE,
+            "detail": (f"longest {spiral_kind} run: {longest} x "
+                       f"{longest_name}" if longest_name else "no repetition"),
         },
         # "adherence" = the turn DELIVERED a playbook, by any sanctioned
         # route. It used to mean "pasted a fenced ```yaml block in chat",

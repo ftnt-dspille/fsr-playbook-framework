@@ -40,6 +40,10 @@ class ReferenceDbHealth:
     is_reference_db: bool          # has the expected schema at all
     counts: dict                   # table -> row count (empty if unreadable)
     error: str = ""
+    #: `PRAGMA quick_check` output, or "" when the check was not run. A store
+    #: can be present, schema-correct and fully populated while its b-trees are
+    #: damaged -- see `intact`.
+    integrity: str = ""
 
     @property
     def populated(self) -> bool:
@@ -47,6 +51,22 @@ class ReferenceDbHealth:
         if not (self.exists and self.is_reference_db):
             return False
         return all(self.counts.get(t, 0) > 0 for t in _CORE_TABLES)
+
+    @property
+    def intact(self) -> bool:
+        """True when SQLite reports no structural damage.
+
+        Row counts are not enough. On 2026-08-14 this store passed every other
+        check -- present, right schema, connectors=728, operations=6952 -- while
+        `verifications` had out-of-order rowids, so `find_operation` raised
+        `DatabaseError: database disk image is malformed` on SOME queries and
+        answered others fine. The agent saw an intermittently-missing catalog:
+        it spent 8 of 18 calls re-searching for an op that exists, never
+        delivered a playbook, and the tool-gate scored it 1/4. That is the
+        `empty reference DB presenting as a product bug` failure this module was
+        written for, wearing its other face.
+        """
+        return not self.integrity or self.integrity == "ok"
 
     @property
     def summary(self) -> str:
@@ -59,11 +79,24 @@ class ReferenceDbHealth:
                     f"{self.path}")
         counts = ", ".join(f"{t}={self.counts.get(t, 0)}" for t in _CORE_TABLES)
         state = "populated" if self.populated else "EMPTY/SLIM"
+        if not self.intact:
+            # Skip SQLite's `*** in database main ***` banner -- the line
+            # after it is the one that says what is actually damaged.
+            lines = [ln for ln in self.integrity.splitlines()
+                     if ln.strip() and not ln.startswith("***")]
+            first = lines[0] if lines else (self.integrity or "?")
+            return (f"reference DB CORRUPT ({counts}): {self.path} -- "
+                    f"{first}. Lookups will fail intermittently and the agent "
+                    f"will read as unable to find operations that exist.")
         return f"reference DB {state} ({counts}): {self.path}"
 
 
-def health(db_path) -> ReferenceDbHealth:
-    """Inspect a reference store without creating or modifying it."""
+def health(db_path, *, skip_integrity: bool = False) -> ReferenceDbHealth:
+    """Inspect a reference store without creating or modifying it.
+
+    `skip_integrity` drops the `PRAGMA quick_check` for callers on a hot path
+    that only want the counts.
+    """
     path = Path(db_path)
     if not path.exists():
         return ReferenceDbHealth(path=path, exists=False,
@@ -84,8 +117,20 @@ def health(db_path) -> ReferenceDbHealth:
         counts = {}
         for t in _CORE_TABLES:
             counts[t] = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]  # noqa: S608
+        # Structural check. `quick_check` skips the (expensive) index-vs-table
+        # cross-check that `integrity_check` does; on a ~90MB store it costs
+        # under a second, which is affordable in a preflight that a corrupt
+        # store otherwise sails through.
+        # Unset, not "ok": a check that did not run must not report a pass.
+        integrity = ""
+        if not skip_integrity:
+            try:
+                rows = conn.execute("PRAGMA quick_check(5)").fetchall()
+                integrity = "\n".join(str(r[0]) for r in rows) or "ok"
+            except sqlite3.Error as e:
+                integrity = f"quick_check failed: {e}"
         return ReferenceDbHealth(path=path, exists=True, is_reference_db=True,
-                                 counts=counts)
+                                 counts=counts, integrity=integrity)
     except sqlite3.Error as e:
         return ReferenceDbHealth(path=path, exists=True, is_reference_db=False,
                                  counts={}, error=str(e))

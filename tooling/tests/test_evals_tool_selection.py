@@ -226,3 +226,51 @@ def test_render_screen_names_every_model_and_verdict(monkeypatch):
     txt = h.render_screen(h.screen_models(model_names=["m1", "m2"], repeats=2))
     assert "m1" in txt and "m2" in txt
     assert "consistent" in txt and "failing" in txt
+
+
+# --- no_spiral: repetition WITHOUT progress, not repetition ----------------
+
+def test_five_lookups_of_five_DIFFERENT_step_types_is_not_a_spiral():
+    """The turn this gate used to fail.
+
+    `select_build_offer`, run 20260814T115131Z: the agent looked up start,
+    set_variable, decision, end and connector back to back -- which is how you
+    build a five-step playbook -- then compiled, verified and delivered it.
+    Every other gate passed and this one called the correct method a spiral.
+    Rule 1: a grader that punishes a right answer is worse than no grader.
+    """
+    trace = [{"name": "get_step_type", "args": {"name": n}, "ok": True}
+             for n in ("start", "set_variable", "decision", "end", "connector")]
+    run, tool, kind = scoring._longest_spiral(trace)
+    assert run == 1, f"{run} x {tool} ({kind})"
+
+
+def test_the_same_lookup_repeated_verbatim_IS_a_spiral():
+    """A deterministic lookup repeated with identical args cannot return
+    anything new -- the waste #128 went looking for."""
+    trace = [{"name": "find_operation",
+              "args": {"connector": "fortigate-firewall", "q": "block"},
+              "ok": True}] * 5
+    run, tool, kind = scoring._longest_spiral(trace)
+    assert (run, tool, kind) == (5, "find_operation", "identical")
+
+
+def test_retrying_a_DEAD_tool_with_fresh_guesses_IS_a_spiral():
+    """The classic flail, and the one the args-only rule would miss: every
+    call different, every call failed. This is the shape the SIEM pivot had
+    before its sim fixture existed."""
+    trace = [{"name": "siem_search", "args": {"try": i}, "ok": False}
+             for i in range(5)]
+    run, tool, kind = scoring._longest_spiral(trace)
+    assert (run, kind) == (5, "failing")
+
+
+def test_a_succeeding_run_of_distinct_args_is_left_to_the_flail_gate():
+    """Rule 3: this gate must disagree with its neighbour somewhere.
+    `investigation_no_param_flail` owns arg-cycling on one op; no_spiral owns
+    repetition that cannot make progress. A run that is distinct AND working
+    belongs to neither."""
+    trace = [{"name": "run_op", "args": {"ip": f"10.0.0.{i}"}, "ok": True}
+             for i in range(6)]
+    run, _, _ = scoring._longest_spiral(trace)
+    assert run == 1

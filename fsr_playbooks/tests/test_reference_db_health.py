@@ -94,3 +94,62 @@ def test_resolver_refuses_a_missing_db_instead_of_creating_one(tmp_path):
     with pytest.raises(ReferenceDbError):
         Resolver(p)
     assert not p.exists(), "Resolver must not conjure an empty reference DB"
+
+
+# --- the other face of the same failure: present, populated, and DAMAGED ---
+
+def _corrupt_page(path: Path) -> Path:
+    """Scribble over a b-tree page so SQLite reports structural damage.
+
+    Page 1 is the schema header -- corrupting it makes the file stop being a
+    database at all, which is the case already covered. Damage a later page so
+    the store still opens, still reports its schema, and still counts rows.
+    """
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE bulk (v TEXT)")
+    conn.executemany("INSERT INTO bulk VALUES (?)",
+                     [(f"row-{i}-{'x' * 200}",) for i in range(4000)])
+    conn.commit()
+    conn.close()
+    page_size = 4096
+    with open(path, "r+b") as fh:
+        fh.seek(page_size * 20)
+        fh.write(b"\xde\xad\xbe\xef" * 64)
+    return path
+
+
+def test_a_corrupt_but_populated_db_is_reported_corrupt(tmp_path):
+    """Row counts are not health.
+
+    Found 2026-08-14: the store passed every other check -- present, right
+    schema, connectors=728, operations=6952 -- while `verifications` carried
+    out-of-order rowids, so `find_operation` raised
+    `DatabaseError: database disk image is malformed` on SOME queries and
+    answered others fine. The agent saw a catalog that intermittently lost
+    operations that exist: 8 of 18 calls re-searching for one, no playbook
+    delivered, tool-gate 1/4. Doctor said 4/4 checks passed.
+    """
+    p = _corrupt_page(_make_db(tmp_path / "damaged.db",
+                               connectors=3, operations=9))
+    h = health(p)
+    if h.intact:
+        pytest.skip("this SQLite build did not notice the scribbled page")
+    # Still populated -- that is the whole point. Populated and intact are
+    # different questions, and only one of them was being asked.
+    assert h.populated
+    assert not h.intact
+    assert "CORRUPT" in h.summary
+
+
+def test_a_healthy_db_reports_intact(tmp_path):
+    h = health(_make_db(tmp_path / "full.db", connectors=1, operations=1))
+    assert h.intact and h.integrity == "ok"
+
+
+def test_skip_integrity_leaves_the_flag_unset(tmp_path):
+    """The counts-only path for callers that cannot afford the check --
+    `intact` must not then claim a check that never ran."""
+    h = health(_make_db(tmp_path / "full.db", connectors=1, operations=1),
+               skip_integrity=True)
+    assert h.integrity == ""
+    assert h.intact  # unknown reads as fine; only a RUN check can accuse

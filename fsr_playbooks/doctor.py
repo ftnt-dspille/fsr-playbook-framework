@@ -137,6 +137,14 @@ def check_reference_db() -> Check:
             f"broken YAML can validate clean. Fix: point FSR_REFERENCE_DB at a "
             f"populated store, or re-vendor the full one.",
         )
+    if not h.intact:
+        return Check(
+            "reference DB populated", False,
+            f"{h.summary} Fix: rebuild the damaged table (dump its rows, "
+            f"recreate, reinsert) or restore a known-good copy, then re-run "
+            f"`make doctor`. Do NOT read an eval or tool-gate run taken "
+            f"against a corrupt store -- the agent's misses are the store's.",
+        )
     return Check("reference DB populated", True, h.summary)
 
 
