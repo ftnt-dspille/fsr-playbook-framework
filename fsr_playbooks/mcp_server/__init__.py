@@ -83,6 +83,7 @@ from .tools_compile import (
 from .tools_connector_discovery import (
     find_containment_actions,
     find_enrichment_actions,
+    find_record_actions,
     get_run_env,
     list_configured_connectors,
     list_playbook_runs,

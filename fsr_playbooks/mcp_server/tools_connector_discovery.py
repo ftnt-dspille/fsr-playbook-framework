@@ -1256,3 +1256,223 @@ def list_playbook_runs(playbook: str | None = None,
         members = [m for m in members if m.get("status") in bad]
     runs = [_shape_run(m) for m in members[:limit]]
     return {"playbook_uuid": playbook_uuid, "count": len(runs), "runs": runs}
+
+
+# ---------------------------------------------------------------------------
+# Acting on the FortiSOAR RECORD itself
+# ---------------------------------------------------------------------------
+#
+# `find_enrichment_actions` and `find_containment_actions` are shortcuts past
+# connector discovery for the two outward-facing halves of a turn: look the
+# indicator up, and act on the device. The third thing an analyst always wants
+# is the inward-facing one -- write what you found back onto the record -- and
+# it had no shortcut at all.
+#
+# Measured cost of that gap (fixture `invest_disk_latency_no_ti`, the RESTRAINT
+# fixture, runs 20260814T111633Z and 20260814T112533Z): the agent spent SEVEN of
+# its thirteen calls -- find_connector x3, find_operation x3, get_op_schema --
+# working out how to leave a comment, on a budget of eight. It got there in the
+# end, by hand-building a `cyops_utilities.update_cyops_resource` body. The
+# FortiSOAR-native knowledge it was missing is small, stable and already in the
+# reference store:
+#
+#   * a comment is a RECORD, in the `comments` module, whose `content` holds
+#     the text and whose per-module link field (`comments.alerts`,
+#     `comments.incidents`, …) attaches it. Not a field on the alert.
+#   * a field update is `update_cyops_resource` against the record's own IRI.
+#   * a picklist field takes an IRI, never the label -- which is why
+#     `resolve_picklist_value` has to run first.
+#
+# This tool grants NO new capability: it returns the same tier-3 ops the agent
+# could already have found the long way, and the write still has to be staged
+# through `emit_action_card` for analyst approval. It sells discovery, not
+# permission.
+
+#: intent -> how to express it as a FortiSOAR-native record op. `body` is a
+#: template; `{}` placeholders are filled by the caller.
+_RECORD_ACTIONS: tuple[dict[str, Any], ...] = (
+    {
+        "action": "comment",
+        "op": "insert_cyops_resource",
+        "summary": "Post a comment on a record (the analyst-visible "
+                   "investigation note).",
+        "collection": "/api/3/comments",
+        "body": {"content": "<the comment text; HTML is accepted>"},
+        "link_field_is_the_module": True,
+        "notes": "content is an HTML field -- plain text is fine. The link "
+                 "field is named after the TARGET module and takes a list of "
+                 "record IRIs.",
+    },
+    {
+        "action": "update_field",
+        "op": "update_cyops_resource",
+        "summary": "Change fields on the record itself (status, severity, "
+                   "owner, description).",
+        "collection": "/api/3/{module}/{uuid}",
+        "body": {"<field>": "<new value>"},
+        "notes": "A PICKLIST field (status, severity, ...) takes the "
+                 "picklist's IRI, never its label -- call "
+                 "resolve_picklist_value first, or the write is accepted and "
+                 "sets nothing.",
+    },
+    {
+        "action": "create_record",
+        "op": "insert_cyops_resource",
+        "summary": "Create a new record (an incident rolled up from alerts, "
+                   "an indicator, a task).",
+        "collection": "/api/3/{module}",
+        "body": {"<field>": "<value>"},
+        "notes": "Same picklist rule as update_field.",
+    },
+)
+
+
+def _module_exists(conn: sqlite3.Connection, module: str) -> bool:
+    # `modules.name`, not `module_name` -- that column belongs to
+    # `module_fields`. Getting it wrong raises OperationalError, which the
+    # fail-open below swallows, and the guard then accepts every module name
+    # ever typed. Caught by the test that passes a module that does not exist.
+    try:
+        row = conn.execute("SELECT 1 FROM modules WHERE name=? LIMIT 1",
+                           (module,)).fetchone()
+    except sqlite3.OperationalError:
+        return True  # store predates the table -- do not invent a refusal
+    return bool(row)
+
+
+def _comment_link_field(conn: sqlite3.Connection, module: str) -> str:
+    """The `comments.<module>` field that attaches a comment to `module`.
+
+    Read from the store rather than assumed, so a module whose link field is
+    named unexpectedly cannot produce a body that silently attaches to nothing.
+    """
+    try:
+        row = conn.execute(
+            "SELECT field_name FROM module_fields "
+            "WHERE module_name='comments' AND field_name=? LIMIT 1",
+            (module,)).fetchone()
+    except sqlite3.OperationalError:
+        return ""
+    return row[0] if row else ""
+
+
+def _run_op_tier(connector: str, op: str) -> int:
+    """The approval tier `dispatch` would put this op behind, or 4 if the tier
+    table cannot be read. Erring HIGH is the safe direction: an action listed
+    as needing approval when it does not costs a click; the reverse costs the
+    gate."""
+    try:
+        from fsr_playbooks.llm.tools import _tier_for_run_op
+    except Exception:  # noqa: BLE001
+        return 4
+    return _tier_for_run_op({"connector": connector, "op": op})
+
+
+@mcp.tool()
+def find_record_actions(action: str = "", module: str = "alerts",
+                        uuid: str = "") -> dict[str, Any]:
+    """Call this when the analyst asks you to write something back onto the
+    FortiSOAR record -- comment on it, change its status or severity, assign
+    it, or create a new record from what you found -- and call it BEFORE
+    find_connector / find_operation, which search the whole catalog and will
+    send you round the houses for knowledge this returns in one call.
+
+    Returns the ready-to-stage shape for each record action available here:
+    the connector and op, the collection IRI, and a body template with the
+    FortiSOAR-specific rules that are easy to get wrong -- a comment is a
+    record in the `comments` module linked back by a per-module field, not a
+    field on the alert; a picklist field takes the picklist IRI and never the
+    label.
+
+    Read-only: it discovers actions, it does not run them. Every action it
+    returns is tier 3+ and MUST be staged with emit_action_card for analyst
+    approval, exactly like a containment action.
+
+    Args:
+        action: one of comment / update_field / create_record. Empty returns
+            all of them.
+        module: the target module (alerts, incidents, indicators, ...).
+            Defaults to alerts.
+        uuid: the target record's uuid. When given, the collection IRI and the
+            comment link are filled in for you rather than left as templates.
+
+    Returns:
+        {"module", "actions": [{action, connector, op, tier,
+         requires_approval, collection, body, required_params, notes}],
+         "count"}
+    """
+    module = (module or "alerts").strip().strip("/")
+    want = (action or "").strip().lower()
+    known = {a["action"] for a in _RECORD_ACTIONS}
+    if want and want not in known:
+        return {"ok": False, "code": "unknown_action",
+                "message": f"action {action!r} not recognized",
+                "valid": sorted(known)}
+
+    # Caller errors first, and OFF the box. A bad module name is answerable
+    # from the local store, so asking a live instance about it only turns a
+    # clear refusal into `no_fsr_configured` -- which reads as "this
+    # capability is missing here" rather than "you named a module that does
+    # not exist".
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as _conn:
+        if not _module_exists(_conn, module):
+            return {"ok": False, "code": "unknown_module",
+                    "message": f"no module {module!r} in the reference store",
+                    "hint": "call list_modules or describe_module first"}
+
+    listing = list_configured_connectors(probe=False, verbose=True)
+    if "error" in listing:
+        return {"ok": False, "code": "no_fsr_configured",
+                "message": listing["error"]}
+    configured = {c.get("name") for c in listing.get("configured", [])
+                  if c.get("name")}
+    connector = "cyops_utilities"
+    if connector not in configured:
+        # Not a dead end -- say what is missing and what it costs, per the
+        # never-dead-end rule. The ops are stock FortiSOAR utilities, so this
+        # is a configuration gap, not an absent capability.
+        return {"ok": True, "module": module, "actions": [], "count": 0,
+                "message": (f"{connector} is not configured on this instance, "
+                            f"so record writes cannot be staged through it. "
+                            f"It ships with FortiSOAR -- configuring it "
+                            f"restores comment/update/create.")}
+
+    out: list[dict[str, Any]] = []
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+        have_ops = {r[0] for r in conn.execute(
+            "SELECT op_name FROM operations WHERE connector_name=?",
+            (connector,)).fetchall()}
+        for spec in _RECORD_ACTIONS:
+            if want and spec["action"] != want:
+                continue
+            if spec["op"] not in have_ops:
+                continue
+            body = dict(spec["body"])
+            collection = spec["collection"]
+            if spec.get("link_field_is_the_module"):
+                link = _comment_link_field(conn, module)
+                if not link:
+                    # A comment that attaches to nothing is worse than no
+                    # comment: it is written, it is returned as a success, and
+                    # no one ever sees it on the record.
+                    continue
+                body[link] = [f"/api/3/{module}/{uuid or '<uuid>'}"]
+            else:
+                collection = collection.replace("{module}", module).replace(
+                    "{uuid}", uuid or "<uuid>")
+            tier = _run_op_tier(connector, spec["op"])
+            out.append({
+                "action": spec["action"],
+                "connector": connector,
+                "op": spec["op"],
+                "title": spec["summary"],
+                "tier": tier,
+                "requires_approval": tier >= 3,
+                "collection": collection,
+                "params": {"iri": collection, "body": body},
+                "required_params": _required_params(conn, connector,
+                                                    spec["op"]),
+                "notes": spec["notes"],
+            })
+    return {"ok": True, "module": module, "actions": out, "count": len(out),
+            "stage_with": "emit_action_card"}

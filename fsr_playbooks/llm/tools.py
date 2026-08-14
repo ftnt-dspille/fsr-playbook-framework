@@ -96,6 +96,11 @@ SAFE_TOOLS: list[str] = [
     "list_playbook_runs",
     "find_containment_actions",
     "find_enrichment_actions",
+    # The inward-facing sibling of those two: how to write a finding back onto
+    # the FortiSOAR record (comment / update a field / create a record).
+    # Discovery only -- tier 1, read-only, and every action it returns is
+    # tier 3+ and still has to be staged through emit_action_card.
+    "find_record_actions",
     # Troubleshooting orchestrator (S5). Given a playbook name/uuid it already
     # holds (the designer entity block carries the open playbook's identity),
     # this chains list_recent_failed_runs → get_run_env →
@@ -168,6 +173,7 @@ TOOL_TIERS: dict[str, int] = {
     "list_playbook_runs": 1,
     "find_containment_actions": 1,
     "find_enrichment_actions": 1,
+    "find_record_actions": 1,
     # Read-only troubleshooting chain (reads run env + renders jinja; no write).
     "why_did_playbook_fail": 1,
 }
