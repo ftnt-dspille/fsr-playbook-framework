@@ -115,6 +115,22 @@ def test_the_record_tools_really_are_absent():
     assert "emit_action_card" in reg
 
 
+#: Tools whose NAME contains "record" but which are not record tools. The
+#: substring sweep below is deliberately crude -- it is there to catch a NEW
+#: record read/write appearing in a slice -- so anything exempted has to earn
+#: it here, in writing, rather than by loosening the sweep.
+_NOT_RECORD_TOOLS = {
+    # Compiles a recorded trace into a playbook. Touches no FSR record.
+    "build_playbook_from_trace",
+    # DISCOVERY, not access (#128): returns the connector/op/body shape for
+    # commenting on or updating a record. It reads the reference store, never
+    # the instance, and every action it returns is tier 3+ and still has to be
+    # staged through emit_action_card. Admitting it here is the whole reason
+    # this list exists instead of a wider substring.
+    "find_record_actions",
+}
+
+
 @_connector_present
 def test_no_intent_slice_offers_a_record_tool():
     # Not an intent-filtering artifact: the tools are absent from the
@@ -122,7 +138,7 @@ def test_no_intent_slice_offers_a_record_tool():
     from fsr_playbooks.llm.intents import tools_for_intent
     for intent in ("triage", "build"):
         names = {t["name"] for t in tools_for_intent(intent)}
-        assert not {n for n in names if "record" in n} - {"build_playbook_from_trace"}, intent
+        assert not {n for n in names if "record" in n} - _NOT_RECORD_TOOLS, intent
 
 
 @_connector_present
