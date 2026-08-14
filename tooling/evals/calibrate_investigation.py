@@ -144,6 +144,12 @@ def _aggregate(runs: list[dict]) -> dict:
         "calls": {"min": min(calls), "median": _median([float(c) for c in calls]),
                   "max": max(calls)},
         "gate_k_of_n": gate_k_of_n,
+        # Per repeat, so an approval that fires only SOMETIMES is visible.
+        # A gate that is skipped on one roll of three is the worst possible
+        # result for P2 and must not average away.
+        "approvals_seen": [len(r.get("approvals") or []) for r in runs],
+        "resumes_ok": sum(1 for r in runs
+                          if any(x.get("resumed") for x in (r.get("resumes") or []))),
         # Deduped across repeats: a URL the substrate cannot serve is a
         # property of the BUNDLE, so it should be listed once, not N times.
         "substrate_misses": sorted({m for r in runs
@@ -223,11 +229,12 @@ def _build_provider(kind: str, model: str):
     return AnthropicProvider(model=model, client=AsyncAnthropic(max_retries=12))
 
 
-async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic") -> dict:
+async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
+                   approve: bool = False) -> dict:
     from probes._env import get_config
     get_config()  # load .env (FSR creds + ANTHROPIC_API_KEY)
 
-    from fsr_playbooks.llm.run_turn import run_agent_turn
+    from fsr_playbooks.llm.run_turn import resume_agent_turn, run_agent_turn
     from fsr_playbooks.llm.provider import Message
     from fsr_playbooks.llm.intents import load_intent_prompt, tools_for_intent
 
@@ -237,9 +244,19 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic") ->
 
     trace: list[dict] = []
     final_chunks: list[str] = []
+    approvals: list[dict] = []
 
     def on_event(ev):
         kind = getattr(ev, "kind", "")
+        if kind == "approval_request":
+            approvals.append({
+                "approval_id": ev.approval_id, "tool": ev.tool,
+                "tier": ev.tier, "tool_use_id": ev.tool_use_id,
+                "preview": dict(getattr(ev, "preview", {}) or {}),
+            })
+            log.info("    ~~ APPROVAL REQUIRED tier=%s tool=%s id=%s",
+                     ev.tier, ev.tool, ev.approval_id)
+            return
         if kind == "tool_use":
             args = dict(getattr(ev, "arguments", {}) or {})
             trace.append({"name": ev.name, "args": args})
@@ -258,8 +275,43 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic") ->
         messages=[Message(role="user", content=prompt)],
         tools=tools, on_event=on_event,
     )
+
+    # The gate is dispatch logic, and a run that STOPS at it has only proven
+    # the front half. Tier-3 tools run exclusively on the resume path, so a
+    # guard living inside one is inert until the turn is actually resumed --
+    # a suspended run scores as if the containment never happened, and the
+    # deliverable gates fail for a reason that is not the agent's fault.
+    resumes: list[dict] = []
+    while (approve and getattr(result, "stop_reason", None) == "pending_approval"
+           and approvals):
+        from fsr_playbooks.llm import approvals as _appr
+        pending = approvals[-1]
+        susp = _appr.pop(pending["approval_id"])
+        if susp is None:
+            # Nothing to resume onto. Say so loudly rather than reporting the
+            # turn as merely "suspended" -- an unpoppable approval is a
+            # durability bug, not a policy outcome.
+            log.warning("    !! approval %s not in the gateway -- cannot resume",
+                        pending["approval_id"])
+            resumes.append({**pending, "resumed": False,
+                            "error": "approval not found in gateway"})
+            break
+        log.info("    ~~ APPROVING %s (%s) and resuming",
+                 pending["tool"], pending["approval_id"])
+        before = len(trace)
+        result = await resume_agent_turn(
+            provider=provider, suspended=susp, decision="approve",
+            on_event=on_event,
+        )
+        resumes.append({**pending, "resumed": True,
+                        "calls_after_resume": len(trace) - before,
+                        "stop_reason": getattr(result, "stop_reason", None)})
+        log.info("    ~~ resumed: %s more call(s), stop_reason=%s",
+                 len(trace) - before, getattr(result, "stop_reason", None))
+
     return {"trace": trace, "final_text": "".join(final_chunks).strip(),
-            "stop_reason": getattr(result, "stop_reason", None)}
+            "stop_reason": getattr(result, "stop_reason", None),
+            "approvals": approvals, "resumes": resumes}
 
 
 def main() -> None:
@@ -285,6 +337,12 @@ def main() -> None:
                     help="run each fixture N times and report the spread; the "
                          "reported cell is the MEDIAN run and pass is a "
                          "majority of repeats (default 1 = no error bars)")
+    ap.add_argument("--approve", action="store_true",
+                    help="APPROVE any tier-3 gate and resume the turn, instead "
+                         "of stopping at pending_approval. Tier-3 tools only "
+                         "run on the resume path, so without this the "
+                         "containment fixtures never execute their action -- "
+                         "and LIVE, this means the action really happens.")
     ap.add_argument("--offline", action="store_true",
                     help="bind the tools to the simulated client and seal the "
                          "FSR_* creds out of the env (= EVAL_OFFLINE=1). No "
@@ -360,7 +418,8 @@ def main() -> None:
             miss_mark = len(getattr(box, "misses", [])) if box is not None else 0
             t0 = time.monotonic()
             try:
-                out = asyncio.run(_run_one(t.prompt, args.model, args.provider))
+                out = asyncio.run(_run_one(t.prompt, args.model, args.provider,
+                                           approve=args.approve))
             except Exception as exc:  # noqa: BLE001 -- bank the failure, keep going
                 log.exception("FIXTURE %s RAISED: %r", t.name, exc)
                 runs.append({"recall": 0.0, "passed": False, "calls": 0,
@@ -380,6 +439,8 @@ def main() -> None:
             sc["quality_failed"] = q_failed
             sc["passed"] = sc["passed"] and not q_failed
             sc["calls"] = len(out["trace"])
+            sc["approvals"] = out.get("approvals") or []
+            sc["resumes"] = out.get("resumes") or []
             sc["substrate_misses"] = (
                 list(box.misses[miss_mark:]) if box is not None else [])
             if sc["substrate_misses"]:
