@@ -179,3 +179,33 @@ def test_no_discovery_tool_reports_no_fsr_configured_offline(installed):
         assert code != "no_fsr_configured", (
             f"{name} reports no_fsr_configured with the simulated client "
             f"bound: {out.get('message')!r}")
+
+
+def test_a_siem_pivot_completes_offline_instead_of_no_query_id(installed):
+    """The SIEM half of the same dead end, end to end through the real tool.
+
+    `siem_search` is not one call -- it submits, polls progress and fetches
+    results as three `execute_api_request` calls against the pub/v2 query API.
+    The sim had a fixture for the `search_events` OP and none for that
+    endpoint, so every pivot fell to the generic envelope, found no `queryId`,
+    retried the submit three times with a sleep between each, and returned
+    `no_query_id`. Eight such calls across the five `invest_*` fixtures of run
+    20260813T211826Z, each charged to the agent's tool budget and each one
+    costing it a pivot.
+
+    Empty results are fine and expected (the bundles carry no event table).
+    `no_query_id` is not: under `--offline` it is always a harness gap.
+    """
+    # Resolve the connector the way the harness does -- `importorskip` alone
+    # would skip on every machine that sets FSR_CONNECTOR_REPO but has not put
+    # the checkout on sys.path, and a gate that skips looks exactly like a
+    # gate that passes.
+    from evals.harness import register_triage_tools_if_available
+    substrate = register_triage_tools_if_available()
+    if not substrate.startswith("framework+connector"):
+        pytest.skip(f"no connector triage tools: {substrate}")
+    triage = importlib.import_module("fsr_soc_triage.tools_triage")
+    out = triage.siem_search(by="ip", value="10.0.0.1", window="24h", limit=5)
+    assert isinstance(out, dict), out
+    assert out.get("code") != "no_query_id", out
+    assert out.get("query_id"), f"the pivot never got a query id: {out}"

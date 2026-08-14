@@ -126,3 +126,49 @@ def test_the_connectors_api_and_the_details_route_agree():
     route = {r["name"] for r in client.session.post(
         "/api/integration/connector_details/", json={}).json()["data"]}
     assert typed == route
+
+
+def _siem_exec(endpoint: str, **extra):
+    client = sc.get_client()
+    params = {"endpoint": endpoint, "method": "GET", **extra}
+    return client.post("/api/integration/execute/", {
+        "connector": "fortinet-fortisiem", "operation": "execute_api_request",
+        "params": params})["data"]
+
+
+def test_the_siem_event_query_engine_answers_offline():
+    """Submit -> progress -> results, the pub/v2 triple.
+
+    Every first-class SIEM pivot (`siem_search`, `siem_raw_query`) is three
+    `execute_api_request` calls, not the `search_events` op. With no fixture
+    for it they fell to the generic envelope, which carries no `queryId` -- so
+    the wrapper retried the submit three times, slept between each, and
+    returned `no_query_id`. Eight dead calls across the five `invest_*`
+    fixtures, every one charged to the agent's tool budget.
+    """
+    sub = _siem_exec("/rest/pub/v2/query/eventQuery", method="POST",
+                     payload={"where": 'srcIpAddr="10.0.0.1"'})
+    qid = sub.get("queryId")
+    assert qid, f"no queryId from the sim event-query submit: {sub}"
+
+    prog = _siem_exec("/rest/pub/v2/query/progress",
+                      query_params={"queryId": qid})
+    assert prog.get("progress") == 100, prog
+
+    res = _siem_exec("/rest/pub/v2/query/events/results",
+                     query_params={"queryId": qid, "offset": 0, "limit": 25})
+    # Empty ON PURPOSE: the fixture bundles carry alerts/incidents and no event
+    # table, and synthesizing rows from the where-clause would hand the agent
+    # fabricated confirmation for any indicator it asked about. Assert the
+    # SHAPE, so serving a real captured event table later is a data change.
+    assert isinstance(res.get("events"), list), res
+
+
+def test_two_different_siem_queries_get_different_ids():
+    """One id per payload -- a submit/poll/fetch triple must not collide with
+    another query's results."""
+    a = _siem_exec("/rest/pub/v2/query/eventQuery", method="POST",
+                   payload={"where": 'srcIpAddr="10.0.0.1"'})["queryId"]
+    b = _siem_exec("/rest/pub/v2/query/eventQuery", method="POST",
+                   payload={"where": 'srcIpAddr="10.0.0.2"'})["queryId"]
+    assert a != b

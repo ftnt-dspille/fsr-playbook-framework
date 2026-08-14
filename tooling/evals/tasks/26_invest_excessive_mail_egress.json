@@ -17,5 +17,5 @@
     {"tool": "run_op", "connector": "shodan", "args_contains": ["192.168.77.10"], "label": "Shodan on internal RFC1918 source 192.168.77.10"},
     {"tool": "run_op", "connector": "abuseipdb", "args_contains": ["192.168.77.10"], "label": "AbuseIPDB on internal RFC1918 source 192.168.77.10"}
   ],
-  "notes": "Possible mail exfiltration: internal 192.168.77.10 -> external 35.189.45.227. Same pivot discipline as 25 (enrich external, never external-TI the internal source). Pinned to a real live alert UUID."
+  "notes": "Possible mail exfiltration: internal 192.168.77.10 -> external 35.189.45.227. Same pivot discipline as 25 (enrich external, never external-TI the internal source). Pinned to a real live alert UUID. BUDGET (#128, calibrated 2026-08-14, KEPT at 12): the prompt demands 8 -- record pull, one same-host correlation search, 2-3 TI enrichments on the external IP, a containment lookup, one emit_action_card. Measured offline at 12 / 12 / 13 calls (runs 20260813T211826Z, 20260814T111633Z, 20260814T112533Z): the only one of the five that lands near its budget, so 12 is doing real work here rather than being decoration. Left alone deliberately -- a limit the agent sits exactly on is the evidence the number is right."
 }

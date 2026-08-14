@@ -33,6 +33,7 @@ They assert the CURRENT, measured shape -- not that it is desirable.
 """
 from __future__ import annotations
 
+import functools
 import importlib
 
 import pytest
@@ -61,10 +62,23 @@ def _registry() -> set:
 #: the path) the whole premise of this module is gone -- and that is the goal,
 #: not a failure. Skip rather than assert the framework-only shape, so a
 #: developer with both repos wired up does not see a red suite for succeeding.
-_connector_present = pytest.mark.skipif(
-    "get_record" in _registry(),
-    reason="connector triage tools are registered -- these fixtures are "
-           "servable here, which is the outcome this module wants")
+def _connector_present(fn):
+    """Skip when the connector's triage tools ARE registered -- these fixtures
+    are servable here, which is the outcome this module wants.
+
+    Checked at CALL time, not at collection time. As a `skipif` it read the
+    registry once during collection, so a later test that registers the
+    connector's tools (`test_evals_offline`'s SIEM-pivot gate does, via the
+    harness) flipped these three red purely by ordering -- the same
+    import-order trap that `evals.offline.uninstall()` exists for.
+    """
+    @functools.wraps(fn)
+    def _wrapped(*a, **kw):
+        if "get_record" in _registry():
+            pytest.skip("connector triage tools are registered -- these "
+                        "fixtures are servable here")
+        return fn(*a, **kw)
+    return _wrapped
 
 
 def _unservable(task) -> list:

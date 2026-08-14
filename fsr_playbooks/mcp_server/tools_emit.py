@@ -231,8 +231,18 @@ def emit_action_card(
                     "editable_fields must be a list of strings")
     bad = [f for f in editable_fields if f not in args]
     if bad:
+        # Say what to DO, not just what is wrong. The model's intent when it
+        # lists a field it did not fill is "let the analyst supply this one",
+        # and the widget cannot render an editable field it has no value for.
+        # The terse form of this message cost a whole extra tool call on three
+        # of the five investigation fixtures in run 20260813T211826Z -- the
+        # agent re-emitted the identical card with the field dropped. Both
+        # remedies are legitimate; naming them makes the retry unnecessary.
         return _err("editable_fields_not_in_args",
-                    f"editable_fields not present in args: {bad}")
+                    f"editable_fields not present in args: {bad}. "
+                    f"Either add each to args with the value the analyst "
+                    f"should see prefilled (\"\" for blank), or remove it "
+                    f"from editable_fields.")
     # Don't render an approval card for a connector/op that doesn't exist --
     # the analyst would approve a phantom action that then fails at execute.
     # Use the SHARED grounding guarantee (offline store + live-definition

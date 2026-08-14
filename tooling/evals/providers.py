@@ -256,6 +256,16 @@ def _agentic_anthropic_provider() -> Callable:
                 if isinstance(result, dict):
                     entry["ok"] = result.get("ok")
                     entry["code"] = result.get("code")
+                    # `dispatch` returns a BARE `{"error": "<Type>: <msg>"}`
+                    # when a tool raises -- no `ok`, no `code`, and no audit
+                    # row. In an archived trace that call is indistinguishable
+                    # from a successful one except by a suspiciously small
+                    # `result_chars`, which is how five raising calls in
+                    # run 20260813T211826Z read as the agent making
+                    # duplicate lookups. Keep the text (bounded) so a trace
+                    # can be bucketed without re-running the model.
+                    if result.get("error") is not None:
+                        entry["error"] = str(result["error"])[:200]
                 # Capture the verify_playbook envelope (small, structured)
                 # so the scorer can compute verify-related metrics without
                 # re-running the tool.
@@ -359,6 +369,16 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
                 if isinstance(result, dict):
                     entry["ok"] = result.get("ok")
                     entry["code"] = result.get("code")
+                    # `dispatch` returns a BARE `{"error": "<Type>: <msg>"}`
+                    # when a tool raises -- no `ok`, no `code`, and no audit
+                    # row. In an archived trace that call is indistinguishable
+                    # from a successful one except by a suspiciously small
+                    # `result_chars`, which is how five raising calls in
+                    # run 20260813T211826Z read as the agent making
+                    # duplicate lookups. Keep the text (bounded) so a trace
+                    # can be bucketed without re-running the model.
+                    if result.get("error") is not None:
+                        entry["error"] = str(result["error"])[:200]
                 # `verify_enhancement` returns the same envelope plus
                 # regressions, and it is the ONLY pre-submit gate on the
                 # enhance path -- capture it too, or every enhance turn reads

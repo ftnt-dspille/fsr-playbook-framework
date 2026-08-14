@@ -358,11 +358,53 @@ def _faz_device_logs(params: dict) -> Any:
     return {"data": rows}
 
 
+def _siem_execute_api_request(params: dict) -> Any:
+    """The FortiSIEM pub/v2 event-query engine (submit → progress → results).
+
+    Every first-class SIEM pivot the triage tools expose (`siem_search`,
+    `siem_raw_query`, …) is implemented as three `execute_api_request` calls
+    against `/rest/pub/v2/query/…`, NOT as the `search_events` op above. With
+    no entry here they fell through to :func:`_generic`, whose envelope carries
+    no `queryId` -- so offline every SIEM pivot **submitted three times, slept
+    between each, and came back `no_query_id`**. That is the third instance of
+    the harness-gap-wearing-an-agent-failure shape (see the sim `connectors`
+    API and the record surface): eight dead calls across the five `invest_*`
+    fixtures in run 20260813T211826Z, each one charged to the agent's tool
+    budget and each one costing it a hunt pivot.
+
+    The engine answers **successfully and emptily**: a real queryId, progress
+    100, zero events. Deliberate -- the fixture bundles carry a record surface
+    (alerts/incidents) and no event table, so there is no captured SIEM
+    evidence to serve. Synthesizing rows from the where-clause would hand the
+    agent fabricated confirmation for any indicator it asked about, which is a
+    worse lie than an empty window. "The query ran and matched nothing" is a
+    real outcome an analyst gets often, and it terminates instead of spiraling.
+    Bind an events table to a bundle and serve it here when one is captured.
+    """
+    endpoint = str((params or {}).get("endpoint") or "")
+    if "query/progress" in endpoint:
+        return {"progress": 100}
+    if "query/events/results" in endpoint:
+        return {"events": []}
+    if "query/eventQuery" in endpoint:
+        # Stable per-payload id, so a submit/poll/fetch triple is traceable and
+        # two different queries never collide on one id.
+        payload = (params or {}).get("payload") or {}
+        import hashlib as _hashlib
+        import json as _json
+        digest = _hashlib.sha256(
+            _json.dumps(payload, sort_keys=True, default=str).encode()
+        ).hexdigest()[:12]
+        return {"queryId": f"sim-{digest}"}
+    return _generic("fortinet-fortisiem", "execute_api_request", params or {})
+
+
 _EXECUTE: dict[tuple[str, str], Callable[[dict], Any]] = {
     ("fortinet-fortisiem", "get_ip_context"): _siem_ip_context,
     ("fortinet-fortisiem", "get_host_context"): _siem_host_context,
     ("fortinet-fortisiem", "get_user_context"): _siem_user_context,
     ("fortinet-fortisiem", "search_events"): _siem_search_events,
+    ("fortinet-fortisiem", "execute_api_request"): _siem_execute_api_request,
     ("fortinet-fortisiem", "get_incidents"): _siem_incidents,
     ("virustotal", "query_ip"): _vt_query_ip,
     ("shodan", "host_information"): _shodan_host,
