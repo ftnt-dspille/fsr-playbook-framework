@@ -312,11 +312,28 @@ export const visualStore = {
     } catch { return null; }
   },
 
-  /** Toggle direction YAML→Visual: parse the Monaco buffer back into a
-   * graph and replace the current draft. Marks dirty when the YAML
-   * differs from the on-disk source so Save stays available. Returns
-   * `{ok, message?}` so the page can surface parse errors inline. */
-  async loadFromYaml(yamlText: string): Promise<{ ok: boolean; message?: string }> {
+  /** Toggle direction YAML→Visual: parse the buffer back into a graph and
+   * replace the current draft. Returns `{ok, message?, errors?}` so the page
+   * can surface parse errors inline instead of showing a blank canvas.
+   *
+   * `pristine` marks a document that was just LOADED rather than edited. This
+   * used to set `dirty = true` unconditionally, and all three symptoms found in
+   * the first browser pass came from that one line:
+   *
+   *   - the header read "unsaved" on a document nobody had touched;
+   *   - so the picker's `if (dirty) confirm('Discard unsaved edits?')` fired a
+   *     BLOCKING native dialog on the first playbook switch of the session --
+   *     which a browser-automation harness sees as a frozen renderer, and a
+   *     user sees as being asked to discard edits they never made;
+   *   - and the autosave snapshot, which fires on dirty, wrote revisions of an
+   *     unedited draft.
+   *
+   * The docstring already claimed "marks dirty when the YAML differs from the
+   * on-disk source". Now it does. */
+  async loadFromYaml(
+    yamlText: string,
+    opts: { pristine?: boolean } = {}
+  ): Promise<{ ok: boolean; message?: string; errors?: unknown[] }> {
     try {
       const r = await fetch('/api/visual/', {
         method: 'POST',
@@ -325,10 +342,32 @@ export const visualStore = {
       });
       if (!r.ok) return { ok: false, message: `parse failed (${r.status})` };
       const graph = await r.json() as VisualGraph;
+      // A parse that produced NO playbooks is a failure wearing a 200. The
+      // endpoint answers `{playbooks: [], errors: [...]}` for a document it
+      // cannot render -- e.g. one still using the retired `arguments:` wrapper
+      // -- and taking that as success is why the canvas told the user to "pick
+      // a playbook" about a playbook they had already picked. The one message
+      // that explains it was in the response all along.
+      const errors = (graph as { errors?: unknown[] })?.errors ?? [];
+      if (!graph?.playbooks?.length) {
+        return {
+          ok: false,
+          errors,
+          message: errors.length
+            ? `this document could not be rendered (${errors.length} error${errors.length === 1 ? '' : 's'})`
+            : 'this document contains no playbooks'
+        };
+      }
       snapshot();
       state.graph = graph;
-      state.dirty = true;
-      return { ok: true };
+      if (opts.pristine) {
+        // Freshly loaded: this graph IS the saved state.
+        state.savedGraphJson = JSON.stringify(graph);
+        state.dirty = false;
+      } else {
+        state.dirty = JSON.stringify(graph) !== state.savedGraphJson;
+      }
+      return { ok: true, errors };
     } catch (e) {
       return { ok: false, message: (e as Error).message };
     }

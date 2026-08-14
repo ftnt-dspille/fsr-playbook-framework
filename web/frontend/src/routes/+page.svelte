@@ -23,10 +23,22 @@
   playbookStore.bindAutosave({
     getLatestYaml: getActiveYaml,
     onActiveLoaded: (yaml) => {
-      // Push freshly-loaded drafts into visualStore so flipping to
-      // Design shows the right canvas. Fire-and-forget -- parse errors
-      // are surfaced by the canvas itself.
-      void visualStore.loadFromYaml(yaml).catch(() => {});
+      // Push freshly-loaded drafts into visualStore so flipping to Design
+      // shows the right canvas. `pristine` because LOADING a document is not
+      // EDITING it -- without it the header read "unsaved" before the user
+      // typed anything, the picker then asked them to discard edits they never
+      // made (via a blocking native confirm), and autosave wrote revisions of
+      // an untouched draft.
+      //
+      // The comment here used to say parse errors "are surfaced by the canvas
+      // itself". They were not: the canvas has no way to tell a document that
+      // failed to parse from no document at all, so it showed "Pick a playbook
+      // from the header" about a playbook that was already picked. Keep the
+      // message and let the canvas say what happened.
+      loadError = null;
+      void visualStore.loadFromYaml(yaml, { pristine: true }).then((r) => {
+        if (!r.ok) loadError = r.message ?? 'this document could not be rendered';
+      }).catch((e) => { loadError = (e as Error).message; });
     }
   });
 
@@ -81,6 +93,9 @@
   // redirects here with `?mode=design`. Default is Design.
   let mode: 'design' | 'cli' = $state('design');
   let modeError: string | null = $state(null);
+  //: Why the active document has no canvas, when it has one. Distinct from
+  //: `modeError` (a failed Design/CLI switch): this is set on LOAD.
+  let loadError: string | null = $state(null);
   let switching = $state(false);
 
   /** Sync the active YAML across stores when toggling mode so the
@@ -410,7 +425,7 @@
 <div class="flex min-h-0 flex-1 flex-col">
   {#if mode === 'design'}
     <div class="flex min-h-0 flex-1 overflow-hidden">
-      <EditWorkspace onShowDrawer={showDrawer} />
+      <EditWorkspace onShowDrawer={showDrawer} {loadError} />
     </div>
   {:else}
     <BuildBar onShowDrawer={showDrawer} />

@@ -32,8 +32,13 @@
      * down so the Compile button on EditorToolbar can lift the drawer
      * without EditWorkspace duplicating drawer state. */
     onShowDrawer?: (tab: 'diagnostics' | 'fixes' | 'deploy' | 'debug') => void;
+    /** Why the ACTIVE document has no graph, when one is active. The canvas
+     * cannot tell "nothing loaded" from "loaded but unrenderable" on its own,
+     * and telling a user to pick a playbook they already picked is the worse
+     * of the two guesses. */
+    loadError?: string | null;
   };
-  let { onShowDrawer }: Props = $props();
+  let { onShowDrawer, loadError = null }: Props = $props();
 
   let activePbIdx: number = $state(0);
   // Track the selection by ID, not by object reference. The store
@@ -236,6 +241,20 @@
           {selectedNodeId}
           onSelect={(n) => (selectedNodeId = n?.id ?? null)}
         />
+      {:else if loadError}
+        <div class="flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
+          <p class="text-sm text-[var(--text-default)]">
+            This playbook is loaded, but the canvas can't draw it.
+          </p>
+          <p class="max-w-lg text-xs text-[var(--text-muted)]">{loadError}</p>
+          <button
+            type="button"
+            class="mt-1 rounded border border-[var(--border-soft)] px-2 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-default)]"
+            onclick={() => onShowDrawer?.('diagnostics')}
+          >
+            Show the errors
+          </button>
+        </div>
       {:else}
         <div class="flex h-full items-center justify-center text-sm text-[var(--text-faint)]">
           Pick a playbook from the header to start designing.

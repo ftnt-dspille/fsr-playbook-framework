@@ -289,6 +289,76 @@ describe('visualStore', () => {
       expect(visualStore.canUndo).toBe(true);
     });
 
+    // --- what the first browser pass of the Studio actually found -------
+    //
+    // 408 unit tests were green while the Studio, opened in a real browser,
+    // showed "Pick a playbook from the header to start designing" about a
+    // playbook it had already loaded -- and froze on the next click. Three
+    // defects, one line apart.
+
+    it('a document loaded with {pristine} is NOT dirty', async () => {
+      // `dirty = true` on load meant: the header read "unsaved" before the
+      // user typed anything; the picker then fired a BLOCKING native
+      // confirm("Discard unsaved edits?") on the first playbook switch of the
+      // session (which reads as a frozen renderer to any automation, and as an
+      // insulting question to a user); and autosave wrote revisions of an
+      // untouched draft.
+      visualStore.load('demo.yaml', fixture());
+      const loaded: VisualGraph = {
+        ...fixture(),
+        playbooks: [{ ...fixture().playbooks[0], name: 'Fresh' }]
+      };
+      globalThis.fetch = vi.fn(async () =>
+        new Response(JSON.stringify(loaded), { status: 200 })
+      ) as any;
+
+      const r = await visualStore.loadFromYaml('playbooks:\n  - name: Fresh\n',
+                                               { pristine: true });
+      expect(r.ok).toBe(true);
+      expect(visualStore.state.dirty).toBe(false);
+    });
+
+    it('an EDIT still marks dirty -- the two paths must not collapse', async () => {
+      visualStore.load('demo.yaml', fixture());
+      const edited: VisualGraph = {
+        ...fixture(),
+        playbooks: [{ ...fixture().playbooks[0], name: 'Edited' }]
+      };
+      globalThis.fetch = vi.fn(async () =>
+        new Response(JSON.stringify(edited), { status: 200 })
+      ) as any;
+
+      const r = await visualStore.loadFromYaml('playbooks:\n  - name: Edited\n');
+      expect(r.ok).toBe(true);
+      expect(visualStore.state.dirty).toBe(true);
+    });
+
+    it('a 200 carrying ZERO playbooks is a failure, not a load', async () => {
+      // `/api/visual/` answers `{playbooks: [], errors: [...]}` for a document
+      // it cannot render -- e.g. one still using the retired `arguments:`
+      // wrapper. Reading only the HTTP status took that as success, replaced
+      // the graph with an empty one, and left the canvas showing its
+      // no-document empty state. A real draft did exactly this.
+      visualStore.load('demo.yaml', fixture());
+      const before = JSON.stringify(visualStore.state.graph);
+      globalThis.fetch = vi.fn(async () =>
+        new Response(JSON.stringify({
+          playbooks: [],
+          errors: [
+            { code: 'bad_value', message: 'the `arguments:` wrapper is no longer used', path: 'playbooks[0].steps[2].arguments' },
+            { code: 'bad_value', message: 'the `arguments:` wrapper is no longer used', path: 'playbooks[0].steps[5].arguments' }
+          ]
+        }), { status: 200 })
+      ) as any;
+
+      const r = await visualStore.loadFromYaml('playbooks: []', { pristine: true });
+      expect(r.ok).toBe(false);
+      expect(r.message).toMatch(/2 errors/);
+      expect(r.errors).toHaveLength(2);
+      // And it must not have clobbered the graph that WAS rendering.
+      expect(JSON.stringify(visualStore.state.graph)).toBe(before);
+    });
+
     it('loadFromYaml surfaces parse errors and leaves graph untouched', async () => {
       visualStore.load('demo.yaml', fixture());
       const before = JSON.stringify(visualStore.state.graph);
