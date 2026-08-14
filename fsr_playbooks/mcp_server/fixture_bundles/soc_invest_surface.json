@@ -32,10 +32,22 @@
     "                       102.220.160.21. That is the three-hop chain",
     "                       `min_hunt_depth: 3` measures; without the pivot",
     "                       alert the host search dead-ends and the depth score",
-    "                       is the harness's, not the agent's."
+    "                       is the harness's, not the agent's.",
+    "",
+    "`agents` is deliberately EMPTY, and that is a record, not an omission.",
+    "`_agent_configured_rows` GETs /api/3/agents on the way to finding",
+    "agent-proxied connector configs. A real appliance answers 200 with a",
+    "member list; an unbound module here answered 404, which that helper",
+    "treats as `[]` -- so the offline surface silently modelled a box whose",
+    "agent list is UNREADABLE rather than one that simply has no agents. The",
+    "two are different worlds, and only one of them is a box you could own.",
+    "It cost all seven fixtures a wasted pivot per run, and every quality",
+    "gate here would have blamed the AGENT for it."
   ],
 
   "modules": {
+    "agents": [],
+
     "alerts": [
       {
         "@context": "/api/3/contexts/Alert",

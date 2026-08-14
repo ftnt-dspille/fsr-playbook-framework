@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -87,6 +88,73 @@ def _compute_delta(baseline: dict, results: list[tuple[str, dict]]) -> dict:
     return delta
 
 
+def _median(xs: list[float]) -> float:
+    """Plain median. n is 3-5 here, so sorting beats a dependency."""
+    s = sorted(xs)
+    n = len(s)
+    if not n:
+        return 0.0
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+
+def _aggregate(runs: list[dict]) -> dict:
+    """Collapse N repeats of one fixture into a single entry + a spread block.
+
+    Single runs lie. One fixture was watched swinging 22 -> 31 -> 22 tool
+    calls with nothing changed between them, which means a budget calibrated
+    off one run is pinned to noise, and a later "the agent got worse" reading
+    is a coin flip. So the reported cell is the MEDIAN run -- not the best,
+    not the last -- and `passed` is a MAJORITY of repeats, not a single roll.
+    `spread` carries what the median throws away: min/max, the per-gate
+    k-of-n, and whether the fixture is flaky (some repeats passed, some
+    didn't). A flaky fixture is a different object from a failing one and the
+    summary must not flatten them together.
+    """
+    n = len(runs)
+    recalls = [float(r.get("recall") or 0.0) for r in runs]
+    calls = [int(r.get("calls") or 0) for r in runs]
+    passes = [bool(r.get("passed")) for r in runs]
+    n_pass = sum(passes)
+
+    # The representative run = the one whose recall is the median. Ties break
+    # toward the higher call count, so the reported trace is never the
+    # flattering end of the spread.
+    med_recall = _median(recalls)
+    rep = sorted(runs, key=lambda r: (abs(float(r.get("recall") or 0.0) - med_recall),
+                                      -int(r.get("calls") or 0)))[0]
+    entry = dict(rep)
+
+    gate_names: set[str] = set()
+    for r in runs:
+        gate_names |= {k for k, v in (r.get("quality") or {}).items()
+                       if isinstance(v, dict) and not v.get("skipped")}
+    gate_k_of_n = {
+        g: sum(1 for r in runs
+               if ((r.get("quality") or {}).get(g) or {}).get("passed"))
+        for g in sorted(gate_names)
+    }
+
+    entry["passed"] = n_pass * 2 > n  # strict majority
+    entry["spread"] = {
+        "repeats": n,
+        "passes": n_pass,
+        "flaky": 0 < n_pass < n,
+        "recall": {"min": min(recalls), "median": med_recall, "max": max(recalls)},
+        "calls": {"min": min(calls), "median": _median([float(c) for c in calls]),
+                  "max": max(calls)},
+        "gate_k_of_n": gate_k_of_n,
+        # Deduped across repeats: a URL the substrate cannot serve is a
+        # property of the BUNDLE, so it should be listed once, not N times.
+        "substrate_misses": sorted({m for r in runs
+                                    for m in (r.get("substrate_misses") or [])}),
+        "runs": [{"recall": r.get("recall"), "calls": r.get("calls"),
+                  "passed": bool(r.get("passed")),
+                  "quality_failed": r.get("quality_failed", [])} for r in runs],
+    }
+    return entry
+
+
 log = logging.getLogger("calibrate")
 
 
@@ -114,23 +182,56 @@ def _setup_logging(log_path: Path) -> None:
     logging.getLogger("httpx").setLevel(logging.INFO)
 
 
-async def _run_one(prompt: str, model: str) -> dict:
-    from probes._env import get_config
-    get_config()  # load .env (FSR creds + ANTHROPIC_API_KEY)
+def _active_box():
+    """The bound FixtureBox, or None when the run is live/unbound."""
+    try:
+        from fsr_playbooks.mcp_server import _sim_client as sc
+        return sc.active_box()
+    except Exception:  # noqa: BLE001 -- live runs have no sim client at all
+        return None
+
+
+def _build_provider(kind: str, model: str):
+    """Anthropic by default; `frank` points the OpenAI-compatible provider at
+    the FRANK_* endpoint.
+
+    Repeats multiply cost by N, and the screening doctrine is that the
+    cheapest *consistent* model wins -- error bars are exactly the workload
+    that should not be paid for per-token on a metered key. Reads FRANK_*
+    rather than the global OPENAI_* config for the same reason the harness
+    does: the two are different endpoints and silently sharing config is how
+    a run measures a model nobody chose.
+    """
+    if kind == "frank":
+        import os as _os
+        from fsr_playbooks.llm.openai_provider import OpenAIProvider
+        base_url = _os.environ.get("FRANK_BASE_URL")
+        key = _os.environ.get("FRANK_API_KEY")
+        if not base_url or not key:
+            raise SystemExit("--provider frank needs FRANK_BASE_URL + "
+                             "FRANK_API_KEY (see .env)")
+        return OpenAIProvider(base_url=base_url, api_key=key,
+                              model=model or _os.environ.get("FRANK_MODEL"))
 
     from anthropic import AsyncAnthropic
     from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
-    from fsr_playbooks.llm.run_turn import run_agent_turn
-    from fsr_playbooks.llm.provider import Message
-    from fsr_playbooks.llm.intents import load_intent_prompt, tools_for_intent
-
     # Tier-1 org cap is 50k input tokens/min; a multi-turn investigation
     # resends growing history, so single turns can hit the per-minute
     # ceiling. Failed retries aren't billed -- crank max_retries so the
     # SDK's backoff rides out the per-minute window instead of the turn
     # ending early (which would look like a recall miss).
-    client = AsyncAnthropic(max_retries=12)
-    provider = AnthropicProvider(model=model, client=client)
+    return AnthropicProvider(model=model, client=AsyncAnthropic(max_retries=12))
+
+
+async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic") -> dict:
+    from probes._env import get_config
+    get_config()  # load .env (FSR creds + ANTHROPIC_API_KEY)
+
+    from fsr_playbooks.llm.run_turn import run_agent_turn
+    from fsr_playbooks.llm.provider import Message
+    from fsr_playbooks.llm.intents import load_intent_prompt, tools_for_intent
+
+    provider = _build_provider(provider_kind, model)
     system = load_intent_prompt("triage")
     tools = tools_for_intent("triage")
 
@@ -164,7 +265,14 @@ async def _run_one(prompt: str, model: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default=None, help="run a single fixture by name")
-    ap.add_argument("--model", default=DEMO_MODEL)
+    ap.add_argument("--model", default=None,
+                    help=f"model id (default: {DEMO_MODEL} for anthropic, "
+                         "$FRANK_MODEL for frank)")
+    ap.add_argument("--provider", default="anthropic",
+                    choices=("anthropic", "frank"),
+                    help="which endpoint serves the agent. `frank` is the "
+                         "free screening endpoint -- prefer it for --repeat, "
+                         "where cost multiplies by N.")
     ap.add_argument("--pace", type=int, default=45,
                     help="seconds to wait between fixtures (rate-limit drain)")
     ap.add_argument("--capture", action="store_true",
@@ -173,7 +281,46 @@ def main() -> None:
     ap.add_argument("--baseline", default=None, metavar="STAMP",
                     help="prior calibrate run stamp to diff against (recall + "
                          "gate PASS<->FAIL flips); e.g. 20260530T120000Z")
+    ap.add_argument("--repeat", type=int, default=1, metavar="N",
+                    help="run each fixture N times and report the spread; the "
+                         "reported cell is the MEDIAN run and pass is a "
+                         "majority of repeats (default 1 = no error bars)")
+    ap.add_argument("--offline", action="store_true",
+                    help="bind the tools to the simulated client and seal the "
+                         "FSR_* creds out of the env (= EVAL_OFFLINE=1). No "
+                         "appliance is touched; still spends model credits.")
+    ap.add_argument("--bundle", default=None, metavar="NAME",
+                    help="fixture bundle backing the offline record surface "
+                         "(e.g. soc_invest_surface). Without one the reads "
+                         "answer empty-but-ok and the fixtures measure an "
+                         "agent triaging an empty box.")
     args = ap.parse_args()
+    if args.repeat < 1:
+        raise SystemExit("--repeat must be >= 1")
+    # Order matters, twice over. get_config() reads .env and caches; offline
+    # install() DELETES the FSR_* vars, so a dotenv read after the seal would
+    # setdefault a live target straight back in. And the model default has to
+    # be resolved AFTER that read, because FRANK_MODEL lives in .env -- doing
+    # it before silently ran an unnamed model on the endpoint's own default,
+    # which is the exact "measured a model nobody chose" failure this file
+    # warns about elsewhere.
+    from probes._env import get_config
+    get_config()
+    if args.model is None:
+        args.model = (os.environ.get("FRANK_MODEL") if args.provider == "frank"
+                      else DEMO_MODEL)
+    if not args.model:
+        raise SystemExit(f"no model resolved for --provider {args.provider} "
+                         "(set FRANK_MODEL in .env or pass --model)")
+    substrate = "live"
+    if args.offline:
+        import os as _os
+        _os.environ["EVAL_OFFLINE"] = "1"
+        if args.bundle:
+            _os.environ["EVAL_FIXTURE_BUNDLE"] = args.bundle
+        from evals import offline as _offline
+        _offline.install()
+        substrate = f"{_offline.active_client_name()} / {_offline.active_box_name()}"
 
     from evals.tasks import load_tasks
     from evals.scoring import _score_investigation, _score_investigation_quality
@@ -191,91 +338,113 @@ def main() -> None:
 
     results = []
     for i, t in enumerate(tasks):
-        if i > 0:
-            # Let the per-minute token window drain between fixtures so
-            # the next run starts with a clean rate-limit budget.
-            log.info("... pacing %ss before next fixture ...", args.pace)
-            time.sleep(args.pace)
-        log.info("=" * 72)
-        log.info("FIXTURE: %s   (model %s)", t.name, args.model)
-        t0 = time.monotonic()
-        try:
-            out = asyncio.run(_run_one(t.prompt, args.model))
-        except Exception as exc:  # noqa: BLE001 -- bank the failure, keep going
-            log.exception("FIXTURE %s RAISED: %r", t.name, exc)
-            results.append((t.name, {"recall": 0.0, "passed": False,
-                                     "missing": ["<run raised>"], "forbidden_hit": [],
-                                     "error": repr(exc)}))
-            continue
-        dt = time.monotonic() - t0
-        sc = _score_investigation(out["trace"], t.required_facts, t.forbidden_facts)
-        quality = _score_investigation_quality(out["trace"], t.investigation_quality)
-        # A fixture clears calibration only if recall AND every non-skipped
-        # quality gate pass -- recall alone greenlit 20-call flailing (the
-        # finding that motivated this strengthening).
-        q_failed = [k for k, v in quality.items()
-                    if not v.get("skipped") and not v.get("passed")]
-        sc["quality"] = quality
-        sc["quality_failed"] = q_failed
-        sc["passed"] = sc["passed"] and not q_failed
-        log.info("  stop_reason=%s  pivots=%s  elapsed=%.0fs",
-                 out["stop_reason"], len(out["trace"]), dt)
-        log.info("  RECALL %s (gate %s)  matched %s/%s",
-                 sc["recall"], sc["gate"], sc["matched"], sc["required"])
-        for k, v in quality.items():
-            if v.get("skipped"):
+        runs: list[dict] = []
+        for rep in range(1, args.repeat + 1):
+            if i > 0 or rep > 1:
+                # Let the per-minute token window drain between runs so the
+                # next one starts with a clean rate-limit budget. Repeats pace
+                # too: a repeat that stalls on a 429 measures the rate limiter,
+                # not the agent, and that lands in the spread as noise.
+                log.info("... pacing %ss before next run ...", args.pace)
+                time.sleep(args.pace)
+            log.info("=" * 72)
+            log.info("FIXTURE: %s   run %s/%s   (model %s, substrate %s)",
+                     t.name, rep, args.repeat,
+                     f"{args.provider}:{args.model}", substrate)
+            # Snapshot the substrate's miss log around the run. A 404 from the
+            # fixture box is INDISTINGUISHABLE, in the trace, from an agent
+            # pivoting somewhere pointless -- three dead limbs in this sim
+            # already presented as agent overspend before anyone looked. So
+            # the misses a run CAUSED become a field, not a log-grep.
+            box = _active_box()
+            miss_mark = len(getattr(box, "misses", [])) if box is not None else 0
+            t0 = time.monotonic()
+            try:
+                out = asyncio.run(_run_one(t.prompt, args.model, args.provider))
+            except Exception as exc:  # noqa: BLE001 -- bank the failure, keep going
+                log.exception("FIXTURE %s RAISED: %r", t.name, exc)
+                runs.append({"recall": 0.0, "passed": False, "calls": 0,
+                             "missing": ["<run raised>"], "forbidden_hit": [],
+                             "quality": {}, "quality_failed": [],
+                             "error": repr(exc)})
                 continue
-            log.info("  %-30s %s  (%s)",
-                     k, "PASS" if v["passed"] else "FAIL", v.get("detail", ""))
-        log.info("  OVERALL PASS=%s", sc["passed"])
-        if sc["missing"]:
-            log.info("  MISSING required: %s", sc["missing"])
-        if sc["forbidden_hit"]:
-            log.info("  !! FORBIDDEN fired: %s", sc["forbidden_hit"])
+            dt = time.monotonic() - t0
+            sc = _score_investigation(out["trace"], t.required_facts, t.forbidden_facts)
+            quality = _score_investigation_quality(out["trace"], t.investigation_quality)
+            # A fixture clears calibration only if recall AND every non-skipped
+            # quality gate pass -- recall alone greenlit 20-call flailing (the
+            # finding that motivated this strengthening).
+            q_failed = [k for k, v in quality.items()
+                        if not v.get("skipped") and not v.get("passed")]
+            sc["quality"] = quality
+            sc["quality_failed"] = q_failed
+            sc["passed"] = sc["passed"] and not q_failed
+            sc["calls"] = len(out["trace"])
+            sc["substrate_misses"] = (
+                list(box.misses[miss_mark:]) if box is not None else [])
+            if sc["substrate_misses"]:
+                log.info("  substrate 404s (%s): %s", len(sc["substrate_misses"]),
+                         "; ".join(sc["substrate_misses"][:6]))
+            log.info("  stop_reason=%s  pivots=%s  elapsed=%.0fs",
+                     out["stop_reason"], len(out["trace"]), dt)
+            log.info("  RECALL %s (gate %s)  matched %s/%s",
+                     sc["recall"], sc["gate"], sc["matched"], sc["required"])
+            for k, v in quality.items():
+                if v.get("skipped"):
+                    continue
+                log.info("  %-30s %s  (%s)",
+                         k, "PASS" if v["passed"] else "FAIL", v.get("detail", ""))
+            log.info("  OVERALL PASS=%s", sc["passed"])
+            if sc["missing"]:
+                log.info("  MISSING required: %s", sc["missing"])
+            if sc["forbidden_hit"]:
+                log.info("  !! FORBIDDEN fired: %s", sc["forbidden_hit"])
 
-        # Bank the golden trace the moment the fixture completes, so a
-        # later stall/kill never loses an already-paid-for fixture. Only
-        # the tool-call layer (name+args+ok) is kept -- not response bodies,
-        # which go stale; the fixture pins the indicators these match on.
-        if args.capture and sc["passed"]:
-            gp = GOLDEN_DIR / f"{t.name}.json"
-            gp.write_text(json.dumps({
-                "fixture": t.name, "captured": stamp, "model": args.model,
-                "stop_reason": out["stop_reason"], "recall": sc["recall"],
-                "trace": [{"name": c["name"], "args": c.get("args", {}),
-                           "ok": c.get("ok")} for c in out["trace"]],
-            }, indent=2))
-            log.info("  banked golden trace -> %s", gp.relative_to(REPO_ROOT))
-        # Always bank FAILURE traces (the signal for the next fix) -- unlike
-        # golden passes, these are unconditional, since a thrown-away failing
-        # trace is exactly what forces an expensive re-run to diagnose. Records
-        # the full arg-by-arg trace + the gates that tripped + their implicated
-        # lever, so failure -> file-to-change is a field, not a log-grep.
-        if not sc["passed"]:
-            fdir = RUN_DIR / f"calibrate_{stamp}_failures"
-            fdir.mkdir(parents=True, exist_ok=True)
-            failed_keys = list(sc.get("quality_failed") or [])
-            if sc.get("missing"):
-                failed_keys.append("investigation_recall")
-            if sc.get("forbidden_hit"):
-                failed_keys.append("<forbidden>")
-            (fdir / f"{t.name}.json").write_text(json.dumps({
-                "fixture": t.name, "captured": stamp, "model": args.model,
-                "stop_reason": out["stop_reason"], "recall": sc["recall"],
-                "gate": sc["gate"], "matched": sc["matched"], "required": sc["required"],
-                "missing": sc["missing"], "forbidden_hit": sc["forbidden_hit"],
-                "quality": sc.get("quality", {}),
-                "failed_gates": [{"gate": k, "lever": _lever_for(k),
-                                  "detail": (sc.get("quality", {}).get(k, {}) or {}).get("detail", "")}
-                                 for k in failed_keys],
-                "trace": [{"name": c["name"], "args": c.get("args", {}),
-                           "ok": c.get("ok")} for c in out["trace"]],
-            }, indent=2))
-            log.info("  banked FAILURE trace -> %s",
-                     (fdir / f"{t.name}.json").relative_to(REPO_ROOT))
-            for k in failed_keys:
-                log.info("    lever[%s]: %s", k, _lever_for(k))
-        results.append((t.name, sc))
+            # Bank the golden trace the moment the fixture completes, so a
+            # later stall/kill never loses an already-paid-for fixture. Only
+            # the tool-call layer (name+args+ok) is kept -- not response bodies,
+            # which go stale; the fixture pins the indicators these match on.
+            if args.capture and sc["passed"] and rep == 1:
+                gp = GOLDEN_DIR / f"{t.name}.json"
+                gp.write_text(json.dumps({
+                    "fixture": t.name, "captured": stamp, "model": args.model,
+                    "stop_reason": out["stop_reason"], "recall": sc["recall"],
+                    "trace": [{"name": c["name"], "args": c.get("args", {}),
+                               "ok": c.get("ok")} for c in out["trace"]],
+                }, indent=2))
+                log.info("  banked golden trace -> %s", gp.relative_to(REPO_ROOT))
+            # Always bank FAILURE traces (the signal for the next fix) -- unlike
+            # golden passes, these are unconditional, since a thrown-away failing
+            # trace is exactly what forces an expensive re-run to diagnose. Records
+            # the full arg-by-arg trace + the gates that tripped + their implicated
+            # lever, so failure -> file-to-change is a field, not a log-grep.
+            if not sc["passed"]:
+                fdir = RUN_DIR / f"calibrate_{stamp}_failures"
+                fdir.mkdir(parents=True, exist_ok=True)
+                failed_keys = list(sc.get("quality_failed") or [])
+                if sc.get("missing"):
+                    failed_keys.append("investigation_recall")
+                if sc.get("forbidden_hit"):
+                    failed_keys.append("<forbidden>")
+                fname = f"{t.name}.json" if args.repeat == 1 else f"{t.name}.run{rep}.json"
+                (fdir / fname).write_text(json.dumps({
+                    "fixture": t.name, "captured": stamp, "model": args.model,
+                    "stop_reason": out["stop_reason"], "recall": sc["recall"],
+                    "gate": sc["gate"], "matched": sc["matched"], "required": sc["required"],
+                    "missing": sc["missing"], "forbidden_hit": sc["forbidden_hit"],
+                    "quality": sc.get("quality", {}),
+                    "failed_gates": [{"gate": k, "lever": _lever_for(k),
+                                      "detail": (sc.get("quality", {}).get(k, {}) or {}).get("detail", "")}
+                                     for k in failed_keys],
+                    "trace": [{"name": c["name"], "args": c.get("args", {}),
+                               "ok": c.get("ok")} for c in out["trace"]],
+                }, indent=2))
+                log.info("  banked FAILURE trace -> %s",
+                         (fdir / fname).relative_to(REPO_ROOT))
+                for k in failed_keys:
+                    log.info("    lever[%s]: %s", k, _lever_for(k))
+            runs.append(sc)
+        results.append((t.name, _aggregate(runs)))
 
     log.info("=" * 72)
     log.info("SUMMARY")
@@ -288,9 +457,53 @@ def main() -> None:
             extra = f"  quality_fail={','.join(sc['quality_failed'])}"
         elif sc["missing"]:
             extra = f"  missing={len(sc['missing'])}"
+        sp = sc.get("spread") or {}
+        if sp.get("flaky"):
+            flag = "FLAKY"
         log.info("  [%s] %-34s recall=%s%s", flag, name, sc["recall"], extra)
     n_pass = sum(1 for _, sc in results if sc["passed"])
     log.info("%s/%s fixtures clear the gate.", n_pass, len(results))
+
+    # Error bars. Without them a 22 -> 31 -> 22 call swing on an unchanged
+    # agent reads as a regression, which is the exact misreading the
+    # investigation gates exist to prevent.
+    if args.repeat > 1:
+        log.info("-" * 72)
+        log.info("SPREAD over %s repeats (substrate: %s)", args.repeat, substrate)
+        log.info("  %-34s %-6s %-18s %-14s %s",
+                 "fixture", "pass", "recall min/med/max", "calls min/med/max",
+                 "unstable gates")
+        for name, sc in results:
+            sp = sc.get("spread") or {}
+            r, c = sp.get("recall", {}), sp.get("calls", {})
+            unstable = [f"{g} {k}/{sp['repeats']}"
+                        for g, k in (sp.get("gate_k_of_n") or {}).items()
+                        if 0 < k < sp["repeats"]]
+            log.info("  %-34s %-6s %-18s %-14s %s",
+                     name, f"{sp.get('passes')}/{sp.get('repeats')}",
+                     f"{r.get('min')}/{r.get('median')}/{r.get('max')}",
+                     f"{c.get('min')}/{c.get('median')}/{c.get('max')}",
+                     ", ".join(unstable) or "-")
+        # A URL the bundle cannot serve costs the agent a pivot every single
+        # run, and every gate here would blame the agent for it.
+        by_url: dict[str, list[str]] = {}
+        for name, sc in results:
+            for m in (sc.get("spread") or {}).get("substrate_misses") or []:
+                by_url.setdefault(m, []).append(name)
+        if by_url:
+            log.info("-" * 72)
+            log.info("SUBSTRATE MISSES -- the bundle could not serve these; "
+                     "the agent paid a pivot for each")
+            for url, names in sorted(by_url.items(),
+                                     key=lambda kv: (-len(kv[1]), kv[0])):
+                log.info("  %-58s %s", url[:58], ", ".join(sorted(set(names))))
+
+        flaky = [n for n, sc in results if (sc.get("spread") or {}).get("flaky")]
+        if flaky:
+            log.info("  FLAKY (some repeats passed, some did not): %s",
+                     ", ".join(flaky))
+        else:
+            log.info("  no fixture flipped pass/fail across repeats.")
 
     # Baseline delta -- turns "3/5 PASS" into "mail_egress budget 19->11, now
     # clears": a verdict an agent can act on, vs. a snapshot to eyeball.
@@ -318,8 +531,12 @@ def main() -> None:
 
     summary_path = RUN_DIR / f"calibrate_{stamp}.summary.json"
     summary_path.write_text(json.dumps(
-        {"stamp": stamp, "model": args.model, "baseline": args.baseline,
-         "results": [{"fixture": n,
+        {"stamp": stamp, "model": args.model, "provider": args.provider, "baseline": args.baseline,
+         # Two runs on different substrates are not comparable, and nothing
+         # else in the file would say which one this was.
+         "repeats": args.repeat, "substrate": substrate,
+         "offline": bool(args.offline), "bundle": args.bundle,
+         "results": [{"fixture": n, "spread": sc.get("spread"),
                       **{k: sc.get(k) for k in
                          ("recall", "passed", "missing", "forbidden_hit", "error")},
                       "quality": sc.get("quality", {}),

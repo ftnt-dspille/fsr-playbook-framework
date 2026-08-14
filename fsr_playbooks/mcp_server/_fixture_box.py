@@ -156,6 +156,13 @@ def _record_roots() -> list[Path]:
         # to point at; accept either rather than making the caller be right.
         roots += [Path(repo) / sub / "fsr_soc_triage" / "tests" / "fixtures"
                   / "triage" for sub in ("connector-fsr-soc-assistant", ".")]
+    # This package's OWN triage fixtures, last. `soc_invest_surface` ships here
+    # and references records that also ship here, so without this the bundle
+    # cannot load in its own repo without an env var pointing at itself -- and
+    # the failure surfaces as an unrelated-looking FixtureBoxError at install
+    # time. Last in order, so an explicit root or a connector checkout still
+    # wins and this never silently shadows a captured record.
+    roots.append(Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "triage")
     return roots
 
 

@@ -97,6 +97,15 @@ def open_db(create: bool = True) -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL, explicitly. The shipped db is already in WAL -- but nothing in the
+    # code ever SET it, so that was a property of the file, not of the store.
+    # A rebuilt db comes back in rollback-journal mode (sqlite's default),
+    # where the MCP server and a probe run writing the same tables from two
+    # processes is a genuinely more dangerous shape than it is under WAL. The
+    # `database disk image is malformed` this docstring describes is what that
+    # failure looks like, and "populated" is not the same as "intact". The
+    # pragma is persistent and idempotent, so this costs one no-op per open.
+    conn.execute("PRAGMA journal_mode = WAL")
     if create:
         have = {r["name"] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
