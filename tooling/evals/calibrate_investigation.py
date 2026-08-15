@@ -356,6 +356,11 @@ def main() -> None:
                          "(e.g. soc_invest_surface). Without one the reads "
                          "answer empty-but-ok and the fixtures measure an "
                          "agent triaging an empty box.")
+    ap.add_argument("--allow-unservable", action="store_true",
+                    help="run fixtures whose required_facts name tools this "
+                         "process does not register (they score 0.0 by "
+                         "construction). Off by default: that 0.0 is "
+                         "indistinguishable from an agent regression.")
     args = ap.parse_args()
     if args.repeat < 1:
         raise SystemExit("--repeat must be >= 1")
@@ -385,7 +390,9 @@ def main() -> None:
         substrate = f"{_offline.active_client_name()} / {_offline.active_box_name()}"
 
     from evals.tasks import load_tasks
-    from evals.scoring import _score_investigation, _score_investigation_quality
+    from evals.scoring import (_score_investigation,
+                               _score_investigation_quality,
+                               unservable_required_tools)
 
     tasks = [t for t in load_tasks() if t.mode == "investigation"]
     if args.only:
@@ -396,6 +403,43 @@ def main() -> None:
             raise SystemExit(f"no such fixture(s): {', '.join(missing)}")
     if not tasks:
         raise SystemExit("no investigation fixtures matched")
+
+    # The invest_* fixtures pivot through the CONNECTOR's triage tools, which
+    # are not part of this repo's registry and only appear once something calls
+    # register_triage_tools(). Nothing here used to call it, so the tools were
+    # simply absent and every fixture scored 0.0. Register them when the
+    # connector is importable; the check below turns the remaining case into a
+    # refusal instead of a silent zero.
+    # `evals.harness` already owns this resolution (and honours
+    # FSR_CONNECTOR_REPO); calibrate simply never called it.
+    from evals.harness import register_triage_tools_if_available  # noqa: PLC0415
+    tool_substrate = register_triage_tools_if_available()
+    log.info("tool substrate: %s", tool_substrate)
+
+    # A fixture whose required_facts name a tool this process never registers
+    # can only score recall 0.0, no matter how well the agent investigates.
+    # `get_record` / `search_module_records` are the CONNECTOR's triage tools
+    # (`fsr_soc_triage.registry.register_triage_tools()`), so every invest_*
+    # fixture reads as a total agent regression when run from this repo alone.
+    # The eval harness already labels those rows `unservable`; calibrate used
+    # to print a bare 0.0, and that cost a full model sweep chasing a
+    # regression that was a missing import path. Refuse BEFORE spending calls.
+    unservable = {t.name: u for t in tasks
+                  if (u := unservable_required_tools(t.required_facts))}
+    if unservable and not args.allow_unservable:
+        names = "\n".join(f"    {n:<34} needs {', '.join(u)}"
+                          for n, u in sorted(unservable.items()))
+        raise SystemExit(
+            "refusing to run: these fixtures require tools that are NOT "
+            f"registered in this process, so they can only score 0.0:\n{names}\n"
+            "  Those are the connector's triage tools. Run calibrate with the "
+            "connector on PYTHONPATH (its `scripts/` FIRST), or pass "
+            "--allow-unservable to score them anyway and read every 0.0 as "
+            "'unscoreable here', not 'the agent got worse'.")
+    for name, u in sorted(unservable.items()):
+        log.warning("UNSERVABLE: %s requires unregistered tool(s) %s -- its "
+                    "recall is 0.0 by construction, not by behaviour",
+                    name, ", ".join(u))
 
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     _setup_logging(RUN_DIR / f"calibrate_{stamp}.log")
@@ -605,7 +649,11 @@ def main() -> None:
          # else in the file would say which one this was.
          "repeats": args.repeat, "substrate": substrate,
          "offline": bool(args.offline), "bundle": args.bundle,
+         # An unservable row's 0.0 means "unscoreable here", not "the agent
+         # got worse" -- the summary has to say so or the next diff relearns it.
+         "unservable": unservable, "tool_substrate": tool_substrate,
          "results": [{"fixture": n, "spread": sc.get("spread"),
+                      "unservable": unservable.get(n) or [],
                       **{k: sc.get(k) for k in
                          ("recall", "passed", "missing", "forbidden_hit", "error")},
                       "quality": sc.get("quality", {}),
