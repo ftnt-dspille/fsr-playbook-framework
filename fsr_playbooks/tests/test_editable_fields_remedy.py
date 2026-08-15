@@ -14,9 +14,15 @@ one of five repeats bounced off this at least once and one spent FIVE of its
 ten budgeted tool calls staging a single card. The card is the P2 approval
 gate, so the cost lands on the one step that must always be reachable.
 
-The remedy therefore has to be split by what the operation actually accepts:
-free-form param -> prefill blank; select -> name the options or drop the
-field; unknown name -> drop the field (adding it can only fail).
+The handling is therefore split by what the operation actually accepts:
+
+  optional free-form -> HEAL it (prefill blank and render the card). Listing
+                        the field already stated the intent; asking the model
+                        to restate it is a toll on the approval gate, paid
+                        once per card on every containment.
+  select             -> error naming the real options, or drop the field
+  required           -> error; a blank cannot stand in for a real value
+  not a param at all -> error; adding it to args can only fail
 """
 from __future__ import annotations
 
@@ -39,8 +45,8 @@ def _emit(editable, args):
 
 @pytest.fixture(autouse=True)
 def _needs_catalogued_op():
-    from fsr_playbooks.mcp_server._shared import op_param_options
-    opts = op_param_options(CONNECTOR, OP)
+    from fsr_playbooks.mcp_server._shared import op_param_facts
+    opts = op_param_facts(CONNECTOR, OP)
     if not opts or "ngfw_mode" not in opts:
         pytest.skip("reference store has no params for this op")
 
@@ -65,12 +71,33 @@ def test_unknown_field_is_told_to_drop_not_add() -> None:
     assert "remove" in msg, f"adding an unknown param can only fail: {msg}"
 
 
-def test_free_form_field_still_gets_the_blank_prefill_remedy() -> None:
-    """The original advice is correct here and must survive."""
+def test_optional_free_form_field_is_healed_not_bounced() -> None:
+    """The one case with a single sensible outcome must not cost a round trip.
+
+    Listing a field in editable_fields already says "let the analyst supply
+    this". For an optional free-form param, prefilling blank IS that intent,
+    so asking the model to restate it is a toll paid once per card on every
+    containment -- measured as exactly one wasted call per carding run.
+    """
     out = _emit(["vdom"], dict(BASE_ARGS))
+    assert out["ok"] is True, out
+    assert out["card"]["args"]["vdom"] == ""
+    assert "vdom" in out["card"]["editable_fields"]
+
+
+def test_healing_does_not_mutate_the_caller_s_args() -> None:
+    caller_args = dict(BASE_ARGS)
+    _emit(["vdom"], caller_args)
+    assert "vdom" not in caller_args
+
+
+def test_a_mixed_card_reports_only_what_the_model_must_fix() -> None:
+    """Heal the blanks, ask about the rest -- and don't re-list the healed."""
+    out = _emit(["vdom", "ngfw_mode"], dict(BASE_ARGS))
     assert out["ok"] is False
-    assert "vdom" in out["message"]
-    assert '"" for blank' in out["message"]
+    assert "ngfw_mode" in out["message"]
+    assert "vdom" not in out["message"], (
+        f"re-asking about a field it could have filled: {out['message']}")
 
 
 def test_the_remedy_actually_terminates() -> None:
@@ -79,9 +106,8 @@ def test_the_remedy_actually_terminates() -> None:
     A message that is merely more specific is worth nothing if applying it
     still bounces -- that was the whole defect.
     """
-    args = dict(BASE_ARGS)
-    first = _emit(["vdom", "ngfw_mode"], args)
+    first = _emit(["vdom", "ngfw_mode"], dict(BASE_ARGS))
     assert first["ok"] is False
-    # vdom: prefill blank.  ngfw_mode: drop it (the other offered remedy).
-    out = _emit(["vdom"], {**args, "vdom": ""})
+    # ngfw_mode: drop it (one of the two offered remedies). vdom then heals.
+    out = _emit(["vdom"], dict(BASE_ARGS))
     assert out["ok"] is True, out

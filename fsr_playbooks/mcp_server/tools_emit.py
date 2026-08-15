@@ -245,38 +245,53 @@ def emit_action_card(
         # emit_action_card attempts against a 10-call budget --
         #   add vdom+ngfw_mode -> bad_params (ngfw_mode is not a param)
         #   -> drop both       -> editable_fields_not_in_args -> ...
-        # So split the names by what the op actually takes and give each half
-        # the ONE remedy that terminates.
-        from ._shared import op_param_options
-        known = op_param_options(connector, operation)
-        addable, removable, selects = [], [], {}
+        # So split the names by what the op actually takes.
+        #
+        # For a plain optional param there is only ONE sensible outcome and the
+        # model already expressed it by listing the field: render it blank and
+        # editable so the analyst can fill it. Making that a round trip is a
+        # toll on the approval gate itself -- deterministic, once per card,
+        # paid on every containment. So DO it instead of asking: prefill "".
+        # The error is reserved for the cases where the blank is genuinely
+        # wrong and only the model can choose (a select, a required param) or
+        # where honouring the field is impossible (not a param at all).
+        from ._shared import op_param_facts
+        known = op_param_facts(connector, operation)
+        healed, removable, selects, required = [], [], {}, []
         for f in bad:
-            if known is None:
-                addable.append(f)  # uncatalogued: can't prove anything
-            elif f not in known:
+            fact = (known or {}).get(f)
+            if known is None or (fact and not fact["options"]
+                                 and not fact["required"]):
+                healed.append(f)
+            elif fact is None:
                 removable.append(f)
-            elif known[f] and "" not in known[f]:
-                selects[f] = known[f]  # a select refuses a blank prefill
+            elif fact["options"]:
+                selects[f] = fact["options"]
             else:
-                addable.append(f)
+                required.append(f)
         parts = []
-        if addable:
-            parts.append(
-                f"add {addable} to args with the value the analyst should see "
-                f"prefilled (\"\" for blank)")
         for f, opts in selects.items():
             parts.append(
                 f"'{f}' is a select and does not accept a blank value -- "
                 f"either add it to args as one of {opts}, or remove it from "
                 f"editable_fields")
+        if required:
+            parts.append(
+                f"{required} is required by '{operation}', so it cannot be "
+                f"left blank -- add it to args with a real value")
         if removable:
             parts.append(
                 f"remove {removable} from editable_fields -- "
                 f"'{operation}' on '{connector}' has no such parameter, so "
                 f"adding it to args will be rejected as an invalid argument")
-        return _err("editable_fields_not_in_args",
-                    f"editable_fields not present in args: {bad}. "
-                    + "; ".join(parts) + ".")
+        if parts:
+            still_bad = list(selects) + required + removable
+            return _err("editable_fields_not_in_args",
+                        f"editable_fields not present in args: {still_bad}. "
+                        + "; ".join(parts) + ".")
+        # Only blanks left to fill: heal and carry on. `args` is the model's
+        # dict, so copy rather than mutate its caller-visible object.
+        args = {**args, **{f: "" for f in healed}}
     # Don't render an approval card for a connector/op that doesn't exist --
     # the analyst would approve a phantom action that then fails at execute.
     # Use the SHARED grounding guarantee (offline store + live-definition
