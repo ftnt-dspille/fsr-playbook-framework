@@ -36,13 +36,45 @@ BASELINE_PATH = REPO / "docs" / "typing" / "mypy_ratchet.json"
 MODULES = ["fsr_playbooks/llm", "fsr_playbooks/mcp_server"]
 
 
+class MypyUnavailable(RuntimeError):
+    """mypy could not be RUN. Not the same as 'mypy found nothing'."""
+
+
 def _run_mypy(module: str) -> tuple[int, list[str]]:
-    """Run mypy on *module*; return (error_count, error_lines)."""
+    """Run mypy on *module*; return (error_count, error_lines).
+
+    The exit code is load-bearing and was previously ignored. mypy exits 0 for
+    a clean run and 1 when it reports errors; anything else -- most importantly
+    `No module named mypy` in a venv that never installed it -- means the check
+    DID NOT RUN. That failure writes to stderr and leaves stdout empty, so
+    counting stdout alone scored it as zero errors: the gate printed
+    "0 errors (baseline 42, -42 fixed!)" and passed green in a worktree where
+    mypy was not installed at all. A ratchet that reports an improvement when
+    its tool is missing is worse than no ratchet -- it invites you to lower the
+    floor to a number nothing measured.
+    """
     proc = subprocess.run(
         [sys.executable, "-m", "mypy", module],
         capture_output=True, text=True, cwd=REPO,
     )
     lines = [l for l in proc.stdout.splitlines() if ": error:" in l]
+    if proc.returncode not in (0, 1):
+        raise MypyUnavailable(
+            f"mypy exited {proc.returncode} on {module} -- the type check did "
+            f"NOT run, so its result is not a measurement.\n"
+            f"  stderr: {(proc.stderr or '').strip()[:400]}\n"
+            f"  stdout: {(proc.stdout or '').strip()[:400]}\n"
+            f"  interpreter: {sys.executable}\n"
+            f"Install it in THIS interpreter (`pip install mypy`) and re-run."
+        )
+    if proc.returncode == 1 and not lines:
+        # Exit 1 with nothing parseable means the output shape changed or mypy
+        # failed in a way we are not reading. Refuse rather than score it 0.
+        raise MypyUnavailable(
+            f"mypy exited 1 on {module} but produced no parseable error "
+            f"lines -- refusing to score that as zero.\n"
+            f"  stdout: {(proc.stdout or '').strip()[:400]}"
+        )
     return len(lines), lines
 
 
@@ -69,7 +101,19 @@ def main(argv: list[str] | None = None) -> int:
     modules = [args.module] if args.module else MODULES
     baseline = _load_baseline()
 
-    if args.update:
+    try:
+        return _gate(modules, baseline, update=args.update)
+    except MypyUnavailable as exc:
+        # LOUD, and non-zero. The alternative -- carrying on with whatever the
+        # broken invocation returned -- is how this gate passed green with mypy
+        # uninstalled. A ratchet you cannot measure must not report a number.
+        print(f"mypy-ratchet: CANNOT MEASURE -- {exc}")
+        return 2
+
+
+def _gate(modules: list[str], baseline: dict[str, int], *,
+          update: bool) -> int:
+    if update:
         new = {}
         for m in MODULES:
             count, _ = _run_mypy(m)

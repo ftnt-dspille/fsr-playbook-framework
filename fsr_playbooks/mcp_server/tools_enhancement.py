@@ -117,6 +117,29 @@ def _asked_to_rename(user_message: str | None) -> bool:
     return any(v in msg for v in _RENAME_VERBS)
 
 
+_DELETE_VERBS = ("delete", "remove", "drop the", "drop step", "get rid of",
+                 "take out", "eliminate", "strip out", "no longer need")
+
+
+def _asked_to_delete(user_message: str | None) -> bool:
+    """Did the analyst ask for a deletion in so many words?
+
+    The deletion twin of `_asked_to_rename`, and literal for the same reason:
+    the exemption it feeds REMOVES a blocking regression, so a loose match
+    would wave through a step the model dropped by accident -- which is the
+    failure mode `step_dropped` exists to catch. Missing an unusual phrasing
+    only costs a warning that reads as an error.
+
+    Like the rename exemption this is ANDed with the step actually being named
+    by the user, so "remove the IP from the block list" cannot exempt dropping
+    a step nobody mentioned.
+    """
+    if not user_message:
+        return False
+    msg = user_message.lower()
+    return any(v in msg for v in _DELETE_VERBS)
+
+
 def _expand_by_type(referenced: set[str], user_message: str,
                     name_to_type: dict[str, str]) -> set[str]:
     msg = (user_message or "").lower()
@@ -282,14 +305,44 @@ def _diff_collections(before, after, user_message: str | None
                 "after": None,
                 "changed_fields": [],
             })
+            # A deletion the analyst asked for BY NAME is not a regression --
+            # it is the edit. Blocking it told them their own request was an
+            # error: live probe A3 ("delete the 'Dead End' step") came back
+            # ok=False with EVERY check green (compile clean, typed_walk clean,
+            # schema clean) and this the only finding, so the model narrated a
+            # refusal and asked how to proceed instead of delivering. The edit
+            # only reached the box because the connector's salvage fabricated a
+            # patch_proposal around the failed verification.
+            #
+            # This is the same exemption `step_renamed_as_requested` already
+            # had, and the same one the `behavior_changed_outside_diff` branch
+            # below applies -- three sibling branches, two intent-aware and this
+            # one left behind. The consequence is still surfaced (in
+            # `diff_summary.steps_removed`, in `changes`, and as a warning
+            # here); it just stops being a blocker.
+            #
+            # The write itself is still guarded: `prewrite.check_prewrite`
+            # refuses a save that drops a step unless the caller acknowledges
+            # it. That gate is fail-closed AND has an acknowledgement path.
+            # This one had neither, so two fail-closed gates in series with no
+            # way through made a deletion impossible to perform at all.
+            requested = (referenced is not None
+                         and n in referenced
+                         and _asked_to_delete(user_message))
             regressions.append({
-                "kind": "step_dropped",
+                "kind": ("step_deleted_as_requested" if requested
+                         else "step_dropped"),
                 "step": n,
                 "before": b_steps[n].type,
                 "after": None,
-                "severity": "error",
-                "message": (f"step {n!r} (type={b_steps[n].type}) was present "
-                            "before and is now missing"),
+                "severity": "warning" if requested else "error",
+                "message": (
+                    f"step {n!r} (type={b_steps[n].type}) deleted as requested; "
+                    "anything referencing vars.steps.<slug>.* from it will "
+                    "need updating"
+                    if requested else
+                    f"step {n!r} (type={b_steps[n].type}) was present "
+                    "before and is now missing"),
             })
 
         for n in added:
@@ -438,7 +491,15 @@ def verify_enhancement(
 
     Regression kinds:
       - playbook_dropped       (error)
-      - step_dropped           (error)
+      - step_dropped           (error) -- a step vanished and nobody asked
+      - step_deleted_as_requested (warning) -- the same disappearance, when the
+                                          analyst named that step AND used a
+                                          delete verb. Their own request must
+                                          not come back as a blocker. The save
+                                          is still guarded: `check_prewrite`
+                                          refuses a drop unless the caller
+                                          acknowledges it, and unlike this gate
+                                          it HAS an acknowledgement path.
       - step_renamed_silently  (error) -- same shape, new name; breaks
                                           external vars.steps.<slug>.* refs
       - step_renamed_as_requested (warning) -- the same rename, when the
