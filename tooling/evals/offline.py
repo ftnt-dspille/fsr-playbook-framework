@@ -36,6 +36,7 @@ substrates are not comparable, and nothing else in the row would say so.
 from __future__ import annotations
 
 import os
+import pathlib
 import sys
 import types
 from typing import Any
@@ -65,6 +66,19 @@ def install() -> dict[str, Any]:
 
     for key in _SEALED:
         os.environ.pop(key, None)
+
+    # Divert mutable runtime caches OFF the reference store for the duration
+    # of a measured run (#139). In a source checkout `runtime_cache_db_path()`
+    # resolves to the very DB the eval is being measured against -- by design,
+    # since that file is writable and instance-scoped -- so the op-def cache
+    # wrote into it and `data/fsr_reference.db` was observed changing checksum
+    # mid-run. A pinned substrate that mutates while it is being measured is
+    # not pinned, and this store has a corruption history that makes any extra
+    # writer worth removing. Only set when the caller has not chosen a cache.
+    if not os.environ.get("FSRPB_CACHE_DB"):
+        import tempfile
+        os.environ["FSRPB_CACHE_DB"] = str(
+            pathlib.Path(tempfile.gettempdir()) / "fsrpb_eval_runtime_cache.db")
 
     env_mod = types.ModuleType("probes._env")
     # Carry the real module's other attributes across. A bare stub would break

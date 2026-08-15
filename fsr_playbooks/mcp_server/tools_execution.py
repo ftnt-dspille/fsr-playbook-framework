@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -151,6 +152,23 @@ def _store_health(connector: str, version: str, status: Any, message: str,
 _OP_DEFS_TTL_S = 24 * 3600
 
 
+def _op_defs_db() -> str:
+    """Where the op-def cache lives: ``DB_PATH`` unless a caller diverts it.
+
+    Defaults to ``DB_PATH`` deliberately -- the connector's op-existence tests
+    isolate themselves by monkeypatching that module global, and routing this
+    through `_health_db()` instead silently bypassed their isolation, leaking
+    one test's cached ops into the next.
+
+    ``$FSRPB_CACHE_DB`` (the same knob `runtime_cache_db_path` honours) moves
+    it. `evals.offline.install()` sets it, because in a source checkout
+    ``DB_PATH`` IS the reference store an eval is being measured against, and
+    caching into it made that store change mid-run (#139). Read at call time,
+    never bound at import, so a late monkeypatch still wins.
+    """
+    return os.environ.get("FSRPB_CACHE_DB") or str(DB_PATH)
+
+
 def _op_defs_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """CREATE TABLE IF NOT EXISTS connector_op_defs (
@@ -168,7 +186,7 @@ def _cached_op_defs(connector: str,
     """Cached live op list for (connector, version) within TTL, else None."""
     import time
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(_op_defs_db()) as conn:
             _op_defs_table(conn)
             row = conn.execute(
                 "SELECT ops_json, checked_ts FROM connector_op_defs "
@@ -192,7 +210,7 @@ def _store_op_defs(connector: str, version: str,
                    ops: list[dict[str, Any]]) -> None:
     import time
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(_op_defs_db()) as conn:
             _op_defs_table(conn)
             conn.execute(
                 "INSERT OR REPLACE INTO connector_op_defs "
