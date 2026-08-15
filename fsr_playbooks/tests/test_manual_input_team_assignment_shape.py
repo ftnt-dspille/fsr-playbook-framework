@@ -18,6 +18,8 @@ The wire shape, confirmed against every UI-authored assignment on a live box:
 Live-verified on 8.0.0: a gate compiled from a team NAME comes back from
 `list_wfinput` with `assignment_type: "team"` and the owning team resolved.
 """
+import sqlite3
+
 import pytest
 
 from fsr_playbooks._db import default_db_path
@@ -26,6 +28,38 @@ from fsr_playbooks.compiler.pipeline import compile_yaml
 # Present in the reference DB's `teams` table (warmed from a live box).
 _TEAM_NAME = "SOC Team"
 _TEAM_IRI = "/api/3/teams/6e569c09-3bd4-40f1-98b0-cc994464c3c5"
+
+
+def _teams_catalog_has_the_fixture() -> bool:
+    """Is the row these assertions are written against actually in this DB?
+
+    `teams` is warmed from a live box, so a warm laptop DB has it and CI's slim
+    DB does not -- the same environment-derived-catalog trap that made the
+    pre-write guard refuse saves over `arguments.config`. Without this the whole
+    module sat RED on CI for a missing external artifact rather than for a
+    product defect, which is exactly what the project invariant forbids: a guard
+    blocked by a missing artifact skips-with-warning and re-arms; it never sits
+    perma-red. The skip auto-re-arms the moment the catalog is warmed.
+    """
+    try:
+        db = sqlite3.connect(default_db_path())
+        try:
+            row = db.execute(
+                "select 1 from teams where name = ? and iri = ?",
+                (_TEAM_NAME, _TEAM_IRI)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return False
+    return row is not None
+
+
+pytestmark = pytest.mark.skipif(
+    not _teams_catalog_has_the_fixture(),
+    reason=(f"the reference DB has no team {_TEAM_NAME!r} ({_TEAM_IRI}) -- "
+            "slim/unwarmed catalog, so team RESOLUTION cannot be exercised. "
+            "Re-warm the DB (see tracker #16) to re-arm these assertions."),
+)
 
 
 def _compile(assign_block: str):
