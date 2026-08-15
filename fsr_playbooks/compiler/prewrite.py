@@ -203,31 +203,52 @@ def diff_losses(live_json: dict[str, Any], outgoing_json: dict[str, Any]) -> lis
     return losses
 
 
+@dataclass(frozen=True)
+class RouteEntailment:
+    """Why a vanished route did not need a decision of its own."""
+
+    kind: str
+    """`deleted_step` -- forgiven only when that deletion is acknowledged.
+    `rewired_by_insertion` -- forgiven outright; additions are the edit."""
+    cause: str
+    """The `steps[...]` path responsible."""
+
+
 def entailed_route_drops(
     live_json: dict[str, Any], outgoing_json: dict[str, Any]
-) -> dict[str, str]:
-    """Map each vanished route to the deleted step that necessarily removed it.
+) -> dict[str, RouteEntailment]:
+    """Map each vanished route to the step change that necessarily removed it.
 
-    A route is an edge between two steps. Delete a step and its edges cannot
-    survive -- FSR will not accept a route pointing at a step that is not
-    there. So those route drops are not decisions the caller made; they are
-    arithmetic on the one decision they did make.
+    A route is an edge between two steps, so some route drops are not decisions
+    the caller made -- they are arithmetic on a decision they did make. Two
+    shapes, both found by live effect probes:
 
-    Reporting them as independent losses is what made the escape hatch
-    unusable in practice (live probe A3): "delete the Dead End step" came back
-    demanding acknowledgement of three paths, two of which the caller never
-    authored and could only produce by copying the guard's own path grammar
-    back verbatim.
+    `deleted_step` (probe A3). Delete a step and its edges cannot survive; FSR
+    will not accept a route pointing at a step that is not there. Reporting
+    those as independent losses is what made the escape hatch unusable: "delete
+    the Dead End step" came back demanding acknowledgement of three paths, two
+    of which the caller never authored.
 
-    Returns `{route_path: steps_path}`. A route whose endpoints both survive is
-    NOT in here -- severing an edge between two live steps silently reshapes
-    execution, and remains a first-class loss.
+    `rewired_by_insertion` (probe A2). Insert a step *between* two others and
+    the direct edge they used to share is necessarily replaced by the path
+    through the new step -- `Enrich IP->Block IP` becomes `Enrich IP->Stamp
+    Verdict->Block IP`. The guard read the vanished direct edge as data loss and
+    refused, so the single most common enhancement there is -- add a step in the
+    middle -- could not be saved at all. These are forgiven OUTRIGHT rather than
+    acknowledged: additions are never refused, so there is no refusal for the
+    caller to acknowledge in the first place.
+
+    The insertion rule is deliberately narrow. `A->B` is only forgiven when the
+    outgoing document still connects A to B by a path whose every intermediate
+    node is newly added -- i.e. the edge was rerouted, not severed. Dropping
+    `A->B` while adding an unrelated step elsewhere gets no forgiveness, which
+    keeps "silently reshapes execution" caught.
     """
     before = normalize_collection(live_json)
     after = normalize_collection(outgoing_json)
     after_wfs = {w.get("name"): w for w in after.get("workflows") or []}
 
-    entailed: dict[str, str] = {}
+    entailed: dict[str, RouteEntailment] = {}
     for wf in before.get("workflows") or []:
         name = wf.get("name")
         awf = after_wfs.get(name)
@@ -236,23 +257,65 @@ def entailed_route_drops(
             # everything inside it, routes included.
             continue
         prefix = f"collection.workflows[{name}]"
-        gone_steps = ({s.get("name") for s in wf.get("steps") or []}
-                      - {s.get("name") for s in awf.get("steps") or []})
-        if not gone_steps:
-            continue
+        live_names = {s.get("name") for s in wf.get("steps") or []}
+        kept_names = {s.get("name") for s in awf.get("steps") or []}
+        gone_steps = live_names - kept_names
+        added_steps = kept_names - live_names
+
+        # Outgoing adjacency, for the insertion walk below.
+        out_edges: dict[Any, set[Any]] = {}
+        for route in awf.get("routes") or []:
+            out_edges.setdefault(route.get("src_name"), set()).add(
+                route.get("tgt_name"))
+
         surviving = {_identity(r) for r in awf.get("routes") or []}
         for route in wf.get("routes") or []:
             ident = _identity(route)
             if ident in surviving:
                 continue
-            # Attribute the edge to the deleted endpoint, so acknowledging a
-            # DIFFERENT deletion cannot forgive it.
-            for endpoint in (route.get("src_name"), route.get("tgt_name")):
-                if endpoint in gone_steps:
-                    entailed[f"{prefix}.routes[{ident}]"] = (
-                        f"{prefix}.steps[{endpoint}]")
-                    break
+            path = f"{prefix}.routes[{ident}]"
+            src, tgt = route.get("src_name"), route.get("tgt_name")
+
+            # Attribute to the deleted endpoint, so acknowledging a DIFFERENT
+            # deletion cannot forgive this edge.
+            deleted = next((e for e in (src, tgt) if e in gone_steps), None)
+            if deleted is not None:
+                entailed[path] = RouteEntailment(
+                    "deleted_step", f"{prefix}.steps[{deleted}]")
+                continue
+
+            via = _rerouted_through_new_steps(src, tgt, out_edges, added_steps)
+            if via is not None:
+                entailed[path] = RouteEntailment(
+                    "rewired_by_insertion", f"{prefix}.steps[{via}]")
     return entailed
+
+
+def _rerouted_through_new_steps(
+    src: Any, tgt: Any, out_edges: dict[Any, set[Any]], added: set[Any]
+) -> Any | None:
+    """The first new step on a path `src -> ... -> tgt` made only of new steps.
+
+    None when no such path exists -- meaning the edge was genuinely severed
+    rather than rerouted, and stays a loss. Bounded by `added`, which is small;
+    `seen` keeps a cyclic outgoing graph from looping.
+    """
+    if src is None or tgt is None or not added:
+        return None
+    seen: set[Any] = set()
+    # (node, first added step used to get here)
+    queue: list[tuple[Any, Any]] = [(src, None)]
+    while queue:
+        node, first = queue.pop()
+        for nxt in out_edges.get(node, ()):  # noqa: SIM118
+            if nxt == tgt:
+                if first is not None:
+                    return first
+                continue  # a direct src->tgt edge is not a reroute
+            if nxt in added and nxt not in seen:
+                seen.add(nxt)
+                queue.append((nxt, first if first is not None else nxt))
+    return None
 
 
 def _ack_matches(token: str, path: str) -> bool:
@@ -330,10 +393,17 @@ def check_prewrite(
     def _is_acked(path: str) -> bool:
         if any(_ack_matches(t, path) for t in tokens):
             return True
+        why = entailed.get(path)
+        if why is None:
+            return False
+        if why.kind == "rewired_by_insertion":
+            # Nothing to acknowledge: the cause is an ADDITION, and additions
+            # are never refused. Requiring an ack here would demand the caller
+            # sign off on a deletion they did not make.
+            return True
         # A route removed BY a step deletion is covered by acknowledging that
         # step -- the caller decided the deletion, not its arithmetic.
-        cause = entailed.get(path)
-        return cause is not None and any(_ack_matches(t, cause) for t in tokens)
+        return any(_ack_matches(t, why.cause) for t in tokens)
 
     # Entailed routes are never REPORTED either: naming a consequence next to
     # its cause reads as three separate things being destroyed, which is how a

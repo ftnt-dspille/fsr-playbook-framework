@@ -583,3 +583,102 @@ def test_a_real_argument_still_counts_even_next_to_config():
     verdict = check_prewrite(live, outgoing)
     assert not verdict.ok, "a real argument vanished alongside config"
     assert not any(p.endswith(".config") for p in verdict.dropped), verdict.dropped
+
+
+# --------------------------------------------------------------------------- #
+# #137 / probe A2 -- the insertion mirror of the A3 case.
+#
+# "Add a set-variable step named 'Stamp Verdict' right after 'Enrich IP'"
+# replaces the direct edge Enrich IP->Block IP with a path through the new
+# step. The guard read the vanished direct edge as data loss and refused, so
+# the most common enhancement there is -- add a step in the middle -- could not
+# be saved at all. The refusal reached the analyst as a bare "apply_failed"
+# (connector-side envelope bug), which is why this cost a live run to find.
+# --------------------------------------------------------------------------- #
+
+def _insert_step_between(live: dict, src: str, tgt: str,
+                         new_name: str = "Stamp Verdict") -> dict:
+    """Splice a new step into an existing edge, rewiring as FSR requires."""
+    outgoing = copy.deepcopy(live)
+    wf = _workflows(outgoing)[0]
+    by_name = {s["name"]: s for s in wf["steps"]}
+    assert src in by_name and tgt in by_name, "fixture lacks the edge endpoints"
+
+    new_uuid = "abcdabcd-0000-0000-0000-00000000abcd"
+    new_step = copy.deepcopy(by_name[src])
+    new_step.update({"name": new_name, "uuid": new_uuid,
+                     "@id": f"/api/3/workflow_steps/{new_uuid}"})
+    wf["steps"].append(new_step)
+
+    src_iri = f"/api/3/workflow_steps/{by_name[src]['uuid']}"
+    tgt_iri = f"/api/3/workflow_steps/{by_name[tgt]['uuid']}"
+    new_iri = f"/api/3/workflow_steps/{new_uuid}"
+    # The direct edge is REPLACED, exactly as the designer would do it.
+    wf["routes"] = [r for r in wf["routes"]
+                    if not (r.get("sourceStep") == src_iri
+                            and r.get("targetStep") == tgt_iri)]
+    for i, (s, t) in enumerate(((src_iri, new_iri), (new_iri, tgt_iri))):
+        wf["routes"].append({
+            "@id": f"/api/3/workflow_routes/spliced-{i}",
+            "@type": "WorkflowRoute", "name": f"spliced {i}", "label": None,
+            "isExecuted": False,
+            "uuid": f"22222222-2222-2222-2222-00000000000{i}",
+            "sourceStep": s, "targetStep": t})
+    return outgoing
+
+
+def test_inserting_a_step_mid_flow_is_not_a_loss():
+    """THE A2 defect. The replaced direct edge is arithmetic on the insertion."""
+    live = _load("linear_baseline")
+    outgoing = _insert_step_between(live, "Start", "Set A")
+
+    verdict = check_prewrite(live, outgoing)
+    assert verdict.ok, (
+        "adding a step in the middle of a flow was refused as data loss: "
+        f"{verdict.dropped}"
+    )
+
+
+def test_an_insertion_rewire_needs_no_acknowledgement():
+    """The cause is an ADDITION, and additions are never refused -- so there is
+    no refusal for the caller to acknowledge. Demanding one would ask them to
+    sign off on a deletion they did not make."""
+    live = _load("linear_baseline")
+    outgoing = _insert_step_between(live, "Start", "Set A")
+
+    assert check_prewrite(live, outgoing, acknowledged=[]).ok
+    assert check_prewrite(live, outgoing, acknowledged=None).ok
+
+
+def test_severing_an_edge_while_adding_an_unrelated_step_is_still_a_loss():
+    """The rule is narrow on purpose: rerouted, not merely 'a step was added'.
+
+    Without this the insertion exemption would degrade into 'any addition
+    forgives any route drop', which is the guard's whole reason to exist.
+    """
+    live = _load("linear_baseline")
+    outgoing = copy.deepcopy(live)
+    wf = _workflows(outgoing)[0]
+    added = copy.deepcopy(wf["steps"][-1])
+    added.update({"name": "Unrelated", "uuid": "deaddead-0000-0000-0000-00000000dead"})
+    wf["steps"].append(added)          # an addition, connected to nothing
+    wf["routes"].pop()                 # ...and an edge severed, not rerouted
+
+    verdict = check_prewrite(live, outgoing)
+    assert not verdict.ok, "an unrelated addition forgave a severed edge"
+    assert any(".routes[" in p for p in verdict.dropped), verdict.dropped
+
+
+def test_the_rewire_must_actually_reconnect_the_same_endpoints():
+    """A new step that takes the source's edge but never reaches the original
+    target has changed where execution goes. That is a reshape, not a reroute."""
+    live = _load("linear_baseline")
+    outgoing = _insert_step_between(live, "Start", "Set A")
+    wf = _workflows(outgoing)[0]
+    # Drop the second leg, so Start -> Stamp Verdict -> (nothing).
+    wf["routes"] = [r for r in wf["routes"] if r.get("name") != "spliced 1"]
+
+    verdict = check_prewrite(live, outgoing)
+    assert not verdict.ok, (
+        "a half-spliced insertion that never rejoins the flow was allowed"
+    )
