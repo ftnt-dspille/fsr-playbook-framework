@@ -589,6 +589,18 @@ def main() -> None:
 
     log.info("=" * 72)
     log.info("SUMMARY")
+    # A row measured against a substrate that 404'd is NOT a verdict on the
+    # agent, and printing it as `FAIL` next to honest rows is how this has
+    # been misread four times running (`agents`, the enrichment shortcut,
+    # SIEM pub/v2, `assets` -- the last cost fixture 29 a 35-call median that
+    # dropped to 19 the moment the module was bound). The miss list was
+    # already collected and already footnoted below; a footnote under a table
+    # of numbers loses every time. Disqualify the row instead.
+    tainted = set()
+    for name, sc in results:
+        if (sc.get("spread") or {}).get("substrate_misses") or \
+                sc.get("substrate_misses"):
+            tainted.add(name)
     for name, sc in results:
         flag = "PASS" if sc["passed"] else "FAIL"
         extra = ""
@@ -601,9 +613,18 @@ def main() -> None:
         sp = sc.get("spread") or {}
         if sp.get("flaky"):
             flag = "FLAKY"
+        if name in tainted:
+            flag = "SUBSTRATE"
+            extra += "  <- numbers are NOT the agent's"
         log.info("  [%s] %-34s recall=%s%s", flag, name, sc["recall"], extra)
     n_pass = sum(1 for _, sc in results if sc["passed"])
     log.info("%s/%s fixtures clear the gate.", n_pass, len(results))
+    if tainted:
+        log.info("%s fixture(s) ran against a substrate that could not serve "
+                 "every read: %s. Bind the missing module(s) and re-run before "
+                 "reading their call counts -- a 404 does not just waste its "
+                 "own call, it sends the agent looking for another way round.",
+                 len(tainted), ", ".join(sorted(tainted)))
 
     # Error bars. Without them a 22 -> 31 -> 22 call swing on an unchanged
     # agent reads as a regression, which is the exact misreading the

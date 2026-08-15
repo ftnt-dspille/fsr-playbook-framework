@@ -42,11 +42,27 @@
     "agent list is UNREADABLE rather than one that simply has no agents. The",
     "two are different worlds, and only one of them is a box you could own.",
     "It cost all seven fixtures a wasted pivot per run, and every quality",
-    "gate here would have blamed the AGENT for it."
+    "gate here would have blamed the AGENT for it.",
+    "",
+    "`assets` is EMPTY for the same reason, and the same way. Fixture 29's",
+    "agent searches /api/3/assets?$search=smithDesktop on its way through the",
+    "host pivot. With no `assets` key the box answers 404, the agent retries",
+    "with a second $limit, and BOTH calls are charged to it -- the",
+    "2026-08-15 run's SUBSTRATE MISSES named exactly those two URLs. An",
+    "unbound module is not an empty one: 404 says the asset table is",
+    "UNREADABLE, and no box you could own looks like that.",
+    "",
+    "Empty rather than seeded because the real capture settles it: the",
+    "smithDesktop incident has `affectedHost: None` and `targetAsset: None`,",
+    "so on the box this was captured from, that search really does come back",
+    "with nothing. Seeding an asset would invent a record the capture",
+    "contradicts, and the fixture would then measure a world we made up."
   ],
 
   "modules": {
     "agents": [],
+
+    "assets": [],
 
     "alerts": [
       {
