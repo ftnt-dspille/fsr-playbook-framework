@@ -7,6 +7,7 @@ fall back to local-only mode and stamp `seen` rows.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Optional
 
 from .common import REPO_ROOT
@@ -14,11 +15,27 @@ from .common import REPO_ROOT
 ENV_PATH = REPO_ROOT / ".env"
 
 
+def _env_path() -> Path:
+    """Which dotenv to read.
+
+    ``FSR_ENV_FILE`` (absolute or repo-relative) picks a box other than the
+    default -- the same knob the live round-trip test already honors, so
+    `FSR_ENV_FILE=.env.159 make …` points the probes at .159 without a second
+    convention. Falls back to the repo `.env`.
+    """
+    raw = os.environ.get("FSR_ENV_FILE", "").strip()
+    if not raw:
+        return ENV_PATH
+    p = Path(raw)
+    return p if p.is_absolute() else (REPO_ROOT / p)
+
+
 def _load_dotenv() -> None:
     """Tiny .env parser. Avoids a python-dotenv dep for one file with simple syntax."""
-    if not ENV_PATH.exists():
+    path = _env_path()
+    if not path.exists():
         return
-    for line in ENV_PATH.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -111,7 +128,11 @@ def get_client():
         return None
     from pyfsr import FortiSOAR  # type: ignore
 
-    kwargs = dict(base_url=cfg.base_url, auth=cfg.auth(), verify_ssl=cfg.verify_ssl)
+    # FSR_TIMEOUT was parsed and then dropped on the floor, so every client ran
+    # on pyfsr's 30s default -- long enough for reads, and a guaranteed
+    # ReadTimeout on any agentic chat_turn.
+    kwargs = dict(base_url=cfg.base_url, auth=cfg.auth(), verify_ssl=cfg.verify_ssl,
+                  timeout=cfg.timeout)
     if cfg.port is not None:
         kwargs["port"] = cfg.port
     client = FortiSOAR(**kwargs)

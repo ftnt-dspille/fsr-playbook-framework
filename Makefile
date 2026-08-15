@@ -14,7 +14,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen tool-gate mypy-gate wire-audit wire-census
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen tool-gate mypy-gate wire-audit wire-census test-effect-probes
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -161,6 +161,14 @@ lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
 VENV_PY  := $(CURDIR)/.venv/bin/python
 CONNECTOR_DIR := ../ConnectorsV2/fsr-playbook-builder
 
+# The eval harness registers the connector's triage tools (get_record,
+# search_module_records) only when it can find the checkout, and without them
+# every invest_* fixture is unservable -- calibrate refuses to run rather than
+# report a corpus of 0.0s. This Makefile already knows where the connector is,
+# so default the var it looks for instead of making each caller export it.
+# `?=` still yields to an explicitly-set environment value.
+export FSR_CONNECTOR_REPO ?= $(abspath $(CONNECTOR_DIR))
+
 corpus-gate: ## round-trip fidelity gate over the committed corpus (box-free). CORPUS_DIR=… MIN_PASS=… to measure a real box pull
 	FSRPB_DEV=1 $(VENV_PY) scripts/corpus_gate.py \
 	  $(if $(CORPUS_DIR),--corpus-dir $(CORPUS_DIR),) \
@@ -202,6 +210,14 @@ tool-gate: ## which tool does the agent reach for? Run after ANY tool-descriptio
 	  $(if $(REPEAT),--repeat $(REPEAT),) \
 	  $(if $(TOOL_GATE_BASELINE),--baseline $(TOOL_GATE_BASELINE),)
 
+test-effect-probes: ## LIVE: does the affordance actually WRITE? Seeds a scratch playbook, drives the widget's exact payload, re-reads the box. ONLY=A5,A2,A3 RUNS=2 DUMP=dir FSR_ENV_FILE=.env.159
+	@echo "▶ effect probes -- every verdict is a box read, never a card or an ok flag."
+	@echo "  BLOCKED = the card under test never appeared, so the write path was"
+	@echo "  not exercised (usually #132). That exits non-zero on purpose."
+	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/effect/runner.py \
+	  $(if $(ONLY),--only $(ONLY),) $(if $(RUNS),--runs $(RUNS),) \
+	  $(if $(DUMP),--dump $(DUMP),)
+
 wire-audit: ## LIVE: validate every playbook on the box against the wire models + measure semantic round-trip fidelity. Read-only. Run after any wire/decompiler/emitter change. LIMIT=… FILTER=…
 	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/probe_wire_shapes.py \
 	  $(if $(LIMIT),--limit $(LIMIT),)
@@ -228,6 +244,38 @@ mypy-gate: ## ratchet gate: fail on NEW mypy errors in llm/ + mcp_server/ (basel
 	$(VENV_PY) scripts/mypy_gate.py
 
 doctor: ## environment preflight: version resolution, pyfsr floor, reference DB
+	$(VENV_PY) -m fsr_playbooks.doctor
+
+# The reference store is in WAL mode, so it is a THREE-file database. Restoring
+# it with a plain `cp` leaves the previous `-wal`/`-shm` beside the fresh file
+# and SQLite replays that stale journal into it on the next open -- the restore
+# reads clean, then the very first process to touch it corrupts it. That is how
+# this store got corrupted three times in three days; each "recurrence" was the
+# repair. Always restore through this target.
+#
+# `.recover` is deliberately NOT offered as the fix: it produces a file that
+# passes integrity_check while stranding unattributable rows in lost_and_found
+# (it silently dropped 9 fortisiem operations once), and merging the old tables
+# back with INSERT OR IGNORE doubles every table lacking a unique constraint.
+# A known-good .bak is the answer whenever one exists.
+db-restore: ## restore data/fsr_reference.db from FROM=<backup> (default .db.bak), WAL-safely
+	@set -eu; \
+	src="$(if $(FROM),$(FROM),data/fsr_reference.db.bak)"; \
+	dst=data/fsr_reference.db; \
+	test -f "$$src" || { echo "no such backup: $$src"; exit 2; }; \
+	sqlite3 "$$src" "pragma quick_check;" | grep -qx ok \
+	  || { echo "REFUSING: backup is itself corrupt: $$src"; exit 2; }; \
+	if [ -f "$$dst" ]; then \
+	  if sqlite3 "$$dst" "pragma quick_check;" 2>/dev/null | grep -qx ok; then \
+	    kind=prev; else kind=corrupt; fi; \
+	  stamp=data/fsr_reference.$$kind-$$(date +%Y%m%dT%H%M%S).db.bak; \
+	  echo "→ setting aside current store ($$kind) as $$stamp"; mv "$$dst" "$$stamp"; \
+	fi; \
+	rm -f "$$dst-wal" "$$dst-shm"; \
+	cp "$$src" "$$dst"; \
+	sqlite3 "$$dst" "pragma quick_check;" | grep -qx ok \
+	  || { echo "restore FAILED integrity check"; exit 1; }; \
+	echo "✓ restored $$dst from $$src"; \
 	$(VENV_PY) -m fsr_playbooks.doctor
 
 verify: ## green-check for the fsr_playbooks + connector axis (offline)
