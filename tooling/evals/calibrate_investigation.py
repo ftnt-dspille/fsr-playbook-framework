@@ -316,7 +316,11 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", default=None, help="run a single fixture by name")
+    ap.add_argument("--only", default=None,
+                    help="comma-separated fixture names to run (default: all "
+                         "investigation-mode fixtures). Selecting a subset is "
+                         "how a read-only live sweep excludes the contain_* "
+                         "rows, whose tools change state on a real box.")
     ap.add_argument("--model", default=None,
                     help=f"model id (default: {DEMO_MODEL} for anthropic, "
                          "$FRANK_MODEL for frank)")
@@ -385,7 +389,11 @@ def main() -> None:
 
     tasks = [t for t in load_tasks() if t.mode == "investigation"]
     if args.only:
-        tasks = [t for t in tasks if t.name == args.only]
+        wanted = [n.strip() for n in args.only.split(",") if n.strip()]
+        tasks = [t for t in tasks if t.name in wanted]
+        missing = sorted(set(wanted) - {t.name for t in tasks})
+        if missing:
+            raise SystemExit(f"no such fixture(s): {', '.join(missing)}")
     if not tasks:
         raise SystemExit("no investigation fixtures matched")
 
