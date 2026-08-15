@@ -35,6 +35,7 @@ from ._loop_helpers import (
 )
 from ._loop_helpers import (
     extract_yaml_block,
+    latest_user_text,
 )
 from ._loop_helpers import (
     snapshot_guard_fires as _snapshot_guard_fires,
@@ -289,6 +290,17 @@ async def run_agent_turn(
     # rounds on (session_id, turn, seq) and INSERT OR REPLACE silently
     # overwrites. See chat.py L379-388 for the original incident note.
 
+    # Bind the analyst's own words for the whole turn so intent-aware tools can
+    # DERIVE intent instead of depending on the model to declare it. Bound here
+    # rather than in each provider because all three funnel through this
+    # function -- three copies of the same seed is exactly how the guards it
+    # feeds drifted apart in the first place.
+    from fsr_playbooks.mcp_server._shared import (
+        reset_turn_user_message,
+        set_turn_user_message,
+    )
+
+    _user_msg_token = set_turn_user_message(latest_user_text(messages))
     try:
         async with _total_timeout(timeout_secs):
             async for ev in provider.stream(
@@ -413,6 +425,9 @@ async def run_agent_turn(
         err_ev = ErrorEvent(message=result.error)
         await _fire_event_callback(on_event, err_ev)
         result.transcript.append(err_ev)
+    finally:
+        # Turn-scoped: the next turn's intent must never be read off this one.
+        reset_turn_user_message(_user_msg_token)
 
     result.final_seq = seq_in_turn
     result.guards_fired = _snapshot_guard_fires()

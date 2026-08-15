@@ -161,3 +161,83 @@ def test_other_phrasings_of_the_same_request_are_honoured():
         regs = _regressions(_DELETED, msg)
         assert "step_deleted_as_requested" in regs, f"not honoured: {msg!r}"
         assert regs["step_deleted_as_requested"]["severity"] == "warning"
+
+
+# --------------------------------------------------------------------------- #
+# The intent has to REACH the gate.
+#
+# Every exemption above reads `user_message`, which is an OPTIONAL tool
+# argument -- and live on 8.0 the box model called
+# `verify_enhancement(before_yaml, after_yaml)` with no `user_message` at all.
+# So the analyst typed "Delete the step named 'Dead End'", the gate never saw
+# it, and the exemption was dead code that passed its own unit tests.
+#
+# Same finding as tracker #60 (`requested_by` declared on 0 of 4 live calls):
+# derive the intent, never depend on the model to pass it. These pin the
+# derivation, because the fix above is worthless without it.
+# --------------------------------------------------------------------------- #
+
+import pytest
+
+from fsr_playbooks.mcp_server._shared import (
+    reset_turn_user_message,
+    set_turn_user_message,
+)
+from fsr_playbooks.mcp_server.tools_enhancement import verify_enhancement
+
+
+@pytest.fixture
+def turn_message():
+    """Bind a turn's user message the way the chat loop does."""
+    tokens = []
+
+    def _bind(text):
+        tokens.append(set_turn_user_message(text))
+
+    yield _bind
+    for t in reversed(tokens):
+        reset_turn_user_message(t)
+
+
+def _severities(result):
+    return {r["kind"]: r["severity"] for r in result.get("regressions") or []}
+
+
+def test_the_gate_reads_the_turns_message_when_the_model_omits_it(turn_message):
+    """THE live shape: two positional args, no user_message."""
+    turn_message("Delete the step named 'Dead End' and wire the rest straight "
+                 "through. Change nothing else.")
+
+    result = verify_enhancement(_BEFORE, _DELETED)
+
+    sev = _severities(result)
+    assert "step_dropped" not in sev, (
+        "the analyst's deletion was still called an error -- the turn's message "
+        "never reached the gate"
+    )
+    assert sev.get("step_deleted_as_requested") == "warning"
+
+
+def test_deriving_the_message_unblocks_ready_to_push(turn_message):
+    """The property the model actually acts on. `ready_to_push: False` is what
+    made it narrate a refusal instead of delivering the edit."""
+    turn_message("delete the Dead End step")
+    assert verify_enhancement(_BEFORE, _DELETED)["ready_to_push"] is True
+
+
+def test_without_a_bound_message_the_drop_still_blocks():
+    """No turn context = no intent to read. Fails closed."""
+    result = verify_enhancement(_BEFORE, _DELETED)
+    assert _severities(result).get("step_dropped") == "error"
+    assert result["ready_to_push"] is False
+
+
+def test_an_explicit_argument_still_wins_over_the_bound_message(turn_message):
+    """Eval harnesses and direct agent calls pass it explicitly; that must keep
+    working, and must not be silently overridden by ambient turn state."""
+    turn_message("delete the Dead End step")
+    result = verify_enhancement(_BEFORE, _DELETED,
+                                user_message="add a logging step")
+    assert _severities(result).get("step_dropped") == "error", (
+        "the ambient turn message overrode the caller's explicit argument"
+    )

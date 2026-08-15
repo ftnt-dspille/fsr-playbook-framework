@@ -205,6 +205,35 @@ def get_grounded_yaml() -> str | None:
     return _GROUNDED_YAML.get()
 
 
+# The analyst's own words for the current turn. Bound by the chat loop and read
+# at tool dispatch, exactly like `_GROUNDED_YAML` above and for the same reason.
+#
+# Tools that need INTENT ask for it as an optional argument, and the model does
+# not reliably pass it: live on 8.0 the box model called
+# `verify_enhancement(before_yaml, after_yaml)` with no `user_message` at all,
+# so every intent-aware exemption in that tool was dead code. This is the same
+# finding as tracker #60, where `requested_by` was set on 0 of 4 live calls; the
+# lesson recorded there is DERIVE the intent, never ask the model to declare it.
+_TURN_USER_MESSAGE: ContextVar[str | None] = ContextVar(
+    "_turn_user_message", default=None)
+
+
+def set_turn_user_message(text: str | None) -> Any:
+    """Bind the turn's user message. Returns a reset token."""
+    return _TURN_USER_MESSAGE.set((text or "").strip() or None)
+
+
+def reset_turn_user_message(token: Any) -> None:
+    try:
+        _TURN_USER_MESSAGE.reset(token)
+    except (ValueError, LookupError):      # foreign context -- nothing to undo
+        pass
+
+
+def get_turn_user_message() -> str | None:
+    return _TURN_USER_MESSAGE.get()
+
+
 def load_yaml_text(yaml_text: Any, *, allow_grounding: bool = True,
                    ground_when_empty: bool = False) -> tuple[Any, YamlLoad]:
     """Parse a model-supplied ``yaml_text``, repairing what can be repaired.

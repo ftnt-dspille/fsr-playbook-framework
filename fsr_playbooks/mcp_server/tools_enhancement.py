@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import _verified_yaml
-from ._shared import mcp
+from ._shared import get_turn_user_message, mcp
 from .tools_verify import verify_playbook
 
 
@@ -521,6 +521,22 @@ def verify_enhancement(
     lands; re-typing the playbook into chat instead is the one way to lose the
     edit (see `_verified_yaml` for the live failure this closes).
     """
+    # DERIVE the intent when the model did not declare it. `user_message` is an
+    # optional argument, and live on 8.0 the box model called this tool with
+    # only `before_yaml` and `after_yaml` -- so `referenced` was None and EVERY
+    # intent-aware exemption below (requested rename, requested deletion,
+    # behavior_changed_outside_diff) was unreachable. The analyst had typed
+    # "Delete the step named 'Dead End'"; the gate simply never saw it, called
+    # their deletion an error, and the model dutifully refused its own edit.
+    #
+    # Same lesson as tracker #60 (`requested_by`: declared on 0 of 4 live
+    # calls): derive intent from the analyst's own words, never depend on the
+    # model to pass it along. The chat loop binds them for the turn; an
+    # explicitly passed `user_message` still wins, so eval harnesses and direct
+    # agent calls are unchanged.
+    if user_message is None:
+        user_message = get_turn_user_message()
+
     # 1. Shape check on the after YAML.
     after_result = verify_playbook(after_yaml, live_probe=live_probe)
 
