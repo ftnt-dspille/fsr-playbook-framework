@@ -19,13 +19,9 @@ result so it re-emits, which is what these pin.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
-from fsr_playbooks.llm.openai_provider import _BAD_ARGS_KEY
-from fsr_playbooks.llm.provider import Message, ToolResultEvent
-
 from test_openai_provider import (  # noqa: F401 -- shared fake wire helpers
     _delta_chunk,
     _drain,
@@ -33,6 +29,9 @@ from test_openai_provider import (  # noqa: F401 -- shared fake wire helpers
     _tool_call_delta,
     _usage_chunk,
 )
+
+from fsr_playbooks.llm.openai_provider import _BAD_ARGS_KEY
+from fsr_playbooks.llm.provider import Message, ToolResultEvent
 
 _RUN_OP_TOOLS = [{
     "type": "function",
