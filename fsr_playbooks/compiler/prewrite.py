@@ -49,6 +49,14 @@ class PreWriteVerdict:
     """Semantic paths present in the live playbook and absent from the write."""
     acknowledged: list[str] = field(default_factory=list)
     """Dropped paths the caller explicitly named, so they were allowed."""
+    entailed: list[str] = field(default_factory=list)
+    """Drops that follow necessarily from an acknowledged one.
+
+    Routes incident to a deleted step. Kept OUT of `acknowledged` -- the caller
+    never named these, and reporting them as things they signed off on would
+    misstate what they agreed to. Surfaced so the effect of the save is still
+    fully enumerable.
+    """
     message: str = ""
     code: str = ""
     """Machine-readable refusal class. Empty when `ok`.
@@ -70,9 +78,32 @@ class PreWriteVerdict:
             "ok": self.ok,
             "dropped": list(self.dropped),
             "acknowledged": list(self.acknowledged),
+            "entailed": list(self.entailed),
             "message": self.message,
             "code": self.code,
         }
+
+
+_REDERIVED_ARGS = frozenset({"config"})
+"""Step arguments the compiler re-derives, so their absence is not a deletion.
+
+`config` is filled from the **per-appliance** `connector_configs` catalog
+(`resolver/connector_args.py`: `if not a.get("config"): a["config"] =
+resolve_config_id(connector) or ""`), and `""` is the documented "use the
+connector's default configuration" sentinel. The same YAML therefore compiles
+with a uuid on a host whose catalog is warmed and with `""` on one whose is
+not -- a difference in the *environment*, not in the document.
+
+The decompiler already classifies it that way (`decompiler.py`: it strips
+`config: ""` so a round trip is byte-stable). The guard did not, and the two
+disagreeing is what live probe A3 hit: deleting one step was refused partly
+for `steps[Block IP].arguments.config`, a field nothing in the turn had
+touched. A guard that fires on catalog warmth is noise, and noise on a
+fail-closed path teaches callers to acknowledge paths they have not read.
+
+Scoped to the `arguments` level on purpose: a top-level key that happens to be
+named `config` is not this field.
+"""
 
 
 def _is_empty(value: Any) -> bool:
@@ -113,6 +144,9 @@ def _walk_losses(before: Any, after: Any, path: str, out: list[str]) -> None:
         return
     if isinstance(before, dict) and isinstance(after, dict):
         for k in sorted(before):
+            if k in _REDERIVED_ARGS and path.endswith(".arguments"):
+                # Not the author's data -- see _REDERIVED_ARGS.
+                continue
             _walk_losses(before[k], after.get(k), f"{path}.{k}", out)
         return
     if isinstance(before, list) and isinstance(after, list):
@@ -169,6 +203,75 @@ def diff_losses(live_json: dict[str, Any], outgoing_json: dict[str, Any]) -> lis
     return losses
 
 
+def entailed_route_drops(
+    live_json: dict[str, Any], outgoing_json: dict[str, Any]
+) -> dict[str, str]:
+    """Map each vanished route to the deleted step that necessarily removed it.
+
+    A route is an edge between two steps. Delete a step and its edges cannot
+    survive -- FSR will not accept a route pointing at a step that is not
+    there. So those route drops are not decisions the caller made; they are
+    arithmetic on the one decision they did make.
+
+    Reporting them as independent losses is what made the escape hatch
+    unusable in practice (live probe A3): "delete the Dead End step" came back
+    demanding acknowledgement of three paths, two of which the caller never
+    authored and could only produce by copying the guard's own path grammar
+    back verbatim.
+
+    Returns `{route_path: steps_path}`. A route whose endpoints both survive is
+    NOT in here -- severing an edge between two live steps silently reshapes
+    execution, and remains a first-class loss.
+    """
+    before = normalize_collection(live_json)
+    after = normalize_collection(outgoing_json)
+    after_wfs = {w.get("name"): w for w in after.get("workflows") or []}
+
+    entailed: dict[str, str] = {}
+    for wf in before.get("workflows") or []:
+        name = wf.get("name")
+        awf = after_wfs.get(name)
+        if awf is None:
+            # The whole workflow is gone; its own loss path already covers
+            # everything inside it, routes included.
+            continue
+        prefix = f"collection.workflows[{name}]"
+        gone_steps = ({s.get("name") for s in wf.get("steps") or []}
+                      - {s.get("name") for s in awf.get("steps") or []})
+        if not gone_steps:
+            continue
+        surviving = {_identity(r) for r in awf.get("routes") or []}
+        for route in wf.get("routes") or []:
+            ident = _identity(route)
+            if ident in surviving:
+                continue
+            # Attribute the edge to the deleted endpoint, so acknowledging a
+            # DIFFERENT deletion cannot forgive it.
+            for endpoint in (route.get("src_name"), route.get("tgt_name")):
+                if endpoint in gone_steps:
+                    entailed[f"{prefix}.routes[{ident}]"] = (
+                        f"{prefix}.steps[{endpoint}]")
+                    break
+    return entailed
+
+
+def _ack_matches(token: str, path: str) -> bool:
+    """Does the caller's acknowledgement name this loss path?
+
+    Exact paths are accepted (that is the documented remedy: echo `dropped`
+    back), and so is the tail of one -- most usefully a bare step name. The
+    caller thinks in the vocabulary of the playbook they are editing, not in
+    the guard's internal path grammar, and requiring the latter turned the
+    escape hatch into a second obstacle.
+    """
+    token = token.strip()
+    if not token:
+        return False
+    return (token == path
+            or path.endswith(f".{token}")
+            or path.endswith(f"[{token}]"))
+
+
 def check_prewrite(
     live_json: dict[str, Any] | None,
     outgoing_json: dict[str, Any],
@@ -197,6 +300,7 @@ def check_prewrite(
         # every caller remembering a query parameter.
         require_expanded_collection(live_json)
         losses = diff_losses(live_json, outgoing_json)
+        entailed = entailed_route_drops(live_json, outgoing_json)
     except UnexpandedRelationshipsError as exc:
         return PreWriteVerdict(
             ok=False,
@@ -221,13 +325,30 @@ def check_prewrite(
             ),
         )
 
-    ack = set(acknowledged or [])
-    acked = [p for p in losses if p in ack]
-    unacked = [p for p in losses if p not in ack]
+    tokens = [t for t in (acknowledged or []) if isinstance(t, str)]
+
+    def _is_acked(path: str) -> bool:
+        if any(_ack_matches(t, path) for t in tokens):
+            return True
+        # A route removed BY a step deletion is covered by acknowledging that
+        # step -- the caller decided the deletion, not its arithmetic.
+        cause = entailed.get(path)
+        return cause is not None and any(_ack_matches(t, cause) for t in tokens)
+
+    # Entailed routes are never REPORTED either: naming a consequence next to
+    # its cause reads as three separate things being destroyed, which is how a
+    # one-step deletion came back looking like a partial document.
+    reportable = [p for p in losses if p not in entailed]
+    acked = [p for p in reportable if _is_acked(p)]
+    unacked = [p for p in reportable if not _is_acked(p)]
+    followed = [p for p in losses if p in entailed and _is_acked(p)]
 
     if not unacked:
         note = "no field loss" if not acked else f"{len(acked)} acknowledged drop(s)"
-        return PreWriteVerdict(ok=True, acknowledged=acked, message=note)
+        if followed:
+            note += f" (+{len(followed)} entailed route(s))"
+        return PreWriteVerdict(
+            ok=True, acknowledged=acked, entailed=followed, message=note)
 
     listed = "\n  - ".join(unacked[:20])
     more = f"\n  ... and {len(unacked) - 20} more" if len(unacked) > 20 else ""
@@ -235,12 +356,15 @@ def check_prewrite(
         ok=False,
         dropped=unacked,
         acknowledged=acked,
+        entailed=followed,
         code="would_drop_fields",
         message=(
             f"refusing to save: {len(unacked)} field(s) present in the live playbook "
             f"are missing from what you are about to write:\n  - {listed}{more}\n"
-            "If a deletion IS what was asked for, re-issue the save with those exact "
-            "paths in `acknowledged_drops`. Otherwise re-read the live playbook and "
-            "re-apply your edit on top of it -- do not write a partial document."
+            "If a deletion IS what was asked for, re-issue the save with those paths "
+            "in `acknowledged_drops` -- a bare step name works too. Routes removed by "
+            "a step's deletion are covered by naming that step. Otherwise re-read the "
+            "live playbook and re-apply your edit on top of it -- do not write a "
+            "partial document."
         ),
     )

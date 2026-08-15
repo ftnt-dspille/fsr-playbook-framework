@@ -2062,10 +2062,13 @@ def push_playbook(yaml_text: str,
 
     Args:
         yaml_text: the full playbook YAML to write.
-        acknowledged_drops: only when a deletion IS what was asked for -- pass
-            back the exact paths from the refusal's `dropped` list to confirm
-            you mean to remove them. Never pass paths you did not intend to
-            delete; that disables the only protection on this path.
+        acknowledged_drops: only when a deletion IS what was asked for -- name
+            what you meant to remove. A bare step name ("Dead End") is enough;
+            the exact paths from the refusal's `dropped` list also work. Routes
+            that only disappeared BECAUSE a step did are covered by naming that
+            step -- you never have to acknowledge those separately. Never pass
+            something you did not intend to delete; that disables the only
+            protection on this path.
 
     Returns:
         {ok: true, collection_uuid, collection_name, workflows: [{name, uuid}],

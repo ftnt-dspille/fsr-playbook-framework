@@ -400,3 +400,186 @@ def test_empty_string_counts_as_a_loss_but_zero_does_not():
     if not _workflows(live)[0].get("description"):
         pytest.skip("fixture workflow has no description to clear")
     assert not check_prewrite(live, outgoing).ok
+
+
+# --------------------------------------------------------------------------- #
+# #136 -- the guard over-corrected: it refused deletions it had itself asked
+# the caller to make.
+#
+# Live probe A3 ("delete the Dead End step") was refused with FOUR paths, only
+# one of which the caller had any way to reason about:
+#
+#     - routes[Block IP->Dead End]        entailed by the deletion
+#     - routes[Dead End->End]             entailed by the deletion
+#     - steps[Block IP].arguments.config  re-derived, environment-dependent
+#     - steps[Dead End]                   the actual deletion
+#
+# A guard whose escape hatch requires the caller to enumerate the guard's own
+# internal path grammar -- including consequences it did not author and a field
+# the compiler re-derives -- is not an escape hatch. These tests fix the shape
+# of the remedy, not just its existence.
+# --------------------------------------------------------------------------- #
+
+def _delete_middle_step(live: dict, victim: str = "Set A") -> dict:
+    """Remove one step AND the routes that touched it, as a real edit would.
+
+    A caller cannot keep a route whose endpoint no longer exists -- FSR would
+    reject the document. So the routes going missing is not an independent
+    decision the caller made; it is arithmetic.
+    """
+    outgoing = copy.deepcopy(live)
+    wf = _workflows(outgoing)[0]
+    gone = [s for s in wf["steps"] if s["name"] == victim]
+    assert gone, f"fixture has no step {victim!r} -- test is vacuous"
+    dead_iris = {s["@id"] for s in gone} | {
+        f"/api/3/workflow_steps/{s['uuid']}" for s in gone}
+    wf["steps"] = [s for s in wf["steps"] if s["name"] != victim]
+    wf["routes"] = [r for r in wf["routes"]
+                    if r.get("sourceStep") not in dead_iris
+                    and r.get("targetStep") not in dead_iris]
+    return outgoing
+
+
+def test_deleting_a_step_reports_it_but_not_its_routes():
+    """The refusal must name the DECISION, not its arithmetic consequences.
+
+    Routes incident to a deleted step cannot survive it. Listing them as
+    separate losses tripled the size of the ack list and made the remedy read
+    as though three unrelated things were being destroyed.
+    """
+    live = _load("linear_baseline")
+    outgoing = _delete_middle_step(live)
+
+    verdict = check_prewrite(live, outgoing)
+    assert not verdict.ok, "deleting a step must still be refused by default"
+    assert any(p.endswith("steps[Set A]") for p in verdict.dropped), verdict.dropped
+    assert not [p for p in verdict.dropped if ".routes[" in p], (
+        "routes incident to a deleted step were reported as independent "
+        f"losses the caller has to acknowledge separately: {verdict.dropped}"
+    )
+
+
+def test_acknowledging_the_step_permits_its_entailed_routes():
+    """A3 itself: name the step you are deleting, and the save goes through."""
+    live = _load("linear_baseline")
+    outgoing = _delete_middle_step(live)
+
+    verdict = check_prewrite(live, outgoing, acknowledged=["Set A"])
+    assert verdict.ok, (
+        "acknowledging the deleted step did not clear the routes its own "
+        f"deletion removed: {verdict.message}"
+    )
+
+
+def test_acknowledgement_accepts_a_bare_step_name():
+    """The ack list must be expressible in the caller's vocabulary.
+
+    `acknowledged_drops` previously required the guard's full internal path
+    (`collection.workflows[X].steps[Y]`), which the model can only produce by
+    copying the refusal back verbatim -- and it demonstrably did not.
+    """
+    live = _load("linear_baseline")
+    outgoing = copy.deepcopy(live)
+    victim = _workflows(outgoing)[0]["steps"].pop()["name"]
+
+    assert check_prewrite(live, outgoing, acknowledged=[victim]).ok
+
+
+def test_full_path_acknowledgement_still_works():
+    """The documented remedy (echo `dropped` back) must not regress."""
+    live = _load("linear_baseline")
+    outgoing = _delete_middle_step(live)
+    refused = check_prewrite(live, outgoing)
+    assert check_prewrite(live, outgoing, refused.dropped).ok
+
+
+def test_a_route_deleted_on_its_own_is_still_refused():
+    """Entailment is scoped to deleted steps -- it must not blanket-forgive.
+
+    Dropping an edge between two steps that both survive silently reshapes
+    execution, and is exactly what the route check exists to catch.
+    """
+    live = _load("linear_baseline")
+    outgoing = copy.deepcopy(live)
+    wf = _workflows(outgoing)[0]
+    wf["routes"].pop()
+
+    verdict = check_prewrite(live, outgoing)
+    assert not verdict.ok
+    assert any(".routes[" in p for p in verdict.dropped), verdict.dropped
+
+
+def test_acknowledging_one_deletion_does_not_forgive_another_steps_routes():
+    """Entailment must attribute each route to the step that actually removed
+    it, not to whichever deletion happened to be acknowledged."""
+    live = _load("linear_baseline")
+    # Give the fixture an edge whose endpoints BOTH survive the deletion --
+    # every route it ships with touches Set A, so without this the premise is
+    # vacuous and the test passes for the wrong reason.
+    lwf = _workflows(live)[0]
+    by_name = {s["name"]: s for s in lwf["steps"]}
+    lwf["routes"].append({
+        "@id": "/api/3/workflow_routes/bypass",
+        "@type": "WorkflowRoute",
+        "name": "Start -> Set B",
+        "label": None,
+        "isExecuted": False,
+        "uuid": "11111111-1111-1111-1111-111111111111",
+        "sourceStep": f"/api/3/workflow_steps/{by_name['Start']['uuid']}",
+        "targetStep": f"/api/3/workflow_steps/{by_name['Set B']['uuid']}",
+    })
+
+    outgoing = _delete_middle_step(live, "Set A")
+    # ...and additionally sever the bypass, which the deletion did not require.
+    wf = _workflows(outgoing)[0]
+    wf["routes"] = [r for r in wf["routes"] if r.get("name") != "Start -> Set B"]
+
+    verdict = check_prewrite(live, outgoing, acknowledged=["Set A"])
+    assert not verdict.ok, (
+        "acking the Set A deletion also waved through an unrelated route drop"
+    )
+
+
+def test_a_re_derived_connector_config_is_not_customer_data():
+    """`arguments.config` is resolved from a per-appliance catalog.
+
+    `connector_args.py` fills it from the local `connector_configs` table and
+    falls back to `""` ("use the connector's default") when that table has no
+    row -- so the SAME yaml compiles with a uuid on one host and `""` on
+    another. The decompiler already treats it as re-derived. The guard did
+    not, so every save made from a host with a different catalog was refused
+    for a field neither the author nor the model ever touched.
+    """
+    live = _load("linear_baseline")
+    for wf in _workflows(live):
+        for step in wf["steps"]:
+            step.setdefault("arguments", {})["config"] = (
+                "4744035b-7f44-4272-afe2-0dfd7f7f2c4a")
+
+    outgoing = copy.deepcopy(live)
+    for wf in _workflows(outgoing):
+        for step in wf["steps"]:
+            step["arguments"]["config"] = ""
+
+    verdict = check_prewrite(live, outgoing)
+    assert verdict.ok, (
+        f"a re-derived default config counted as data loss: {verdict.dropped}"
+    )
+
+
+def test_a_real_argument_still_counts_even_next_to_config():
+    """The config exemption is one key, not a hole in the arguments check."""
+    live = _load("linear_baseline")
+    for wf in _workflows(live):
+        for step in wf["steps"]:
+            step.setdefault("arguments", {})["config"] = "some-uuid"
+
+    outgoing = copy.deepcopy(live)
+    for wf in _workflows(outgoing):
+        for step in wf["steps"]:
+            step["arguments"]["config"] = ""
+            step["arguments"].pop("a", None)
+
+    verdict = check_prewrite(live, outgoing)
+    assert not verdict.ok, "a real argument vanished alongside config"
+    assert not any(p.endswith(".config") for p in verdict.dropped), verdict.dropped
