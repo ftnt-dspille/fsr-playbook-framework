@@ -1,6 +1,7 @@
 """NormalizerMixin -- step argument normalization and step type dispatching."""
 from __future__ import annotations
 
+import difflib
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
@@ -1290,6 +1291,101 @@ class NormalizerMixin:
         """
         _expand_decision_typed(step.arguments, step.branches, path, errors)
 
+    def _shape_assigned_team(
+        self, value: Any, path: str, errors: list[CompileError],
+    ) -> list[dict[str, Any]]:
+        """Shape `owner_detail.assignedToTeam` into the wire format FSR writes.
+
+        The UI writes a list of OBJECTS -- `[{"iri": "/api/3/teams/<uuid>",
+        "teamname": "SOC Team"}]`. Emitting a bare list of strings routes (when
+        the string is an IRI) but leaves the editor's Team picker with nothing
+        to bind to, so it renders blank; if anyone opens that step and saves it
+        the empty dropdown can be written back as unassigned, silently breaking
+        gate routing. A bare team NAME does not even route -- FSR cannot resolve
+        it and the gate is created unowned and invisible.
+
+        Accepts a name, an IRI, an object, or a list of any of those, and
+        resolves both directions against the warmed `teams` table (name ↔ iri),
+        the same table `_resolve_owners` uses.
+        """
+        items = value if isinstance(value, list) else [value]
+        # Detect an unsynced/absent `teams` table without crashing on a slim DB.
+        try:
+            n = self.conn.execute("SELECT count(*) FROM teams").fetchone()[0]
+        except sqlite3.OperationalError:
+            n = 0
+        out: list[dict[str, Any]] = []
+        for item in items:
+            if isinstance(item, dict):
+                iri, name = item.get("iri"), item.get("teamname")
+            elif isinstance(item, str):
+                iri, name = (item, None) if item.startswith("/api/") else (None, item)
+            else:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"assignedToTeam entry must be a team name, a team "
+                             f"IRI, or {{iri, teamname}} (got {type(item).__name__})"),
+                    path=path,
+                ))
+                continue
+            if iri and not name:
+                row = self.conn.execute(
+                    "SELECT name FROM teams WHERE iri = ?", (iri,),
+                ).fetchone() if n else None
+                if row:
+                    name = row[0]
+                else:
+                    # Routing still works off the IRI; only the picker label is
+                    # missing. Warn rather than fail -- an IRI for a team that
+                    # exists only on the target box is a legitimate authoring
+                    # choice, and warmup is not always available offline.
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"team IRI {iri!r} has no name in the `teams` "
+                                 f"reference table -- the editor's Team picker "
+                                 f"will render blank. Run warmup against the "
+                                 f"target SOAR, or write the team name."),
+                        path=path,
+                        severity="warning",
+                    ))
+            elif name and not iri:
+                if n == 0:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"assigned team {name!r} can't be resolved -- the "
+                                 f"`teams` reference table is unsynced. Run warmup "
+                                 f"against the target SOAR, or use the team IRI "
+                                 f"(`/api/3/teams/<uuid>`) directly."),
+                        path=path,
+                    ))
+                    continue
+                row = self.conn.execute(
+                    "SELECT iri FROM teams WHERE name = ?", (name,),
+                ).fetchone()
+                if row:
+                    iri = row[0]
+                else:
+                    candidates = [r[0] for r in self.conn.execute(
+                        "SELECT name FROM teams").fetchall()]
+                    sug = difflib.get_close_matches(name, candidates, n=1, cutoff=0.5)
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"unknown assigned team {name!r}; valid: "
+                                 f"{', '.join(sorted(candidates))}"),
+                        path=path,
+                        near=sug[0] if sug else None,
+                        suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+                    ))
+                    continue
+            entry: dict[str, Any] = {}
+            if iri:
+                entry["iri"] = iri
+            if name:
+                entry["teamname"] = name
+            if entry:
+                out.append(entry)
+        return out
+
     def _normalize_manual_input_args(
         self, step: Step, path: str, errors: list[CompileError],
     ) -> None:
@@ -1419,10 +1515,22 @@ class NormalizerMixin:
             if assign_friendly.get("person"):
                 od["assignedToPerson"] = assign_friendly["person"]
             if assign_friendly.get("team"):
-                od["assignedToTeam"] = [assign_friendly["team"]]
+                od["assignedToTeam"] = self._shape_assigned_team(
+                    assign_friendly["team"],
+                    f"{path}.arguments.assign_to.team", errors,
+                )
             if assign_friendly.get("record_field"):
                 od["assignedToRecord"] = True
             a["owner_detail"] = od
+        # Raw `owner_detail:` written by hand (or round-tripped from a decompile)
+        # gets the same treatment -- the wire shape is a list of objects, and a
+        # bare IRI or name routes but leaves the editor's Team picker blank.
+        raw_od_in = a.get("owner_detail")
+        if isinstance(raw_od_in, dict) and raw_od_in.get("assignedToTeam"):
+            raw_od_in["assignedToTeam"] = self._shape_assigned_team(
+                raw_od_in["assignedToTeam"],
+                f"{path}.arguments.owner_detail.assignedToTeam", errors,
+            )
         title = a.pop("title", None) or step.name or "Awaiting input"
         # A bare `message: "text"` is the friendly way to write the prompt, but
         # FSR's `message` argument is NOT prose -- on a real appliance it is the

@@ -573,7 +573,17 @@ def _decompile_step(s, pb_name: str | None = None,
                     assign_out["person"] = od["assignedToPerson"]
                 team = od.get("assignedToTeam")
                 if isinstance(team, list) and team:
-                    assign_out["team"] = team[0]
+                    # Wire shape is a list of objects: [{iri, teamname}].
+                    # Surface the NAME -- it round-trips through the resolver
+                    # and reads as authoring input; fall back to the IRI when
+                    # the box wrote one without a label.
+                    first = team[0]
+                    if isinstance(first, dict):
+                        assign_out["team"] = (
+                            first.get("teamname") or first.get("iri")
+                        )
+                    else:
+                        assign_out["team"] = first
                 elif isinstance(team, str) and team:
                     assign_out["team"] = team
                 if od.get("assignedToRecord"):

@@ -1812,8 +1812,11 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         ),
         "assign_to_shape": (
             "route the prompt to a team or person: `assign_to: {team: "
-            "\"SOC - Security\"}` or `{person: \"admin\"}`, or "
-            "`{record_field: true}` to use the triggered record's owner."
+            "\"SOC Team\"}` or `{person: \"admin\"}`, or "
+            "`{record_field: true}` to use the triggered record's owner. A "
+            "team NAME is resolved to the wire shape `[{iri, teamname}]` "
+            "against the warmed `teams` table -- an unknown name is a compile "
+            "error, not a silently unowned gate. A team IRI also works."
         ),
         "email_shape": (
             "notify the assignee by email: `email: {enabled: true, subject: "
@@ -1831,7 +1834,7 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "name": "Triage Decision",
             "title": "Confirm triage",
             "description": "Review the alert details and approve.",
-            "assign_to": {"team": "SOC - Security"},
+            "assign_to": {"team": "SOC Team"},
             "inputs": [
                 {"name": "comment", "kind": "textarea",
                  "label": "Analyst comment", "required": True},
