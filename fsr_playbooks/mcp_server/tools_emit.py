@@ -897,6 +897,13 @@ def emit_enhancement_offer(
         "summary": summary,
         "verified_id": verified_id.strip(),
         "final_yaml": yaml_text,
+        # Deletions `verify_enhancement` judged intentional. The accept path
+        # forwards these to `update_playbook` as `acknowledged_drops`, which is
+        # the only way a requested deletion can clear the fail-closed pre-write
+        # guard. Rides on the CARD rather than being recomputed at apply time so
+        # the acknowledgement is bound to the same verdict as the bytes -- the
+        # analyst approves one document with one set of consequences.
+        "acknowledged_drops": list(entry.get("acknowledged_drops") or []),
         "ops_summary": ops_summary,
         "diff_summary": diff,
         "steps_added": list(diff.get("steps_added") or []),

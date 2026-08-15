@@ -241,3 +241,61 @@ def test_an_explicit_argument_still_wins_over_the_bound_message(turn_message):
     assert _severities(result).get("step_dropped") == "error", (
         "the ambient turn message overrode the caller's explicit argument"
     )
+
+
+# --------------------------------------------------------------------------- #
+# The acknowledgement has to reach the WRITE.
+#
+# Once verification stopped blocking a requested deletion, the pre-write guard
+# started blocking it instead -- correctly, since `check_prewrite` fails closed
+# on a vanished step unless the caller names it. Live A3 after the verify fix:
+# "would_drop_fields ... steps[Dead End]". The offer path had no way to name
+# anything, so the deletion simply moved from one wall to the next.
+#
+# The acknowledgement is DERIVED from the verdict and rides on the card, so the
+# analyst approves one document with one set of consequences, and no model
+# assertion at apply time can widen it.
+# --------------------------------------------------------------------------- #
+
+def test_a_requested_deletion_is_carried_as_an_acknowledgement(turn_message):
+    turn_message("delete the Dead End step")
+    result = verify_enhancement(_BEFORE, _DELETED)
+    assert result["acknowledged_drops"] == ["Dead End"]
+
+
+def test_an_unrequested_drop_is_never_acknowledged(turn_message):
+    """The guard must keep refusing what nobody asked for -- if this list could
+    fill itself from any removal, it would disarm the pre-write guard entirely.
+    """
+    turn_message("add a logging step at the end")
+    result = verify_enhancement(_BEFORE, _DELETED)
+    assert result["ready_to_push"] is False
+    assert not result.get("acknowledged_drops")
+
+
+def test_the_offer_card_carries_the_acknowledgement(turn_message):
+    """End to end through the tool the connector actually reads."""
+    from fsr_playbooks.mcp_server.tools_emit import emit_enhancement_offer
+
+    turn_message("delete the Dead End step")
+    verified = verify_enhancement(_BEFORE, _DELETED)
+
+    offer = emit_enhancement_offer(
+        id="off-1", summary="remove Dead End",
+        verified_id=verified["verified_id"])
+
+    assert offer["ok"] is True
+    assert offer["card"]["acknowledged_drops"] == ["Dead End"], (
+        "the accept path cannot clear the pre-write guard without this"
+    )
+
+
+def test_a_card_with_nothing_to_acknowledge_carries_an_empty_list(turn_message):
+    """Shape stability: the connector reads this key unconditionally."""
+    from fsr_playbooks.mcp_server.tools_emit import emit_enhancement_offer
+
+    turn_message("rename nothing, just add a note")
+    unchanged = verify_enhancement(_BEFORE, _BEFORE)
+    offer = emit_enhancement_offer(id="off-2", summary="no-op",
+                                   verified_id=unchanged["verified_id"])
+    assert offer["card"]["acknowledged_drops"] == []

@@ -616,11 +616,29 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
         )
         return out
 
+    # Deletions this gate judged INTENTIONAL, carried forward so the write can
+    # acknowledge them. `check_prewrite` fails closed on a vanished step unless
+    # the caller names it in `acknowledged_drops` -- correctly, that is the last
+    # protection against a model silently eating a playbook. But the enhancement
+    # -offer accept path had no way to name anything, so once verification
+    # stopped blocking a requested deletion the write started blocking it
+    # instead: live A3 came back "would_drop_fields ... steps[Dead End]".
+    #
+    # The acknowledgement is DERIVED from the verdict, never model-supplied.
+    # `step_deleted_as_requested` is only emitted when the analyst named that
+    # step AND used a delete verb, so this list is the set of drops a gate
+    # already judged intentional -- the model cannot widen it by asking.
+    out["acknowledged_drops"] = sorted(
+        str(r.get("step")) for r in (out.get("regressions") or [])
+        if r.get("kind") == "step_deleted_as_requested" and r.get("step")
+    )
+
     out["verified_id"] = _verified_yaml.remember(
         after_yaml,
         before_fingerprint=_verified_yaml.fingerprint(before_yaml),
         diff_summary=out.get("diff_summary") or {},
         warnings=out.get("warnings") or [],
+        acknowledged_drops=out["acknowledged_drops"],
     )
     out["how_to_apply"] = (
         "Call emit_enhancement_offer(verified_id=…) to apply this edit. That "
