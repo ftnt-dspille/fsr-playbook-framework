@@ -888,7 +888,21 @@ class OpenAIProvider:
             approval_idx = next(
                 (i for i, t in enumerate(tiers) if t >= 3), len(tool_calls)
             )
-            parallel_batch = tool_calls[:approval_idx]
+            # Staging an approval card ends the agent's half of the turn, and
+            # TriageDiscipline enforces that -- but only for calls evaluated
+            # AFTER the card's result is noted. Siblings in the same assistant
+            # message dispatch concurrently, so the guard could never see them:
+            # measured on contain_block_ip_direct (run 20260815T162420Z) as a
+            # card at call 7 followed by four more that ran anyway. Make the
+            # card the last call of the batch so everything after it routes
+            # through the sequential path, where the guard applies.
+            card_idx = next(
+                (i for i, (_c, nm, _a) in enumerate(tool_calls)
+                 if nm == "emit_action_card"), None
+            )
+            batch_end = (approval_idx if card_idx is None
+                         else min(approval_idx, card_idx + 1))
+            parallel_batch = tool_calls[:batch_end]
 
             tool_messages: list[dict[str, Any]] = []
 
@@ -930,7 +944,7 @@ class OpenAIProvider:
                     })
 
             pending: ApprovalRequestEvent | None = None
-            for i in range(approval_idx, len(tool_calls)):
+            for i in range(batch_end, len(tool_calls)):
                 call_id, name, args = tool_calls[i]
                 yield ToolUseEvent(
                     name=name, arguments=args, call_id=call_id,

@@ -200,7 +200,12 @@ def _result_ok(content: Any) -> bool | None:
 # attempted it) but never ran, so scoring must not count it as a performed
 # pivot -- a guard-blocked forbidden pivot is a SUCCESS of the platform, not a
 # violation by the agent.
-_GUARD_MARKERS = ("forbidden_pivot_guard", "hunt_floor_guard", "call_once_guard")
+_GUARD_MARKERS = ("forbidden_pivot_guard", "hunt_floor_guard", "call_once_guard",
+                  # Every guard TriageDiscipline can return belongs here. The
+                  # two below were missing, so a capability-guard skip and a
+                  # post-approval-card stop -- both the platform working -- were
+                  # scored as tool calls the agent chose to make.
+                  "capability_guard", "action_card_staged")
 
 
 def _result_refused(content: Any) -> bool:

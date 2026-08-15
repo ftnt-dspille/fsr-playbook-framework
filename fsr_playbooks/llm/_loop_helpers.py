@@ -644,11 +644,38 @@ class TriageDiscipline:
         # has -- 0 of 4 live calls). Turn-scoped: this instance is rebuilt per
         # turn, so an order never outlives the message that gave it.
         self._analyst_ordered = _detect_analyst_order(user_text)
+        # Set by note_result once an approval card is successfully staged.
+        # Turn-scoped like the rest of this object: a card staged on an earlier
+        # turn was already answered (or expired) and must not gag the next one.
+        self._action_card_staged = False
         # How many distinct evidence tools remain before the floor lifts --
         # surfaced in the block message so the model knows it's making progress.
         self._lock = threading.Lock()
 
     def _check_locked(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        # 0a. An approval card is staged: the ANALYST is the next actor, so the
+        # agent stops acting. `emit_action_card`'s own contract is that the turn
+        # halts until the user confirms or cancels -- the widget renders the card
+        # and waits -- so every tool dispatched after it is work whose result no
+        # one will ever see, on a turn the analyst has already been handed.
+        # Measured on contain_block_ip_direct (run 20260815T160035Z): the card
+        # was staged at call 14 of 26, and the eleven calls after it were TI
+        # enrichment of an IP the analyst had already declared the confirmed C2.
+        # Deferral, not failure: the model should close with its verdict, and an
+        # `ok: false` here would read as a tool error worth retrying.
+        if self._action_card_staged:
+            return {
+                "ok": True,
+                "kind": "guard_defer",
+                "action_card_staged": True,
+                "directive": (
+                    f"NOT RUN: `{name}` was skipped because an approval card is "
+                    f"already staged for the analyst. They must approve, edit or "
+                    f"cancel it before anything else runs -- you cannot act "
+                    f"further on this turn. Do not call another tool. Close out "
+                    f"with a short verdict describing what you staged and why."
+                ),
+            }
         # 0. Capability guard (§E) -- this session already learned the connector
         # is unavailable (not configured / unhealthy); don't burn a live
         # re-probe on it. `list_configured_connectors` success (the analyst's
@@ -831,6 +858,13 @@ class TriageDiscipline:
           continue"), and a still-broken connector re-records itself on the
           next attempt anyway.
         """
+        # Before the capabilities early-return: staging an approval card ends
+        # the agent's half of the turn regardless of whether this session
+        # tracks capabilities at all (see the guard in `_check_locked`).
+        if (name == "emit_action_card" and isinstance(result, dict)
+                and result.get("ok") is True):
+            with self._lock:
+                self._action_card_staged = True
         caps = self._capabilities
         if caps is None or not isinstance(result, dict):
             return

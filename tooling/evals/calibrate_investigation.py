@@ -264,9 +264,16 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
         elif kind == "tool_result":
             res = getattr(ev, "result", None)
             ok = res.get("ok") if isinstance(res, dict) else None
+            # A discipline guard blocks the call without running it. Scoring
+            # already excludes `refused` entries from the tool budget and from
+            # the forbidden-pivot check -- but calibrate never SET the flag, so
+            # a guard doing its job was charged to the agent as a tool call.
+            from evals.chat_drive import _result_refused  # noqa: PLC0415
+            refused = _result_refused(res)
             if trace:
                 trace[-1]["ok"] = ok
-            log.info("       <- ok=%s", ok)
+                trace[-1]["refused"] = refused
+            log.info("       <- ok=%s%s", ok, "  (guard-refused)" if refused else "")
         elif kind == "text":
             final_chunks.append(ev.text)
 
@@ -403,6 +410,27 @@ def main() -> None:
             raise SystemExit(f"no such fixture(s): {', '.join(missing)}")
     if not tasks:
         raise SystemExit("no investigation fixtures matched")
+
+    # A corrupt reference store makes `find_operation` raise on SOME queries
+    # and answer others, so the agent re-searches for operations that exist and
+    # the run reads as flailing. It happened twice in two days: on 2026-08-15 a
+    # damaged `idx_ops_op` hid 72 real operations and drove this very fixture
+    # from a median of 5 tool calls to 22. `doctor` detects it (health().intact)
+    # but nothing made calibrate ask, and the numbers looked like agent
+    # behaviour. Ask before spending a single model call.
+    try:
+        from fsr_playbooks.llm.tools import _DB_PATH  # noqa: PLC0415
+        from fsr_playbooks.reference_db import health  # noqa: PLC0415
+        _h = health(_DB_PATH)
+    except Exception as exc:  # noqa: BLE001 -- never invent an env problem
+        log.info("could not check the reference store (%s)", exc.__class__.__name__)
+        _h = None
+    if _h is not None and not _h.intact:
+        raise SystemExit(
+            f"refusing to run: {_h.summary}\n"
+            "  Every number from this run would be the store's misses, not the "
+            "agent's. Repair it (`sqlite3 <db> .recover | sqlite3 <new>`, then "
+            "recreate the indexes) and re-run `make doctor` first.")
 
     # The invest_* fixtures pivot through the CONNECTOR's triage tools, which
     # are not part of this repo's registry and only appear once something calls
