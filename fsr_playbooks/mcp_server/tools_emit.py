@@ -238,11 +238,45 @@ def emit_action_card(
         # of the five investigation fixtures in run 20260813T211826Z -- the
         # agent re-emitted the identical card with the field dropped. Both
         # remedies are legitimate; naming them makes the retry unnecessary.
+        # ...but "add it to args" is only legitimate for a name the operation
+        # ACCEPTS. Offering it unconditionally contradicts the param validator
+        # below, and the model oscillates between the two errors: measured on
+        # contain_block_ip_direct (run 20260815T152033Z) as up to FIVE
+        # emit_action_card attempts against a 10-call budget --
+        #   add vdom+ngfw_mode -> bad_params (ngfw_mode is not a param)
+        #   -> drop both       -> editable_fields_not_in_args -> ...
+        # So split the names by what the op actually takes and give each half
+        # the ONE remedy that terminates.
+        from ._shared import op_param_options
+        known = op_param_options(connector, operation)
+        addable, removable, selects = [], [], {}
+        for f in bad:
+            if known is None:
+                addable.append(f)  # uncatalogued: can't prove anything
+            elif f not in known:
+                removable.append(f)
+            elif known[f] and "" not in known[f]:
+                selects[f] = known[f]  # a select refuses a blank prefill
+            else:
+                addable.append(f)
+        parts = []
+        if addable:
+            parts.append(
+                f"add {addable} to args with the value the analyst should see "
+                f"prefilled (\"\" for blank)")
+        for f, opts in selects.items():
+            parts.append(
+                f"'{f}' is a select and does not accept a blank value -- "
+                f"either add it to args as one of {opts}, or remove it from "
+                f"editable_fields")
+        if removable:
+            parts.append(
+                f"remove {removable} from editable_fields -- "
+                f"'{operation}' on '{connector}' has no such parameter, so "
+                f"adding it to args will be rejected as an invalid argument")
         return _err("editable_fields_not_in_args",
                     f"editable_fields not present in args: {bad}. "
-                    f"Either add each to args with the value the analyst "
-                    f"should see prefilled (\"\" for blank), or remove it "
-                    f"from editable_fields.")
+                    + "; ".join(parts) + ".")
     # Don't render an approval card for a connector/op that doesn't exist --
     # the analyst would approve a phantom action that then fails at execute.
     # Use the SHARED grounding guarantee (offline store + live-definition

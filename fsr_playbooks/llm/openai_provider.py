@@ -104,6 +104,12 @@ DEFAULT_MODEL = (
 # on stop_reason="stop" instead of the contract's "end_turn" -- silently
 # breaking every consumer keyed on the contract (the live chat test T3, etc.).
 # Map the OpenAI tokens onto the same vocabulary Anthropic emits.
+# Marks a tool call whose arguments the model emitted unparseably. It travels
+# in place of the args so every dispatch site (parallel batch and sequential
+# approval loop both go through `_guarded_dispatch`) bounces it identically,
+# instead of each one silently running the tool with `{}`.
+_BAD_ARGS_KEY = "__bad_tool_arguments__"
+
 _FINISH_TO_CONTRACT = {
     "stop": "end_turn",
     # The OUTPUT-TOKEN CAP, and nothing else. This used to map onto
@@ -521,6 +527,21 @@ class OpenAIProvider:
                 return nm + "|" + repr(ar)
 
         def _guarded_dispatch(nm: str, ar: dict[str, Any]) -> Any:
+            # A call whose arguments could not be parsed must NOT run with them
+            # silently emptied. `{}` is a different call from the one the model
+            # made: on the Frank path this produced three consecutive
+            # `run_op({})` dispatches, and because `_resolve_tier` reads the op
+            # out of the args, a tier-4 containment with unreadable args
+            # resolves as a plain tier-3 (unknowns escalate, so nothing runs
+            # ungated -- but a step-up requirement is lost). Bounce it back.
+            if isinstance(ar, dict) and _BAD_ARGS_KEY in ar:
+                return {
+                    "ok": False, "code": "bad_tool_arguments",
+                    "message": (f"{nm}: {ar[_BAD_ARGS_KEY]}. Re-issue the call "
+                                f"with a single valid JSON object as the "
+                                f"arguments."),
+                    "suggestions": [],
+                }
             if nm not in allowed_names:
                 return {
                     "ok": False,
@@ -655,9 +676,12 @@ class OpenAIProvider:
                 try:
                     parsed = json.loads(raw_args)
                     if not isinstance(parsed, dict):
-                        parsed = {}
-                except Exception:
-                    parsed = {}
+                        parsed = {_BAD_ARGS_KEY: (
+                            "arguments must be a JSON object, got "
+                            f"{type(parsed).__name__}")}
+                except Exception as exc:  # noqa: BLE001
+                    parsed = {_BAD_ARGS_KEY:
+                              f"arguments were not valid JSON ({exc})"}
                 tool_calls_for_msg.append({
                     "id": call_id, "type": "function",
                     "function": {"name": slot["name"], "arguments": raw_args},

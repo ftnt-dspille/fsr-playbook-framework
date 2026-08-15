@@ -402,12 +402,13 @@ class FortiAIProxyProvider:
             tool_args = payload.get("tool_args") or {}
             usage = payload.get("usage") or {}
 
-            return (
-                content,
-                tool_name,
-                tool_args if isinstance(tool_args, dict) else {},
-                usage,
-            )
+            # Pass `tool_args` through UNCHANGED. Coercing a non-dict to `{}`
+            # here is what produced the `run_op({})` dispatches seen on
+            # contain_block_ip_direct: the proxy hands back tool_args as a
+            # JSON *string*, which this turned into an empty call before the
+            # caller's parser (which handles strings, and now reports a parse
+            # failure instead of emptying) ever saw it.
+            return content, tool_name, tool_args, usage
 
         for _turn in range(MAX_TOOL_TURNS):
             turn_idx += 1
@@ -436,17 +437,56 @@ class FortiAIProxyProvider:
             if tool_name:
                 # --- Tool call turn ------------------------------------------
                 raw_args = tool_args
+                args_error: str | None = None
                 try:
                     if isinstance(raw_args, str):
                         parsed_args = json.loads(raw_args)
                         if not isinstance(parsed_args, dict):
+                            args_error = ("arguments must be a JSON object, got "
+                                          f"{type(parsed_args).__name__}")
                             parsed_args = {}
-                    else:
+                    elif isinstance(raw_args, dict):
                         parsed_args = raw_args
-                except Exception:
+                    else:
+                        args_error = ("arguments must be a JSON object, got "
+                                      f"{type(raw_args).__name__}")
+                        parsed_args = {}
+                except Exception as exc:  # noqa: BLE001
+                    args_error = f"arguments were not valid JSON ({exc})"
                     parsed_args = {}
 
                 call_id = f"call_{session_id}_{turn_idx}"
+                if args_error is not None:
+                    # Do NOT dispatch a call whose arguments we could not read.
+                    # Emptying them and running anyway is silent arg-dropping:
+                    # observed on contain_block_ip_direct (run 20260815T153152Z)
+                    # as three consecutive `run_op({})` calls that burned a
+                    # third of the turn's budget and staged nothing. It also
+                    # weakens the gate -- `_resolve_tier` reads the op out of
+                    # the args, so a tier-4 containment with unreadable args
+                    # resolves as a plain tier-3 (it escalates from unknown, so
+                    # nothing runs ungated, but a step-up requirement is lost).
+                    # Hand the parse failure back so the model can re-emit.
+                    err = {"ok": False, "code": "bad_tool_arguments",
+                           "message": (f"{tool_name}: {args_error}. Re-issue "
+                                       f"the call with a single valid JSON "
+                                       f"object as the arguments."),
+                           "suggestions": []}
+                    yield ToolUseEvent(name=tool_name, arguments={},
+                                       call_id=call_id,
+                                       tier=_tier_for(tool_name, {}))
+                    yield ToolResultEvent(call_id=call_id, result=err,
+                                          duration_ms=0)
+                    history.append({
+                        "role": "assistant",
+                        "content": f"[called {tool_name} with unreadable arguments]",
+                    })
+                    history.append({
+                        "role": "user",
+                        "content": f"Tool result: {tool_name} = {json.dumps(err)}",
+                    })
+                    yield _emit_usage("tool_calls")
+                    continue
                 tier = _tier_for(tool_name, parsed_args)
                 yield ToolUseEvent(
                     name=tool_name, arguments=parsed_args,

@@ -416,6 +416,43 @@ def _auto_remap_params(params: dict[str, Any] | None,
     return {"params": fixed, "from": uk, "to": req}
 
 
+def op_param_options(connector: str, op: str) -> dict[str, list[str]] | None:
+    """Map param_name -> its select options ([] when free-form), or None if
+    the operation has nothing catalogued.
+
+    `_validate_op_params` derives this internally to reject unknown names and
+    out-of-set select values. It is exposed because a caller that wants to
+    tell the model WHICH remedy terminates needs both halves: whether the op
+    takes the name at all, and whether the name is a select that would reject
+    a blank prefill. `emit_action_card` advised `""` for every missing field,
+    which is precisely the value a select refuses.
+
+    None means "cannot prove anything" (un-synced store or unreadable DB) and
+    must be treated as unknown, never as an empty mapping.
+    """
+    import json as _json
+    if not connector or not op:
+        return None
+    try:
+        with _db() as conn:
+            rows = _rows(conn,
+                         "SELECT param_name, options_json FROM operation_params "
+                         "WHERE connector_name=? AND op_name=?",
+                         (connector, op))
+    except sqlite3.Error:
+        return None
+    if not rows:
+        return None
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        try:
+            opts = _json.loads(r["options_json"] or "[]")
+        except (ValueError, TypeError):
+            opts = []
+        out[r["param_name"]] = [str(o) for o in opts] if isinstance(opts, list) else []
+    return out
+
+
 def _validate_op_params(connector: str, op: str,
                         params: dict[str, Any] | None) -> dict[str, Any] | None:
     """Validate `params` against the operation's parameter schema.
