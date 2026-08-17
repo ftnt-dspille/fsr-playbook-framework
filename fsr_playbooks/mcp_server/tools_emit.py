@@ -958,3 +958,61 @@ def emit_manual_input(
             "fields": fields,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 consolidation: one card emitter over the seven emit_* card tools.
+# The specialized names stay registered during the migration; each one's
+# runtime validation is the single source of truth, so emit_card only routes.
+# emit_decision_step is NOT a card (it renders a YAML step) and stays apart.
+# ---------------------------------------------------------------------------
+
+CARD_TYPES: dict[str, str] = {
+    "choice": "emit_choice_card",
+    "action": "emit_action_card",
+    "manual_input": "emit_manual_input",
+    "capability_gap": "emit_capability_gap_card",
+    "playbook_offer": "emit_playbook_offer",
+    "patch_proposal": "emit_patch_proposal",
+    "enhancement_offer": "emit_enhancement_offer",
+}
+
+
+@mcp.tool()
+def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """ONE card emitter -- pick `card_type`, pass that card's fields as
+    `payload`; the turn halts on the rendered card.
+
+    Which card_type to pick: `choice` = branching question as pickable chips
+    (never ask in prose). `action` = editable preview of a connector op the
+    analyst confirms before it runs. `manual_input` = form for a paused
+    playbook gate. `capability_gap` = the instance CANNOT do what is needed
+    (nothing configured for it) -- name the gap + fix steps, never dead-end
+    in prose. `playbook_offer` = deliver a NEW playbook (the mandatory
+    terminal action of a build turn). `enhancement_offer` = apply a verified
+    edit to the OPEN playbook (terminal action of an enhance turn; needs
+    `verified_id` from verify_enhancement). `patch_proposal` = one-click
+    before/after fix to one step or field of the open playbook.
+    """
+    kt = (card_type or "").strip().lower()
+    fn_name = CARD_TYPES.get(kt)
+    if fn_name is None:
+        return _err("unknown_card_type",
+                    f"card_type {card_type!r} not recognized",
+                    suggestions=[f"valid card_types: {sorted(CARD_TYPES)}"])
+    if not isinstance(payload, dict):
+        return _err("bad_payload", "payload must be an object holding the "
+                                   "card's fields")
+    import fsr_playbooks.mcp_server as _pkg  # noqa: PLC0415 - registration cycle
+    fn = getattr(_pkg, fn_name)
+    try:
+        out = fn(**payload)
+    except TypeError:
+        import inspect  # noqa: PLC0415
+        params = list(inspect.signature(fn).parameters)
+        return _err("bad_payload",
+                    f"payload does not match card_type {kt!r}",
+                    suggestions=[f"{fn_name} takes: {params}"])
+    if isinstance(out, dict):
+        out.setdefault("card_type", kt)
+    return out

@@ -114,6 +114,7 @@ from .tools_discovery import (
 )
 from .tools_emit import (
     emit_action_card,
+    emit_card,
     emit_capability_gap_card,
     emit_choice_card,
     emit_decision_step,

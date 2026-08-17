@@ -70,6 +70,9 @@ SAFE_TOOLS: list[str] = [
     "build_playbook_from_trace",
     # "find_step_recipe",  # hidden -- recipes corpus not populated yet; revisit later
     # Widget card emitters -- drive the chat UI's awaiting_* halts.
+    # Phase 1 consolidation: one emitter over the seven card tools. The
+    # specialized names below stay registered during the migration.
+    "emit_card",
     "emit_choice_card",
     "emit_action_card",
     "emit_manual_input",
@@ -162,6 +165,10 @@ TOOL_TIERS: dict[str, int] = {
     # separate, tier-gated tool). Pure authoring → tier 0.
     "build_playbook_from_trace": 0,
     # "find_step_recipe": 0,  # hidden -- see SAFE_TOOLS
+    # Tier 0 like its constituents: emitting a card is pure local shaping; the
+    # card itself (and, for the write frontier, the read-only-turn refusal in
+    # dispatch) is the gate.
+    "emit_card": 0,
     "emit_choice_card": 0,
     "emit_action_card": 0,
     "emit_manual_input": 0,
@@ -593,6 +600,27 @@ WRITE_FRONTIER_TOOLS = frozenset({
 # Add a name here only if running the tool CHANGES the analyst's playbook
 # without a second confirmation of its own.
 CHANGE_GATED_TOOLS: frozenset[str] = frozenset()
+
+# The consolidated `emit_card` routes to the specialized emitters by
+# `card_type`, so a name-keyed frontier check alone would let
+# emit_card(card_type='enhancement_offer', ...) sail through a read-only turn
+# that refuses emit_enhancement_offer outright -- the exact #117 shape, one
+# indirection deeper. These are the card_types whose constituents are in
+# WRITE_FRONTIER_TOOLS.
+_FRONTIER_CARD_TYPES = frozenset({
+    "enhancement_offer", "playbook_offer", "patch_proposal",
+})
+
+
+def _is_write_frontier(name: str, args: dict[str, Any]) -> bool:
+    """Frontier membership for the read-only-turn refusal: the tool NAME, or
+    `emit_card` carrying a frontier card_type."""
+    if name in WRITE_FRONTIER_TOOLS:
+        return True
+    if name != "emit_card":
+        return False
+    ct = str((args or {}).get("card_type") or "").strip().lower()
+    return ct in _FRONTIER_CARD_TYPES
 
 
 def set_change_affordance(present: bool) -> Any:
@@ -1026,6 +1054,31 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
             "limit": {"type": "integer", "default": 10},
         },
     },
+    # The consolidated card emitter: the wire enforces the card_type
+    # vocabulary; the payload's per-type contract is enforced at runtime by
+    # the specialized emitter it routes to (whose overrides below remain the
+    # per-card wire contracts during the migration).
+    "emit_card": {
+        "type": "object",
+        "required": ["card_type", "payload"],
+        "additionalProperties": False,
+        "properties": {
+            "card_type": {
+                "type": "string",
+                "enum": ["choice", "action", "manual_input", "capability_gap",
+                         "playbook_offer", "patch_proposal",
+                         "enhancement_offer"],
+                "description": "Which card to render; see the tool "
+                               "description for when each applies.",
+            },
+            "payload": {
+                "type": "object",
+                "description": "The chosen card's fields -- identical to the "
+                               "matching emit_<card_type>_card tool's "
+                               "arguments (e.g. choice: id, prompt, options).",
+            },
+        },
+    },
     "emit_choice_card": {
         "type": "object",
         "required": ["id", "prompt", "options"],
@@ -1370,6 +1423,33 @@ def _resolve(name: str) -> Callable[..., Any]:
     return fn
 
 
+def _tier_line(name: str, tier: int) -> str:
+    """One sentence declaring a tool's approval behavior, appended to every
+    advertised description (assessment Phase 1.4): the model should know
+    BEFORE calling whether a tool auto-runs, suspends for approval, or is
+    resolved per call -- today it learns by burning turns. Derived from
+    TOOL_TIERS so it can never drift from what dispatch actually does."""
+    if tier < 0:
+        if name in ("step_through_playbook", "dry_run_playbook"):
+            return ("Approval: auto-runs; asks the analyst first only if "
+                    "execute_unsafe_ops=True.")
+        if name == "push_playbook":
+            # -1 in TOOL_TIERS, but _resolve_tier hardcodes 3: it writes.
+            return ("Approval: always suspends for analyst approval before "
+                    "running.")
+        if name == "run_playbook":
+            return ("Approval: suspends for analyst approval unless the host "
+                    "has designated this playbook auto-runnable.")
+        return ("Approval: resolved per call -- reads auto-run; FSR writes and "
+                "containment/remediation suspend for analyst approval first.")
+    if tier >= 4:
+        return ("Approval: always suspends for analyst step-up approval "
+                "before running.")
+    if tier >= 3:
+        return "Approval: always suspends for analyst approval before running."
+    return "Approval: auto-runs, no analyst approval needed."
+
+
 def build_registry() -> dict[str, ToolSpec]:
     out: dict[str, ToolSpec] = {}
     for name in SAFE_TOOLS:
@@ -1380,6 +1460,9 @@ def build_registry() -> dict[str, ToolSpec]:
         confirm_mode = "auto" if static_tier in (0, 1) else ("approve" if static_tier in (2, 3) else "step_up")
         if static_tier < 0:
             confirm_mode = "dynamic"
+        # Appended AFTER the cap so the declaration can never be the paragraph
+        # that gets dropped.
+        short = f"{short}\n\n{_tier_line(name, static_tier)}"
         out[name] = ToolSpec(
             name=name,
             description=short,
@@ -1516,7 +1599,7 @@ def dispatch(
     # the offer the analyst never asked for; if approved, it can delete the
     # open playbook's steps (tracker #117).  Refuse with a clean error the
     # model can narrate ("this is a read-only turn") instead of staging a card.
-    if _is_read_only_turn() and name in WRITE_FRONTIER_TOOLS and not _internal:
+    if _is_read_only_turn() and _is_write_frontier(name, raw_args) and not _internal:
         return {
             "ok": False,
             "code": "read_only_turn",
