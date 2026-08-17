@@ -32,6 +32,10 @@ from .._db import default_db_path
 
 # Allow-list. Names match attribute names on `mcp_server`.
 SAFE_TOOLS: list[str] = [
+    # Phase 1 consolidation: the single discovery entry point. The
+    # specialized find_*/search_* names below stay registered during the
+    # migration; tool-gate arbitrates when they leave the advertised slice.
+    "find",
     "find_connector",
     "find_operation",
     "get_op_schema",
@@ -120,6 +124,9 @@ SAFE_TOOLS: list[str] = [
 
 TOOL_TIERS: dict[str, int] = {
     # Tier 0 -- pure local compute.
+    # `find` kind=action consults configured-connector state (a tier-1-style
+    # read at most); discovery never mutates, so tier 1 like its constituents.
+    "find": 1,
     "find_connector": 0,
     "find_operation": 0,
     "get_op_schema": 0,
@@ -978,6 +985,39 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
 # sync with the runtime checks inside the tool itself -- the override is
 # the wire contract; the runtime check covers non-LLM callers.
 TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
+    # The consolidated discovery tool: the wire enforces the kind vocabulary
+    # so a guessed kind fails at the schema, not as a burned turn.
+    "find": {
+        "type": "object",
+        "required": ["kind"],
+        "additionalProperties": False,
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": ["connector", "operation", "action", "example",
+                         "recipe", "api", "jinja", "playbook"],
+                "description": "Catalog to search; see the tool description "
+                               "for when each applies.",
+            },
+            "query": {"type": "string",
+                      "description": "Plain-language search terms."},
+            "connector": {"type": "string",
+                          "description": "Required for kind=operation; "
+                                         "scopes kind=example to one "
+                                         "connector's ops."},
+            "target_type": {"type": "string",
+                            "description": "kind=action: ip/host/endpoint/"
+                                           "user/url/domain/hash/file/email."},
+            "action_type": {"type": "string",
+                            "enum": ["containment", "enrichment", "record"],
+                            "description": "kind=action: restrict to one "
+                                           "family."},
+            "module": {"type": "string",
+                       "description": "kind=action record writes: target "
+                                      "module (alerts, incidents, ...)."},
+            "limit": {"type": "integer", "default": 10},
+        },
+    },
     "emit_choice_card": {
         "type": "object",
         "required": ["id", "prompt", "options"],

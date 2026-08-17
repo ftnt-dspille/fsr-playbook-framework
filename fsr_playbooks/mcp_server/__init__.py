@@ -135,6 +135,7 @@ from .tools_execution import (
 )
 
 # Jinja tools
+from .tools_find import find
 from .tools_jinja import (
     find_jinja_example,
     find_jinja_filter,
@@ -184,6 +185,7 @@ __all__ = [
     # Discovery
     "_CONFIG_CACHE",
     "_ICON_CACHE",
+    "find",
     "find_connector",
     "find_operation",
     "find_operation_example",
