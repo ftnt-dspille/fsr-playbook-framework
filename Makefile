@@ -194,7 +194,7 @@ TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,s
 # spiral.
 # data/eval_runs/ is gitignored, so a fresh checkout has no baseline to diff
 # against and must capture its own before a delta means anything.
-TOOL_GATE_BASELINE ?= 20260814T115728Z
+TOOL_GATE_BASELINE ?= 20260817T153958Z
 
 tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3 OFFLINE=1
 	@echo "note: the score is composite (#127), so a row can CLIMB, not just"
