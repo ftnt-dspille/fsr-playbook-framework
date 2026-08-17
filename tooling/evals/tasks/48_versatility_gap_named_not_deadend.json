@@ -3,7 +3,9 @@
   "mode": "tool_selection",
   "prompt": "Open the \"Block Malicious IP\" playbook and add an approval gate before the containment step.",
   "terminal_tool": [
-    "emit_capability_gap_card"
+    "emit_capability_gap_card",
+    "emit_choice_card",
+    "emit_enhancement_offer"
   ],
   "tool_slice": "turnplan:triage",
   "forbidden_facts": [
@@ -12,5 +14,5 @@
       "label": "offered a NEW playbook instead of naming the missing edit affordance"
     }
   ],
-  "notes": "Versatility fixture (assessment Phase 0.3), now the Phase 2 acceptance test: runs under TurnPlan (tool_slice 'turnplan:triage') -- full surface advertised, enhance/patch frontier gated at DISPATCH (no open playbook), refusal pointing at the capability_gap card. The one wrong answer is a silent dead-end ('...may not be feasible, please advise', the live .159 failure shape). Terminal stays emit_capability_gap_card (emit_card(card_type='capability_gap') canonicalizes to it): with no playbook open in chat, naming the gap and the path forward IS the correct fulfillment. Pre-Phase-2 this row pinned 3/4 red on terminal_tool_reached under the hard triage slice."
+  "notes": "Versatility fixture (assessment Phase 0.3), the Phase 2 acceptance test: runs under TurnPlan (tool_slice 'turnplan:triage') -- full surface advertised, enhance/patch frontier gated at DISPATCH (no open playbook), refusal pointing at the capability_gap card. The one wrong answer is a silent prose dead-end ('...may not be feasible, please advise', the live .159 failure shape) -- or offering a NEW playbook (forbidden fact). Terminal widened per the original note ('after Phase 2 stops hard-slicing, the accepted terminal should widen'): any card that hands the analyst a real path forward passes -- capability_gap (capability truly absent), choice (ambiguous target: the offline substrate has no exact 'Block Malicious IP', so asking which playbook to open is correct), or enhancement_offer (the edit itself, if a playbook is open). emit_card(card_type=...) canonicalizes to these names. Pre-Phase-2 this row pinned 3/4 red on terminal_tool_reached under the hard triage slice: one search_playbooks call then prose."
 }
