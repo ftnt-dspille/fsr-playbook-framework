@@ -1507,6 +1507,15 @@ CONSOLIDATED_AWAY = frozenset({
     "list_picklists", "picklist_for_field", "resolve_picklist_value",
     # → connector_health(...)
     "healthcheck_connector",
+    # → emit_card(card_type=...) -- retired once Phase 2's dispatch-level
+    # affordance gate landed (turn_plan.gate_refusal + the read-only-turn
+    # refusal keyed on emit_card's card_type): the union can no longer reach
+    # a card family the turn's state doesn't afford, so the per-card names
+    # need not stay advertised to keep the frontier partitioned.
+    # emit_decision_step is NOT a card (it authors a YAML step) and stays.
+    "emit_choice_card", "emit_action_card", "emit_manual_input",
+    "emit_capability_gap_card", "emit_playbook_offer",
+    "emit_enhancement_offer", "emit_patch_proposal",
 })
 
 

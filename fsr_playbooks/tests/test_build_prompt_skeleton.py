@@ -270,7 +270,7 @@ def test_prompt_delivers_an_edit_through_the_offer_card_not_a_fence():
     applied the last of them. The fence is no longer the contract; the card
     is, and it carries the verified bytes so the re-typing cannot happen.
     """
-    assert "emit_enhancement_offer" in _FLAT
+    assert "emit_card(card_type='enhancement_offer'" in _FLAT
     assert "verified_id" in _FLAT
     # The old instruction must be GONE, not merely outvoted by a newer one
     # further down the prompt.
@@ -281,7 +281,7 @@ def test_prompt_does_not_offer_a_duplicate_when_a_playbook_is_open():
     # emit_playbook_offer's accept path PUSHES (creates) a new playbook. Offering
     # one while the analyst has a playbook open saves a duplicate and leaves the
     # open record untouched, so the terminal rule has to be conditional.
-    assert "do not call `emit_playbook_offer` here" in _FLAT
+    assert "do not call `emit_card(card_type='playbook_offer')` here" in _FLAT
     assert "duplicate" in _FLAT
 
 

@@ -169,8 +169,13 @@ def test_emit_playbook_offer_validates_required_fields():
 
 
 def test_emit_playbook_offer_available_to_triage_agent():
+    # Reached through the emit_card union since the per-card names were
+    # CONSOLIDATED_AWAY (Phase 2); the constituent stays registered so
+    # dispatch and approval resumes keep working.
+    from fsr_playbooks.llm.tools import REGISTRY
     names = {t["name"] for t in tools_for_intent("triage")}
-    assert "emit_playbook_offer" in names
+    assert "emit_card" in names
+    assert "emit_playbook_offer" in REGISTRY
 
 
 # --- direct-build mode (§A -- yaml-carrying offer, no trace needed) ----------

@@ -49,11 +49,13 @@ def test_prompt_carries_prior_constraints_and_gap_rule():
 
 
 def test_intent_is_prior_not_slice():
-    # build prior still advertises the triage frontier and vice versa
+    # build prior still advertises the triage frontier and vice versa.
+    # The card family is reached through the emit_card union (the per-card
+    # names are CONSOLIDATED_AWAY since the dispatch gate landed).
     build_names = {t["name"] for t in plan_turn("build").tools}
-    assert {"emit_action_card", "run_op"} <= build_names
+    assert {"emit_card", "run_op"} <= build_names
     triage_names = {t["name"] for t in plan_turn("triage").tools}
-    assert {"validate_yaml", "push_playbook", "emit_playbook_offer"} <= triage_names
+    assert {"validate_yaml", "push_playbook", "emit_card"} <= triage_names
 
 
 def test_low_signal_message_still_gated():

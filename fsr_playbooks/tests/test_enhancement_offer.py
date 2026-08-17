@@ -169,7 +169,12 @@ def test_tool_is_registered_and_build_only():
     assert "emit_enhancement_offer" in tools.SAFE_TOOLS
     assert tools.TOOL_TIERS["emit_enhancement_offer"] == 0
     assert "emit_enhancement_offer" in intents.BUILD_ONLY_TOOLS
+    # Since Phase 2 the per-card name is CONSOLIDATED_AWAY: the model reaches
+    # it through emit_card(card_type='enhancement_offer'), and the no-open-
+    # playbook case is refused at DISPATCH by turn_plan.gate_refusal rather
+    # than by dropping the name from a slice. Registry membership is what
+    # keeps dispatch and approval resumes working.
+    assert "emit_enhancement_offer" in tools.REGISTRY
     build = {t["name"] for t in intents.tools_for_intent("build")}
-    triage = {t["name"] for t in intents.tools_for_intent("triage")}
-    assert "emit_enhancement_offer" in build, "build mode cannot deliver edits"
-    assert "emit_enhancement_offer" not in triage, "triage has no open playbook"
+    assert "emit_card" in build, "build mode cannot deliver edits"
+    assert "emit_enhancement_offer" not in build, "retired name re-advertised"
