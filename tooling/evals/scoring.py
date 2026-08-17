@@ -205,6 +205,14 @@ INVESTIGATION_TOOL_BUDGET_MAX = int(
 # signature (agent guessing param names live: ip -> ip_address -> indicator).
 INVESTIGATION_MAX_PARAM_RETRIES = int(
     os.environ.get("EVAL_INVESTIGATION_MAX_PARAM_RETRIES", "2"))
+# >N calls repeating an earlier (tool, args) pair verbatim = spiral (#140).
+# Calibrated over the 130 saved traces in data/eval_runs/*_failures: the count
+# is 0 on the large majority even of FAILING runs, 1-2 on the occasional
+# ordinary one, and >=3 only on the genuine outliers (fixture 29's 40-call run
+# = 4, mail_egress's 32-call run = 9). 2 keeps the teeth without firing on the
+# stray repeat.
+INVESTIGATION_MAX_REDUNDANT_CALLS = int(
+    os.environ.get("EVAL_INVESTIGATION_MAX_REDUNDANT_CALLS", "2"))
 # Tools that count as "staged a concrete deliverable for the analyst". A
 # capability gap / choice card IS a valid ending when no containment op is
 # configured on the box -- credit it, don't demand an action card that can't
@@ -497,40 +505,85 @@ def score_build_fidelity(trace: list[dict[str, Any]] | None,
     }
 
 
-def _param_flail(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
+def _param_flail(trace: list[dict[str, Any]]) -> tuple[int, str | None, int]:
     """Worst-offender count of DISTINCT arg-sets for a single (connector, op).
 
     The grounding-flail signature: the agent re-invokes the same op cycling
     param names (`ip` -> `ip_address` -> `indicator`) because it's discovering
     the real schema live by trial and error. One op called once with the right
-    params yields 1; a 3-way param guess yields 3. Returns (worst, label)."""
+    params yields 1; a 3-way param guess yields 3.
+
+    A run_op whose args never parsed into a real (connector, op) -- malformed
+    JSON from the model, or a truncated tool call -- is NOT grounding flail: the
+    agent never reached an op to be wrong about. Counting those collapsed every
+    such call onto one phantom key and reported the result against an op named
+    `None` (#138), which is what made `invest_excessive_mail_egress` read as
+    unstable. They are excluded here and reported separately instead.
+
+    Returns (worst, label, unparsed)."""
     from collections import defaultdict
-    seen: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    seen: dict[tuple[str, str], set[str]] = defaultdict(set)
+    unparsed = 0
     for c in trace:
         if c.get("name") != "run_op":
             continue
         args = _call_args(c)
-        key = (
-            "run_op",
-            str(args.get("connector", "")).lower(),
-            str(args.get("op", "")).lower(),
-        )
+        conn = str(args.get("connector", "")).lower()
+        op = str(args.get("op", "")).lower()
+        if not (conn and op):
+            unparsed += 1
+            continue
         params = args.get("params")
         if not isinstance(params, dict):
             params = {k: v for k, v in args.items()
                       if k not in ("connector", "op", "confirm")}
-        seen[key].add(json.dumps(params, sort_keys=True, default=str))
+        seen[(conn, op)].add(json.dumps(params, sort_keys=True, default=str))
     if not seen:
-        return 0, None
+        return 0, None, unparsed
     worst_key = max(seen, key=lambda k: len(seen[k]))
     worst = len(seen[worst_key])
-    label = f"{worst_key[1]}.{worst_key[2]}" if worst_key[1] else worst_key[2]
-    return worst, (label or None)
+    return worst, f"{worst_key[0]}.{worst_key[1]}", unparsed
 
 
 # Discovery tools that reveal an op's real param schema. A run_op retry that
 # follows any of these for the same op is "informed"; one that doesn't is blind.
 _SCHEMA_DISCOVERY_TOOLS = ("get_op_schema", "find_operation", "find_operation_example")
+
+
+def _redundant_calls(trace: list[dict[str, Any]]) -> tuple[int, list[str]]:
+    """Count calls that repeat an earlier (tool, args) pair BYTE-IDENTICALLY.
+
+    #140. The investigation gates had no spiral check at all -- `no_spiral` is
+    an authoring-path gate -- so `invest_defense_evasion_host` could burn 40
+    calls (run 20260815T174220Z) and only `tool_budget` noticed. A budget says
+    "too much"; this says *which* calls bought nothing.
+
+    Deliberately NOT a blunt per-tool count: counting repeats by NAME is what
+    got `no_spiral` loosened, because it failed a legitimate five-step build for
+    looking up five different step types. Same tool, different args = progress.
+    Same tool, same args = a deterministic lookup that cannot return anything
+    new the second time.
+
+    Also deliberately NOT limited to CONSECUTIVE repeats (the rule
+    `_longest_spiral` uses): fixture 29's repeats were scattered across the
+    turn, not adjacent -- the agent re-asked a question it had already answered
+    twenty calls earlier. Returns (redundant_count, labels of the repeated
+    calls)."""
+    from collections import Counter
+    keys = Counter(
+        (str(c.get("name") or ""),
+         json.dumps(c.get("args") or {}, sort_keys=True, default=str))
+        for c in trace
+    )
+    repeats = {k: v for k, v in keys.items() if v > 1}
+    # A repeated call with EMPTY args is a malformed/unparseable tool call
+    # hammered over and over (see #138) -- still pure waste, so still counted,
+    # but say which it is: "run_op x4" reads as one real op re-run, and the
+    # reader would go looking for an op that was never named.
+    labels = [f"{name}{'(no args)' if args in ('{}', 'null') else ''} x{n}"
+              for (name, args), n in
+              sorted(repeats.items(), key=lambda kv: -kv[1])]
+    return sum(n - 1 for n in repeats.values()), labels
 
 
 def _blind_param_retry(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
@@ -602,14 +655,36 @@ def _score_investigation_quality(
 
     # --- no param-grounding flail -------------------------------------------
     max_retries = quality.get("max_param_retries", INVESTIGATION_MAX_PARAM_RETRIES)
-    worst, label = _param_flail(trace)
+    worst, label, unparsed = _param_flail(trace)
     flail_ok = worst <= max_retries
+    # Reported, never charged: a malformed run_op is a tool-call defect, not
+    # grounding flail (#138). Surfacing the count keeps it from being silently
+    # dropped -- a run with unparseable calls is worth knowing about.
+    unparsed_note = (f"; {unparsed} run_op call(s) had unparseable args "
+                     f"(not counted as flail)" if unparsed else "")
     gates["investigation_no_param_flail"] = {
         "passed": flail_ok, "skipped": False,
         "worst_distinct_argsets": worst, "limit": max_retries, "op": label,
-        "detail": (f"{label} called with {worst} distinct arg-sets "
-                   f"(limit {max_retries})" if not flail_ok
-                   else f"no op exceeded {max_retries} distinct arg-sets"),
+        "unparseable_run_op_calls": unparsed,
+        "detail": ((f"{label} called with {worst} distinct arg-sets "
+                    f"(limit {max_retries})" if not flail_ok
+                    else f"no op exceeded {max_retries} distinct arg-sets")
+                   + unparsed_note),
+    }
+
+    # --- no spiral: byte-identical (tool, args) repeats (#140) ---------------
+    max_redundant = quality.get("max_redundant_calls",
+                                INVESTIGATION_MAX_REDUNDANT_CALLS)
+    redundant, repeat_labels = _redundant_calls(trace)
+    gates["investigation_no_spiral"] = {
+        "passed": redundant <= max_redundant, "skipped": False,
+        "redundant_calls": redundant, "limit": max_redundant,
+        "repeats": repeat_labels,
+        "detail": (f"{redundant} call(s) repeated an earlier (tool, args) pair "
+                   f"verbatim (limit {max_redundant}): {', '.join(repeat_labels)}"
+                   if redundant > max_redundant
+                   else f"{redundant} verbatim-repeated call(s) "
+                        f"(limit {max_redundant})"),
     }
 
     # --- no BLIND param retry (hammered run_op without ever pulling a schema) -
@@ -1515,6 +1590,7 @@ def score(
         else:
             for k in ("investigation_recall", "investigation_tool_budget",
                       "investigation_no_param_flail",
+                      "investigation_no_spiral",
                       "investigation_deliverable"):
                 out["levels"][k] = {
                     "passed": False, "skipped": True,

@@ -227,6 +227,9 @@ def _sniff_parameters(text: str) -> list[str]:
 # the compiler emits. Renames the declaration site AND every downstream
 # `vars.<old>` reference; rewrites `vars.steps.<set_var_step>.<key>` →
 # `vars.<key>`. The reserved-key list is sourced from validator.py.
+# Accept both "set_variable" (short form) and "SetVariable" (canonical).
+
+_SET_VAR_TYPE_NAMES = frozenset({"set_variable", "SetVariable"})
 
 
 @dataclass
@@ -268,7 +271,7 @@ def _sniff_set_variable_steps(text: str) -> list[_SetVarStep]:
         if not isinstance(step_node, yaml.MappingNode):
             return
         fields = {_scalar(k): v for k, v in _map_items(step_node)}
-        if _scalar(fields.get("type")) != "set_variable":
+        if _scalar(fields.get("type")) not in _SET_VAR_TYPE_NAMES:
             return
         name = _scalar(fields.get("name")) or ""
         if not name:
