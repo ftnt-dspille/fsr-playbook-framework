@@ -584,6 +584,13 @@ class FortiAIProxyProvider:
                     "role": "user",
                     "content": f"Tool result: {tool_name} = {content_str}",
                 })
+                # TurnPlan item 3: state the shrinking budget in the soft
+                # window before the cap (mirrors the other providers).
+                from ._loop_helpers import budget_note
+                _bnote = budget_note(_turn + 1, MAX_TOOL_TURNS)
+                if _bnote:
+                    history.append({"role": "user",
+                                    "content": f"[turn budget] {_bnote}"})
                 any_tools_run = True
 
                 yield _emit_usage("tool_calls")

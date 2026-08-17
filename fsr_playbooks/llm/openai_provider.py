@@ -1030,6 +1030,13 @@ class OpenAIProvider:
                 return
 
             history.extend(tool_messages)
+            # TurnPlan item 3: state the shrinking budget in the soft window
+            # before the cliff (the forced wrap-up round handles exhaustion).
+            from ._loop_helpers import budget_note
+            _bnote = budget_note(_turn + 1, _turn_budget)
+            if _bnote:
+                history.append({"role": "system",
+                                "content": f"[turn budget] {_bnote}"})
             any_tools_run = True
             yield _emit_usage(finish_reason or "tool_calls")
 

@@ -1017,6 +1017,20 @@ _WRAPUP_NO_YAML = (
 )
 
 
+
+def budget_note(calls_used: int, max_turns: int = MAX_TOOL_TURNS) -> str:
+    """TurnPlan item 3: the early "N calls left -- wrap up" warning.
+
+    The cliff itself already has a handler (``wrapup_directive`` forces a
+    delivery round at exhaustion); this is the soft window BEFORE it, so the
+    model plans its close instead of being ambushed by the forced round.
+    Empty while there is headroom and at/after exhaustion."""
+    left = max_turns - calls_used
+    if left <= 0:
+        return ""
+    from .turn_plan import TurnBudget
+    return TurnBudget(max_tool_turns=max_turns).note(calls_used)
+
 def wrapup_directive(history: list[dict[str, Any]],
                      max_turns: int = MAX_TOOL_TURNS) -> tuple[str, int]:
     """The forced wrap-up round's directive and its token budget.

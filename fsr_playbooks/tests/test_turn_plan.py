@@ -116,3 +116,27 @@ def test_dispatch_consults_installed_plan_and_only_then():
     finally:
         reset_turn_plan(token)
     assert active_turn_plan() is None
+
+
+def test_budget_note_helper_soft_window_only():
+    """budget_note (the live-loop injection) warns ONLY in the soft window:
+    silent with headroom, silent at/after exhaustion (the forced wrap-up
+    round owns the cliff)."""
+    from fsr_playbooks.llm._loop_helpers import budget_note
+    assert budget_note(1, 16) == ""
+    assert "3 tool calls left" in budget_note(13, 16)
+    assert "1 tool call left" in budget_note(15, 16)
+    assert budget_note(16, 16) == ""
+    assert budget_note(20, 16) == ""
+
+
+def test_providers_inject_budget_note():
+    """Every live provider loop carries the injection (the drift risk is a
+    provider missing it and its users hitting the cliff unwarned)."""
+    import pathlib
+
+    import fsr_playbooks
+    base = pathlib.Path(fsr_playbooks.__file__).parent / "llm"
+    for prov in ("anthropic_provider.py", "openai_provider.py",
+                 "fortiai_proxy_provider.py"):
+        assert "budget_note" in (base / prov).read_text(), prov

@@ -1020,6 +1020,13 @@ class AnthropicProvider:
                 yield DoneEvent(stop_reason="pending_approval")
                 return
 
+            # TurnPlan item 3: state the shrinking budget in the soft window
+            # before the cliff (the forced wrap-up round handles exhaustion).
+            from ._loop_helpers import budget_note
+            _bnote = budget_note(_turn + 1, _turn_budget)
+            if _bnote:
+                tool_result_blocks.append(
+                    {"type": "text", "text": f"[turn budget] {_bnote}"})
             history.append(Message(role="user", content=tool_result_blocks))
             any_tools_run = True
             yield UsageEvent(
