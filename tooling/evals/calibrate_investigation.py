@@ -291,10 +291,14 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
 
     from fsr_playbooks.llm.run_turn import resume_agent_turn, run_agent_turn
     from fsr_playbooks.llm.provider import Message
-    from fsr_playbooks.llm.intents import load_intent_prompt, tools_for_intent
+    from fsr_playbooks.llm.intents import tools_for_intent
+    from evals.prompt_source import resolve_triage_prompt
 
     provider = _build_provider(provider_kind, model)
-    system = load_intent_prompt("triage")
+    # NOT load_intent_prompt(): that resolves to a 583-char fallback stub in
+    # this repo, so every run scored a prompt nobody ships. resolve_triage_prompt
+    # raises instead of falling back -- see evals/prompt_source.py.
+    system = resolve_triage_prompt().text
     tools = tools_for_intent("triage")
 
     trace: list[dict] = []
@@ -512,6 +516,18 @@ def main() -> None:
     from evals.harness import register_triage_tools_if_available  # noqa: PLC0415
     tool_substrate = register_triage_tools_if_available()
     log.info("tool substrate: %s", tool_substrate)
+
+    # Fail here, before a single credit is spent, if the prompt under test
+    # cannot be resolved -- and SAY which prompt this run measured. A run whose
+    # provenance is unstated cannot be compared to another run.
+    from evals.prompt_source import PromptUnresolvable, resolve_triage_prompt
+    try:
+        _prompt = resolve_triage_prompt()
+    except PromptUnresolvable as exc:
+        log.error("prompt substrate: UNRESOLVABLE\n%s", exc)
+        raise SystemExit(2) from None
+    prompt_substrate = _prompt.summary
+    log.info("prompt substrate: %s", prompt_substrate)
 
     # A fixture whose required_facts name a tool this process never registers
     # can only score recall 0.0, no matter how well the agent investigates.
@@ -822,6 +838,11 @@ def main() -> None:
          # An unservable row's 0.0 means "unscoreable here", not "the agent
          # got worse" -- the summary has to say so or the next diff relearns it.
          "unservable": unservable, "tool_substrate": tool_substrate,
+         # Which PROMPT this run measured. Runs whose fingerprints differ are
+         # measuring different agents; runs whose fingerprints match cannot
+         # show a prompt effect, however different their scores look.
+         "prompt_substrate": prompt_substrate,
+         "prompt_fingerprint": _prompt.fingerprint,
          "results": [{"fixture": n, "spread": sc.get("spread"),
                       "unservable": unservable.get(n) or [],
                       **{k: sc.get(k) for k in
