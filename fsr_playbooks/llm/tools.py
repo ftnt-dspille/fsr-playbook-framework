@@ -1664,6 +1664,22 @@ def dispatch(
     # object back to a dict HERE -- before validation and tier-resolution, both of
     # which read `params`. Same "accept the shape the model emits" class as the
     # GetRecordArgs / SearchModuleRecordsArgs gates.
+    # Same "accept the shape the model emits" class: emit_card takes
+    # (card_type, payload) but models regularly put the card's fields at the
+    # TOP level (emit_card(card_type='playbook_offer', id=..., summary=...)).
+    # That cost a bad_payload round-trip on most bottle-from-triage runs --
+    # the model always self-repairs, but each repair is a full LLM turn.
+    # Fold stray top-level keys into `payload` when payload isn't a dict;
+    # a missing/unknown card_type still errors (correctly).
+    if name == "emit_card":
+        _known = {"card_type", "payload"}
+        _extras = {k: v for k, v in raw_args.items()
+                   if k not in _known and not k.startswith("_")}
+        if _extras and not isinstance(raw_args.get("payload"), dict):
+            raw_args["payload"] = _extras
+            for k in _extras:
+                raw_args.pop(k, None)
+
     if name == "run_op":
         _p = raw_args.get("params")
         if isinstance(_p, str):

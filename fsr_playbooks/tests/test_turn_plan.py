@@ -140,3 +140,20 @@ def test_providers_inject_budget_note():
     for prov in ("anthropic_provider.py", "openai_provider.py",
                  "fortiai_proxy_provider.py"):
         assert "budget_note" in (base / prov).read_text(), prov
+
+
+def test_emit_card_top_level_fields_folded_into_payload():
+    """Models regularly flatten emit_card's payload to top-level kwargs; the
+    dispatch normalizer folds them back so the card renders on the FIRST
+    call instead of costing a bad_payload self-repair round-trip."""
+    out = dispatch("emit_card", {
+        "card_type": "choice", "id": "c1",
+        "prompt": "Which one?", "options": [
+            {"label": "A", "value": "a"}, {"label": "B", "value": "b"}],
+    })
+    assert isinstance(out, dict) and out.get("code") != "bad_payload", out
+    # An explicit dict payload is untouched, and a missing card_type still
+    # errors -- the normalizer only repairs the misplaced-fields shape.
+    bad = dispatch("emit_card", {"id": "x", "summary": "no card_type"})
+    assert (bad or {}).get("ok") is not True and (
+        bad.get("error") is not None or bad.get("code"))
