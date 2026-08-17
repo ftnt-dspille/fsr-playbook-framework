@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from fsr_playbooks.mcp_server import connector_health, picklist
 
-
 # ── picklist ────────────────────────────────────────────────────────────────
 
 def _stub_picklists(monkeypatch):
