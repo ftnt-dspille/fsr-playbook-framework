@@ -1145,7 +1145,14 @@ def score_offer_timing(trace: list[dict[str, Any]],
         return {"passed": False, "skipped": True, "detail": f"unavailable: {exc}"}
 
     offers = [i for i, c in enumerate(trace)
-              if c.get("name") == "emit_playbook_offer"]
+              if c.get("name") == "emit_playbook_offer"
+              # A REFUSED emission (bad_payload, not_afforded, read_only_turn,
+              # ...) never rendered a card -- the analyst saw nothing -- so it
+              # is not an offer. Counting it double-charged a model that fixed
+              # its payload shape and re-emitted: one card on screen, "offered
+              # 2 times" on the gate (seen live once emit_card's payload
+              # indirection landed).
+              and c.get("code") in (None, "") and c.get("ok") is not False]
     mut_before: list[int] = []
     any_op: list[int] = []
     for i, c in enumerate(trace):

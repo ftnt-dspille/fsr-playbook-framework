@@ -106,3 +106,19 @@ def test_score_wires_the_flag_from_the_fixtures_terminal_tool():
     r = scoring.score("", mode="tool_selection", trace=[_offer()],
                       terminal_tool=["emit_playbook_offer"])
     assert r["levels"]["offer_timing"]["passed"] is True
+
+
+def test_refused_offer_is_not_an_offer():
+    """A bad_payload/not_afforded/read_only_turn refusal never rendered a
+    card, so a model that fixes its payload and re-emits has offered ONCE.
+    Seen live once emit_card's payload indirection landed: the first call
+    misplaced the fields, was refused, and the retry was charged as a
+    second offer."""
+    trace = [
+        {"name": "emit_playbook_offer", "args": {}, "code": "bad_payload",
+         "ok": False},
+        {"name": "emit_playbook_offer", "args": {"id": "x"}},
+    ]
+    lv = scoring.score_offer_timing(trace, offer_requested=True)
+    assert lv["passed"], lv
+    assert lv["offers"] == 1
