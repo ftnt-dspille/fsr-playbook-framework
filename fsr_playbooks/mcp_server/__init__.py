@@ -127,6 +127,7 @@ from .tools_enhancement import verify_enhancement
 # Execution tools
 from .tools_execution import (
     _record_verification,
+    connector_health,
     dry_run_playbook,
     healthcheck_connector,
     push_playbook,
@@ -148,6 +149,7 @@ from .tools_jinja import (
 from .tools_picklists import (
     get_picklist,
     list_picklists,
+    picklist,
     picklist_for_field,
     precheck_picklist_value,
     resolve_picklist_value,
@@ -205,6 +207,7 @@ __all__ = [
     "push_playbook",
     "run_playbook",
     "dry_run_playbook",
+    "connector_health",
     "healthcheck_connector",
     # Jinja
     "find_jinja_filter",
@@ -220,6 +223,7 @@ __all__ = [
     "find_step_recipe",
     "search_api_examples",
     # Picklists
+    "picklist",
     "list_picklists",
     "get_picklist",
     "picklist_for_field",

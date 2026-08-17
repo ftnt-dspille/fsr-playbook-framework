@@ -149,6 +149,52 @@ def resolve_picklist_value(value: str, picklist_name: str | None = None,
             return _err(exc.code, exc.message, suggestions=exc.suggestions)
 
 
+@mcp.tool()
+def picklist(name: str = "", module: str = "", field: str = "",
+             value: str = "") -> dict[str, Any]:
+    """ONE picklist tool -- discover, inspect, and resolve; the args you pass
+    pick the mode.
+
+    Which args to pass: `value` alone decides resolution -- pass it (with
+    `name`, or `module`+`field` to auto-discover the picklist) to turn a
+    friendly value like 'High' into the IRI a playbook field requires; ALWAYS
+    do this before putting a picklist value in YAML, a bare string does not
+    bind. `module`+`field` without a value answers WHICH picklist backs a
+    record field (e.g. alerts + severity) plus its valid values. `name` alone
+    lists one picklist's items; an unknown name returns near-matches, not an
+    empty list. No args lists every picklist name on this instance. Answered
+    from the local reference store when warmed, live fetch as fallback.
+    """
+    from . import (  # noqa: PLC0415 - late import avoids a registration cycle
+        get_picklist,
+        list_picklists,
+        picklist_for_field,
+        resolve_picklist_value,
+    )
+    if value:
+        out = resolve_picklist_value(value, picklist_name=name or None,
+                                     module=module or None,
+                                     field=field or None)
+        mode = "resolve"
+    elif module or field:
+        if not (module and field):
+            return {"ok": False, "code": "missing_field",
+                    "message": "field lookup needs BOTH `module` and `field` "
+                               "(e.g. module='alerts', field='severity')"}
+        out = picklist_for_field(module, field)
+        mode = "field"
+    elif name:
+        out = get_picklist(name)
+        mode = "items"
+    else:
+        out = list_picklists()
+        mode = "list"
+    if isinstance(out, dict):
+        out.setdefault("mode", mode)
+        return out
+    return {"mode": mode, "results": out}
+
+
 # ---------------------------------------------------------------------------
 # api_examples_catalog integration (HTTP virtual-connector fallback)
 # ---------------------------------------------------------------------------

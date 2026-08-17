@@ -2494,6 +2494,40 @@ def healthcheck_connector(name: str, version: str | None = None,
                 "raw": r.text[:500]}
 
 
+@mcp.tool()
+def connector_health(name: str, version: str | None = None,
+                     config: str | None = None) -> dict[str, Any]:
+    """ONE connector health tool -- is it installed on this instance AND is
+    its upstream reachable right now? Answers both questions in one call.
+
+    Use it before authoring a step against a connector (a recipe that ships
+    compile-clean still fails at runtime on a missing connector) and before
+    recommending an op (configured but Disconnected means the vendor is
+    down). Not-installed returns close-match names from the instance's real
+    catalog; installed proceeds to a live reachability probe whose status is
+    Available (green), Disconnected (configured, upstream down), or
+    no-config (installed but never configured).
+
+    Args:
+        name: connector name (e.g. fortinet-fortigate).
+        version: optional -- defaults to the first configured version.
+        config: optional config UUID when more than one configuration exists.
+    """
+    from . import (  # noqa: PLC0415 - late import avoids a registration cycle
+        healthcheck_connector,
+        precheck_connector_installed,
+    )
+    inst = precheck_connector_installed(name, version)
+    if inst.get("ok") is False:
+        # Not installed / unreachable box: reachability is moot; surface the
+        # close-match suggestions so the model can self-correct the name.
+        return {**inst, "name": name, "stage": "installed"}
+    health = healthcheck_connector(name, version=version, config=config)
+    if isinstance(health, dict):
+        return {**health, "name": name, "installed": True, "stage": "health"}
+    return {"name": name, "installed": True, "stage": "health", "raw": health}
+
+
 def _fetch_runs_both(client, *, limit: int, extra_qs: str = "") -> list[dict[str, Any]]:
     """Fetch from /workflows/ AND /historical-workflows/, merge by modified desc.
 

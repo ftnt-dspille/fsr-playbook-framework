@@ -49,6 +49,12 @@ SAFE_TOOLS: list[str] = [
     "verify_enhancement",
     "emit_decision_step",
     "healthcheck_connector",
+    # Phase 1 consolidation: installed + reachable in one call. The two
+    # constituent names stay registered during the migration.
+    "connector_health",
+    # Phase 1 consolidation: the single picklist entry point. As with `find`,
+    # the specialized names below stay registered during the migration.
+    "picklist",
     "list_picklists",
     "picklist_for_field",
     "resolve_picklist_value",
@@ -136,6 +142,7 @@ TOOL_TIERS: dict[str, int] = {
     "find_jinja_pattern": 0,
     "get_filter_examples": 0,
     "search_playbooks": 0,
+    "picklist": 0,
     "list_picklists": 0,
     "picklist_for_field": 0,
     "resolve_picklist_value": 0,
@@ -145,6 +152,7 @@ TOOL_TIERS: dict[str, int] = {
     # Tier 0 -- pure local YAML render from a structured payload.
     "emit_decision_step": 0,
     "healthcheck_connector": 1,
+    "connector_health": 1,
     "diagnose_yaml_against_pb_execution": 1,
     # Phase 0 -- pure local compute (no FSR I/O).
     "validate_yaml": 0,
