@@ -175,7 +175,10 @@ def set_tool_slice(intent: str | None) -> None:
             set_turn_plan,
         )
         _, _, sub = intent.partition(":")
-        plan = plan_turn(sub or "triage")
+        # Budget stated to the model matches the loop's real ceiling, so the
+        # soft-close nudge (budget.note, injected by the agentic loops) fires
+        # before the wall instead of describing a wall that isn't there.
+        plan = plan_turn(sub or "triage", max_tool_turns=_AGENTIC_MAX_TURNS)
         set_turn_plan(plan)
         _TURN_PLAN = plan
         _TOOL_SLICE = [t["name"] for t in plan.tools]
@@ -322,6 +325,13 @@ def _agentic_anthropic_provider() -> Callable:
                     "tool_use_id": call_id,
                     "content": content,
                 })
+            # TurnPlan item 3: state the shrinking budget instead of letting
+            # the cap truncate the turn (mirrors the openai-compatible loop).
+            if _TURN_PLAN is not None:
+                _note = _TURN_PLAN.budget.note(turns)
+                if _note:
+                    tool_results.append(
+                        {"type": "text", "text": f"[turn budget] {_note}"})
             history.append({"role": "user", "content": tool_results})
         return {"text": "\n".join(text_chunks), "trace": trace,
                 "turns": turns, "usage": usage_log,
@@ -432,6 +442,15 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
                     "role": "tool", "tool_call_id": tc.get("id", ""),
                     "content": content,
                 })
+            # TurnPlan item 3 (constraints are STATED, not discovered): once
+            # the loop nears its ceiling, tell the model instead of letting
+            # the cap truncate it mid-thought. The connector's live loop
+            # should mirror this injection.
+            if _TURN_PLAN is not None:
+                _note = _TURN_PLAN.budget.note(turns)
+                if _note:
+                    history.append({"role": "system",
+                                    "content": f"[turn budget] {_note}"})
         return {"text": "\n".join(text_chunks), "trace": trace,
                 "turns": turns, "audit": _snap()}
     return _call
