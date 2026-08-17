@@ -41,7 +41,12 @@ _REPO_DB = str(Path(__file__).resolve().parents[2] / "data" / "fsr_reference.db"
 
 
 def _fortisiem_in_store() -> bool:
-    r = find_operation("fortinet-fortisiemv2", "", db_path=_REPO_DB)
+    # On CI the gitignored reference DB is absent/empty; an unreadable store
+    # must read as "skip", not break collection.
+    try:
+        r = find_operation("fortinet-fortisiemv2", "", db_path=_REPO_DB)
+    except Exception:  # noqa: BLE001
+        return False
     return bool(r.get("matches"))
 
 
