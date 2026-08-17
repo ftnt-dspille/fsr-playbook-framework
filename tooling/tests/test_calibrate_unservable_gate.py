@@ -132,3 +132,35 @@ def test_clean_sweep_is_unchanged_by_the_lost_run_handling() -> None:
     assert agg["spread"]["lost"] == 0
     assert agg["spread"]["repeats"] == 3
     assert agg["spread"]["calls"]["median"] == 12.0
+
+
+# ---- a REJECTION is a result; only a transport failure is a loss -------------
+# Run 20260817T025645Z lost a repeat to a provider 400 that arrived right after
+# three run_op calls carrying `__bad_tool_arguments__`. Excluding that as
+# "lost" would hide the exact agent defect the harness exists to catch.
+
+def _transport():
+    import sys
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
+    from evals.calibrate_investigation import _is_transport_failure
+    return _is_transport_failure
+
+
+def test_connection_failures_are_losses() -> None:
+    f = _transport()
+    for msg in ("httpx.ConnectError: All connection attempts failed",
+                "The request timed out after 300s",
+                "provider API error (status 503)",
+                "Error code: 429 - rate limit exceeded"):
+        assert f(msg) is True, msg
+
+
+def test_provider_rejections_are_not_losses() -> None:
+    f = _transport()
+    for msg in ("OpenAI rejected the request: Error code: 400 - "
+                "{'status_code': 400, 'error': {'message': 'provider API error'}}",
+                "Error code: 422 - invalid_request",
+                "maximum context length exceeded"):
+        assert f(msg) is False, (
+            f"{msg!r} must be SCORED -- a refused request is a result, and "
+            "what the agent put in it is usually why")

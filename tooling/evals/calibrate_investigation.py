@@ -253,6 +253,37 @@ def _build_provider(kind: str, model: str):
     return AnthropicProvider(model=model, client=AsyncAnthropic(max_retries=12))
 
 
+# Only TRANSPORT failures make a run unscoreable. The distinction is
+# load-bearing and was nearly lost: run 20260817T025645Z lost a repeat to a
+# provider `400`, and that 400 arrived immediately after THREE `run_op` calls
+# carrying `__bad_tool_arguments__` -- the model emitted malformed JSON until
+# the request itself was invalid. Excluding that as "lost" would hide the exact
+# agent defect the harness exists to catch. A rejection is a result; only a
+# connection that never delivered one is a loss.
+_TRANSPORT_FAILURE_MARKERS = (
+    "connecterror", "connect error", "all connection attempts failed",
+    "timed out", "timeout", "readerror", "read error",
+    "remoteprotocolerror", "connection reset", "temporarily unavailable",
+    "502", "503", "504",
+)
+
+
+def _is_transport_failure(message: str) -> bool:
+    """True when the turn never got a response at all.
+
+    A provider REJECTION (4xx other than 429) is deliberately NOT a transport
+    failure: the request reached the model and was refused, usually because of
+    what the agent put in it."""
+    m = (message or "").lower()
+    if "429" in m or "rate limit" in m:
+        return True          # never delivered; retryable, not the agent's doing
+    if any(k in m for k in ("400", "422", "bad request", "badrequest",
+                            "invalid_request", "context length",
+                            "maximum context")):
+        return False         # the request was malformed -- that IS a result
+    return any(k in m for k in _TRANSPORT_FAILURE_MARKERS)
+
+
 async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
                    approve: bool = False) -> dict:
     from probes._env import get_config
@@ -552,15 +583,21 @@ def main() -> None:
             # a finding about a turn that never got a response. Mark it lost;
             # `_aggregate` drops lost runs from the tally rather than counting
             # them as failures.
-            if out.get("stream_errors"):
-                log.error("  RUN LOST -- %s stream error(s), NOT scored: %s",
-                          len(out["stream_errors"]), out["stream_errors"][0][:160])
+            errs = out.get("stream_errors") or []
+            if errs and all(_is_transport_failure(e) for e in errs):
+                log.error("  RUN LOST -- %s transport error(s), NOT scored: %s",
+                          len(errs), errs[0][:160])
                 runs.append({"recall": None, "passed": False, "calls": 0,
                              "missing": [], "forbidden_hit": [],
                              "quality": {}, "quality_failed": [],
-                             "lost": True,
-                             "error": out["stream_errors"][0]})
+                             "lost": True, "error": errs[0]})
                 continue
+            if errs:
+                # Rejected, not lost. Score it -- the request reached the model
+                # and was refused, and what the agent put in the request is
+                # usually why. Flagged so it is never mistaken for a clean run.
+                log.error("  RUN REJECTED (scored, NOT lost) -- %s: %s",
+                          len(errs), errs[0][:160])
             sc = _score_investigation(out["trace"], t.required_facts, t.forbidden_facts)
             quality = _score_investigation_quality(out["trace"], t.investigation_quality)
             # A fixture clears calibration only if recall AND every non-skipped
@@ -576,6 +613,7 @@ def main() -> None:
             sc["resumes"] = out.get("resumes") or []
             sc["substrate_misses"] = (
                 list(box.misses[miss_mark:]) if box is not None else [])
+            sc["rejected"] = list(errs)
             if sc["substrate_misses"]:
                 log.info("  substrate 404s (%s): %s", len(sc["substrate_misses"]),
                          "; ".join(sc["substrate_misses"][:6]))
