@@ -71,3 +71,64 @@ def test_every_investigation_fixture_declares_a_servable_tool_or_is_known() -> N
         f"{unknown}. If they are connector-owned, add them to the set above "
         f"AND to the unservable refusal's guidance; if they are new framework "
         f"tools, confirm they are actually registered.")
+
+
+# ---- a LOST run is not a 0.0 -------------------------------------------------
+# Same doctrine as the module docstring, different cause. A stream failure
+# reaches calibrate as an ErrorEvent and nothing else; the turn then returns
+# normally with an empty trace. Scoring that yields `recall=0.0, 0 calls` --
+# indistinguishable from an agent that ran and reached nothing. Run
+# 20260817T020056Z lost four repeats to `httpx.ConnectError` and reported
+# `[FAIL] invest_intrusion_incident recall=0.0 missing=2`, a finding about a
+# turn that never got a response.
+
+def _agg():
+    import sys
+    sys.path.insert(0, str(REPO_ROOT / "tooling"))
+    from evals.calibrate_investigation import _aggregate
+    return _aggregate
+
+
+def _run(recall, calls, passed=True, lost=False):
+    d = {"recall": recall, "calls": calls, "passed": passed, "quality": {},
+         "quality_failed": [], "missing": [], "forbidden_hit": []}
+    if lost:
+        d.update({"lost": True, "recall": None, "calls": 0, "passed": False,
+                  "error": "httpx.ConnectError: All connection attempts failed"})
+    return d
+
+
+def test_calibrate_captures_stream_errors() -> None:
+    src = CALIBRATE.read_text()
+    assert 'kind == "error"' in src, (
+        "calibrate's on_event must handle ErrorEvent -- without it a dropped "
+        "gateway scores as the agent reaching nothing")
+    assert "stream_errors" in src
+
+
+def test_lost_repeat_does_not_drag_the_median() -> None:
+    """Fixture 29's real numbers must survive its lost siblings."""
+    agg = _agg()([_run(None, 0, lost=True), _run(None, 0, lost=True),
+                  _run(1.0, 18)])
+    sp = agg["spread"]
+    assert sp["lost"] == 2
+    assert sp["repeats"] == 1, "repeats must count SCORED runs only"
+    assert sp["recall"]["median"] == 1.0, "a lost run must not pull recall to 0"
+    assert sp["calls"]["median"] == 18.0, "a lost run must not pull calls to 0"
+    assert agg["passed"] is True
+
+
+def test_all_repeats_lost_reports_no_data_never_fail() -> None:
+    agg = _agg()([_run(None, 0, lost=True)] * 3)
+    assert agg["spread"]["no_data"] is True
+    assert agg["spread"]["lost"] == 3
+    assert agg["recall"] is None, (
+        "a fixture whose every repeat died has no recall -- reporting 0.0 "
+        "makes a claim about an agent that never ran")
+
+
+def test_clean_sweep_is_unchanged_by_the_lost_run_handling() -> None:
+    agg = _agg()([_run(1.0, 12), _run(1.0, 12), _run(1.0, 11)])
+    assert agg["spread"]["lost"] == 0
+    assert agg["spread"]["repeats"] == 3
+    assert agg["spread"]["calls"]["median"] == 12.0

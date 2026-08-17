@@ -111,6 +111,27 @@ def _aggregate(runs: list[dict]) -> dict:
     didn't). A flaky fixture is a different object from a failing one and the
     summary must not flatten them together.
     """
+    # Lost runs (stream died -- see the `lost` flag) are NOT results. Averaging
+    # them in was how a dropped gateway became "the agent scored 0.0": one lost
+    # repeat dragged fixture 29's median to 0.0 while its one real run scored
+    # 18 and passed every gate. They are counted and reported, never scored.
+    lost_runs = [r for r in runs if r.get("lost")]
+    scored = [r for r in runs if not r.get("lost")]
+    n_lost = len(lost_runs)
+    if not scored:
+        # Every repeat lost. There is no verdict to give, and reporting FAIL
+        # here would be a claim about an agent that never ran.
+        return {"recall": None, "passed": False, "calls": 0, "missing": [],
+                "forbidden_hit": [], "quality": {}, "quality_failed": [],
+                "no_data": True,
+                "error": (lost_runs[0].get("error") if lost_runs else None),
+                "spread": {"repeats": len(runs), "passes": 0, "flaky": False,
+                           "lost": n_lost, "no_data": True,
+                           "recall": None, "calls": None, "gate_k_of_n": {},
+                           "approvals_seen": [], "resumes_ok": 0,
+                           "substrate_misses": [], "runs": []}}
+
+    runs = scored
     n = len(runs)
     recalls = [float(r.get("recall") or 0.0) for r in runs]
     calls = [int(r.get("calls") or 0) for r in runs]
@@ -139,6 +160,9 @@ def _aggregate(runs: list[dict]) -> dict:
     entry["spread"] = {
         "repeats": n,
         "passes": n_pass,
+        # Scored repeats only. `lost` is carried alongside so a cell reading
+        # "2/2" is never mistaken for a clean 3-repeat sweep.
+        "lost": n_lost,
         "flaky": 0 < n_pass < n,
         "recall": {"min": min(recalls), "median": med_recall, "max": max(recalls)},
         "calls": {"min": min(calls), "median": _median([float(c) for c in calls]),
@@ -245,9 +269,22 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
     trace: list[dict] = []
     final_chunks: list[str] = []
     approvals: list[dict] = []
+    # Stream failures reach us as an ErrorEvent and NOTHING ELSE -- the turn
+    # then returns normally with an empty trace. Until this was captured, a
+    # gateway that dropped mid-sweep scored as `recall=0.0, 0 calls`, which is
+    # indistinguishable from an agent that ran and reached nothing. Run
+    # 20260817T020056Z lost four repeats to `httpx.ConnectError` and reported
+    # `[FAIL] invest_intrusion_incident recall=0.0 missing=2` -- a finding
+    # about an agent that never got a response.
+    stream_errors: list[str] = []
 
     def on_event(ev):
         kind = getattr(ev, "kind", "")
+        if kind == "error":
+            msg = str(getattr(ev, "message", "") or "unknown stream error")
+            stream_errors.append(msg)
+            log.error("    !! STREAM ERROR: %s", msg[:200])
+            return
         if kind == "approval_request":
             approvals.append({
                 "approval_id": ev.approval_id, "tool": ev.tool,
@@ -318,7 +355,8 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
 
     return {"trace": trace, "final_text": "".join(final_chunks).strip(),
             "stop_reason": getattr(result, "stop_reason", None),
-            "approvals": approvals, "resumes": resumes}
+            "approvals": approvals, "resumes": resumes,
+            "stream_errors": stream_errors}
 
 
 def main() -> None:
@@ -508,6 +546,21 @@ def main() -> None:
                              "error": repr(exc)})
                 continue
             dt = time.monotonic() - t0
+            # A run whose stream died never produced a verdict, so it must not
+            # BE one. Scoring it anyway yields `recall=0.0, 0 calls`, which the
+            # summary renders as the agent failing to reach its required ops --
+            # a finding about a turn that never got a response. Mark it lost;
+            # `_aggregate` drops lost runs from the tally rather than counting
+            # them as failures.
+            if out.get("stream_errors"):
+                log.error("  RUN LOST -- %s stream error(s), NOT scored: %s",
+                          len(out["stream_errors"]), out["stream_errors"][0][:160])
+                runs.append({"recall": None, "passed": False, "calls": 0,
+                             "missing": [], "forbidden_hit": [],
+                             "quality": {}, "quality_failed": [],
+                             "lost": True,
+                             "error": out["stream_errors"][0]})
+                continue
             sc = _score_investigation(out["trace"], t.required_facts, t.forbidden_facts)
             quality = _score_investigation_quality(out["trace"], t.investigation_quality)
             # A fixture clears calibration only if recall AND every non-skipped
@@ -616,9 +669,29 @@ def main() -> None:
         if name in tainted:
             flag = "SUBSTRATE"
             extra += "  <- numbers are NOT the agent's"
+        # Same disqualification, different cause: the stream died, so there is
+        # nothing to be a verdict ABOUT. Never print FAIL for a turn that never
+        # got a response.
+        n_lost = sp.get("lost") or 0
+        if sp.get("no_data"):
+            flag = "NO DATA"
+            extra = (f"  all {sp.get('repeats')} repeat(s) lost to stream "
+                     f"errors -- the agent never ran")
+        elif n_lost:
+            extra += f"  ({n_lost} repeat(s) lost to stream errors)"
         log.info("  [%s] %-34s recall=%s%s", flag, name, sc["recall"], extra)
     n_pass = sum(1 for _, sc in results if sc["passed"])
+    no_data = [n for n, sc in results if (sc.get("spread") or {}).get("no_data")]
+    lost_total = sum((sc.get("spread") or {}).get("lost") or 0
+                     for _, sc in results)
     log.info("%s/%s fixtures clear the gate.", n_pass, len(results))
+    if lost_total:
+        log.warning("!! %s repeat(s) LOST to stream errors -- the gateway "
+                    "dropped mid-sweep. Those runs are excluded, not scored as "
+                    "0.0. Re-run before treating this sweep as a baseline.%s",
+                    lost_total,
+                    (f" No data at all for: {', '.join(no_data)}."
+                     if no_data else ""))
     if tainted:
         log.info("%s fixture(s) ran against a substrate that could not serve "
                  "every read: %s. Bind the missing module(s) and re-run before "
@@ -637,12 +710,22 @@ def main() -> None:
                  "unstable gates")
         for name, sc in results:
             sp = sc.get("spread") or {}
+            n_lost = sp.get("lost") or 0
+            # `repeats` here is the SCORED count, so the pass cell must not
+            # imply a full sweep when repeats were lost -- "2/2 (1 lost)".
+            pass_cell = f"{sp.get('passes')}/{sp.get('repeats')}"
+            if n_lost:
+                pass_cell += f" (-{n_lost})"
+            if sp.get("no_data"):
+                log.info("  %-34s %-6s %s", name, "--",
+                         f"NO DATA -- all {n_lost} repeat(s) lost to stream errors")
+                continue
             r, c = sp.get("recall", {}), sp.get("calls", {})
             unstable = [f"{g} {k}/{sp['repeats']}"
                         for g, k in (sp.get("gate_k_of_n") or {}).items()
                         if 0 < k < sp["repeats"]]
             log.info("  %-34s %-6s %-18s %-14s %s",
-                     name, f"{sp.get('passes')}/{sp.get('repeats')}",
+                     name, pass_cell,
                      f"{r.get('min')}/{r.get('median')}/{r.get('max')}",
                      f"{c.get('min')}/{c.get('median')}/{c.get('max')}",
                      ", ".join(unstable) or "-")
