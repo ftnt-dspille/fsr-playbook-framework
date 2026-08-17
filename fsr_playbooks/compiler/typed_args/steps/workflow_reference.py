@@ -71,8 +71,19 @@ def expand_workflow_reference(
     ``workflowReference`` presence (the resolver's ``MISSING_FIELD`` message is
     more precise than pydantic's "Field required") -- it only flags a
     present-but-wrong-typed value.
+
+    When ``workflowReference`` (IRI) is present, ``target`` is NOT a local
+    playbook-name reference -- it's a child-playbook input parameter that
+    happens to be named ``target`` (e.g. the device list for ``> api proxy
+    encapsulation to device``).  Skip its typed validation in that case so
+    non-string values (lists, Jinja strings) pass through cleanly.
     """
     if not isinstance(args, dict):
         return None
+    # If workflowReference (IRI) is set, target is a child parameter, not
+    # a playbook name.  Remove it from the envelope before type-validation
+    # so non-string values don't trigger a spurious BAD_VALUE.
+    if args.get("workflowReference"):
+        args = {k: v for k, v in args.items() if k != "target"}
     validate_args(WorkflowReferenceArgs, args, f"{path}.arguments", errors)
     return None

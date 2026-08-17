@@ -743,6 +743,14 @@ class ConnectorArgsMixin:
             "pass_parent_env", "pass_input_record", "step_variables",
             "for_each", "when", "mock_result", "do_until",
         }
+        # When workflowReference (IRI) is used, `target` is NOT a local
+        # playbook-name reference -- it's a child-playbook input parameter
+        # (e.g. the `target` parameter of "> api proxy encapsulation to
+        # device" which holds a list of device names).  Remove it from the
+        # envelope-key set so it flows through as a child argument.
+        ref_iri = a.get("workflowReference") if isinstance(a, dict) else None
+        if ref_iri:
+            _WR_ENVELOPE_KEYS = _WR_ENVELOPE_KEYS - {"target"}
         if isinstance(a, dict) and "arguments" not in a:
             child_args = {k: v for k, v in a.items()
                           if k not in _WR_ENVELOPE_KEYS}
@@ -770,6 +778,22 @@ class ConnectorArgsMixin:
             return
 
         if target_name:
+            # Guard: target must be a string (playbook name) to look up.
+            # If it's a list/dict (e.g. a child-playbook parameter that
+            # happens to be named `target`), skip the local lookup --
+            # workflowReference (IRI) handles cross-collection refs.
+            if not isinstance(target_name, str):
+                if ref_iri:
+                    # target is a child parameter, not a playbook name;
+                    # workflowReference is the actual reference.  Already
+                    # moved to child_args above.  Nothing more to validate.
+                    return
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=f"target must be a string (playbook name), got {type(target_name).__name__}",
+                    path=f"{path}.arguments.target",
+                ))
+                return
             target_pb = pb_by_name.get(target_name)
             if target_pb is None:
                 # Check if target is a UUID -- cross-collection reference.

@@ -268,7 +268,12 @@ def emit(collection: Collection) -> dict[str, Any]:
             if s.type == "workflow_reference" and isinstance(s.arguments, dict):
                 target = s.arguments.pop("target", None)
                 if target:
-                    if target in wf_uuid_by_name:
+                    # If workflowReference is already set, target was a
+                    # child-playbook parameter (not a playbook name). Put
+                    # it back so it flows into the emitted arguments.
+                    if s.arguments.get("workflowReference"):
+                        s.arguments["target"] = target
+                    elif isinstance(target, str) and target in wf_uuid_by_name:
                         # Local in-collection reference → deterministic UUID.
                         s.arguments["workflowReference"] = (
                             f"/api/3/workflows/{wf_uuid_by_name[target]}"
