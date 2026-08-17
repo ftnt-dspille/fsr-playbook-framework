@@ -321,6 +321,47 @@ def find_connector(q: str, limit: int = 15,
 # find_operation
 # ---------------------------------------------------------------------------
 
+# Cross-product vocabulary: the analyst's noun on the left, the terms other
+# products use for the same thing on the right. Used ONLY as a zero-hit
+# fallback in find_operation, so a miss stays a miss unless a synonym truly
+# matches (FortiSIEM "incidents" ARE its alerts; QRadar calls them "offenses").
+_TERM_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "alert": ("incident", "event", "offense", "detection"),
+    "incident": ("alert", "case", "offense"),
+    "event": ("log", "alert"),
+    "ip": ("address", "host"),
+    "block": ("quarantine", "ban", "deny"),
+    "unblock": ("unquarantine", "unban", "allow"),
+}
+
+
+def _synonym_queries(q: str) -> list[tuple[str, tuple[str, str]]]:
+    """Alternative queries for a zero-hit ``q``, worth trying in order.
+
+    For each query word with a known synonym set, yield (a) ``q`` with the
+    word substituted and (b) the bare synonym term -- the substituted form
+    keeps the verb context ("get incident"), the bare term still catches
+    snake_case op names ("get_incidents") the phrase form can't reach.
+    Each entry carries (their_term, our_term) for the explanation note.
+    """
+    out: list[tuple[str, tuple[str, str]]] = []
+    words = q.lower().split()
+    for w in words:
+        base = w[:-1] if w.endswith("s") else w
+        for syn in _TERM_SYNONYMS.get(base, ()):
+            substituted = " ".join(syn if x == w else x for x in words)
+            if substituted != q.lower():
+                out.append((substituted, (syn, base)))
+            out.append((syn, (syn, base)))
+    seen: set[str] = set()
+    deduped: list[tuple[str, tuple[str, str]]] = []
+    for alt, pair in out:
+        if alt not in seen:
+            seen.add(alt)
+            deduped.append((alt, pair))
+    return deduped
+
+
 @mcp.tool()
 def find_operation(connector: str, q: str = "", limit: int = 10,
                    verbose: bool = False,
@@ -376,6 +417,35 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                    ORDER BY op_name LIMIT ?""",
                 (connector, limit),
             )
+        # Zero hits on a q are often a VOCABULARY miss, not an absence: the
+        # analyst's term and the product's term differ (FortiSIEM calls alerts
+        # "incidents"; live 2026-08-17 the agent searched "get alert" on
+        # fortinet-fortisiemv2, got nothing useful back, and concluded the
+        # capability didn't exist). Retry with domain-synonym substitutions
+        # before giving up, and SAY which term matched so the model learns the
+        # product's vocabulary instead of looping or capitulating.
+        synonym_note: str | None = None
+        if q and not rows:
+            for alt_q, (theirs, ours) in _synonym_queries(q):
+                alt_rows = _rows(
+                    conn,
+                    f"""SELECT {cols}
+                       FROM operations
+                       WHERE connector_name = ?
+                         AND (op_name LIKE '%'||?||'%'
+                              OR title LIKE '%'||?||'%'
+                              OR description LIKE '%'||?||'%')
+                       ORDER BY op_name LIMIT ?""",
+                    (connector, alt_q, alt_q, alt_q, limit),
+                )
+                if alt_rows:
+                    rows = alt_rows
+                    synonym_note = (
+                        f"no operations match {q!r} on {connector!r}; these "
+                        f"matched {alt_q!r} instead -- this product's term "
+                        f"for '{ours}' is '{theirs}'."
+                    )
+                    break
         op_failed: list[str] = []
         if rows:
             keys = [f"{connector}:{r['op_name']}" for r in rows]
@@ -408,6 +478,8 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
             r.pop("category", None)
 
         out: dict[str, Any] = {"matches": rows}
+        if synonym_note:
+            out["synonym_note"] = synonym_note
         if contain_hits:
             out["containment_redirect"] = (
                 f"{sorted(contain_hits)} are state-changing response actions. "
