@@ -25,6 +25,10 @@ LEVER_MAP: dict[str, str] = {
                                  "2.8 parallel dispatch (too many calls)",
     "investigation_no_param_flail": "fsr_playbooks validate_op_grounded + connector_op_defs "
                                     "op-def cache (guessed param names)",
+    "investigation_no_spiral": "system_prompt_triage.md §pivot-discipline 'advance, "
+                               "don't restart' + the across-turns rule (re-asked a "
+                               "question it had already answered -- same tool, "
+                               "byte-identical args)",
     "investigation_blind_param_retry": "run_op bad_params inline valid_params + "
                                        "system_prompt_triage.md 'call get_op_schema "
                                        "before run_op' (hammered without lookup)",

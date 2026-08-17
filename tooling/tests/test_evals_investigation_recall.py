@@ -258,3 +258,72 @@ def test_refused_calls_excluded_from_budget_and_spiral():
     assert q["investigation_tool_budget"]["passed"] is True
     ag = scoring._score_agentic(trace=executed + refused, text="")
     assert ag["no_spiral"]["longest_run"] == 1
+
+
+# ---- #140: no_spiral on the investigation path -------------------------------
+# The investigation gates had no spiral check at all (`no_spiral` is an
+# authoring-path gate), so fixture 29 could burn 40 calls and only the budget
+# noticed. These pin the discrimination that matters: same tool with DIFFERENT
+# args is progress, same tool with byte-identical args is not.
+
+def test_quality_no_spiral_ignores_distinct_args_on_one_tool():
+    # The regression that got the authoring `no_spiral` loosened: five lookups
+    # of five different things is a legitimate build, not a spiral.
+    trace = [_call("get_step_type", step_type=t) for t in
+             ("start", "set_variable", "decision", "end", "connector")]
+    q = scoring._score_investigation_quality(trace, {})
+    assert q["investigation_no_spiral"]["passed"] is True
+    assert q["investigation_no_spiral"]["redundant_calls"] == 0
+
+
+def test_quality_no_spiral_flags_verbatim_repeats():
+    # Byte-identical (tool, args) repeated -- a deterministic lookup cannot
+    # return anything new the second time.
+    trace = [
+        _call("get_record", uuid="x"),
+        _call("find_enrichment_actions", target_type="ip"),
+        _call("siem_search", by="ip", value="1.2.3.4"),
+        _call("find_enrichment_actions", target_type="ip"),
+        _call("siem_search", by="ip", value="1.2.3.4"),
+        _call("find_operation", connector="virustotal"),
+        _call("find_operation", connector="virustotal"),
+    ]
+    q = scoring._score_investigation_quality(trace, {"max_redundant_calls": 2})
+    spiral = q["investigation_no_spiral"]
+    assert spiral["passed"] is False
+    assert spiral["redundant_calls"] == 3
+
+
+def test_quality_no_spiral_counts_non_adjacent_repeats():
+    # Fixture 29's repeats were scattered across the turn, not back-to-back --
+    # a consecutive-only rule (what _longest_spiral uses) would miss them.
+    filler = [_call("get_record", uuid=str(i)) for i in range(6)]
+    trace = ([_call("siem_search", by="ip", value="9.9.9.9")] + filler
+             + [_call("siem_search", by="ip", value="9.9.9.9")])
+    q = scoring._score_investigation_quality(trace, {"max_redundant_calls": 0})
+    assert q["investigation_no_spiral"]["redundant_calls"] == 1
+    assert q["investigation_no_spiral"]["passed"] is False
+
+
+def test_quality_no_spiral_labels_malformed_calls_distinctly():
+    # Four empty-arg run_op calls are a hammered malformed call, not one real
+    # op re-run -- the label must not send a reader hunting for an op name.
+    trace = [_call("run_op") for _ in range(4)]
+    q = scoring._score_investigation_quality(trace, {"max_redundant_calls": 2})
+    spiral = q["investigation_no_spiral"]
+    assert spiral["passed"] is False
+    assert spiral["redundant_calls"] == 3
+    assert spiral["repeats"] == ["run_op(no args) x4"]
+
+
+def test_param_flail_does_not_attribute_malformed_calls_to_a_phantom_op():
+    # #138: run_op calls whose args never parsed into a (connector, op) were
+    # collapsed onto one key and reported against an op named None.
+    trace = [_call("run_op") for _ in range(4)]
+    q = scoring._score_investigation_quality(trace, {"max_param_retries": 2})
+    flail = q["investigation_no_param_flail"]
+    assert flail["passed"] is True
+    assert flail["op"] is None
+    assert flail["worst_distinct_argsets"] == 0
+    assert flail["unparseable_run_op_calls"] == 4
+    assert "unparseable" in flail["detail"]
