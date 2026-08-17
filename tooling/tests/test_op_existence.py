@@ -23,6 +23,9 @@ def _isolate_op_def_cache(tmp_path, monkeypatch):
     touch the real reference store). Tests that need a specific DB override
     this with their own `monkeypatch.setattr(te, "DB_PATH", ...)` afterward."""
     from fsr_playbooks.mcp_server import tools_execution as te
+    # `_op_defs_db()` honours $FSRPB_CACHE_DB before DB_PATH, so a leaked
+    # eval-offline diversion would silently bypass this isolation.
+    monkeypatch.delenv("FSRPB_CACHE_DB", raising=False)
     monkeypatch.setattr(te, "DB_PATH", str(tmp_path / "op_def_cache.db"))
 
 

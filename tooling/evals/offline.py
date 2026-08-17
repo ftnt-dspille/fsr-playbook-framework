@@ -75,7 +75,8 @@ def install() -> dict[str, Any]:
     # mid-run. A pinned substrate that mutates while it is being measured is
     # not pinned, and this store has a corruption history that makes any extra
     # writer worth removing. Only set when the caller has not chosen a cache.
-    if not os.environ.get("FSRPB_CACHE_DB"):
+    cache_db_was_unset = not os.environ.get("FSRPB_CACHE_DB")
+    if cache_db_was_unset:
         import tempfile
         os.environ["FSRPB_CACHE_DB"] = str(
             pathlib.Path(tempfile.gettempdir()) / "fsrpb_eval_runtime_cache.db")
@@ -105,6 +106,8 @@ def install() -> dict[str, Any]:
     _shared._LIVE_CLIENT_CACHE.pop("client", None)
     te._CONFIGURED_CACHE["rows"] = None
     te._CONFIGURED_CACHE["ts"] = 0.0
+
+    saved["_cache_db_was_unset"] = cache_db_was_unset
 
     bind_bundle()
     return saved
@@ -153,6 +156,11 @@ def uninstall(saved: dict[str, Any]) -> None:
     offline-gate tests assert on the REAL module's `is_live()`. Leaving the
     stub behind made an unrelated test fail depending on order.
     """
+    # The runtime-cache diversion is session-global env state: left set, it
+    # silently bypasses any later DB_PATH-based isolation (the op-existence
+    # tests' fixture), leaking one run's cached ops into unrelated tests.
+    if saved.pop("_cache_db_was_unset", False):
+        os.environ.pop("FSRPB_CACHE_DB", None)
     for name, mod in saved.items():
         if mod is None:
             sys.modules.pop(name, None)
