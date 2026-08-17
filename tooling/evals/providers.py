@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 ProviderFn = Callable[[str, str], str]
 
@@ -140,15 +141,44 @@ _AGENTIC_MAX_TURNS = 12
 # user actually hits -- the connector serves an intent slice, not the registry.
 _TOOL_SLICE: list[str] | None = None
 
+# Redesign Phase 2: when a task runs under `tool_slice: "turnplan"` (optionally
+# "turnplan:<intent>"), the cell resolves through plan_turn() instead of the
+# legacy intent slices -- full surface advertised, affordance gate installed at
+# dispatch, and the TurnPlan prompt (prior + constraints + gap-card rule)
+# replaces the harness system prompt (see harness._prompt_for).
+_TURN_PLAN = None
+
+
+def eval_turn_plan():
+    """The TurnPlan active for the current cell, or None (legacy slicing)."""
+    return _TURN_PLAN
+
 
 def set_tool_slice(intent: str | None) -> None:
     """Restrict the advertised tools to `intents.tools_for_intent(intent)`.
 
-    Pass None to restore the full registry. Resolved to names here (not tool
+    Pass None to restore the full registry; pass "turnplan[:<intent>]" to
+    resolve the cell through Phase 2's plan_turn() (full surface + dispatch
+    affordance gate + TurnPlan prompt). Resolved to names here (not tool
     dicts) so the provider keeps ownership of the cache_control marker."""
-    global _TOOL_SLICE
+    global _TOOL_SLICE, _TURN_PLAN
+    if _TURN_PLAN is not None:
+        from fsr_playbooks.llm.turn_plan import set_turn_plan  # type: ignore
+        set_turn_plan(None)
+        _TURN_PLAN = None
     if intent is None:
         _TOOL_SLICE = None
+        return
+    if intent == "turnplan" or intent.startswith("turnplan:"):
+        from fsr_playbooks.llm.turn_plan import (  # type: ignore
+            plan_turn,
+            set_turn_plan,
+        )
+        _, _, sub = intent.partition(":")
+        plan = plan_turn(sub or "triage")
+        set_turn_plan(plan)
+        _TURN_PLAN = plan
+        _TOOL_SLICE = [t["name"] for t in plan.tools]
         return
     from fsr_playbooks.llm.intents import tools_for_intent  # type: ignore
     _TOOL_SLICE = [t["name"] for t in tools_for_intent(intent)]
@@ -166,8 +196,12 @@ def _import_studio_tools():
     if str(backend) not in sys.path:
         sys.path.insert(0, str(backend))
     from fsr_playbooks.llm.tools import (  # type: ignore
-        anthropic_tools, openai_tools, dispatch,
-        clear_audit_log, snapshot_audit_log, set_eval_policy,
+        anthropic_tools,
+        clear_audit_log,
+        dispatch,
+        openai_tools,
+        set_eval_policy,
+        snapshot_audit_log,
     )
     return (anthropic_tools, openai_tools, dispatch,
             clear_audit_log, snapshot_audit_log, set_eval_policy)
@@ -176,8 +210,9 @@ def _import_studio_tools():
 def _agentic_anthropic_provider() -> Callable:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("ANTHROPIC_API_KEY not set")
-    import anthropic  # type: ignore[import-not-found]
     import json as _json
+
+    import anthropic  # type: ignore[import-not-found]
     client = anthropic.Anthropic()
     model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
     anthropic_tools, _, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
@@ -302,6 +337,7 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
     apply. Backs both LM Studio (local, no auth) and Frank (the Fortilab AI
     gateway, Bifrost virtual key)."""
     import json as _json
+
     import requests  # type: ignore[import-untyped]
     _, openai_tools, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
     raw_tools = openai_tools()

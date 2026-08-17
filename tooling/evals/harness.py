@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from agent import load_system_prompt
-from evals.providers import (ProviderFn, get_provider,
-                             set_tool_slice)
+
+from evals.providers import ProviderFn, get_provider, set_tool_slice
 from evals.scoring import canonicalize_trace, delivered_yaml, score
 from evals.tasks import Task, load_tasks
 
@@ -295,15 +295,23 @@ def run_matrix(
             # module isn't on sys.path (classic providers).
             try:
                 from fsr_playbooks.llm.tools import (  # type: ignore
-                    clear_audit_log as _clr, set_eval_policy as _set_pol,
+                    clear_audit_log as _clr,
+                )
+                from fsr_playbooks.llm.tools import (
+                    set_eval_policy as _set_pol,
                 )
                 _set_pol(t.approval_policy)
                 _clr()
             except Exception:
                 pass
             set_tool_slice(t.tool_slice)
+            # A turnplan cell's prompt IS the plan's prompt -- prior +
+            # constraints + gap-card rule -- not the harness default.
+            from evals.providers import eval_turn_plan as _etp
+            _plan = _etp()
             try:
-                raw = provider(_prompt_for(t, system_prompt),
+                raw = provider(_plan.prompt if _plan is not None
+                               else _prompt_for(t, system_prompt),
                                _user_message_for(t))
             except Exception as e:  # noqa: BLE001
                 _err_row = {

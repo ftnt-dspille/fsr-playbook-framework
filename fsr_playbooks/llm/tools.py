@@ -1631,6 +1631,20 @@ def dispatch(
             ),
         }
 
+    # TurnPlan affordance gate (redesign Phase 2): when a host installed a
+    # plan for this turn, calls the page state does not afford (e.g. patching
+    # a playbook that isn't open) are refused HERE -- fail closed with a
+    # visible path forward (the refusal points at the capability_gap card) --
+    # instead of being silently removed from the advertised list. No plan
+    # installed => no gate (fail-open, like every turn-scoped gate above).
+    if not _internal:
+        from .turn_plan import active_turn_plan
+        _plan = active_turn_plan()
+        if _plan is not None:
+            _refusal = _plan.gate_refusal(name, raw_args)
+            if _refusal is not None:
+                return _refusal
+
     # Models frequently STRINGIFY object-valued args -- `params` is shown as JSON
     # in the tool docs, so they send run_op(params='{"indicator":"1.2.3.4"}')
     # instead of a dict. Neither the arg gate (Optional[dict]) nor the tool fn
