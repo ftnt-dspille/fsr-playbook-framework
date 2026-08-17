@@ -113,6 +113,17 @@ def test_field_to_picklist_mapping_works_once_warmed(monkeypatch):
     full = _shared.REPO_ROOT / "data" / "fsr_reference.db"
     if not full.exists():
         pytest.skip("full reference store absent")
+    try:
+        conn = sqlite3.connect(f"file:{full}?mode=ro", uri=True)
+        try:
+            warmed = conn.execute(
+                "SELECT 1 FROM picklists LIMIT 1").fetchone() is not None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        warmed = False
+    if not warmed:
+        pytest.skip("reference DB has no picklist rows (slim CI DB)")
     monkeypatch.setattr(_shared, "DB_PATH", str(full))
     monkeypatch.setitem(_shared._LIVE_CLIENT_CACHE, "client", None)
     out = _call(t.picklist_for_field, "alerts", "severity")
