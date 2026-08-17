@@ -1,0 +1,18 @@
+{
+  "name": "versatility_bottle_from_triage",
+  "mode": "tool_selection",
+  "prompt": "That confirms it -- the C2 beaconing is real and the block is staged. Now bottle this investigation into a playbook so future alerts of this type run the same steps automatically.",
+  "terminal_tool": ["build_playbook_from_trace", "emit_playbook_offer"],
+  "tool_slice": "triage",
+  "forbidden_facts": [
+    {
+      "tool": "find_connector",
+      "label": "re-derived from scratch instead of using the session as the trace"
+    },
+    {
+      "tool": "find_operation",
+      "label": "re-derived from scratch instead of using the session as the trace"
+    }
+  ],
+  "notes": "Versatility fixture (assessment Phase 0.3): the request crosses the triage/build boundary mid-conversation. Live on .159 (2026-08-17) this ask made the agent re-derive the whole investigation via find_* (a slice it did not even have), conclude 'no connector can block IPs' minutes after staging that exact block, and dead-end in prose. The session IS the trace: the triage slice carries emit_playbook_offer, so the turn can succeed today by offering; build_playbook_from_trace is accepted too so the fixture keeps scoring after Phase 2 widens the surface. A prose dead-end scores 0. Acceptance test for Phase 2 (unified TurnPlan routing)."
+}

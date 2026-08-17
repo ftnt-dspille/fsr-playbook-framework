@@ -1,0 +1,14 @@
+{
+  "name": "versatility_gap_named_not_deadend",
+  "mode": "tool_selection",
+  "prompt": "Open the \"Block Malicious IP\" playbook and add an approval gate before the containment step.",
+  "terminal_tool": ["emit_capability_gap_card"],
+  "tool_slice": "triage",
+  "forbidden_facts": [
+    {
+      "tool": "emit_playbook_offer",
+      "label": "offered a NEW playbook instead of naming the missing edit affordance"
+    }
+  ],
+  "notes": "Versatility fixture (assessment Phase 0.3): the ask needs a tool outside the sliced set. The enhance/edit tools (emit_enhancement_offer, verify_enhancement) are build-only, so a triage turn cannot perform this request -- and the one wrong answer is a silent dead-end ('a fully automated edit may not be feasible... please advise', the live .159 failure shape). The capability_gap card exists precisely for this moment: name what is missing and hand the analyst a path forward. After Phase 2 stops hard-slicing, the accepted terminal should widen to the enhance tools themselves."
+}
