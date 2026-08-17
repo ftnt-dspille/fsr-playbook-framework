@@ -1490,12 +1490,32 @@ def _ensure_mcp_materialized() -> None:
     materializer.ensure_initialized()
 
 
+# Phase 1 retirement: names subsumed by the consolidated tools. They STAY in
+# REGISTRY -- dispatch, approval resumes, and non-LLM callers keep working --
+# but are no longer advertised, so the model reasons over one entry point per
+# capability instead of the historical spread. The seven emit_* card names are
+# deliberately NOT here yet: their union crosses the intent-slice boundary
+# (emit_action_card is triage-only; emit_enhancement_offer / emit_patch_proposal
+# are build-only), and retiring them before Phase 2's dispatch-level gate would
+# let emit_card reach a card family the analyst's slice dropped.
+CONSOLIDATED_AWAY = frozenset({
+    # → find(kind=...)
+    "find_connector", "find_operation", "find_jinja_filter",
+    "search_playbooks", "find_containment_actions",
+    "find_enrichment_actions", "find_record_actions",
+    # → picklist(...)
+    "list_picklists", "picklist_for_field", "resolve_picklist_value",
+    # → connector_health(...)
+    "healthcheck_connector",
+})
+
+
 def anthropic_tools() -> list[dict[str, Any]]:
     """Anthropic's tool-use schema shape."""
     _ensure_mcp_materialized()
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
-        for t in REGISTRY.values()
+        for t in REGISTRY.values() if t.name not in CONSOLIDATED_AWAY
     ]
 
 
@@ -1512,7 +1532,7 @@ def openai_tools() -> list[dict[str, Any]]:
                 "parameters": t.input_schema,
             },
         }
-        for t in REGISTRY.values()
+        for t in REGISTRY.values() if t.name not in CONSOLIDATED_AWAY
     ]
 
 

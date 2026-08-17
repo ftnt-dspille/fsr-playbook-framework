@@ -121,14 +121,16 @@ def test_manifest_is_loaded_and_has_the_connector_tools():
 
 
 def test_census_includes_connector_tools_without_runtime():
-    """A census with no --runtime and no --probe must still see all 66 tools
-    (41 framework + 25 connector-registered from the manifest), not the 41
+    """A census with no --runtime and no --probe must still see all 70 tools
+    (45 framework + 25 connector-registered from the manifest), not what
     the framework advertises at import.
 
-    41, not 40, since `find_record_actions` (#128) -- the discovery shortcut
-    for writing a finding back onto a record."""
+    45, not 41, since Phase 1 added the consolidated `find` / `picklist` /
+    `connector_health` / `emit_card` entry points; their constituents stay
+    registered (census counts the registry -- CONSOLIDATED_AWAY names are
+    dispatchable, just no longer advertised)."""
     rep = tc.census(runtime=None, probe=None)
-    assert rep["meta"]["tools"] == 66
+    assert rep["meta"]["tools"] == 70
     assert rep["meta"]["connector_registered"] == 25
     names = {t["tool"] for t in rep["tools"]}
     # A sample of the P1/P2 tools the connector registers (post-merge)

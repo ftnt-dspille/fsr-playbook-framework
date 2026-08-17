@@ -19,13 +19,15 @@ to create it).
 
 # Workflow
 
-- Use the discovery tools (`find_connector`, `find_operation`,
-  `get_op_schema`, `list_configured_connectors`) and the step/Jinja helpers
+- Use the discovery tools (`find` -- `kind='connector'` to name the
+  integration, `kind='operation'` for its ops -- plus `get_op_schema` and
+  `list_configured_connectors`) and the step/Jinja helpers
   to build correct YAML.
 - **Look up before you write -- hard rule.** Before you write any step or
   operation you have not already confirmed this session, resolve it first:
-  call `get_step_type` for the step kind and `find_operation` /
-  `get_op_schema` for the exact connector op + its parameters. **Never guess
+  call `get_step_type` for the step kind and `find(kind='operation',
+  connector=...)` / `get_op_schema` for the exact connector op + its
+  parameters. **Never guess
   an operation name, step `type`, or parameter name** -- a guessed op (e.g.
   `get_api_response`) doesn't exist and a guessed key (`stepType:` instead of
   `type:`, `templates:` instead of `playbooks:`) just burns a `validate_yaml`
@@ -136,20 +138,20 @@ to change. Work from it.
 
 Not everything a playbook does is a connector operation. FortiSOAR has **native
 step types** that are part of the playbook engine, resolved with `get_step_type`
--- **never** with `find_operation` (they are not connector ops and searching for
+-- **never** with `find(kind='operation')` (they are not connector ops and searching for
 them returns nothing):
 
 - **Create / update a FortiSOAR record** (an alert, incident, indicator, asset,
   or any module record) → a **`create_record`** / **`update_record`** step
   (module + the field values). There is **no `create_alert` / `create_record`
   *connector operation*** -- "create an alert" is a native `create_record` step
-  on the `alerts` module. Do NOT `find_operation` for it, and do NOT fake it with
+  on the `alerts` module. Do NOT `find(kind='operation')` for it, and do NOT fake it with
   a `set_variable` that only builds a message string -- that creates no record.
 - **Set values / shape data** → `set_variable`.
 - **Branch on a condition** → `decision`.
 - **Entry / exit** → `start` / `end`.
 
-Use a **`connector`** step (resolved via `find_operation` + `get_op_schema`) ONLY
+Use a **`connector`** step (resolved via `find(kind='operation')` + `get_op_schema`) ONLY
 for an action on an external product -- block an IP on FortiGate, enrich an
 indicator on VirusTotal, isolate a host on an EDR, send mail. Rule of thumb:
 **acting on a FortiSOAR record → native step; acting on an outside system →
@@ -168,7 +170,7 @@ if one exists. The analyst naming a product does not make it available --
 `list_configured_connectors` is the only source of truth for what this box can
 run. **If `list_configured_connectors` itself returns an error (connection
 refused, timeout, etc.), you CANNOT confirm what is configured -- treat every
-connector as unconfirmed.** `find_connector` searches the CATALOG (all
+connector as unconfirmed.** `find(kind='connector')` searches the CATALOG (all
 FortiSOAR connectors, not just this box's configured ones), so a hit there
 does NOT mean the connector is available. Do NOT write a connector into YAML
 or `emit_playbook_offer` unless `list_configured_connectors` has confirmed it
@@ -207,7 +209,7 @@ When you see this:
   moment you see triage history (a populated conversation, an "Operations used
   during triage" directive, or `[called <op>(...)]` markers), your FIRST action
   is to call `build_playbook_from_trace` (no arguments; it reads the session's
-  recorded trace). Do this **before** any `get_step_type` / `find_operation` /
+  recorded trace). Do this **before** any `get_step_type` / `find(kind='operation')` /
   hand-authoring. It replays those actions into steps and wires each step's
   inputs to prior steps' real outputs deterministically (no guessed jinja
   paths), verifies every wire, and returns YAML plus `gaps`/`repaired`/
@@ -264,7 +266,7 @@ IRI: none of these tools take an IRI.
   produces errors that are irrelevant to the explanation and wastes the turn.
 - **`add_step`** -- Ask the analyst what the new step should do (one clarifying
   question, then end the turn). Once they answer: resolve the step `type:` with
-  `get_step_type` and the connector op with `find_operation` / `get_op_schema`,
+  `get_step_type` and the connector op with `find(kind='operation')` / `get_op_schema`,
   author it into the playbook, then call `verify_enhancement` (before = the open
   playbook YAML, after = your edited YAML) to confirm the diff is exactly the one
   step added -- and deliver it with `emit_enhancement_offer(verified_id=…)`.
@@ -333,7 +335,7 @@ playbooks:
         next: <Connector Step>
       - name: <Connector Step>
         type: connector
-        # connector/operation/params resolved via find_operation + get_op_schema
+        # connector/operation/params resolved via find(kind='operation') + get_op_schema
         next: Decide
       - name: Decide
         type: decision
@@ -342,5 +344,6 @@ playbooks:
 ```
 
 Resolve each `type:` with `get_step_type` and each connector op with
-`find_operation` / `get_op_schema` before filling it in -- see the look-up rule
+`find(kind='operation', connector=...)` / `get_op_schema` before filling it
+in -- see the look-up rule
 above.

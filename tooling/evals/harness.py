@@ -22,7 +22,7 @@ from typing import Any
 from agent import load_system_prompt
 from evals.providers import (ProviderFn, get_provider,
                              set_tool_slice)
-from evals.scoring import delivered_yaml, score
+from evals.scoring import canonicalize_trace, delivered_yaml, score
 from evals.tasks import Task, load_tasks
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -321,7 +321,11 @@ def run_matrix(
             # providers return a string. Detect and route.
             if isinstance(raw, dict):
                 final_text = raw.get("text", "")
-                trace = raw.get("trace")
+                # Phase 1 consolidation: rewrite `find`/`picklist`/
+                # `connector_health`/`emit_card` calls to their constituent
+                # names so every name-keyed scorer (terminal tools, decoys,
+                # offer timing, delivered_yaml) keeps working unchanged.
+                trace = canonicalize_trace(raw.get("trace"))
                 turns = raw.get("turns")
                 usage = raw.get("usage")
                 audit = raw.get("audit")

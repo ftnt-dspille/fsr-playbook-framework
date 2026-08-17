@@ -54,6 +54,92 @@ _YAML_BEARING_ARGS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+# ── Phase 1 consolidation shim ──────────────────────────────────────────────
+# Every scorer in this module keys on the SPECIALIZED tool names -- terminal
+# tools, decoys, offer timing, yaml-bearing args. The consolidated entry points
+# (`find`, `picklist`, `connector_health`, `emit_card`) route to the same
+# constituents at dispatch, so a trace using them is the same behavior under a
+# different name. Canonicalize each call back to its constituent BEFORE scoring
+# (the harness applies this right after trace extraction); the original name is
+# preserved in `via`. Kept as literal maps (not imported from the tool modules)
+# so scoring stays importable anywhere; `test_emit_card_unified` pins the card
+# map against CARD_TYPES upstream.
+
+_CARD_TYPE_TO_TOOL = {
+    "choice": "emit_choice_card",
+    "action": "emit_action_card",
+    "manual_input": "emit_manual_input",
+    "capability_gap": "emit_capability_gap_card",
+    "playbook_offer": "emit_playbook_offer",
+    "patch_proposal": "emit_patch_proposal",
+    "enhancement_offer": "emit_enhancement_offer",
+}
+_FIND_KIND_TO_TOOL = {
+    "connector": "find_connector",
+    "operation": "find_operation",
+    "jinja": "find_jinja_filter",
+    "playbook": "search_playbooks",
+    "recipe": "find_recipe",
+    "api": "find_api_product",
+}
+_ACTION_TYPE_TO_TOOL = {
+    "containment": "find_containment_actions",
+    "enrichment": "find_enrichment_actions",
+    "record": "find_record_actions",
+}
+
+
+def canonicalize_trace(trace: list[dict[str, Any]] | None,
+                       ) -> list[dict[str, Any]] | None:
+    """Rewrite consolidated-tool calls to their constituent names for scoring."""
+    if not trace:
+        return trace
+    out: list[dict[str, Any]] = []
+    for c in trace:
+        name = c.get("name")
+        args = c.get("args") or c.get("input") or {}
+        args = args if isinstance(args, dict) else {}
+        mapped: str | None = None
+        new_args: dict[str, Any] | None = None
+        if name == "emit_card":
+            mapped = _CARD_TYPE_TO_TOOL.get(
+                str(args.get("card_type") or "").strip().lower())
+            payload = args.get("payload")
+            if mapped and isinstance(payload, dict):
+                new_args = payload
+        elif name == "find":
+            kind = str(args.get("kind") or "").strip().lower()
+            if kind == "action":
+                # No action_type filter consults containment+enrichment both;
+                # attribute it to containment (the family the decoy fixtures
+                # watch) -- the `via` field keeps the real call visible.
+                fam = str(args.get("action_type") or "").strip().lower()
+                mapped = _ACTION_TYPE_TO_TOOL.get(fam,
+                                                  "find_containment_actions")
+            elif kind == "example":
+                mapped = ("find_operation_example" if args.get("connector")
+                          else "search_api_examples")
+            else:
+                mapped = _FIND_KIND_TO_TOOL.get(kind)
+        elif name == "picklist":
+            if args.get("value"):
+                mapped = "resolve_picklist_value"
+            elif args.get("module") or args.get("field"):
+                mapped = "picklist_for_field"
+            elif args.get("name"):
+                mapped = "get_picklist"
+            else:
+                mapped = "list_picklists"
+        elif name == "connector_health":
+            mapped = "healthcheck_connector"
+        if mapped:
+            c = {**c, "name": mapped, "via": name}
+            if new_args is not None:
+                c["args"] = new_args
+        out.append(c)
+    return out
+
+
 def delivered_yaml(final_text: str, trace: list[dict[str, Any]] | None) -> str:
     """The YAML the turn actually DELIVERED, not merely the bit it pasted.
 

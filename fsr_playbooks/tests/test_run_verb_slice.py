@@ -71,11 +71,15 @@ def test_run_verb_survives_a_connector_style_triage_only_extension(
 
 
 def test_run_verb_survives_a_build_only_extension():
-    """Symmetric direction: BUILD_ONLY already contains search_playbooks, and
-    the exemption is what keeps it in triage."""
+    """Symmetric direction: `search_playbooks` is retired from advertisement
+    (CONSOLIDATED_AWAY -- subsumed by `find(kind=playbook)`), so the global-
+    search half of the run verb now rides on `find`, which must survive both
+    subtractions the way the exemption used to guarantee for the old name."""
     assert "search_playbooks" in I.BUILD_ONLY_TOOLS, (
         "premise changed -- search_playbooks left BUILD_ONLY_TOOLS")
-    assert "search_playbooks" in _slice("triage")
+    assert "find" in _slice("triage") and "find" in _slice("build"), (
+        "the run verb lost its global playbook search -- `find` must be "
+        "advertised in every intent")
 
 
 def test_exemption_does_not_leak_authoring_into_triage():
