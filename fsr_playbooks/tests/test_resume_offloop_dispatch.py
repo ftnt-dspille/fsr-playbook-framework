@@ -8,9 +8,13 @@ inline inside the running loop, so every approved live-MCP action died with
 the analyst saw "Approved -- but the action did not run" (live-verified on a
 lab appliance, 2026-08-17).
 
-These tests pin the fix for both providers: an approved tool whose fn calls
-``asyncio.run`` internally must execute and surface its real result in the
-first ``ToolResultEvent``.
+These tests pin, for all three providers:
+  * an approved tool whose fn calls ``asyncio.run`` internally executes and
+    surfaces its real result;
+  * the result is preceded by a NAMED synthetic ToolUseEvent (without it the
+    widget renders a nameless "Used skill tool" chip on every resume);
+  * resume re-enters the loop with the suspended turn's tool slice, and
+    tolerates old pickled sessions that predate the ``tools`` field.
 """
 from __future__ import annotations
 
@@ -21,10 +25,12 @@ import pytest
 from fsr_playbooks.llm import approvals as A
 from fsr_playbooks.llm import tools as T
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
+from fsr_playbooks.llm.fortiai_proxy_provider import FortiAIProxyProvider
 from fsr_playbooks.llm.openai_provider import OpenAIProvider
-from fsr_playbooks.llm.provider import ToolResultEvent
+from fsr_playbooks.llm.provider import ToolResultEvent, ToolUseEvent
 
 _TOOL = "loopy_block_for_test"
+_SLICE = [{"name": _TOOL, "description": "d", "input_schema": {}}]
 
 
 def _loopy_tool() -> dict:
@@ -46,42 +52,79 @@ def _registered(monkeypatch):
     )
 
 
-def _session() -> A.SuspendedSession:
-    s = A.SuspendedSession(
+def _session(**over) -> A.SuspendedSession:
+    base = dict(
         approval_id="ap-loop", session_id="s-loop", tool=_TOOL,
         tool_use_id="tu-loop", args={}, tier=3,
         history_snapshot=[], prior_tool_result_blocks=[],
-        remaining_tool_calls=[], system="sys", tags={},
+        remaining_tool_calls=[], system="sys", tags={}, tools=list(_SLICE),
     )
+    base.update(over)
+    s = A.SuspendedSession(**base)
     A.bind(s)
     return s
 
 
-def _first_tool_result(provider) -> dict:
-    """Drive resume() until the approved call's ToolResultEvent, then stop.
+def _resume_prefix(provider, suspended=None):
+    """Drive resume() through the approved call's ToolUse+ToolResult pair,
+    then stop -- the dispatch happens before the first yield, so the fake
+    client is never asked to stream a model reply. Returns (use, result,
+    captured_stream_tools)."""
+    captured: dict = {}
+    orig_stream = provider.stream
 
-    The dispatch happens before the first yield; stopping there keeps the
-    fake client from ever being asked to stream a model reply.
-    """
+    async def _capture_stream(*, tools=None, **kw):
+        captured["tools"] = tools
+        return
+        yield  # pragma: no cover -- makes this an async generator
+
+    provider.stream = _capture_stream
+
     async def _go():
-        agen = provider.resume(suspended=_session(), decision="approve")
+        events = []
+        agen = provider.resume(
+            suspended=suspended or _session(), decision="approve")
         try:
+            # Consume fully: the stubbed stream() yields nothing, so the
+            # generator terminates right after capturing the tool slice.
             async for ev in agen:
-                if isinstance(ev, ToolResultEvent):
-                    return ev.result
-                raise AssertionError(f"unexpected event before result: {ev!r}")
+                events.append(ev)
         finally:
-            await agen.aclose()
-        raise AssertionError("resume yielded no ToolResultEvent")
+            provider.stream = orig_stream
+        return events
 
-    return asyncio.run(_go())
+    events = asyncio.run(_go())
+    uses = [e for e in events if isinstance(e, ToolUseEvent)]
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert uses and results, events
+    return uses[0], results[0], captured
 
 
-def test_anthropic_resume_runs_loop_owning_tool(_registered):
-    result = _first_tool_result(AnthropicProvider(model="fake", client=object()))
-    assert result == {"ok": True, "code": "ran"}
+_PROVIDERS = [
+    lambda: AnthropicProvider(model="fake", client=object()),
+    lambda: OpenAIProvider(model="fake", client=object()),
+    lambda: FortiAIProxyProvider(model="fake", base_url="http://x", api_key="k"),
+]
 
 
-def test_openai_resume_runs_loop_owning_tool(_registered):
-    result = _first_tool_result(OpenAIProvider(model="fake", client=object()))
-    assert result == {"ok": True, "code": "ran"}
+@pytest.mark.parametrize("mk", _PROVIDERS)
+def test_resume_runs_loop_owning_tool_and_names_it(mk, _registered):
+    use, result, _ = _resume_prefix(mk())
+    assert result.result == {"ok": True, "code": "ran"}
+    assert use.name == _TOOL and use.synthetic and use.call_id == "tu-loop"
+
+
+@pytest.mark.parametrize("mk", _PROVIDERS)
+def test_resume_reenters_with_suspended_tool_slice(mk, _registered):
+    _, _, captured = _resume_prefix(mk())
+    assert captured.get("tools") == _SLICE
+
+
+@pytest.mark.parametrize("mk", _PROVIDERS)
+def test_resume_tolerates_prefield_pickled_session(mk, _registered):
+    # Old pickled sessions restore without the `tools` attr entirely.
+    s = _session()
+    del s.__dict__["tools"]
+    _, result, captured = _resume_prefix(mk(), suspended=s)
+    assert result.result == {"ok": True, "code": "ran"}
+    assert captured.get("tools") == []

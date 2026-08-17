@@ -183,6 +183,14 @@ class SuspendedSession:
     system: str
     tags: dict[str, Any]
     summary: str | None = None
+    # The tool slice the suspended turn was advertising. Resume re-enters the
+    # provider loop with THIS list (not []), so the model can act on the
+    # approved action's outcome -- retry with fixed args (through a fresh
+    # tier gate), or finish the request's remaining steps -- instead of only
+    # narrating. Old pickled sessions lack the attr: read via getattr.
+    # Not HMAC-bound (same trust level as history_snapshot/system): dispatch
+    # re-checks tiers on every call, so advertisement is not authorization.
+    tools: list[Any] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     # HMAC token binding (approval_id, tool, args_hash, created_at) under the
     # server secret. Set by `bind()` before stash; checked by `verify()` on

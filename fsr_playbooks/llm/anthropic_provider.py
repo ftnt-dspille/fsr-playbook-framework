@@ -262,6 +262,16 @@ class AnthropicProvider:
                         "reason": "User denied the action."}
             decision_event_result = resolved
 
+        # Emit a NAMED synthetic tool_use before the result: the original
+        # ToolUseEvent lives in the prior turn's transcript, so a renderer
+        # matching name by call_id within THIS turn finds nothing and falls
+        # back to a nameless "tool" chip (live: the approve/deny result on a
+        # resumed turn rendered as `Used skill tool`).
+        yield ToolUseEvent(
+            name=suspended.tool, arguments=dict(suspended.args),
+            call_id=suspended.tool_use_id, tier=suspended.tier,
+            synthetic=True,
+        )
         # Emit the resolved tool_result so the UI can render it inline
         # with the approval card it was waiting on.
         yield ToolResultEvent(
@@ -299,7 +309,8 @@ class AnthropicProvider:
         async for ev in self.stream(
             system=suspended.system,
             messages=rehydrated,
-            tools=[],
+            # Old pickled sessions predate the field -- getattr, not attr.
+            tools=list(getattr(suspended, "tools", None) or []),
             tags=suspended.tags,
         ):
             yield ev
@@ -961,6 +972,8 @@ class AnthropicProvider:
                         system=system,
                         tags=dict(tags),
                         summary=result.get("summary"),
+                        # the advertised slice -- resume re-enters with it
+                        tools=list(tools or []),
                     )
                     # Phase 3.1: HMAC-bind the session to its args before
                     # stashing, so store tampering is detected on resume.

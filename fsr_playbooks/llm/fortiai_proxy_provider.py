@@ -9,6 +9,7 @@ Phase B of docs/plans/FORTIAI_PROXY_PROVIDER_PLAN.md.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid as _uuid
@@ -181,14 +182,22 @@ class FortiAIProxyProvider:
             return
 
         if decision == "approve":
-            resolved = dispatch(
-                suspended.tool, {**suspended.args, "_approved": True},
+            # Off-loop like the main loop's dispatch: live MCP tools call
+            # asyncio.run() internally, which raises on the running loop.
+            resolved = await asyncio.to_thread(
+                dispatch, suspended.tool, {**suspended.args, "_approved": True},
                 _internal=True,
             )
         else:
             resolved = {"ok": False, "code": "user_denied",
                         "reason": "User denied the action."}
 
+        # Named synthetic tool_use first -- see anthropic_provider.resume().
+        yield ToolUseEvent(
+            name=suspended.tool, arguments=dict(suspended.args),
+            call_id=suspended.tool_use_id, tier=suspended.tier,
+            synthetic=True,
+        )
         yield ToolResultEvent(call_id=suspended.tool_use_id, result=resolved)
 
         result_str = _stringify(resolved)
@@ -225,7 +234,8 @@ class FortiAIProxyProvider:
         async for ev in self.stream(
             system=suspended.system,
             messages=rehydrated,
-            tools=[],
+            # Old pickled sessions predate the field -- getattr, not attr.
+            tools=list(getattr(suspended, "tools", None) or []),
             tags=suspended.tags,
         ):
             yield ev
@@ -541,6 +551,8 @@ class FortiAIProxyProvider:
                         system=system,
                         tags=dict(tags),
                         summary=result.get("summary"),
+                        # the advertised slice -- resume re-enters with it
+                        tools=list(tools or []),
                     )
                     _approvals.bind(suspended_session)
                     if self._approval_gateway is not None:
