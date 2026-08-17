@@ -247,8 +247,11 @@ class AnthropicProvider:
             return
 
         if decision == "approve":
-            # Bypass the gate this one time -- see tools.dispatch.
-            resolved = dispatch(
+            # Bypass the gate this one time -- see tools.dispatch. Off-loop
+            # like the main loop's dispatch: live MCP tools call asyncio.run()
+            # internally, which raises if dispatched inline on the running loop.
+            resolved = await asyncio.to_thread(
+                dispatch,
                 suspended.tool,
                 {**suspended.args, "_approved": True},
                 _internal=True,

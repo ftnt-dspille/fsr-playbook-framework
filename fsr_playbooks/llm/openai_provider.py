@@ -343,8 +343,10 @@ class OpenAIProvider:
             return
 
         if decision == "approve":
-            resolved = dispatch(
-                suspended.tool, {**suspended.args, "_approved": True},
+            # Off-loop like the main loop's dispatch: live MCP tools call
+            # asyncio.run() internally, which raises on the running loop.
+            resolved = await asyncio.to_thread(
+                dispatch, suspended.tool, {**suspended.args, "_approved": True},
                 _internal=True,
             )
         else:
