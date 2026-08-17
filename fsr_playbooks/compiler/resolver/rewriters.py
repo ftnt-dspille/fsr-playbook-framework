@@ -12,6 +12,12 @@ class RewriterMixin:
 
     conn: sqlite3.Connection
 
+    # Step type can appear in the IR as either the friendly short form
+    # ("set_variable") or the FSR canonical form ("SetVariable"). Both are
+    # valid YAML; the parser does not normalize. Check both so PascalCase
+    # steps are not silently skipped.
+    _SET_VARIABLE_TYPES = frozenset({"set_variable", "SetVariable"})
+
     def _auto_rewrite_set_var_step_refs(
         self, pb, pi: int, errors: list[CompileError],
         renames: dict[str, str] | None = None,
@@ -29,7 +35,7 @@ class RewriterMixin:
         # variable names that step writes.
         sv_keys: dict[str, set[str]] = {}
         for step in pb.steps:
-            if step.type != "set_variable" or not isinstance(step.arguments, dict):
+            if step.type not in self._SET_VARIABLE_TYPES or not isinstance(step.arguments, dict):
                 continue
             jkey = (step.name or step.id or "").replace(" ", "_")
             if not jkey:
@@ -38,6 +44,12 @@ class RewriterMixin:
             keys: set[str] = set()
             if isinstance(args.get("arg_list"), list):
                 for it in args["arg_list"]:
+                    if isinstance(it, dict) and "name" in it:
+                        keys.add(it["name"])
+            elif isinstance(args.get("variables"), list):
+                # The "variables:" key is the YAML-friendly form the parser
+                # preserves before the normalizer converts it to arg_list.
+                for it in args["variables"]:
                     if isinstance(it, dict) and "name" in it:
                         keys.add(it["name"])
             else:
@@ -304,11 +316,12 @@ class RewriterMixin:
 
         renames: dict[str, str] = {}
         for si, step in enumerate(pb.steps):
-            if step.type != "set_variable" or not isinstance(step.arguments, dict):
+            if step.type not in self._SET_VARIABLE_TYPES or not isinstance(step.arguments, dict):
                 continue
             args = step.arguments
             spath = f"playbooks[{pi}].steps[{si}]"
-            # Two shapes: flat dict {name: value} OR arg_list:[{name,value}]
+            # Three shapes: flat dict {name: value}, arg_list:[{name,value}],
+            # or variables:[{name,value}] (pre-normalization YAML form).
             if isinstance(args.get("arg_list"), list):
                 for k, item in enumerate(args["arg_list"]):
                     if isinstance(item, dict) and item.get("name") in _RESERVED_VARS_KEYS:
@@ -325,6 +338,24 @@ class RewriterMixin:
                                 f"`vars.{new}`."
                             ),
                             path=f"{spath}.arguments.arg_list[{k}].name",
+                            severity="warning",
+                        ))
+            elif isinstance(args.get("variables"), list):
+                for k, item in enumerate(args["variables"]):
+                    if isinstance(item, dict) and item.get("name") in _RESERVED_VARS_KEYS:
+                        old = item["name"]
+                        new = self._safe_rename(old, _RESERVED_VARS_KEYS)
+                        item["name"] = new
+                        renames[old] = new
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"set_variable key {old!r} is reserved by FSR "
+                                f"runtime; auto-renamed to {new!r}. Downstream "
+                                f"`vars.{old}` references rewritten to "
+                                f"`vars.{new}`."
+                            ),
+                            path=f"{spath}.arguments.variables[{k}].name",
                             severity="warning",
                         ))
             else:
