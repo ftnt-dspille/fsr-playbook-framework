@@ -331,7 +331,8 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
             return
         if kind == "tool_use":
             args = dict(getattr(ev, "arguments", {}) or {})
-            trace.append({"name": ev.name, "args": args})
+            trace.append({"name": ev.name, "args": args,
+                          "call_id": getattr(ev, "call_id", None)})
             log.info("    -> %s(%s)", ev.name, json.dumps(args, default=str)[:110])
         elif kind == "tool_result":
             res = getattr(ev, "result", None)
@@ -342,10 +343,22 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
             # a guard doing its job was charged to the agent as a tool call.
             from evals.chat_drive import _result_refused  # noqa: PLC0415
             refused = _result_refused(res)
-            if trace:
-                trace[-1]["ok"] = ok
-                trace[-1]["refused"] = refused
-            log.info("       <- ok=%s%s", ok, "  (guard-refused)" if refused else "")
+            # Match by call_id, newest-first: the parallel read-only batch
+            # emits ALL of a round's tool_use events before any tool_result,
+            # so `trace[-1]` attributed every result of a batch to its last
+            # call -- which is how three guard refusals scored as ordinary
+            # agent spend (and one unrelated call as refused).
+            cid = getattr(ev, "call_id", None)
+            entry = next((t for t in reversed(trace)
+                          if t.get("call_id") == cid), None) if cid else None
+            if entry is None and trace:
+                entry = trace[-1]
+            if entry is not None:
+                entry["ok"] = ok
+                entry["refused"] = refused
+            log.info("       <- %s ok=%s%s",
+                     (entry or {}).get("name", "?"), ok,
+                     "  (guard-refused)" if refused else "")
         elif kind == "text":
             final_chunks.append(ev.text)
 

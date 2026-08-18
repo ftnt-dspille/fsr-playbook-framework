@@ -283,8 +283,11 @@ def test_discipline_marks_hunt_floor_met_in_state():
     d = TriageDiscipline(state=state)
 
     # Run investigation tools to meet the floor
-    for _ in range(MIN_INVESTIGATION_BEFORE_CONTAINMENT):
-        d.evaluate("search_module_records", {"module": "alerts", "query": "host"})
+    for _i in range(MIN_INVESTIGATION_BEFORE_CONTAINMENT):
+        # distinct queries: identical repeats now hit the duplicate-search
+        # guard (#128) and must not credit the floor
+        d.evaluate("search_module_records",
+                   {"module": "alerts", "q": f"host-{_i}"})
 
     # The shared state should now have hunt_floor_met=True
     assert state.hunt_floor_met is True
@@ -551,8 +554,11 @@ def test_hunt_floor_unlocks_after_investigation():
     """The retry the guard promises must actually succeed."""
     d = TriageDiscipline()
     assert _drive(d, "find_containment_actions", {"target_type": "ip"}) is not None
-    for _ in range(MIN_INVESTIGATION_BEFORE_CONTAINMENT):
-        _drive(d, "search_module_records", {"module": "alerts", "q": "1.2.3.4"})
+    for _i in range(MIN_INVESTIGATION_BEFORE_CONTAINMENT):
+        # distinct queries: identical repeats now hit the duplicate-search
+        # guard (#128) and must not credit the floor
+        d.evaluate("search_module_records",
+                   {"module": "alerts", "q": f"host-{_i}"})
     assert _drive(d, "find_containment_actions", {"target_type": "ip"}) is None, (
         "a blocked call must not be recorded, or the promised retry hits "
         "the call-once guard instead of succeeding"
@@ -851,3 +857,109 @@ def test_every_provider_seeds_the_discipline_from_the_user_message():
             assert "user_text=" in call, (
                 f"{p.name} builds TriageDiscipline without user_text= -- the "
                 "analyst-order exemption is inert there")
+
+
+# ───────────────── #128 dispatch levers: correlation + enrichment budget ────
+#
+# Two rounds of prompt prose failed to move the correlation fan-out (both IPs
+# x both modules = 4 searches against a budget of 2) or the 4th enrichment
+# source stacked on one address. These guards make the redundant call
+# impossible rather than discouraged; each shape below is transcribed from the
+# banked invest_outbound_cleartext_c2 traces.
+
+def _fresh128():
+    return TriageDiscipline()
+
+
+def test_duplicate_correlation_search_is_refused():
+    d = _fresh128()
+    assert d.evaluate("search_module_records",
+                      {"module": "alerts", "q": "108.17.204.5"}) is None
+    r = d.evaluate("search_module_records",
+                   {"module": "alerts", "q": "108.17.204.5"})
+    assert r is not None and r.get("duplicate_search_guard")
+    assert r["kind"] == "guard_redirect"
+    # a different module for the same value is the budgeted second search
+    assert d.evaluate("search_module_records",
+                      {"module": "incidents", "q": "108.17.204.5"}) is None
+
+
+def test_internal_ip_correlation_search_is_refused():
+    d = _fresh128()
+    r = d.evaluate("search_module_records",
+                   {"module": "alerts", "q": "192.168.77.49"})
+    assert r is not None and r.get("internal_correlation_guard")
+    assert r["kind"] == "guard_redirect"
+
+
+def test_non_ip_and_external_ip_searches_pass():
+    d = _fresh128()
+    assert d.evaluate("search_module_records",
+                      {"module": "assets", "q": "smithDesktop"}) is None
+    assert d.evaluate("search_module_records",
+                      {"module": "alerts", "q": "8.8.4.4"}) is None
+
+
+def _enrich(d, connector, ip="108.17.204.5", op="query_ip"):
+    return d.evaluate("run_op", {"connector": connector, "op": op,
+                                 "params": {"ip": ip}})
+
+
+def test_fourth_enrichment_source_for_same_indicator_is_refused():
+    d = _fresh128()
+    for c in ("virustotal", "abuseipdb", "shodan"):
+        assert _enrich(d, c) is None
+    r = _enrich(d, "fortinet-fortisiem", op="get_ip_context")
+    assert r is not None and r.get("enrichment_cap_guard")
+    assert r["kind"] == "guard_redirect"
+    assert r["sources_used"] == ["abuseipdb", "shodan", "virustotal"]
+
+
+def test_enrichment_cap_allows_retry_of_a_source_already_used():
+    d = _fresh128()
+    for c in ("virustotal", "abuseipdb", "shodan"):
+        assert _enrich(d, c) is None
+    # a retry against a source already in the trail is not a NEW source
+    assert _enrich(d, "virustotal") is None
+
+
+def test_enrichment_cap_never_touches_mutating_or_containment_ops():
+    d = _fresh128()
+    for c in ("virustotal", "abuseipdb", "shodan"):
+        assert _enrich(d, c) is None
+    # containment connector: not an enrichment family at all
+    assert d.evaluate("run_op", {"connector": "fortigate-firewall",
+                                 "op": "block_ip_new",
+                                 "params": {"ip": "108.17.204.5"}}) is None
+    # enrichment-family connector but a mutating op name
+    assert d.evaluate("run_op", {"connector": "fortinet-fortisiem",
+                                 "op": "update_incident",
+                                 "params": {"ip": "108.17.204.5"}}) is None
+
+
+def test_enrichment_cap_is_per_indicator():
+    d = _fresh128()
+    for c in ("virustotal", "abuseipdb", "shodan"):
+        assert _enrich(d, c) is None
+    assert _enrich(d, "fortiguard", ip="9.9.9.9") is None
+
+
+def test_emit_card_action_union_hits_the_hunt_floor():
+    """The consolidated union must not walk past the discipline the retired
+    name is gated on."""
+    d = _fresh128()
+    g = d.evaluate("emit_card", {"card_type": "action", "payload": {}})
+    assert g is not None and g.get("hunt_floor_guard")
+
+
+def test_emit_card_action_union_sets_the_staged_gag():
+    d = _fresh128()
+    d.note_result("emit_card", {"card_type": "action", "payload": {}},
+                  {"ok": True, "card": {}})
+    g = d.evaluate("search_module_records", {"module": "alerts", "q": "x"})
+    assert g is not None and g.get("action_card_staged")
+
+
+def test_emit_card_non_action_types_are_not_staging():
+    d = _fresh128()
+    assert d.evaluate("emit_card", {"card_type": "choice", "payload": {}}) is None

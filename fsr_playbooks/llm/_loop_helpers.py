@@ -409,6 +409,29 @@ def _call_once_sig(name: str, args: Any) -> str:
 _TI_CONNECTOR_TOKENS: tuple[str, ...] = (
     "virustotal", "shodan", "ipqualityscore", "abuseipdb",
 )
+# Connector families whose run_op calls are ENRICHMENT of an indicator --
+# reputation, context, telemetry lookups. The per-indicator source cap below
+# counts and refuses only these, so a containment run_op (fortigate,
+# fortiedr, ...) against the same IP can never be capped by its own
+# enrichment trail.
+_ENRICHMENT_CONNECTOR_TOKENS: tuple[str, ...] = _TI_CONNECTOR_TOKENS + (
+    "fortiguard", "fortisiem", "fortianalyzer", "greynoise", "urlscan",
+    "alienvault", "otx", "xforce", "recordedfuture", "whois", "ipinfo",
+    "threatstream", "misp",
+)
+# Belt-and-suspenders for the cap: an op whose NAME says it mutates is never
+# treated as enrichment even if its connector matched above.
+_MUTATING_OP_RE = re.compile(
+    r"block|quarantine|isolat|contain|ban|deactivat|disable|suspend|revoke|"
+    r"update|create|delete|remediate|unblock|release",
+    re.IGNORECASE,
+)
+# Distinct enrichment sources one indicator gets before the guard says
+# "synthesize". Calibrated on #128: every invest fixture budgets 3, and the
+# observed 4th (a context lookup stacked on three reputation verdicts for the
+# SAME address) is the redundancy the budget refuses to fund. Two rounds of
+# prompt prose did not move this; the refusal makes it structural.
+MAX_ENRICHMENT_SOURCES_PER_INDICATOR = 3
 # Full pivot floor: record + cross-module search + external enrichment + a
 # pivot ≈ 3 genuine evidence calls before containment may be staged.
 MIN_INVESTIGATION_BEFORE_CONTAINMENT = 3
@@ -574,6 +597,19 @@ def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
     return internal, external
 
 
+def _effective_tool_name(name: str, args: Any) -> str:
+    """Fold the consolidated `emit_card` union onto the retired per-type
+    emitter name every discipline rule keys on. Without this the union tool
+    walked straight past the hunt floor and the staged-card gag -- the same
+    union-blindness class as the wire splice (effect probe A2) and the
+    deliverable grader."""
+    if name == "emit_card":
+        ct = str((args or {}).get("card_type") or "").strip().lower()
+        if ct == "action":
+            return "emit_action_card"
+    return name
+
+
 class TriageDiscipline:
     """Per-session triage guard. ``evaluate(name, args)`` atomically checks the
     three discipline rules and, when the call is allowed, records it -- returning
@@ -644,6 +680,13 @@ class TriageDiscipline:
         # has -- 0 of 4 live calls). Turn-scoped: this instance is rebuilt per
         # turn, so an order never outlives the message that gave it.
         self._analyst_ordered = _detect_analyst_order(user_text)
+        # Correlation searches already made this turn: {module\x00query} sigs,
+        # for the duplicate-search guard. Turn-scoped like _analyst_ordered --
+        # a later turn may legitimately re-search after the world changed.
+        self._corr_searched: set[str] = set()
+        # Enrichment sources consumed per external indicator this turn:
+        # {indicator_value: {connector, ...}} for the source-cap guard.
+        self._enrichment_sources: dict[str, set[str]] = {}
         # Set by note_result once an approval card is successfully staged.
         # Turn-scoped like the rest of this object: a card staged on an earlier
         # turn was already answered (or expired) and must not gag the next one.
@@ -727,6 +770,88 @@ class TriageDiscipline:
                             f"connectors for EXTERNAL, routable indicators."
                         ),
                     }
+        # 1b. Correlation-search discipline (#128). Two shapes of redundant
+        # `search_module_records` fan-out, both measured stable across every
+        # banked invest trace (both IPs x both modules = 4 searches against a
+        # budget of 2):
+        #   * the SAME (module, query) searched twice -- pure repetition;
+        #   * cross-module correlation of an INTERNAL (RFC1918) address --
+        #     the same doctrine as the forbidden-pivot guard: internal hosts
+        #     pivot through SIEM/CMDB context ops, and correlation search is
+        #     reserved for the external indicator.
+        if name == "search_module_records":
+            q = str((args or {}).get("q")
+                    or (args or {}).get("query") or "").strip()
+            module = str((args or {}).get("module") or "").strip().lower()
+            sig = f"{module}\x00{q.lower()}"
+            if q and sig in self._corr_searched:
+                return {
+                    "ok": False,
+                    "kind": "guard_redirect",
+                    "duplicate_search_guard": True,
+                    "error": (
+                        f"Skipped: you already searched `{module}` for "
+                        f"{q!r} this turn and correlation search returns its "
+                        f"full result in one shot. Do not repeat it -- use the "
+                        f"result you already have."
+                    ),
+                }
+            _ip = None
+            try:
+                _ip = ipaddress.ip_address(q)
+            except ValueError:
+                pass
+            if _ip is not None and (_ip.is_private or _ip.is_loopback
+                                    or _ip.is_link_local):
+                return {
+                    "ok": False,
+                    "kind": "guard_redirect",
+                    "internal_correlation_guard": True,
+                    "error": (
+                        f"Skipped: {q} is an internal (private) address -- "
+                        f"cross-module correlation search is reserved for the "
+                        f"EXTERNAL indicator, which identifies the campaign. "
+                        f"Pivot internal hosts through the SIEM/CMDB context "
+                        f"ops instead (get_ip_context / siem_search), or read "
+                        f"the alert's own linked records. Do not retry this "
+                        f"search."
+                    ),
+                }
+        # 1c. Enrichment source cap (#128). Once an external indicator holds
+        # verdicts from MAX_ENRICHMENT_SOURCES_PER_INDICATOR distinct sources,
+        # a further source for the SAME indicator is refused: the budget funds
+        # a verdict, not a survey. Scoped hard so nothing else can trip it --
+        # only run_op, only enrichment-family connectors, only ops that don't
+        # look mutating, and only when the call targets exactly one external
+        # IP whose trail is already full.
+        if name == "run_op":
+            connector = str((args or {}).get("connector") or "").lower()
+            op = str((args or {}).get("op")
+                     or (args or {}).get("operation") or "")
+            if (any(t in connector for t in _ENRICHMENT_CONNECTOR_TOKENS)
+                    and not _MUTATING_OP_RE.search(op)):
+                internal, external = _classify_ips(args)
+                if len(external) == 1 and not internal:
+                    value = next(iter(external))
+                    sources = self._enrichment_sources.get(value, set())
+                    if (len(sources) >= MAX_ENRICHMENT_SOURCES_PER_INDICATOR
+                            and connector not in sources):
+                        return {
+                            "ok": False,
+                            "kind": "guard_redirect",
+                            "enrichment_cap_guard": True,
+                            "indicator": value,
+                            "sources_used": sorted(sources),
+                            "error": (
+                                f"Skipped: {value} already has verdicts from "
+                                f"{len(sources)} sources this turn "
+                                f"({', '.join(sorted(sources))}) -- a "
+                                f"{len(sources) + 1}th source for the same "
+                                f"indicator adds cost, not confidence. "
+                                f"Synthesize the verdict from what you have "
+                                f"and move to the next step of the triage."
+                            ),
+                        }
         # 2. Call-once discovery -- the set is returned in one shot PER
         # target_type. Block only a repeat of the SAME (name, target_type);
         # a different indicator type is a distinct, legitimate call.
@@ -817,6 +942,7 @@ class TriageDiscipline:
     def evaluate(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
         """Atomic check-and-record. Returns a guard envelope (block) or None
         (allowed -- and the call is recorded as dispatched)."""
+        name = _effective_tool_name(name, args)
         with self._lock:
             guard = self._check_locked(name, args or {})
             if guard is not None:
@@ -828,6 +954,22 @@ class TriageDiscipline:
             self._called.add(name)
             if name in _CALL_ONCE_DISCOVERY:
                 self._called.add(_call_once_sig(name, args))
+            if name == "search_module_records":
+                _q = str((args or {}).get("q")
+                         or (args or {}).get("query") or "").strip()
+                _m = str((args or {}).get("module") or "").strip().lower()
+                if _q:
+                    self._corr_searched.add(f"{_m}\x00{_q.lower()}")
+            if name == "run_op":
+                _conn = str((args or {}).get("connector") or "").lower()
+                _op = str((args or {}).get("op")
+                          or (args or {}).get("operation") or "")
+                if (any(t in _conn for t in _ENRICHMENT_CONNECTOR_TOKENS)
+                        and not _MUTATING_OP_RE.search(_op)):
+                    _int, _ext = _classify_ips(args)
+                    if len(_ext) == 1 and not _int:
+                        self._enrichment_sources.setdefault(
+                            next(iter(_ext)), set()).add(_conn)
             if counts_as_investigation(name):
                 self.invest_attempts += 1
                 # Once floor is met, mark it in the shared state
@@ -861,6 +1003,7 @@ class TriageDiscipline:
         # Before the capabilities early-return: staging an approval card ends
         # the agent's half of the turn regardless of whether this session
         # tracks capabilities at all (see the guard in `_check_locked`).
+        name = _effective_tool_name(name, args)
         if (name == "emit_action_card" and isinstance(result, dict)
                 and result.get("ok") is True):
             with self._lock:

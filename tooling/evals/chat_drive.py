@@ -205,7 +205,11 @@ _GUARD_MARKERS = ("forbidden_pivot_guard", "hunt_floor_guard", "call_once_guard"
                   # two below were missing, so a capability-guard skip and a
                   # post-approval-card stop -- both the platform working -- were
                   # scored as tool calls the agent chose to make.
-                  "capability_guard", "action_card_staged")
+                  "capability_guard", "action_card_staged",
+                  # #128 dispatch levers: refused correlation/enrichment
+                  # redundancy is the guard working, not agent spend.
+                  "duplicate_search_guard", "internal_correlation_guard",
+                  "enrichment_cap_guard")
 
 
 def _result_refused(content: Any) -> bool:

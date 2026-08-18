@@ -307,6 +307,32 @@ _DELIVERABLE_TOOLS = (
     "emit_action_card", "emit_choice_card", "emit_capability_gap_card",
 )
 
+# The consolidated `emit_card` union carries its type in a `card_type` arg;
+# these values are the deliverable subset (same set as _DELIVERABLE_TOOLS,
+# in the framework's short vocabulary). Without this the grader was blind to
+# every card the union emitted -- the exact class of miss the wire splice had
+# (effect probe A2): the agent staged a real action card and scored
+# "no deliverable staged".
+_DELIVERABLE_CARD_TYPES = frozenset({"action", "choice", "capability_gap"})
+
+
+def _staged_deliverables(trace: list[dict[str, Any]],
+                         allowed: tuple[str, ...]) -> list[str]:
+    """Deliverable labels staged in `trace`: retired per-type emitters by
+    name, plus `emit_card` calls whose card_type maps to an allowed emitter."""
+    hit: list[str] = []
+    allowed_types = {t for t in _DELIVERABLE_CARD_TYPES
+                     if f"emit_{t}_card" in allowed}
+    for c in trace:
+        name = c.get("name")
+        if name in allowed:
+            hit.append(str(name))
+        elif name == "emit_card":
+            ct = str((c.get("args") or {}).get("card_type") or "").strip().lower()
+            if ct in allowed_types:
+                hit.append(f"emit_card[{ct}]")
+    return hit
+
 
 def unservable_required_tools(
         required_facts: list[dict[str, Any]] | None) -> list[str]:
@@ -796,7 +822,7 @@ def _score_investigation_quality(
     else:
         allowed = req if isinstance(req, (list, tuple)) else _DELIVERABLE_TOOLS
         allowed = tuple(allowed)
-        hit = [c.get("name") for c in trace if c.get("name") in allowed]
+        hit = _staged_deliverables(trace, allowed)
         gates["investigation_deliverable"] = {
             "passed": bool(hit), "skipped": False,
             "staged": sorted(set(hit)), "accepted": list(allowed),
