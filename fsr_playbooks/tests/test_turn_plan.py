@@ -48,6 +48,35 @@ def test_prompt_carries_prior_constraints_and_gap_rule():
     assert "Approval tier" in p
 
 
+def test_base_prompt_is_the_unlayered_intent_prompt():
+    # A host that stacks its own prompt layers (grounding, personas) starts
+    # from base_prompt; prompt = base_prompt + prior/constraints layers.
+    from fsr_playbooks.llm.intents import load_intent_prompt
+    for intent in ("triage", "build"):
+        plan = plan_turn(intent)
+        assert plan.base_prompt == load_intent_prompt(intent), intent
+        assert plan.prompt.startswith(plan.base_prompt), intent
+        assert len(plan.prompt) > len(plan.base_prompt), intent
+
+
+def test_registered_intent_prompt_loader_wins():
+    # A host that owns an intent's prompt (the connector owns triage)
+    # registers a loader; plan_turn then serves the host's text as the base.
+    from fsr_playbooks.llm import intents
+
+    intents.register_intent_prompt("triage", lambda: "HOST TRIAGE PROMPT")
+    try:
+        assert intents.load_intent_prompt("triage") == "HOST TRIAGE PROMPT"
+        plan = plan_turn("triage")
+        assert plan.base_prompt == "HOST TRIAGE PROMPT"
+        assert plan.prompt.startswith("HOST TRIAGE PROMPT")
+        # A failing/empty loader falls back to the vendored copy.
+        intents.register_intent_prompt("triage", lambda: "")
+        assert intents.load_intent_prompt("triage") not in ("", None)
+    finally:
+        intents._PROMPT_LOADERS.pop("triage", None)
+
+
 def test_disposition_prompt_states_focus_per_prior():
     """Phase 3: with the full surface advertised, focus comes from the stated
     disposition, not tool absence. Each prior names its posture, what the

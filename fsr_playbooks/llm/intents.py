@@ -244,10 +244,34 @@ def resolve_intent(value: Any) -> str:
     return value if value in INTENTS else DEFAULT_INTENT
 
 
+# Host-registered prompt loaders, by intent. A host that OWNS an intent's
+# prompt (the connector owns triage via fsr_soc_triage's fragment assembly)
+# registers its loader here so plan_turn/load_intent_prompt serve the host's
+# authoritative text instead of this package's vendored copy -- the same
+# host-registration pattern as register_triage_tools for the tool registry.
+# A registered loader is consulted every call (loaders cache internally);
+# any loader error falls back to the vendored copy, never fails the caller.
+_PROMPT_LOADERS: dict[str, Any] = {}
+
+
+def register_intent_prompt(intent: str, loader: Any) -> None:
+    """Register ``loader() -> str`` as the authoritative prompt source for
+    ``intent``. An empty/failing loader falls back to the vendored copy."""
+    _PROMPT_LOADERS[resolve_intent(intent)] = loader
+
+
 def load_intent_prompt(intent: str) -> str:
     """Load the intent's system prompt from the vendored markdown, cached.
     Falls back to an inline string if the file is missing/empty."""
     intent = resolve_intent(intent)
+    loader = _PROMPT_LOADERS.get(intent)
+    if loader is not None:
+        try:
+            loaded = str(loader() or "").strip()
+            if loaded:
+                return loaded
+        except Exception:  # noqa: BLE001 -- fall back to the vendored copy
+            pass
     if intent in _PROMPT_CACHE:
         return _PROMPT_CACHE[intent]
     fallback = _FALLBACK_TRIAGE_PROMPT if intent == "triage" else _FALLBACK_BUILD_PROMPT

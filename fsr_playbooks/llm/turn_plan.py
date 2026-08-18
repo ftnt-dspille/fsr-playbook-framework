@@ -115,6 +115,11 @@ class TurnPlan:
     intent: str
     prompt: str
     tools: list[dict[str, Any]] = field(default_factory=list)
+    # The intent prompt alone, before the context-prior/constraints layers. A
+    # host that assembles its own prompt stack (grounding, personas, house
+    # rules) starts from this and appends the layered blocks itself -- so the
+    # plan stays the single source of the base text without dictating order.
+    base_prompt: str = ""
     tier_policy: dict[str, int] = field(default_factory=dict)
     budget: TurnBudget = field(default_factory=TurnBudget)
     context: TurnContext = field(default_factory=TurnContext)
@@ -237,14 +242,15 @@ def plan_turn(
     tools = anthropic_tools()  # the FULL consolidated surface -- no slicing
     tier_policy = {t["name"]: TOOL_TIERS.get(t["name"], 0) for t in tools}
 
-    prompt = load_intent_prompt(intent)
+    base_prompt = load_intent_prompt(intent)
+    prompt = base_prompt
     prompt += _context_prior(intent, ctx)
     prompt += _constraints(budget)
     if message is not None:
         prompt += gate_directive(classify_message(message), ctx.scenario_title)
 
     return TurnPlan(
-        intent=intent, prompt=prompt, tools=tools,
+        intent=intent, prompt=prompt, tools=tools, base_prompt=base_prompt,
         tier_policy=tier_policy, budget=budget, context=ctx,
     )
 
