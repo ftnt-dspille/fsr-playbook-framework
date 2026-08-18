@@ -986,6 +986,8 @@ _CARD_SYNONYMS: dict[str, dict[str, tuple[str, ...]]] = {
     "action": {
         "args": ("params", "parameters", "arguments"),
         "summary": ("title", "description", "summary_text"),
+        # the model reaches for its run_op vocabulary here (live, 2026-08-18)
+        "operation": ("op", "op_name", "operation_name"),
     },
     "choice": {
         "prompt": ("question", "title", "text"),
@@ -1101,6 +1103,13 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     ignored = sorted(k for k in payload if k not in params)
     if ignored:
         payload = {k: v for k, v in payload.items() if k in params}
+    # A card id is bookkeeping, not content -- a payload that is otherwise
+    # complete must not bounce for lacking one (live: an action card with
+    # every real field right was refused twice before the model thought to
+    # invent an id).
+    if "id" in params and not payload.get("id"):
+        import uuid  # noqa: PLC0415
+        payload["id"] = uuid.uuid4().hex[:16]
     try:
         out = fn(**payload)
     except TypeError:

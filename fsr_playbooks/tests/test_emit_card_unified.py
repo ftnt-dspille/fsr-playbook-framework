@@ -201,3 +201,33 @@ def test_a_genuinely_unusable_payload_still_refuses():
     from fsr_playbooks.mcp_server.tools_emit import emit_card
     r = emit_card("action", {"title": "no connector, no operation"})
     assert r["ok"] is False
+
+
+def test_the_run_op_dialect_action_payload_is_accepted():
+    """The exact first-attempt payload a live approve turn sent (2026-08-18):
+    run_op vocabulary (`op`/`params`/`title`), extra `step_name`, and no id.
+    It was refused twice before the model converged; every attempt carried a
+    complete, renderable card."""
+    r = emit_card("action", {
+        "connector": "fortigate-firewall", "op": "block_ip_new",
+        "params": {"method": "Quarantine Based", "ip_addresses": "198.51.100.7",
+                   "ip_type": "IPv4", "time_to_live": "Never", "duration": 0,
+                   "ip_block_policy": "", "ip_group_name": ""},
+        "step_name": "Block Malicious IP", "title": "Block IP Address"})
+    assert r["ok"] is True, r
+    card = r["card"]
+    assert card["operation"] == "block_ip_new"
+    assert card["args"]["ip_addresses"] == "198.51.100.7"
+    assert card["summary"] == "Block IP Address"
+    assert "step_name" in r.get("ignored_fields", [])
+
+
+def test_a_missing_card_id_is_generated_not_refused():
+    r = emit_card("action", {
+        "connector": "fortigate-firewall", "operation": "block_ip_new",
+        "args": {"method": "Quarantine Based", "ip_addresses": "198.51.100.7",
+                 "ip_type": "IPv4", "time_to_live": "Never", "duration": 0,
+                 "ip_block_policy": "", "ip_group_name": ""},
+        "summary": "Block IP"})
+    assert r["ok"] is True, r
+    assert r["card"]["id"]
