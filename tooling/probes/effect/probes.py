@@ -275,3 +275,9 @@ ALL = {
     "A2": probe_a2_enhancement_offer,
     "A3": probe_a3_delete_step,
 }
+
+# Phase 2 group T (triage write-through, #135) lives in triage.py; imported
+# at the bottom so its `from probes.effect.probes import Result` works.
+from probes.effect.triage import TRIAGE_PROBES  # noqa: E402
+
+ALL.update(TRIAGE_PROBES)
