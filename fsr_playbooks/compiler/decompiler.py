@@ -845,8 +845,8 @@ def _decompile_step(s, pb_name: str | None = None,
         # Phase B1: reverse the friendly `filters:` form. The forward
         # normalizer builds the wire `query: {sort, limit, logic, filters:
         # [{type, field, value, operator, _operator}]}` envelope from flat
-        # `filters:` / `limit:` / `logic:`. Reverse it so a pulled step
-        # surfaces the friendly form, not the raw wire envelope.
+        # `filters:` / `limit:` / `logic:` / `sort:`. Reverse it so a pulled
+        # step surfaces the friendly form, not the raw wire envelope.
         q = args.pop("query", None)
         if isinstance(q, dict):
             filters_out = []
@@ -859,7 +859,15 @@ def _decompile_step(s, pb_name: str | None = None,
                 wf["value"] = f.get("value")
                 op = f.get("operator", "eq")
                 wf["operator"] = op
-                # carry through any extra keys (e.g. __selectFields)
+                # Preserve the filter `type` -- "object" vs "primitive" is
+                # semantically meaningful: "object" means the value is a
+                # reference/IRI, "primitive" means it's a scalar. Dropping
+                # it causes the normalizer to default to "primitive" on
+                # recompile, changing how FSR evaluates reference filters.
+                ftype = f.get("type")
+                if ftype and ftype != "primitive":
+                    wf["type"] = ftype
+                # carry through any extra keys (e.g. _value, __selectFields)
                 for k, v in f.items():
                     if k not in ("type", "field", "value", "operator",
                                  "_operator"):
@@ -871,6 +879,14 @@ def _decompile_step(s, pb_name: str | None = None,
                 # Empty filters -- keep the wire `query:` envelope so the
                 # validator's required-`query` check passes on recompile.
                 args["query"] = q
+            # Preserve sort -- the normalizer builds wire sort from the
+            # friendly `sort:` list. Without this, any sort clause is lost
+            # (defaults to [] on recompile). The original JSON carries
+            # `_fieldName`/`_fieldTitle` on each sort entry; preserve them
+            # so the designer renders the sort field correctly.
+            sort_in = q.get("sort")
+            if isinstance(sort_in, list) and sort_in:
+                args["sort"] = sort_in
             limit = q.get("limit")
             if limit is not None and limit != 30:
                 args["limit"] = limit

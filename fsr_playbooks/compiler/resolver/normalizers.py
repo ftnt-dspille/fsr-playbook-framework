@@ -846,15 +846,15 @@ class NormalizerMixin:
                 if not isinstance(f, dict):
                     wire_filters.append(f)
                     continue
-                wf: dict[str, Any] = {"type": "primitive"}
+                wf: dict[str, Any] = {"type": f.get("type", "primitive")}
                 wf["field"] = f.get("field")
                 wf["value"] = f.get("value")
                 op = f.get("operator", "eq")
                 wf["operator"] = op
                 wf["_operator"] = op
-                # Carry through any extra keys the author set (e.g. __selectFields)
+                # Carry through any extra keys the author set (e.g. _value)
                 for k, v in f.items():
-                    if k not in ("field", "value", "operator"):
+                    if k not in ("type", "field", "value", "operator"):
                         wf.setdefault(k, v)
                 wire_filters.append(wf)
             a["query"] = {
