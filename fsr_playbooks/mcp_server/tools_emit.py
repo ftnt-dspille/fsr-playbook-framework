@@ -1086,6 +1086,7 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         return _err("bad_payload", "payload must be an object holding the "
                                    "card's fields")
     import inspect  # noqa: PLC0415
+
     import fsr_playbooks.mcp_server as _pkg  # noqa: PLC0415 - registration cycle
     fn = getattr(_pkg, fn_name)
 
