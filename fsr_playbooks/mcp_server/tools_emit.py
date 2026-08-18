@@ -967,6 +967,88 @@ def emit_manual_input(
 # emit_decision_step is NOT a card (it renders a YAML step) and stays apart.
 # ---------------------------------------------------------------------------
 
+# The vocabulary the model reaches for vs the one the card functions declare.
+# Every card emission in the 2026-08-18 investigation sweep was REFUSED on its
+# first attempt and self-repaired on the second -- 4 fixtures out of 4, three
+# `bad_payload` and one `bad_option`. The model does not send garbage; it sends
+# the same card described with the words the tool docs use everywhere else
+# (`params` is what run_op takes, `title`/`description` is how every other
+# surface names a heading, `{id,label,detail}` is the shape of an option
+# elsewhere). Each refusal costs a full LLM round-trip and a tool call against
+# the turn budget, and the repaired call drops the extra keys anyway.
+#
+# So accept the shape the model emits -- the same convention `dispatch` already
+# applies to run_op's stringified `params` and emit_card's top-level fields.
+# Only ever fill a canonical key that is ABSENT: a payload that already speaks
+# the declared vocabulary is passed through untouched.
+_CARD_SYNONYMS: dict[str, dict[str, tuple[str, ...]]] = {
+    # canonical field -> the aliases seen in real traces, in priority order
+    "action": {
+        "args": ("params", "parameters", "arguments"),
+        "summary": ("title", "description", "summary_text"),
+    },
+    "choice": {
+        "prompt": ("question", "title", "text"),
+    },
+    "capability_gap": {
+        "missing": ("gap", "capability"),
+    },
+}
+
+# Per-option aliases for a choice card's `options` entries.
+_OPTION_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "value": ("id", "key"),
+    "label": ("text", "name", "title"),
+    "hint": ("detail", "description"),
+}
+
+
+def _normalize_card_payload(kt: str, payload: dict[str, Any]) -> tuple[
+        dict[str, Any], list[str]]:
+    """Rewrite a card payload into the declared vocabulary.
+
+    Returns `(payload, dropped)` where `dropped` names the keys the card
+    function has no parameter for. Dropping is not silent: the caller reports
+    them on the result, because the alternative today is a hard refusal whose
+    self-repair drops exactly the same keys one round-trip later.
+    """
+    out = dict(payload)
+    for canon, aliases in _CARD_SYNONYMS.get(kt, {}).items():
+        if out.get(canon) not in (None, "", {}, []):
+            continue
+        for alias in aliases:
+            if out.get(alias) not in (None, "", {}, []):
+                out[canon] = out.pop(alias)
+                break
+
+    if kt == "choice" and isinstance(out.get("options"), list):
+        opts = []
+        for opt in out["options"]:
+            if not isinstance(opt, dict):
+                opts.append(opt)
+                continue
+            o = dict(opt)
+            for canon, aliases in _OPTION_SYNONYMS.items():
+                if o.get(canon):
+                    continue
+                for alias in aliases:
+                    if o.get(alias):
+                        o[canon] = o[alias] if canon == "label" else o.pop(alias)
+                        break
+            opts.append(o)
+        out["options"] = opts
+
+    # An action card with no `editable_fields` is the commonest omission. The
+    # analyst must be able to correct the args they are approving (a wrong IP
+    # in a block is the whole reason the card exists), so default to the args
+    # that were sent rather than to nothing.
+    if kt == "action" and "editable_fields" not in out:
+        if isinstance(out.get("args"), dict):
+            out["editable_fields"] = list(out["args"])
+
+    return out, []
+
+
 CARD_TYPES: dict[str, str] = {
     "choice": "emit_choice_card",
     "action": "emit_action_card",
@@ -1003,16 +1085,29 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return _err("bad_payload", "payload must be an object holding the "
                                    "card's fields")
+    import inspect  # noqa: PLC0415
     import fsr_playbooks.mcp_server as _pkg  # noqa: PLC0415 - registration cycle
     fn = getattr(_pkg, fn_name)
+
+    # Speak the model's dialect before validating (see _CARD_SYNONYMS).
+    payload, _ = _normalize_card_payload(kt, payload)
+
+    # Keys the card function has no parameter for would TypeError below. The
+    # refusal is honest but expensive -- the model's repair drops these keys
+    # anyway -- so drop them here and SAY SO on the result rather than
+    # spending a round-trip to arrive at the same card.
+    params = list(inspect.signature(fn).parameters)
+    ignored = sorted(k for k in payload if k not in params)
+    if ignored:
+        payload = {k: v for k, v in payload.items() if k in params}
     try:
         out = fn(**payload)
     except TypeError:
-        import inspect  # noqa: PLC0415
-        params = list(inspect.signature(fn).parameters)
         return _err("bad_payload",
                     f"payload does not match card_type {kt!r}",
                     suggestions=[f"{fn_name} takes: {params}"])
     if isinstance(out, dict):
         out.setdefault("card_type", kt)
+        if ignored and out.get("ok"):
+            out["ignored_fields"] = ignored
     return out
