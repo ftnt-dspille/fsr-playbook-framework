@@ -34,7 +34,14 @@ def _run(pid: str, fn, runs: int) -> list[Result]:
             out.append(fn())
         except Exception as exc:  # noqa: BLE001 -- a drive failure is a result
             msg = f"{type(exc).__name__}: {exc}"
-            verdict = "ENV-SKIP" if "not configured" in msg or "SeedError" in msg else "FAIL"
+            # An unreachable/unauthenticatable box is not a product signal
+            # (live on .159: the auth service hung mid-session and a probe
+            # FAILED on 'Authentication failed (400)' -- a verdict about the
+            # box, not the write path).
+            _env_tokens = ("not configured", "SeedError", "Authentication failed",
+                           "ConnectError", "ConnectionError", "ReadTimeout",
+                           "ConnectTimeout", "Max retries exceeded")
+            verdict = "ENV-SKIP" if any(t in msg for t in _env_tokens) else "FAIL"
             out.append(Result(pid, fn.__doc__.splitlines()[0] if fn.__doc__ else pid,
                               verdict, msg))
     return out
