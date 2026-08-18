@@ -212,6 +212,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
         playbooks = [
             {
                 "name": pb.name,
+                "uuid": pb.uuid,
                 "description": pb.description or None,
                 "tag": pb.tag or None,
                 "is_active": pb.is_active,
@@ -221,6 +222,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
                 "annotations": [
                     {
                         "id": a.id,
+                        "uuid": a.uuid,
                         "kind": a.kind if a.kind != "note" else None,
                         "title": a.title if a.title != "Note" else None,
                         "body": a.body or None,
@@ -243,6 +245,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
 
     out = {
         "collection": ir.name,
+        "uuid": ir.uuid,
         "description": ir.description,
         "visible": ir.visible,
         "playbooks": playbooks,
@@ -481,6 +484,22 @@ def _decompile_step(s, pb_name: str | None = None,
                       for m in mods}
         if dc and dc != default_dc:
             friendly["displayConditions"] = dc
+        # fieldbasedtrigger: the trigger filter configuration. Always preserve
+        # when present -- the normalizer does NOT re-derive it from friendly
+        # inputs; dropping it would lose the trigger condition entirely.
+        fbt = args.get("fieldbasedtrigger")
+        if fbt:
+            friendly["fieldbasedtrigger"] = fbt
+        # Trigger infrastructure flags: preserve non-default values.
+        # Defaults: __triggerLimit=True, triggerOnSource=True,
+        # triggerOnReplicate=False. The normalizer setdefaults them, so
+        # only emit when they differ from defaults.
+        if args.get("__triggerLimit") is False:
+            friendly["__triggerLimit"] = False
+        if args.get("triggerOnSource") is False:
+            friendly["triggerOnSource"] = False
+        if args.get("triggerOnReplicate") is True:
+            friendly["triggerOnReplicate"] = True
         if friendly:
             out.update(friendly)
     elif s.type == "decision" and isinstance(args, dict):
@@ -887,6 +906,13 @@ def _decompile_step(s, pb_name: str | None = None,
         out["unlabeled_next"] = list(s.unlabeled_next)
     if s.comment:
         out["comment"] = s.comment
+    # Round-trip: emit original UUID and canvas position when present.
+    if s.uuid:
+        out["uuid"] = s.uuid
+    if s.top is not None:
+        out["top"] = s.top
+    if s.left is not None:
+        out["left"] = s.left
     return out
 
 
@@ -954,6 +980,8 @@ def decompile(fsr_json: dict[str, Any], db_path: Path) -> Collection:
         description=coll.get("description", "") or "",
         visible=bool(coll.get("visible", True)),
         playbooks=playbooks,
+        # Round-trip: preserve original collection UUID.
+        uuid=coll.get("uuid") or None,
     )
 
 
@@ -1094,6 +1122,10 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
             ),
             step_type_name=canonical_by_uuid.get(u),
             for_each=for_each,
+            # Round-trip: preserve original UUID and canvas position.
+            uuid=u or None,
+            top=s.get("top"),
+            left=s.get("left"),
         ))
 
     trigger_uuid = _to_uuid(wf.get("triggerStep"))
@@ -1198,6 +1230,8 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
             collapsed=bool(g.get("isCollapsed", False)),
             hide_in_logs=bool(g.get("hideInLogs", gtype == "note")),
             contains=contains,
+            # Round-trip: preserve original group UUID.
+            uuid=guuid or None,
         ))
 
     # FSR is inconsistent here: parameters is either `{}` (empty) or a
@@ -1250,4 +1284,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
         parameters=params,
         steps=steps_out,
         annotations=annotations,
+        # Round-trip: preserve original workflow UUID so cross-collection
+        # references (workflowReference IRIs) survive the round-trip.
+        uuid=wf.get("uuid") or None,
     )

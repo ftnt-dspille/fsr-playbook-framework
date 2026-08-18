@@ -42,6 +42,7 @@ _PARAM_TYPE_VOCAB = {
 _STEP_IR_KEYS = frozenset({
     "id", "type", "name", "next", "branches", "unlabeled_next",
     "comment", "description", "for_each",
+    "uuid", "top", "left",  # round-trip preservation
 })
 _STEP_SUGAR_KEYS = frozenset({
     "post_comment", "set", "retry", "on_remote", "with",
@@ -235,6 +236,9 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 path=f"{pb_path}.name",
             ))
             continue
+
+        # Round-trip: preserve original appliance UUID when present.
+        pb_uuid = pb_raw.get("uuid")
 
         steps_raw = pb_raw.get("steps") or []
         if not isinstance(steps_raw, list):
@@ -826,6 +830,12 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 description=(s_raw["description"]
                             if isinstance(s_raw.get("description"), str) else ""),
                 for_each=for_each,
+                # Round-trip: preserve original UUID and position from
+                # decompiled YAML. None for hand-authored YAML (emitter
+                # generates deterministic uuid5 and auto-layouts).
+                uuid=s_raw.get("uuid") if isinstance(s_raw.get("uuid"), str) else None,
+                top=s_raw.get("top") if isinstance(s_raw.get("top"), (int, str)) else None,
+                left=s_raw.get("left") if isinstance(s_raw.get("left"), (int, str)) else None,
             ))
 
         # Resolve reference values against the playbook's step roster.
@@ -997,6 +1007,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 collapsed=bool(a_raw.get("collapsed", False)),
                 hide_in_logs=bool(a_raw.get("hide_in_logs", kind == "note")),
                 contains=[str(c) for c in contains],
+                uuid=a_raw.get("uuid") if isinstance(a_raw.get("uuid"), str) else None,
             ))
 
         # Owner teams + private visibility. `owners` accepts team NAMES (the
@@ -1050,6 +1061,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             parameter_types=param_types,
             steps=steps,
             annotations=annotations,
+            uuid=pb_uuid,
         ))
 
     if any(e.severity != "warning" for e in errors):
@@ -1061,4 +1073,5 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
         visible=bool(doc.get("visible", True)),
         playbooks=playbooks,
         target_mode=target_mode,
+        uuid=doc.get("uuid") if isinstance(doc.get("uuid"), str) else None,
     ), errors

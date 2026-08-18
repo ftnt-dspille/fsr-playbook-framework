@@ -50,6 +50,15 @@ class Step:
     # batch_size, break_loop. None means no looping.
     for_each: dict | None = None
 
+    # --- Round-trip preservation (populated by decompiler, None for hand-authored) ---
+    # Original appliance UUID. When present, emitter uses this instead of
+    # generating a deterministic uuid5. Preserves cross-collection references.
+    uuid: str | None = None
+    # Original canvas position. When present, emitter uses these instead of
+    # auto-layout. Preserves visual arrangement from the FSR UI.
+    top: int | str | None = None
+    left: int | str | None = None
+
     # Filled by the resolver:
     step_type_uuid: str | None = None
     step_type_name: str | None = None  # canonical FSR name e.g. 'Connectors'
@@ -133,6 +142,11 @@ class Playbook:
     steps: list[Step] = field(default_factory=list)
     annotations: list[Annotation] = field(default_factory=list)
 
+    # --- Round-trip preservation ---
+    # Original appliance UUID. When present, emitter uses this instead of
+    # generating a deterministic uuid5. Preserves cross-collection references.
+    uuid: str | None = None
+
 
 @dataclass
 class Collection:
@@ -149,3 +163,8 @@ class Collection:
     #                   touches ONLY the listed playbooks inside the
     #                   target collection; siblings are preserved.
     target_mode: str = "wrap"
+
+    # --- Round-trip preservation ---
+    # Original appliance UUID. When present, emitter uses this instead of
+    # generating a deterministic uuid5. Preserves cross-collection references.
+    uuid: str | None = None

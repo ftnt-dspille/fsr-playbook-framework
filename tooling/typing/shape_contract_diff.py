@@ -74,6 +74,7 @@ ACCEPTED_PHANTOM: set[str] = {
     "collectionType",  # wire key written by record_crud.py (not in STAGES);
     # decompiler reads it on pull to reverse → friendly `module:`.
     "connector_name",
+    "fieldbasedtrigger",  # trigger filter config read by decompiler (preserved on pull)
     "fieldOperation",  # wire-internal default read by decompiler (stripped on pull)
     "from_str",  # stale legacy smtp field read by decompiler (stripped on pull)
     "inputs",

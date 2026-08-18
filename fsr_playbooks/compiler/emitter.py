@@ -181,13 +181,15 @@ def _compute_layout(steps: list, start_id: str | None) -> dict[str, tuple[int, i
 
 
 def emit(collection: Collection) -> dict[str, Any]:
-    coll_uuid = _u("collection", collection.name)
+    coll_uuid = collection.uuid or _u("collection", collection.name)
     workflows_out: list[dict[str, Any]] = []
 
     # All playbook UUIDs upfront so workflow_reference steps can resolve
     # local `target: <name>` references to /api/3/workflows/<uuid> IRIs.
+    # Prefer IR-carried UUID (round-trip) over deterministic uuid5.
     wf_uuid_by_name = {
-        pb.name: _u("workflow", collection.name, pb.name) for pb in collection.playbooks
+        pb.name: (pb.uuid or _u("workflow", collection.name, pb.name))
+        for pb in collection.playbooks
     }
 
     for pb in collection.playbooks:
@@ -196,8 +198,10 @@ def emit(collection: Collection) -> dict[str, Any]:
         routes_out: list[dict[str, Any]] = []
 
         # Pass 1: assign UUIDs, compute step layout
+        # Prefer IR-carried UUID (round-trip) over deterministic uuid5.
         step_uuids: dict[str, str] = {
-            s.id: _u("step", collection.name, pb.name, s.id) for s in pb.steps
+            s.id: (s.uuid or _u("step", collection.name, pb.name, s.id))
+            for s in pb.steps
         }
         step_layout: dict[str, tuple[int, int]] = {}  # id -> (top, left)
 
@@ -242,7 +246,7 @@ def emit(collection: Collection) -> dict[str, Any]:
         for ann in annotations:
             if ann.kind != "block":
                 continue
-            ann_uuid = _u("group", collection.name, pb.name, ann.id)
+            ann_uuid = ann.uuid or _u("group", collection.name, pb.name, ann.id)
             ann.uuid = ann_uuid
             for sid in ann.contains:
                 step_group[sid] = ann_uuid
@@ -262,7 +266,14 @@ def emit(collection: Collection) -> dict[str, Any]:
         trigger_step_iri = None
         for idx, s in enumerate(pb.steps):
             su = step_uuids[s.id]
-            top, left = step_layout[s.id]
+            # Prefer IR-carried canvas position (round-trip) over auto-layout.
+            if s.top is not None and s.left is not None:
+                try:
+                    top, left = int(s.top), int(s.left)
+                except (TypeError, ValueError):
+                    top, left = step_layout[s.id]
+            else:
+                top, left = step_layout[s.id]
             # workflow_reference: rewrite local `target: <name>` to IRI;
             # drop the friendly key from emitted JSON.
             if s.type == "workflow_reference" and isinstance(s.arguments, dict):
