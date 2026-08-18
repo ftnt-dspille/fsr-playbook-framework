@@ -129,9 +129,15 @@ def probe_a5_snippet_apply() -> Result:
                           "the probe cannot tell a write from a miss", str(before))
 
         session = drive.new_session("a5")
+        # Name the affordance: this probe tests apply_patch's snippet splice,
+        # not the model's card routing (that is #132's territory). Left to its
+        # own preference the model may stage the same edit as an
+        # enhancement_offer -- equally legitimate, but it resumes through
+        # update_playbook and never reaches the splice under test.
         res = drive.turn(
             f"In the step 'Block IP', change ip_addresses to {NEW_IP}. "
-            "Change nothing else.",
+            "Change nothing else. Stage it as a one-click patch proposal "
+            "(patch_proposal card) so I can review the exact diff.",
             session=session, entity=entity)
         tools = drive.tool_names(res)
         card = drive.first_card(res, "patch_proposal")
