@@ -48,6 +48,19 @@ def test_prompt_carries_prior_constraints_and_gap_rule():
     assert "Approval tier" in p
 
 
+def test_disposition_prompt_states_focus_per_prior():
+    """Phase 3: with the full surface advertised, focus comes from the stated
+    disposition, not tool absence. Each prior names its posture, what the
+    out-of-posture surface is FOR, and that approval gating is unchanged."""
+    build = plan_turn("build").prompt
+    assert "Disposition: you are authoring a playbook" in build
+    assert "GROUND your steps" in build
+    assert "approval card" in build
+    triage = plan_turn("triage").prompt
+    assert "Disposition: you are working a live record" in triage
+    assert "OFFERING to bottle" in triage
+
+
 def test_intent_is_prior_not_slice():
     # build prior still advertises the triage frontier and vice versa.
     # The card family is reached through the emit_card union (the per-card

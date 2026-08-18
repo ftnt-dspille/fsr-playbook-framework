@@ -147,6 +147,35 @@ class TurnPlan:
         return None
 
 
+# Phase 3: the disposition prompt. Focus used to come from tool ABSENCE (the
+# Track C5 build/triage wall dropped the other posture's tools from the
+# advertised slice); with the full surface advertised, focus must come from
+# stated discipline instead. Each prior gets a paragraph saying what the
+# out-of-posture surface is FOR -- grounding vs. bottling -- and what counts
+# as drift. Safety never lived here: live state-changing calls still hit the
+# tier-3 approval gate at dispatch regardless of what the prose says.
+_DISPOSITIONS = {
+    "build": (
+        "Disposition: you are authoring a playbook. The live investigation "
+        "surface (record reads, hunts, run_op, action cards) is available to "
+        "GROUND your steps -- confirm a field exists, sample a real record, "
+        "sanity-check an operation's output shape -- not to open an "
+        "investigation. Do not stage a live containment action-card from the "
+        "editor unless the analyst explicitly asks for a live action now; "
+        "otherwise propose it as a playbook step. Any live state-changing "
+        "call still routes through the approval card."
+    ),
+    "triage": (
+        "Disposition: you are working a live record. The authoring surface "
+        "(compile, validate, push, enhance) is available for when the "
+        "analyst asks to bottle this investigation or edit a playbook. When "
+        "the investigation reveals a repeatable pattern, OFFERING to bottle "
+        "it is welcome; silently drifting into building one instead of "
+        "finishing the investigation is not."
+    ),
+}
+
+
 def _context_prior(intent: str, ctx: TurnContext) -> str:
     facts = []
     if ctx.page:
@@ -161,13 +190,17 @@ def _context_prior(intent: str, ctx: TurnContext) -> str:
             "(build_playbook_from_trace can bottle it directly)"
         )
     stated = "; ".join(facts) if facts else "no page state was provided"
-    return (
+    block = (
         "\n\n## Turn context (a prior, not a cage)\n"
         f"Working prior: **{intent}**. Page state: {stated}. The full tool "
         "surface is available to you regardless of this prior -- if the "
         "analyst's request crosses into other work (triage from the editor, "
         "authoring from an alert), follow the request, not the prior."
     )
+    disposition = _DISPOSITIONS.get(intent)
+    if disposition:
+        block += "\n" + disposition
+    return block
 
 
 def _constraints(budget: TurnBudget) -> str:
