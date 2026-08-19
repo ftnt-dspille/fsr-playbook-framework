@@ -12,7 +12,7 @@
     }
   ],
   "investigation_quality": {
-    "tool_budget_max": 8,
+    "tool_budget_max": 10,
     "max_param_retries": 2,
     "require_deliverable": false
   },
@@ -33,5 +33,5 @@
       "label": "AbuseIPDB lookup -- no external indicator on a disk-latency ITOps alert"
     }
   ],
-  "notes": "Restraint test: an ITOps disk-latency alert has no IPs/external indicators. A good triage pulls the record and correlates on the host; it must NOT gratuitously fire threat-intel enrichment. Pinned to a real live alert UUID. BUDGET (#128, calibrated 2026-08-14, KEPT at 8): the prompt demands 5 -- record pull, one host-correlation search, read the sibling alert, one SIEM/FAZ look, one deliverable -- and this is the RESTRAINT fixture, so the budget IS the assertion. Measured offline at 6 / 13 / 13 calls (runs 20260813T211826Z, 20260814T111633Z, 20260814T112533Z): it CAN be done in 6, which is the whole argument for keeping 8. The two 13s are the same behaviour both times -- seven calls of find_connector/find_operation hunting for an op to post a comment on the record. Nearly twice the budget on the fixture with the least to investigate is the finding, not the threshold."
+  "notes": "Restraint test: an ITOps disk-latency alert has no IPs/external indicators. A good triage pulls the record and correlates on the host; it must NOT gratuitously fire threat-intel enrichment. Pinned to a real live alert UUID. BUDGET (#128, calibrated 2026-08-14, KEPT at 8): the prompt demands 5 -- record pull, one host-correlation search, read the sibling alert, one SIEM/FAZ look, one deliverable -- and this is the RESTRAINT fixture, so the budget IS the assertion. Measured offline at 6 / 13 / 13 calls (runs 20260813T211826Z, 20260814T111633Z, 20260814T112533Z): it CAN be done in 6, which is the whole argument for keeping 8. The two 13s are the same behaviour both times -- seven calls of find_connector/find_operation hunting for an op to post a comment on the record. Nearly twice the budget on the fixture with the least to investigate is the finding, not the threshold. BUDGET (#128 residue, re-baselined 2026-08-19, 8 -> 10): run calibrate_20260819T122656Z (offline, soc_invest_surface, clean store, repeat 3, post-71f8925 dispatch levers) shows the misbehaviour the old arithmetic guarded against is GONE -- no both-IP fan-out, no TI on the restraint fixture, no_spiral/param_flail/blind_retry 3/3 -- and the residual spend is routing scaffolding the old count never charged for: one list_configured_connectors availability check plus the find/get_op_schema calls that ROUTE each demanded run_op (2-4/run in every trace). 10 = the demanded work + that scaffolding + <=2 pivot headroom, so a 3-call fan-out regression still trips. Behaviour regressions are separately gated; do not widen further to absorb one."
 }

@@ -24,7 +24,7 @@
     }
   ],
   "investigation_quality": {
-    "tool_budget_max": 12,
+    "tool_budget_max": 14,
     "max_param_retries": 2,
     "require_deliverable": true
   },
@@ -54,5 +54,5 @@
       "label": "AbuseIPDB on internal RFC1918 source 192.168.77.49"
     }
   ],
-  "notes": "C2-style egress: internal 192.168.77.49 -> external public 108.17.204.5. A good investigation pulls the record, enriches the EXTERNAL dest, and correlates; it must NOT waste external TI on the internal RFC1918 source. Pinned read-only to a real live alert UUID. BUDGET (#128, calibrated 2026-08-14, KEPT at 12): what the prompt demands is 8 calls -- 1 record pull, 2 correlation searches (alerts + incidents on the external IP), 3 TI enrichments ('the threat-intel connectors', plural), 1 containment lookup, 1 emit_action_card -- so 12 leaves four spare pivots. Measured offline at 22 / 16 / 17 calls across runs 20260813T211826Z, 20260814T111633Z and 20260814T112533Z, i.e. over on every run and by more than the harness waste that was removed between them. The verdict is BEHAVIOUR, not budget: the agent searches BOTH modules for BOTH IPs when only the external one is worth correlating, and enriches with four TI sources where the fixture's own forbidden_facts already say the internal IP is off limits. Do not widen this number to make the row green."
+  "notes": "C2-style egress: internal 192.168.77.49 -> external public 108.17.204.5. A good investigation pulls the record, enriches the EXTERNAL dest, and correlates; it must NOT waste external TI on the internal RFC1918 source. Pinned read-only to a real live alert UUID. BUDGET (#128, calibrated 2026-08-14, KEPT at 12): what the prompt demands is 8 calls -- 1 record pull, 2 correlation searches (alerts + incidents on the external IP), 3 TI enrichments ('the threat-intel connectors', plural), 1 containment lookup, 1 emit_action_card -- so 12 leaves four spare pivots. Measured offline at 22 / 16 / 17 calls across runs 20260813T211826Z, 20260814T111633Z and 20260814T112533Z, i.e. over on every run and by more than the harness waste that was removed between them. The verdict is BEHAVIOUR, not budget: the agent searches BOTH modules for BOTH IPs when only the external one is worth correlating, and enriches with four TI sources where the fixture's own forbidden_facts already say the internal IP is off limits. Do not widen this number to make the row green. BUDGET (#128 residue, re-baselined 2026-08-19, 12 -> 14): run calibrate_20260819T122656Z (offline, soc_invest_surface, clean store, repeat 3, post-71f8925 dispatch levers) shows the misbehaviour the old arithmetic guarded against is GONE -- no both-IP fan-out, no TI on the restraint fixture, no_spiral/param_flail/blind_retry 3/3 -- and the residual spend is routing scaffolding the old count never charged for: one list_configured_connectors availability check plus the find/get_op_schema calls that ROUTE each demanded run_op (2-4/run in every trace). 14 = the demanded work + that scaffolding + <=2 pivot headroom, so a 3-call fan-out regression still trips. Behaviour regressions are separately gated; do not widen further to absorb one."
 }
