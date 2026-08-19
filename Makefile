@@ -144,8 +144,8 @@ chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
 		echo "usage: make chat-drive SCENARIO=<fixture-name>  |  MSG=\"...\""; exit 2; \
 	fi
 
-chat-calibrate: ## live: capability gate over every investigation fixture (costs credits)
-	$(PY) tooling/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),)
+chat-calibrate: ## live: capability gate over every investigation fixture (costs credits). SCENARIO=<fixture> PROVIDER=frank|anthropic REPEAT=n RETRIES=n
+	$(PY) tooling/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),) $(if $(PROVIDER),--provider $(PROVIDER),) $(if $(REPEAT),--repeat $(REPEAT),) $(if $(RETRIES),--retries $(RETRIES),)
 
 enhance-live: ## live: enhance-DELIVERY gate -- drive every enhance_scenario, grade emit_enhancement_offer vs prose (SCENARIO=<name> RUNS=n CONFIG=name). Needs .env + deployed connector.
 	$(PY) tooling/evals/enhance_live.py $(if $(SCENARIO),--only $(SCENARIO),) $(if $(RUNS),--runs $(RUNS),) $(if $(CONFIG),--config $(CONFIG),)

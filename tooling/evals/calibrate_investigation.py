@@ -127,6 +127,8 @@ def _aggregate(runs: list[dict]) -> dict:
                 "error": (lost_runs[0].get("error") if lost_runs else None),
                 "spread": {"repeats": len(runs), "passes": 0, "flaky": False,
                            "lost": n_lost, "no_data": True,
+                           "retries": sum(int(r.get("retries") or 0)
+                                          for r in runs),
                            "recall": None, "calls": None, "gate_k_of_n": {},
                            "approvals_seen": [], "resumes_ok": 0,
                            "substrate_misses": [], "runs": []}}
@@ -163,6 +165,10 @@ def _aggregate(runs: list[dict]) -> dict:
         # Scored repeats only. `lost` is carried alongside so a cell reading
         # "2/2" is never mistaken for a clean 3-repeat sweep.
         "lost": n_lost,
+        # Retries spent to GET these scored repeats. A fixture that scores
+        # clean only because it was re-driven three times is not a healthy
+        # sweep, and the pass cell alone would never say so.
+        "retries": sum(int(r.get("retries") or 0) for r in runs),
         "flaky": 0 < n_pass < n,
         "recall": {"min": min(recalls), "median": med_recall, "max": max(recalls)},
         "calls": {"min": min(calls), "median": _median([float(c) for c in calls]),
@@ -260,12 +266,41 @@ def _build_provider(kind: str, model: str):
 # the request itself was invalid. Excluding that as "lost" would hide the exact
 # agent defect the harness exists to catch. A rejection is a result; only a
 # connection that never delivered one is a loss.
+# NOTE the friendly-wrapper entries. The providers do not surface the raw
+# exception: `openai_provider._friendly_error` turns an `APIConnectionError`
+# into "Could not reach the OpenAI endpoint at <url> -- check network
+# connectivity and the base URL", which contains not one word of the raw
+# `httpx.ConnectError`. Matching only the raw text classified a DEAD gateway
+# as a provider rejection and scored it 0.0 -- the exact reading the lost-run
+# work exists to prevent, still live against `--provider frank`. Caught by
+# pointing a real run at a closed port; see test_calibrate_gateway_resilience.
 _TRANSPORT_FAILURE_MARKERS = (
     "connecterror", "connect error", "all connection attempts failed",
+    "could not reach", "connection refused", "network is unreachable",
+    "name or service not known", "nodename nor servname",
     "timed out", "timeout", "readerror", "read error",
     "remoteprotocolerror", "connection reset", "temporarily unavailable",
     "502", "503", "504",
 )
+
+
+# Backoff between retries of a turn whose transport died (#142). Indexed by
+# attempt, last value repeats. Longer than a request timeout on purpose: the
+# Fortilab gateway's drops last tens of seconds, and retrying into the same
+# outage just spends the budget faster.
+_RETRY_BACKOFF_S = (10, 30)
+
+
+def contamination_exit_code(lost_total: int, allow_contaminated: bool) -> int:
+    """0 for a clean sweep, 3 for one that lost repeats to the gateway (#143).
+
+    Split out from `main` so the doctrine is testable without driving a model:
+    a sweep that lost repeats produced PARTIAL numbers, and anything reading
+    the exit code would otherwise bank them as a baseline.
+    """
+    if lost_total and not allow_contaminated:
+        return 3
+    return 0
 
 
 def _is_transport_failure(message: str) -> bool:
@@ -407,7 +442,7 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
             "stream_errors": stream_errors}
 
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default=None,
                     help="comma-separated fixture names to run (default: all "
@@ -449,6 +484,21 @@ def main() -> None:
                          "(e.g. soc_invest_surface). Without one the reads "
                          "answer empty-but-ok and the fixtures measure an "
                          "agent triaging an empty box.")
+    ap.add_argument("--retries", type=int, default=1, metavar="N",
+                    help="extra attempts for a turn whose TRANSPORT died "
+                         "(default 1 = 2 attempts total). A provider rejection "
+                         "is never retried -- the request reached the model. "
+                         "Retries are counted and reported: a gateway needing "
+                         "them every run is a finding, not noise.")
+    ap.add_argument("--allow-contaminated", action="store_true",
+                    help="exit 0 even when repeats were LOST to the gateway. "
+                         "Off by default: a contaminated sweep must not "
+                         "silently become a baseline. Use it only when you "
+                         "have read the losses and want the partial numbers.")
+    ap.add_argument("--no-preflight", action="store_true",
+                    help="skip the gateway reachability probe. The probe costs "
+                         "one free request and refuses to start a 35-minute "
+                         "sweep against an endpoint that is already down.")
     ap.add_argument("--allow-unservable", action="store_true",
                     help="run fixtures whose required_facts name tools this "
                          "process does not register (they score 0.0 by "
@@ -457,6 +507,8 @@ def main() -> None:
     args = ap.parse_args()
     if args.repeat < 1:
         raise SystemExit("--repeat must be >= 1")
+    if args.retries < 0:
+        raise SystemExit("--retries must be >= 0")
     # Order matters, twice over. get_config() reads .env and caches; offline
     # install() DELETES the FSR_* vars, so a dotenv read after the seal would
     # setdefault a live target straight back in. And the model default has to
@@ -472,6 +524,25 @@ def main() -> None:
     if not args.model:
         raise SystemExit(f"no model resolved for --provider {args.provider} "
                          "(set FRANK_MODEL in .env or pass --model)")
+    # Ask the gateway if it is there BEFORE committing 35 minutes to it. Run
+    # 20260817T020056Z spent the whole sweep and lost 4 repeats to a gateway
+    # that was already dropping. This is reachability only -- it cannot catch
+    # a MID-sweep drop, which is what --retries is for.
+    if args.provider == "frank" and not args.no_preflight:
+        from fsr_playbooks.doctor import probe_llm_gateway  # noqa: PLC0415
+        _ok, _detail = probe_llm_gateway(os.environ.get("FRANK_BASE_URL", ""),
+                                         os.environ.get("FRANK_API_KEY", ""),
+                                         args.model)
+        if not _ok:
+            raise SystemExit(
+                f"refusing to run: gateway preflight FAILED -- {_detail}\n"
+                "  Every repeat would be lost to the same outage. Fix the "
+                "gateway or pass --no-preflight to try anyway.")
+        # print, not log: this runs before `_setup_logging`, and a preflight
+        # nobody can see is a preflight nobody trusts -- the run summary must
+        # state which gateway it measured, exactly like the prompt substrate.
+        print(f"gateway preflight: {_detail}")
+
     substrate = "live"
     if args.offline:
         import os as _os
@@ -594,33 +665,78 @@ def main() -> None:
             # the misses a run CAUSED become a field, not a log-grep.
             box = _active_box()
             miss_mark = len(getattr(box, "misses", [])) if box is not None else 0
-            t0 = time.monotonic()
-            try:
-                out = asyncio.run(_run_one(t.prompt, args.model, args.provider,
-                                           approve=args.approve))
-            except Exception as exc:  # noqa: BLE001 -- bank the failure, keep going
-                log.exception("FIXTURE %s RAISED: %r", t.name, exc)
-                runs.append({"recall": 0.0, "passed": False, "calls": 0,
-                             "missing": ["<run raised>"], "forbidden_hit": [],
-                             "quality": {}, "quality_failed": [],
-                             "error": repr(exc)})
+            # A transport failure is transient far more often than not, and
+            # losing the repeat costs the whole fixture: run 20260817T020056Z
+            # lost 3 of 3 repeats of `invest_intrusion_incident` to
+            # `httpx.ConnectError` and produced no evidence either way after
+            # 35 minutes. Retry it, bounded, and COUNT the retries -- a gateway
+            # that needs three tries every time is a finding, not something to
+            # smooth away. Safe only because a lost run is already excluded
+            # rather than scored 0.0: retrying before losses were visible would
+            # have dressed a dead gateway up as a slow one.
+            out = None
+            dt = 0.0
+            n_retries = 0
+            terminal: dict | None = None
+            for attempt in range(1, args.retries + 2):
+                t0 = time.monotonic()
+                try:
+                    out = asyncio.run(_run_one(t.prompt, args.model,
+                                               args.provider,
+                                               approve=args.approve))
+                    dt = time.monotonic() - t0
+                    errs = out.get("stream_errors") or []
+                    # Only an ALL-transport set is retryable. A rejection
+                    # mixed in means the model saw the request, and re-sending
+                    # it would just buy the same refusal at twice the price.
+                    fatal = bool(errs) and all(_is_transport_failure(e) for e in errs)
+                    why = errs[0] if fatal else None
+                except Exception as exc:  # noqa: BLE001 -- bank it, keep going
+                    dt = time.monotonic() - t0
+                    out = None
+                    why = repr(exc)
+                    fatal = _is_transport_failure(why)
+                    if not fatal:
+                        log.exception("FIXTURE %s RAISED: %r", t.name, exc)
+                        terminal = {"recall": 0.0, "passed": False, "calls": 0,
+                                    "missing": ["<run raised>"],
+                                    "forbidden_hit": [], "quality": {},
+                                    "quality_failed": [], "error": why,
+                                    "retries": n_retries}
+                        break
+                if not fatal:
+                    break
+                if attempt <= args.retries:
+                    back = _RETRY_BACKOFF_S[min(attempt - 1,
+                                                len(_RETRY_BACKOFF_S) - 1)]
+                    n_retries += 1
+                    log.warning("  transport failure on attempt %s/%s (%s) "
+                                "-- retrying in %ss",
+                                attempt, args.retries + 1,
+                                (why or "")[:120], back)
+                    time.sleep(back)
+                    continue
+                # A run whose stream died never produced a verdict, so it must
+                # not BE one. Scoring it anyway yields `recall=0.0, 0 calls`,
+                # which the summary renders as the agent failing to reach its
+                # required ops -- a finding about a turn that never got a
+                # response. Mark it lost; `_aggregate` drops lost runs from the
+                # tally rather than counting them as failures.
+                log.error("  RUN LOST after %s attempt(s) -- transport error, "
+                          "NOT scored: %s", attempt, (why or "")[:160])
+                terminal = {"recall": None, "passed": False, "calls": 0,
+                            "missing": [], "forbidden_hit": [], "quality": {},
+                            "quality_failed": [], "lost": True, "error": why,
+                            "retries": n_retries}
+                break
+            if terminal is not None:
+                runs.append(terminal)
                 continue
-            dt = time.monotonic() - t0
-            # A run whose stream died never produced a verdict, so it must not
-            # BE one. Scoring it anyway yields `recall=0.0, 0 calls`, which the
-            # summary renders as the agent failing to reach its required ops --
-            # a finding about a turn that never got a response. Mark it lost;
-            # `_aggregate` drops lost runs from the tally rather than counting
-            # them as failures.
+            if n_retries:
+                log.warning("  (recovered after %s retry/retries -- the "
+                            "gateway is unhealthy even though this run scored)",
+                            n_retries)
             errs = out.get("stream_errors") or []
-            if errs and all(_is_transport_failure(e) for e in errs):
-                log.error("  RUN LOST -- %s transport error(s), NOT scored: %s",
-                          len(errs), errs[0][:160])
-                runs.append({"recall": None, "passed": False, "calls": 0,
-                             "missing": [], "forbidden_hit": [],
-                             "quality": {}, "quality_failed": [],
-                             "lost": True, "error": errs[0]})
-                continue
             if errs:
                 # Rejected, not lost. Score it -- the request reached the model
                 # and was refused, and what the agent put in the request is
@@ -643,6 +759,7 @@ def main() -> None:
             sc["substrate_misses"] = (
                 list(box.misses[miss_mark:]) if box is not None else [])
             sc["rejected"] = list(errs)
+            sc["retries"] = n_retries
             if sc["substrate_misses"]:
                 log.info("  substrate 404s (%s): %s", len(sc["substrate_misses"]),
                          "; ".join(sc["substrate_misses"][:6]))
@@ -868,6 +985,19 @@ def main() -> None:
          "delta": delta}, indent=2))
     log.info("run summary -> %s", summary_path.relative_to(REPO_ROOT))
 
+    # A contaminated sweep must not silently become a baseline. Same doctrine
+    # as tool-gate's SUBSTRATE MISMATCH: the numbers here are partial, and
+    # anything reading the exit code -- CI, a Makefile target, a shell `&&` --
+    # would otherwise treat them as a clean run. Explicit opt-out rather than
+    # leaving people to delete the check.
+    code = contamination_exit_code(lost_total, args.allow_contaminated)
+    if code:
+        log.error("EXIT 3: %s repeat(s) lost to the gateway. These numbers are "
+                  "PARTIAL -- re-run before using them as a baseline, or pass "
+                  "--allow-contaminated if you have read the losses.",
+                  lost_total)
+    return code
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
