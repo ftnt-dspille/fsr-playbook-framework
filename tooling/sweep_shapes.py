@@ -6,7 +6,7 @@ machinery, then captures shapes from each run's wf_pk. Each example both
 validates the analyzer (the run either matches expectations or surfaces a real
 failure) and strengthens `fsr_playbooks/_data/grounded_shapes.json`.
 
-Usage (source .env.205 first):
+Usage (source your .env first):
     PYTHONPATH=. python tooling/sweep_shapes.py            # all examples
     PYTHONPATH=. python tooling/sweep_shapes.py code_snippet record_create
 """
@@ -23,11 +23,13 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tooling"))
 
-from fsr_playbooks.compiler.grounded_shapes import (  # noqa: E402
-    GroundedShapeStore, shape_from_value,
-)
-from ground_shapes import _fetch_env_raw, _step_connector_op  # noqa: E402
 from e2e.runner import run_test  # noqa: E402
+from ground_shapes import _fetch_env_raw, _step_connector_op  # noqa: E402
+
+from fsr_playbooks.compiler.grounded_shapes import (  # noqa: E402
+    GroundedShapeStore,
+    shape_from_value,
+)
 
 STORE_PATH = REPO / "fsr_playbooks" / "_data" / "grounded_shapes.json"
 EXAMPLES = REPO / "examples"

@@ -210,7 +210,7 @@ tool-gate: ## which tool does the agent reach for? Run after ANY tool-descriptio
 	  $(if $(REPEAT),--repeat $(REPEAT),) \
 	  $(if $(TOOL_GATE_BASELINE),--baseline $(TOOL_GATE_BASELINE),)
 
-test-effect-probes: ## LIVE: does the affordance actually WRITE? Seeds a scratch playbook, drives the widget's exact payload, re-reads the box. ONLY=A5,A2,A3 RUNS=2 DUMP=dir FSR_ENV_FILE=.env.159
+test-effect-probes: ## LIVE: does the affordance actually WRITE? Seeds a scratch playbook, drives the widget's exact payload, re-reads the box. ONLY=A5,A2,A3 RUNS=2 DUMP=dir
 	@echo "▶ effect probes -- every verdict is a box read, never a card or an ok flag."
 	@echo "  BLOCKED = the card under test never appeared, so the write path was"
 	@echo "  not exercised (usually #132). That exits non-zero on purpose."

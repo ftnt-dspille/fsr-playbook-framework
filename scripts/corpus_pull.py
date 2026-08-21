@@ -38,9 +38,7 @@ def is_db_gap(msg: str) -> bool:
             or "unknown operation" in msg
             or "not in reference DB" in msg)
 
-ENV = sys.argv[1] if len(sys.argv) > 1 else (
-    "/Users/dylanspille/WebstormProjects/fsr_all_widgets/"
-    "fortisoar-widget-harness/.env.159")
+ENV = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("FSR_ENV_FILE", ".env")
 LIMIT = int(sys.argv[2]) if len(sys.argv) > 2 else 400
 OUT = Path(__file__).parent / "f4_failing"
 OUT.mkdir(exist_ok=True)

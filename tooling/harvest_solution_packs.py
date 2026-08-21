@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import zipfile
@@ -45,11 +46,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO_ROOT / "data" / "solution_packs"
 
 # Reuse the same instance registry the rest of the toolchain uses rather than
-# inventing another credential path.
+# inventing another credential path. Keys are short box labels; values are
+# paths to .env files (keep out of tracked source -- use FSR_ENV_FILE env var
+# or pass the path explicitly).
 INSTANCE_ENVS = {
-    "159": "~/WebstormProjects/fsr_all_widgets/fortisoar-widget-harness/.env.159",
-    "205": "~/PycharmProjects/Miscellaneous/fortisoar/.env",
-    "206": "~/WebstormProjects/fsr_all_widgets/fortisoar-widget-harness/.env.206",
+    "159": os.environ.get("FSR_ENV_FILE_159", ".env"),
+    "205": os.environ.get("FSR_ENV_FILE_205", ".env"),
+    "206": os.environ.get("FSR_ENV_FILE_206", ".env"),
 }
 
 

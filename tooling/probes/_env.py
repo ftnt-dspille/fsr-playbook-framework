@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from .common import REPO_ROOT
 
@@ -20,8 +19,8 @@ def _env_path() -> Path:
 
     ``FSR_ENV_FILE`` (absolute or repo-relative) picks a box other than the
     default -- the same knob the live round-trip test already honors, so
-    `FSR_ENV_FILE=.env.159 make …` points the probes at .159 without a second
-    convention. Falls back to the repo `.env`.
+    `FSR_ENV_FILE=your-env make …` points the probes at that box without a
+    second convention. Falls back to the repo `.env`.
     """
     raw = os.environ.get("FSR_ENV_FILE", "").strip()
     if not raw:
@@ -70,7 +69,7 @@ class EnvConfig:
         self.username: str = os.environ.get("FSR_USERNAME", "").strip()
         self.password: str = os.environ.get("FSR_PASSWORD", "").strip()
         self.verify_ssl: bool = _bool("FSR_VERIFY_SSL", True)
-        self.port: Optional[int] = (
+        self.port: int | None = (
             int(os.environ["FSR_PORT"]) if os.environ.get("FSR_PORT") else None
         )
         self.timeout: int = int(os.environ.get("FSR_TIMEOUT", "30"))

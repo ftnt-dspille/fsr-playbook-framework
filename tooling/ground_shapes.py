@@ -5,7 +5,7 @@ results), measures each step's output shape, and folds it into the persistent
 GroundedShapeStore. Also dumps the raw env so we can ground data-presence and
 namespace (E5/E6) facts against what the box ACTUALLY produced -- not inference.
 
-Usage (source .env.205 first):
+Usage (source your .env first):
     PYTHONPATH=tooling:fsr_playbooks python -m ground_shapes examples/demo_code_snippet.yaml \
         --playbook "FSRPB Demo - Code Snippet" --input first_name=Dylan
 
@@ -29,7 +29,8 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tooling"))
 
 from fsr_playbooks.compiler.grounded_shapes import (  # noqa: E402
-    GroundedShapeStore, shape_from_value,
+    GroundedShapeStore,
+    shape_from_value,
 )
 
 
