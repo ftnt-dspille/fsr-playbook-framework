@@ -737,6 +737,97 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
                 ))
 
 
+
+def _check_step_footguns(pb: Playbook, pi: int,
+                         errors: list[CompileError]) -> None:
+    """Catch things FSR accepts on import but break at runtime.
+
+    These are structural mistakes the FSR importer doesn't gate -- the
+    playbook imports cleanly, then silently does nothing or errors when
+    a user clicks the button / the trigger fires.
+    """
+    path = f"playbooks[{pi}]"
+    for si, s in enumerate(pb.steps):
+        spath = f"{path}.steps[{si}]"
+
+        # 1. select_fields: [] -- empty list is a no-op (FSR returns all
+        #    fields), almost certainly a mistake. The author meant to list
+        #    field names but left it empty.
+        if s.select_fields is not None and len(s.select_fields) == 0:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"step {s.id!r}: `select_fields` is empty -- FSR will "
+                    f"return ALL fields (same as omitting it). Either list "
+                    f"the fields you want or remove the key."
+                ),
+                path=f"{spath}.select_fields",
+                severity="warning",
+            ))
+
+        # 2. find_record without `module` -- FSR accepts the import but
+        #    the step fails at runtime ("module is required"). The module
+        #    is the collection to query (e.g. `alerts`, `incidents`).
+        if s.type == "find_record":
+            args = s.arguments if isinstance(s.arguments, dict) else {}
+            mod = args.get("module") or args.get("collectionType") or args.get("collection")
+            if not mod:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message=(
+                        f"step {s.id!r}: find_record has no `module` -- "
+                        f"FSR will error at runtime. Set module to the "
+                        f"collection to query (e.g. `module: alerts`)."
+                    ),
+                    path=f"{spath}.module",
+                    severity="error",
+                ))
+
+        # 3. Manual trigger (type: start) with empty `resources` -- the
+        #    button won't appear on any module page. FSR accepts it but
+        #    the playbook is unreachable from the UI. `resources` is the
+        #    list of module names the button shows on (e.g.
+        #    `resources: [alerts, incidents]`).
+        if s.type == "start":
+            args = s.arguments if isinstance(s.arguments, dict) else {}
+            res = args.get("resources")
+            # OnUpdate/OnCreate/OnDelete triggers set `resources` to the
+            # module they watch -- empty is wrong there too. A plain
+            # manual start with `resources: []` means the button appears
+            # nowhere.
+            if isinstance(res, list) and len(res) == 0:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message=(
+                        f"step {s.id!r}: trigger has `resources: []` -- "
+                        f"the button/trigger will not appear on any module "
+                        f"page. Add the module(s) it should show on "
+                        f"(e.g. `resources: [alerts]`)."
+                    ),
+                    path=f"{spath}.resources",
+                    severity="error",
+                ))
+
+        # 4. create_record / update_record without `module` -- same class
+        #    as find_record; FSR accepts the import, runtime fails. The
+        #    resolver renames `module` → `collection` on the wire, so check
+        #    both field names.
+        if s.type in ("create_record", "update_record"):
+            args = s.arguments if isinstance(s.arguments, dict) else {}
+            mod = args.get("module") or args.get("collection") or args.get("collectionType")
+            if not mod:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message=(
+                        f"step {s.id!r}: {s.type} has no `module` -- "
+                        f"FSR will error at runtime. Set module to the "
+                        f"target collection (e.g. `module: incidents`)."
+                    ),
+                    path=f"{spath}.module",
+                    severity="error",
+                ))
+
+
 def validate(collection: Collection) -> list[CompileError]:
     errors: list[CompileError] = []
 
@@ -761,6 +852,7 @@ def validate(collection: Collection) -> list[CompileError]:
         _check_jinja_paths(pb, pi, errors)
         _check_jinja_templates(pb, pi, errors)
         _check_undefined_vars(pb, pi, errors)
+        _check_step_footguns(pb, pi, errors)
 
         # Step names must be unique within a playbook. FSR's Jinja runtime
         # exposes step output at `vars.steps.<Name_with_underscores>`, so

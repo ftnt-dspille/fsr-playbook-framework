@@ -50,6 +50,13 @@ class Step:
     # batch_size, break_loop. None means no looping.
     for_each: dict | None = None
 
+    # find_record select-field projection. On the wire this lives inside
+    # `arguments.query.__selectFields` (an array of field names). Authors
+    # write `select_fields: [id, name, ...]` at the step level; the emitter
+    # hoists it into `query.__selectFields`. When None, all fields are
+    # returned (FSR default).
+    select_fields: list[str] | None = None
+
     # --- Round-trip preservation (populated by decompiler, None for hand-authored) ---
     # Original appliance UUID. When present, emitter uses this instead of
     # generating a deterministic uuid5. Preserves cross-collection references.
@@ -168,6 +175,10 @@ class Collection:
     #                   touches ONLY the listed playbooks inside the
     #                   target collection; siblings are preserved.
     target_mode: str = "wrap"
+
+    # Modern tag pills on the collection -- collection.recordTags. Authored
+    # as `tags: [name, ...]` (plain names); emitted verbatim.
+    tags: list[str] = field(default_factory=list)
 
     # --- Round-trip preservation ---
     # Original appliance UUID. When present, emitter uses this instead of

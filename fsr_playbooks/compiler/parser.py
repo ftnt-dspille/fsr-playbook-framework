@@ -41,7 +41,7 @@ _PARAM_TYPE_VOCAB = {
 # wrapper is gone; all args are hoisted to the step's top level).
 _STEP_IR_KEYS = frozenset({
     "id", "type", "name", "next", "branches", "unlabeled_next",
-    "comment", "description", "for_each",
+    "comment", "description", "for_each", "select_fields",
     "uuid", "top", "left",  # round-trip preservation
 })
 _STEP_SUGAR_KEYS = frozenset({
@@ -840,6 +840,11 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 description=(s_raw["description"]
                             if isinstance(s_raw.get("description"), str) else ""),
                 for_each=for_each,
+                select_fields=(
+                    [str(f).strip() for f in s_raw["select_fields"]
+                     if isinstance(s_raw.get("select_fields"), list) and str(f).strip()]
+                    if isinstance(s_raw.get("select_fields"), list) else None
+                ),
                 # Round-trip: preserve original UUID and position from
                 # decompiled YAML. None for hand-authored YAML (emitter
                 # generates deterministic uuid5 and auto-layouts).
@@ -1086,5 +1091,6 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
         visible=bool(doc.get("visible", True)),
         playbooks=playbooks,
         target_mode=target_mode,
+        tags=_parse_pb_tags(doc.get("tags")),
         uuid=doc.get("uuid") if isinstance(doc.get("uuid"), str) else None,
     ), errors

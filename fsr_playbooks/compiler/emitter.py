@@ -509,10 +509,15 @@ def emit(collection: Collection) -> dict[str, Any]:
             "isPrivate": pb.is_private,
         })
 
+    all_tags = sorted(
+        {t for pb in collection.playbooks for t in pb.tags}
+        | set(collection.tags)
+    )
+
     return {
         "type": "workflow_collections",
         "macros": [],
-        "exported_tags": [],
+        "exported_tags": all_tags,
         "data": [{
             "@type": "WorkflowCollection",
             "name": collection.name,
@@ -520,7 +525,7 @@ def emit(collection: Collection) -> dict[str, Any]:
             "visible": collection.visible,
             "image": None,
             "uuid": coll_uuid,
-            "recordTags": [],
+            "recordTags": list(collection.tags),
             "workflows": workflows_out,
         }],
     }
@@ -589,6 +594,18 @@ def _emit_step(s: Step, step_uuid: str, top: int, left: int,
         # operation, etc). The IR keeps it as a sibling of `arguments` for
         # ergonomic YAML; we merge it in here.
         args["for_each"] = dict(s.for_each)
+    if s.select_fields:
+        # select_fields lives inside arguments.query.__selectFields on the
+        # wire. The IR keeps it as a step-level key for ergonomic YAML.
+        # checkboxFields must be true for FSR to honor the projection --
+        # the resolver already defaults it to false, so we force it on
+        # here (same as the normalizer does for `select:`).
+        q = args.get("query")
+        if not isinstance(q, dict):
+            q = {}
+        q["__selectFields"] = list(s.select_fields)
+        args["query"] = q
+        args["checkboxFields"] = True
     _clean_step_arguments(args)
     return {
         "@type": "WorkflowStep",

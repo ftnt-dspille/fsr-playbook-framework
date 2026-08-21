@@ -4,8 +4,9 @@ The inverse of `emitter.emit`. Used for the round-trip acceptance test
 and (later) for "import an existing playbook into the YAML world."
 
 Lossiness: FSR JSON carries fields the IR doesn't model (lastModifyDate,
-deletedAt, layout coords, recordTags, ownership). Those are dropped
-on the way in; the IR is the human-meaningful subset.
+deletedAt, layout coords, ownership). Those are dropped on the way in;
+the IR is the human-meaningful subset. recordTags are preserved as
+Playbook.tags / Collection.tags.
 """
 from __future__ import annotations
 
@@ -215,6 +216,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
                 "uuid": pb.uuid,
                 "description": pb.description or None,
                 "tag": pb.tag or None,
+                "tags": list(pb.tags) or None,
                 "is_active": pb.is_active,
                 "trigger_step_id": pb.trigger_step_id,
                 "parameters": list(pb.parameters) or None,
@@ -248,6 +250,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
         "uuid": ir.uuid,
         "description": ir.description,
         "visible": ir.visible,
+        "tags": list(ir.tags) or None,
         "playbooks": playbooks,
     }
 
@@ -502,6 +505,37 @@ def _decompile_step(s, pb_name: str | None = None,
             friendly["triggerOnReplicate"] = True
         if friendly:
             out.update(friendly)
+    elif s.type in ("start_on_create", "start_on_update", "start_on_delete") and isinstance(args, dict):
+        # Post-create/update/delete trigger: strip the system-default
+        # step_variables the resolver stamps on every such step
+        # (typed_args/steps/post_create_update.py:116-117):
+        #   {"input": {"records": ["{{vars.input.records[0]}}"]}}
+        # This is pure system wiring -- the resolver re-derives it via
+        # setdefault, so dropping it round-trips and cleans up the YAML.
+        # Also strip the default trigger flags (triggerOnSource=True,
+        # triggerOnReplicate=False, __triggerLimit=True) -- same setdefaults.
+        sv = out.get("step_variables") or args.get("step_variables")
+        if sv == {"input": {"records": ["{{vars.input.records[0]}}"]}}:
+            out.pop("step_variables", None)
+            args.pop("step_variables", None)
+        # Non-default trigger flags: emit only when they differ.
+        if args.get("triggerOnSource") is False:
+            out["triggerOnSource"] = False
+        if args.get("triggerOnReplicate") is True:
+            out["triggerOnReplicate"] = True
+        if args.get("__triggerLimit") is False:
+            out["__triggerLimit"] = False
+        # fieldbasedtrigger: the trigger filter condition. Preserve when
+        # non-empty (the resolver does NOT re-derive it from friendly inputs).
+        fbt = args.get("fieldbasedtrigger")
+        if fbt and fbt != {"sort": [], "limit": 30, "logic": "AND", "filters": []}:
+            out["fieldbasedtrigger"] = fbt
+        # Strip remaining canonical keys the resolver re-derives.
+        for k in ("resource", "resources", "triggerOnSource", "triggerOnReplicate",
+                  "__triggerLimit", "fieldbasedtrigger", "version", "useMockOutput"):
+            args.pop(k, None)
+        if args:
+            _hoist_args(out, args)
     elif s.type == "decision" and isinstance(args, dict):
         conds = args.pop("conditions", None) or []
         new_conds = []
@@ -893,8 +927,11 @@ def _decompile_step(s, pb_name: str | None = None,
             logic = q.get("logic")
             if logic is not None and logic != "AND":
                 args["logic"] = logic
-        # Strip the wire-only `checkboxFields: false` the normalizer defaults
-        if args.get("checkboxFields") is False:
+        # Strip `checkboxFields` entirely -- it's a wire-only flag that
+        # the resolver/emitter manages automatically (set to true when
+        # select_fields/query.__selectFields is present, false otherwise).
+        # Authors should never need to write it.
+        if "checkboxFields" in args:
             args.pop("checkboxFields", None)
         if args:
             _hoist_args(out, args)
@@ -910,6 +947,9 @@ def _decompile_step(s, pb_name: str | None = None,
     # here round-trips.
     if getattr(s, "for_each", None):
         out["for_each"] = dict(s.for_each)
+
+    if getattr(s, "select_fields", None):
+        out["select_fields"] = list(s.select_fields)
 
     if s.next:
         out["next"] = s.next
@@ -991,11 +1031,16 @@ def decompile(fsr_json: dict[str, Any], db_path: Path) -> Collection:
     for wf in as_record_list(coll.get("workflows"), path="collection.workflows"):
         playbooks.append(_decompile_workflow(wf, type_by_uuid, priority_by_iri))
 
+    raw_coll_tags = coll.get("recordTags") or []
+    if isinstance(raw_coll_tags, str):
+        raw_coll_tags = [raw_coll_tags]
+
     return Collection(
         name=coll.get("name", "") or "",
         description=coll.get("description", "") or "",
         visible=bool(coll.get("visible", True)),
         playbooks=playbooks,
+        tags=[str(t) for t in raw_coll_tags if str(t).strip()],
         # Round-trip: preserve original collection UUID.
         uuid=coll.get("uuid") or None,
     )
@@ -1097,6 +1142,17 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
         fe_raw = raw_args.pop("for_each", None)
         for_each = dict(fe_raw) if isinstance(fe_raw, dict) and fe_raw else None
 
+        # select_fields lives inside arguments.query.__selectFields on the
+        # wire; lift it out into a step-level IR field.
+        select_fields = None
+        q = raw_args.get("query")
+        if isinstance(q, dict) and q.get("__selectFields"):
+            sf = q.pop("__selectFields")
+            if isinstance(sf, list) and sf:
+                select_fields = [str(f) for f in sf if str(f).strip()]
+            if not q.get("__selectFields"):
+                q.pop("__selectFields", None)
+
         # Resolve step_iri → step id in decision conditions and manual_input
         # options. The emitter stamps step_iri on each condition/option as a
         # direct UUID pointer to the target step (more reliable than the route
@@ -1138,6 +1194,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
             ),
             step_type_name=canonical_by_uuid.get(u),
             for_each=for_each,
+            select_fields=select_fields,
             # Round-trip: preserve original UUID and canvas position.
             uuid=u or None,
             top=s.get("top"),
@@ -1288,6 +1345,10 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
     raw_priority = wf.get("priority")
     priority = (priority_by_iri or {}).get(raw_priority) if isinstance(raw_priority, str) else None
 
+    raw_tags = wf.get("recordTags") or []
+    if isinstance(raw_tags, str):
+        raw_tags = [raw_tags]
+
     return Playbook(
         name=wf.get("name", "") or "",
         description=wf.get("description", "") or "",
@@ -1300,6 +1361,7 @@ def _decompile_workflow(wf: dict[str, Any], type_by_uuid: dict[str, str],
         parameters=params,
         steps=steps_out,
         annotations=annotations,
+        tags=[str(t) for t in raw_tags if str(t).strip()],
         # Round-trip: preserve original workflow UUID so cross-collection
         # references (workflowReference IRIs) survive the round-trip.
         uuid=wf.get("uuid") or None,
