@@ -226,6 +226,37 @@ class NormalizerMixin:
                     suggestion="did you mean 'create_record'?",
                 ))
                 return
+            # A record-action (Execute-menu / right-click) trigger is NOT its own
+            # short type -- it is `start` WITH a `module:`, which this resolver
+            # switches to `cybersponse.action` below. Authors reasonably guess a
+            # name like `record_action` / `start_on_action` / `manual_action`, and
+            # plain edit-distance cannot help: the answer is a different ARGUMENT
+            # on a type they already know, not a nearby name. `start_on_action` in
+            # particular matches `start_on_update` closely enough that the generic
+            # suggestion actively points the wrong way.
+            lowered = step.type.lower()
+            if "action" in lowered or lowered in ("record_trigger", "manual_trigger"):
+                msg = (
+                    f"unknown step type: {step.type!r}. A record-action trigger "
+                    "(the module's Execute menu) is not a separate type -- use "
+                    "`type: start` WITH a `module:`, e.g.\n"
+                    "  - type: start\n"
+                    "    name: Start\n"
+                    "    module: alerts\n"
+                    "    button_label: Do the thing\n"
+                    "    requires_record: true      # false = no record context\n"
+                    "    run_mode: per_record       # or once_for_all\n"
+                    "`type: start` with no `module:` stays a designer/referenced "
+                    "trigger. See `step_help('start')` for the full arg schema."
+                )
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_STEP_TYPE,
+                    message=msg,
+                    path=f"{path}.type",
+                    near="start",
+                    suggestion=msg,
+                ))
+                return
             errors.append(CompileError(
                 code=ErrorCode.UNKNOWN_STEP_TYPE,
                 message=f"unknown step type: {step.type!r}",
@@ -1221,6 +1252,10 @@ class NormalizerMixin:
                 "playbookField": True,
                 "jinjaExpressionView": True,
                 "useRecordFieldDefault": False,
+                # Live UI writes these on every input field; FSR's form renderer
+                # keys required-ness off `requiredCondition`, not just `required`.
+                "requiredCondition": "required" if bool(item.get("required", False)) else "notrequired",
+                "_addRequiredConditions": True,
             }
             if kind in ("select", "multiselect"):
                 opts = item.get("options")
@@ -1231,7 +1266,31 @@ class NormalizerMixin:
                         path=f"{ipath}.options",
                     ))
                     continue
+                # The dynamicList widget JSON.parses its `options`. A literal
+                # list serializes to a valid JSON array in the emitted wire JSON,
+                # so it passes through untouched. A JINJA string, however, must
+                # resolve to JSON at RUNTIME -- a bare `{{ vars.x }}` that renders
+                # a Python list emits single-quoted repr, fails JSON.parse, and
+                # shows an EMPTY dropdown. Warn the author to pipe it | tojson.
+                if (isinstance(opts, str) and "{{" in opts
+                        and "tojson" not in opts and "to_json" not in opts):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=("`options:` jinja must resolve to JSON for the "
+                                 "dynamicList widget (it JSON.parses options); "
+                                 "pipe the source list through `| tojson`, else "
+                                 "the dropdown renders empty"),
+                        path=f"{ipath}.options",
+                        severity="warning",
+                    ))
                 field["options"] = opts
+                # dynamicList-specific keys the live UI writes; without them the
+                # widget can fail to bind and render an empty control.
+                field["collection"] = False
+                field["searchable"] = False
+                field["mmdUpdate"] = True
+                field["lengthConstraint"] = True
+                field["allowedGridColumn"] = False
             # lookup → `type` carries the FSR module name (people, alerts,
             # indicators, etc.). Live FSR keys typeahead lookups off this.
             if kind == "lookup":

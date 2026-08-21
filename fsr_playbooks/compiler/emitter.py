@@ -462,6 +462,10 @@ def emit(collection: Collection) -> dict[str, Any]:
             "name": pb.name,
             "aliasName": None,
             "tag": pb.tag or "",
+            # Modern tag pills on the playbook list -- workflow.recordTags,
+            # a plain list of tag names (the shape FSR stores/returns for
+            # workflow recordTags). Empty list = untagged.
+            "recordTags": list(pb.tags),
             "description": pb.description or "",
             "isActive": pb.is_active,
             "debug": pb.debug,

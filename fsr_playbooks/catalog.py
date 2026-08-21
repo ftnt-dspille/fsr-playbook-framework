@@ -31,6 +31,19 @@ from typing import Any
 from ._db import default_db_path
 from .compiler.resolver import SHORT_TYPE_TO_FSR
 
+# Purpose overrides for types whose upstream FSR description is accurate for the
+# canonical step type but misleading as a *friendly-YAML* description. `start` is
+# the case that matters: its FSR description only mentions the referenced/schedule
+# flavour, so the catalog gave no hint that a record-action (Execute-menu) trigger
+# is the SAME short type with a `module:`. Authors then conclude the compiler has
+# no record-action trigger and hand-build JSON instead.
+_PURPOSE_OVERRIDE: dict[str, str] = {
+    "start": ("Manual trigger. Bare = referenced/scheduled (designer Run button). "
+              "ADD `module:` to make it a record-action trigger on that module's "
+              "Execute menu (+ button_label / requires_record / run_mode)."),
+}
+
+
 # Friendly types with no distinct canonical step type (they compile down to a
 # Connectors/no-op call), so the catalog label would be misleading. Give them a
 # purpose of their own. Sourced from the resolver's own annotations.
@@ -112,7 +125,8 @@ def list_step_types() -> list[StepTypeInfo]:
     for short, canonical in sorted(SHORT_TYPE_TO_FSR.items()):
         row = rows.get(canonical)
         label = (row["label"] if row else None) or canonical
-        purpose = _SYNTHETIC_PURPOSE.get(short) or _one_line(row["description"] if row else None) or label
+        purpose = (_PURPOSE_OVERRIDE.get(short) or _SYNTHETIC_PURPOSE.get(short)
+                   or _one_line(row["description"] if row else None) or label)
         out.append(StepTypeInfo(short, canonical, label, purpose, short in modeled))
     return out
 
@@ -166,7 +180,8 @@ def step_help(name: str) -> StepHelp:
         conn.close()
 
     label = (row["label"] if row else None) or canonical
-    purpose = _SYNTHETIC_PURPOSE.get(short) or _one_line(row["description"] if row else None) or label
+    purpose = (_PURPOSE_OVERRIDE.get(short) or _SYNTHETIC_PURPOSE.get(short)
+               or _one_line(row["description"] if row else None) or label)
     return StepHelp(
         short=short,
         canonical=canonical,

@@ -137,6 +137,16 @@ def _slugify(s: str) -> str:
     return out or "step"
 
 
+def _parse_pb_tags(raw: Any) -> list[str]:
+    """Coerce a playbook's `tags:` (list or single string) to clean names."""
+    if isinstance(raw, list):
+        return [str(t).strip() for t in raw if str(t).strip()]
+    if raw:
+        name = str(raw).strip()
+        return [name] if name else []
+    return []
+
+
 def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
     errors: list[CompileError] = []
     # Strip control chars the model may have introduced while re-emitting a
@@ -1048,6 +1058,9 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             name=pb_name,
             description=pb_raw.get("description", "") or "",
             tag=pb_raw.get("tag", "") or "",
+            # Modern tag pills -> workflow.recordTags. Accept a list or a
+            # single string; coerce to a clean list of names.
+            tags=_parse_pb_tags(pb_raw.get("tags")),
             # Defaults to active -- authors almost never want to deploy an
             # inactive playbook, and FSR's UI creates them active by default.
             # Set `is_active: false` explicitly to ship a disabled draft.

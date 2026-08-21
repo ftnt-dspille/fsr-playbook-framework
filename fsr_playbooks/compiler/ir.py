@@ -94,7 +94,12 @@ class Annotation:
 class Playbook:
     name: str
     description: str = ""
+    # Legacy single free-text tag on the workflow entity (the `tag` column).
     tag: str = ""
+    # Modern tag pills shown on the playbook list -- the workflow's
+    # `recordTags` array. Authored as `tags: [name, ...]` (plain names, the
+    # shape FSR stores for workflow recordTags); emitted verbatim.
+    tags: list[str] = field(default_factory=list)
     # Defaults to active (matches FSR's UI + author intent: you don't usually
     # deploy a playbook you want disabled). Set is_active=False for a draft.
     is_active: bool = True
