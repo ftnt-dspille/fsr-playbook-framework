@@ -896,3 +896,201 @@ def test_cyops_utilities_canonical_decompiles_to_connector():
     assert args.get("operation") == "no_op", args
     # version always stripped (re-derived default)
     assert "version" not in args, args
+
+
+# --------------------------------------------------------------------------
+# child_args: a workflow_reference's child-playbook parameters
+#
+# The child's parameter names belong to the CHILD. Hoisting them to the step
+# surface put them in the same namespace as the step's own IR keys, so a param
+# named `type` (or `name`/`description`/`title`) was popped as an IR collision
+# and vanished -- silently. The runtime does not fail on a missing declared
+# param; it passes "", so the playbook compiled clean and misbehaved at run
+# time. Live-hit: it dropped `type` from the ZTPF metadata-source dispatcher
+# and broke every metadata source on the box.
+# --------------------------------------------------------------------------
+
+_CHILD_ARGS_PB = """
+collection: T
+playbooks:
+  - name: Child
+    uuid: b1c2d3e4-0011-4000-8000-000000000011
+    trigger_step_id: start
+    parameters: [type, datakey, description, title]
+    steps:
+      - name: Start
+        type: start
+        next: Ret
+      - name: Ret
+        type: set_variable
+        vars: {out: "{{ vars.input.params }}"}
+  - name: PB
+    steps:
+      - name: Start
+        type: start_on_create
+        module: alerts
+        next: Call
+      - name: Call
+        type: workflow_reference
+        target: Child
+        child_args:
+          type: "{{ vars.item.type.itemValue }}"
+          datakey: "{{ vars.item.datakey }}"
+          description: d
+          title: t
+"""
+
+
+def _call_args(fsr_json):
+    """The wire `arguments` of the workflow_reference step named 'Call'."""
+    for wf in fsr_json["data"][0]["workflows"]:
+        for s in wf.get("steps", []):
+            if s.get("name") == "Call":
+                return s["arguments"]
+    raise AssertionError("step 'Call' not found")
+
+
+def test_child_args_reach_the_nested_arguments_map():
+    """`child_args:` is the channel the runtime actually reads.
+
+    Live-verified contract: when a step carries both a nested `arguments` map
+    and hoisted top-level keys, the runtime reads the NESTED map and ignores
+    the hoisted ones. So every child param must land in `arguments`."""
+    res = compile_yaml(_CHILD_ARGS_PB, PACKAGED_SLIM_DB)
+    assert res.ok, [e.message for e in res.errors if e.severity != "warning"]
+    args = _call_args(res.fsr_json)
+    assert args["arguments"] == {
+        "type": "{{ vars.item.type.itemValue }}",
+        "datakey": "{{ vars.item.datakey }}",
+        "description": "d",
+        "title": "t",
+    }, args
+
+
+def test_child_params_are_not_emitted_as_hoisted_duplicates():
+    """Nested-only, matching what FortiSOAR's own editor exports.
+
+    Emitting both is what let a missing param hide: the step looked correctly
+    parameterised at the top level while the runtime read only the nested map.
+    """
+    res = compile_yaml(_CHILD_ARGS_PB, PACKAGED_SLIM_DB)
+    args = _call_args(res.fsr_json)
+    for k in ("type", "datakey", "description", "title"):
+        assert k not in args, f"{k} leaked to the step's top level: {sorted(args)}"
+
+
+def test_child_args_survive_the_round_trip():
+    """The regression. `type` must come back, under `child_args:`."""
+    res = compile_yaml(_CHILD_ARGS_PB, PACKAGED_SLIM_DB)
+    assert res.ok, [e.message for e in res.errors if e.severity != "warning"]
+    doc = yaml.safe_load(decompile_to_yaml(res.fsr_json, PACKAGED_SLIM_DB))
+    pb = next(p for p in doc["playbooks"] if p["name"] == "PB")
+    by_name = {s["name"]: s for s in pb["steps"]}
+    call = by_name["Call"]
+    assert "child_args" in call, call
+    assert call["child_args"]["type"] == "{{ vars.item.type.itemValue }}", call
+    assert call["child_args"]["datakey"] == "{{ vars.item.datakey }}", call
+    # and it must NOT have been hoisted into the step namespace
+    assert call["type"] == "workflow_reference", call
+
+
+def test_hoisted_child_params_still_accepted():
+    """The legacy surface keeps working -- for names that do not collide."""
+    res = compile_yaml(
+        """
+collection: T
+playbooks:
+  - name: Child
+    trigger_step_id: start
+    parameters: [datakey]
+    steps:
+      - name: Start
+        type: start
+        next: Ret
+      - name: Ret
+        type: set_variable
+        vars: {out: "{{ vars.input.params }}"}
+  - name: PB
+    steps:
+      - name: Start
+        type: start_on_create
+        module: alerts
+        next: Call
+      - name: Call
+        type: workflow_reference
+        target: Child
+        datakey: dk
+""",
+        PACKAGED_SLIM_DB,
+    )
+    assert res.ok, [e.message for e in res.errors if e.severity != "warning"]
+    assert _call_args(res.fsr_json)["arguments"] == {"datakey": "dk"}
+
+
+def test_child_param_given_twice_is_an_error():
+    res = compile_yaml(
+        """
+collection: T
+playbooks:
+  - name: Child
+    trigger_step_id: start
+    parameters: [datakey]
+    steps:
+      - name: Start
+        type: start
+        next: Ret
+      - name: Ret
+        type: set_variable
+        vars: {out: "{{ vars.input.params }}"}
+  - name: PB
+    steps:
+      - name: Start
+        type: start_on_create
+        module: alerts
+        next: Call
+      - name: Call
+        type: workflow_reference
+        target: Child
+        datakey: hoisted
+        child_args: {datakey: explicit}
+""",
+        PACKAGED_SLIM_DB,
+    )
+    msgs = [e.message for e in res.errors]
+    assert any("given both at step level" in m for m in msgs), msgs
+
+
+def test_declared_but_unsupplied_child_param_warns():
+    """The check that would have caught the live outage at compile time.
+
+    A declared parameter the caller omits is not a runtime error -- the child
+    receives "". Silent wrong value, so the compiler has to say something."""
+    res = compile_yaml(
+        """
+collection: T
+playbooks:
+  - name: Child
+    trigger_step_id: start
+    parameters: [type, datakey]
+    steps:
+      - name: Start
+        type: start
+        next: Ret
+      - name: Ret
+        type: set_variable
+        vars: {out: "{{ vars.input.params }}"}
+  - name: PB
+    steps:
+      - name: Start
+        type: start_on_create
+        module: alerts
+        next: Call
+      - name: Call
+        type: workflow_reference
+        target: Child
+        child_args: {datakey: dk}
+""",
+        PACKAGED_SLIM_DB,
+    )
+    warns = [e.message for e in res.errors if e.severity == "warning"]
+    assert any("declares ['type']" in m for m in warns), warns

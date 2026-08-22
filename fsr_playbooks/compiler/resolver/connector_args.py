@@ -742,6 +742,7 @@ class ConnectorArgsMixin:
             "target", "workflowReference", "apply_async",
             "pass_parent_env", "pass_input_record", "step_variables",
             "for_each", "when", "mock_result", "do_until",
+            "child_args",
         }
         # When workflowReference (IRI) is used, `target` is NOT a local
         # playbook-name reference -- it's a child-playbook input parameter
@@ -752,9 +753,53 @@ class ConnectorArgsMixin:
         if ref_iri:
             _WR_ENVELOPE_KEYS = _WR_ENVELOPE_KEYS - {"target"}
         if isinstance(a, dict) and "arguments" not in a:
-            child_args = {k: v for k, v in a.items()
-                          if k not in _WR_ENVELOPE_KEYS}
+            # Two authoring surfaces, one wire channel.
+            #
+            #   child_args: {k: v}   explicit, and the ONLY way to pass a param
+            #                        whose name collides with a step IR/sugar key
+            #                        (`type`, `name`, `description`, `title`, ...)
+            #                        -- the parser consumes those at step level.
+            #   k: v                 hoisted, the legacy surface; still accepted.
+            #
+            # Live-verified wire contract: when a step carries BOTH a nested
+            # `arguments` map and hoisted top-level keys, the runtime reads the
+            # NESTED map and ignores the hoisted ones entirely; a declared
+            # parameter absent from it arrives as "" rather than failing. So the
+            # nested map must be complete, and the hoisted copies are removed
+            # below -- emitting both is what let a missing param hide behind a
+            # step that looked correctly parameterised in the designer.
+            explicit = a.pop("child_args", None)
+            if explicit is not None and not isinstance(explicit, dict):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "`child_args:` must be a mapping of the child "
+                        f"playbook's parameters, got {type(explicit).__name__}"
+                    ),
+                    path=f"{path}.child_args",
+                ))
+                explicit = None
+            hoisted = {k: v for k, v in a.items()
+                       if k not in _WR_ENVELOPE_KEYS}
+            if explicit:
+                dupes = sorted(set(hoisted) & set(explicit))
+                for k in dupes:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"child parameter {k!r} is given both at step level "
+                            "and under `child_args:` -- keep one (prefer "
+                            "`child_args:`)"
+                        ),
+                        path=f"{path}.child_args.{k}",
+                    ))
+            child_args = {**hoisted, **(explicit or {})}
             if child_args:
+                # Emit the nested map ONLY -- the shape FortiSOAR's own editor
+                # produces (an exported step carries envelope keys plus
+                # `arguments`, never hoisted child duplicates).
+                for k in hoisted:
+                    a.pop(k, None)
                 a["arguments"] = child_args
 
         target_name = a.get("target")
@@ -815,6 +860,26 @@ class ConnectorArgsMixin:
                 ))
                 return
             valid = set(target_pb.parameters)
+            # Declared but not supplied. The platform does NOT fail this: the
+            # child's `parameters:` list is a strict allow-list, and a declared
+            # parameter the caller omits arrives as "" -- a silent wrong value,
+            # not a crash. That is exactly how a dropped param stays invisible
+            # until something downstream misbehaves, so surface it here.
+            missing = sorted(valid - set(provided_args))
+            if missing:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    severity="warning",
+                    message=(
+                        f"target playbook {target_name!r} declares "
+                        f"{missing} but the call does not supply "
+                        f"{'them' if len(missing) > 1 else 'it'}; the child "
+                        'receives "" for each. Pass under `child_args:` '
+                        "(required for names that collide with step keys, "
+                        "e.g. `type`)."
+                    ),
+                    path=f"{path}.child_args",
+                ))
             for k in provided_args:
                 if k not in valid:
                     sug = difflib.get_close_matches(k, list(valid), n=1, cutoff=0.6) if valid else []

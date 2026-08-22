@@ -275,8 +275,38 @@ _STEP_IR_FIELD_NAMES = frozenset({
 })
 
 
+#: Step types whose nested `arguments` is an opaque CHILD-playbook parameter
+#: map rather than this step's own arguments.
+_CHILD_ARG_STEP_TYPES = frozenset({"workflow_reference", "trigger_tenant_playbook"})
+
+
 def _hoist_args(out: dict, args: dict) -> None:
     """Merge `args` into `out` at step level, skipping IR-field collisions."""
+    # A child-playbook parameter map belongs to the CHILD, not to this step, so
+    # its names must never enter the step namespace. Hoisting them was silent
+    # data loss: a child param called `type` (or `name`/`description`/`title`)
+    # collides with a step IR field and gets dropped by the IR loop below, and
+    # the runtime then passes "" for it rather than failing -- so the playbook
+    # compiles clean, deploys, and misbehaves. Live-hit: every ZTPF metadata
+    # source broke this way when `type` was dropped from
+    # `> get jinja_vars from metadata sources for device_id`.
+    #
+    # Emit them under `child_args:` instead; the resolver feeds that straight
+    # back into the nested `arguments` the runtime actually reads. Runs BEFORE
+    # the `name` rescue below so a child param named `name` is not stolen as a
+    # connector display label.
+    if out.get("type") in _CHILD_ARG_STEP_TYPES and "arguments" in args:
+        child = args.pop("arguments")
+        if isinstance(child, dict) and child:
+            out["child_args"] = dict(child)
+            # Older compiler output wrote each child param BOTH nested and
+            # hoisted. The runtime reads the nested map and ignores the hoisted
+            # copies (live-verified), so the nested one is authoritative and the
+            # top-level copy is redundant -- drop it, or the recompile sees the
+            # same parameter declared twice.
+            for k in child:
+                args.pop(k, None)
+        # A list (empty []) means no child params -- drop it.
     # `name` in args is the connector display label -- collides with step.name.
     # Preserve as `display_name:` if it differs from the step name (custom
     # label); strip if it matches (re-derived by the compiler from catalog).
@@ -284,9 +314,7 @@ def _hoist_args(out: dict, args: dict) -> None:
     conn_label = args.pop("name", None)
     if conn_label is not None and conn_label != out.get("name"):
         args["display_name"] = conn_label
-    # Phase G: workflow_reference stores child-playbook input params under a
-    # nested `arguments` key. Flatten them to step level (the parser's
-    # resolver re-separates envelope keys from child params on recompile).
+    # Any other step type carrying a nested `arguments` still flattens.
     if "arguments" in args:
         child = args.pop("arguments")
         if isinstance(child, dict):
