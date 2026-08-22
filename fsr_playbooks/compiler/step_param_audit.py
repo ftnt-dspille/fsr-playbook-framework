@@ -61,19 +61,22 @@ ALLOWLISTS: dict[str, dict[str, set[str]]] = {
     # post_create / post_update -- _normalize_post_create_update_args
     # resolver.py:744
     "start_on_create": {
-        "friendly":  {"module", "modules", "when", "mock_result", "condition"},
+        "friendly":  {"module", "modules", "when", "trigger_filter",
+                      "mock_result", "condition"},
         "canonical": {"resource", "resources", "step_variables",
                       "triggerOnSource", "triggerOnReplicate",
                       "__triggerLimit", "fieldbasedtrigger", "useMockOutput"},
     },
     "start_on_update": {
-        "friendly":  {"module", "modules", "when", "mock_result", "condition"},
+        "friendly":  {"module", "modules", "when", "trigger_filter",
+                      "mock_result", "condition"},
         "canonical": {"resource", "resources", "step_variables",
                       "triggerOnSource", "triggerOnReplicate",
                       "__triggerLimit", "fieldbasedtrigger", "useMockOutput"},
     },
     "start_on_delete": {
-        "friendly":  {"module", "modules", "when", "mock_result", "condition"},
+        "friendly":  {"module", "modules", "when", "trigger_filter",
+                      "mock_result", "condition"},
         "canonical": {"resource", "resources", "step_variables",
                       "triggerOnSource", "triggerOnReplicate",
                       "__triggerLimit", "fieldbasedtrigger", "useMockOutput"},

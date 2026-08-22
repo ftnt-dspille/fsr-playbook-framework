@@ -477,6 +477,9 @@ class NormalizerMixin:
         a.setdefault("displayConditions",
                      {m: {"sort": [], "limit": 30, "logic": "AND", "filters": []}
                       for m in modules})
+        # trigger_filter: friendly alias for the canonical fieldbasedtrigger.
+        if "trigger_filter" in a and "fieldbasedtrigger" not in a:
+            a["fieldbasedtrigger"] = a.pop("trigger_filter")
         step.arguments = a
 
     def _normalize_post_create_update_args(
@@ -498,7 +501,8 @@ class NormalizerMixin:
         fieldbasedtrigger.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
-        _FRIENDLY = {"module", "modules", "when", "mock_result", "condition"}
+        _FRIENDLY = {"module", "modules", "when", "trigger_filter",
+                     "mock_result", "condition"}
         _CANONICAL = {
             "resource", "resources", "step_variables", "triggerOnSource",
             "triggerOnReplicate", "__triggerLimit", "fieldbasedtrigger",

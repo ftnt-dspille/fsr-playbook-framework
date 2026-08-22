@@ -49,14 +49,16 @@ UNIVERSAL_STEP_KEYS: set[str] = {
 # keys are still tallied but not diff'd against any expected set.
 EXPECTED_KEYS: dict[str, dict[str, set[str]]] = {
     "cybersponse.post_create": {
-        "friendly":  {"module", "modules", "when", "mock_result", "condition"},
+        "friendly":  {"module", "modules", "when", "trigger_filter",
+                      "mock_result", "condition"},
         "canonical": {"resource", "resources", "step_variables",
                       "triggerOnSource", "triggerOnReplicate",
                       "__triggerLimit", "fieldbasedtrigger", "useMockOutput",
                       "version"},
     },
     "cybersponse.post_update": {
-        "friendly":  {"module", "modules", "when", "mock_result", "condition"},
+        "friendly":  {"module", "modules", "when", "trigger_filter",
+                      "mock_result", "condition"},
         "canonical": {"resource", "resources", "step_variables",
                       "triggerOnSource", "triggerOnReplicate",
                       "__triggerLimit", "fieldbasedtrigger", "useMockOutput",

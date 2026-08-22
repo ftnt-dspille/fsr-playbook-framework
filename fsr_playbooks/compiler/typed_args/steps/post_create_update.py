@@ -124,6 +124,9 @@ def expand_post_create_update(
         fbt = expand_when(when, step_type, path, errors)
         if fbt is not None:
             a["fieldbasedtrigger"] = fbt
+    elif "trigger_filter" in a:
+        # Friendly alias for the canonical ``fieldbasedtrigger`` wire key.
+        a["fieldbasedtrigger"] = a.pop("trigger_filter")
     elif "fieldbasedtrigger" not in a:
         a["fieldbasedtrigger"] = {
             "sort": [], "limit": 30, "logic": "AND", "filters": [],

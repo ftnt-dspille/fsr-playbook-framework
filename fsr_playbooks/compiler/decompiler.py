@@ -518,9 +518,10 @@ def _decompile_step(s, pb_name: str | None = None,
         # fieldbasedtrigger: the trigger filter configuration. Always preserve
         # when present -- the normalizer does NOT re-derive it from friendly
         # inputs; dropping it would lose the trigger condition entirely.
+        # Emit as the friendly alias ``trigger_filter``.
         fbt = args.get("fieldbasedtrigger")
         if fbt:
-            friendly["fieldbasedtrigger"] = fbt
+            friendly["trigger_filter"] = fbt
         # Trigger infrastructure flags: preserve non-default values.
         # Defaults: __triggerLimit=True, triggerOnSource=True,
         # triggerOnReplicate=False. The normalizer setdefaults them, so
@@ -555,9 +556,10 @@ def _decompile_step(s, pb_name: str | None = None,
             out["__triggerLimit"] = False
         # fieldbasedtrigger: the trigger filter condition. Preserve when
         # non-empty (the resolver does NOT re-derive it from friendly inputs).
+        # Emit as the friendly alias ``trigger_filter``.
         fbt = args.get("fieldbasedtrigger")
         if fbt and fbt != {"sort": [], "limit": 30, "logic": "AND", "filters": []}:
-            out["fieldbasedtrigger"] = fbt
+            out["trigger_filter"] = fbt
         # Strip remaining canonical keys the resolver re-derives.
         for k in ("resource", "resources", "triggerOnSource", "triggerOnReplicate",
                   "__triggerLimit", "fieldbasedtrigger", "version", "useMockOutput"):
