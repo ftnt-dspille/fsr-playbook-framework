@@ -78,10 +78,11 @@ CONFIRM = Lane(
 #:
 #: `screen` and `confirm` differ in two things at once -- model and substrate
 #: -- so no disagreement between them can be pinned on either. The first
-#: agreement number this repo produced (3/5) contained one disagreement that
-#: was purely substrate (the box has no playbook the fixture names, the
-#: offline bundle serves one) and one that was purely behavioural, and telling
-#: them apart took reading traces by hand.
+#: agreement number this repo produced (3/5) was hand-read from traces as one
+#: substrate disagreement plus one behavioural one. Running this lane showed
+#: BOTH were the model -- attribute-vs-confirm agreed 5/5, so the substrate
+#: accounted for nothing. The hand attribution was wrong in the only case
+#: anyone had checked, which is the argument for measuring it.
 #:
 #: With this lane each pair varies exactly one factor:
 #:   screen    vs attribute -> same substrate, different model  -> MODEL

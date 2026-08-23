@@ -175,10 +175,10 @@ def test_the_attribute_lane_varies_exactly_one_factor_against_each_side() -> Non
     """The whole point of a third lane.
 
     screen vs confirm moves the model AND the substrate at once, so a
-    disagreement between them is attributable to neither -- the first
-    agreement number this repo produced (3/5) mixed one substrate
-    disagreement with one behavioural one, and separating them took reading
-    traces by hand. Each pair below moves exactly one thing.
+    disagreement between them is attributable to neither. The first agreement
+    number this repo produced (3/5) was hand-read as "one substrate, one
+    behavioural"; measuring it showed both were the model. Each pair below
+    moves exactly one thing.
     """
     assert differs_in(SCREEN, CONFIRM) == ("model", "substrate")
     assert attributable_to(SCREEN, CONFIRM) is None
