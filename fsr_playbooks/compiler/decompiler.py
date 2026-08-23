@@ -458,6 +458,13 @@ def _decompile_step(s, pb_name: str | None = None,
     if isinstance(s.description, str) and s.description.strip():
         out["description"] = s.description
 
+    # Strip system-default step_variables hoisted to `out` for plain start
+    # (abstract_trigger): {"input": {"params": []}} is the resolver default
+    # (_normalize_start_args). The action-trigger variant with records is
+    # stripped in the action-trigger branch below.
+    if s.type == "start" and out.get("step_variables") == {"input": {"params": []}}:
+        out.pop("step_variables", None)
+
     if s.type == "start" and isinstance(args, dict) and (
             _ACTION_TRIGGER_CANONICAL_MARKERS & args.keys()):
         # Action-trigger minimification (start + module -> cybersponse.action,
@@ -507,6 +514,7 @@ def _decompile_step(s, pb_name: str | None = None,
             friendly["inputVariables"] = input_vars
         else:
             out.pop("step_variables", None)
+            args.pop("step_variables", None)
         # displayConditions: drop the per-module empty default the normalizer
         # setdefaults (lines 278-280); keep only a customized filter.
         dc = args.get("displayConditions")
@@ -544,7 +552,14 @@ def _decompile_step(s, pb_name: str | None = None,
         # Also strip the default trigger flags (triggerOnSource=True,
         # triggerOnReplicate=False, __triggerLimit=True) -- same setdefaults.
         sv = out.get("step_variables") or args.get("step_variables")
-        if sv == {"input": {"records": ["{{vars.input.records[0]}}"]}}:
+        # Strip the two system-default shapes the resolver setdefaults:
+        #   {"input": {"records": ["{{vars.input.records[0]}}"]}}         (no params)
+        #   {"input": {"params": [], "records": ["{{vars.input.records[0]}}"]}}  (with params)
+        _TRIGGER_SV_DEFAULTS = (
+            {"input": {"records": ["{{vars.input.records[0]}}"]}},
+            {"input": {"params": [], "records": ["{{vars.input.records[0]}}"]}},
+        )
+        if sv in _TRIGGER_SV_DEFAULTS:
             out.pop("step_variables", None)
             args.pop("step_variables", None)
         # Non-default trigger flags: emit only when they differ.
@@ -589,6 +604,10 @@ def _decompile_step(s, pb_name: str | None = None,
             new_conds.append(entry)
         if new_conds:
             out["conditions"] = new_conds
+        if args.get("step_variables") == []:
+            args.pop("step_variables", None)
+        if out.get("step_variables") == []:
+            out.pop("step_variables", None)
         if args:
             _hoist_args(out, args)
     elif s.type == "manual_input" and isinstance(args, dict):
@@ -673,6 +692,10 @@ def _decompile_step(s, pb_name: str | None = None,
                     assign_out["record_field"] = True
                 if assign_out:
                     args["assign_to"] = assign_out
+        if args.get("step_variables") == []:
+            args.pop("step_variables", None)
+        if out.get("step_variables") == []:
+            out.pop("step_variables", None)
         if args:
             _hoist_args(out, args)
     elif s.type == "set_variable" and isinstance(args, dict):
@@ -725,6 +748,8 @@ def _decompile_step(s, pb_name: str | None = None,
         # canonical step-type change on recompile (`CyopsUtilites` -> `Connectors`)
         # -- see the LIVE-VERIFY PENDING note on the overlay entry.
         args.pop("version", None)
+        if args.get("step_variables") == []:
+            args.pop("step_variables", None)
         if out.get("step_variables") == []:
             out.pop("step_variables", None)
         if args.get("config") == "":
@@ -811,6 +836,8 @@ def _decompile_step(s, pb_name: str | None = None,
                 args.pop(_env_k, None)
             if args.get("config") == "":
                 args.pop("config", None)
+            if args.get("step_variables") == []:
+                args.pop("step_variables", None)
             if out.get("step_variables") == []:
                 out.pop("step_variables", None)
         if args:
@@ -845,6 +872,8 @@ def _decompile_step(s, pb_name: str | None = None,
                 args.pop(_env_k, None)
             if args.get("config") == "":
                 args.pop("config", None)
+            if args.get("step_variables") == []:
+                args.pop("step_variables", None)
             if out.get("step_variables") == []:
                 out.pop("step_variables", None)
         # Strip stale legacy `from_str` -- older smtp connectors used this
@@ -901,6 +930,8 @@ def _decompile_step(s, pb_name: str | None = None,
             args.pop("__recommend", None)
         if args.get("_showJson") is False:
             args.pop("_showJson", None)
+        if args.get("step_variables") == []:
+            args.pop("step_variables", None)
         if out.get("step_variables") == []:
             out.pop("step_variables", None)
         if args:
@@ -963,10 +994,30 @@ def _decompile_step(s, pb_name: str | None = None,
         # Authors should never need to write it.
         if "checkboxFields" in args:
             args.pop("checkboxFields", None)
+        if args.get("step_variables") == []:
+            args.pop("step_variables", None)
+        if out.get("step_variables") == []:
+            out.pop("step_variables", None)
         if args:
             _hoist_args(out, args)
     elif args:
-        _hoist_args(out, args)
+        # Generic fallback: strip the empty-list step_variables default
+        # that many step types carry on the wire (decision, manual_input,
+        # create_record, etc.). The resolver does not re-derive it, but
+        # FSR treats its absence the same as `[]`, so the round-trip is
+        # byte-stable.
+        # Also strip the plain-start default {"input": {"params": []}}
+        # (resolver _normalize_start_args setdefaults it on every abstract_trigger).
+        if args.get("step_variables") == []:
+            args.pop("step_variables", None)
+        if args.get("step_variables") == {"input": {"params": []}}:
+            args.pop("step_variables", None)
+        if out.get("step_variables") == []:
+            out.pop("step_variables", None)
+        if out.get("step_variables") == {"input": {"params": []}}:
+            out.pop("step_variables", None)
+        if args:
+            _hoist_args(out, args)
 
     # `for_each` is lifted OUT of `arguments:` when the IR is built from the
     # wire, so it must be put back on the step surface here or the loop is
