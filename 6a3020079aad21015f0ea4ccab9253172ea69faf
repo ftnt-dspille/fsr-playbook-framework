@@ -1,0 +1,22 @@
+Contains a SECOND, unrelated change swept in from a concurrent session:
+A1.4 deferred tool loading (fsr_playbooks/llm/anthropic_provider.py,
+run_turn.py, tests/test_provider_capability_matrix.py). Its intended message:
+
+  llm: deferred tool loading for the long tail (A1.4)
+
+  Anthropic tool search + defer_loading on the materialized MCP tools, BM25
+  search tool prepended. Schemas are APPENDED on search, never swapped, so a
+  dynamic surface and a warm cache stop being mutually exclusive.
+
+  The split is mcp_*, NOT the page's ranked head: deferring by page would put
+  the array back to varying mid-session, the exact cache defect A1.3 removed.
+
+  Both API constraints enforced here rather than at the wire -- the search tool
+  is never itself deferred, and an all-deferrable slice is left alone instead
+  of earning 400 'All tools have defer_loading set'.
+
+  Opt-in via run_agent_turn(defer_tools=True); a caller that does not ask gets
+  a byte-identical array, asserted.
+
+  P2 unchanged -- DISCOVERY only. Tier-3, the affordance gates, per-config
+  scoping and persona scopes all still decide execution.
