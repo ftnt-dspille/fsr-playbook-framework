@@ -311,11 +311,30 @@ async def run_agent_turn(
     # decision is not restated per provider. Handing the turn bound over is
     # what makes a native task budget possible at all; a provider that cannot
     # take one keeps `budget_note` switched on through the returned residue.
+    # The ask comes from the ACTIVE TURN PLAN unless this call overrode it.
+    # plan_turn is the single per-turn resolution point, and the capability
+    # ask is part of resolving a turn -- deriving it a second time here is how
+    # the prompt, the tool slice and the tier policy drifted apart before
+    # Phase 2. A caller with no plan installed (the framework's own MCP
+    # callers, tests) still gets the pre-seam defaults, because a default
+    # `TurnRequest` asks for nothing that changes a wire.
+    _plan_ask = None
+    try:
+        from .turn_plan import active_turn_plan
+        _active = active_turn_plan()
+        _plan_ask = getattr(_active, "ask", None) if _active else None
+    except Exception:  # pragma: no cover - a plan must never fail a turn
+        _plan_ask = None
     _ask = TurnRequest(
-        reasoning=reasoning,
-        max_tool_turns=max_tool_turns or MAX_TOOL_TURNS,
-        defer_tools=defer_tools,
-        prune_history=prune_history,
+        reasoning=(reasoning if reasoning is not None
+                   else getattr(_plan_ask, "reasoning", None)),
+        max_tool_turns=(max_tool_turns
+                        or getattr(_plan_ask, "max_tool_turns", None)
+                        or MAX_TOOL_TURNS),
+        defer_tools=(defer_tools
+                     or bool(getattr(_plan_ask, "defer_tools", False))),
+        prune_history=(prune_history if prune_history is not None
+                       else getattr(_plan_ask, "prune_history", None)),
     )
     try:
         provider.request(_ask)

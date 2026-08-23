@@ -47,6 +47,7 @@ from .intents import (
     load_intent_prompt,
     resolve_intent,
 )
+from .provider import TurnRequest
 
 # Default hard ceiling mirrors the historical connector loop cap. The plan
 # turns it from an invisible cliff into a stated budget + graceful close.
@@ -115,6 +116,58 @@ class TurnContext:
     preferred_tools: tuple[str, ...] = ()
 
 
+#: Env override for the requested reasoning depth (`low`..`max`). Unset means
+#: SEND NOTHING, which is not the same as "default": on the 4.6+ family
+#: omitting `thinking` already runs adaptive at effort `high`, so asking for
+#: `high` changes the wire to buy exactly nothing. The lever with real value is
+#: asking for LESS on turns that are genuinely cheap -- and which those are is
+#: not something this module knows yet. Calibrating it by guess is how the #128
+#: budget numbers got set the first time; leave it unset until a lane run says
+#: which intents can take it.
+REASONING_ENV = "FSR_TURN_REASONING"
+
+
+def _has_deferrable_tail(tools: list[dict[str, Any]]) -> bool:
+    """True when the surface carries a long tail worth searching for.
+
+    Deferring is only a win when there is a tail: with no `mcp_*` tools the
+    provider's own `apply_deferred_loading` no-ops, and asking for it anyway
+    would put a tool-search tool in the cached prefix for nothing.
+    """
+    return any(str(t.get("name", "")).startswith("mcp_") for t in tools)
+
+
+def _ask_for(budget: TurnBudget, tools: list[dict[str, Any]]) -> TurnRequest:
+    """The capability ASK this turn makes of whatever provider serves it.
+
+    Provider-neutral by construction: this says what the turn WANTS, and
+    `HostEmulation` decides who does it. On a provider that serves none of
+    these (the OpenAI-compatible backend the product runs today) every one
+    comes back as host emulation and the wire is byte-identical to before --
+    which is exactly why asking is safe to switch on everywhere at once.
+
+    What is asked, and why each is unconditional rather than tuned:
+
+    * the tool budget -- the plan already computed it and states it in the
+      prompt; handing the same number to a provider that tracks it server-side
+      replaces `budget_note` with a countdown the model can actually see.
+    * history pruning -- the host was already rewriting the transcript every
+      turn (`shrink_history`). Asking means a provider that can clear old tool
+      results server-side does it instead, and we stop paying to resend what
+      it would have cleared. Never both (see `HostEmulation`).
+    * deferred tools -- only when there IS a tail (see above).
+    * reasoning depth -- NOT asked by default; see `REASONING_ENV`.
+    """
+    import os
+    depth = (os.environ.get(REASONING_ENV, "") or "").strip().lower() or None
+    return TurnRequest(
+        reasoning=depth,
+        max_tool_turns=budget.max_tool_turns,
+        prune_history=True,
+        defer_tools=_has_deferrable_tail(tools),
+    )
+
+
 @dataclass(frozen=True)
 class TurnPlan:
     """Everything a host needs to run one turn, resolved in one place."""
@@ -130,6 +183,12 @@ class TurnPlan:
     tier_policy: dict[str, int] = field(default_factory=dict)
     budget: TurnBudget = field(default_factory=TurnBudget)
     context: TurnContext = field(default_factory=TurnContext)
+
+    #: What this turn asks of the provider (A2). The loop reads it rather than
+    #: each call site restating it -- the same consolidation this module exists
+    #: for. A host that never installs a plan asks for nothing and gets the
+    #: pre-seam behaviour, which is why this is safe to default on.
+    ask: TurnRequest = field(default_factory=TurnRequest)
 
     #: Set when this plan is a STAND-IN for a derivation that failed, naming
     #: what failed. A failsafe plan states no page facts -- it only keeps the
@@ -322,6 +381,7 @@ def plan_turn(
     return TurnPlan(
         intent=intent, prompt=prompt, tools=tools, base_prompt=base_prompt,
         tier_policy=tier_policy, budget=budget, context=ctx,
+        ask=_ask_for(budget, tools),
     )
 
 
