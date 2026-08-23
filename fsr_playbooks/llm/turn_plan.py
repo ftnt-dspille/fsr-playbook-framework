@@ -106,6 +106,13 @@ class TurnContext:
     has_open_playbook: bool = False
     has_trace: bool = False            # a triage transcript exists to bottle
     scenario_title: str | None = None
+    #: A1.3 -- the tools this page most often needs, best first. A RANKING,
+    #: not a slice: every one of them is already in the advertised array, and
+    #: so is everything they are ranked above. Naming them here is what lets
+    #: the host stop SUBTRACTING per page, which is what was discarding the
+    #: prompt-cache prefix (tool definitions are part of it) on every page
+    #: change. Empty = no page preference, and the prior says nothing.
+    preferred_tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -245,12 +252,25 @@ def _context_prior(intent: str, ctx: TurnContext) -> str:
             "(build_playbook_from_trace can bottle it directly)"
         )
     stated = "; ".join(facts) if facts else "no page state was provided"
+    ranked = ""
+    if ctx.preferred_tools:
+        # Steering by PROMPT, not by tool array. The alternative -- reordering
+        # or trimming `tools[]` per page -- moves bytes inside the cached
+        # prefix, so it buys focus by paying for a full prefix rebuild every
+        # time the analyst changes page.
+        names = ", ".join(f"`{t}`" for t in ctx.preferred_tools)
+        ranked = (
+            f" On this page the tools that usually matter, best first, are: "
+            f"{names}. Reach for those before scanning the rest -- they are a "
+            f"starting point, not a restriction."
+        )
     block = (
         "\n\n## Turn context (a prior, not a cage)\n"
         f"Working prior: **{intent}**. Page state: {stated}. The full tool "
         "surface is available to you regardless of this prior -- if the "
         "analyst's request crosses into other work (triage from the editor, "
         "authoring from an alert), follow the request, not the prior."
+        + ranked
     )
     disposition = _DISPOSITIONS.get(intent)
     if disposition:
