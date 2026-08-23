@@ -130,7 +130,7 @@ class TurnPlan:
     failsafe_reason: str | None = None
 
     @classmethod
-    def failsafe(cls, reason: str) -> "TurnPlan":
+    def failsafe(cls, reason: str) -> TurnPlan:
         """The plan to install when deriving the real one FAILED.
 
         A host that uses TurnPlan derives one per turn, and every derivation

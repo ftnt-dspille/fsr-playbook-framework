@@ -377,6 +377,11 @@ def _check_undefined_vars(pb: Playbook, pi: int,
     defined: set[str] = set(_RESERVED_VARS_KEYS)
     # `vars.item` (+ `vars.item.<field>`) is the per-iteration loop binding.
     defined.add("item")
+    # Declared playbook parameters -- callers pass values via
+    # ``arguments={name: value}`` on a workflow_reference step, and on FSR
+    # 8.0+ the trigger API also flattens them to ``vars.<name>`` directly.
+    # Either way they are expected to be present at runtime.
+    defined |= set(pb.parameters)
     # Every var name defined in the playbook, gathered across the whole
     # playbook (vars are global; definition can lexically follow the read).
     # Two definition mechanisms:
@@ -408,15 +413,16 @@ def _check_undefined_vars(pb: Playbook, pi: int,
                         code=ErrorCode.BAD_VALUE,
                         message=(f"Jinja reference vars.{name} in step "
                                  f"{s.id!r}: {name!r} is never defined by a "
-                                 f"SetVariable or step_variables and is not a "
-                                 f"runtime key; it will evaluate empty at "
-                                 f"runtime"),
+                                 f"SetVariable, step_variables, or playbook "
+                                 f"parameters, and is not a runtime key; it "
+                                 f"will evaluate empty at runtime"),
                         path=f"{path}.steps[{si}].arguments.{sub}",
                         near=suggestion,
                         suggestion=(f"did you mean vars.{suggestion}?"
                                     if suggestion else
-                                    "define it with a set_variable step or "
-                                    "step_variables first"),
+                                    "define it with a set_variable step, "
+                                    "step_variables, or add it to "
+                                    "parameters: first"),
                         severity="warning",
                     ))
 
