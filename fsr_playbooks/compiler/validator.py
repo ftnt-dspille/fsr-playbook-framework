@@ -30,9 +30,13 @@ _VARS_STEPS_RE = re.compile(
 _RESERVED_VARS_KEYS = {
     # Authoritative list per FSR docs ("Reserved Keywords"). Setting any
     # of these via SetVariable either silently shadows the FSR-provided
-    # value OR makes the runtime crash (e.g. setting `message` to a
-    # plain string triggers `'str' object has no attribute 'get'` because
-    # the engine treats it as a structured envelope).
+    # value OR makes the runtime crash.
+    #
+    # Live-verified on FSR 8.0.0-6034:
+    # - CRASHES ('str' object has no attribute 'get'): env, message
+    # - SILENTLY SHADOWED (set value lost): input
+    # - WORKS but shadows FSR built-ins: result, steps, globalVars, self,
+    #   parent_wf, workflow
     "items",
     "result",
     "input",
