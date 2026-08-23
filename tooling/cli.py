@@ -2917,6 +2917,53 @@ def cmd_demo_prep(args: argparse.Namespace) -> int:
     return probe_cleanup.main()
 
 
+def cmd_matrix(args: argparse.Namespace) -> int:
+    """One entry point over the eval harness: `matrix --lane screen|confirm`.
+
+    This is a resolver, not a second harness. It turns a lane + a corpus slice
+    into exactly the flags `evals` already takes, prints what it resolved
+    BEFORE spending anything, and stamps the lane name into the matrix so the
+    differ can refuse a screen-vs-confirm diff by name.
+
+    Everything it can do was already possible by hand -- and that was the
+    problem: the routing gate, the investigation calibration and the
+    enhance-delivery gate each carried their own provider default, their own
+    substrate, and their own idea of the corpus, so no two of their numbers
+    were comparable.
+    """
+    from evals.lanes import LaneError, resolve
+
+    try:
+        plan = resolve(lane=args.lane, mode=args.mode, tasks=args.tasks,
+                       allow_live=args.live_ok)
+    except LaneError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+
+    # Say what will run before it runs. A lane run is minutes long; finding out
+    # afterwards that it took the wrong substrate wastes the whole thing.
+    print(f"▶ matrix: {plan.describe()}", file=sys.stderr)
+
+    # The lane rides in the environment because `run_matrix` records it, and
+    # `run_matrix` is reachable from the plain `evals` path too.
+    os.environ["EVAL_LANE"] = plan.lane.name
+
+    ev = argparse.Namespace(
+        models=plan.lane.models,
+        tasks=",".join(plan.tasks),
+        repeat=args.repeat,
+        live=plan.lane.live,
+        offline=plan.lane.offline,
+        bundle=plan.lane.bundle,
+        json=args.json,
+        save=True,          # a lane run that is not archived cannot be diffed
+        replay=None,
+        baseline=args.baseline,
+        list_runs=False,
+    )
+    return cmd_evals(ev)
+
+
 def cmd_evals(args: argparse.Namespace) -> int:
     """Run the LLM-evaluation harness over the task corpus.
 
@@ -3054,6 +3101,15 @@ def cmd_evals(args: argparse.Namespace) -> int:
             delta = delta_vs(prior, matrix)
             print()
             print(render_delta(delta))
+            if not (delta.get("substrate") or {}).get("comparable", True):
+                # Refused, not failed-on-regression: there is no honest
+                # regression verdict to give across incomparable runs, and
+                # returning 0 here would let a gate go green on a diff nobody
+                # could read.
+                print("\nREFUSED: baseline is not comparable to this run "
+                      "(see above). No regression verdict was computed.",
+                      file=sys.stderr)
+                return 1
             regressed = [c for c in delta["cells"]
                          if c.get("status") == "regressed"]
             if regressed:
@@ -4036,7 +4092,8 @@ def cmd_chat_stats(args: argparse.Namespace) -> int:
 
     print(f"=== sessions ({len(by_sess)}) -- log: {path}")
     print(f"{'session':10} {'turns':>5} {'in':>7} {'out':>6} "
-          f"{'cache_r':>8} {'cache_w':>8} {'max_hist':>9}  first_ts")
+          f"{'cache_r':>8} {'cache_w':>8} {'hit%':>5} {'pfx':>4} "
+          f"{'max_hist':>9}  first_ts")
     for sid, rs in sorted(by_sess.items(),
                           key=lambda kv: -sum(r.get("input_tokens", 0)
                                               + r.get("output_tokens", 0)
@@ -4047,8 +4104,19 @@ def cmd_chat_stats(args: argparse.Namespace) -> int:
         cw = sum(r.get("cache_write", 0) for r in rs)
         mh = max((r.get("history_chars", 0) for r in rs), default=0)
         first = rs[0].get("ts", "")[:19]
+        # hit% -- share of PREFIX-eligible input served from cache. The
+        # denominator is cache_read + uncached input, because a hit reports
+        # its tokens under cache_read and NOT under input_tokens.
+        denom = cr + ti
+        hit = (100.0 * cr / denom) if denom else 0.0
+        # pfx -- distinct (tools, system) fingerprints this session used. 1 is
+        # the goal: >1 means the advertised surface moved mid-session and every
+        # change discarded the whole cached prefix. Blank for providers that
+        # do not report one.
+        fps = {r.get("prefix_fingerprint") for r in rs if r.get("prefix_fingerprint")}
+        pfx = str(len(fps)) if fps else "-"
         print(f"{sid:10} {len(rs):5d} {ti:7d} {to:6d} {cr:8d} {cw:8d} "
-              f"{mh:9d}  {first}")
+              f"{hit:5.1f} {pfx:>4} {mh:9d}  {first}")
 
     # ---- 2. worst turns ----
     print()
@@ -4772,6 +4840,46 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--list-runs", action="store_true",
                     help="list archived eval run ids and exit")
     sp.set_defaults(func=cmd_evals)
+
+    sp = sub.add_parser(
+        "matrix",
+        help="ONE testing entry point: run the corpus in a named LANE "
+             "(screen = free/offline Frank, confirm = paid/live) and archive "
+             "it with the lane stamped in, so two runs can be diffed only "
+             "when they measured the same world",
+    )
+    sp.add_argument("--lane", default="screen", choices=["screen", "confirm"],
+                    help="screen (DEFAULT): agentic_frank/GLM-5.2, offline, "
+                         "soc_invest_surface bundle -- free and box-free, run "
+                         "it on every change. confirm: agentic_openai_api "
+                         "against a live appliance -- costs credits, needs "
+                         "--live-ok, and exists to answer one question at "
+                         "milestones: does the free lane still predict the "
+                         "paid one?")
+    sp.add_argument("--mode", default="all",
+                    help="corpus slice, taken from each fixture's own `mode` "
+                         "field: all (default), routing, invest, enhance, "
+                         "repair, refuse, authoring -- plus `gate`, the five "
+                         "name-pinned fixtures `make tool-gate` diffs against "
+                         "its baseline")
+    sp.add_argument("--tasks", default=None,
+                    help="explicit comma-separated task names; overrides "
+                         "--mode")
+    sp.add_argument("--repeat", type=int, default=1,
+                    help="run N times and print the consistency screen; a "
+                         "single run lies (auto-memory: model screening "
+                         "doctrine). Milestones only -- it is N times the "
+                         "wall clock and, on the confirm lane, N times the "
+                         "bill.")
+    sp.add_argument("--baseline", default=None,
+                    help="prior run id to diff against. The differ refuses "
+                         "when the lanes/substrates/scorer disagree.")
+    sp.add_argument("--live-ok", action="store_true",
+                    help="deliberate opt-in required by any lane that spends "
+                         "money or reaches a box")
+    sp.add_argument("--json", action="store_true",
+                    help="emit the full matrix as JSON on stdout")
+    sp.set_defaults(func=cmd_matrix)
 
     sp = sub.add_parser(
         "chat-drive",

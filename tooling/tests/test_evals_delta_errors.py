@@ -46,7 +46,10 @@ def test_a_real_drop_is_still_a_regression():
 
 
 def test_the_render_names_the_error_instead_of_a_minus_sign():
-    d = harness.delta_vs(_run("a", [_ok("x")]), _run("b", [_err("x")]))
+    # Labeled on both sides: an unlabeled pair is refused outright (see the
+    # comparability tests below), and this test is about the CELL rendering.
+    d = harness.delta_vs(_labeled("a", [_ok("x")], **_SAME),
+                         _labeled("b", [_err("x")], **_SAME))
     out = harness.render_delta(d)
     assert "errored" in out and "ReadTimeout" in out
     assert "- regressed" not in out
@@ -67,8 +70,12 @@ def _labeled(run_id, rows, **substrate):
     return r
 
 
+# The full comparability key. `scorer_version` joined it when the composite
+# score landed (#127) and `lane` when the two named lanes did -- a run missing
+# either is `unknown`, which is a mismatch, not a pass.
 _SAME = {"tool_substrate": "framework+connector",
-         "record_substrate": "soc_invest_surface", "offline": True}
+         "record_substrate": "soc_invest_surface", "offline": True,
+         "scorer_version": 2, "lane": "screen"}
 
 
 def test_matching_substrates_compare_normally():
@@ -76,7 +83,7 @@ def test_matching_substrates_compare_normally():
                          _labeled("b", [_ok("x", 0.5)], **_SAME))
     assert d["substrate"]["comparable"] is True
     assert d["cells"][0]["status"] == "regressed"
-    assert "SUBSTRATE MISMATCH" not in harness.render_delta(d)
+    assert "NOT COMPARABLE" not in harness.render_delta(d)
 
 
 def test_a_different_tool_set_makes_the_two_runs_incomparable():
@@ -85,11 +92,12 @@ def test_a_different_tool_set_makes_the_two_runs_incomparable():
         _labeled("b", [_ok("x", 0.5)], **_SAME))
     assert d["substrate"]["comparable"] is False
     out = harness.render_delta(d)
-    assert "SUBSTRATE MISMATCH" in out
+    assert "NOT COMPARABLE" in out
     assert "framework-only → framework+connector" in out
-    # Above the table. By the time someone has read the cells they have
-    # already formed an opinion about the agent.
-    assert out.index("SUBSTRATE MISMATCH") < out.index("status")
+    # The table is WITHHELD, not captioned. A banner above a printed grid
+    # loses -- the eye goes to the numbers, and by the time someone has read
+    # the cells they have already formed an opinion about the agent.
+    assert "status" not in out
 
 
 def test_an_UNLABELED_run_is_a_mismatch_not_a_pass():

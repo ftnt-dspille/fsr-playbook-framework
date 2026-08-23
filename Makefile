@@ -14,7 +14,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen tool-gate mypy-gate wire-audit wire-census test-effect-probes
+.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen matrix tool-gate mypy-gate wire-audit wire-census test-effect-probes
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -144,9 +144,19 @@ chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
 		echo "usage: make chat-drive SCENARIO=<fixture-name>  |  MSG=\"...\""; exit 2; \
 	fi
 
+# NOT a lane run, and its numbers are not comparable to one: it drives the
+# triage agent loop directly on a hardcoded model against a live box, so it
+# records no lane/substrate stamp. `make matrix MODE=invest` scores the SAME
+# seven fixtures on the screen lane, free and box-free -- reach for that first
+# and keep this for the question it alone answers (does the live triage path
+# still clear the recall gate on a real appliance?).
 chat-calibrate: ## live: capability gate over every investigation fixture (costs credits). SCENARIO=<fixture> PROVIDER=frank|anthropic REPEAT=n RETRIES=n
 	$(PY) tooling/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),) $(if $(PROVIDER),--provider $(PROVIDER),) $(if $(REPEAT),--repeat $(REPEAT),) $(if $(RETRIES),--retries $(RETRIES),)
 
+# Also not a lane run: it drives the DEPLOYED connector's chat_turn over its
+# own `enhance_scenarios/` set, which is a different corpus from the five
+# `mode=enhance` fixtures `make matrix MODE=enhance` scores. Both are worth
+# having; do not diff one against the other.
 enhance-live: ## live: enhance-DELIVERY gate -- drive every enhance_scenario, grade emit_enhancement_offer vs prose (SCENARIO=<name> RUNS=n CONFIG=name). Needs .env + deployed connector.
 	$(PY) tooling/evals/enhance_live.py $(if $(SCENARIO),--only $(SCENARIO),) $(if $(RUNS),--runs $(RUNS),) $(if $(CONFIG),--config $(CONFIG),)
 
@@ -194,21 +204,71 @@ TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,s
 # spiral.
 # data/eval_runs/ is gitignored, so a fresh checkout has no baseline to diff
 # against and must capture its own before a delta means anything.
-TOOL_GATE_BASELINE ?= 20260817T153958Z
+# Re-baselined 2026-08-23: the prior pin (20260817T153958Z) predates
+# scoring.SCORER_VERSION, so it carries no stamp and is now correctly REFUSED
+# as incomparable -- see tooling/tests/test_eval_comparability.py. That run
+# (20260823T112659Z) was offline with records EMPTY and carried no lane.
+#
+# Re-baselined AGAIN the same day when the gate moved onto the screen lane:
+# the lane serves the soc_invest_surface bundle, so `record_substrate` went
+# empty -> soc_invest_surface and `lane` went unknown -> screen. The differ
+# refused the old pin on both counts, which is the intended behaviour and not
+# a regression -- the run itself scored 20/20, cell for cell identical to its
+# predecessor. Current pin: offline, framework+connector tools,
+# soc_invest_surface records, lane=screen, scorer_version=2, 20/20.
+TOOL_GATE_BASELINE ?= 20260823T143020Z
 
+# ── One testing story (docs/plans/AGENT_DESIGN_AND_TEST_UNIFICATION.md, B1) ──
+# Two named lanes over ONE corpus and ONE scorer, instead of three scripts with
+# three provider defaults and three ideas of the substrate:
+#
+#   screen  (default)  agentic_frank / GLM-5.2, --offline --bundle
+#                      soc_invest_surface. Free, box-free, run on every change.
+#   confirm            agentic_openai_api against a LIVE appliance. Costs
+#                      credits. Milestones only, in the background, never in an
+#                      iteration loop -- it answers one question: does the free
+#                      lane still predict the paid one?
+#
+# The lane is stamped into the archived matrix and joins the comparability key,
+# so the differ REFUSES a screen-vs-confirm diff instead of printing cells that
+# moved because the world did.
+#
+#   make matrix                            # screen lane, whole corpus
+#   make matrix MODE=gate BASELINE=<id>    # the tool-gate 5, diffed
+#   make matrix MODE=invest                # the investigation slice
+#   make matrix LANE=confirm LIVE_OK=1     # paid + live; say you meant it
+#
+# MODE slices come from each fixture's own `mode` field (all | routing |
+# invest | enhance | repair | refuse | authoring), plus `gate` -- the five
+# name-pinned routing fixtures tool-gate diffs. TASKS=a,b overrides MODE.
+matrix: ## ONE eval entry point. LANE=screen|confirm MODE=all|gate|routing|invest|enhance|repair|refuse|authoring TASKS=… REPEAT=n BASELINE=<run_id> LIVE_OK=1
+	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py matrix \
+	  --lane $(if $(LANE),$(LANE),screen) \
+	  $(if $(MODE),--mode $(MODE),) $(if $(TASKS),--tasks $(TASKS),) \
+	  $(if $(REPEAT),--repeat $(REPEAT),) \
+	  $(if $(BASELINE),--baseline $(BASELINE),) \
+	  $(if $(LIVE_OK),--live-ok,)
+
+# `tool-gate` survives as the FAST routing-only subset with its own pin --
+# `make matrix MODE=gate` runs the same five fixtures through the lane
+# resolver. Keep the pin here; lanes.py:GATE_TASKS mirrors the list and a test
+# asserts the two have not drifted.
 tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3 OFFLINE=1
 	@echo "note: the score is composite (#127), so a row can CLIMB, not just"
 	@echo "      drop: terminal_tool_reached + offer_timing +"
 	@echo "      appropriate_approval_requests + no_spiral. Every run is saved;"
 	@echo "      re-baseline with 'make tool-gate BASELINE=' and pin the new id."
-	@echo "      OFFLINE=1 binds the tools to the simulated client (no box)."
+	@echo "      It now runs on the SCREEN lane (offline Frank + the"
+	@echo "      soc_invest_surface bundle), so OFFLINE=1 is no longer a"
+	@echo "      choice -- this gate is box-free by construction."
 	@echo "      2026-08-13: offline reproduced the live baseline exactly, 20/20."
-	@echo "      A SUBSTRATE MISMATCH banner means the two runs saw different"
-	@echo "      worlds -- fix that before reading a single cell."
-	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py evals \
-	  --tasks $(TOOL_GATE_TASKS) --save $(if $(OFFLINE),--offline,) \
+	@echo "      A NOT COMPARABLE refusal means the two runs saw different"
+	@echo "      worlds; the table is WITHHELD, not captioned. Fix the world"
+	@echo "      or re-baseline -- there is no cell worth reading first."
+	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py matrix \
+	  --lane screen --mode gate \
 	  $(if $(REPEAT),--repeat $(REPEAT),) \
-	  $(if $(TOOL_GATE_BASELINE),--baseline $(TOOL_GATE_BASELINE),)
+	  $(if $(BASELINE)$(TOOL_GATE_BASELINE),--baseline $(if $(BASELINE),$(BASELINE),$(TOOL_GATE_BASELINE)),)
 
 test-effect-probes: ## LIVE: does the affordance actually WRITE? Seeds a scratch playbook, drives the widget's exact payload, re-reads the box. ONLY=A5,A2,A3 RUNS=2 DUMP=dir
 	@echo "▶ effect probes -- every verdict is a box read, never a card or an ok flag."

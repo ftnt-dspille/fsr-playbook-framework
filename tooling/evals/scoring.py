@@ -877,6 +877,20 @@ def _score_investigation_quality(
 #: correct behavior is worse than no grader.
 _VERIFY_TOOLS = ("verify_playbook", "verify_enhancement")
 
+#: Bump this whenever a change alters what a given trace SCORES. It is stamped
+#: into every saved matrix and forms part of the comparability key, so a diff
+#: across a scorer change is refused instead of read as agent movement.
+#:
+#: This is not hypothetical, it is the known case: the tool-gate baseline
+#: pinned before #127 was scored on `terminal_tool_reached` alone and gives
+#: every row 1.0. Diffed against a composite-scored run, every honest row looks
+#: like a regression -- and nothing in the artifact said the rule had changed.
+#:
+#:   1 -- terminal_tool_reached only (pre-#127; no run carries this stamp)
+#:   2 -- #127 composite: + offer_timing, appropriate_approval_requests,
+#:        no_spiral
+SCORER_VERSION = 2
+
 #: The composite authoring score for `mode="tool_selection"`: the gates that
 #: count alongside `terminal_tool_reached`. Each measures a behaviour we
 #: already say we care about elsewhere -- offering at the right moment (A4),
