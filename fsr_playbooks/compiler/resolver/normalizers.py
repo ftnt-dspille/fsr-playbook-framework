@@ -83,12 +83,12 @@ def _rewrite_query_filter_ops(
 ) -> None:
     """Rewrite substring operators on a record-step query filter, in place.
 
-    The `/api/query/<module>` layer has no scalar `contains` -- the same gap the
-    field-based trigger has, so this reuses the trigger's rewrite table and
-    wildcard wrapper rather than growing a second vocabulary. `contains` on a
-    record step does not merely fail to match: on 8.0 it returns HTTP 500, and
-    so do `startswith`/`sw`. `like` with an explicit `%` is the one substring
-    match the query layer honours::
+    The `/api/query/<module>` layer historically had no scalar `contains` --
+    the same gap the field-based trigger has, so this reuses the trigger's
+    rewrite table and wildcard wrapper rather than growing a second vocabulary.
+    `like` with an explicit `%` is the canonical substring match the query
+    layer honours. While `contains`/`startswith` also work on FSR 8.0.0-6034
+    (live-verified), `like` with `%` is the safe cross-version form.
 
         {"field": "description", "operator": "like", "_operator": "like",
          "value": "%test%", "type": "primitive"}

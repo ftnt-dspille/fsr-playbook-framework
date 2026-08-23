@@ -266,8 +266,16 @@ _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
 # structural namespaces handled elsewhere). First segment only.
 _VARS_TOPLEVEL_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_]*)")
 # Output keys FSR adds to every step's `vars.steps.<key>` envelope.
+# Split into two tiers based on live-verified behavior (FSR 8.0.0-6034):
+# - _STEP_ENVELOPE_KEYS: status, result — only on connector/envelope step
+#   outputs ({data, status, message, operation}). NOT available on
+#   workflow_reference (output = child's vars) or for_each (output = list).
+# - _OBJECT_META_KEYS: @id, @type, uuid, name, id, step_id — Hydra/object
+#   metadata, available on any object (e.g. records from find_record).
 _UNIVERSAL_OUTPUT_KEYS = {"status", "result", "id", "name", "uuid",
-                          "@id", "@type", "step_id"}
+                           "@id", "@type", "step_id"}
+_STEP_ENVELOPE_KEYS = {"status", "result"}
+_OBJECT_META_KEYS = _UNIVERSAL_OUTPUT_KEYS - _STEP_ENVELOPE_KEYS
 
 
 def _jinja_key(step: Step) -> str:
@@ -832,8 +840,20 @@ def _resolve_path(env_key: str, attr_chain: str,
     for kind, val in tokens:
         if kind == "attr":
             if val in _UNIVERSAL_OUTPUT_KEYS:
-                # FSR exposes these on every step; accept.
-                return _shape_scalar("any"), ""
+                if val in _OBJECT_META_KEYS:
+                    # Object metadata (@id, @type, uuid, name, id, step_id)
+                    # is always available on any object -- Hydra envelopes,
+                    # records, etc. Accept on any shape.
+                    return _shape_scalar("any"), ""
+                # Step-envelope keys (status, result) are only on connector
+                # step outputs ({data, status, message, operation}), NOT on
+                # workflow_reference (output = child's vars) or for_each
+                # (output = list). Live-verified on FSR 8.0.0-6034.
+                if cur.get("kind") == "unknown":
+                    return _shape_scalar("any"), ""
+                if cur.get("kind") == "object" and val in (cur.get("keys") or {}):
+                    return _shape_scalar("any"), ""
+                # Otherwise fall through to normal key check.
             if cur.get("kind") == "object":
                 keys = cur.get("keys") or {}
                 if val not in keys:

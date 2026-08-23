@@ -74,8 +74,10 @@ _TRIGGER_OP_ALIASES: dict[str, str] = {
     "is_changed": "changed", "has_changed": "changed",
 }
 # Pattern-producing rewrites: op → (canonical operator, wildcard wrap mode).
-# FSR has no scalar startswith/endswith/contains operator -- they are all `like`
-# (or `notlike`) with the value wrapped. Live-verified. Auto-applied + warned.
+# `like` with explicit `%` is the canonical cross-version substring match.
+# While `contains`/`startswith`/`endswith` also work on FSR 8.0.0-6034
+# (live-verified), `like` with `%` is the safe form across FSR versions.
+# Auto-applied + warned.
 _TRIGGER_OP_REWRITE: dict[str, tuple[str, str]] = {
     "contains": ("like", "both"), "icontains": ("like", "both"),
     "notcontains": ("notlike", "both"), "not_contains": ("notlike", "both"),

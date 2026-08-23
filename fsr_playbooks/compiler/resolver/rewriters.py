@@ -140,8 +140,9 @@ class RewriterMixin:
                     message=(
                         f"`vars.steps.{jkey}.{key}` rewritten to `vars.{key}` -- "
                         f"set_variable outputs live at top-level vars, not "
-                        f"under the step-output namespace. The other form "
-                        f"silently evaluates to empty at runtime."
+                        f"under the step-output namespace. While the step-ref "
+                        f"form also works at runtime (live-verified 8.0.0), "
+                        f"the top-level form is the canonical pattern."
                     ),
                     path=f"playbooks[{pi}].steps[{si}].arguments",
                     severity="warning",
