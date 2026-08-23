@@ -1,0 +1,12 @@
+MESSAGE IS WRONG -- crossed sessions.
+
+This commit contains fsr_playbooks/compiler/linter.py only (another session's
+work). It carries the row-7 message because a `git commit --amend` from a
+concurrent session landed on it. The real row-7 change (native reasoning depth
++ task budgets on Anthropic) is its PARENT, 10702cc.
+
+The amendment 10702cc was supposed to receive, and did not:
+  LIVE-ACCEPTED on claude-sonnet-5 -- adaptive thinking + effort + task_budget
+  as siblings in one output_config, on beta.messages.stream, two round-trips
+  through a tool loop: both 200, tool_use then end_turn. The wire shape and the
+  SDK beta surface are confirmed. BEHAVIOUR remains unproven (LANE=confirm).
