@@ -50,6 +50,7 @@ from ._loop_helpers import (
 from ._loop_helpers import (
     shrink_history as _shrink_history,
 )
+from .cache_prefix import prefix_fingerprint as _prefix_fingerprint
 from .provider import (
     ApprovalRequestEvent,
     DoneEvent,
@@ -65,7 +66,12 @@ from .provider import (
 from .tools import _resolve_tier as _tier_for
 from .tools import anthropic_tools, dispatch
 
-DEFAULT_MODEL = os.environ.get("STUDIO_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+# The agent runs a multi-step tool loop, so the default must be a model that
+# can plan across calls. Sonnet 4.5 predates adaptive thinking entirely -- it
+# takes no `thinking` / `effort` control at all, so the capability seam has
+# nothing to give it. Sonnet 5 is the volume default; callers that want more
+# pass `model=` (the connector's config dropdown offers claude-opus-5).
+DEFAULT_MODEL = os.environ.get("STUDIO_ANTHROPIC_MODEL", "claude-sonnet-5")
 
 
 # P1 -- forced written assessment. When a turn runs tools but the final
@@ -512,6 +518,10 @@ class AnthropicProvider:
                 cached_tools.append({**t, "cache_control": {"type": "ephemeral"}})
             else:
                 cached_tools.append(t)
+        # Stamp the prefix digest onto every UsageEvent this stream emits. A
+        # session whose fingerprint changes between turns paid to rebuild the
+        # cache, and `cache_read` alone cannot say why -- see cache_prefix.
+        _prefix_fp = _prefix_fingerprint(system, tools)
 
         _turn_budget = max_tool_turns or MAX_TOOL_TURNS
         for _turn in range(_turn_budget):
@@ -681,6 +691,7 @@ class AnthropicProvider:
                                 session_id=session_id, turn=turn_idx, model=self.model,
                                 input_tokens=input_tok, output_tokens=output_tok,
                                 cache_read=cache_hit, cache_write=cache_write,
+                                prefix_fingerprint=_prefix_fp,
                                 history_chars=history_chars,
                                 stop_reason=final.stop_reason or "",
                                 self_repair_turn=self_repair_turns - 1,
@@ -698,6 +709,7 @@ class AnthropicProvider:
                         session_id=session_id, turn=turn_idx, model=self.model,
                         input_tokens=input_tok, output_tokens=output_tok,
                         cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
                         history_chars=history_chars,
                         stop_reason="build_progress_forced",
                         self_repair_turn=self_repair_turns,
@@ -715,6 +727,7 @@ class AnthropicProvider:
                         session_id=session_id, turn=turn_idx, model=self.model,
                         input_tokens=input_tok, output_tokens=output_tok,
                         cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
                         history_chars=history_chars,
                         stop_reason="enhance_delivery_forced",
                         self_repair_turn=self_repair_turns,
@@ -768,6 +781,7 @@ class AnthropicProvider:
                         session_id=session_id, turn=turn_idx, model=self.model,
                         input_tokens=input_tok, output_tokens=output_tok,
                         cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
                         history_chars=history_chars,
                         stop_reason="create_delivery_forced",
                         self_repair_turn=self_repair_turns,
@@ -830,6 +844,7 @@ class AnthropicProvider:
                         session_id=session_id, turn=turn_idx, model=self.model,
                         input_tokens=input_tok, output_tokens=output_tok,
                         cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
                         history_chars=history_chars,
                         stop_reason="assessment_forced",
                         self_repair_turn=self_repair_turns,
@@ -850,6 +865,7 @@ class AnthropicProvider:
                     session_id=session_id, turn=turn_idx, model=self.model,
                     input_tokens=input_tok, output_tokens=output_tok,
                     cache_read=cache_hit, cache_write=cache_write,
+                    prefix_fingerprint=_prefix_fp,
                     history_chars=history_chars,
                     stop_reason=final.stop_reason or "",
                     self_repair_turn=self_repair_turns,
@@ -1012,6 +1028,7 @@ class AnthropicProvider:
                     session_id=session_id, turn=turn_idx, model=self.model,
                     input_tokens=input_tok, output_tokens=output_tok,
                     cache_read=cache_hit, cache_write=cache_write,
+                    prefix_fingerprint=_prefix_fp,
                     history_chars=history_chars,
                     stop_reason="pending_approval",
                     self_repair_turn=self_repair_turns,
@@ -1033,6 +1050,7 @@ class AnthropicProvider:
                 session_id=session_id, turn=turn_idx, model=self.model,
                 input_tokens=input_tok, output_tokens=output_tok,
                 cache_read=cache_hit, cache_write=cache_write,
+                prefix_fingerprint=_prefix_fp,
                 history_chars=history_chars,
                 stop_reason=final.stop_reason or "tool_use",
                 self_repair_turn=self_repair_turns,
