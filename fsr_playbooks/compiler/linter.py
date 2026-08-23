@@ -282,6 +282,40 @@ def _check_code_snippet(s: Step, pi: int, si: int) -> list[CompileError]:
 # (gap E) for the evidence and the open question.
 
 
+def _check_raise_exception_mock(s: Step, pi: int, si: int) -> CompileError | None:
+    """Warn when a ``raise_exception`` step is reachable under ``--mock``.
+
+    ``cyops_utilities.raise_exception`` honors ``useMockOutput=true`` and
+    returns null instead of raising. A playbook that routes a failure branch
+    through a ``raise_exception`` step will report ``finished`` (not ``failed``)
+    under ``--mock``, masking the failure path. Authors testing with ``--mock``
+    get a false green.
+
+    The fix is to add a ``mock_result`` that includes an ``error`` key so the
+    mock run surfaces the failure downstream, or to exclude the step from mock
+    runs (not currently supported by FSR).
+    """
+    args = s.arguments or {}
+    connector = args.get("connector")
+    operation = args.get("operation")
+    if not (connector == "cyops_utilities" and operation == "raise_exception"):
+        return None
+    if any(k in args for k in ("mock_result", "mockResult")):
+        return None  # has a mock, so the behavior is at least intentional
+    return CompileError(
+        code=ErrorCode.BAD_VALUE,
+        message=(
+            f"step {(s.name or s.id)!r} calls cyops_utilities.raise_exception "
+            f"without a mock_result. Under useMockOutput=true it returns null "
+            f"instead of raising, so a --mock run will report 'finished' even "
+            f"though the failure branch executed -- a false green."
+        ),
+        path=f"playbooks[{pi}].steps[{si}].arguments.mock_result",
+        suggestion="add a mock_result with an error key so --mock surfaces the failure",
+        severity="warning",
+    )
+
+
 def lint(text: str, coll: Collection | None) -> list[CompileError]:
     """Run every linter rule. Pure - no DB, no live FSR."""
     errs: list[CompileError] = []
@@ -296,6 +330,9 @@ def lint(text: str, coll: Collection | None) -> list[CompileError]:
                 if e:
                     errs.append(e)
                 e = _check_mock_result(s, pi, si)
+                if e:
+                    errs.append(e)
+                e = _check_raise_exception_mock(s, pi, si)
                 if e:
                     errs.append(e)
                 errs.extend(_check_code_snippet(s, pi, si))
