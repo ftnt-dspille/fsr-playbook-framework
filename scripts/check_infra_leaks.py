@@ -58,6 +58,13 @@ DENY = [
 # Known-public strings that match a DENY pattern but are intentionally shipped.
 ALLOW = [
     re.compile(r"repo\.fortisoar\.fortinet\.com", re.IGNORECASE),
+    # The public FortiCloud FortiAI endpoint. It is the STOCK connector
+    # configuration's default `server_address` -- shipped by Fortinet, in
+    # every customer's appliance, and documented -- so it is not a lab detail
+    # we could leak. Naming it is load-bearing: the architecture doc has to
+    # say that the default points off-box, because an earlier revision claimed
+    # FortiAI was egress-free and air-gap-suitable unconditionally.
+    re.compile(r"fortiai\.forticloud\.com", re.IGNORECASE),
 ]
 
 # Binaries get a NARROWER deny set than source text, and the difference is
