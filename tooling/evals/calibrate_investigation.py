@@ -29,7 +29,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tooling"))
 sys.path.insert(0, str(REPO_ROOT))
 
-DEMO_MODEL = "claude-haiku-4-5-20251001"
+# The AGENT-LOOP model for this calibration, and it must be a reasoning one
+# (B5): calibrate drives the triage agent through a multi-step tool loop, and
+# scoring a non-reasoning model there measures the model, not the levers.
+# Haiku 4.5 stays in the catalog for classification/screening subtasks -- it
+# just cannot be this. Sonnet 5 is the volume default; --model overrides.
+DEMO_MODEL = os.environ.get("FSR_CALIBRATE_MODEL", "claude-sonnet-5")
 
 GOLDEN_DIR = REPO_ROOT / "tooling" / "evals" / "golden_traces"
 RUN_DIR = REPO_ROOT / "data" / "eval_runs"

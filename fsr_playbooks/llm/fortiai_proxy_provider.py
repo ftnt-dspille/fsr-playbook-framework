@@ -45,6 +45,10 @@ from ._loop_helpers import (
     extract_yaml_block as _extract_yaml_block,
 )
 from .provider import (
+    CapabilityMixin,
+    HostEmulation,
+    ProviderCapabilities,
+    TurnRequest,
     ApprovalRequestEvent,
     DoneEvent,
     ErrorEvent,
@@ -234,7 +238,7 @@ def _is_error_result(result: Any) -> bool:
     return result.get("ok") is False or "error" in result
 
 
-class FortiAIProxyProvider:
+class FortiAIProxyProvider(CapabilityMixin):
     """Non-streaming LLM provider for the FortiAI proxy.
 
     Calls ``agent_chat_completions`` on the ``fortinet-fortiai-proxy``
@@ -248,6 +252,11 @@ class FortiAIProxyProvider:
     """
 
     name = "fortiai-proxy"
+    #: Native reasoning depth ONLY: `reasoning_effort` (plus the effort-implies-
+    #: LARGE rule) rides in `params.config` on every call -- see
+    #: :func:`_resolve_llm_config`. The proxy has no server-side turn budget,
+    #: no tool search and no context editing, so the host emulates those.
+    capabilities = ProviderCapabilities(reasoning_depth=True)
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
 
     def __init__(
@@ -355,6 +364,19 @@ class FortiAIProxyProvider:
             yield ev
 
     # -- stream -------------------------------------------------------------
+
+    def request(self, req: TurnRequest) -> HostEmulation:
+        """Serve reasoning depth NATIVELY, emulate the rest.
+
+        The depth is not a prompt nudge here: it becomes `reasoning_effort` in
+        `params.config` on the next call, and `_resolve_llm_config` promotes
+        the feature to AI_MODEL_LARGE with it (effort on MEDIUM answers with a
+        silent empty turn). An unasked-for depth leaves the configured one
+        alone -- `request()` is per turn, not a reconfiguration.
+        """
+        if req.reasoning:
+            self.reasoning_effort = req.reasoning
+        return super().request(req)
 
     async def stream(
         self,
@@ -732,7 +754,8 @@ class FortiAIProxyProvider:
                     # TurnPlan item 3: state the shrinking budget in the soft
                     # window before the cap (mirrors the other providers).
                     from ._loop_helpers import budget_note
-                    _bnote = budget_note(_turn + 1, MAX_TOOL_TURNS)
+                    _bnote = budget_note(_turn + 1, MAX_TOOL_TURNS) \
+                        if self.emulation.task_budget else ""
                     if _bnote:
                         history.append({"role": "user",
                                         "content": f"[turn budget] {_bnote}"})

@@ -21,7 +21,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from .provider import DoneEvent, Event, Message, UsageEvent
+from .provider import (
+    CapabilityMixin,
+    DoneEvent,
+    Event,
+    Message,
+    ProviderCapabilities,
+    UsageEvent,
+)
 
 
 def scripted(turns: list[list[Event]]) -> list[list[Event]]:
@@ -29,8 +36,11 @@ def scripted(turns: list[list[Event]]) -> list[list[Event]]:
     return turns
 
 
-class FakeProvider:
+class FakeProvider(CapabilityMixin):
     name = "fake"
+    #: A scripted stand-in serves no primitives -- and MUST declare none, so
+    #: tests that swap it in exercise the same emulation path as production.
+    capabilities = ProviderCapabilities()
 
     def __init__(self, turns: Iterable[Iterable[Event]] | None = None,
                  model: str = "fake-1"):

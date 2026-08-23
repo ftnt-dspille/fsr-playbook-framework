@@ -1,0 +1,162 @@
+"""The capability matrix: a declared primitive must REACH THE WIRE.
+
+`shipped-but-inert` is the recurring defect in this codebase -- a feature that
+is present, imported, released, and silently does nothing. The capability seam
+in `provider.py` is a new place for exactly that to happen: a provider can
+declare `reasoning_depth = True` and never send a reasoning parameter, and
+every test that only reads `capabilities` would still be green.
+
+So this file does not read the declaration. For each capability a provider
+declares TRUE it demands a PROBE -- a callable that drives the provider and
+asserts the primitive is observable on what it would send. A provider that
+flips a flag without adding a probe fails here, and so does one whose probe
+stops finding the primitive.
+
+The other half is the fallback: for each capability a provider declares FALSE,
+asking for it must come back as host emulation, because that residue is what
+switches the hand-built stand-ins (`TurnBudget.note()`, `shrink_history`) on.
+"""
+from __future__ import annotations
+
+import pytest
+
+from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
+from fsr_playbooks.llm.fake_provider import FakeProvider
+from fsr_playbooks.llm.fortiai_proxy_provider import (
+    FEATURE_LARGE,
+    FortiAIProxyProvider,
+    _resolve_llm_config,
+)
+from fsr_playbooks.llm.lmstudio_provider import LMStudioProvider
+from fsr_playbooks.llm.openai_provider import OpenAIProvider
+from fsr_playbooks.llm.provider import (
+    CAPABILITY_NAMES,
+    HostEmulation,
+    ProviderCapabilities,
+    TurnRequest,
+)
+
+#: Every provider this package ships, by the name it registers under. Adding a
+#: provider without adding it here is caught by `test_every_provider_is_in_the_matrix`.
+PROVIDERS = {
+    "anthropic": lambda: AnthropicProvider(api_key="test-key"),
+    "openai": lambda: OpenAIProvider(api_key="test-key"),
+    "lmstudio": lambda: LMStudioProvider(),
+    "fortiai-proxy": lambda: FortiAIProxyProvider(base_url="https://example.invalid",
+                                                  api_key="test-key", client=object()),
+    "fake": lambda: FakeProvider(),
+}
+
+
+def _probe_fortiai_reasoning(p: FortiAIProxyProvider) -> None:
+    """FortiAI serves reasoning depth by putting it in `params.config`."""
+    p.request(TurnRequest(reasoning="high"))
+    overlay = _resolve_llm_config(p.feature, p.reasoning_effort)
+    assert overlay.get("reasoning_effort") == "high", overlay
+    # effort implies LARGE -- asking for depth on MEDIUM is a 400 at the wire.
+    assert overlay.get("model") == FEATURE_LARGE, overlay
+
+
+#: (provider name, capability) -> probe. A declared-true capability with no
+#: entry here is a failure, not an omission.
+PROBES = {
+    ("fortiai-proxy", "reasoning_depth"): _probe_fortiai_reasoning,
+}
+
+
+@pytest.mark.parametrize("name", sorted(PROVIDERS))
+def test_provider_declares_capabilities(name: str) -> None:
+    caps = PROVIDERS[name]().capabilities
+    assert isinstance(caps, ProviderCapabilities)
+
+
+@pytest.mark.parametrize("name", sorted(PROVIDERS))
+def test_declared_capability_reaches_the_wire(name: str) -> None:
+    provider = PROVIDERS[name]()
+    for cap in CAPABILITY_NAMES:
+        if not getattr(provider.capabilities, cap):
+            continue
+        probe = PROBES.get((name, cap))
+        assert probe is not None, (
+            f"{name} declares {cap}=True with no probe. Declaring a capability "
+            f"is a claim that it reaches the wire; add a probe to PROBES that "
+            f"proves it, or set the flag False and let the host emulate."
+        )
+        probe(provider)
+
+
+@pytest.mark.parametrize("name", sorted(PROVIDERS))
+def test_undeclared_capability_falls_back_to_host_emulation(name: str) -> None:
+    provider = PROVIDERS[name]()
+    residue = provider.request(TurnRequest(reasoning="high", prune_history=True,
+                                           defer_tools=True))
+    for cap in CAPABILITY_NAMES:
+        if getattr(provider.capabilities, cap):
+            assert not getattr(residue, cap), (
+                f"{name} declares {cap} natively but still asked the host to "
+                f"emulate it -- both paths would run."
+            )
+        else:
+            assert getattr(residue, cap), (
+                f"{name} does not serve {cap}, so the host-side stand-in must "
+                f"be switched on for it."
+            )
+
+
+@pytest.mark.parametrize("name", sorted(PROVIDERS))
+def test_unasked_provider_emulates_exactly_as_before(name: str) -> None:
+    """A provider nobody calls `request()` on -- the framework's own MCP
+    callers -- must behave as it did before the seam existed: budget notes and
+    history shrinking on, nothing deferred, no reasoning override."""
+    e = PROVIDERS[name]().emulation
+    assert e.task_budget is True
+    assert e.history_pruning is True
+    assert e.deferred_tools is False
+    assert e.reasoning_depth is False
+
+
+def test_probe_registry_has_no_stale_entries() -> None:
+    for (name, cap) in PROBES:
+        assert name in PROVIDERS, f"probe for unknown provider {name!r}"
+        assert cap in CAPABILITY_NAMES, f"probe for unknown capability {cap!r}"
+        assert getattr(PROVIDERS[name]().capabilities, cap), (
+            f"{name} has a probe for {cap} but no longer declares it -- either "
+            f"the capability regressed silently or the probe is stale."
+        )
+
+
+def test_resolve_is_pure_and_symmetric() -> None:
+    caps = ProviderCapabilities(reasoning_depth=True, task_budget=True)
+    r = HostEmulation.resolve(caps, TurnRequest(reasoning="low"))
+    assert r == HostEmulation(reasoning_depth=False, task_budget=False,
+                              deferred_tools=False, history_pruning=True)
+    # Not asking for a capability is not the same as the provider serving it,
+    # but both mean "do not emulate".
+    assert HostEmulation.resolve(ProviderCapabilities(),
+                                 TurnRequest(reasoning=None)).reasoning_depth is False
+
+
+def test_every_provider_is_in_the_matrix() -> None:
+    """A provider that never enters this file is a provider whose declaration
+    nothing checks -- which is how the seam would quietly rot."""
+    import importlib
+    import inspect
+    import pkgutil
+
+    import fsr_playbooks.llm as llm_pkg
+    from fsr_playbooks.llm.provider import CapabilityMixin
+
+    found: set[str] = set()
+    for mod in pkgutil.iter_modules(llm_pkg.__path__):
+        if not mod.name.endswith("_provider"):
+            continue
+        module = importlib.import_module(f"fsr_playbooks.llm.{mod.name}")
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if (obj is not CapabilityMixin and issubclass(obj, CapabilityMixin)
+                    and obj.__module__ == module.__name__):
+                found.add(obj.name)
+    missing = found - set(PROVIDERS)
+    assert not missing, (
+        f"providers absent from the capability matrix: {sorted(missing)}. Add "
+        f"a constructor to PROVIDERS so its declaration is checked."
+    )

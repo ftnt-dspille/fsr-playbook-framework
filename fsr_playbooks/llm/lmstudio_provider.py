@@ -44,6 +44,8 @@ from ._loop_helpers import (
     extract_yaml_block as _extract_yaml_block,
 )
 from .provider import (
+    CapabilityMixin,
+    ProviderCapabilities,
     DoneEvent,
     ErrorEvent,
     Event,
@@ -84,8 +86,11 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, 
     return out
 
 
-class LMStudioProvider:
+class LMStudioProvider(CapabilityMixin):
     name = "lmstudio"
+    #: A local llama.cpp-style endpoint: no server-side budget, pruning or
+    #: tool search to hand it.
+    capabilities = ProviderCapabilities()
 
     # Class-level default so the loop reads a sane cap even on an instance
     # built without __init__ (tests use `__new__` to drive `_pump` directly).

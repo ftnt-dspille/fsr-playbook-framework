@@ -138,6 +138,115 @@ Event = (
 )
 
 
+# ─────────────────────── provider capability seam (A2) ───────────────────────
+#
+# Three of the four backends we ship are not Anthropic, so the reasoning /
+# budget / pruning primitives cannot be wired straight into one provider: the
+# surface that actually runs inside FortiSOAR would get none of them, and the
+# two paths would drift. Instead every provider DECLARES what it serves
+# natively, the loop asks for what it wants, and whatever the provider cannot
+# serve comes back as `HostEmulation` -- the explicit instruction to run the
+# host-side stand-in (`TurnBudget.note()`, `shrink_history`) for exactly those.
+#
+# The failure this shape is built against is `shipped-but-inert`: a provider
+# that declares a capability and silently no-ops it. `capabilities` is data, so
+# `fsr_playbooks/tests/test_provider_capability_matrix.py` can demand a probe
+# proving each declared-true capability reaches the wire.
+
+#: Every capability name, in declaration order. The capability-matrix test
+#: iterates this, so adding a field here is enough to force a probe for it.
+CAPABILITY_NAMES = (
+    "reasoning_depth",
+    "task_budget",
+    "deferred_tools",
+    "history_pruning",
+)
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """What a provider serves NATIVELY. Default: nothing -- a provider only
+    gets credit for a primitive by declaring it, and the matrix test then
+    makes it prove it."""
+
+    #: Native control over reasoning depth (`thinking` / `effort` /
+    #: `reasoning_effort`), as opposed to prompt-level "think harder" tuning.
+    reasoning_depth: bool = False
+    #: Server-enforced turn budget (`output_config.task_budget`), as opposed
+    #: to the host counting turns and injecting `budget_note`.
+    task_budget: bool = False
+    #: Tool search / deferred loading, as opposed to the host shipping the
+    #: whole tool array every turn.
+    deferred_tools: bool = False
+    #: Context editing / compaction, as opposed to `shrink_history`.
+    history_pruning: bool = False
+
+
+@dataclass(frozen=True)
+class TurnRequest:
+    """What the loop ASKS for on this turn. Asking is provider-neutral; who
+    honours it is not."""
+
+    #: Reasoning depth to request ("low" / "medium" / "high"); None = default.
+    reasoning: str | None = None
+    #: Bound on tool turns. None = the loop's own MAX_TOOL_TURNS.
+    max_tool_turns: int | None = None
+    #: Keep the transcript inside the context window.
+    prune_history: bool = True
+    #: Let the model discover tools instead of receiving the full array.
+    defer_tools: bool = False
+
+
+@dataclass(frozen=True)
+class HostEmulation:
+    """The RESIDUE of a `TurnRequest`: each flag is True when the loop asked
+    for that capability and the provider does not serve it, so the host-side
+    stand-in must run. A flag is False either because nothing asked for it or
+    because the provider is handling it -- both mean "do not emulate"."""
+
+    reasoning_depth: bool = False
+    task_budget: bool = False
+    deferred_tools: bool = False
+    history_pruning: bool = False
+
+    @classmethod
+    def resolve(cls, caps: ProviderCapabilities, req: TurnRequest) -> HostEmulation:
+        return cls(
+            reasoning_depth=bool(req.reasoning) and not caps.reasoning_depth,
+            # The loop ALWAYS bounds tool turns -- there is no "unbounded"
+            # request -- so this one is requested unconditionally.
+            task_budget=not caps.task_budget,
+            deferred_tools=req.defer_tools and not caps.deferred_tools,
+            history_pruning=req.prune_history and not caps.history_pruning,
+        )
+
+
+class CapabilityMixin:
+    """Default capability seam for a provider: declares nothing, emulates
+    everything. A provider serving a primitive natively overrides
+    `capabilities` and applies the request in `request()`.
+
+    Providers that are never asked (the framework's own MCP callers construct
+    a provider and call `stream` directly) still get the right answer: the
+    default emulation is the one for a default `TurnRequest`, i.e. exactly the
+    host-side behaviour that predates this seam.
+    """
+
+    capabilities: ProviderCapabilities = ProviderCapabilities()
+
+    _turn_request: TurnRequest = TurnRequest()
+
+    def request(self, req: TurnRequest) -> HostEmulation:
+        """Ask for this turn's capabilities; get back what the host must
+        emulate. Providers overriding this MUST still return the residue."""
+        self._turn_request = req
+        return self.emulation
+
+    @property
+    def emulation(self) -> HostEmulation:
+        return HostEmulation.resolve(self.capabilities, self._turn_request)
+
+
 @dataclass
 class Message:
     role: Role
@@ -148,6 +257,12 @@ class Message:
 
 class LLMProvider(Protocol):
     name: str
+    #: Declared native primitives -- see the capability seam above.
+    capabilities: ProviderCapabilities
+
+    def request(self, req: TurnRequest) -> HostEmulation:
+        """Ask for this turn's capabilities; return what the host must emulate."""
+        ...
 
     async def stream(
         self,

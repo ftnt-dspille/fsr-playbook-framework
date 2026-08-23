@@ -52,6 +52,8 @@ from ._loop_helpers import (
 )
 from .cache_prefix import prefix_fingerprint as _prefix_fingerprint
 from .provider import (
+    CapabilityMixin,
+    ProviderCapabilities,
     ApprovalRequestEvent,
     DoneEvent,
     ErrorEvent,
@@ -167,8 +169,14 @@ def _with_history_breakpoint(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]
     return out
 
 
-class AnthropicProvider:
+class AnthropicProvider(CapabilityMixin):
     name = "anthropic"
+    #: Nothing native YET. The Messages API does expose adaptive thinking,
+    #: `output_config.effort`/`task_budget`, tool search and context editing --
+    #: wiring them is row 7 of AGENT_DESIGN_AND_TEST_UNIFICATION.md. Declaring
+    #: them before they reach the wire is the shipped-but-inert defect this
+    #: seam exists to prevent, so they stay False and the host emulates.
+    capabilities = ProviderCapabilities()
 
     # Class-level default so the loop reads a sane cap even on an instance
     # built without __init__ (tests use `__new__` to drive `_pump` directly).
@@ -531,7 +539,12 @@ class AnthropicProvider:
             # historical blocks -- the most recent assistant + tool_result
             # stay byte-identical so prompt cache is preserved.
             try:
-                _shrink_history(history)
+                # Host-side stand-in for context editing. `emulation` says
+                # whether it is ours to do: once this provider declares
+                # `history_pruning` and wires the native primitive, the
+                # residue goes False here and the two never both run.
+                if self.emulation.history_pruning:
+                    _shrink_history(history)
             except Exception:
                 # Never let compaction break a chat turn.
                 import logging
@@ -1040,7 +1053,8 @@ class AnthropicProvider:
             # TurnPlan item 3: state the shrinking budget in the soft window
             # before the cliff (the forced wrap-up round handles exhaustion).
             from ._loop_helpers import budget_note
-            _bnote = budget_note(_turn + 1, _turn_budget)
+            _bnote = budget_note(_turn + 1, _turn_budget) \
+                if self.emulation.task_budget else ""
             if _bnote:
                 tool_result_blocks.append(
                     {"type": "text", "text": f"[turn budget] {_bnote}"})

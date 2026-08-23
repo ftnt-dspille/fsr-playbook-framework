@@ -71,6 +71,8 @@ from ._loop_helpers import (
     extract_yaml_block as _extract_yaml_block,
 )
 from .provider import (
+    CapabilityMixin,
+    ProviderCapabilities,
     ApprovalRequestEvent,
     DoneEvent,
     ErrorEvent,
@@ -277,8 +279,12 @@ def _normalize_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-class OpenAIProvider:
+class OpenAIProvider(CapabilityMixin):
     name = "openai"
+    #: This provider sends no reasoning/budget parameters at all today (it
+    #: also fronts Frank/GLM, whose endpoint exposes a different set), so the
+    #: host emulates everything.
+    capabilities = ProviderCapabilities()
 
     # Class-level default so the loop reads a sane cap even on an instance
     # built without __init__ (tests use `__new__` to drive `_pump` directly).
@@ -1033,7 +1039,8 @@ class OpenAIProvider:
             # TurnPlan item 3: state the shrinking budget in the soft window
             # before the cliff (the forced wrap-up round handles exhaustion).
             from ._loop_helpers import budget_note
-            _bnote = budget_note(_turn + 1, _turn_budget)
+            _bnote = budget_note(_turn + 1, _turn_budget) \
+                if self.emulation.task_budget else ""
             if _bnote:
                 history.append({"role": "system",
                                 "content": f"[turn budget] {_bnote}"})
