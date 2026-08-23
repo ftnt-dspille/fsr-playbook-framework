@@ -35,11 +35,37 @@ REMOTE="${REMOTE:-origin}"
 [[ -z "$(git status --porcelain)" ]] || { echo "release: working tree not clean" >&2; exit 1; }
 
 # --- tag must be new -------------------------------------------------------
+#
+# A tag can exist WITHOUT the version ever having been published: the publish
+# workflow fires on a GitHub *release*, not on a tag push, so a tag pushed by
+# hand strands. Nine of them (v0.6.30-v0.6.38) exist on this repo for exactly
+# that reason, and the bare "pick the next version" message sent a reader
+# looking for a wheel that was never built. Say which case this is.
+tag_refusal() {
+    local where="$1"
+    echo "release: tag $TAG already $where." >&2
+    if [[ "$PUBLISHED_AT_TAG_CHECK" == "yes" ]]; then
+        echo "  PyPI serves $VERSION, so this version is already out -- pick a higher one." >&2
+    else
+        echo "  PyPI does NOT serve $VERSION (latest is ${LATEST_AT_TAG_CHECK:-unknown})." >&2
+        echo "  That is a STRANDED tag: the publish workflow fires on a GitHub" >&2
+        echo "  release, not on a tag push, so tagging by hand builds nothing." >&2
+        echo "  Pick the next unused version -- do not try to reuse this tag." >&2
+    fi
+    exit 1
+}
+# One PyPI read, used to tell "already released" from "tagged but never built".
+_PYPI_JSON="$(curl -s --max-time 15 https://pypi.org/pypi/fsr-playbooks/json || echo "")"
+LATEST_AT_TAG_CHECK="$(printf '%s' "$_PYPI_JSON" \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin)["info"]["version"])' 2>/dev/null || echo "")"
+PUBLISHED_AT_TAG_CHECK="$(printf '%s' "$_PYPI_JSON" \
+    | VERSION="$VERSION" python3 -c 'import sys,json,os;print("yes" if (json.load(sys.stdin).get("releases") or {}).get(os.environ["VERSION"]) else "no")' 2>/dev/null || echo "unknown")"
+
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    echo "release: tag $TAG already exists locally -- pick the next version" >&2; exit 1
+    tag_refusal "exists locally"
 fi
 if git ls-remote --tags "$REMOTE" "$TAG" | grep -q "$TAG"; then
-    echo "release: tag $TAG already on $REMOTE" >&2; exit 1
+    tag_refusal "is on $REMOTE"
 fi
 
 # --- VERSION must beat PyPI's latest --------------------------------------
