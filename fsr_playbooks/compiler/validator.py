@@ -1044,13 +1044,16 @@ def _check_child_playbook_returns(
 
             # 3. Parent passes child_args the child doesn't declare as parameters
             child_params = set(child.parameters or [])
-            child_args = args.get("child_args") or {}
+            # The resolved IR stores child_args under `arguments` (a nested
+            # dict), the parsed IR stores them under `child_args`.
+            child_args = args.get("child_args") or args.get("arguments") or {}
             if isinstance(child_args, dict):
                 # Envelope keys that are NOT child params
                 envelope_keys = {
                     "target", "workflowReference", "apply_async",
                     "pass_parent_env", "pass_input_record", "step_variables",
                     "for_each", "when", "mock_result", "do_until", "child_args",
+                    "arguments",
                 }
                 for k in child_args:
                     if k in envelope_keys:
@@ -1076,7 +1079,7 @@ def _check_child_playbook_returns(
                     "target", "workflowReference", "apply_async",
                     "pass_parent_env", "pass_input_record", "step_variables",
                     "for_each", "when", "mock_result", "do_until", "child_args",
-                    "connector", "operation", "config", "params",
+                    "arguments", "connector", "operation", "config", "params",
                 }}
                 missing = child_params - passed
                 if missing:
