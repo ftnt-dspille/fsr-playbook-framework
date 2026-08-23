@@ -2964,6 +2964,45 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     return cmd_evals(ev)
 
 
+def cmd_agreement(args: argparse.Namespace) -> int:
+    """Publish the screen-vs-confirm agreement number (B3).
+
+    Not a diff. `evals --baseline` refuses to compare two runs whose
+    substrates disagree; here they are supposed to, and what is compared is
+    the VERDICT each lane reached per task. The output names the tasks where
+    the free lane failed to predict the paid one -- the only tasks a paid run
+    is ever needed for again.
+    """
+    from evals.agreement import (
+        AgreementError, agree, list_screens, load_screen, render_agreement,
+    )
+    if args.list_screens:
+        runs = list_screens()
+        if not runs:
+            print("no archived screen (--repeat) runs", file=sys.stderr)
+            return 0
+        for r in runs:
+            print(r)
+        return 0
+    if not (args.screen and args.confirm):
+        print("both --screen <run_id> and --confirm <run_id> are required "
+              "(see --list-screens)", file=sys.stderr)
+        return 2
+    try:
+        rep = agree(load_screen(args.screen), load_screen(args.confirm))
+    except (AgreementError, FileNotFoundError) as e:
+        print(f"REFUSED: {e}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(rep, indent=2, default=str))
+    else:
+        print(render_agreement(rep))
+    # Exit non-zero on a disagreement so this can gate a milestone: a dropping
+    # agreement number is the signal to re-screen, and it is the only honest
+    # justification for spending tokens on the paid lane.
+    return 1 if rep["agreement"] is None or rep["disagreements"] else 0
+
+
 def cmd_evals(args: argparse.Namespace) -> int:
     """Run the LLM-evaluation harness over the task corpus.
 
@@ -3024,6 +3063,7 @@ def cmd_evals(args: argparse.Namespace) -> int:
               "failing result.", file=sys.stderr)
         return 2
     if args.repeat and args.repeat > 1:
+        from evals.agreement import save_screen
         from evals.harness import render_screen, screen_models
         screen = screen_models(model_names=models, task_names=task_filter,
                                repeats=args.repeat, live=args.live)
@@ -3031,6 +3071,11 @@ def cmd_evals(args: argparse.Namespace) -> int:
             print(json.dumps(screen, indent=2, default=str))
         else:
             print(render_screen(screen))
+        # ALWAYS archived, not only under --save. A repeat run is the only
+        # run whose number is trustworthy enough to publish, and it used to be
+        # the only one that could not be: --save was silently ignored on this
+        # path, so the lane-agreement report had nothing on disk to read.
+        print(f"\narchived screen: {save_screen(screen)}", file=sys.stderr)
         return 0 if any(v == "consistent"
                         for v in screen["verdicts"].values()) else 1
     if args.replay:
@@ -4840,6 +4885,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--list-runs", action="store_true",
                     help="list archived eval run ids and exit")
     sp.set_defaults(func=cmd_evals)
+
+    sp = sub.add_parser(
+        "agreement",
+        help="publish the per-task agreement between a screen (--repeat) run "
+             "and a confirm one: does the free lane still predict the paid "
+             "one, and on which fixtures does it not?",
+    )
+    sp.add_argument("--screen", default=None, metavar="RUN_ID",
+                    help="archived screen-lane --repeat run")
+    sp.add_argument("--confirm", default=None, metavar="RUN_ID",
+                    help="archived confirm-lane --repeat run")
+    sp.add_argument("--list-screens", action="store_true",
+                    help="list archived --repeat runs and exit")
+    sp.add_argument("--json", action="store_true",
+                    help="emit the agreement report as JSON")
+    sp.set_defaults(func=cmd_agreement)
 
     sp = sub.add_parser(
         "matrix",
