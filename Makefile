@@ -219,7 +219,7 @@ TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,s
 TOOL_GATE_BASELINE ?= 20260823T143020Z
 
 # ── One testing story (docs/plans/AGENT_DESIGN_AND_TEST_UNIFICATION.md, B1) ──
-# Two named lanes over ONE corpus and ONE scorer, instead of three scripts with
+# Named lanes over ONE corpus and ONE scorer, instead of three scripts with
 # three provider defaults and three ideas of the substrate:
 #
 #   screen  (default)  agentic_frank / GLM-5.2, --offline --bundle
@@ -228,6 +228,12 @@ TOOL_GATE_BASELINE ?= 20260823T143020Z
 #                      credits. Milestones only, in the background, never in an
 #                      iteration loop -- it answers one question: does the free
 #                      lane still predict the paid one?
+#   attribute          the CONFIRM model on the SCREEN substrate. Costs credits
+#                      but touches no box. screen-vs-confirm moves the model
+#                      and the substrate at once, so a disagreement between
+#                      them is attributable to neither; this lane splits them:
+#                      screen vs attribute = MODEL, attribute vs confirm =
+#                      SUBSTRATE. `agreement` prints which one it is.
 #
 # The lane is stamped into the archived matrix and joins the comparability key,
 # so the differ REFUSES a screen-vs-confirm diff instead of printing cells that
@@ -237,11 +243,23 @@ TOOL_GATE_BASELINE ?= 20260823T143020Z
 #   make matrix MODE=gate BASELINE=<id>    # the tool-gate 5, diffed
 #   make matrix MODE=invest                # the investigation slice
 #   make matrix LANE=confirm LIVE_OK=1     # paid + live; say you meant it
+#   make matrix LANE=attribute LIVE_OK=1   # paid, box-free; splits the blame
 #
 # MODE slices come from each fixture's own `mode` field (all | routing |
 # invest | enhance | repair | refuse | authoring), plus `gate` -- the five
 # name-pinned routing fixtures tool-gate diffs. TASKS=a,b overrides MODE.
-matrix: ## ONE eval entry point. LANE=screen|confirm MODE=all|gate|routing|invest|enhance|repair|refuse|authoring TASKS=… REPEAT=n BASELINE=<run_id> LIVE_OK=1
+# Does the cheap lane still predict the expensive one? Both sides must be
+# archived `--repeat` runs naming DIFFERENT lanes; the report says what varies
+# between them, and refuses rather than printing a number nobody can read.
+#
+#   make agreement A=<screen_run> B=<confirm_run>
+#   fsrpb agreement --list-screens
+agreement: ## Per-task lane agreement. A=<run_id> B=<run_id> (different lanes)
+	$(VENV_PY) tooling/cli.py agreement \
+	  $(if $(A),--screen $(A),) $(if $(B),--confirm $(B),) \
+	  $(if $(LIST),--list-screens,)
+
+matrix: ## ONE eval entry point. LANE=screen|confirm|attribute MODE=all|gate|routing|invest|enhance|repair|refuse|authoring TASKS=… REPEAT=n BASELINE=<run_id> LIVE_OK=1
 	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py matrix \
 	  --lane $(if $(LANE),$(LANE),screen) \
 	  $(if $(MODE),--mode $(MODE),) $(if $(TASKS),--tasks $(TASKS),) \

@@ -139,3 +139,43 @@ def test_a_repeat_run_archives_a_screen(tmp_path, monkeypatch) -> None:
     assert loaded["lane"] == "screen"
     assert loaded["scorer_version"] == "v1"
     assert agmod.list_screens() == ["RID"]
+
+
+def test_the_report_names_what_actually_varies() -> None:
+    """A number that mixes two variables must SAY so.
+
+    The first agreement number this repo produced compared screen against
+    confirm, which moves the model and the substrate at once. Two of its five
+    cells disagreed; one was substrate, one was behaviour, and nothing in the
+    output said which -- so the report is now explicit that neither is
+    attributable, and points at the lane that splits them.
+    """
+    cells = {"select_build_offer": _cell(3)}
+    rep = agree(_screen("A", "screen", "agentic_frank", cells),
+                _screen("B", "confirm", "agentic_openai_api", cells))
+    assert rep["differs_in"] == ["model", "substrate"]
+    assert rep["attributable_to"] is None
+    assert "attribute" in render_agreement(rep)
+
+
+def test_a_single_factor_pair_is_attributed() -> None:
+    cells = {"select_build_offer": _cell(3)}
+    model_only = agree(_screen("A", "screen", "agentic_frank", cells),
+                       _screen("B", "attribute", "agentic_openai_api", cells))
+    assert model_only["attributable_to"] == "model"
+    assert "MODEL" in render_agreement(model_only)
+
+    substrate_only = agree(
+        _screen("A", "attribute", "agentic_openai_api", cells),
+        _screen("B", "confirm", "agentic_openai_api", cells))
+    assert substrate_only["attributable_to"] == "substrate"
+    assert "SUBSTRATE" in render_agreement(substrate_only)
+
+
+def test_an_archived_run_naming_an_unknown_lane_is_not_guessed_at() -> None:
+    """Archives outlive the lane map; an unknown lane attributes to nothing."""
+    cells = {"select_build_offer": _cell(3)}
+    rep = agree(_screen("A", "screen", "agentic_frank", cells),
+                _screen("B", "lane_that_was_deleted", "some_model", cells))
+    assert rep["differs_in"] == []
+    assert rep["attributable_to"] is None

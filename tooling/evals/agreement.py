@@ -19,6 +19,11 @@ comparison. So the comparability contract is inverted:
 Anything else is refused with the field that differs, in the same spirit as
 the differ: a number nobody can read is worse than no number.
 
+The report also names what actually VARIES between the two lanes. screen vs
+confirm varies model AND substrate at once, so no disagreement it produces is
+attributable to either -- which is what the `attribute` lane is for. The
+report says so rather than leaving the reader to assume.
+
 What comes out is per-task: did each lane's verdict agree? The disagreements
 are the only tasks that ever need a paid run again. Everything else is
 screened free forever, and re-running this whenever either model changes is
@@ -32,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.harness import RUNS_DIR, _new_run_id
+from evals.lanes import LANES, attributable_to, differs_in
 from evals.scoring import SCORER_VERSION
 
 #: A repeat run's archive filename. Kept beside `matrix.json` rather than in
@@ -188,12 +194,22 @@ def agree(screen: dict[str, Any], confirm: dict[str, Any]) -> dict[str, Any]:
             "flaky": (0 < int(a.get("passes", 0)) < int(a.get("of", 0))
                       or 0 < int(b.get("passes", 0)) < int(b.get("of", 0))),
         })
+    # What a disagreement between THESE two lanes can honestly be blamed on.
+    # Unknown when either side names a lane this build does not define -- an
+    # archived run outlives the map, and guessing would be the one thing this
+    # module exists to stop.
+    la, lb = LANES.get(a_lane), LANES.get(b_lane)
+    factors = list(differs_in(la, lb)) if (la and lb) else []
+    blame = attributable_to(la, lb) if (la and lb) else None
+
     scored = [t for t in tasks if t["status"] != "unscoreable"]
     agreed = [t for t in scored if t["status"] == "agree"]
     return {
         "screen_run": screen.get("run_id"),
         "confirm_run": confirm.get("run_id"),
         "screen_lane": a_lane, "confirm_lane": b_lane,
+        "differs_in": factors,
+        "attributable_to": blame,
         "scorer_version": a_sv,
         "repeats": {"screen": screen.get("repeats"),
                     "confirm": confirm.get("repeats")},
@@ -215,6 +231,12 @@ def render_agreement(rep: dict[str, Any]) -> str:
         f"{rep['confirm_lane']} {rep['confirm_run']}",
         f"  scorer {rep['scorer_version']}   repeats "
         f"screen={rep['repeats']['screen']} confirm={rep['repeats']['confirm']}",
+        f"  varies: {', '.join(rep.get('differs_in') or []) or 'nothing'}"
+        + (f"   -> a disagreement is attributable to the "
+           f"{rep['attributable_to'].upper()}"
+           if rep.get("attributable_to") else
+           "   -> a disagreement is attributable to NEITHER; run the "
+           "`attribute` lane to split them"),
         "",
     ]
     width = max([len(t["task"]) for t in rep["tasks"]] + [8])

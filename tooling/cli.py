@@ -4893,9 +4893,13 @@ def build_parser() -> argparse.ArgumentParser:
              "one, and on which fixtures does it not?",
     )
     sp.add_argument("--screen", default=None, metavar="RUN_ID",
-                    help="archived screen-lane --repeat run")
+                    help="archived --repeat run for side A (any lane; "
+                         "conventionally the cheaper one)")
     sp.add_argument("--confirm", default=None, metavar="RUN_ID",
-                    help="archived confirm-lane --repeat run")
+                    help="archived --repeat run for side B, naming a "
+                         "DIFFERENT lane. Pair it with `attribute` on either "
+                         "side to blame a disagreement on the model or the "
+                         "substrate rather than both at once.")
     sp.add_argument("--list-screens", action="store_true",
                     help="list archived --repeat runs and exit")
     sp.add_argument("--json", action="store_true",
@@ -4909,14 +4913,19 @@ def build_parser() -> argparse.ArgumentParser:
              "it with the lane stamped in, so two runs can be diffed only "
              "when they measured the same world",
     )
-    sp.add_argument("--lane", default="screen", choices=["screen", "confirm"],
+    sp.add_argument("--lane", default="screen",
+                    choices=["screen", "confirm", "attribute"],
                     help="screen (DEFAULT): agentic_frank/GLM-5.2, offline, "
                          "soc_invest_surface bundle -- free and box-free, run "
                          "it on every change. confirm: agentic_openai_api "
                          "against a live appliance -- costs credits, needs "
                          "--live-ok, and exists to answer one question at "
                          "milestones: does the free lane still predict the "
-                         "paid one?")
+                         "paid one? attribute: the paid model on the FREE "
+                         "substrate -- costs credits but touches no box, and "
+                         "exists so a screen-vs-confirm disagreement can be "
+                         "pinned on the model or the substrate instead of "
+                         "guessed at")
     sp.add_argument("--mode", default="all",
                     help="corpus slice, taken from each fixture's own `mode` "
                          "field: all (default), routing, invest, enhance, "

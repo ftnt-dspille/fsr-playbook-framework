@@ -25,11 +25,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from evals.harness import _substrate_delta  # noqa: E402
 from evals.lanes import (  # noqa: E402
+    ATTRIBUTE,
     CONFIRM,
     GATE_TASKS,
     LANES,
     SCREEN,
     LaneError,
+    attributable_to,
+    differs_in,
     resolve,
     select_tasks,
 )
@@ -164,5 +167,41 @@ def test_an_unlabelled_run_is_not_comparable_to_a_lane_run() -> None:
 
 
 def test_lanes_registry_is_keyed_by_name() -> None:
-    assert {"screen", "confirm"} == set(LANES)
+    assert {"screen", "confirm", "attribute"} == set(LANES)
     assert all(name == lane.name for name, lane in LANES.items())
+
+
+def test_the_attribute_lane_varies_exactly_one_factor_against_each_side() -> None:
+    """The whole point of a third lane.
+
+    screen vs confirm moves the model AND the substrate at once, so a
+    disagreement between them is attributable to neither -- the first
+    agreement number this repo produced (3/5) mixed one substrate
+    disagreement with one behavioural one, and separating them took reading
+    traces by hand. Each pair below moves exactly one thing.
+    """
+    assert differs_in(SCREEN, CONFIRM) == ("model", "substrate")
+    assert attributable_to(SCREEN, CONFIRM) is None
+
+    assert attributable_to(SCREEN, ATTRIBUTE) == "model"
+    assert attributable_to(ATTRIBUTE, CONFIRM) == "substrate"
+
+
+def test_the_attribute_lane_is_paid_but_box_free() -> None:
+    """It costs money, so it is gated like `confirm`; it never reaches an
+    appliance, so it can run while a box is down -- and a box being down is
+    the most common reason a paid number is worthless."""
+    assert ATTRIBUTE.costs is True
+    assert ATTRIBUTE.live is False
+    assert ATTRIBUTE.offline is True
+    assert ATTRIBUTE.bundle == SCREEN.bundle
+    assert ATTRIBUTE.models == CONFIRM.models
+
+    with pytest.raises(LaneError) as e:
+        resolve(lane="attribute", mode="gate", all_tasks=CORPUS)
+    assert "LIVE_OK" in str(e.value)
+    # ...but it must not claim to reach an appliance, because it does not.
+    assert "appliance" not in str(e.value)
+    plan = resolve(lane="attribute", mode="gate", all_tasks=CORPUS,
+                   allow_live=True)
+    assert plan.lane is ATTRIBUTE

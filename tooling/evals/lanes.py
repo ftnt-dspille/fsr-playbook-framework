@@ -1,4 +1,4 @@
-"""Two named lanes over ONE corpus and ONE scorer.
+"""Named lanes over ONE corpus and ONE scorer.
 
 Before this module there were two testing stories that could not be compared.
 `make tool-gate` ran five routing fixtures on free/offline Frank;
@@ -14,10 +14,13 @@ mode is a slice of the corpus, taken from each fixture's own `mode` field
 rather than a hand-kept list of names -- so a new fixture joins its slice by
 declaring what it is.
 
-`screen` is the default for everything and is free. `confirm` costs money and
+`screen` is the default for everything and is free. `attribute` and `confirm`
+cost money, and `confirm` also
 touches a box, so it exists to answer exactly one question at milestones --
 *does the free lane still predict the paid one?* -- and never runs in an
-iteration loop (auto-memory: `feedback_no_long_eval_loops`).
+iteration loop (auto-memory: `feedback_no_long_eval_loops`). `attribute` sits
+between them so that when the answer is "no", the "why" is a fact rather than
+a reading of traces: see `differs_in` below.
 
 The lane name is recorded into the matrix and joins the comparability key, so
 the differ refuses to diff a screen run against a confirm run rather than
@@ -71,7 +74,57 @@ CONFIRM = Lane(
     why="paid + live box, milestones only",
 )
 
-LANES: dict[str, Lane] = {lane.name: lane for lane in (SCREEN, CONFIRM)}
+#: The attribution lane: the PAID model on the FREE substrate.
+#:
+#: `screen` and `confirm` differ in two things at once -- model and substrate
+#: -- so no disagreement between them can be pinned on either. The first
+#: agreement number this repo produced (3/5) contained one disagreement that
+#: was purely substrate (the box has no playbook the fixture names, the
+#: offline bundle serves one) and one that was purely behavioural, and telling
+#: them apart took reading traces by hand.
+#:
+#: With this lane each pair varies exactly one factor:
+#:   screen    vs attribute -> same substrate, different model  -> MODEL
+#:   attribute vs confirm   -> same model, different substrate  -> SUBSTRATE
+#:
+#: It costs money (so it is `LIVE_OK`-gated like `confirm`) but never touches
+#: an appliance, which also makes it the only paid lane that can run while a
+#: box is down.
+ATTRIBUTE = Lane(
+    name="attribute",
+    models="agentic_openai_api",
+    offline=True,
+    bundle="soc_invest_surface",
+    live=False,
+    costs=True,
+    why="paid model, box-free substrate; isolates MODEL from SUBSTRATE",
+)
+
+LANES: dict[str, Lane] = {
+    lane.name: lane for lane in (SCREEN, CONFIRM, ATTRIBUTE)}
+
+
+#: What varies between two lanes. This is what makes an agreement number mean
+#: one thing: a disagreement between lanes that differ in a single factor is
+#: attributable to it, and a disagreement between lanes that differ in two is
+#: not attributable to either, however tempting the story.
+def differs_in(a: Lane, b: Lane) -> tuple[str, ...]:
+    out = []
+    if a.models != b.models:
+        out.append("model")
+    if (a.offline, a.bundle, a.live) != (b.offline, b.bundle, b.live):
+        out.append("substrate")
+    return tuple(out)
+
+
+def attributable_to(a: Lane, b: Lane) -> str | None:
+    """The single factor a disagreement between `a` and `b` can be blamed on.
+
+    `None` when the lanes differ in more than one factor (or none) -- the
+    honest answer, and the reason the attribute lane exists.
+    """
+    d = differs_in(a, b)
+    return d[0] if len(d) == 1 else None
 
 
 #: Corpus slices, keyed on each fixture's own `mode`. `None` is the authoring
@@ -175,10 +228,12 @@ def resolve(*, lane: str, mode: str = "all",
             f"{', '.join(sorted(LANES))}")
     ln = LANES[lane]
     if ln.costs and not allow_live:
+        reach = ("spends money and reaches a live appliance" if ln.live
+                 else "spends money")
         raise LaneError(
-            f"lane {lane!r} spends money and reaches a live appliance "
-            f"({ln.why}). Pass LIVE_OK=1 to say you meant it. The screen lane "
-            f"is free and is the default for everything.")
+            f"lane {lane!r} {reach} ({ln.why}). Pass LIVE_OK=1 to say you "
+            f"meant it. The screen lane is free and is the default for "
+            f"everything.")
     if tasks:
         names = [t.strip() for t in tasks.split(",") if t.strip()]
         mode = "explicit"
