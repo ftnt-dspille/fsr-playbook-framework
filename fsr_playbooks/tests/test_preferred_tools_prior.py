@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from fsr_playbooks.llm.turn_plan import TurnContext, plan_turn
 
+
 def _plan(**ctx_kwargs):
     # `plan_turn` builds the FULL consolidated surface itself -- it does no
     # slicing at all, which is precisely the invariant these tests defend.

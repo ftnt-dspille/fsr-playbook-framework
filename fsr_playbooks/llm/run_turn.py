@@ -31,12 +31,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ._loop_helpers import (
-    clear_guard_fires as _clear_guard_fires,
-)
-from ._loop_helpers import (
     MAX_TOOL_TURNS,
     extract_yaml_block,
     latest_user_text,
+)
+from ._loop_helpers import (
+    clear_guard_fires as _clear_guard_fires,
 )
 from ._loop_helpers import (
     snapshot_guard_fires as _snapshot_guard_fires,
