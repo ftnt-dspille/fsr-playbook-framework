@@ -2262,8 +2262,9 @@ class NormalizerMixin:
                 code=ErrorCode.BAD_VALUE,
                 message=(
                     f"param {p_name!r} on {connector}.{operation} is only "
-                    f"valid when {conds}; FSR will hide the field at "
-                    f"runtime and likely reject the call"
+                    f"valid when {conds}; FSR silently ignores the value "
+                    f"at runtime (live-verified on 8.0.0 -- the field is "
+                    f"hidden and the value has no effect)"
                 ),
                 path=f"{path}.arguments.params.{p_name}",
                 suggestion=f"set the parent param to match, or remove {p_name!r}",
