@@ -53,7 +53,7 @@ jobs:
         run: |
           uv venv --python ${{ matrix.python }}
           uv pip install pyyaml "ruamel.yaml" jinja2 openai anthropic "mcp>=1.0" \
-                         pytest requests-mock anyio
+                         httpx pytest requests-mock anyio
           uv pip install --no-deps -e packaging/fsr_playbooks
       - name: Run tests
         # Call the venv interpreter directly -- deterministic, avoids uv trying

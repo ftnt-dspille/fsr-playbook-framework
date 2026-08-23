@@ -41,6 +41,13 @@ dependencies = [
 llm = [
     "openai>=1.0",
     "anthropic>=0.40",
+    # The FortiAI proxy provider hard-imports httpx at MODULE level, so this is
+    # a real dependency of the extra, not a transitive convenience. It was
+    # undeclared when that provider landed and rode in on whatever the SDKs
+    # happened to pull -- which is not a guarantee (anthropic 1.x moved to
+    # httpx2), and on CI it pulled nothing: main went red for four runs and a
+    # box installing `[mcp]` would have hit the same ImportError.
+    "httpx>=0.27",
 ]
 # MCP server -- mcp_server hard-imports fsr_playbooks.llm, so [mcp] implies [llm].
 mcp = [
