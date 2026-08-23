@@ -323,7 +323,10 @@ def _hoist_args(out: dict, args: dict) -> None:
         # If it's a list (empty []), just drop it -- no child params.
     for k in list(args):
         if k in _STEP_IR_FIELD_NAMES and k in out:
-            args.pop(k)
+            # This arg key collides with a structural IR field (e.g. `type`
+            # is both the step type and a data argument). Emit with `arg_`
+            # prefix so the parser round-trips it as a data argument.
+            out[f"arg_{k}"] = args.pop(k)
     out.update(args)
 
 

@@ -927,28 +927,32 @@ name = "pyfsr"
 source = { editable = "../pyfsr" }
 dependencies = [
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "requests" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = ">=7.6.9" },
-    { name = "fsr-playbooks", marker = "extra == 'playbooks'", specifier = ">=0.4.11" },
+    { name = "fsr-playbooks", marker = "extra == 'playbooks'", specifier = ">=0.6.22,<0.7" },
     { name = "furo", marker = "extra == 'docs'", specifier = ">=2024.8.6" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
     { name = "mcp", marker = "extra == 'test'", specifier = ">=1.0,<2" },
     { name = "mypy", marker = "extra == 'typecheck'", specifier = ">=1.13" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=4.0.0" },
-    { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic", specifier = ">=2.1" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "pytest-mock", marker = "extra == 'test'" },
+    { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "sphinx", marker = "python_full_version >= '3.12' and extra == 'docs'", specifier = ">=9.1,<10" },
     { name = "sphinx-autoapi", marker = "extra == 'docs'", specifier = ">=3.8,<4" },
     { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'", specifier = ">=3.0.0" },
     { name = "sphinx-copybutton", marker = "extra == 'docs'", specifier = ">=0.5.2" },
     { name = "sphinx-design", marker = "extra == 'docs'", specifier = ">=0.6.1" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'test'" },
+    { name = "types-pyyaml", marker = "extra == 'typecheck'" },
 ]
 provides-extras = ["docs", "mcp", "playbooks", "test", "typecheck"]
 

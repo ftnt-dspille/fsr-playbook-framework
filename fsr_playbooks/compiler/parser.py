@@ -345,6 +345,16 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 k: v for k, v in s_raw.items()
                 if k not in _reserved
             }
+            # Escape convention: keys prefixed with `arg_` that collide with
+            # structural IR keys are data arguments, not structural markers.
+            # e.g. `arg_type: foo` in YAML becomes `type: foo` in wire args.
+            # This lets authors send a connector param named `type` (or any
+            # other reserved name) without the compiler silently dropping it.
+            for k in list(args):
+                if k.startswith("arg_"):
+                    real = k[4:]  # strip "arg_" prefix
+                    if real in _reserved:
+                        args[real] = args.pop(k)
 
             # Reject legacy nested shapes that have step-level shortcuts.
             if stype == "decision" and "conditions" in args:
