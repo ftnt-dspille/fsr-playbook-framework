@@ -267,6 +267,43 @@ def _model_supports_tool_search(model: str) -> bool:
     return (model or "").strip() in _TOOL_SEARCH_MODELS
 
 
+#: ───────────────── context editing / history pruning (A2, row 10) ─────────
+#:
+#: Context editing CLEARS old tool results server-side before the model reads
+#: the transcript; it is not compaction (which summarizes) and it is not
+#: `shrink_history` (which rewrites blocks on our side and pays to resend
+#: them). Same family as the other primitives -- an older model must declare
+#: the capability False and let the host emulate rather than eat a 400.
+_CONTEXT_EDIT_MODELS = _ADAPTIVE_THINKING_MODELS
+
+#: Beta flag context editing rides on. NOT `compact-2026-01-12` -- that is the
+#: separate compaction feature, and sending its edit type here is a 400.
+CONTEXT_EDIT_BETA = "context-management-2025-06-27"
+
+#: The edit strategy. `clear_tool_uses_20250919` drops old tool RESULTS and
+#: keeps the assistant's own reasoning about them. `clear_tool_inputs` is left
+#: off on purpose: this loop's tool inputs are the YAML the analyst is having
+#: built, and clearing them would erase what a later turn edits.
+CONTEXT_EDIT_STRATEGY = {"type": "clear_tool_uses_20250919"}
+
+
+def _model_supports_context_editing(model: str) -> bool:
+    return (model or "").strip() in _CONTEXT_EDIT_MODELS
+
+
+def context_edit_kwargs(model: str, asked: bool) -> dict:
+    """The request kwargs that hand pruning to the server, or `{}`.
+
+    Empty unless the loop explicitly asked AND the model can take it, which is
+    what keeps `shrink_history` switched on everywhere else -- the two must
+    never both run, or we would pay to rewrite a transcript the server is
+    already clearing.
+    """
+    if not asked or not _model_supports_context_editing(model):
+        return {}
+    return {"context_management": {"edits": [dict(CONTEXT_EDIT_STRATEGY)]}}
+
+
 #: Kill switch. `FSR_ANTHROPIC_NATIVE=0` makes this provider declare BOTH
 #: primitives unsupported, which routes the turn back through the host-side
 #: emulation via the ordinary seam -- one env var, no second code path. It
@@ -357,8 +394,9 @@ class AnthropicProvider(CapabilityMixin):
         Sonnet 4.5 serves neither primitive and must fall back to the host
         emulation, while on the 4.6+ family both reach the wire.
 
-        Still False: `deferred_tools` (tool search) and `history_pruning`
-        (context editing) -- rows 8-10. They stay False until they are sent.
+        `history_pruning` (context editing) is declared here too, but it only
+        reaches the wire on a turn that ASKED for it -- see
+        `context_edit_kwargs`.
         """
         if not _native_enabled():
             return ProviderCapabilities()
@@ -366,6 +404,7 @@ class AnthropicProvider(CapabilityMixin):
             reasoning_depth=_model_supports_reasoning_depth(self.model),
             task_budget=_model_supports_task_budget(self.model),
             deferred_tools=_model_supports_tool_search(self.model),
+            history_pruning=_model_supports_context_editing(self.model),
         )
 
     # Class-level default so the loop reads a sane cap even on an instance
@@ -538,8 +577,15 @@ class AnthropicProvider(CapabilityMixin):
         budget: dict[str, Any] = {}
         if req.max_tool_turns is not None and not self.emulation.task_budget:
             budget = task_budget_kwargs(self.model, req.max_tool_turns or tool_turns)
-        merged = merge_output_config(reasoning, budget)
-        betas = [TASK_BUDGET_BETA] if budget else []
+        # Native context editing, likewise only on an explicit ask -- the
+        # residue is what keeps `shrink_history` on for everyone else.
+        pruning = context_edit_kwargs(
+            self.model,
+            req.prune_history is True and not self.emulation.history_pruning,
+        )
+        merged = merge_output_config(reasoning, budget, pruning)
+        betas = ([TASK_BUDGET_BETA] if budget else []) + (
+            [CONTEXT_EDIT_BETA] if pruning else [])
         return merged, betas
 
     async def _wrapup_call(
@@ -759,9 +805,11 @@ class AnthropicProvider(CapabilityMixin):
             # stay byte-identical so prompt cache is preserved.
             try:
                 # Host-side stand-in for context editing. `emulation` says
-                # whether it is ours to do: once this provider declares
-                # `history_pruning` and wires the native primitive, the
-                # residue goes False here and the two never both run.
+                # whether it is ours to do: on a turn that asked for native
+                # pruning (row 10) the residue is False here and the server
+                # clears the old tool results instead -- the two never both
+                # run, because paying to rewrite a transcript the server is
+                # already clearing is worse than either alone.
                 if self.emulation.history_pruning:
                     _shrink_history(history)
             except Exception:

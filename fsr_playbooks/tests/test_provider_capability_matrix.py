@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from fsr_playbooks.llm.anthropic_provider import (
+    CONTEXT_EDIT_BETA,
     TASK_BUDGET_BETA,
     TASK_BUDGET_MIN_TOKENS,
     AnthropicProvider,
@@ -118,6 +119,44 @@ def _probe_anthropic_deferred_tools(p: AnthropicProvider) -> None:
     assert apply_deferred_loading(surface, old.model) == (surface, 0)
 
 
+def _probe_anthropic_history_pruning(p: AnthropicProvider) -> None:
+    """An explicit ask becomes server-side context editing, and only then."""
+    p.request(TurnRequest(prune_history=True))
+    kwargs, betas = p._native_request_kwargs(tool_turns=8)
+    edits = kwargs["context_management"]["edits"]
+    assert edits == [{"type": "clear_tool_uses_20250919"}], kwargs
+    assert CONTEXT_EDIT_BETA in betas, betas
+    # NOT compaction -- a different feature with a different beta flag.
+    assert "compact-2026-01-12" not in betas, betas
+    # Nobody asked -> nothing on the wire, and `shrink_history` stays on.
+    p.request(TurnRequest())
+    assert p._native_request_kwargs(tool_turns=8) == ({}, [])
+    assert p.emulation.history_pruning is True
+    # A model that predates the family emulates instead of eating a 400.
+    old = AnthropicProvider(api_key="test-key", model="claude-sonnet-4-5-20250929")
+    assert old.capabilities.history_pruning is False
+    old.request(TurnRequest(prune_history=True))
+    assert old._native_request_kwargs(tool_turns=8) == ({}, [])
+    assert old.emulation.history_pruning is True
+
+
+def test_native_pruning_and_the_host_stand_in_never_both_run() -> None:
+    """The failure this guards is paying twice: `shrink_history` rewriting a
+    transcript the server is already clearing."""
+    p = AnthropicProvider(api_key="test-key")
+    residue = p.request(TurnRequest(prune_history=True))
+    kwargs, _ = p._native_request_kwargs(tool_turns=8)
+    assert "context_management" in kwargs
+    assert residue.history_pruning is False
+
+
+def test_prune_history_false_prunes_nowhere() -> None:
+    p = AnthropicProvider(api_key="test-key")
+    residue = p.request(TurnRequest(prune_history=False))
+    assert residue.history_pruning is False
+    assert p._native_request_kwargs(tool_turns=8) == ({}, [])
+
+
 #: (provider name, capability) -> probe. A declared-true capability with no
 #: entry here is a failure, not an omission.
 PROBES = {
@@ -125,6 +164,7 @@ PROBES = {
     ("anthropic", "reasoning_depth"): _probe_anthropic_reasoning,
     ("anthropic", "task_budget"): _probe_anthropic_task_budget,
     ("anthropic", "deferred_tools"): _probe_anthropic_deferred_tools,
+    ("anthropic", "history_pruning"): _probe_anthropic_history_pruning,
 }
 
 

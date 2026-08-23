@@ -191,8 +191,14 @@ class TurnRequest:
     reasoning: str | None = None
     #: Bound on tool turns. None = the loop's own MAX_TOOL_TURNS.
     max_tool_turns: int | None = None
-    #: Keep the transcript inside the context window.
-    prune_history: bool = True
+    #: Keep the transcript inside the context window. TRI-STATE, and the
+    #: tri-state is load-bearing: `None` (the default) means nobody asked, so
+    #: the host-side `shrink_history` runs exactly as it did before this seam
+    #: -- a framework MCP caller that never calls `request()` must not have its
+    #: wire changed under it. `True` is an explicit ask, and only that lets a
+    #: provider serve context editing natively. `False` means do not prune at
+    #: all, host or provider.
+    prune_history: bool | None = None
     #: Let the model discover tools instead of receiving the full array.
     defer_tools: bool = False
 
@@ -220,7 +226,13 @@ class HostEmulation:
             # `budget_note` must stay on for a turn nobody bounded.
             task_budget=not (caps.task_budget and req.max_tool_turns is not None),
             deferred_tools=req.defer_tools and not caps.deferred_tools,
-            history_pruning=req.prune_history and not caps.history_pruning,
+            # Same rule as the budget above: native only when the loop
+            # actually ASKED (`prune_history is True`). `None` keeps the
+            # stand-in on; `False` turns both off.
+            history_pruning=(
+                req.prune_history is not False
+                and not (caps.history_pruning and req.prune_history is True)
+            ),
         )
 
 
